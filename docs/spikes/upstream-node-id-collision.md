@@ -24,6 +24,59 @@ Record Tracktion's answer here when it comes — in particular whether they trea
 output as a compatibility surface across versions, since that is the question the report puts to
 them and the one that decides what a fix can look like.
 
+**Nobody had reported this before.** A six-angle sweep of the forum found no prior thread. The
+negative rests on exact identifiers rather than fuzzy phrasing — `areNodeIDsUnique`,
+`node_player_utils`, `findNodeWithID`, `ArrangerLauncherSwitchingNode`, `SampleFader`,
+`0x9e3779b9`, quoted `"hash_combine"`, `splitmix`, `avalanche` all return zero topics, and no
+thread in the whole Tracktion category contains both "hash" and "node". Re-run with
+`before:2026-09-01` to confirm the result is not just our own post. The `nodeID` hits are all
+`juce::AudioProcessorGraph::NodeID`, an unrelated type.
+
+Two caveats on reading that silence as rarity. The clip launcher is new (TE v3, 2024) and the
+category carries few launcher reports of any kind, so some of the quiet is an absence of users on
+that path. And the nearest prior art is JUCE-side and about the same *shape* of defect rather than
+this bug: [56390](https://forum.juce.com/t/correct-hash-generation-of-plugin-parameters/56390) and
+61278 argue that JUCE's plugin-parameter ID hashes are not guaranteed unique and that a
+`jassert`-only guard is inadequate — answered there with "I don't recall any reports of developers
+encountering VST3 parameter ID collisions." That is precisely the dismissal a concrete colliding
+value is meant to pre-empt.
+
+## Addendum drafted for reply
+
+Not yet posted. The filed report omits the #367 disambiguation, which is the first thing a
+maintainer will reach for. Post as a reply into 69430, not as a new thread.
+
+---
+
+Three things I should have put in the original post.
+
+**This is not issue #367.** That one was *"Launcher clips click on every playback-graph rebuild —
+node state transfer never engages inside SlotControlNode"*, and its root cause was the opposite of
+this: the child nodes were **excluded** from the flat lookup list, so `findNodeWithID` found
+nothing. Here they are present but ambiguous. Your fix for it (`d760ce8c1bd`, exposing
+`SlotControlNode` children as internal nodes) is in the tree I tested, and since it changes what
+`getInternalNodes()` returns — which `ArrangerLauncherSwitchingNode` folds into its own ID — I
+checked whether it introduced this. It did not: building against `d760ce8c1bd~1` reproduces the
+collision at the same track counts. It predates that fix.
+
+**Why the aliasing is the part that matters.** From the node graph thread, on how a rebuild carries
+state:
+
+> Persistent data (plugins, automation, playheads, time-stretchers etc.) are stored with smart
+> pointers and not re-created when the graph rebuilds.
+
+That is exactly the mechanism the duplicate ID subverts. Two same-type nodes with one ID both
+resolve to the same predecessor and adopt its state by `shared_ptr`, so the sharing is not a
+one-off mismatch — it is re-established on every subsequent rebuild, between two nodes that have no
+dependency edge and can therefore run on different threads in the same block.
+
+**One correction to my own post:** the `hash (7653239033668669842, track->itemID)` call is
+`tracktion_ArrangerLauncherSwitchingNode.cpp:41`; line 40 is the seed constant.
+
+For what it is worth, the duplicate-ID diagnostic inside `areNodeIDsUnique` has been in the tree
+and read by users for a couple of years without anyone reporting it fire, so I do not think this is
+a known-noisy assertion — it appears to be a first sighting rather than something long tolerated.
+
 ---
 
 **Duplicate playback-graph node IDs from `tracktion::core::hash_combine`**
