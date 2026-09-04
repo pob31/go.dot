@@ -3,9 +3,10 @@
 Everything below the rule is a **post written for the JUCE Forum, Tracktion Engine category**, kept
 here verbatim so the finding does not live only in a browser tab.
 
-**Status: posted 2026-09-04.**
+**Status: posted 2026-09-04, edited the same day.**
 <https://forum.juce.com/t/duplicate-playback-graph-node-ids-from-tracktion-hash-combine/69430>
-— no replies yet.
+— no replies yet. The copy below is the report as first filed; the addendum at the foot was later
+folded into it by edit, so the live thread is ahead of this file and is the authority.
 
 Tracktion do not accept third-party pull requests — *"We don't accept third party GitHub pull
 requests directly due to copyright restrictions but if you would like to contribute any changes
@@ -41,10 +42,16 @@ this bug: [56390](https://forum.juce.com/t/correct-hash-generation-of-plugin-par
 encountering VST3 parameter ID collisions." That is precisely the dismissal a concrete colliding
 value is meant to pre-empt.
 
-## Addendum drafted for reply
+## Addendum — folded into the original post by edit, 2026-09-04
 
-Not yet posted. The filed report omits the #367 disambiguation, which is the first thing a
-maintainer will reach for. Post as a reply into 69430, not as a new thread.
+Posted as an edit to 69430 rather than as a reply, so the live thread reads as one piece. The text
+below is what was added; the copy above is the report **as first filed**, before the edit. The
+thread is the authority if the two ever disagree.
+
+Outstanding: the smart-pointer quote went in **unattributed**. It is dave96's, from
+[Node graph clarifications, post 14](https://forum.juce.com/t/node-graph-clarifications/56170/14),
+and attributing it is what makes it land — it is his own description of the model the bug subverts,
+not our characterisation of his architecture.
 
 ---
 
