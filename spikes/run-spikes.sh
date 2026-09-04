@@ -96,7 +96,7 @@ spike_path() {
 # Deliberately absent, and each for a stated reason:
 #   spike06  live-input latency against real hardware, same
 #   MTC      needs a real or virtual MIDI port (PRD 6.1 "Also verify")
-DETERMINISTIC_SPIKES="spike04_graph_stability spike02_launch_offset spike01_bus_routing spike03_join_quality spike05_param_50hz"
+DETERMINISTIC_SPIKES="spike04_graph_stability spike02_launch_offset spike01_bus_routing spike03_join_quality spike05_param_50hz spike06_rack_latency_pdc"
 
 # --- selftest: the argument contract, no engine involved --------------------
 if [ "$MODE" = "--selftest" ]; then
