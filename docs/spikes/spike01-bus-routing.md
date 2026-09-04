@@ -2,9 +2,13 @@
 
 ## Verdict
 
-**PASS.** Routing is exact and reproducible in every shape that matters — mono, stereo and
-mixed — up to a **throughput** ceiling that is comfortably clear of the target rig at
-48 kHz and close to it at 96 kHz (72 simultaneous objects at 48 kHz, ~40 at 96 kHz):
+**PASS.** Routing is exact in every shape that matters — mono, stereo and mixed — up to a
+**throughput** ceiling that is comfortably clear of the target rig at 48 kHz and close to it
+at 96 kHz (72 simultaneous objects at 48 kHz, ~40 at 96 kHz).
+
+*Reproducibility caveat:* only the 32-track / 64-channel stereo configuration was run twice
+and confirmed identical. The other passing rows were run once. "Exact" is measured; "always
+exact" is not claimed.
 
 - **Mono direct outs** — one mono file, one hardware channel, one destination — work
   perfectly at 64 objects. This is the WFS / L-ISA path (mono source per object, straight
@@ -112,10 +116,15 @@ At 8 objects the raw frame positions are exact at both rates — differences of 
 
 ## What was learned
 
-**Routing itself is exact, in mono as well as stereo.** Where the experiment is
-reproducible it is not "mostly right" — every track landed on its intended destination and
-nothing leaked anywhere else, at arbitrary hardware channel indices chosen by
-`describeWaveDevices`.
+**Routing itself is exact, in mono as well as stereo.** Where the experiment is reproducible
+it is not "mostly right" — every track landed on its intended destination and nothing leaked
+anywhere else, at arbitrary hardware channel indices chosen by `describeWaveDevices`.
+
+That claim is worth more than it was: the analysis originally inspected only the **first**
+channel of each bus, so in stereo mode the odd hardware channels were never scanned at all
+and a leak into any of them would have been invisible. It now scans every channel of every
+bus, and the passing configurations still report zero contamination — 32/32 stereo and 48/48
+mixed, with the right halves included this time.
 
 **Mono direct outs are fully supported, and that is the finding this spike exists for.**
 `WaveDeviceDescription` takes a channel *array*, so a one-channel device is expressible;
@@ -168,10 +177,18 @@ under enough throughput demand what is ready when a block is processed depends o
 Forty-eight simultaneous streaming clips is enough throughput to trip it. Larger buffers did
 not help, which is consistent with a threading effect rather than an underrun.
 
-**The 128-channel failure is different in character** — consistently 1 correct out of 64,
-both runs, rather than varying — which is the signature of something structural rather than
-of load. It has not been isolated, and it may be this spike's hosted-device setup rather
-than Tracktion's routing. It is recorded as an unexplored edge, not as a defect in TE.
+**"1 correct" was the instrument's floor, not a finding, and an earlier version of this
+report read a conclusion into it.** Bus 0 is the identification reference, so its elapsed
+time is identically zero and it matches track 0 whenever it carries any content at all. A
+run in which *every* bus is wrong therefore still scores 1. The earlier text argued that
+"consistently 1 correct, rather than varying" was "the signature of something structural
+rather than of load" — but 1 is simply what total failure looks like here, and nothing about
+its consistency distinguishes one cause from another.
+
+The spike now detects that case explicitly (`identification_degenerate=1`) and exits
+`HARNESS-ERROR` rather than reporting a routing verdict. All the high-channel-count failures
+above are degenerate in this sense: they establish that the configuration did not work, and
+nothing at all about *why*.
 
 **The constraint, stated precisely, because the obvious reading of it is wrong.**
 `tracktion_EditNodeBuilder.cpp:90-93` is
@@ -230,12 +247,17 @@ it is measured there.
    → two mono slots" generalises to it, but whether wide cues exist in v1 at all, and
    whether they are one cue object over a slot group or several cues the operator keeps in
    step, is a product decision (devplan:17).
-2. **The cost of stereo racks on a mono-heavy rig.** If most objects are mono direct outs
-   with their own effects, every rack is still a stereo object. Worth deciding whether that
-   is simply accepted or whether the rack path needs a mono variant — and worth measuring in
-   spike #6 before deciding.
+2. **Rack width on a mono-heavy rig.** Live mono input into a rack is mono-to-stereo or
+   stereo-to-stereo, so a stereo `RackInstance` is the right shape for a reverb or a
+   spatialiser and costs nothing extra. It is only a mono-in/mono-out effects path that
+   carries half a rack of silence. Spike #6 measures both before anything is decided.
 3. **The 96 kHz throughput ceiling is the one open question that could affect the rig.**
    Around 40 simultaneously launched streaming clips at 96 kHz in this configuration.
    Whether that holds on the real Digiface, and whether a realistic staggered GO ever
    approaches it, needs the hardware half of this spike. Until then it is a measured
    property of the harness, not a stated limit of the product.
+4. **The high-channel-count failures are all degenerate results.** With the identification
+   anchored on a reference bus, a total failure scores exactly 1 and the instrument can say
+   only *that* a configuration did not work, never *why*. Isolating one properly needs an
+   identification scheme independent of any single bus — worth building only if the 96 kHz
+   ceiling turns out to matter on real hardware.

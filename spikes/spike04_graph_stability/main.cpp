@@ -54,8 +54,13 @@
     product decisions — nothing in the PRD or devplan reserves them — so they
     carry defaults and are documented as knobs of this program only.
 
-    This spike also settles PRD §6.1's second unnumbered "Also verify" item:
-    multiple active Edits summed by the DeviceManager, via --edits=K.
+    NOT ADDRESSED HERE: PRD §6.1's second unnumbered "Also verify" item, multiple
+    active Edits summed by the DeviceManager. An earlier version of this file
+    advertised a --edits=K flag for it. The flag was parsed and echoed into the
+    report and honoured by NOTHING - runOnce built exactly one Edit - so a sweep
+    would have recorded `edits=8` against a single-Edit run. It has been removed
+    rather than left to mislead. Whether that item gets its own spike is an open
+    decision (spikes/CMakeLists.txt:68-73).
 */
 
 #include "../SpikeHarness.h"
@@ -75,7 +80,7 @@ namespace
         "rebuild, no crossfade tax on already-playing material.";
 
     constexpr auto extraFlags =
-        " [--slots=N] [--launches=N] [--edits=N] [--validate-instrument]";
+        " [--slots=N] [--launches=N] [--validate-instrument]";
 
     //==============================================================================
     /*  One run of the experiment. `storm` decides whether the storm tracks
@@ -400,7 +405,6 @@ int main (int argc, char** argv)
     // Spike mechanics, not product decisions - defaults are allowed here.
     const auto slots    = static_cast<int> (spike::valueFor (argc, argv, "--slots=").value_or (4));
     const auto launches = static_cast<int> (spike::valueFor (argc, argv, "--launches=").value_or (64));
-    const auto edits    = static_cast<int> (spike::valueFor (argc, argv, "--edits=").value_or (1));
 
     if (args.tracks < 2)
     {
@@ -418,7 +422,6 @@ int main (int argc, char** argv)
     report.value ("buffer", args.buffer);
     report.value ("slots", slots);
     report.value ("launches", launches);
-    report.value ("edits", edits);
 
     // The storm run and the reference run. Identical but for the launching.
     const auto stormRun = runOnce (engine, args, slots, launches, true);

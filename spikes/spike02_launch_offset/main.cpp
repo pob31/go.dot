@@ -360,11 +360,24 @@ int main (int argc, char** argv)
     if (! allFound)
         return report.cannotMeasure ("a transient was not found on every bus, so the ladder is incomplete");
 
-    // 5 samples: the tolerance TE holds itself to in tracktion_Plugins.test.cpp:60.
-    const bool accurate = worstError <= 5.0;
+    /*  Gate at ONE sample, not five.
+
+        Five is the tolerance TE holds itself to in tracktion_Plugins.test.cpp:60,
+        and it is the right gate for a latency measurement. It is far too loose
+        here: this instrument resolves only to whole samples, so an "error" below
+        1.0 means the transient landed on the nearest sample to the requested
+        position - which is the strongest statement this rig can make. Gating at 5
+        would pass a launcher that was four samples out and call it accurate.
+
+        What the reported fractional value IS: the fractional part of o*SR, which
+        an integer-resolution measurement is arithmetically obliged to produce.
+        See docs/spikes/spike02-launch-offset.md - an earlier version of that
+        report read it as evidence of sub-sample placement, which it is not.
+    */
+    const bool accurate = worstError < 1.0;
 
     return report.verdict (accurate,
                            accurate
-                             ? "the launcher honours an arbitrary in-file offset to within 5 samples"
-                             : "the launcher did not place at least one offset within 5 samples");
+                             ? "the launcher honours an arbitrary in-file offset to the nearest sample"
+                             : "at least one offset landed more than a sample from its requested position");
 }

@@ -49,13 +49,18 @@
 
         constexpr int getTrackNumChannels()  { return 2; }
 
-    A track carries two channels. Not "by default" - constexpr. So "arbitrary
-    multichannel routing" in TE means N stereo buses at arbitrary hardware
-    channel indices, and NOT one track carrying six channels. This spike feeds a
-    six-channel source to a track and records what actually arrives, because the
-    difference between those two readings decides whether a >2-channel cue in
-    Go.dot is one object or several (PRD §3.9b, §6.2) - which is the author's
-    decision, not this spike's.
+    A track's INTERNAL width is two channels. Not "by default" - constexpr. The
+    DESTINATION width is a separate thing and may be one channel; --bus-width=1
+    measures that, and mono direct outs work.
+
+    WHAT THIS SPIKE DOES NOT MEASURE: what a >2-channel SOURCE does on a track.
+    An earlier version claimed to "feed a six-channel source to a track and record
+    what actually arrives". It did not: it generated a six-channel file, built an
+    AudioFile from it, and read back that file's own channel count into a field
+    named wideSourceChannelsAtOutput. Nothing was inserted, launched or played,
+    so the number reported was the channel count of a file this program had just
+    written - an instrument measuring itself. Removed rather than left in place.
+    The >2-channel question is open and belongs to whoever answers PRD §3.9b.
 */
 
 #include "../SpikeHarness.h"
@@ -162,31 +167,38 @@ namespace
         int identifiedTrack = -1;   // which track's transient time this matches
     };
 
-    std::optional<choc::buffer::FrameCount>
-    firstNonZeroOnChannel (const choc::buffer::ChannelArrayBuffer<float>& b,
-                           choc::buffer::ChannelCount channel,
-                           float threshold = 1.0e-4f)
-    {
-        if (channel >= b.getNumChannels())
-            return {};
+    /*  These three all scan EVERY channel of a bus, not just its first.
 
+        They used to take a single channel index, which in stereo mode meant only
+        the LEFT half of each bus was ever inspected - channels 0, 2, 4... A leak
+        into any odd hardware channel was invisible to the instrument, so the
+        report's "nothing leaked anywhere else" was unsupported for exactly half
+        the channels it claimed to cover. Taking a (first, width) range instead
+        makes the claim mean what it says.
+    */
+    std::optional<choc::buffer::FrameCount>
+    firstNonZeroOnBus (const choc::buffer::ChannelArrayBuffer<float>& b,
+                       int firstChannel, int width,
+                       float threshold = 1.0e-4f)
+    {
         for (choc::buffer::FrameCount f = 0; f < b.getNumFrames(); ++f)
-            if (std::abs (b.getSample (channel, f)) > threshold)
-                return f;
+            for (int c = firstChannel; c < firstChannel + width; ++c)
+                if (static_cast<choc::buffer::ChannelCount> (c) < b.getNumChannels())
+                    if (std::abs (b.getSample (static_cast<choc::buffer::ChannelCount> (c), f)) > threshold)
+                        return f;
 
         return {};
     }
 
-    double peakDbfsOnChannel (const choc::buffer::ChannelArrayBuffer<float>& b,
-                              choc::buffer::ChannelCount channel)
+    double peakDbfsOnBus (const choc::buffer::ChannelArrayBuffer<float>& b,
+                          int firstChannel, int width)
     {
-        if (channel >= b.getNumChannels())
-            return -999.0;
-
         float worst = 0.0f;
 
-        for (choc::buffer::FrameCount f = 0; f < b.getNumFrames(); ++f)
-            worst = std::max (worst, std::abs (b.getSample (channel, f)));
+        for (int c = firstChannel; c < firstChannel + width; ++c)
+            if (static_cast<choc::buffer::ChannelCount> (c) < b.getNumChannels())
+                for (choc::buffer::FrameCount f = 0; f < b.getNumFrames(); ++f)
+                    worst = std::max (worst, std::abs (b.getSample (static_cast<choc::buffer::ChannelCount> (c), f)));
 
         return worst <= 0.0f ? -999.0 : 20.0 * std::log10 (static_cast<double> (worst));
     }
@@ -196,27 +208,29 @@ namespace
         arriving where it should not be, i.e. leakage.
     */
     int strayNonZeroSamples (const choc::buffer::ChannelArrayBuffer<float>& b,
-                             choc::buffer::ChannelCount channel,
+                             int firstChannel, int width,
                              choc::buffer::FrameCount expectedFrame,
                              choc::buffer::FrameCount window,
                              choc::buffer::FrameCount scanUntil,
                              float threshold = 1.0e-4f)
     {
-        if (channel >= b.getNumChannels())
-            return 0;
-
         int stray = 0;
         const auto last = std::min (scanUntil, b.getNumFrames());
+        const auto lo = expectedFrame > window ? expectedFrame - window : 0;
 
-        for (choc::buffer::FrameCount f = 0; f < last; ++f)
+        for (int c = firstChannel; c < firstChannel + width; ++c)
         {
-            if (std::abs (b.getSample (channel, f)) <= threshold)
+            if (static_cast<choc::buffer::ChannelCount> (c) >= b.getNumChannels())
                 continue;
 
-            const auto lo = expectedFrame > window ? expectedFrame - window : 0;
+            for (choc::buffer::FrameCount f = 0; f < last; ++f)
+            {
+                if (std::abs (b.getSample (static_cast<choc::buffer::ChannelCount> (c), f)) <= threshold)
+                    continue;
 
-            if (f < lo || f > expectedFrame + window)
-                ++stray;
+                if (f < lo || f > expectedFrame + window)
+                    ++stray;
+            }
         }
 
         return stray;
@@ -396,7 +410,9 @@ namespace
         std::vector<std::optional<choc::buffer::FrameCount>> firsts;
 
         for (int i = 0; i < numTracks; ++i)
-            firsts.push_back (firstNonZeroOnChannel (output, static_cast<choc::buffer::ChannelCount> (layout[static_cast<size_t> (i)].firstChannel)));
+            firsts.push_back (firstNonZeroOnBus (output,
+                                                 layout[static_cast<size_t> (i)].firstChannel,
+                                                 layout[static_cast<size_t> (i)].width));
 
         // Bus 0 carries track 0, whose transient is the earliest by construction.
         const auto reference = firsts.empty() ? std::optional<choc::buffer::FrameCount>{}
@@ -410,7 +426,9 @@ namespace
         {
             BusReading r;
             r.firstNonZero = firsts[static_cast<size_t> (i)];
-            r.peakDbfs = peakDbfsOnChannel (output, static_cast<choc::buffer::ChannelCount> (layout[static_cast<size_t> (i)].firstChannel));
+            r.peakDbfs = peakDbfsOnBus (output,
+                                        layout[static_cast<size_t> (i)].firstChannel,
+                                        layout[static_cast<size_t> (i)].width);
 
             if (r.firstNonZero && reference)
             {
@@ -458,27 +476,12 @@ namespace
 
         for (int i = 0; i < numTracks; ++i)
             if (result.buses[static_cast<size_t> (i)].firstNonZero)
-                if (strayNonZeroSamples (output, static_cast<choc::buffer::ChannelCount> (layout[static_cast<size_t> (i)].firstChannel),
+                if (strayNonZeroSamples (output,
+                                         layout[static_cast<size_t> (i)].firstChannel,
+                                         layout[static_cast<size_t> (i)].width,
                                          *result.buses[static_cast<size_t> (i)].firstNonZero,
                                          tolerance, analysisEnd) > 0)
                     result.buses[static_cast<size_t> (i)].identifiedTrack = -2;   // contaminated
-
-        /*  THE STEREO CEILING. A six-channel (or --wide-source-channels=N) file
-            on a track, and what actually reaches its two-channel output.
-        */
-        result.wideSourceChannelsRequested = wideChannels;
-
-        if (wideChannels > 2)
-        {
-            auto wide = spike::makeToneFile (params.sampleRate, 2.0, wideChannels, 440.0f);
-
-            if (wide != nullptr)
-            {
-                const AudioFile wideAudio (engine, wide->getFile());
-                result.wideSourceChannelsAtOutput = wideAudio.getNumChannels();
-                result.wideSourcePeakDbfs = 0.0;   // the file itself is full scale by construction
-            }
-        }
 
         result.measured = true;
         return result;
@@ -544,19 +547,37 @@ int main (int argc, char** argv)
         else                               { ++misrouted; }
     }
 
+    /*  DEGENERATE-RESULT GUARD.
+
+        Bus 0 is the identification reference, so its elapsed time is identically
+        zero and it matches track 0 whenever it has ANY content above threshold.
+        "1 correct" is therefore the FLOOR of this instrument, not a measurement:
+        a run in which every bus is wrong still scores 1.
+
+        That distinction was drawn wrongly once already. The report read
+        "consistently 1 correct out of 64, rather than varying - the signature of
+        something structural rather than of load", when 1 was simply what total
+        failure looks like here. Say so explicitly instead of inviting the
+        inference again.
+    */
+    const bool degenerate = correct == 1 && run.buses.size() > 1
+                              && run.buses[0].identifiedTrack == 0;
+
+    report.value ("identification_degenerate", degenerate ? 1 : 0);
     report.value ("buses.correct", correct);
     report.value ("buses.misrouted", misrouted);
     report.value ("buses.contaminated", contaminated);
     report.value ("buses.silent", silent);
 
-    report.value ("wide_source.channels_requested", run.wideSourceChannelsRequested);
-    report.value ("wide_source.channels_in_file", run.wideSourceChannelsAtOutput);
-    report.value ("track_num_channels_constexpr", 2);
-
     const bool allCorrect = correct == static_cast<int> (run.buses.size());
+
+    if (degenerate)
+        return report.cannotMeasure (
+            "only the reference bus identified, which is this instrument's floor rather "
+            "than a result - no conclusion about routing can be drawn from this run");
 
     return report.verdict (allCorrect,
                            allCorrect
-                             ? "every track reached its own stereo bus and no other"
+                             ? "every track reached its own destination bus and no other"
                              : "the routing matrix did not match intent - see the per-bus lines");
 }

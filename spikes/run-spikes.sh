@@ -160,5 +160,16 @@ for s in $DETERMINISTIC_SPIKES; do
 done
 
 echo
+
+# Measuring nothing is not success. Multi-config generators put binaries under
+# <bindir>/Debug or <bindir>/Release, so an almost-right bindir finds no
+# executables at all - and without this guard that exits 0 and CI goes green
+# having run no spike whatsoever.
+if [ "$runs" -eq 0 ]; then
+    echo "run-spikes.sh: NO SPIKE RAN. Found no executables in $BINDIR." >&2
+    echo "               A run that measures nothing is not a pass." >&2
+    exit 3
+fi
+
 echo "run-spikes.sh: $runs run(s), exit $overall"
 exit $overall

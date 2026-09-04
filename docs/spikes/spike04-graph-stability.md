@@ -150,9 +150,12 @@ on audio content at all.
   confirmed. Worth adding *how* it is provable, since Phase 2 will be designed against it:
   the rebuild hook, `Edit::TreeWatcher`'s trigger list, and
   `TransportControl::ReallocationInhibitor`.
-- **§3.25, one Edit / one transport** — no amendment needed from this spike. The
-  `--edits=K` mode addressing §6.1's "multiple active Edits summed by the DeviceManager"
-  is wired but not yet exercised; it stays open.
+- **§3.25, one Edit / one transport** — no amendment needed from this spike, and nothing
+  here bears on §6.1's "multiple active Edits summed by the DeviceManager". An earlier
+  version of this spike advertised a `--edits=K` flag for that item; it was parsed, echoed
+  into the report, and honoured by no code at all, so a sweep would have recorded
+  `edits=8` against a single-Edit run. The flag has been removed. The item is untouched
+  and fully open.
 - **§3.4 and §3.13** — add finding 2 above. TE's launch instant is not deterministic, so
   the tick-quantised GO that §3.4 describes has to be enforced on Go.dot's side.
 - **§3.9c** — the fixed-track-set discipline covers **output routing** too, not only the
@@ -168,5 +171,6 @@ on audio content at all.
    pinned or pre-loaded, because block-accurate processing alone does not make a render
    reproducible while file I/O is asynchronous. Worth deciding whether closing that is
    Phase 0 work or Phase 12's.
-3. Whether §6.1's unnumbered "multiple active Edits" item is answered inside this spike
-   (`--edits=K`) or deserves its own, is your call per `spikes/CMakeLists.txt:68-73`.
+3. §6.1's unnumbered "multiple active Edits summed by the DeviceManager" item is **not**
+   addressed here — see the note above about the removed flag. Whether it folds into a
+   spike or gets its own is your call per `spikes/CMakeLists.txt:68-73`.
