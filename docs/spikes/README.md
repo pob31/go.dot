@@ -33,3 +33,27 @@ bash spikes/run-spikes.sh --full build/spikes/spikes-bin/Release   # the author'
 Spikes take `--tracks`, `--sample-rate` and `--buffer` with **no defaults**: the
 fixed track count and the target rates and buffer sizes are open author decisions
 (devplan:49-50), and a default written anywhere in the tree would answer them.
+
+## Where these numbers came from, and which of them are portable
+
+All runs so far are on a **Lenovo laptop with an Intel Core Ultra 7 255H** — 16 cores, hybrid
+performance/efficiency, Windows 11, with ordinary desktop background load.
+
+Findings split into two kinds, and the distinction matters when reading any report here:
+
+- **Portable.** Sample accuracy, routing correctness, PDC behaviour, API shape, whether a
+  mechanism exists at all. These are properties of Tracktion Engine and will not change on
+  other hardware.
+- **Machine-dependent.** Throughput ceilings, reproducibility under load, and every timing
+  figure. A hybrid-core mobile CPU migrates threads between P- and E-cores under scheduler and
+  thermal pressure, which is the most likely cause of the intermittent non-reproducibility seen
+  at 96 kHz in spikes 01, 03 and 04.
+
+The machine-dependent half is worth re-running on a **Mac mini M4 Pro** — desktop thermals, a
+different scheduler, and the macOS platform CI currently only builds on:
+
+```
+git clone --recurse-submodules https://github.com/pob31/go.dot.git   # or: bash scripts/bootstrap.sh
+cmake --preset spikes && cmake --build --preset spikes-release
+bash spikes/run-spikes.sh --full build/spikes/spikes-bin/Release
+```

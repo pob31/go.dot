@@ -183,6 +183,32 @@ above, and it comes out at exactly 48000 frames at 48 kHz and 96000 at 96 kHz. E
 this set has now produced at least one false FAIL from assuming a position instead of
 measuring it.
 
+## The machine these numbers came from
+
+Every measurement in this report was taken on:
+
+```
+Lenovo 21Q8CTO1WW laptop
+Intel Core Ultra 7 255H - 16 cores, HYBRID (performance + efficiency cores)
+31.5 GB RAM, Windows 11
+Background load at time of measurement: ~18%, with Firefox and two VS Code windows resident
+```
+
+**This matters for anything that depends on sustained throughput or timing reproducibility.**
+A hybrid-core mobile CPU migrates threads between performance and efficiency cores under
+scheduler and thermal pressure, and a measurement thread moved to an E-core mid-run produces
+exactly the kind of *intermittent* non-reproducibility seen here. It also explains why
+real-time pacing did not help: pacing controls when work is submitted, not which core runs it.
+
+So the throughput and reproducibility limits below are **properties of this machine under this
+load**, not established properties of Tracktion Engine. They are recorded because they are what
+was measured, and flagged because they are the findings most likely to move on different
+hardware. Sample-accuracy, routing correctness and API behaviour do not depend on any of this
+and are not affected.
+
+A cross-check on a Mac mini M4 Pro - desktop thermals, different scheduler, and the macOS
+platform that CI currently only *builds* on - is the cheapest way to separate the two.
+
 ## Consequences for the PRD
 
 - **§3.24, "Joins"** — *"Sample-accurate loop points, with an optional short crossfade at the
