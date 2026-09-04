@@ -1,8 +1,10 @@
 # Go.dot — Reuse map
 
-**Draft 0.1**, 2026-09-04. What the author's other projects already provide, per Go.dot
-phase, and what stops each piece being used as-is. Written so the next phases start from
-it instead of rediscovering it. Paths are relative to the sibling checkouts on the
+**Draft 0.2**, 2026-09-05 (0.1 was 2026-09-04). What the author's other projects already
+provide, per Go.dot phase, and what stops each piece being used as-is. Written so the next
+phases start from it instead of rediscovering it. Draft 0.2 re-verified the Phase 2 rows
+against the checkouts, added what each one is *for* in Phase 2, and corrected one claim of
+draft 0.1 in writing rather than by deletion (§ *A correction to draft 0.1*). Paths are relative to the sibling checkouts on the
 development machine (`D:\dev\WFS_DIY_v1`, its `spatcore` submodule, `D:\dev\juce_simpleweb`)
 and to the repositories `github.com/pob31/{WFS-DIY,spatcore,juce_simpleweb}`.
 
@@ -17,7 +19,7 @@ CI enforces it, so amendments go into the PRD by the author, citing this map.
 |---|---|---|---|
 | **WFS-DIY** | the shipping wave-field-synthesis app; JUCE 9.0.1, Projucer-built | GPL-3 | production |
 | **spatcore** (`WFS_DIY_v1/spatcore`, pinned at `7e7ed63`) | the shared real-time core extracted from WFS-DIY: `rt/`, `dsp/`, `wfs/`, `reverb/`, `gpu/`, `control/{osc,state,mcp}`, `controllers/`, `ui/`, `io/` | GPL-3 (added 2026-09-04, `7e1a8ad`) | consumed by WFS-DIY at source level; CMake targets exist for XOA / Tight-WFS |
-| **juce_simpleweb** (`pob31/juce_simpleweb`, fork of `benkuper/juce_simpleweb`) | JUCE module: HTTP + WebSocket server on one port, WebSocket client; Simple-Web-Server (MIT) over standalone asio (BSL-1.0); TLS optional | GPL-3 | **the copy vendored inside WFS-DIY is ahead of the fork** (see below) |
+| **juce_simpleweb** (`benkuper/juce_simpleweb`; `pob31/juce_simpleweb` is a fork of it) | JUCE module: HTTP + WebSocket server on one port, WebSocket client; Simple-Web-Server (MIT) over standalone asio (BSL-1.0); TLS optional | GPL-3 | **three lineages, none of them a superset of the others** — see the section below before pinning anything |
 
 XOA and Tight-WFS were looked at only for conventions; both are under construction and
 nothing here depends on them.
@@ -27,10 +29,19 @@ nothing here depends on them.
 1. **JUCE 8.0.13 versus JUCE 9.0.1.** Go.dot is pinned to JUCE 8.0.13 because that is the
    SHA Tracktion Engine 3.5.0 was tested against (`scripts/check-pins.py`); WFS-DIY and
    spatcore are on JUCE 9.0.1. Anything in spatcore that uses a JUCE 9 API does not compile
-   here. Known instance: `control/osc/OSCParser.h` constructs `juce::OSCArgument(true)`,
-   and JUCE 8's `juce_OSCArgument.h` knows only int32/float32/string/blob/colour.
-   JUCE-free headers (`rt/RtThreadPriority.h`) and `juce_core`-only headers
-   (`rt/RtSnapshot.h`) are safe.
+   here. **Draft 0.1 named one instance and it was wrong** (see the correction under
+   *Phase 1* below): `control/osc/OSCParser.h`'s `juce::OSCArgument (true)` compiles on
+   both. **No confirmed JUCE-9-only usage in spatcore is known today** — which makes this a
+   constraint to keep testing against rather than one with a worked example, and the rule
+   below is what to do about it. Everything Go.dot has actually compiled is clean:
+   `rt/{RtSnapshot,RtThreadPriority,AudioWorkgroupCoordinator,LockFreeRingBuffer,
+   SharedInputRingBuffer}.h` and all of `io/` (JUCE-free, `juce_core`-only, or using
+   `juce::AudioWorkgroup`, which is a JUCE **8** feature). spatcore is C++17, so the
+   language level never bites either.
+
+   **The rule that survives the correction:** compile a spatcore header in its own
+   translation unit before depending on it, rather than reasoning about which JUCE version
+   its APIs came from.
 2. **One JUCE compile.** `cmake/WfgThirdParty.cmake` compiles every JUCE and Tracktion
    module exactly once, in `wfg_thirdparty`. spatcore's CMake targets link `juce::*`
    module targets, which would compile the module sources a second time into
@@ -47,7 +58,7 @@ are **three independently-maintained surfaces** kept honest only by a runtime au
 logs drift after the fact. `MCPOSCQueryAuditor` exists for that reason, and spatcore's own
 boundary proposal recommends collapsing the three into one registry.
 
-Go.dot starts collapsed: [`../parameters/godot-parameters.csv`](../parameters/godot-parameters.csv)
+Go.dot starts collapsed: [`parameters/godot-parameters.csv`](parameters/godot-parameters.csv)
 is the single source for the document schema, the parameter tree, the RELAX NG schema and
 the OSCQuery reply. The CSV convention is WFS-DIY's, and a good one; what is not carried
 over is the drift.
@@ -56,9 +67,9 @@ over is the drift.
 
 | Need | Reuse | Status |
 |---|---|---|
-| HTTP + WebSocket transport for OSCQuery | `juce_simpleweb` (`SimpleWebSocketServer`, `SimpleWebSocketClient`) | pinned as a submodule once the fork carries WFS-DIY's patches |
+| HTTP + WebSocket transport for OSCQuery | `juce_simpleweb` (`SimpleWebSocketServer`, `SimpleWebSocketClient`) | **blocked on a rebase, not on a PR** — see *Which juce_simpleweb to pin* below |
 | OSCQuery server shape | `WFS_DIY_v1/Source/Network/OSCQueryServer.{h,cpp}`: HOST_INFO, full tree, attribute queries, LISTEN/IGNORE, 30 ms coalesced binary pushes, PATH_CHANGED, per-IP echo suppression | **pattern only** — the transport shell is generic, the namespace builders are WFS-specific, and its HTTP handler walks the live ValueTree from a worker thread (a race Go.dot's snapshot removes). Go.dot's server is written in-tree behind a namespace-provider seam |
-| OSC codec | `spatcore/control/osc/{OSCParser,OSCSerializer}.h` | **not usable**: JUCE 9 only, drops bundle time tags, cannot serialise `T`/`F`, unknown tags throw. Go.dot writes its own full OSC 1.1 codec, shaped so it can be lifted into spatcore |
+| OSC codec | `spatcore/control/osc/{OSCParser,OSCSerializer}.h` | **not usable**: it drops bundle time tags, cannot serialise `T`/`F`, decodes them as an int32 `1`/`0`, and throws on an unknown tag. Go.dot writes its own full OSC 1.1 codec, shaped so it can be lifted into spatcore. *(Draft 0.1 also called it JUCE-9-only. That was wrong — see the correction below.)* |
 | UDP/TCP receivers with sender IP | `spatcore/control/osc/{OSCReceiverWithSenderIP,OSCTCPReceiver}` (raw-data callback path) | **shape reused** (raw datagram + sender IP:port), code not: their legacy path pulls `OSCParser.h` in |
 | Origin tagging | `spatcore/control/osc/OscTransportTypes.h` (`OriginTag`, thread-local `OriginTagScope`) | **concept only**: a thread-local cannot survive Go.dot's queue hop; the origin travels on the event |
 | Tick-thread priority | `spatcore/rt/RtThreadPriority.h` (MMCSS "Pro Audio" via runtime-loaded avrt, mach time-constraint, SCHED_FIFO; JUCE-free) | **used as-is** |
@@ -66,23 +77,104 @@ over is the drift.
 | XML persistence | `spatcore/control/state/XmlPersistence` | **not usable**: writes a `<!-- Created: -->` timestamp header (which is why WFS-DIY's harness has to normalise) and uses JUCE's default XML formatting; Go.dot's document must be canonical and byte-identical |
 | Number formatting | JUCE's `String (double)` and `var (double).toString()` | **not usable, measured**: over 19 993 random doubles the JUCE writer loses 9 214 of them (46%) to a save-and-load round trip, because it stops at fifteen significant digits; its reader is not correctly rounded either, losing about one in four hundred. Go.dot writes with `std::to_chars` and reads with a classic-locale stream — zero failures. This is what put the macOS floor at 13.3, and it is worth knowing before any sibling project trusts a JUCE-written number to survive a file |
 
-### Phase 2 — first sound
+#### A correction to draft 0.1: `OSCArgument(true)` is not a JUCE 9 symbol
 
-| Need | Reuse |
-|---|---|
-| Message → real-time hand-off | `spatcore/rt/RtSnapshot.h` — POD snapshot under a `SpinLock`, the pattern from the 2026-07 binaural RT-safety fix |
-| Apple Silicon audio workgroups | `spatcore/rt/AudioWorkgroupCoordinator.h`; note `docs/spikes/README.md` leaves the workgroup question open and Tracktion's own switch is `EditPlaybackContext::enableAudioWorkgroup(true)` |
-| Device layer | `spatcore/io/DeviceHost.h` (explicit channel masks that stick), `io/DeviceIoCallback.h` (hardware-indexed buffer, no channel cap), `io/TestSignalGenerator.h` (500 ms protective ramp) — the RME Digiface Dante rig of PRD §6.2 |
-| Lock-free rings | `spatcore/rt/LockFreeRingBuffer.h` (SPSC float ring), `rt/SharedInputRingBuffer.h` |
-| The observed sample rate replaces `--sample-rate` | — |
+Draft 0.1 said spatcore's `control/osc/OSCParser.h` **requires JUCE 9**, because
+`OSCParser.h:128,131` construct `juce::OSCArgument (true)` for the `T` and `F` type tags.
+Re-checked against both trees on 2026-09-05, that is not so, and the reasoning is written out
+rather than quietly deleted because the *conclusion* it supported happens to survive while the
+*reason* does not.
+
+`juce::OSCArgument` has **no boolean constructor in either version**. JUCE 8.0.13
+(`juce_osc/osc/juce_OSCArgument.h:53,56,59,67,70`) and JUCE 9.0.1 offer exactly the same five:
+`int32`, `float`, `const String&`, `MemoryBlock`, `OSCColour`. So `OSCArgument (true)` binds to
+the `int32` overload by integral promotion — unambiguously, since promotion beats the
+floating-point conversion — and it **compiles on JUCE 8 exactly as it does on JUCE 9**.
+
+What it does is the same on both, and is worse than a build error: a `T` or `F` argument
+decodes as an int32 `1` or `0`, so the boolean type is lost silently on every platform WFS-DIY
+already ships on. It is a pre-existing semantic defect that travels with the file, not a
+version gate — and it stays on the list of things worth a spatcore decision below.
+
+Two things this changes and one it does not. It **does not** change the decision: Go.dot still
+writes its own codec, for the three remaining reasons in the row above. It **does** empty the
+JUCE 8 / JUCE 9 constraint of its only worked example — no confirmed JUCE-9-only usage in
+spatcore is known today, so §2 above now says to compile a header rather than to reason about
+its APIs. And it means anyone porting `OSCParser.h` to JUCE 8 should expect it to build and
+then be wrong, which is the harder failure to notice.
+
+### Which juce_simpleweb to pin
+
+Checked on 2026-09-05, because the OPTIONS patch reaching Ben's master looked like it
+unblocked pinning upstream directly. It half does, and the half that remains is the half
+Go.dot needs.
+
+**Three lineages, and none contains the others.**
+
+| | `benkuper/juce_simpleweb` master (`af01ca4`) | `pob31/juce_simpleweb` (`eb45198`) | vendored in WFS-DIY |
+|---|---|---|---|
+| OPTIONS through `default_resource` | **yes** (PR #5) | yes | yes |
+| error code forwarded to `connectionError` | **yes** (PR #8) | no | no |
+| WebSocket client timeout argument | **yes** (PR #7) | no | no |
+| deadlock fix when stopping the server | **yes** (PR #9) | no | no |
+| `#ifndef SIMPLEWEB_SECURE_SUPPORTED` guard | **no** | no | **yes** |
+| `NOGDI` removed | no | no | **yes** |
+| `_WIN32_WINNT 0x0A00` unconditionally | no | no | **yes** |
+
+So the OPTIONS patch is upstream and the local copy of it can go. **The TLS-off guard is
+not**, and it is the one that decides whether Go.dot can build at all without OpenSSL:
+upstream's header still says `#define SIMPLEWEB_SECURE_SUPPORTED 1` unconditionally, so
+spatcore's recipe — `target_compile_definitions(juce_simpleweb INTERFACE
+SIMPLEWEB_SECURE_SUPPORTED=0)` — is redefined by the header it is trying to configure.
+The result is a macro redefinition and TLS still on, not a build with TLS off.
+
+**Two consequences worth knowing before the work starts.**
+
+Upstream's three newer fixes are worth having: a deadlock when stopping the server while it
+waits for the message-manager lock is exactly the failure a show would hit at get-out. So
+the target is upstream master *plus* the three Windows/TLS patches, not one or the other.
+
+And upstream changed a virtual's signature: `connectionError` now carries an `int status`.
+WFS-DIY's `OSCQueryServer::connectionError (id, message)` is marked `override`, so it will
+fail to compile rather than silently stop being called — loud, which is the good outcome,
+but it means moving WFS-DIY to upstream is a small edit rather than a pin bump. Go.dot
+should write against the new signature from its first line.
+
+**What would settle it:** rebase `pob31/juce_simpleweb` onto upstream master and re-apply
+the four local patches. The `#ifndef` guard is a one-line, entirely backwards-compatible
+change — every existing consumer keeps TLS on — so it is also the obvious next PR to Ben,
+and if it lands, Go.dot can pin upstream directly and the fork can go away.
+
+### Phase 2 — first sound (the next phase)
+
+Re-verified against the sibling checkouts on 2026-09-05. Every header in this table
+**compiles on JUCE 8.0.13**: the JUCE 8 / JUCE 9 boundary of §2 turns out to bind
+`control/osc` only, and even there not for the reason draft 0.1 gave. spatcore targets
+C++17, so nothing in it needs a language-level exception either.
+
+| Need | Reuse | Status |
+|---|---|---|
+| Device open policy | `spatcore/io/DeviceHost.h`: `AudioDeviceManager::initialise (max, max, xml, …)`, explicit `BigInteger` masks with `useDefaultInputChannels` / `useDefaultOutputChannels` set **false** (while either is true, `setAudioDeviceSetup` throws the caller's mask away and substitutes the count frozen at the last `initialise`), `ensureDeviceTypesScanned()` before `setAudioDeviceSetup` (on an unscanned manager it takes a no-device-type early exit and returns an *empty* error string while opening nothing), and read-back of the *active* masks rather than the requested ones | **used as-is**, at source level |
+| Hardware-indexed callback | `spatcore/io/DeviceIoCallback.h`: `audioDeviceIOCallbackWithContext`, buffer channel *h* == hardware channel *h*, device output rows aliased zero-copy, everything sized in `audioDeviceAboutToStart`, no allocation and no lock in the callback. Avoids `AudioSourcePlayer`, whose `float* channels[128]` caps a buffer at 128 channels | **shape used as-is; one seam differs.** Its per-block hook is a `juce::AudioSource` (`getNextAudioBlock`), while Tracktion's hosted interface wants `processBlock (AudioBuffer<float>&, MidiBuffer&)`. Go.dot's callback calls the hosted interface directly rather than dressing it as an `AudioSource` |
+| Gain slew | WFS-DIY `Source/MainComponent`: `juce::SmoothedValue<float, ValueSmoothingTypes::Linear>` — **never Multiplicative**, which cannot ramp to or from zero and emits a NaN burst, i.e. a loud crack on the PA, guarded in JUCE by nothing but a debug `jassert`; `std::atomic<float>` targets; a 50 ms ramp; `setTargetValue` once per block; per-sample `getNextValue()` only while `isSmoothing()`, else the vectorised `applyGain`, skipped entirely at unity | **adopted verbatim** in `CueOutputPlugin` |
+| Message → real-time hand-off | `spatcore/rt/RtSnapshot.h` — a POD snapshot (`static_assert (is_trivially_copyable_v<T>)`), but under a `juce::SpinLock` on **both** sides; spatcore's own `effects-channels-plan.md` already recommends a triple buffer for new work, and `RtTripleBuffer.h` does not exist yet | **concept only.** Go.dot's audio-side state is per-coefficient atomics (level, routing matrix), which needs no snapshot at all; if a struct hand-off does appear, it is written as the lock-free triple buffer spatcore's plan asks for, so it can be lifted back |
+| Tick-thread priority | `spatcore/rt/RtThreadPriority.h` — JUCE-free; MMCSS "Pro Audio" through a runtime-loaded `avrt.dll` (no import library on any link line), mach time-constraint policy, `SCHED_FIFO` | **used as-is** (already Phase 1's) |
+| Apple Silicon audio workgroups | `spatcore/rt/AudioWorkgroupCoordinator.h` — wraps `juce::AudioWorkgroup::join (WorkgroupToken&)`, which are **JUCE 8** features, not JUCE 9; one `generation` atomic on the fast path, a `CriticalSection` only when the workgroup changes. Tracktion's own switch is `EditPlaybackContext::enableAudioWorkgroup (true)`, macOS-only and marked experimental | **deferred, not rejected.** The M4 Pro cross-check left workgroups off and still found reproducibility perfect, so this is now a question about xrun headroom at buffer 32, not about correctness |
+| Fade shapes | Two conventions exist in WFS-DIY and neither is Go.dot's. `Source/Sampler/SamplerEngine.h` counts fade-in/out in integer samples on the audio thread. `Source/Network/OSCParameterRamper.h` ramps ValueTree parameters at 50 Hz on the message thread, takes its progress from **wall-clock elapsed** because GUI congestion stretched its 20 ms tick past 100 ms, and drops a ramp if anyone else wrote the parameter meanwhile (takeover detection) | **takeover detection adopted; wall-clock progress deliberately not.** Go.dot's `FadeJob` counts *ticks*, which is what lets a fade replay identically. `SamplerEngine` also carries a trap worth naming: it copies a `std::shared_ptr<AudioBuffer>` on the audio thread, so the last reference can be dropped — and the buffer freed — inside the callback |
+| Lock-free rings | `spatcore/rt/LockFreeRingBuffer.h` (SPSC float ring), `rt/SharedInputRingBuffer.h` (single-producer, multi-consumer, each consumer owning its own cursor; a slow consumer is overrun by design, there is no backpressure) | **not needed in Phase 2** — no live input yet. Phase 9's rack will want both |
+| Protective ramp on a test signal | `spatcore/io/TestSignalGenerator.h` — a 500 ms ramp declared a safety property rather than a nicety, plus a 10 ms declick, and it *replaces* rather than mixes into its target channel | **not needed in Phase 2**; recorded for whenever Go.dot grows a test tone |
+| The observed sample rate | WFS-DIY reads it only from the live device (`device->getCurrentSampleRate()`, 48 kHz fallback when none is open) and **never exposes it over OSCQuery** — its namespace is built by walking the ValueTree, which holds no audio-device node, so the rate reaches no client at all | **shape reused, scope widened.** Go.dot publishes rate, block size and clock source under `/godot/engine` and `/godot/audio`, because §6.2 makes "no clock" and "no interface" two failures an operator has to tell apart at a glance |
+| RT-safety instrumentation | — | **none exists** anywhere in the author's repos: no malloc hook, no `operator new` override, no `-fsanitize=realtime`, no allocation counter. The only instrument is `JUCE_ASSERT_MESSAGE_THREAD`, asserted at the *non*-real-time end of each seam. Go.dot's PR 2.2 is new work, and the first place §4.2's lipogram is enforced by anything other than review |
 
 ### Phase 2/4 — closed-loop cues and mock targets
 
-| Need | Reuse |
-|---|---|
-| An OSCQuery *client* | `WFS_DIY_v1/Plugin/Source/Shared/OscQueryClient.{h,cpp}` |
-| OSC over TCP | `spatcore/control/osc/OSCTCPReceiver` — 4-byte big-endian length prefix, ≤16 clients — the framing WFS-DIY already speaks, so `verified` writes can go over TCP |
-| Mock target and golden drivers | `tools/validation/control-replay/` again |
+| Need | Reuse | Status |
+|---|---|---|
+| An OSCQuery *client* | `WFS_DIY_v1/Plugin/Source/Shared/OscQueryClient.{h,cpp}`: HTTP over a raw `juce::StreamingSocket` **because `juce::URL` re-encodes OSCQuery's bare `?HOST_INFO` as `?HOST_INFO=`, which the server then does not match**; WebSocket through juce_simpleweb; `LISTEN`/`IGNORE` as JSON commands; and the detail that shapes Go.dot's design — **the server sends no current value on `LISTEN`**, so the client polls `?VALUE` once per subscribed path after connecting | **pattern adopted, code rewritten.** Its own OSC decode handles only `f i T F` and coerces all four to `float`; Go.dot has a full OSC 1.1 codec already. Its callbacks arrive on the WebSocket thread with no marshalling, deliberately — an async hop could outlive the owning processor during a plugin host's scan |
+| `verified` read-back | the same client, polling `?VALUE` once per tick | **this is why Phase 2 verifies by polling** rather than by `LISTEN`: it is what WFS-DIY's own client had to do, and it leaves no subscription state to reconstruct when the log is replayed with no network |
+| OSC over TCP | `spatcore/control/osc/OSCTCPReceiver` — 4-byte big-endian length prefix, at most 16 clients, one thread each; its `.cpp` pulls `OSCParser.h` in | **not used in Phase 2** (mounts send UDP; 8011 stays reserved). The framing is recorded for when `verified` wants TCP |
+| Mock target | — | **none exists.** `tools/validation/control-replay/remote_tablet_mock.py` is a mock *client*, and nothing in `tools/` fakes a server or a device. Go.dot writes `tests/blackbox/mock_target.py` (stdlib HTTP + UDP) plus an in-process scripted target behind its own namespace-provider seam |
+| Golden drivers | `tools/validation/control-replay/common.py`: exit codes 0 pass / 1 mismatch / 2 usage / 3 app-start, an `App` launcher that polls for readiness, `OSCSender`, `oscquery_get`, `compare_or_update` | **adopted** (already Phase 1's convention) |
 
 ### Phase 5 — desktop UI and undo
 
@@ -118,17 +210,15 @@ Go.dot embeds this server or bridges MCP → OSCQuery externally. The port block
 
 ## Gaps worth a spatcore decision (the author's, not Go.dot's)
 
-- `control/osc/OSCParser.h` / `OSCSerializer.h`: JUCE 9 only; bundle time tags parsed and
-  discarded, always written as "immediately"; `T`/`F` arguments serialise to nothing (a
-  desync). Go.dot's codec could be lifted into spatcore.
-- The vendored `WFS_DIY_v1/ThirdParty/juce_simpleweb` differs from `pob31/juce_simpleweb`
-  at: `juce_simpleweb.h` (`#ifndef SIMPLEWEB_SECURE_SUPPORTED` guard, `_WIN32_WINNT 0x0A00`,
-  `NOGDI` removed), `SimpleWebSocketServer.{h,cpp}` (`#if SIMPLEWEB_SECURE_SUPPORTED` around
-  the HTTPS `serveFile`). `spatcore/cmake/SpatcoreConsumer.cmake` relies on the guard; the
-  fork cannot build TLS-off without it. Push the patches; upstream to benkuper.
-- ~~`spatcore` has no LICENSE file.~~ **Done, 2026-09-04** (`7e1a8ad`): GPL-3, matching
-  where the code came from and everywhere it goes. WFS-DIY's gitlink still points at the
-  commit before it, so a pin bump there is the author's to make when convenient.
+- `control/osc/OSCParser.h` / `OSCSerializer.h`: bundle time tags parsed and discarded,
+  always written as "immediately"; `T`/`F` arguments serialise to nothing (a desync) and
+  decode as an int32 `1`/`0`, because `OSCArgument (true)` promotes to the `int32` overload —
+  on **both** JUCE 8 and JUCE 9, so this is a live defect in WFS-DIY today rather than the
+  version gate draft 0.1 called it. Go.dot's codec could be lifted into spatcore.
+- The three juce_simpleweb lineages have diverged in both directions; the detail is in
+  *Which juce_simpleweb to pin* above, and the short version is that the fork needs a rebase
+  before anything can pin it.
+
 - `SpatcoreConsumer.cmake` strips `libssl libcrypto z` from juce_simpleweb's interface
   link libraries — the macOS/Windows spellings. The module also declares `linuxLibs:
   ssl,crypto`, which JUCE turns into `-lssl -lcrypto`, so a TLS-off Linux build still links

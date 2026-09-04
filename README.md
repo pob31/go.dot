@@ -33,14 +33,16 @@ The specification lives in `docs/`, and it is the spec — not background readin
 
 Phase 0 — *"a repo that builds on three platforms"* — is complete, and the seven
 Tracktion Engine validation spikes have been run (`docs/spikes/`; all pass). Phase 1, the
-headless engine that loads a show document and exposes it over OSCQuery, has started with
-its two documents:
+headless engine that loads a show document and exposes it over OSCQuery, is under way. Its
+documents come first, and they are the thing to read before the code:
 
 - **[`docs/godot-namespace-draft-0.1.md`](docs/godot-namespace-draft-0.1.md)** — the
   *shape* of the `/godot` namespace and the show document: how a node is addressed, what
   metadata it carries, how a mutation happens and how it is recorded. A living document,
   because Go.dot is not a port of something that already works and there is no finished
-  parameter list to transcribe.
+  parameter list to transcribe. Its §11 draws the shape Phase 2 adds — runs, the four cue
+  kinds, the audio graph — written ahead of that code so the pull requests have something
+  to be reviewed against.
 - **[`docs/parameters/godot-parameters.csv`](docs/parameters/godot-parameters.csv)** —
   *what* exists, added to as each phase lands. One table generating four surfaces: the
   document schema, the parameter tree, the RELAX NG schema and the OSCQuery reply. WFS-DIY
@@ -54,26 +56,35 @@ its two documents:
 
 - CMake build wired to JUCE and Tracktion Engine as pinned submodules, with the
   vendor sources compiled exactly once into `wfg_thirdparty`.
-- `wfg`, a console binary that boots and exits: `wfg --version` prints the JUCE
-  and TE versions it actually linked, `wfg selftest` stands the JUCE message
-  thread up headless and exits 0.
-- `wfg_tests`, a doctest suite that asserts the toolchain facts a green compile
-  does not prove — the JUCE pin at *runtime*, the module configuration actually
-  reaching our targets, and every case run twice, under `C` and under `fr_FR`.
+- **The engine skeleton**: one road in (`Engine::submit` from any thread), one ordered path
+  out (`processTick`, which applies every event in arrival order on the tick thread), a
+  named-command registry, and a tick-indexed event log that a session can be replayed from
+  and must reproduce record for record. Built before there was anything to record, which is
+  the only order in which that guarantee is cheap.
+- **`osc::Value`**, the OSC 1.1 value type the whole control plane shares, with a number
+  formatter that writes the shortest text reading back as the identical value. Measured:
+  JUCE's own writer loses 46% of random doubles to a save-and-load round trip, which is what
+  put the macOS floor at 13.3.
+- `wfg`, a console binary: `--version` prints the JUCE and TE versions it actually linked,
+  `selftest` stands the JUCE message thread up headless, `commands` lists the registered
+  command set, `replay` re-executes a log and reports whether it reproduced itself.
+- `wfg_tests`, a doctest suite — the toolchain facts a green compile does not prove (the
+  JUCE pin at *runtime*, the module configuration actually reaching our targets), plus the
+  skeleton's own guarantees, every case run twice, under `C` and under `fr_FR`.
 - GitHub Actions CI for Linux, macOS and Windows, plus a pin gate and an
   isolated job that builds the spikes.
 - `spikes/`, for the seven Tracktion Engine validation programs of PRD §6.1.
   They are throwaway by construction: they may link `wfg::thirdparty` and never
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
-**What does not exist yet** — no engine subsystems at all: no parameter tree, no
-OSCQuery server, no cue model, no tick clock, no document format, no UI, no
-plugin hosting, no video. Phase 1 builds the first five, in this order: the engine
-skeleton (commands, tick-indexed event log, replay), the document, the tick clock, the
-parameter tree with mounted namespaces as stubs, the cue list with one standby pointer,
-and last the OSCQuery server on `juce_simpleweb`. Two further submodules arrive with it —
-`ThirdParty/juce_simpleweb` and `ThirdParty/spatcore` — the first for the HTTP+WebSocket
-transport, the second consumed at source level for its real-time helpers.
+**What does not exist yet.** Most of the engine. There is no document format and no bundle,
+no tick clock driving anything, no parameter tree, no mounted namespaces, no cue list or
+standby pointer, no OSC codec on the wire, no OSCQuery server, and therefore no `serve`: the
+skeleton is exercised by tests and by `wfg replay`, not by a client. Phase 1 adds those in
+that order, and two further submodules arrive with them — `ThirdParty/juce_simpleweb` for
+the HTTP+WebSocket transport and `ThirdParty/spatcore`, consumed at source level for its
+real-time helpers. No audio, no UI, no plugin hosting, no video: audio is Phase 2, which is
+planned but not started, and everything else is later.
 
 **Open questions, deliberately unanswered anywhere in this tree**
 

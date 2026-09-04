@@ -1,8 +1,10 @@
 # Go.dot — Parameter-tree namespace and document schema
 
-**Draft 0.2** — the PRD §9.3 "parameter-tree namespace and node metadata schema". It also
+**Draft 0.3** — the PRD §9.3 "parameter-tree namespace and node metadata schema". It also
 fixes the show-document schema, because the document is the other half of the same
 namespace: every node under `/godot/cue` is a projection of an attribute in `show.xml`.
+Draft 0.3 adds §11, the shape Phase 2 gives the tree, written ahead of its code so that the
+Phase 2 pull requests have something to be reviewed against.
 
 **This is a living document, and deliberately so.** Go.dot is not a port of something that
 already works, the way WFS-DIY was a port of a Max patch — there is no finished parameter
@@ -243,14 +245,13 @@ grammar, and it grows with it.
 
 | Element | Attributes (type, default) | Children |
 |---|---|---|
-| `Show` | `formatVersion` int (1) | `Lists`, `Mounts`, `Retired` (question B) |
+| `Show` | `formatVersion` int (1) | `Lists`, `Mounts` |
 | `Lists` | — | `List*` |
 | `List` | `id`, `name` string | `(Cue \| Group)*` |
 | `Cue` | `id`; `number` string; `name` string; `kind` enum (`memo`); `notes` string; `enabled` bool (true); `colour` string; `preWait`, `postWait` double seconds (0, cap 6) | — |
 | `Group` | `id`; `number`; `name`; `notes`; `enabled`; `colour`; `mode` enum (`sequence`); `advance` enum (`manual`); `preWait`, `postWait` | `(Cue \| Group)*` |
 | `Mounts` | — | `Mount*` |
 | `Mount` | `id`; `prefix` string; `transport` enum (`udp`); `namespace` string; `rateCap` double Hz (50, cap 3); `anticipatable` bool (false); `panic` enum (`park`) | — |
-| `Retired` | — | `Id*` (`id`) — question B |
 
 Example, canonical:
 
@@ -352,23 +353,180 @@ back on if nobody feels strongly by then.
 - **Identifiers — 8-character Crockford base32.** `[0-9A-HJKMNP-TV-Z]{8}`, 40 bits from
   `std::random_device`, unique within the document at creation.
 
+- **B — Deleted identifiers are not retired** (settled 2026-09-05): "reusing is not such a
+  problem, we can skip tombstones". So there is no `Retired` element, deletion forgets, and
+  the document carries nothing to record what is no longer in it.
+
+  What the guarantee actually is, stated plainly rather than overclaimed: an identifier is
+  unique among the objects that exist, and a fresh one is drawn from 40 bits, so *reissuing*
+  a number that some deleted object once held is possible and vanishingly unlikely. PRD
+  §3.5's "never reused" is therefore honoured in practice and not enforced in the file. The
+  cost, if it is ever felt, is that a Choufleur note (§3.23) pointing at a deleted cue shows
+  as unknown rather than as deleted — the two are indistinguishable without a tombstone.
+  Adding one later changes nothing already written, which is why this was safe to decide
+  quickly.
+
+- **G — The fixed track count lives in the document** (settled 2026-09-05, for Phase 2):
+  `Show/Audio/@tracks`, required, with no default anywhere in the tree. It is the polyphony
+  ceiling of PRD §3.25 and it is something someone decided (§4.10), so the show says it and a
+  new show has to say it. Every fixture states its own.
+
+- **H — A GO on a media cue that is already running is ignored** (settled 2026-09-05):
+  the `go` is applied and logged, standby advances, no second run is created and the running
+  instance continues. PRD §3.8's per-cue-type policy may revisit this later; restart and
+  second-instance were the alternatives offered.
+
+- **I — Audio backends as WFS-DIY builds them** (settled 2026-09-05): `JUCE_ASIO=1` behind a
+  `WFG_ASIO_SDK` path variable (the SDK is not redistributable, so without a path the build
+  is WASAPI/DirectSound only) and `JUCE_JACK=1` on Linux with `libjack-jackd2-dev` in the
+  package list. CoreAudio needs nothing.
+
 ### Open, with the subphase that forces each
 
 | # | Question | Forced by | Fallback if undecided |
 |---|---|---|---|
 | A | Does **standby survive save/load**, or start empty every time? §3.20 lists ephemeral state without naming standby; §3.5 calls it engine state. | the cue list (PR 1.7) | persist it in `state.xml` — a rehearsal reopened where it was left is the kinder default, and it is one row of the CSV to reverse |
-| B | Are deleted identifiers **retired** in the document, so "never reused" is verifiable? | the document core (PR 1.2) | do not, and say so: 40 bits of randomness makes reuse vanishingly unlikely, and the guarantee can be strengthened later without changing anything already written |
 | C | Does `standby.next` **descend into a group**, or step over it? §3.6 says the pointer descends into a manual sequence group; §3.5 says it lands after an automatic chain. Both are Phase 3 behaviour. | the cue list (PR 1.7) | step over it in Phase 1 and say so in the test, rather than implement half of Phase 3 |
 | D | The **touch-gating** vocabulary (§3.16 "required from day one"): `node.touch` / `node.release` per origin, pushes suppressed to the touching origin, released on disconnect. | the OSCQuery server (PR 1.9) | as described — it is the smallest thing that satisfies §3.16, and no surface exists yet to disagree with it |
 | E | Does the Phase 5 desktop UI run **in-process or as a separate client**? | Phase 5, but it shapes Phase 2's plugin-parameter handover | assume separate, because that is the stricter assumption and the one PRD §3.2 reads most naturally |
 | F | The **mount** attribute set: `transport` declared now and used from Phase 2, a mount-level `panic` default with per-node overrides. | mounts (PR 1.6) | as drawn in §2.5 |
+| J | **Should PRD §4.2 record what Tracktion does inside the callback?** Its device callback takes one uncontended `std::shared_lock` per block and its node-player pool uses semaphores; the lipogram can be *enforced* on Go.dot's code and only *measured* on Tracktion's (§11.5). A PRD amendment is the author's to make. | the lipogram test (PR 2.2) | enforce on Go.dot's scopes, report Tracktion's count separately, never hide it |
 
-None of these blocks the next subphase. B is the only one due soon, and its fallback costs
-nothing to change afterwards.
+None of these blocks the next subphase, and the one that was due soonest — B, tombstones —
+is now settled. J changes no code either way; it changes what §4.2 claims.
 
 ## 10. Not in Phase 1, by design
 
 Media, fades, triggers, bindings, run pointers, prepare/commit, headers and footers, the
 solver, timecode, surfaces, video, plugins. The tree above is the skeleton those hang on:
 a cue's outputs and parameters (Phase 2+) become further nodes under `/godot/cue/<id>`,
-run pointers become `/godot/runs/<id>` (Phase 3), and mounts stop being stubs in Phase 2.
+run pointers become `/godot/run/<id>` (a minimal form in Phase 2, plural per group in
+Phase 3), and mounts stop being stubs in Phase 2. §11 draws the Phase 2 part.
+
+## 11. Phase 2 — first sound: what the tree, the commands and the log gain
+
+Written on 2026-09-05, while Phase 1's PRs 1.2–1.11 are still landing. **Nothing in this
+section exists yet.** It fixes the shape so that PRs 2.1–2.9 are reviewed against a text
+rather than against memory; the rows reach `parameters/godot-parameters.csv` with the PR
+that implements each of them, never before. The engine-side design (threads, the generated
+Tracktion Edit, the measurements each PR must take) is in the approved Phase 2 plan and will
+be reconciled into this file at close-out, as §2 was for Phase 1.
+
+### 11.1 `/godot/audio` — the fixed graph, and two nodes it adds to `/godot/engine`
+
+| Node | Type | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/audio/tracks` | `i` | ro | show | the fixed track count — the polyphony ceiling (§3.25). Required, no default (G) |
+| `/godot/audio/bus/<id>/name` | `s` | rw | show | user-authored, what a dropdown shows |
+| `/godot/audio/bus/<id>/firstChannel` | `i` | ro | show | hardware output index, 0-based |
+| `/godot/audio/bus/<id>/width` | `i` | ro | show | explicit, never inferred (§3.9b) |
+| `/godot/audio/device` | `s` | ro | none | the open device's name |
+| `/godot/audio/outputs` | `i` | ro | none | hardware outputs the device presents; a cue wider than this is refused at load |
+| `/godot/audio/status` | `s` | ro | none | `stopped` \| `running` \| `noClock` — "no clock" and "no interface" are different failures (§6.2) |
+| `/godot/engine/launchLatencyTicks` | `i` | ro | none | `1 + ceil (blockSize / samplesPerTick)`, see §11.5 |
+| `/godot/engine/rtViolations` | `i` | ro | none | allocations counted inside Go.dot's audio scopes since start |
+
+A **bus** is a summing point — a named, contiguous range of hardware outputs with a declared
+width. Processor *slots* (exclusive, allocated) are Phase 4 and are not drawn here.
+
+### 11.2 Cue kinds
+
+`kind` grows to `memo | group | media | fade | stop | osc`. Each kind's attributes are nodes
+under `/godot/cue/<id>/`, `rw`, `persist = show`:
+
+| Kind | Attributes (type, default) |
+|---|---|
+| `media` | `file` string, bundle-relative under `media/`; `level` double dB (0, −120..12); `startOffset` double s (0); `Route*` children: `bus` id, `gains` = `C_in × width` doubles, row-major (`/godot/cue/<id>/route/<busId>/gains`, the first list-typed node) |
+| `fade` | `target` cue id; `level` double dB; `duration` double s; `curve` enum `linear \| sCurve` |
+| `stop` | `target` cue id; `verb` enum `hard \| fade`; `duration`; `curve` |
+| `osc` | `address` string, a mounted node; `value` string, one typed atom as the log writes it (`f:0.5`, `s:"…"`, `T`); `wait` enum `none \| sent \| verified`; `timeout` double s |
+
+A media cue's `level` is what was decided. The level a running instance is actually at is
+`/godot/run/<id>/level` (§11.3), which is what a fade writes. The two never merge (§4.10).
+A missing media file is reported at load and fails the arm, never the load.
+
+### 11.3 `/godot/run` — what is happening
+
+A run is the live instance of a launched cue. Phase 2 has one per launched cue; Phase 3
+makes them plural per group and adds kill, advance and prune. Run IDs are generated exactly
+like cue IDs and are logged as applied in the `go` record.
+
+| Node | Type | Meaning |
+|---|---|---|
+| `/godot/run/<id>/cue`, `kind` | `s` | the cue it instantiates, and its kind |
+| `/godot/run/<id>/state` | `s` | `armed` \| `playing` \| `stopping` \| `done` \| `failed` |
+| `/godot/run/<id>/track` | `i` | the fixed track it plays on (media only) |
+| `/godot/run/<id>/position` | `d` | seconds into the file — a readout, never a model input |
+| `/godot/run/<id>/level` | `d` | live level in dB, `rw`; what fades write |
+| `/godot/run/<id>/late` | `i` | blocks between the intended launch and the earliest one possible |
+| `/godot/run/<id>/error` | `s` | reason when `failed`: `no-track`, `media-missing`, `timeout`, … |
+
+All `persist = none`. `GODOT.RATE_CAP` on `position` is the tick rate; nothing here is
+anticipatable.
+
+### 11.4 Commands, and the events the engine reports to itself
+
+Operator commands, write-only method nodes as in §2.6:
+
+| Command | Node | Params | Notes |
+|---|---|---|---|
+| `go` | `/godot/cmd/go` | — | acts on the focused list's standby and **advances it** (§3.5); the run ID it created is the record's last argument |
+| `cue.fire` | `/godot/cmd/cue/fire` | `s` cue id | fires a named cue and **does not touch standby** — only GO moves it |
+| `run.kill` | `/godot/cmd/run/kill` | `s` run id | hard stop; the primitive Phase 10's stop levels will use |
+| `audio.arm` | `/godot/cmd/audio/arm` | `s` cue id | explicit arm; standby arms implicitly |
+
+**Engine-origin commands.** Everything the tick thread learns from Tracktion or from a mounted
+target *that a decision depends on* enters the model as a command with origin `engine` or
+`mount:<id>`, applied on the tick it was observed and logged like any other. They are
+registered commands (§4.11 holds for what the machine reports too) whose handlers are
+replay-idempotent, and they are rejected from any other origin (`R … bad-origin`):
+
+| Command | Args | When |
+|---|---|---|
+| `audio.editBuilt` | `h` seed, `i` tracks, `i` outputs | the Edit was generated and its node graph verified collision-free; the seed makes replay build the same Edit |
+| `audio.armed` | `s` run, `i` track | the media is in the slot |
+| `audio.deviceStarted` | `i` sampleRate, `i` blockSize, `s` device, `h` switchSample | the device (re)started; the tick clock rebases at the boundary after `switchSample` |
+| `audio.sessionReleased` | `i` generation | the tick thread has let go of a retired playback context |
+| `run.started`, `run.ended` | `s` run | the launch handle reported playing / stopped |
+| `run.late` | `s` run, `i` blocks | a GO arrived before its arm completed |
+| `run.failed` | `s` run, `s` reason | |
+| `mount.readback` | `s` mount, `s` address, one atom | a value read back from a target's OSCQuery server |
+
+### 11.5 Two rules and one protocol
+
+- **State transitions are events; continuous readouts are not.** A run's `position`, the
+  engine's `tick`, a meter: snapshot readouts for clients, never inputs to a decision. A run
+  ending, a device starting, a read-back arriving: logged commands. Replay with no audio
+  engine at all re-injects every transition from the log and reproduces the saved bundle, the
+  tree dump and the log itself — the same guarantee §7 already makes.
+- **The launch tick.** A `go` applied at tick *n* launches at tick
+  `n + 1 + ceil (blockSize / samplesPerTick)`: far enough ahead that Tracktion never starts a
+  clip back-dated (a launch beat already in the past skips the file forward by the lateness,
+  it does not delay it), and a pure function of the log header, so replay computes the same
+  tick. One or two ticks of latency, exposed at `/godot/engine/launchLatencyTicks`. Every
+  message belonging to one GO leaves in the same frame (§3.4).
+- **The session protocol.** Tracktion recreates its playback context on every device change,
+  on the message thread. The tick thread never holds a raw pointer into it: it reads an
+  immutable session `{context, launch handles, generation}` published by the audio host, and
+  the host retires a session only after `audio.sessionReleased <generation>` has been applied.
+
+**The audio thread's contact with the control plane** stays one relaxed atomic add on the
+sample counter, plus the atomics of Go.dot's own output plugin (level and routing matrix,
+slewed per block). The lipogram (§4.2) is *enforced* by a test on Go.dot's scopes of the
+callback — prologue, sub-block loop, the plugin's process, epilogue — and *measured* on
+Tracktion's, whose own device callback takes one shared lock per block by design (question J).
+
+### 11.6 The bundle and the log
+
+```
+MyShow/
+  media/               audio files, referenced bundle-relative from Cue/@file
+```
+
+The log header gains one line per media file the show references — `# media <path> <bytes>`
+— so a replay knows what was read without hashing a show's media on every open.
+
+### 11.7 Ports, unchanged
+
+Mounts send over UDP (their declared `transport`); 8011 stays reserved for OSC over TCP, and
+`verified` reads back over the target's OSCQuery HTTP port. Nothing new is opened.
