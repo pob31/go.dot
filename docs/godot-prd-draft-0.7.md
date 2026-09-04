@@ -710,6 +710,52 @@ Multitouch principles:
 - Wifi loss must leave the pane **visibly stale**, never silently frozen, and
   any in-flight adjustment lands on a defined value.
 
+#### How the tablet client is delivered *(amended in 0.8)*
+
+**A web client is the primary surface, and a native companion is an optional
+addition on top of it — not an alternative to it.**
+
+The web client (TypeScript over OSCQuery + WebSocket) is what makes the tablet a
+*genuine* fallback: no install, no store relationship, and it reaches the iPad in
+the house, an Android tablet, and a browser on the booth machine from one
+codebase. It also inherits §3.22: because the engine speaks OSCQuery and OSCQuery
+**describes itself**, the client discovers the namespace rather than shipping a
+copy of it. WFS-DIY's Android remote needs a hand-maintained parameter table on
+both sides; Go.dot's client does not, and cannot drift from the engine.
+
+What a native companion buys is **resume latency**, and it is a real operational
+benefit rather than a technical nicety:
+
+- A suspended native app is still resident. Swiping to it restores the surface
+  **immediately**, with its state intact; only the socket has to re-establish.
+- A backgrounded browser tab may be **discarded** under memory pressure and then
+  has to reload the page, re-render and re-subscribe. The operator reaching for
+  the tablet mid-cue is the exact moment that cost is least affordable.
+
+So the pane is never *silently* wrong either way — but "swipe and it is there"
+and "swipe and it is loading" are different instruments in a show.
+
+Background persistence is a separate property from resume latency, and it splits
+by platform rather than by technology:
+
+| surface | resident in the background? |
+|---|---|
+| **Android** | **Yes** — a foreground service holds the connection open, so the client is never stale at all. WFS-DIY does exactly this. |
+| **iOS** | **No**, native or web. Background execution is limited to declared modes (audio, VoIP, location, BLE); a general network listener is not among them. A native app still wins on resume, but nothing keeps it live. |
+| **Desktop browser** | **Yes** — desktop browsers do not suspend tabs the way mobile does, so the booth panel is unaffected. |
+
+Two consequences for the design, and neither is a change of direction:
+
+- The **web client remains primary** and must be complete on its own. It is the
+  redundancy path (§3.5), and a redundancy path that requires an installed app is
+  not one.
+- **"Visibly stale" is not a weakness to be engineered away.** On iOS it is the
+  only truthful behaviour available, so the design goal is a *fast and honest
+  resume* — re-subscribe promptly, show connection state plainly, and land
+  in-flight adjustments on a defined value — rather than a pretence of
+  continuity. On Android a companion can remove the staleness entirely; that is a
+  bonus on one platform, not the baseline the others are held to.
+
 Modifier vocabulary is **deferred until the needs are clear**, then designed
 once across desktop, tablet and hardware together — two of the three have no
 keyboard, so per-feature decisions produce shift-clicks with no touch
