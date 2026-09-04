@@ -205,10 +205,21 @@ if(MSVC)
     # reads them as the system codepage and mangles every non-ASCII string literal.
 elseif(APPLE)
     # libc++ hardening: bounds and precondition checks in the standard library, at
-    # full strength in Debug and in the cheap "hardened" mode otherwise. Transcribed
-    # from TE's TestRunner:107-108, which is one of the few lines there worth copying.
+    # full strength in Debug and in the cheap "fast" mode otherwise.
+    #
+    # The spelling matters and has changed. TE's TestRunner:107-108 uses
+    # _LIBCPP_ENABLE_ASSERTIONS / _LIBCPP_ENABLE_HARDENED_MODE; BOTH were removed
+    # from libc++, and the SDK now refuses them outright rather than ignoring them:
+    #
+    #   hardening.h:25: error: "_LIBCPP_ENABLE_ASSERTIONS has been removed,
+    #                           please use _LIBCPP_HARDENING_MODE=<mode> instead"
+    #
+    # which fails EVERY .mm translation unit - i.e. all of JUCE on Apple. Copying
+    # TE's line verbatim is what put the first macOS CI run in the red, and it is
+    # a good example of why the three-platform job exists: the same line builds
+    # fine on Windows and Linux, where these macros mean nothing at all.
     target_compile_definitions(wfg_deps INTERFACE
-        $<IF:$<CONFIG:Debug>,_LIBCPP_ENABLE_ASSERTIONS=1,_LIBCPP_ENABLE_HARDENED_MODE=1>)
+        $<IF:$<CONFIG:Debug>,_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG,_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST>)
 endif()
 
 # DECLINED from TE's examples/TestRunner/CMakeLists.txt, so nobody "fixes" it later:
