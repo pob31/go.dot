@@ -13,7 +13,7 @@ PRD §9.2 gives the decision rule for the whole set:
 | 2 | Launcher start at an arbitrary in-file offset | **PASS** — honoured to the nearest sample; §6.1's "one genuine gap" premise is false | [spike02-launch-offset.md](spike02-launch-offset.md) |
 | 1 | Launcher clip → multichannel bus routing | **PASS** — mono, stereo and mixed 64-ch rigs all exact; limit is throughput (~72 objects @48k, ~40 @96k) | [spike01-bus-routing.md](spike01-bus-routing.md) |
 | 3 | Follow-action join quality | **PASS** on sample-accuracy; **NO** crossfade without a custom clip; artefact is buffer-dependent; overlapping copies are sample-aligned (no comb filtering) | [spike03-join-quality.md](spike03-join-quality.md) |
-| 5 | External parameter control at 50 Hz | not yet run | — |
+| 5 | External parameter control at 50 Hz | **PASS** — 512 params = 13% of a 20 ms tick (Release); ~4 µs per write | [spike05-param-50hz.md](spike05-param-50hz.md) |
 | 6 | Live-input latency through a Rack, PDC | not yet run | — |
 | 7 | Proxy-plugin sandbox as a custom TE plugin type | not yet run | — |
 | — | *Also verify*: TE transport chasing MTC | not yet run | — |
