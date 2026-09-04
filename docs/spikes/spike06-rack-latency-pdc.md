@@ -2,21 +2,30 @@
 
 ## Verdict
 
-**FAIL, and this is the most consequential result of the seven.** PRD §3.25's warning is
-confirmed, not retired:
+**PASS.** PRD §3.25's warning about PDC is **confirmed as a default and retired as a problem.**
 
-> *"Watch PDC on live input: TE may insert delay to align a live track with the rest of the
-> graph, which is exactly what the rack path must not have."*
+Both halves matter and neither is the whole answer:
 
-It does exactly that. A plugin with 250 ms of latency on **one** track delays **every other
-track's file playback by exactly 250 ms**. The shift tracks the plugin's latency precisely —
-50 ms gives 50 ms, 100 ms gives 100 ms — and a Rack behaves identically to a bare plugin.
+**PDC is global and on by default.** A plugin with 250 ms of latency on **one** track delays
+**every other track's file playback by exactly 250 ms**. The shift tracks the plugin's latency
+precisely — 50 ms gives 50 ms, 100 ms gives 100 ms — and a Rack behaves identically to a bare
+plugin. That is correct DAW behaviour and wrong show behaviour: it would put a quarter of a
+second between the GO button and every cue in the system.
 
-This is correct DAW behaviour and wrong show behaviour. In a show it means a reverb on a live
-microphone puts a quarter of a second between the GO button and every cue in the system.
+**One public call removes it completely:**
 
-**The documented escape hatch does not work**, and **Tracktion's Edit layer offers no way to
-disable latency compensation**, though the lever exists one layer below it.
+```cpp
+edit.setLatencyCompensationEnabled (false);   // tracktion_Edit.h:542-543
+```
+
+Measured across 50/100/250 ms of latency, 48 and 96 kHz, four buffer sizes, bare and inside a
+Rack — **the file-path shift was exactly zero in every configuration**. The latency track stays
+late by exactly its own plugin's latency, which is that plugin doing its job; nothing else is
+dragged along. The Edit still *reports* the latency, so Go.dot can know the number and place an
+offset wherever it decides one belongs.
+
+One lever that does **not** work, recorded because its name misleads:
+**`Edit::setLowLatencyMonitoring`** leaves the shift unchanged. It is the wrong tool for this.
 
 ## Criterion
 
@@ -73,15 +82,47 @@ Track alignment relative to each other: `latency_track_delay_vs_file_samples = 0
 tracks stay perfectly aligned — which is PDC working exactly as designed. The problem is that
 "aligned" is achieved by making *everything* late.
 
+**With `Edit::setLatencyCompensationEnabled(false)` — the result that changes the verdict.**
+Five configurations, chosen to vary everything that could plausibly matter:
+
+| rate | buffer | plugin latency | Rack? | default shift | **shift with PDC off** | latency track vs file |
+|---|---|---|---|---|---|---|
+| 48 kHz | 128 | 50 ms | no | 2400 | **0** | 2400 |
+| 48 kHz | 128 | 100 ms | no | 4800 | **0** | 4800 |
+| 48 kHz | 128 | 250 ms | **yes** | 12000 | **0** | 12000 |
+| 96 kHz | 256 | 250 ms | no | 24000 | **0** | 24000 |
+| 96 kHz | 64 | 100 ms | **yes** | 9600 | **0** | 9600 |
+
+All figures in samples. Three things to read out of the last column: the file path is *exactly*
+undisturbed rather than approximately so; the latency track is late by *exactly* its own
+plugin's latency, so disabling compensation removes only the compensation and not the plugin;
+and `nopdc.reported_latency_samples` still reports 12000, so the number remains available to
+Go.dot even with compensation off.
+
 Mono source into the stereo bus: `bus_peak_left = 0.5`, `bus_peak_right = 0`.
 
 ## What was learned
 
-**Re-measured on Tracktion develop (3.5.0): unchanged.** Everything in this section was first
-measured on v3.2.0 and re-run after the move to develop — the file-path shift is still exactly
-250 ms for a 250 ms plugin, `setLowLatencyMonitoring` still does not help, and
-`EditPlaybackContext` still calls the three-argument `setNode`. 404 commits of engine change
-did not touch this, which makes it a design property rather than a passing defect.
+**The compensation is switchable, and the switch is public.** `Edit` carries it directly:
+
+```cpp
+/** Can be used to disable latency compensation when playing (it is enabled by default) */
+void setLatencyCompensationEnabled (bool enabled);        // tracktion_Edit.h:542-543
+bool isLatencyCompensationEnabled() const noexcept;
+```
+
+It is wired the whole way down. `Edit::setLatencyCompensationEnabled` (`tracktion_Edit.cpp:2416`)
+stores the flag and calls `restartPlayback()`; `EditPlaybackContext`'s `setNode`
+(`tracktion_EditPlaybackContext.cpp:205`) re-reads it on **every** graph build and forwards it to
+`LockFreeMultiThreadedNodePlayer::setLatencyCompensationEnabled`, which reaches `SummingNode`,
+`ConnectedNode` and `RackReturnNode`. Because it is re-read per build, setting it before the
+player exists is enough — this spike does that rather than depending on `restartPlayback()`
+under a hosted device interface.
+
+**Re-measured on Tracktion develop (3.5.0): the default behaviour is unchanged.** The file-path
+shift is still exactly 250 ms for a 250 ms plugin and `setLowLatencyMonitoring` still does not
+help. 404 commits of engine change did not touch this, which makes the *default* a design
+property rather than a passing defect.
 
 **PDC delays the whole graph by the worst plugin latency, and there is no per-track escape.**
 The compensation is global by construction: `SummingNode` and `ConnectedNode` insert latency
@@ -101,17 +142,15 @@ to be in circuit. **Caveat:** the buffer-shrinking half cannot be exercised thro
 device interface, so this particular measurement may understate what it does on real hardware.
 The bypass half is not in doubt.
 
-**The lever exists, one layer below where TE uses it.** `tracktion_graph` supports disabling
-compensation — `LockFreeMultiThreadedNodePlayer::setNode(..., bool disableLatencyCompensation)`,
-`NodePlayerUtilities::createNodeGraph(..., disableLatencyCompensation)`, and the flag is
-honoured in `SummingNode`, `ConnectedNode` and `RackReturnNode`. But
-`EditPlaybackContext.cpp:207` calls the **three-argument** `setNode`, so the parameter defaults
-to `false`, and nothing in the Edit layer ever passes `true`. Grepping the whole engine, the
-only place `disableLatencyCompensation` is even read is inside the graph nodes themselves.
-
-So the capability Go.dot needs is present in the graph library and unreachable through the
-public engine API. That is a much better position than "impossible", and a much worse one than
-"supported".
+**How the flag actually reaches the graph.** The `disableLatencyCompensation` parameter is
+threaded through `NodePlayerUtilities::prepareToPlay`, `transformNodes` and
+`Node::TransformOptions`, and is read in `SummingNode`, `ConnectedNode` and `RackReturnNode`. It
+does **not** arrive as an argument to `setNode` — neither public overload takes it, and the
+`prepareToPlay` that does is private. It arrives as **state**: the player holds
+`std::atomic<bool> disableLatencyComp`, set by
+`LockFreeMultiThreadedNodePlayer::setLatencyCompensationEnabled`, which
+`EditPlaybackContext::setNode` calls on every graph build from
+`edit.isLatencyCompensationEnabled()`.
 
 **Mono into a wider destination now spreads — this changed between Tracktion versions.**
 A mono source on a track routed to a *stereo* bus produced `left = 0.5, right = 0` on
@@ -153,37 +192,39 @@ platform that CI currently only *builds* on - is the cheapest way to separate th
 ## Consequences for the PRD
 
 - **§3.25, "Plugins and the rack are where TE earns its keep"** — the warning becomes a
-  **finding**. Proposed wording: *"PDC is global: a plugin's declared latency delays every
-  other track in the Edit by the same amount, Rack or not. `Edit::setLowLatencyMonitoring` does
-  not avoid it. `tracktion_graph` can disable compensation
-  (`LockFreeMultiThreadedNodePlayer::setNode`'s `disableLatencyCompensation`) but
-  `EditPlaybackContext` never passes it, so reaching it requires going below the Edit API."*
-- **§4.1, "The GO path is small, boring and merciless. GO never blocks."** — this is where the
-  finding bites hardest. Any latency-bearing plugin anywhere in the Edit adds its latency to
-  every cue's start. That is a direct conflict with a stated law, not a performance detail.
+  **configuration note**. PDC is global: a plugin's declared latency delays every other track in
+  the Edit by the same amount, Rack or not. `Edit::setLowLatencyMonitoring` does not avoid it.
+  `Edit::setLatencyCompensationEnabled(false)` does, completely, and is public and documented.
+  Go.dot should call it at Edit construction and treat alignment as its own responsibility —
+  which §3.25 already says it should, since Go.dot owns time.
+- **§4.1, "The GO path is small, boring and merciless. GO never blocks."** — no longer in
+  conflict. With compensation off, a latency-bearing plugin delays only its own path. Left on,
+  it would add its latency to every cue's start, so the call is not optional — it is what keeps
+  §4.1 true once any plugin declares latency.
 - **§3.18, the live rack** — "The rack has a stated latency budget" now has a second reason to
   exist: the budget is not only about the live path's own delay, it is about what that delay
   does to *everything else*.
 - **§3.19c, latency offsets** — the user-set signed offsets described there are for aligning
-  *devices*. They do not address this, which happens inside one Edit's graph.
+  *devices*, and do not address this, which happens inside one Edit's graph. But with
+  compensation off they become the **mechanism** for the cases where alignment *is* wanted:
+  `EditPlaybackContext::getLatencySamples()` still reports the graph's latency, so Go.dot can
+  read the number and apply an offset deliberately rather than having one applied globally.
+- **§6.1, "multiple active Edits"** — stays a fallback held in reserve. It was briefly the
+  fallback the PDC decision depended on; it no longer is, because the live rack can stay in the
+  single Edit.
 
 ## Open questions for the author
 
-1. **Which of the three routes does Go.dot take?** This is an architectural decision and it is
-   yours:
-   - **(a)** Reach below the Edit API to pass `disableLatencyCompensation` — Go.dot then owns
-     alignment entirely, which it arguably should anyway since it owns time (§3.25).
-   - **(b)** Keep latency-bearing plugins out of the shared Edit — the live rack lives in a
-     separate Edit or a separate engine instance, which reopens §6.1's "multiple active Edits"
-     question that no spike has yet addressed.
-   - **(c)** Accept the latency on the GO path — which contradicts §4.1 and is listed only for
-     completeness.
+No architectural decision is required: PDC is turned off with one public call, so neither a
+second engine nor an upstream request to Tracktion is needed. What remains is smaller:
 
-   My recommendation is (a), because it matches the inversion §3.25 already commits to: Go.dot
-   owns time and TE is the player. But it means depending on a `tracktion_graph` entry point
-   that the engine layer does not use, which is a maintenance cost to accept knowingly.
-2. **Does the rack's latency budget (§3.18) become a hard cap rather than a target?** If PDC
-   stays enabled, the budget *is* the added GO latency for the whole show.
+1. **Does the rack's latency budget (§3.18) still need to be a hard cap?** Its original second
+   reason to exist — that one plugin's latency taxed the whole show — is gone. The budget is now
+   about the live path's own delay only, which is a smaller and more ordinary question.
+2. **Where does Go.dot apply alignment deliberately?** With compensation off, Go.dot owns it. The
+   engine still reports the number via `EditPlaybackContext::getLatencySamples()`, so the
+   question is a product one: which paths should be aligned to which, and is that per-destination
+   (§3.19c's model) or per-cue?
 3. **The hardware half is not run.** Real round-trip latency through the Digiface, and whether
    `setLowLatencyMonitoring`'s buffer-shrinking behaves differently against a real driver, both
-   need the interface attached.
+   need the interface attached. Neither bears on the verdict.

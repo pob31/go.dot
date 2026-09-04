@@ -1,8 +1,7 @@
 # Go.dot — Product Requirements Document
 
 **Draft 0.8** — **the §6.1 spikes have been run.** All seven, with one report each
-in `docs/spikes/`. Six pass; **#6 (PDC on live tracks) fails** and is the single
-result needing a design decision, in §3.25. §9.2's rule — the polyphony model
+in `docs/spikes/`. **All seven pass.** §9.2's rule — the polyphony model
 stands unless #2 or #4 fails — is satisfied: **the model stands**, and §3.25's
 "fixed graph, dynamic content" is now measured rather than assumed.
 
@@ -1342,25 +1341,44 @@ making everything late. **This collides with §4.1** — a reverb on a live
 microphone would put its latency between the GO button and every cue in the
 system.
 
-Two things that look like escapes and are not:
+**But it can be switched off, through the public API, with one call.**
 
-- `Edit::setLowLatencyMonitoring` left the shift unchanged. Its mechanism is to
-  shrink the device buffer and **bypass** the listed plugins, i.e. remove the
-  latency by removing the plugin — incompatible with a rack whose purpose is to
-  be in circuit.
-- `tracktion_graph` *can* disable compensation
-  (`LockFreeMultiThreadedNodePlayer::setNode`'s `disableLatencyCompensation`,
-  honoured in `SummingNode`, `ConnectedNode` and `RackReturnNode`) — but
-  `EditPlaybackContext` calls the three-argument overload, so it is always
-  `false` and nothing in the Edit layer ever passes `true`.
+```cpp
+edit.setLatencyCompensationEnabled (false);   // tracktion_Edit.h:542-543
+```
 
-So the capability Go.dot needs exists in the graph library and is **unreachable
-through the public engine API**. Three routes, and the choice is architectural:
-reach below the Edit API to disable compensation (consistent with this section's
-own inversion — Go.dot owns time, so Go.dot owns alignment); keep latency-bearing
-plugins out of the shared Edit; or accept the latency on the GO path, which §4.1
-forbids. **Undecided — this is the one spike result that requires a design
-decision before Phase 9.**
+Measured across 50/100/250 ms of plugin latency, at 48 and 96 kHz, at four buffer
+sizes, bare and inside a Rack — **every configuration gave a file-path shift of
+exactly zero**. The latency track stays late by exactly its own plugin's latency,
+which is that plugin doing its job; nothing else is dragged along with it. And
+the Edit still *reports* the latency through
+`EditPlaybackContext::getLatencySamples()`, so Go.dot can know the number and
+apply an offset itself wherever it decides one belongs — §3.19c already
+contemplates exactly that mechanism for video.
+
+The call is wired end to end: `Edit::setLatencyCompensationEnabled`
+(`tracktion_Edit.cpp:2416`) stores the flag and calls `restartPlayback()`, and
+`EditPlaybackContext`'s `setNode` (`tracktion_EditPlaybackContext.cpp:205`)
+re-reads it on **every** graph build and forwards it down to `SummingNode`,
+`ConnectedNode` and `RackReturnNode`. It is not a private hook, not a fork, and
+not something to ask Tracktion for: it is a documented method with the comment
+*"Can be used to disable latency compensation when playing (it is enabled by
+default)"*.
+
+So this is a **configuration decision, not an architectural one**, and §4.1 is
+satisfied without giving anything up. What it costs is that Go.dot then owns
+alignment — which is what §3.25 says it should, since it owns time.
+
+One genuine non-escape, recorded because its name suggests otherwise:
+`Edit::setLowLatencyMonitoring` left the shift **unchanged**. Its mechanism is to
+shrink the device buffer and **bypass** the listed plugins, i.e. remove the
+latency by removing the plugin — incompatible with a rack whose purpose is to be
+in circuit. It is the wrong lever.
+
+**Scope: nothing before Phase 9 is affected either way.** PDC only engages when
+something in the Edit *declares* latency. Recorded-media playback declares none,
+Go.dot's built-in plugin set is its own to keep at zero, and the out-of-process
+proxy (§3.18) declares zero by design.
 
 The proxy plugin itself is **feasible and cheap**: a custom TE plugin type
 wrapping a shared-memory round trip to a second process measured **0.9 µs** at
@@ -1501,8 +1519,7 @@ its edges. All seven are answerable in about a fortnight.
 
 *Amended in 0.8.* All seven were run; reports are in `docs/spikes/`, one file per
 spike, and the index there carries the verdicts and the machine they were measured
-on. In summary: **#1, #2, #3, #4, #5 and #7 pass**; **#6 fails** and is the one
-result requiring a design decision (see §3.25). Item 2's premise was false — the
+on. In summary: **all seven pass.** Item 2's premise was false — the
 offset capability is present, so the "one genuine gap" it names does not exist —
 and item 6's parenthesis was correct. §9.2's rule that "the polyphony model stands
 unless #2 or #4 fails" is therefore satisfied: **the model stands.**
@@ -1510,6 +1527,9 @@ unless #2 or #4 fails" is therefore satisfied: **the model stands.**
 Neither of the two unnumbered items below was addressed by any spike, and both
 remain fully open. MTC needs a real or virtual MIDI port; the multiple-Edits
 question was never exercised.
+
+The multiple-Edits item is a fallback held in reserve, with no deadline on it:
+the live rack stays in the single Edit.
 
 Also verify: TE transport chasing MTC; multiple active Edits summed by the
 DeviceManager (fallback if the single-Edit model proves insufficient).

@@ -14,7 +14,7 @@ PRD §9.2 gives the decision rule for the whole set:
 | 1 | Launcher clip → multichannel bus routing | **PASS** — mono, stereo and mixed 64-ch rigs all exact; limit is throughput (~72 objects @48k, ~40 @96k) | [spike01-bus-routing.md](spike01-bus-routing.md) |
 | 3 | Follow-action join quality | **PASS** on sample-accuracy; **NO** crossfade without a custom clip; artefact is buffer-dependent; overlapping copies are sample-aligned (no comb filtering) | [spike03-join-quality.md](spike03-join-quality.md) |
 | 5 | External parameter control at 50 Hz | **PASS** — 512 params = 13% of a 20 ms tick (Release); ~4 µs per write | [spike05-param-50hz.md](spike05-param-50hz.md) |
-| 6 | Live-input latency through a Rack, PDC | **FAIL** — PDC delays the whole graph by the worst plugin latency; §3.25's warning is real | [spike06-rack-latency-pdc.md](spike06-rack-latency-pdc.md) |
+| 6 | Live-input latency through a Rack, PDC | **PASS** — PDC is global and ON by default, but `Edit::setLatencyCompensationEnabled(false)` removes it entirely | [spike06-rack-latency-pdc.md](spike06-rack-latency-pdc.md) |
 | 7 | Proxy-plugin sandbox as a custom TE plugin type | **PASS** — 0.9 µs round trip, survives the child being killed | [spike07-proxy-plugin.md](spike07-proxy-plugin.md) |
 | — | *Also verify*: TE transport chasing MTC | not yet run | — |
 | — | *Also verify*: multiple Edits summed by the DeviceManager | not addressed by any spike; fully open | — |
@@ -152,7 +152,8 @@ All seven spikes were first written and measured against **Tracktion Engine v3.2
 | #2 offset honoured to the nearest sample | PASS | **PASS, unchanged** |
 | #3 join sample-accurate, 40-sample artefact | PASS | **PASS, unchanged** |
 | #3 overlapping copies sample-aligned | PASS | **PASS, unchanged** |
-| #6 PDC delays the whole graph | FAIL | **FAIL, unchanged** |
+| #6 PDC delays the whole graph *by default* | yes | **yes, unchanged** |
+| #6 `setLatencyCompensationEnabled(false)` removes it | — | **PASS, verified 5 configs** |
 | #7 proxy sandbox, deadline and kill path | PASS | **PASS, unchanged** |
 | #1 **track width capped at 2 channels** | hard `constexpr` limit | **REMOVED — discrete multichannel, verified to 8** |
 | #1/#6 **mono into a wider destination** | stays in channel 1 | **canonically upmixed** |
