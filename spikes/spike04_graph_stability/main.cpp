@@ -63,6 +63,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <string>
 
 using namespace tracktion;
 using namespace tracktion::engine;
@@ -157,11 +158,24 @@ namespace
         const AudioFile witnessAudio (engine, witnessFile->getFile());
         const AudioFile stormAudio   (engine, stormFile->getFile());
 
-        // Track 0 is the witness. Exactly one slot, one clip, launched once.
-        auto& witnessSlots = tracks[0]->getClipSlotList();
-        witnessSlots.ensureNumberOfSlots (1);
-        auto* witnessSlot = witnessSlots.getClipSlots()[0];
-        insertWaveClip (*witnessSlot, {}, witnessFile->getFile(),
+        /*  Track 0 is the witness, and its clip goes on the TIMELINE, not in a
+            slot - which is the difference between a measurement and a coin toss.
+
+            A launched clip starts at whatever beat the playback context reports
+            when you ask, and that is influenced by transport start rather than
+            purely by processed blocks. Two identical runs therefore start the
+            witness a few samples apart, and a few samples of offset in a
+            full-scale sine is a ~6 dBFS sample-wise difference - indistinguishable
+            from the crossfade tax this spike exists to detect. Quantising the
+            launch to a whole beat narrows the window but does not close it.
+
+            A timeline clip starts at an edit position, which is fixed. The
+            witness is still "already-playing material" in every sense PRD 6.1 #4
+            means - it is playing, continuously, while the storm launches around
+            it - and the storm still drives the launcher, which is the thing
+            under test.
+        */
+        insertWaveClip (*tracks[0], {}, witnessFile->getFile(),
                         { { 0_tp, TimeDuration::fromSeconds (runSeconds + 4.0) } },
                         DeleteExistingClips::no);
 
@@ -212,17 +226,9 @@ namespace
         const auto blockSize = params.blockSize;
         const auto settleBlocks = static_cast<int> (params.sampleRate / blockSize);   // ~1 s
 
-        // One block first: a MonotonicBeat only exists once the transport is
-        // rolling and the playback context has a sync point, so nothing can be
-        // launched before this.
-        player->process (blockSize);
-
-        if (auto* clip = witnessSlot->getClip())
-            if (! spike::launchAtNextSyncPoint (*clip))
-                return result;
-
-        // Let the witness settle. Anything that was going to rebuild because of
-        // setup has done so by the time we mark the baseline.
+        // The witness needs no launching - it is on the timeline and starts with
+        // the transport. Settle first: anything that was going to rebuild because
+        // of setup has done so by the time the baseline is marked.
         for (int i = 0; i < settleBlocks; ++i)
             player->process (blockSize);
         rebuilds.mark();
@@ -252,7 +258,7 @@ namespace
                     auto* s = slotArray[nextSlot % slotArray.size()];
 
                     if (auto* clip = s->getClip())
-                        spike::launchAtNextSyncPoint (*clip);
+                        spike::launchAtNextWholeBeat (*clip);
                 }
 
                 ++launched;
@@ -310,6 +316,24 @@ namespace
             return -999.0;
 
         return 20.0 * std::log10 (static_cast<double> (worst));
+    }
+
+    //==============================================================================
+    /*  Peak level of one channel, in dBFS. Diagnostic, not a verdict: it answers
+        "is the storm actually on its own bus?", which is the difference between a
+        real crossfade tax and a routing mistake in this program.
+    */
+    double peakDbfs (const choc::buffer::ChannelArrayBuffer<float>& b, choc::buffer::ChannelCount ch)
+    {
+        if (ch >= b.getNumChannels())
+            return -999.0;
+
+        float worst = 0.0f;
+
+        for (choc::buffer::FrameCount f = 0; f < b.getNumFrames(); ++f)
+            worst = std::max (worst, std::abs (b.getSample (ch, f)));
+
+        return worst <= 0.0f ? -999.0 : 20.0 * std::log10 (static_cast<double> (worst));
     }
 
     //==============================================================================
@@ -410,9 +434,35 @@ int main (int argc, char** argv)
     // Channels 0-1 only: the witness bus. See the routing comment in runOnce().
     const auto witnessDiffDb = maxAbsDiffDbfs (stormRun.output, quietRun.output, 2);
 
+    /*  CONTROL. Two runs that are identical in every respect - both quiet - and
+        whose witness channels must therefore be bit-identical if this experiment
+        is deterministic at all.
+
+        Without it the witness metric cannot be interpreted. A non-zero
+        storm-vs-quiet difference means "launching perturbed already-playing
+        material" ONLY if quiet-vs-quiet is zero; otherwise it means the harness
+        is noisy and the number is measuring the harness. The first sweep of this
+        spike produced -inf at one track count and +6 dBFS at the next, which is
+        not how a crossfade tax behaves and is exactly what prompted this.
+    */
+    const auto controlRun = runOnce (engine, args, slots, launches, false);
+
+    if (! controlRun.measured)
+        return report.cannotMeasure ("control run could not be set up");
+
+    const auto controlDiffDb = maxAbsDiffDbfs (quietRun.output, controlRun.output, 2);
+
     report.value ("rebuilds.delta", stormRun.rebuildDelta);
     report.value ("rebuilds.delta_reference", quietRun.rebuildDelta);
     report.value ("witness_max_abs_diff_dbfs", witnessDiffDb);
+    report.value ("control_max_abs_diff_dbfs", controlDiffDb);
+
+    // Per-bus peaks: witness bus is channels 0-1, storm bus is 2-3.
+    for (choc::buffer::ChannelCount ch = 0; ch < 4; ++ch)
+    {
+        report.value ("storm_peak_ch" + std::to_string (ch), peakDbfs (stormRun.output, ch));
+        report.value ("quiet_peak_ch" + std::to_string (ch), peakDbfs (quietRun.output, ch));
+    }
     report.value ("block_us.p50", stormRun.blockUsP50);
     report.value ("block_us.p99", stormRun.blockUsP99);
     report.value ("block_us.max", stormRun.blockUsMax);
@@ -427,8 +477,14 @@ int main (int argc, char** argv)
     else
         report.value ("instrument_produces_nonzero", "not-run");
 
-    const bool noRebuild   = stormRun.rebuildDelta == 0;
-    const bool noCrossfade = witnessDiffDb <= -120.0;
+    const bool noRebuild    = stormRun.rebuildDelta == 0;
+    const bool deterministic = controlDiffDb <= -120.0;
+    const bool noCrossfade   = witnessDiffDb <= -120.0;
+
+    if (! deterministic)
+        return report.cannotMeasure (
+            "two identical quiet runs differ, so the witness metric is measuring the "
+            "harness, not the engine - the rebuild count above is still valid");
 
     return report.verdict (noRebuild && noCrossfade,
                            noRebuild

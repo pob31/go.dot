@@ -450,7 +450,7 @@ namespace spike
         Returns false if there is no handle or no sync point yet, so a caller can
         tell "could not launch" from "launched and nothing happened".
     */
-    inline bool launchAtNextSyncPoint (tracktion::engine::Clip& clip)
+    inline bool launchAtNextWholeBeat (tracktion::engine::Clip& clip)
     {
         auto handle = clip.getLaunchHandle();
 
@@ -467,7 +467,29 @@ namespace spike
         if (! syncPoint)
             return false;
 
-        handle->play (syncPoint->monotonicBeat);
+        /*  Quantise to the next WHOLE beat rather than launching at the raw
+            sync point, and this is what makes a launch reproducible.
+
+            The sync point advances with wall-clock-influenced transport start,
+            not purely with processed blocks, so two identical runs in the same
+            process ask for launch at slightly different beats. For a full-scale
+            sine that is a phase shift, and a phase shift between two runs shows
+            up as a ~6 dBFS sample-wise difference - which reads exactly like the
+            "crossfade tax on already-playing material" this spike is looking
+            for, and is not. It cost two sweeps to notice, because the drift is
+            small enough to land on the same beat most of the time.
+
+            At 60 bpm one beat is a second and jitter is sub-millisecond, so
+            snapping to the next whole beat is deterministic with enormous
+            margin. It is also what the product does anyway: PRD 3.4, "Launches
+            quantise to the tick: every message belonging to one GO leaves in the
+            same frame."
+        */
+        const auto current = syncPoint->monotonicBeat.v.inBeats();
+        const tracktion::engine::MonotonicBeat launchAt
+            { tracktion::BeatPosition::fromBeats (std::floor (current) + 1.0) };
+
+        handle->play (launchAt);
         return true;
     }
 

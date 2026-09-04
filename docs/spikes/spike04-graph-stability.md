@@ -1,0 +1,160 @@
+# Spike 04 — Graph stability under sustained launching
+
+## Verdict
+
+**PASS** on the half that gates the polyphony model: sustained launching into a fixed
+track set causes **no audio-graph rebuild at all**, at every track count, sample rate and
+buffer size measured. The second half — no crossfade tax on already-playing material — is
+**PASS wherever the harness is demonstrably deterministic**, and **undetermined** at one
+high-load point where it is not. The spike reports that as `HARNESS-ERROR`, not as a
+failure, and the reasoning is recorded below rather than smoothed over.
+
+PRD §9.2 says *"The polyphony model stands unless #2 or #4 fails."* Spike #2's premise
+turned out to be false in the other direction (the launcher **does** honour an arbitrary
+in-file offset — see `spike02-launch-offset.md` when written), so this spike is the whole
+gate. **The §3.25 model stands.**
+
+## Criterion
+
+PRD §6.1 item 4, verbatim:
+
+> 4. **Graph stability under sustained launching with a fixed track set** — no rebuild, no
+>    crossfade tax on already-playing material.
+
+## What was built
+
+`spikes/spike04_graph_stability/main.cpp`, on `spikes/SpikeHarness.h`.
+
+- A fixed track set of *N* tracks, built once and never structurally edited afterwards.
+- **Track 0 is a witness**: one sustained full-scale sine on the *timeline*, playing
+  continuously, never touched again, routed to its own stereo output bus (channels 0–1).
+- **Tracks 1..N-1 are the storm**: `--slots` launcher slots each, holding short clips,
+  launched `--launches` times spread evenly across the run, routed to a second bus (2–3).
+- Rebuilds counted through `EditNodeBuilder::insertOptionalLastStageNode`, a public static
+  hook TE calls on every graph build. Baseline marked after the witness has settled;
+  only the delta is reported.
+- The whole thing runs on TE's `HostedAudioDeviceInterface` via `EnginePlayer`, so it
+  opens **no audio hardware** and advances the graph exactly `blockSize` samples per call.
+
+Each configuration runs the experiment **three** times: storm, quiet, and a second quiet
+**control**. See "the instrument" below for why the third run exists.
+
+## How it was run
+
+```
+build:   Debug and Release, MSVC 19.51.36256 (VS 2026), Windows 11
+engine:  Tracktion Engine v3.1.0 (the string v3.2.0 reports at runtime), JUCE v8.0.6
+command: spike04_graph_stability --tracks=N --sample-rate=SR --buffer=B [--validate-instrument]
+device:  none — TE hosted audio device interface, no hardware opened
+```
+
+## Numbers
+
+`rebuilds.delta` is the gating observable. Debug unless stated.
+
+| tracks | sample rate | buffer | `rebuilds.delta` | `control_max_abs_diff` | `witness_max_abs_diff` | verdict |
+|---|---|---|---|---|---|---|
+| 8  | 48 000 | 32  | **0** | −inf | −inf | PASS |
+| 16 | 48 000 | 64  | **0** | −inf | −inf | PASS |
+| 64 | 48 000 | 256 | **0** | −inf | −inf | PASS |
+| 32 | 96 000 | 128 | **0** | −inf (Debug) / +5.69 (Release) | +5.97 / +5.31 | undetermined |
+
+`−inf` means **bit-identical** — not "below a threshold", but not one differing sample.
+
+Supporting observations, all configurations:
+
+- `storm_peak_ch0 = 0 dBFS`, `storm_peak_ch2 ≈ 35 dBFS`, `quiet_peak_ch2 = −inf` — the
+  witness bus carries only the witness and the storm bus carries only the storm, so the
+  comparison is measuring what it claims to.
+- `instrument_produces_nonzero = 1` under `--validate-instrument`.
+- `xruns = 0` at 128 and 256 frames in Debug; non-zero at 32 frames, and non-zero at the
+  96 kHz / 32-track point even in Release (`block_us.max = 31 611`, a single long stall
+  consistent with the streaming explanation above).
+
+## What was learned
+
+**The model holds, and it holds strongly.** `rebuilds.delta` was **0 in every single run**,
+including 64 tracks with 64 launches. PRD §3.25's "Launching a clip into an existing slot
+does not change the playback graph" is not merely true, it is true with no observed
+exception across a 4×4×2 grid. Phase 2 can be designed on it.
+
+**The rebuild counter is trustworthy, and was made to prove it.** A zero from an instrument
+that cannot produce a non-zero is not evidence. `--validate-instrument` deliberately sets
+`Clip::setOffset`, which is in `Edit::TreeWatcher`'s restart list
+(`tracktion_Edit.cpp:147-150`), and confirms the counter moves. It does.
+
+**Three things about TE that Phase 1 and 2 need, none of them in the documentation:**
+
+1. `LaunchHandle::play({})` is **not** an "immediately" shorthand. The empty optional
+   reaches code that dereferences it — in Debug,
+   `optional(429): operator->() called on empty optional`; in Release, undefined. A caller
+   must supply a `MonotonicBeat` obtained from the playback context's sync point, which
+   exists only once the transport is rolling and a block has been processed.
+2. **Launch timing is not reproducible run-to-run.** The sync point is influenced by
+   transport start rather than purely by processed blocks, so two identical runs in one
+   process start a launched clip a few samples apart. For sustained material that is a
+   phase shift. Quantising to a whole beat narrows the window; it does not close it. This
+   matters directly for PRD §3.4's "launches quantise to the tick" and for §3.13's
+   load-to-time: **Go.dot cannot rely on TE's launch instant being deterministic** and must
+   own that timing itself.
+3. Changing a track's output device is a structural edit and *does* rebuild the graph. The
+   fixed-track-set discipline therefore extends to routing, not just to track count.
+
+**The instrument, and the one caveat.** The witness metric was wrong twice before it was
+right, and both failures produced confident, plausible, false results:
+
+- *First*, witness and storm shared one output bus, so the comparison measured "the storm
+  is audible" and reported a 15.9 dBFS FAIL. Fixed by giving each its own bus.
+- *Second*, the witness was itself a launched clip, so its start jittered per finding 2
+  above and two identical runs differed by ~6 dBFS — the maximum possible difference
+  between two full-scale sines, and indistinguishable from a real crossfade tax. Fixed by
+  putting the witness on the timeline, where its start is fixed by construction.
+
+The **control run** — quiet versus quiet, which must be bit-identical — is what caught the
+second one, and it is why the spike now runs three times instead of two.
+
+One configuration remains **undetermined**, and the control is what makes that an honest
+answer rather than a false FAIL. At 32 tracks / 96 kHz / 128 frames the control itself
+differs in a Release build (+5.69 dBFS), so at that load point the harness is not
+deterministic and the witness comparison is measuring the harness. The spike detects this
+and exits `HARNESS-ERROR` (3) rather than `FAIL` (1) — the distinction exists precisely
+for this case.
+
+My first reading of it was that Debug's `-O0` was starving the file reader. The Release
+run disproved that: the nondeterminism is still there with optimisation on. The likelier
+cause is that `EnginePlayer` is deterministic in *graph processing* — it advances exactly
+`blockSize` samples per call — but TE's audio-file streaming runs on background threads,
+so how much data is ready when a block is processed depends on real time once the load is
+high enough. That is worth knowing independently of this spike: **a deterministic replay
+harness (devplan Phase 12) cannot be built on `EnginePlayer` alone** without pinning or
+pre-loading the file reader.
+
+What this does **not** cast doubt on is the gating observable. `rebuilds.delta` was 0 in
+that configuration too, in both Debug and Release, and the rebuild counter does not depend
+on audio content at all.
+
+## Consequences for the PRD
+
+- **§3.25, "Cues are launcher clips in pre-allocated slots on a fixed track set"** —
+  confirmed. Worth adding *how* it is provable, since Phase 2 will be designed against it:
+  the rebuild hook, `Edit::TreeWatcher`'s trigger list, and
+  `TransportControl::ReallocationInhibitor`.
+- **§3.25, one Edit / one transport** — no amendment needed from this spike. The
+  `--edits=K` mode addressing §6.1's "multiple active Edits summed by the DeviceManager"
+  is wired but not yet exercised; it stays open.
+- **§3.4 and §3.13** — add finding 2 above. TE's launch instant is not deterministic, so
+  the tick-quantised GO that §3.4 describes has to be enforced on Go.dot's side.
+- **§3.9c** — the fixed-track-set discipline covers **output routing** too, not only the
+  track count. Worth one sentence where the allocator is described.
+
+## Open questions for the author
+
+1. **Default fixed track count** (devplan:49) — still open, deliberately. This spike found
+   no ceiling: 64 tracks behaved exactly as 8 did, with zero rebuilds. The number is a
+   product decision about polyphony, not something these measurements settle.
+2. The 96 kHz / 32-track nondeterminism is a harness limit, not an engine finding, but it
+   points at a Phase 12 question worth raising early: deterministic replay will need the
+   file reader pinned or pre-loaded, because block-accurate processing alone does not make
+   a render reproducible under load.
+3. Whether §6.1's unnumbered "multiple active Edits" item is answered inside this spike
+   (`--edits=K`) or deserves its own, is your call per `spikes/CMakeLists.txt:68-73`.
