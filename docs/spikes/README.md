@@ -15,7 +15,7 @@ PRD §9.2 gives the decision rule for the whole set:
 | 3 | Follow-action join quality | **PASS** on sample-accuracy; **NO** crossfade without a custom clip; artefact is buffer-dependent; overlapping copies are sample-aligned (no comb filtering) | [spike03-join-quality.md](spike03-join-quality.md) |
 | 5 | External parameter control at 50 Hz | **PASS** — 512 params = 13% of a 20 ms tick (Release); ~4 µs per write | [spike05-param-50hz.md](spike05-param-50hz.md) |
 | 6 | Live-input latency through a Rack, PDC | **FAIL** — PDC delays the whole graph by the worst plugin latency; §3.25's warning is real | [spike06-rack-latency-pdc.md](spike06-rack-latency-pdc.md) |
-| 7 | Proxy-plugin sandbox as a custom TE plugin type | not yet run | — |
+| 7 | Proxy-plugin sandbox as a custom TE plugin type | **PASS** — 0.9 µs round trip, survives the child being killed | [spike07-proxy-plugin.md](spike07-proxy-plugin.md) |
 | — | *Also verify*: TE transport chasing MTC | not yet run | — |
 | — | *Also verify*: multiple Edits summed by the DeviceManager | not addressed by any spike; fully open | — |
 
