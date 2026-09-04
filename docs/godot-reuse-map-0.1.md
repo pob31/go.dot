@@ -180,6 +180,20 @@ C++17, so nothing in it needs a language-level exception either.
 | Mock target | — | **none exists.** `tools/validation/control-replay/remote_tablet_mock.py` is a mock *client*, and nothing in `tools/` fakes a server or a device. Go.dot writes `tests/blackbox/mock_target.py` (stdlib HTTP + UDP) plus an in-process scripted target behind its own namespace-provider seam |
 | Golden drivers | `tools/validation/control-replay/common.py`: exit codes 0 pass / 1 mismatch / 2 usage / 3 app-start, an `App` launcher that polls for readiness, `OSCSender`, `oscquery_get`, `compare_or_update` | **adopted** (already Phase 1's convention) |
 
+### Phase 3 — groups, triggers, ranges
+
+Nothing to reuse: no sibling project has a cue model, which is the whole reason Go.dot
+exists. What Phase 3 does have waiting for it is a decision already recorded rather than
+one to rediscover — **group waits compose with member waits rather than replacing them**
+(author, 2026-09-05). A group's pre-wait runs before its members begin theirs, so raising
+one number defers a whole scene without disturbing relative timing; a group's post-wait
+runs after every member is complete, members' own post-waits included. The full statement,
+including how it stacks through nested groups, is in
+[`godot-namespace-draft-0.1.md`](godot-namespace-draft-0.1.md) §2.4, *Waits compose*.
+
+The schema already carries it: `preWait` and `postWait` are `cue` rows, and a Group
+inherits every Cue row, so a group has its own from Phase 1.2 onward.
+
 ### Phase 5 — desktop UI and undo
 
 | Need | Reuse |

@@ -119,12 +119,34 @@ focused list's standby answers `standby.next`/`previous`.
 | `/godot/cue/<id>/order` | `s` | ro | groups only: child IDs in order |
 | `/godot/cue/<id>/mode` | `s` | rw | groups only: `timeline` \| `sequence` (§3.6) |
 | `/godot/cue/<id>/advance` | `s` | rw | groups only: `auto` \| `manual` |
-| `/godot/cue/<id>/preWait` | `d` | rw | seconds; any cue, not only a group |
-| `/godot/cue/<id>/postWait` | `d` | rw | seconds; §3.6's "how long after completion this cue reports done to its parent" |
+| `/godot/cue/<id>/preWait` | `d` | rw | seconds. Any cue, and a group has one of its own — see *Waits compose* below |
+| `/godot/cue/<id>/postWait` | `d` | rw | seconds. §3.6's "how long after completion this cue reports done to its parent" |
 
 Groups carry no outputs, media or parameters (§4.12); Phase 1 stores their structure and
-attributes so fixtures can nest, and nothing more. question C in §9 fixes what
+attributes so fixtures can nest, and nothing more. Question C in §9 fixes what
 `standby.next` does with them.
+
+#### Waits compose, they do not replace
+
+A group has a pre-wait and a post-wait **of its own**, and they wrap its members'
+rather than standing in for them. Recorded here because Phase 3 implements it and the
+alternative reading — a group's wait replacing its members' — is the one someone would
+reach for from the schema alone.
+
+- **Pre-wait.** The group's own runs first; only then do its members begin theirs. In a
+  timeline group, where §3.6 makes member pre-waits *offsets* from entry, a member
+  therefore fires at `group entry + group preWait + member preWait`. The useful
+  consequence, and the reason it works this way: raising one number defers a whole scene
+  by the same amount, without touching the relative timing anyone spent an afternoon
+  getting right.
+- **Post-wait.** A group is complete when every member is — each member's own post-wait
+  included, since that is what "done" means for a cue (§3.6's completion table). The
+  group's post-wait then runs on top of that, before the group reports done to *its*
+  parent. So a nested group's waits stack outward, one layer per level, which is what
+  makes "hold two seconds after this whole block" expressible at any depth.
+
+Both are inert where §3.6 says they are: a post-wait is meaningful in a sequence and does
+nothing in a parallel parent, because nothing is waiting to be told.
 
 ### 2.5 `/godot/mount`
 
