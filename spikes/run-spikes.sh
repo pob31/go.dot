@@ -94,11 +94,9 @@ spike_path() {
 # hardware and produce the same numbers on a runner as on a desk.
 #
 # Deliberately absent, and each for a stated reason:
-#   spike01  its --device= half needs a real interface; the deterministic half
-#            joins this list when it is written
 #   spike06  live-input latency against real hardware, same
 #   MTC      needs a real or virtual MIDI port (PRD 6.1 "Also verify")
-DETERMINISTIC_SPIKES="spike04_graph_stability spike02_launch_offset"
+DETERMINISTIC_SPIKES="spike04_graph_stability spike02_launch_offset spike01_bus_routing"
 
 # --- selftest: the argument contract, no engine involved --------------------
 if [ "$MODE" = "--selftest" ]; then

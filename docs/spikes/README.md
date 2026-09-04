@@ -11,7 +11,7 @@ PRD §9.2 gives the decision rule for the whole set:
 |---|---|---|---|
 | 4 | Graph stability under sustained launching | **PASS** — zero rebuilds at every configuration | [spike04-graph-stability.md](spike04-graph-stability.md) |
 | 2 | Launcher start at an arbitrary in-file offset | **PASS** — sub-sample accurate; §6.1's "one genuine gap" premise is false | [spike02-launch-offset.md](spike02-launch-offset.md) |
-| 1 | Launcher clip → multichannel bus routing | not yet run | — |
+| 1 | Launcher clip → multichannel bus routing | **PASS to 64 output channels**, exact; stereo-per-track is a hard `constexpr` ceiling | [spike01-bus-routing.md](spike01-bus-routing.md) |
 | 3 | Follow-action join quality | not yet run | — |
 | 5 | External parameter control at 50 Hz | not yet run | — |
 | 6 | Live-input latency through a Rack, PDC | not yet run | — |
