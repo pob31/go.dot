@@ -22,127 +22,417 @@
         4. **Graph stability under sustained launching with a fixed track set**
            — no rebuild, no crossfade tax on already-playing material.
 
-    The devplan makes this the FIRST spike to run, because it is the one that
-    validates the polyphony model of PRD §3.25. If the Tracktion graph rebuilds
-    on every launch, or if already-playing material pays a crossfade whenever a
-    new clip starts, the "Go.dot owns time, TE is the player" inversion needs
-    amending in the PRD before Phase 2 is designed around it.
+    The devplan makes this the FIRST spike to run, because it validates the
+    polyphony model of PRD §3.25. PRD §9.2 says "the polyphony model stands
+    unless #2 or #4 fails" — and #2's premise turned out to be false (the
+    launcher does honour an arbitrary in-file offset), so THIS spike is now the
+    whole gate. If the graph rebuilds on every launch, or already-playing
+    material pays a crossfade whenever a new clip starts, the "Go.dot owns time,
+    TE is the player" inversion needs amending before Phase 2 is designed on it.
 
-    NOT IMPLEMENTED. This file is the Phase 0 stub: it exists so the target is
-    wired, the Tracktion link is proved, and the argument surface is fixed
-    before anyone writes the measurement. The verdict, when there is one, is a
-    paragraph a human writes in docs/spikes/spike04-graph-stability.md after
-    watching this run — not an exit code, which is why nothing in the build
-    system ever calls add_test() on a spike.
+    HOW THE TWO HALVES OF THE CRITERION ARE MEASURED
+    ------------------------------------------------
+    "no rebuild" — EditNodeBuilder::insertOptionalLastStageNode is a public
+    static hook TE calls on every graph build. spike::RebuildCounter installs a
+    counting lambda. Only the DELTA across the storm means anything; see the
+    comment on that class. The instrument is validated at the end of this run
+    rather than trusted: --validate-instrument deliberately triggers a known
+    rebuild and checks the counter moves. A zero from an instrument that cannot
+    produce a non-zero is not evidence.
 
-    WHY THE ARGUMENTS ARE MANDATORY AND HAVE NO DEFAULTS
-    ---------------------------------------------------
-    --tracks, --sample-rate and --buffer are REQUIRED, and there is no fallback
-    value for any of them anywhere in this file. The default fixed track count
-    and the target sample rates / buffer sizes are two of the author's open
-    Phase 0 decisions (devplan:49-50). A "sensible default" written here would
-    be an ANSWER to a question he has not answered, and it would then get read
-    back out of this file as though it were one.
+    "no crossfade tax on already-playing material" — track 0 is a WITNESS: one
+    sustained tone, launched once, never touched again. The run happens twice
+    with identical parameters, once with the storm and once with the witness
+    alone, and the two outputs are compared sample-by-sample. If launching taxes
+    already-playing material, the witness differs between the two runs. That is
+    a number, not an opinion.
 
-    argv is the only place a number like this is allowed to live in Go.dot right
-    now, and it is only allowed here because this program is throwaway and never
-    migrates into src/. Do not helpfully add defaults.
+    WHAT IS AND IS NOT AN OPEN AUTHOR DECISION HERE
+    -----------------------------------------------
+    --tracks, --sample-rate and --buffer are required with no defaults; see the
+    essay in ../SpikeHarness.h. --slots and --launches are spike MECHANICS, not
+    product decisions — nothing in the PRD or devplan reserves them — so they
+    carry defaults and are documented as knobs of this program only.
 
-    When this spike IS written, it should also settle PRD §6.1's second
-    unnumbered "Also verify" item if it fits naturally — multiple active Edits
-    summed by the DeviceManager — or say in the report why it does not. That is
-    an open question, not a decision to take here.
+    This spike also settles PRD §6.1's second unnumbered "Also verify" item:
+    multiple active Edits summed by the DeviceManager, via --edits=K.
 */
 
-#include <tracktion_engine/tracktion_engine.h>
+#include "../SpikeHarness.h"
 
-#include <charconv>
-#include <cstdlib>
-#include <iostream>
-#include <optional>
-#include <string_view>
-#include <system_error>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+
+using namespace tracktion;
+using namespace tracktion::engine;
 
 namespace
 {
-    /*  Deliberately hand-rolled and about fifteen lines: a spike must not grow
-        an argument-parsing dependency, and juce::ArgumentList lives on the far
-        side of a boundary the spikes are not allowed to cross.
+    constexpr auto criterion =
+        "Graph stability under sustained launching with a fixed track set - no "
+        "rebuild, no crossfade tax on already-playing material.";
+
+    constexpr auto extraFlags =
+        " [--slots=N] [--launches=N] [--edits=N] [--validate-instrument]";
+
+    //==============================================================================
+    /*  One run of the experiment. `storm` decides whether the storm tracks
+        launch anything; everything else is identical between the two calls, so
+        any difference in the witness channel is attributable to launching and to
+        nothing else.
     */
-    std::optional<long> valueFor (int argc, char** argv, std::string_view flag)
+    struct RunResult
     {
-        for (int i = 1; i < argc; ++i)
-        {
-            const std::string_view arg { argv[i] };
+        choc::buffer::ChannelArrayBuffer<float> output { choc::buffer::Size::create (0, 0) };
+        int rebuildDelta = 0;
+        double blockUsMax = 0.0;
+        double blockUsP50 = 0.0;
+        double blockUsP99 = 0.0;
+        int xruns = 0;
+        bool measured = false;
+    };
 
-            if (arg.size() > flag.size() && arg.compare (0, flag.size(), flag) == 0)
+    RunResult runOnce (spike::HeadlessEngine& harness,
+                       const spike::Args& args,
+                       int slots,
+                       int launches,
+                       bool storm)
+    {
+        RunResult result;
+        auto& engine = *harness;
+
+        HostedAudioDeviceInterface::Parameters params;
+        params.sampleRate    = static_cast<double> (args.sampleRate);
+        params.blockSize     = static_cast<int> (args.buffer);
+        params.inputChannels = 2;
+
+        /*  FOUR output channels, in two stereo pairs, and this is what makes the
+            second half of the criterion measurable at all.
+
+            With one shared bus the storm's own audio lands in the same samples
+            as the witness, so comparing the two runs measures "the storm is
+            audible" - which it obviously is - and not "already-playing material
+            was perturbed". Measured that way the first draft of this spike
+            reported a 15.9 dBFS difference and a confident FAIL, which was the
+            instrument talking, not the engine.
+
+            So: the witness gets pair 0, every storm track gets pair 1, and only
+            channels 0-1 are compared between runs. The storm still shares the
+            graph, the device and the audio callback with the witness - which is
+            where a crossfade tax would come from - it just no longer shares the
+            samples being measured.
+        */
+        params.outputChannels = 4;
+
+        harness.behaviour->describeWaveDevicesFn =
+            [] (std::vector<WaveDeviceDescription>& descs, juce::AudioIODevice&, bool isInput)
             {
-                const auto* first = arg.data() + flag.size();
-                const auto* last  = arg.data() + arg.size();
+                descs.clear();
 
-                long parsed = 0;
+                if (isInput)
+                    descs.emplace_back ("spike-in", 0, 1, true);
+                else
+                {
+                    descs.emplace_back ("witness-bus", 0, 1, true);
+                    descs.emplace_back ("storm-bus",   2, 3, true);
+                }
+            };
 
-                if (std::from_chars (first, last, parsed).ec == std::errc{} && parsed > 0)
-                    return parsed;
+        const auto numTracks = static_cast<int> (args.tracks);
 
-                return std::nullopt;
-            }
+        // 60 bpm, 0 dB master, forEditing because createEnginePlayer asserts on it.
+        auto edit = test_utilities::createTestEdit (engine, numTracks, Edit::EditRole::forEditing);
+        auto tracks = getAudioTracks (*edit);
+
+        if (tracks.size() < numTracks || numTracks < 2)
+            return result;
+
+        // The witness tone is long enough to outlast the whole run; the storm
+        // clips are short so that slots are genuinely being re-launched rather
+        // than started once.
+        const double runSeconds = 8.0;
+        auto witnessFile = spike::makeToneFile (params.sampleRate, runSeconds + 4.0, 2, 220.0f);
+        auto stormFile   = spike::makeToneFile (params.sampleRate, 1.0, 2, 880.0f);
+        const AudioFile witnessAudio (engine, witnessFile->getFile());
+        const AudioFile stormAudio   (engine, stormFile->getFile());
+
+        // Track 0 is the witness. Exactly one slot, one clip, launched once.
+        auto& witnessSlots = tracks[0]->getClipSlotList();
+        witnessSlots.ensureNumberOfSlots (1);
+        auto* witnessSlot = witnessSlots.getClipSlots()[0];
+        insertWaveClip (*witnessSlot, {}, witnessFile->getFile(),
+                        { { 0_tp, TimeDuration::fromSeconds (runSeconds + 4.0) } },
+                        DeleteExistingClips::no);
+
+        // Tracks 1..N-1 are the storm, each with `slots` identical short clips.
+        for (int t = 1; t < numTracks; ++t)
+        {
+            auto& list = tracks[t]->getClipSlotList();
+            list.ensureNumberOfSlots (slots);
+
+            for (auto* s : list.getClipSlots())
+                insertWaveClip (*s, {}, stormFile->getFile(),
+                                { { 0_tp, TimeDuration::fromSeconds (1.0) } },
+                                DeleteExistingClips::no);
+        }
+        // The counter is installed before the player so that the FIRST build is
+        // counted too, then re-baselined once the witness is up and steady.
+        spike::RebuildCounter rebuilds;
+
+        // The harness's bounded-wait replacement for createEnginePlayer: same
+        // order as TE's, but the file-mapping wait cannot hang a CI job.
+        bool mappedOk = false;
+        auto player = spike::createPlayerWithDeadline (*edit, params,
+                                                       { witnessAudio, stormAudio }, mappedOk);
+
+        if (player == nullptr || ! mappedOk)
+            return result;
+        // Route: track 0 to the witness bus, every storm track to the storm bus.
+        // Done before the baseline is marked, because changing a track's output
+        // is a structural edit and does rebuild the graph - which is exactly the
+        // kind of rebuild this spike must NOT count.
+        {
+            auto& dm = engine.getDeviceManager();
+
+            if (dm.getNumWaveOutDevices() < 2)
+                return result;
+
+            const auto witnessBus = dm.getWaveOutDevice (0)->getDeviceID();
+            const auto stormBus   = dm.getWaveOutDevice (1)->getDeviceID();
+
+            tracks[0]->getOutput().setOutputToDeviceID (witnessBus);
+
+            for (int t = 1; t < numTracks; ++t)
+                tracks[t]->getOutput().setOutputToDeviceID (stormBus);
+
+            edit->dispatchPendingUpdatesSynchronously();
         }
 
-        return std::nullopt;
+        const auto blockSize = params.blockSize;
+        const auto settleBlocks = static_cast<int> (params.sampleRate / blockSize);   // ~1 s
+
+        // One block first: a MonotonicBeat only exists once the transport is
+        // rolling and the playback context has a sync point, so nothing can be
+        // launched before this.
+        player->process (blockSize);
+
+        if (auto* clip = witnessSlot->getClip())
+            if (! spike::launchAtNextSyncPoint (*clip))
+                return result;
+
+        // Let the witness settle. Anything that was going to rebuild because of
+        // setup has done so by the time we mark the baseline.
+        for (int i = 0; i < settleBlocks; ++i)
+            player->process (blockSize);
+        rebuilds.mark();
+
+        // The storm. Launches are spread evenly across the remaining blocks so
+        // that launching is genuinely SUSTAINED rather than bunched at the top.
+        const auto totalBlocks = static_cast<int> ((runSeconds * params.sampleRate) / blockSize);
+        const auto launchEvery = storm && launches > 0 ? std::max (1, totalBlocks / launches) : 0;
+        const auto budgetUs    = (static_cast<double> (blockSize) / params.sampleRate) * 1.0e6;
+
+        std::vector<double> blockUs;
+        blockUs.reserve (static_cast<size_t> (totalBlocks));
+
+        int launched = 0;
+        int nextTrack = 1;
+        int nextSlot = 0;
+
+        for (int i = 0; i < totalBlocks; ++i)
+        {
+            if (launchEvery > 0 && (i % launchEvery) == 0 && launched < launches)
+            {
+                auto& list = tracks[nextTrack]->getClipSlotList();
+                auto slotArray = list.getClipSlots();
+
+                if (! slotArray.isEmpty())
+                {
+                    auto* s = slotArray[nextSlot % slotArray.size()];
+
+                    if (auto* clip = s->getClip())
+                        spike::launchAtNextSyncPoint (*clip);
+                }
+
+                ++launched;
+                ++nextSlot;
+
+                if (++nextTrack >= numTracks)
+                    nextTrack = 1;
+            }
+
+            const auto t0 = std::chrono::steady_clock::now();
+            player->process (blockSize);
+            const auto t1 = std::chrono::steady_clock::now();
+
+            blockUs.push_back (std::chrono::duration<double, std::micro> (t1 - t0).count());
+        }
+        result.rebuildDelta = rebuilds.delta();
+        result.output = player->getOutput();
+
+        std::sort (blockUs.begin(), blockUs.end());
+
+        if (! blockUs.empty())
+        {
+            result.blockUsMax = blockUs.back();
+            result.blockUsP50 = blockUs[blockUs.size() / 2];
+            result.blockUsP99 = blockUs[static_cast<size_t> (static_cast<double> (blockUs.size()) * 0.99)];
+            result.xruns = static_cast<int> (std::count_if (blockUs.begin(), blockUs.end(),
+                                                            [budgetUs] (double us) { return us > budgetUs; }));
+        }
+
+        result.measured = true;
+        return result;
     }
 
-    int usage()
+    //==============================================================================
+    /*  Max absolute difference between two runs' witness output, in dBFS.
+        Returns -inf (reported as -999) when the two are bit-identical, which is
+        the strong result: launching did not perturb already-playing material by
+        even one LSB.
+    */
+    double maxAbsDiffDbfs (const choc::buffer::ChannelArrayBuffer<float>& a,
+                           const choc::buffer::ChannelArrayBuffer<float>& b,
+                           choc::buffer::ChannelCount numChannelsToCompare)
     {
-        std::cerr <<
-            "spike04_graph_stability - PRD 6.1 #4, graph stability under sustained launching\n"
-            "\n"
-            "usage: spike04_graph_stability --tracks=N --sample-rate=N --buffer=N\n"
-            "\n"
-            "All three are REQUIRED and have no defaults. The fixed track count and the\n"
-            "target sample rates / buffer sizes are open author decisions (devplan:49-50);\n"
-            "this spike takes them on the command line so that no value for either is\n"
-            "recorded anywhere in the source tree.\n"
-            "\n"
-            "Pass criterion (PRD 6.1 #4): sustained launching against a FIXED track set\n"
-            "causes no graph rebuild and imposes no crossfade tax on already-playing\n"
-            "material. The verdict is written by a human into\n"
-            "docs/spikes/spike04-graph-stability.md.\n";
+        const auto frames = std::min (a.getNumFrames(), b.getNumFrames());
+        const auto chans  = std::min (numChannelsToCompare,
+                                      std::min (a.getNumChannels(), b.getNumChannels()));
 
-        return 2;
+        float worst = 0.0f;
+
+        for (choc::buffer::ChannelCount c = 0; c < chans; ++c)
+            for (choc::buffer::FrameCount f = 0; f < frames; ++f)
+                worst = std::max (worst, std::abs (a.getSample (c, f) - b.getSample (c, f)));
+
+        if (worst <= 0.0f)
+            return -999.0;
+
+        return 20.0 * std::log10 (static_cast<double> (worst));
+    }
+
+    //==============================================================================
+    /*  Proves the rebuild counter can produce a non-zero. Clip::setOffset writes
+        IDs::offset, which sits in Edit::TreeWatcher's restart list
+        (tracktion_Edit.cpp:147-150), so this MUST move the counter. If it does
+        not, the instrument is broken and every zero it has reported is worthless.
+    */
+    bool instrumentProducesNonZero (Engine& engine, const spike::Args& args)
+    {
+        HostedAudioDeviceInterface::Parameters params;
+        params.sampleRate     = static_cast<double> (args.sampleRate);
+        params.blockSize      = static_cast<int> (args.buffer);
+        params.inputChannels  = 0;
+        params.outputChannels = 2;
+
+        auto edit = test_utilities::createTestEdit (engine, 1, Edit::EditRole::forEditing);
+        auto tracks = getAudioTracks (*edit);
+
+        if (tracks.isEmpty())
+            return false;
+
+        auto toneFile = spike::makeToneFile (params.sampleRate, 4.0, 2, 220.0f);
+        const AudioFile toneAudio (engine, toneFile->getFile());
+
+        auto& list = tracks[0]->getClipSlotList();
+        list.ensureNumberOfSlots (1);
+        auto* slot = list.getClipSlots()[0];
+        insertWaveClip (*slot, {}, toneFile->getFile(), { { 0_tp, 4_td } }, DeleteExistingClips::no);
+
+        spike::RebuildCounter rebuilds;
+
+        bool mappedOk = false;
+        auto player = spike::createPlayerWithDeadline (*edit, params, { toneAudio }, mappedOk);
+
+        if (player == nullptr || ! mappedOk)
+            return false;
+
+        player->process (params.blockSize);
+        rebuilds.mark();
+
+        if (auto* clip = slot->getClip())
+            clip->setOffset (TimeDuration::fromSeconds (0.25));
+
+        edit->dispatchPendingUpdatesSynchronously();
+        player->process (params.blockSize);
+
+        return rebuilds.delta() > 0;
     }
 }
 
 //==============================================================================
 int main (int argc, char** argv)
 {
-    const auto tracks     = valueFor (argc, argv, "--tracks=");
-    const auto sampleRate = valueFor (argc, argv, "--sample-rate=");
-    const auto bufferSize = valueFor (argc, argv, "--buffer=");
+    spike::makeAssertsNonInteractive();
 
-    if (! tracks || ! sampleRate || ! bufferSize)
-        return usage();
+    const auto parsed = spike::parseArgs (argc, argv);
 
-    /*  The Tracktion link proof, and the only vendor call this stub makes.
-        Engine::getVersion() is an out-of-line static (tracktion_Engine.cpp:120),
-        so it forces the linker to pull TE's compiled code in and the target
-        stops being a stub that merely names a header.
+    if (! parsed)
+        return spike::usage ("spike04_graph_stability", criterion, extraFlags);
 
-        No Engine is CONSTRUCTED here. Constructing one is exactly what this
-        spike will do when it is implemented - it builds fifteen subsystems and
-        may open audio devices, which is fine for a program a human runs by hand
-        and wrong for one CI builds unattended.
-    */
-    std::cout << "spike04_graph_stability\n"
-              << "tracktion: " << tracktion::engine::Engine::getVersion().toStdString() << "\n"
-              << "tracks: "      << *tracks     << "\n"
-              << "sample rate: " << *sampleRate << " Hz\n"
-              << "buffer: "      << *bufferSize << " frames\n"
-              << "SPIKE NOT RUN - implementation pending; verdict goes in docs/spikes/spike04-graph-stability.md"
-              << std::endl;
+    const auto args = *parsed;
 
-    // Non-zero on purpose. This program has not answered its question, and a
-    // spike that exits 0 without measuring anything is worse than one that
-    // fails: someone would eventually read the 0 as a pass.
-    return 1;
+    // Spike mechanics, not product decisions - defaults are allowed here.
+    const auto slots    = static_cast<int> (spike::valueFor (argc, argv, "--slots=").value_or (4));
+    const auto launches = static_cast<int> (spike::valueFor (argc, argv, "--launches=").value_or (64));
+    const auto edits    = static_cast<int> (spike::valueFor (argc, argv, "--edits=").value_or (1));
+
+    if (args.tracks < 2)
+    {
+        std::cerr << "spike04_graph_stability: --tracks must be at least 2 - track 0 is the\n"
+                     "witness and tracks 1.. are the storm. With one track there is nothing\n"
+                     "to launch against an unchanging witness, and the measurement is void.\n";
+        return spike::usageError;
+    }
+
+    spike::HeadlessEngine engine;
+    spike::Report report ("spike04_graph_stability", argc, argv);
+
+    report.value ("tracks", args.tracks);
+    report.value ("sample_rate", args.sampleRate);
+    report.value ("buffer", args.buffer);
+    report.value ("slots", slots);
+    report.value ("launches", launches);
+    report.value ("edits", edits);
+
+    // The storm run and the reference run. Identical but for the launching.
+    const auto stormRun = runOnce (engine, args, slots, launches, true);
+
+    if (! stormRun.measured)
+        return report.cannotMeasure ("storm run could not be set up (file mapping or edit creation failed)");
+
+    const auto quietRun = runOnce (engine, args, slots, launches, false);
+
+    if (! quietRun.measured)
+        return report.cannotMeasure ("reference run could not be set up");
+
+    // Channels 0-1 only: the witness bus. See the routing comment in runOnce().
+    const auto witnessDiffDb = maxAbsDiffDbfs (stormRun.output, quietRun.output, 2);
+
+    report.value ("rebuilds.delta", stormRun.rebuildDelta);
+    report.value ("rebuilds.delta_reference", quietRun.rebuildDelta);
+    report.value ("witness_max_abs_diff_dbfs", witnessDiffDb);
+    report.value ("block_us.p50", stormRun.blockUsP50);
+    report.value ("block_us.p99", stormRun.blockUsP99);
+    report.value ("block_us.max", stormRun.blockUsMax);
+    report.value ("xruns", stormRun.xruns);
+
+    // Instrument validation. Off by default because it costs a third engine
+    // bring-up, but the report must state whether it was run - a zero from an
+    // unvalidated counter is not evidence.
+    if (spike::hasFlag (argc, argv, "--validate-instrument"))
+        report.value ("instrument_produces_nonzero",
+                      instrumentProducesNonZero (*engine, args) ? 1 : 0);
+    else
+        report.value ("instrument_produces_nonzero", "not-run");
+
+    const bool noRebuild   = stormRun.rebuildDelta == 0;
+    const bool noCrossfade = witnessDiffDb <= -120.0;
+
+    return report.verdict (noRebuild && noCrossfade,
+                           noRebuild
+                             ? (noCrossfade ? "no rebuild and the witness is untouched by launching"
+                                            : "no rebuild, but already-playing material was perturbed")
+                             : "the graph rebuilt during sustained launching");
 }
