@@ -41,7 +41,8 @@ fixed track count and the target rates and buffer sizes are open author decision
 The seven reports in this directory were measured on a **Lenovo laptop with an Intel Core
 Ultra 7 255H** — 16 cores, hybrid performance/efficiency, Windows 11, with ordinary desktop
 background load. They have since been re-run on a **Mac mini M4 Pro**; see
-[cross-check-m4pro.md](cross-check-m4pro.md).
+[cross-check-m4pro.md](cross-check-m4pro.md). That run also turned up a Tracktion bug, written
+up for upstream in [upstream-node-id-collision.md](upstream-node-id-collision.md).
 
 Findings split into two kinds, and the distinction matters when reading any report here:
 

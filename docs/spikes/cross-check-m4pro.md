@@ -249,7 +249,8 @@ next to each other in the same mechanism, and both bear on §6.1 #4's guarantee.
 
 **Reported, not patched — and why not patching was the right call.** Tracktion do not accept
 third-party pull requests ("due to copyright restrictions"); they ask for the JUCE Forum, so
-this goes there as a report. A candidate fix *was* built and measured — replacing the mixing
+this goes there as a report — drafted in
+[upstream-node-id-collision.md](upstream-node-id-collision.md). A candidate fix *was* built and measured — replacing the mixing
 step with a splitmix64 finaliser took the sweep from 24 of 63 track counts to **0 of 63**, left
 all seven spikes unchanged (spike #4 still bit-identical, zero rebuilds), and left Tracktion's
 own test suite at exactly 341/343 with the *same* two pre-existing `tracktion_ClipLauncher`
