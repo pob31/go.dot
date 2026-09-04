@@ -28,7 +28,7 @@ four places; if it is, it exists in all of them, spelled the same.
 | `owner` | which object carries it: `engine`, `document`, `list`, `cue`, `group`, `mount`. A `group` is a cue, so it also gets every `cue` row. |
 | `address` | the node's address under its owner. `/godot/cue/<UID>/name` comes from `owner=cue, address=name`. |
 | `type` | one OSC type tag: `s i h f d T b`. `T` means a boolean, which also accepts an int 0 or 1 because many senders cannot emit `T`/`F`. |
-| `access` | `r`, `w` or `rw`. A write to an `r` node is refused and logged, never ignored. |
+| `access` | `r`, `w` or `rw`. A write to an `r` node is refused and logged, never ignored. Independent of `persist`: a mount's prefix is stored in the file *and* read-only at runtime. Conflating the two was a real bug here. |
 | `default` | omitted from the document when the value equals it, which is what keeps the canonical form sparse. |
 | `range` | `min..max` (either end may be empty) or an enum as `a\|b\|c`. Blank means unconstrained. |
 | `unit` | `s`, `Hz`, `dB`, `samples`, `m`, … Blank when the value is not a quantity. |
@@ -36,7 +36,7 @@ four places; if it is, it exists in all of them, spelled the same.
 | `rate_cap` | Hz, the cap on outbound dispatch for this node. |
 | `anticipatable` | whether it may be pre-sent before GO: imperceptible *and* revocable. Third-party defaults to `no`. |
 | `panic` | its defined resting state (PRD §4.6): `park`, `snap`, or a literal value. |
-| `persist` | `show` (someone decided it), `state` (the machine happened to be doing it), or `none` (runtime only, never written). This column is PRD §4.10 made mechanical. |
+| `persist` | `show` (someone decided it), `state` (the machine happened to be doing it), or `none` (runtime only, never written). This column is PRD §4.10 made mechanical, and it is also how a DERIVED value is marked — a cue's `index`, its `kind`, a list's `order` are computed from the tree, so storing them would be a second copy that eventually disagrees. A `none` row is not a document attribute at all. |
 | `description` | one sentence, and it is the `DESCRIPTION` an OSCQuery client shows. Write it for the person reading it at 2 a.m. |
 
 RFC 4180 CSV: comma-separated, and a field containing a comma or a quote is

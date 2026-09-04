@@ -17,19 +17,19 @@ document,dirty,T,r,false,,,state,5,no,park,none,Whether there are unsaved change
 list,name,s,rw,,,,state,50,no,park,show,The cue list's name.
 list,order,s,r,,,,state,50,no,park,none,The identifiers of the list's top-level children, in order, space-separated.
 list,standby,s,rw,,,,state,50,no,park,state,The cue GO will act on. One per list; moved only by a standby command, never by selection or scrolling.
-cue,kind,s,r,memo,memo|group,,state,50,no,park,show,What kind of cue this is. Phase 1 has memo (a cue with no output) and group.
+cue,kind,s,r,memo,memo|group,,state,50,no,park,none,"What kind of cue this is, derived from the element rather than stored: a Group is a group. Phase 1 has memo (a cue with no output) and group."
 cue,number,s,rw,,,,state,50,no,park,show,The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.
 cue,name,s,rw,,,,state,50,no,park,show,The cue's name, as the operator reads it.
 cue,notes,s,rw,,,,state,50,no,park,show,Free text for the designer.
 cue,enabled,T,rw,true,,,state,50,no,park,show,Whether the cue runs at all. A disabled cue is skipped, not deleted.
 cue,colour,s,rw,,,,state,50,no,park,show,A #RRGGBB decoration. Never the sole carrier of information.
+cue,preWait,d,rw,0,0..,s,state,50,no,park,show,How long after entry before this cue starts.
+cue,postWait,d,rw,0,0..,s,state,50,no,park,show,How long after completion before this cue reports done to its parent.
 cue,parent,s,r,,,,state,50,no,park,none,The identifier of the containing list or group.
 cue,index,i,r,0,,,state,50,no,park,none,Position among siblings, zero-based.
 group,order,s,r,,,,state,50,no,park,none,The identifiers of the group's children, in order, space-separated.
 group,mode,s,rw,sequence,timeline|sequence,,state,50,no,park,show,Whether members are scheduled at entry or run one after another.
 group,advance,s,rw,manual,auto|manual,,state,50,no,park,show,Whether a member starts when the previous completes or on GO.
-group,preWait,d,rw,0,0..,s,state,50,no,park,show,How long after entry before the group starts.
-group,postWait,d,rw,0,0..,s,state,50,no,park,show,How long after completion before the group reports done to its parent.
 mount,prefix,s,r,,,,state,1,no,park,show,The address the foreign namespace is mounted at.
 mount,transport,s,r,udp,udp|tcp|ws,,state,1,no,park,show,How the mounted target is reached. Declared now; used from Phase 2.
 mount,namespace,s,r,,,,state,1,no,park,show,The bundle-relative OSCQuery namespace file describing the target.
