@@ -174,30 +174,62 @@ instances** — one per audio track. It is fully deterministic (five identical r
 to `--validate-instrument`, and unique to spike05: spike01 and spike04 at the same track
 counts collide zero times.
 
-**Why, and it is not a rare accident.** `ArrangerLauncherSwitchingNode::getNodeProperties()`
-computes `nodeID = hash (seed, track->itemID)` and then folds in each input
-(`tracktion_ArrangerLauncherSwitchingNode.cpp:41` and `:55`). Follow the two pieces:
+**Why, and it is not a rare accident.** `hash_combine` is
+`seed ^= std::hash<T>()(v) + 0x9e3779b9 + (seed * 65537u) + (seed / 3u);`
+(`tracktion_Hash.h:58`). With the seed fixed that reduces to `seed ⊕ (h(v) + K)` — affine in
+the value rather than a hash of it. On a bit-flip test about 2 of 64 output bits change per
+flipped bit of the *value* (ideal 32) against about 24 per flipped bit of the *seed*, so the
+precise defect is that **the value argument is barely mixed**, not that the function fails to
+avalanche generally.
 
-- `std::hash<EditItemID>` is the **identity function** — `return (size_t) e.getRawID();`
-  (`tracktion_EditItem.h:168`). The raw track ID enters unmixed.
-- `hash_combine` is `seed ^= std::hash<T>()(v) + 0x9e3779b9 + (seed * 65537u) + (seed / 3u);`
-  (`tracktion_Hash.h:58`). With a constant seed the tail is a constant, so the whole thing
-  collapses to roughly `seed ⊕ (rawTrackID + C)`.
+Two things it is *not*, both of which an earlier draft of this section got wrong.
+`std::hash<EditItemID>` being the identity (`tracktion_EditItem.h:168`) is a co-cause, not a
+defect — libstdc++ and libc++ both do this for integral types, and a combine is expected to do
+the mixing itself. And clustering alone is not the mechanism: the base step
+`hash (7653239033668669842, track->itemID)` is **injective**, so bases cluster (our eight tracks
+span 48) but can never collide by themselves.
 
-The observed IDs say the same thing out loud — at 6, 7 and 8 tracks they are
-`…447948628`, `…447948635` and `…447948622`, identical in their first seventeen digits. These
-are near-sequential clustered integers, not spread hashes. So a collision between two tracks
-is an arithmetic near-coincidence rather than a 1-in-2⁶⁴ event, which is exactly why it is
-deterministic and why it depends on track count in a way that looks arbitrary: 6, 7, 8 and 32
-collide while 4, 9, 16 and 24 do not.
+The collision is manufactured one fold later, at
+`tracktion_ArrangerLauncherSwitchingNode.cpp:55`, where the child `SummingNode` ID is folded in.
+A difference in a value survives the next combine multiplied by roughly 65537 and can be
+annihilated by an opposite difference arriving from the child chain. That reconstructs exactly,
+and unlike the sweep it follows from the formula alone — inverting the fold gives the child IDs
+needed to reach the observed value, and both check out:
 
-**Why it is worth caring about, beyond tidiness.** The same file uses that ID to find a node's
-previous incarnation across a graph rebuild — `findNodeWithID<ArrangerLauncherSwitchingNode>
-(*oldGraph, props.nodeID)` at `:88`. If two tracks share an ID, a rebuild can match the wrong
-one. Spike #4's entire finding is that rebuilds must not disturb already-playing material, so
-this is adjacent to something the polyphony model depends on. Nothing observed here shows it
-actually happening — spike #4 reported zero rebuilds and a bit-identical witness in all 64
-runs — but the mechanism is there.
+```
+hash_combine (4306145609409080913, 173965249108218) ==   # track 1010
+hash_combine (4306145609409080925, 173965248321758) ==   # track 1022
+                                    16973511083447948622
+```
+
+**Why it is worth caring about, beyond tidiness — and it is worse than "the wrong node".**
+`prepareToPlay` uses that ID to find a node's previous incarnation across a graph rebuild
+(`findNodeWithID<ArrangerLauncherSwitchingNode> (*oldGraph, props.nodeID)` at `:88`). With two
+same-type duplicates, **both** new nodes resolve to the *same* old node, and the adoption at
+`:90-105` is `shared_ptr` assignment rather than copy. The two live nodes therefore end up
+sharing one `SampleFader`, one `ActiveNoteList` and one `activeNode` atomic — re-established at
+every subsequent rebuild. The faders are guarded by a channel-count check; `arrangerActiveNoteList`,
+`activeNode` and `midiSourceID` are adopted with no guard at all. Two ALSNs on different tracks
+have no dependency edge, so they can be scheduled on different threads in the same block.
+
+`tracktion_WaveNode.cpp:1727` already defends against exactly this, which suggests the hazard
+was recognised once: `if (other.editItemID != editItemID) return;` — an identity re-check after
+the ID lookup. `ArrangerLauncherSwitchingNode` has no equivalent, nor does
+`tracktion_LoopingMidiNode.cpp:1469`; `tracktion_PluginNode.cpp:332` guards on shape, not identity.
+
+ALSN is where this was caught, not the population: the assertion covers every node in
+`orderedNodes`, and the same combine feeds `SummingNode`, `ConnectedNode`, `InsertSendNode` and
+`LatencyNode`. Nothing observed here shows harm actually occurring — spike #4 reported zero
+rebuilds and a bit-identical witness in all 64 runs, so this rig never exercises the rebuild
+path — but the mechanism is there.
+
+**What the sweep does and does not say.** "24 of 63 track counts" is an *assertion* rate, not a
+harm rate: `areNodeIDsUnique` fires on duplicates across all node types while `findNodeWithID`
+is `dynamic_cast`-filtered, so cross-type duplicates are inert. It is also Debug-only — in
+Release the collisions happen silently — and only the instrumented runs were confirmed down to
+the colliding pair. The rig allocates IDs on a regular lattice, which sits on a resonance
+between the track-ID and clip-ID strides; jittering the strides in a model drops the rate to a
+few per cent rather than to zero.
 
 **Not reported upstream, and not a regression.** A search of Tracktion's issues and PRs finds
 nothing for the collision, the assertion, or the hash. The one issue in the same area is
@@ -215,8 +247,32 @@ Worth noting alongside it: #367 is about damage done *when a rebuild occurs*, an
 recorded zero rebuilds in all 64 runs — so nothing here has exercised that path. The two sit
 next to each other in the same mechanism, and both bear on §6.1 #4's guarantee.
 
-This looks like an upstream Tracktion issue rather than a Go.dot one, and it is left
-unfixed deliberately. Reproduce with:
+**Reported, not patched — and why not patching was the right call.** Tracktion do not accept
+third-party pull requests ("due to copyright restrictions"); they ask for the JUCE Forum, so
+this goes there as a report. A candidate fix *was* built and measured — replacing the mixing
+step with a splitmix64 finaliser took the sweep from 24 of 63 track counts to **0 of 63**, left
+all seven spikes unchanged (spike #4 still bit-identical, zero rebuilds), and left Tracktion's
+own test suite at exactly 341/343 with the *same* two pre-existing `tracktion_ClipLauncher`
+failures before and after. It was still wrong to propose, for two reasons found by review:
+
+- **It reintroduces the same bug class elsewhere.** A finaliser applied to `seed + K + h(v)`
+  depends on `seed` and `h(v)` only through their sum, so `hash (a, b) == hash (a + k, b - k)`
+  whenever `std::hash` is the identity. `tracktion_MidiInputDeviceNode.h:41` is
+  `hash ((size_t) midiSourceID, targetID)` with both operands small integers — those would
+  collide deterministically. The `seed * 65537u` term that was removed is what separates them
+  today.
+- **Hash values are persisted, in one place that is not a cache.**
+  `PatternGenerator::hashNotes (seq, 2)` is built on `core::hash`
+  (`tracktion_Musicality.cpp:2183`) and stored in the Edit as `IDs::hash` (`:825`);
+  `getAutoUpdate()` (`:2205`) compares stored against recomputed. Change the mixer and they
+  never match, so chord/arp/bass/melody clips in previously-saved Edits silently stop
+  auto-regenerating. That is a document-compatibility decision, and it is Tracktion's to make.
+
+Cached renders and proxies regenerating once (`ContainerClip::getHash()` and the `WaveNode`
+proxy/time-stretch keys) is the milder half, and those values were never portable anyway — the
+hard-coded seeds are `std::hash<std::string_view>` outputs, so toolchain-specific.
+
+Reproduce the collision with:
 
 ```
 cmake --build --preset spikes-debug
