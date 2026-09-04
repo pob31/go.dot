@@ -94,9 +94,12 @@ Notification mode, Release:
 of its budget. PRD §3.4's "curves are evaluated on the tick thread" is safe against any
 parameter count a show is likely to have.
 
-**The lateness floor is Windows, not us.** At 8 parameters the writes take 52 µs — 0.3% of the
-tick — yet lateness is still 0.76 ms at p50 and 2.60 ms at p99. That floor is `juce::Timer`
-granularity on Windows and it is present when the spike is doing essentially nothing. Reading
+**The lateness floor is the timer, not us — and it is not Windows-specific.** At 8 parameters
+the writes take 52 µs — 0.3% of the tick — yet lateness is still 0.76 ms at p50 and 2.60 ms at
+p99. This report originally called that floor "Windows"; the macOS run below shows the same
+floor (0.61 ms p50, 3.03 ms p99 at 8 parameters), so it is `juce::Timer` granularity in
+general rather than anything about the platform. It is present when the spike is doing
+essentially nothing. Reading
 those p99 figures as a cost of parameter writing would be wrong: **the number that scales with
 *P* is the tick cost, and lateness barely moves until the tick cost approaches the budget.**
 Between 8 and 512 parameters — a 64-fold increase in work — p99 lateness moves from 2.60 ms to
@@ -179,5 +182,33 @@ platform that CI currently only *builds* on - is the cheapest way to separate th
    queue drained by the message thread, or the tick taking `MessageManagerLock`, is a design
    decision this spike informs but does not make. The lock version was deliberately not
    measured here, because it answers a different question — see "What was built".
-3. **Does the same margin hold on macOS and Linux?** The lateness floor is a Windows timer
-   property; the ~4 µs write cost should port, but neither has been measured.
+3. ~~**Does the same margin hold on macOS and Linux?**~~ **macOS: answered, yes.** See the
+   section below. Linux is still unmeasured.
+
+## macOS — Mac mini M4 Pro, Release
+
+These are the first macOS figures this spike has produced. Until the fix recorded in
+[cross-check-m4pro.md](cross-check-m4pro.md), it returned zeros on macOS and reported PASS
+anyway: its tick was driven by `runDispatchLoop()`, which is `[NSApp run]`, and a console
+binary has no `NSApp`. 48 kHz, buffer 128, `--seconds=3`, one run each.
+
+| P | tick cost | % of 20 ms | lateness p50 | lateness p99 | µs / param | xruns |
+|---|---|---|---|---|---|---|
+| 8 | 0.079 ms | 0.4% | 0.61 ms | 3.03 ms | 9.93 | 0 |
+| 64 | 0.468 ms | 2.3% | 0.82 ms | 2.85 ms | 7.30 | 0 |
+| 256 | 1.590 ms | 8.0% | 1.34 ms | 3.10 ms | 6.21 | 0 |
+| 512 | 2.901 ms | 14.5% | 1.32 ms | 2.92 ms | 5.67 | 0 |
+
+**The headline holds.** 512 parameters cost 14.5% of a 20 ms tick on macOS against 12.9% on
+Windows — the same conclusion with slightly less margin. Per-write settles at ~5.7 µs against
+Windows' ~4 µs, the same order. Extrapolated saturation is ~3500 parameters.
+
+**The lateness floor is the same on both platforms**, which is what retires the "floor is
+Windows" reading above: p50 sits between 0.6 and 1.3 ms and p99 between 2.85 and 3.10 ms
+across a 64-fold increase in work, exactly as on Windows.
+
+**Where macOS does fail: tight buffers.** Across the full grid, this spike fails at buffer 32
+and 64 — and at 96 kHz more broadly — on the `xruns == 0` invariant, usually by a single
+block. That is the expected consequence of asking for a 0.67 ms buffer while a 50 Hz writer
+runs, and it is the same region where spike #4 records this machine straining. It is a
+statement about those buffer sizes, not about parameter control.

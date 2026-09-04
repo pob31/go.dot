@@ -13,7 +13,7 @@ PRD §9.2 gives the decision rule for the whole set:
 | 2 | Launcher start at an arbitrary in-file offset | **PASS** — honoured to the nearest sample; §6.1's "one genuine gap" premise is false | [spike02-launch-offset.md](spike02-launch-offset.md) |
 | 1 | Launcher clip → multichannel bus routing | **PASS** — mono, stereo and mixed 64-ch rigs all exact; limit is throughput (~72 objects @48k, ~40 @96k) | [spike01-bus-routing.md](spike01-bus-routing.md) |
 | 3 | Follow-action join quality | **PASS** on sample-accuracy; **NO** crossfade without a custom clip; artefact is buffer-dependent; overlapping copies are sample-aligned (no comb filtering) | [spike03-join-quality.md](spike03-join-quality.md) |
-| 5 | External parameter control at 50 Hz | **PASS on Windows only** — 512 params = 13% of a 20 ms tick (Release); ~4 µs per write. On macOS the spike measures nothing and still reports PASS — see [cross-check-m4pro.md](cross-check-m4pro.md) | [spike05-param-50hz.md](spike05-param-50hz.md) |
+| 5 | External parameter control at 50 Hz | **PASS** — 512 params = 13% of a 20 ms tick on Windows, 14.5% on an M4 Pro; ~4 µs per write, ~5.7 µs on macOS. Fails at buffers 32/64 on xruns, which is those buffers, not the writes | [spike05-param-50hz.md](spike05-param-50hz.md) |
 | 6 | Live-input latency through a Rack, PDC | **PASS** — PDC is global and ON by default, but `Edit::setLatencyCompensationEnabled(false)` removes it entirely | [spike06-rack-latency-pdc.md](spike06-rack-latency-pdc.md) |
 | 7 | Proxy-plugin sandbox as a custom TE plugin type | **PASS** — 0.9 µs round trip, survives the child being killed | [spike07-proxy-plugin.md](spike07-proxy-plugin.md) |
 | — | *Also verify*: TE transport chasing MTC | not yet run | — |

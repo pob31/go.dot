@@ -94,7 +94,9 @@ rebuilds and the witness, not on xruns — but it marks where this machine's edg
 
 ## Two findings the Mac surfaced that are not about the Mac
 
-### 1. Spike 05 measures nothing on macOS, and reports PASS anyway
+The first is **fixed**; the second is **diagnosed and left alone** for the author.
+
+### 1. Spike 05 measured nothing on macOS, and reported PASS anyway — FIXED
 
 All **64** spike05 runs — 32 Debug, 32 Release — report:
 
@@ -116,16 +118,39 @@ It reports PASS because its gate is `writes_done == writes_requested && xruns ==
 *"A run that measures nothing is not a pass"*, guarding the case where no executable is found —
 but the same hole exists inside the spike.
 
-Two consequences worth recording:
+**The fix, in two halves.**
 
-- Spike 05's own open question — *"Does the same margin hold on macOS?"* — is **still
-  unanswered**. The README's "512 params = 13% of a 20 ms tick, ~4 µs per write" is a
-  Windows-only figure and should be labelled as one until the spike can run here.
-- The fix has two halves: gate on `ticks_measured > 0` so a silent run fails, and drive the
-  loop with `runDispatchLoopUntil()` (or initialise an `NSApplication`) so it has something to
-  measure.
+*Make it tick.* `runDispatchLoopUntil()` would have worked — it pumps CFRunLoop rather than
+`NSApp` — but it is behind `JUCE_MODAL_LOOPS_PERMITTED`, which this project sets to 0
+deliberately (`cmake/WfgThirdParty.cmake:174`, "a modal loop in a show engine is a hang"), and
+that decision is not a spike's to reverse. So on macOS the spike now pumps the same CFRunLoop
+in the same mode, which is not a substitute for the JUCE message loop but *is* the JUCE
+message loop on this platform: JUCE registers its message queue as a CFRunLoop source in
+`kCFRunLoopCommonModes`, so `juce::Timer` callbacks arrive through exactly that pump. Windows
+and Linux are untouched.
 
-### 2. A Tracktion graph assertion that Windows could never have shown
+*Make silence fail.* A run with `ticks_fired == 0` now exits 3 (HARNESS-ERROR), not 0. The
+harness already draws that distinction — a spike that could not tick has said nothing about
+the engine, which is not the same as an engine that misbehaved — and `run-spikes.sh` states
+the identical principle one level up for the case where it finds no executables.
+
+**Spike 05's open question is now answered**, and the numbers are in
+[spike05-param-50hz.md](spike05-param-50hz.md): 512 parameters cost **14.5%** of a 20 ms tick
+on this machine against 12.9% on Windows, at ~5.7 µs per write against ~4 µs. The conclusion
+holds with slightly less margin.
+
+It also retires a claim. Spike 05's report called the lateness floor "Windows, not us"; macOS
+shows the same floor — 0.61 ms p50 and 3.03 ms p99 at 8 parameters — so it is `juce::Timer`
+granularity in general, not a platform property. That correction is now in the report.
+
+**One consequence to expect.** Now that it runs, this spike fails at buffers 32 and 64, and at
+96 kHz more broadly, on its `xruns == 0` invariant — usually by a single block in a 5-second
+run. Across the full grid that is 35 of 64 runs, in both build types. The gate was left
+strict: those are extremely tight buffers and straining there is the expected result, the same
+region spike #4 records this machine struggling in. It is a statement about those buffer
+sizes, not about parameter control, and never once about writes failing to land.
+
+### 2. Tracktion's node IDs are not really hashed — DIAGNOSED, not fixed
 
 24 occurrences in the Debug sweep, all in spike05, all identical:
 
@@ -133,16 +158,55 @@ Two consequences worth recording:
 JUCE Assertion failure in tracktion_NodePlayerUtilities.h:122
 ```
 
-Line 122 is `jassert (areNodeIDsUnique (nodeGraph->orderedNodes, true))` — the graph spike05
-builds contains **duplicate node IDs**. It is a `jassert`, so Release compiles it out; that is
-why the Release sweep is silent.
+Line 122 is `jassert (areNodeIDsUnique (nodeGraph->orderedNodes, true))`. It is a `jassert`, so
+Release compiles it out; that is why the Release sweep is silent.
 
-This is almost certainly **not** a macOS bug. JUCE routes assertions through
+**Why Windows could never have shown it.** JUCE routes assertions through
 `Logger::outputDebugString`, which is `OutputDebugString()` on Windows — visible only to an
 attached debugger, invisible when running the sweep from a terminal — and `fputs(…, stderr)`
-on macOS. The assertion was likely firing on the Windows runs the whole time with nobody in a
-position to see it. Non-unique node IDs are worth a look on their own terms, independently of
-which platform revealed them.
+on macOS. It was almost certainly firing on Windows all along with nobody in a position to see
+it.
+
+**What actually collides.** Tracktion ships its own diagnostic for this (the `JUCE_DEBUG`
+block at `tracktion_NodePlayerUtilities.h:52`), which prints the offending IDs and node types.
+Exactly **one** ID collides, and always between **two `ArrangerLauncherSwitchingNode`
+instances** — one per audio track. It is fully deterministic (five identical runs), unrelated
+to `--validate-instrument`, and unique to spike05: spike01 and spike04 at the same track
+counts collide zero times.
+
+**Why, and it is not a rare accident.** `ArrangerLauncherSwitchingNode::getNodeProperties()`
+computes `nodeID = hash (seed, track->itemID)` and then folds in each input
+(`tracktion_ArrangerLauncherSwitchingNode.cpp:41` and `:55`). Follow the two pieces:
+
+- `std::hash<EditItemID>` is the **identity function** — `return (size_t) e.getRawID();`
+  (`tracktion_EditItem.h:168`). The raw track ID enters unmixed.
+- `hash_combine` is `seed ^= std::hash<T>()(v) + 0x9e3779b9 + (seed * 65537u) + (seed / 3u);`
+  (`tracktion_Hash.h:58`). With a constant seed the tail is a constant, so the whole thing
+  collapses to roughly `seed ⊕ (rawTrackID + C)`.
+
+The observed IDs say the same thing out loud — at 6, 7 and 8 tracks they are
+`…447948628`, `…447948635` and `…447948622`, identical in their first seventeen digits. These
+are near-sequential clustered integers, not spread hashes. So a collision between two tracks
+is an arithmetic near-coincidence rather than a 1-in-2⁶⁴ event, which is exactly why it is
+deterministic and why it depends on track count in a way that looks arbitrary: 6, 7, 8 and 32
+collide while 4, 9, 16 and 24 do not.
+
+**Why it is worth caring about, beyond tidiness.** The same file uses that ID to find a node's
+previous incarnation across a graph rebuild — `findNodeWithID<ArrangerLauncherSwitchingNode>
+(*oldGraph, props.nodeID)` at `:88`. If two tracks share an ID, a rebuild can match the wrong
+one. Spike #4's entire finding is that rebuilds must not disturb already-playing material, so
+this is adjacent to something the polyphony model depends on. Nothing observed here shows it
+actually happening — spike #4 reported zero rebuilds and a bit-identical witness in all 64
+runs — but the mechanism is there.
+
+This looks like an upstream Tracktion issue rather than a Go.dot one, and it is left
+unfixed deliberately. Reproduce with:
+
+```
+cmake --build --preset spikes-debug
+./build/spikes/spikes/Debug/spike05_param_50hz --tracks=8 --sample-rate=48000 \
+    --buffer=128 --seconds=1 --validate-instrument 2>&1 >/dev/null | grep -B1 Assertion
+```
 
 ## What this run deliberately did not do
 

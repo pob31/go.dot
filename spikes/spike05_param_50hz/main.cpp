@@ -29,8 +29,11 @@
     a real message thread that can be disturbed, and something honest that
     measures the disturbance.
 
-      main thread   runs juce::MessageManager::runDispatchLoop() - a genuine JUCE
-                    message loop, not a substitute
+      main thread   runs a genuine JUCE message loop, not a substitute. That is
+                    runDispatchLoop() on Windows and Linux; on macOS it is a
+                    CFRunLoop pump, for the reason spelled out at the call site
+                    - the JUCE one is [NSApp run] and a console binary has no
+                    NSApp, so it returns instantly and measures nothing
       a Timer       at 20 ms (PRD §3.4's 50 Hz tick) writes the parameters and
                     measures ITS OWN LATENESS. A timer callback that should fire
                     every 20 ms and fires late is precisely what "disturbing the
@@ -62,6 +65,10 @@
 */
 
 #include "../SpikeHarness.h"
+
+#if JUCE_MAC
+ #include <CoreFoundation/CoreFoundation.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -141,17 +148,24 @@ namespace
             const auto t1 = std::chrono::steady_clock::now();
             writeCostUs.push_back (std::chrono::duration<double, std::micro> (t1 - t0).count());
 
+            ++ticksFired;
+
             if (--ticksRemaining <= 0)
             {
                 stopTimer();
                 juce::MessageManager::getInstance()->stopDispatchLoop();
+
+                // The macOS pump below watches this; stopDispatchLoop() cannot
+                // stop it, because it stops an NSApp that was never started.
+                finished.store (true, std::memory_order_release);
             }
         }
 
         std::vector<AutomatableParameter*> params;
         std::vector<double> lateness, writeCostUs;
         std::chrono::steady_clock::time_point lastFire {};
-        long long writesDone = 0, writesRequested = 0;
+        long long writesDone = 0, writesRequested = 0, ticksFired = 0;
+        std::atomic<bool> finished { false };
         int ticksRemaining;
         juce::NotificationType notification;
         float phase = 0.0f;
@@ -290,14 +304,43 @@ int main (int argc, char** argv)
                      notify ? juce::sendNotificationSync : juce::dontSendNotification);
     timer.startTimer (tickMs);
 
-    // The real message loop. This is the thing the criterion is about.
+    /*  The real message loop. This is the thing the criterion is about.
+
+        macOS needs a different call, and the reason is worth writing down because
+        the wrong one fails SILENTLY. runDispatchLoop() is [NSApp run] on macOS
+        (juce_MessageManager_mac.mm). A spike is a console binary that never makes
+        an NSApplication, so NSApp is nil, the message goes nowhere, and the call
+        returns at once - the timer never fires and every figure below is zero.
+        That is exactly what every macOS run of this spike did until this was
+        fixed, and the old verdict gate passed it.
+
+        JUCE's own bounded loop, runDispatchLoopUntil(), pumps CFRunLoop and would
+        do the job, but it sits behind JUCE_MODAL_LOOPS_PERMITTED and this project
+        sets that to 0 on purpose (cmake/WfgThirdParty.cmake:174 - "a modal loop in
+        a show engine is a hang"). That decision is not this spike's to reverse.
+
+        So macOS pumps the same CFRunLoop that runDispatchLoopUntil() would have,
+        in the same mode. This is not a substitute for the JUCE message loop, it IS
+        the JUCE message loop on this platform: JUCE registers its message queue as
+        a CFRunLoop source in kCFRunLoopCommonModes (juce_MessageQueue_mac.h:56),
+        so juce::Timer callbacks arrive through exactly this pump. The 50 ms slice
+        only bounds how long the loop can sleep before re-checking the flag; the
+        timer still fires on the run loop's own schedule, so lateness is measured
+        against the same clock as everywhere else.
+    */
+   #if JUCE_MAC
+    while (! timer.finished.load (std::memory_order_acquire))
+        CFRunLoopRunInMode (kCFRunLoopDefaultMode, 0.05, false);
+   #else
     juce::MessageManager::getInstance()->runDispatchLoop();
+   #endif
 
     audioRunning.store (false, std::memory_order_relaxed);
     audioThread.join();
 
     report.value ("writes_requested", timer.writesRequested);
     report.value ("writes_done", timer.writesDone);
+    report.value ("ticks_fired", timer.ticksFired);
     report.value ("ticks_measured", timer.lateness.size());
 
     report.value ("tick_lateness_ms.p50", percentile (timer.lateness, 0.50));
@@ -315,6 +358,24 @@ int main (int argc, char** argv)
     report.value ("xruns", xruns.load());
     report.value ("xruns_including_warmup", xrunsAll.load());
     report.value ("warmup_blocks_excluded", warmupBlocks);
+
+    /*  A run that measured nothing is not a pass.
+
+        The invariant below is writes_done == writes_requested, and 0 == 0
+        satisfies it - so a tick that never fired used to report PASS while
+        proving nothing whatsoever. That is how the macOS breakage above stayed
+        invisible across two full sweeps. run-spikes.sh states the same principle
+        one level up, for the case where it finds no executables; this is that
+        rule inside the spike.
+
+        It is a HARNESS-ERROR (exit 3), not a violation (exit 1), and the
+        distinction is the one the harness already draws: a spike that could not
+        tick has said nothing about the engine, which is not the same as an engine
+        that misbehaved.
+    */
+    if (timer.ticksFired == 0)
+        return report.cannotMeasure ("the 50 Hz tick never fired - no message loop dispatched it, "
+                                     "so nothing about parameter control was measured");
 
     /*  CI gates the INVARIANTS only. Whether the timing is acceptable is a
         judgement about a specific machine and a specific parameter count, and it
