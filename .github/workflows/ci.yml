@@ -9,13 +9,14 @@ name: CI
 # release.yml, and mixing the two is how a release pipeline ends up running on
 # every push.
 #
-# Beyond "it compiled", CI asserts exactly five things:
+# Beyond "it compiled", CI asserts exactly six things:
 #   1. the two submodule pins are coherent and TE's vendored JUCE is empty  (job `pins`)
-#   2. configure emits no CMake Warning originating outside ThirdParty/      (job `linux`)
-#   3. the product binary RUNS: `wfg --version` and `wfg selftest` exit 0    (ctest, 3 platforms)
-#   4. the unit suite passes under BOTH `C` and `fr_FR`, and fails loudly
+#   2. CLAUDE.md still matches PRD section 4 byte-for-byte                   (job `pins`)
+#   3. configure emits no CMake Warning originating outside ThirdParty/      (job `linux`)
+#   4. the product binary RUNS: `wfg --version` and `wfg selftest` exit 0    (ctest, 3 platforms)
+#   5. the unit suite passes under BOTH `C` and `fr_FR`, and fails loudly
 #      if the locale is unavailable                                          (ctest, 3 platforms)
-#   5. our own code compiles clean under -Werror with JUCE's recommended
+#   6. our own code compiles clean under -Werror with JUCE's recommended
 #      warning set                                                           (job `linux`, strict step)
 #
 # Five separate jobs rather than one `strategy.matrix` over the three OSes:
@@ -81,6 +82,17 @@ jobs:
 
       - name: Check submodule pins
         run: python3 scripts/check-pins.py
+
+      - name: Check CLAUDE.md has not drifted from PRD section 4
+        # CLAUDE.md is the review criterion for every PR and the devplan makes it
+        # "= PRD 4" verbatim. Two documents saying the same thing can disagree, and
+        # the one that drifts silently is the one people read. CLAUDE.md tells its
+        # reader the PRD wins; this is what makes that true rather than aspirational.
+        #
+        # It lives here, in the no-compiler job, because it costs a second and
+        # because a stale review criterion should not wait behind three platforms
+        # of compile minutes to be noticed.
+        run: python3 scripts/check-claude-md.py
 
   # ---------------------------------------------------------------------------
   # Job 2 — Linux. The busiest job: it is the cheapest runner, so it carries the
