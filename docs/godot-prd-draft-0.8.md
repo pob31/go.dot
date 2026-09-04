@@ -1557,7 +1557,41 @@ laptop, against roughly 72 at 48 kHz. That tracks total sample throughput rather
 than channel count, was not fixed by pacing the render to real time, and has not
 been reproduced on other hardware — so it is recorded as a property of that
 machine under that load, not as an engine limit. **It wants confirming on the
-show machine before a rig is planned around it.**
+show machine before a rig is planned around it.** That confirmation does not need
+the interface: the spikes drive TE through a `HostedAudioDeviceInterface` with the
+device manager disabled, so their sample rate is a software parameter and the
+figure is a CPU measurement, independent of what any device can be told to do.
+
+*Amended in 0.8 — device clock ownership.* **Go.dot does not own the sample rate,
+and on the target rig it cannot set it.** The Digiface Dante takes its clock from
+the Dante domain, configured in Dante Controller; the interface follows the
+domain, the driver reports what it is given, and the application is last in that
+chain rather than first. The same is true of any interface slaved to external
+clock — word clock, MADI, AES — but Dante makes it the normal case rather than
+the exception, and a Dante Virtual Soundcard on the same machine sits in the same
+domain.
+
+So **the sample rate is an observed property, not a setting**, and three things
+follow:
+
+- **A show file's sample rate is a declaration of intent, not a command.** Go.dot
+  can record what a show was authored at and compare it with what the device
+  reports, but it cannot impose it. **Behaviour on mismatch is an author
+  decision** — refuse to load, load with a warning, or adapt and resample — and
+  it is not answered here. Note that §3.3's "every parameter has a defined
+  resting state" does not apply: this is not a parameter Go.dot owns.
+- **The rate can change from outside the application, mid-show.** Someone opening
+  Dante Controller and moving the domain to another rate re-clocks the interface
+  underneath a running show; the driver signals a reset and playback restarts.
+  This is an asynchronous failure mode with no defined behaviour yet, and it is
+  the sharp one — §4.4's three levels of stop do not cover a stop nobody asked
+  for.
+- **Clock lock is a first-class state to surface**, distinct from device presence.
+  An unlocked device is present, enumerated and producing nothing. "No clock" and
+  "no interface" are different failures with different remedies, and an operator
+  needs to be able to tell them apart at a glance.
+
+None of this bears on the seven spike results, which never opened a device.
 
 ### 6.3 Video — DeckLink vs GPU
 
