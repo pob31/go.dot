@@ -212,10 +212,10 @@ Build presets append `-debug` / `-release` (`dev-debug`, `ci-linux-release`, …
 
 | Dependency | Version | Commit |
 |---|---|---|
-| JUCE | 8.0.6+19 (on `develop`) | `19edd538429c93d277bf95b55aaa7e3eb545f951` |
-| Tracktion Engine | v3.2.0 | `0a5f4e6a5f53d09c89b414a44386a12df7fa1ec6` |
+| JUCE | 8.0.13+7 (on `develop`) | `19edd538429c93d277bf95b55aaa7e3eb545f951` |
+| Tracktion Engine | develop (3.5.0) | `0a5f4e6a5f53d09c89b414a44386a12df7fa1ec6` |
 
-The load-bearing fact: **Tracktion Engine v3.2.0's own `modules/juce` gitlink is
+The load-bearing fact: **Tracktion Engine develop (3.5.0)'s own `modules/juce` gitlink is
 byte-for-byte our JUCE pin.** We are not guessing at a compatible JUCE — we are
 using the one TE was tested against, while pinning it ourselves so the URL is
 HTTPS and the build never enters TE's root `CMakeLists.txt`. Keeping that
@@ -242,7 +242,7 @@ If JUCE's version number changes, update `WFG_PIN_JUCE` in
 `cmake/WfgOptions.cmake` too — `wfg_tests` asserts at **runtime** that
 `SystemStats::getJUCEVersion()` contains it, which is what catches a stale
 ccache or a stale `.lib` after a bump. There is deliberately no matching runtime
-assertion for TE: at the v3.2.0 tag, `Engine::getVersion()` still returns
+assertion for TE: at the develop (3.5.0) tag, `Engine::getVersion()` still returns
 `"Tracktion Engine v3.1.0"`, so only the `"Tracktion Engine"` prefix is asserted.
 
 ---

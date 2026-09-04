@@ -40,7 +40,7 @@
 
 cmake_minimum_required(VERSION 3.22)
 
-# Why 3.22 and not higher: JUCE 8.0.6's own root CMakeLists declares
+# Why 3.22 and not higher: JUCE 8.0.13's own root CMakeLists declares
 # cmake_minimum_required(VERSION 3.22), so that is the floor we inherit whatever
 # we write here, and it is also the version in Ubuntu 22.04's apt. Raising it to
 # 3.25 would buy CMAKE_MSVC_DEBUG_INFORMATION_FORMAT (see the Windows CI job's

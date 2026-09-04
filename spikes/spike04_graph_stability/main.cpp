@@ -137,11 +137,13 @@ namespace
                 descs.clear();
 
                 if (isInput)
-                    descs.emplace_back ("spike-in", 0, 1, true);
+                {
+                    descs.push_back (WaveDeviceDescription::withNumChannels ("spike-in", 0, 2, true));
+                }
                 else
                 {
-                    descs.emplace_back ("witness-bus", 0, 1, true);
-                    descs.emplace_back ("storm-bus",   2, 3, true);
+                    descs.push_back (WaveDeviceDescription::withNumChannels ("witness-bus", 0, 2, true));
+                    descs.push_back (WaveDeviceDescription::withNumChannels ("storm-bus",   2, 2, true));
                 }
             };
 

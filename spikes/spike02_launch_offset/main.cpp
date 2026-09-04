@@ -151,12 +151,14 @@ namespace
 
                 if (isInput)
                 {
-                    descs.emplace_back ("spike-in", 0, 1, true);
+                    descs.push_back (WaveDeviceDescription::withNumChannels ("spike-in", 0, 2, true));
                     return;
                 }
 
                 for (int i = 0; i < numOffsets; ++i)
-                    descs.emplace_back ("bus" + juce::String (i), i * 2, i * 2 + 1, true);
+                    descs.push_back (WaveDeviceDescription::withNumChannels (
+                                         "bus" + juce::String (i),
+                                         static_cast<uint32_t> (i * 2), 2, true));
             };
 
         auto edit = test_utilities::createTestEdit (engine, numOffsets, Edit::EditRole::forEditing);

@@ -133,11 +133,13 @@ namespace
                 descs.clear();
 
                 if (isInput)
-                    descs.emplace_back ("spike-in", 0, 1, true);
+                {
+                    descs.push_back (WaveDeviceDescription::withNumChannels ("spike-in", 0, 2, true));
+                }
                 else
                 {
-                    descs.emplace_back ("file-bus",    0, 1, true);
-                    descs.emplace_back ("latency-bus", 2, 3, true);
+                    descs.push_back (WaveDeviceDescription::withNumChannels ("file-bus",    0, 2, true));
+                    descs.push_back (WaveDeviceDescription::withNumChannels ("latency-bus", 2, 2, true));
                 }
             };
 

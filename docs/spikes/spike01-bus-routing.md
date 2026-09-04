@@ -26,8 +26,11 @@ sample rate (~3.5 M and ~3.8-4.6 M samples/s), which is what identifies it as a 
 ceiling rather than a channel or track ceiling. **At 96 kHz on 64 channels this matters**,
 and the caveats below say what it does and does not establish.
 
-There is also a **constraint no experiment can move**, and it needs qualifying carefully
-because the obvious reading of it is wrong.
+**The stereo ceiling is gone.** This report originally recorded a hard `constexpr` limit of
+two channels per track, measured against Tracktion **v3.2.0**. On the **develop** branch
+(3.5.0) that constant no longer exists and a track carries **discrete multichannel** content —
+measured at 2, 4 and 8 channels, each carrying its own distinct signal, verified with
+per-channel staggered transients so duplication could not be mistaken for width.
 
 ## Criterion
 
@@ -64,7 +67,7 @@ the distinction is what makes a failure diagnosable.
 
 ```
 build:   Debug, MSVC 19.51.36256 (VS 2026), Windows 11
-engine:  Tracktion Engine v3.1.0 (runtime string), JUCE v8.0.6
+engine:  Tracktion Engine develop 3.5.0 (runtime string still reports v3.1.0), JUCE v8.0.13
 command: spike01_bus_routing --tracks=N --sample-rate=48000 --buffer=128
 device:  none — TE hosted audio device interface, no hardware opened
 ```
@@ -190,35 +193,57 @@ The spike now detects that case explicitly (`identification_degenerate=1`) and e
 above are degenerate in this sense: they establish that the configuration did not work, and
 nothing at all about *why*.
 
-**The constraint, stated precisely, because the obvious reading of it is wrong.**
-`tracktion_EditNodeBuilder.cpp:90-93` is
+## The stereo ceiling, and its removal
+
+This is the finding that changed when the project moved from Tracktion **v3.2.0** to the
+**develop** branch (3.5.0), and it changed in the most useful direction.
+
+**On v3.2.0 the ceiling was real and immovable.** `tracktion_EditNodeBuilder.cpp:90-93` was
 
 ```cpp
 constexpr int getTrackNumChannels()  { return 2; }
 ```
 
-Not a default, not a setting — `constexpr`. But this governs the width of a track's
-**internal processing**, not the width of the **destination**. A track is two channels
-inside; its output device may be one channel, and a mono source routed to a mono device
-arrives on exactly one hardware channel, as measured above. So the constraint is **not** "no
-mono", and it is not an obstacle to the spatial workflow.
+— not a default, not a setting. `RackInstance::getNumOutputChannelsGivenInputs` returned a
+literal `2` and its channel enum was `{ left, right }`. A cue wider than stereo could not be
+one track, so it had to be *N* tracks launched together, which broke §3.25's "the launcher
+slots **are** the exclusive resources, same object, no translation" for wide cues.
 
-What it does constrain is the other direction: **a cue wider than stereo cannot be one
-track.** A 5.1 or 8-channel cue is *N* tracks launched together, which means the §3.9c
-allocator hands out slots in groups and a "cue" and a "slot" stop being one-to-one. §3.25
-currently says the launcher slots **are** the exclusive resources, "same object, no
-translation" — true for a mono or stereo cue, not for a wide one.
+**On develop (3.5.0) that constant is gone**, replaced by a channel-configuration system:
 
-**Racks are stereo objects**, and whether that is a cost or the right shape depends on the
-job. `RackInstance::getNumOutputChannelsGivenInputs` returns 2 and `RackInstance::Channel` is
-`{ left, right }`.
+```cpp
+// tracktion_ChannelConfiguration.h
+static ChannelConfiguration mono / stereo / surround5_1 / surround7_1;
+static ChannelConfiguration discreteChannels (int numChannels, int firstDeviceChannelIndex = 0);
+static ChannelConfiguration canonical      (int numChannels, int firstDeviceChannelIndex = 0);
 
-For the intended use — **live mono input into a rack, mono-to-stereo or stereo-to-stereo** —
-a stereo rack is the *correct* shape, not waste: a mono source into a reverb or a spatialiser
-wants a stereo result, and TE gives it directly. The cost only appears for a mono-in,
-mono-out effects path, where half the rack is carrying silence. Both cases belong to
-spike #6, which measures the live-input path, and neither should be asserted as a cost until
-it is measured there.
+// tracktion_RackInstance.cpp:374
+int RackInstance::getNumOutputChannelsGivenInputs (int numInputs)
+{
+    return std::max (numInputs, numOutputChannels.get());     // configurable, not 2
+}
+```
+
+Measured, not inferred. `--wide-check=N` builds a source in which **channel *c* carries its
+transient at a different time**, so duplication cannot pass itself off as width:
+
+| track width | channels carrying their own distinct content |
+|---|---|
+| 2 | **2 / 2** |
+| 4 | **4 / 4** |
+| 8 | **8 / 8** |
+
+So on develop **a wide cue can be one track**, §3.25's one-slot-per-cue model survives
+unqualified, and racks can be multichannel. The §3.9b and §3.25 amendments this report
+previously proposed are **withdrawn**.
+
+**One behaviour change comes with it, and it cuts against a PRD principle rather than for
+it.** Spike #6 measured a mono source into a *stereo* destination as `left = 0.5, right = 0`
+on v3.2.0 and `left = 0.5, right = 0.5` on 3.5.0: mono is now **canonically upmixed** into a
+wider destination. §3.9b says *"Width is explicit, never automatic"* — on 3.5.0 that is no
+longer true of the engine, so Go.dot must declare destination widths explicitly if it wants
+the old behaviour. A **mono destination still stays mono**, as this spike measures throughout;
+it is only mono-into-wider that now spreads.
 
 ## The machine these numbers came from
 

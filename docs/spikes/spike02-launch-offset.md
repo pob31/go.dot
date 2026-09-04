@@ -52,7 +52,7 @@ tested anything: at 48 kHz it is exactly 16000 samples.)
 
 ```
 build:   Debug, MSVC 19.51.36256 (VS 2026), Windows 11
-engine:  Tracktion Engine v3.1.0 (runtime string), JUCE v8.0.6
+engine:  Tracktion Engine develop 3.5.0 (runtime string still reports v3.1.0), JUCE v8.0.13
 command: spike02_launch_offset --tracks=5 --sample-rate=SR --buffer=B
 device:  none — TE hosted audio device interface, no hardware opened
 ```

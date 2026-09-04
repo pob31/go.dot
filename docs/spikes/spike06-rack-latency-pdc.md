@@ -48,7 +48,7 @@ Zero would mean TE leaves the file path alone and §3.25's warning could be reti
 
 ```
 build:   Debug, MSVC 19.51.36256 (VS 2026), Windows 11
-engine:  Tracktion Engine v3.1.0 (runtime string), JUCE v8.0.6
+engine:  Tracktion Engine develop 3.5.0 (runtime string still reports v3.1.0), JUCE v8.0.13
 command: spike06_rack_latency_pdc --tracks=2 --sample-rate=48000 --buffer=128 --latency-ms=N [--use-rack]
 device:  none — TE hosted audio device interface, no hardware opened
 ```
@@ -76,6 +76,12 @@ tracks stay perfectly aligned — which is PDC working exactly as designed. The 
 Mono source into the stereo bus: `bus_peak_left = 0.5`, `bus_peak_right = 0`.
 
 ## What was learned
+
+**Re-measured on Tracktion develop (3.5.0): unchanged.** Everything in this section was first
+measured on v3.2.0 and re-run after the move to develop — the file-path shift is still exactly
+250 ms for a 250 ms plugin, `setLowLatencyMonitoring` still does not help, and
+`EditPlaybackContext` still calls the three-argument `setNode`. 404 commits of engine change
+did not touch this, which makes it a design property rather than a passing defect.
 
 **PDC delays the whole graph by the worst plugin latency, and there is no per-track escape.**
 The compensation is global by construction: `SummingNode` and `ConnectedNode` insert latency
@@ -107,10 +113,16 @@ So the capability Go.dot needs is present in the graph library and unreachable t
 public engine API. That is a much better position than "impossible", and a much worse one than
 "supported".
 
-**Mono stays mono.** A mono source on a track routed to a stereo bus produces signal on the
-left channel only (`0.5` / `0`) — no automatic spreading or centre-panning. Combined with
-spike #1's finding that mono *destinations* work exactly, the picture for the spatial workflow
-is consistent: what you declare is what you get, in both directions.
+**Mono into a wider destination now spreads — this changed between Tracktion versions.**
+A mono source on a track routed to a *stereo* bus produced `left = 0.5, right = 0` on
+v3.2.0 and produces `left = 0.5, right = 0.5` on develop (3.5.0). Mono is now canonically
+upmixed into a wider destination rather than left in channel 1.
+
+That is a better default for most hosts and a slightly awkward one for §3.9b's *"Width is
+explicit, never automatic"*, which is now no longer true of the engine. A **mono destination**
+still stays mono — spike #1 measures that at up to 64 mono direct outs — so the spatial
+workflow is unaffected. It is only mono-into-wider that spreads, and Go.dot must declare
+destination widths explicitly if it wants to control that.
 
 ## The machine these numbers came from
 

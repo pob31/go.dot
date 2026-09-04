@@ -61,7 +61,7 @@ TEST_CASE ("toolchain: Tracktion Engine's compiled code is linked")
         into the user's application-data directory, which has no business
         running in a unit test on a CI runner.
 
-        DO NOT ASSERT THE NUMBER. At the v3.2.0 tag this returns
+        DO NOT ASSERT THE NUMBER. At the develop (3.5.0) tag this returns
         "Tracktion Engine v3.1.0" — measured on 2026-09-04, and it disagrees
         with TE's own VERSION.md. Asserting "3.2.0" here would fail today;
         asserting "3.1.0" would silently pass through a future bump that fixed

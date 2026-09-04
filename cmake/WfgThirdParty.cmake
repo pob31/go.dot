@@ -73,7 +73,7 @@ add_subdirectory("${CMAKE_SOURCE_DIR}/ThirdParty/JUCE" juce)
 # 2. Tracktion Engine — the modules/ SUBDIRECTORY ONLY
 # ---------------------------------------------------------------------------
 
-# set(JUCE_VERSION ...): JUCE's own project(JUCE VERSION 8.0.6) sets that variable in
+# set(JUCE_VERSION ...): JUCE's own project(JUCE VERSION 8.0.13) sets that variable in
 # JUCE's DIRECTORY SCOPE only, so it is not visible here. Without this line, TE's
 # modules/CMakeLists.txt:25
 #     INSTALL_PATH "include/JUCE-${JUCE_VERSION}/modules"

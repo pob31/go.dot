@@ -92,7 +92,7 @@ git@github.com:juce-framework/JUCE.git over SSH, which fails on every CI runner 
 every keyless clone with 'Permission denied (publickey)' three levels down. Go.dot
 pins JUCE itself; TE's vendored copy is never built and may stay empty forever.
 
-Do NOT use --depth 1 either: our JUCE pin (19edd538, JUCE 8.0.6+19) is not the tip of
+Do NOT use --depth 1 either: our JUCE pin (19edd538, JUCE 8.0.13+19) is not the tip of
 develop, and a shallow submodule fetch fails with
 'fatal: reference is not a tree: 19edd538429c93d277bf95b55aaa7e3eb545f951'.
 
@@ -136,7 +136,7 @@ unset(_wfg_te_juce)
 # ---------------------------------------------------------------------------
 # Guard 3 — compiler floor
 # ---------------------------------------------------------------------------
-# The floor is TRACKTION ENGINE's, not ours. TE 3.2.0 is a C++20 codebase that
+# The floor is TRACKTION ENGINE's, not ours. TE 3.5.0 is a C++20 codebase that
 # uses concepts and constrained templates in headers we include transitively
 # from tracktion_engine.h; TE's own CI builds with gcc-11 and Xcode 15.3, so
 # those are the versions its C++20 usage is actually exercised against.
@@ -154,7 +154,7 @@ if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(_wfg_cxx_floor 11)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "AppleClang")
     # AppleClang versions do not track upstream Clang: AppleClang 15 ships with
-    # Xcode 15, which is the oldest Xcode TE 3.2.0's CI covers.
+    # Xcode 15, which is the oldest Xcode TE 3.5.0's CI covers.
     set(_wfg_cxx_floor 15)
 elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
     set(_wfg_cxx_floor 14)
@@ -165,7 +165,7 @@ if(_wfg_cxx_floor AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS _wfg_cxx_floor)
         "Go.dot: ${CMAKE_CXX_COMPILER_ID} ${CMAKE_CXX_COMPILER_VERSION} is too old.\n"
         "Minimum is ${CMAKE_CXX_COMPILER_ID} ${_wfg_cxx_floor}.\n"
         "\n"
-        "This floor comes from Tracktion Engine, not from Go.dot's own code: TE 3.2.0 "
+        "This floor comes from Tracktion Engine, not from Go.dot's own code: TE 3.5.0 "
         "requires C++20 (concepts and constrained templates appear in headers we "
         "include), and TE's own CI validates against gcc-11 and Xcode 15.3.\n"
         "\n"

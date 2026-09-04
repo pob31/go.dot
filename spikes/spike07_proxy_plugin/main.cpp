@@ -149,6 +149,18 @@ namespace
         */
         double getLatencySeconds() override { return 0.0; }
 
+        /*  NEW IN TE 3.5, and now PURE virtual on Plugin, so this is not optional.
+            The bus layout replaces the old implicit "everything is stereo": a
+            plugin declares its input and output channel configuration and the
+            graph honours it. Stereo in, stereo out here, because the proxy is
+            transparent - but a real sandbox could declare any width, which is
+            what makes a multichannel out-of-process effect expressible at all.
+        */
+        BusLayout getBusses() const override
+        {
+            return BusLayout::singleStereoInOut();
+        }
+
         void applyToBuffer (const PluginRenderContext& pc) override
         {
             if (context == nullptr || context->shared == nullptr || pc.destBuffer == nullptr)

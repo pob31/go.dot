@@ -109,7 +109,7 @@ unset(_wfg_locale_fr_default)
 # while a stale ccache entry or an un-rebuilt wfg_thirdparty.lib can still be
 # linking the PREVIOUS JUCE. Only asking the linked binary what version it is will
 # catch that.
-set(WFG_PIN_JUCE "8.0.6" CACHE STRING
+set(WFG_PIN_JUCE "8.0.13" CACHE STRING
     "JUCE version pinned by ThirdParty/JUCE; asserted at runtime against SystemStats::getJUCEVersion()")
 
 # Documentation only — there is no runtime counterpart to the check above, and
@@ -119,5 +119,5 @@ set(WFG_PIN_JUCE "8.0.6" CACHE STRING
 # asserts this number is asserting a bug in someone else's repo and will fail the
 # moment they fix it. ToolchainTests.cpp checks the "Tracktion Engine" PREFIX and
 # non-emptiness only.
-set(WFG_PIN_TE "3.2.0" CACHE STRING
+set(WFG_PIN_TE "3.5.0-develop" CACHE STRING
     "Tracktion Engine version pinned by ThirdParty/tracktion_engine (documentation only — see comment)")

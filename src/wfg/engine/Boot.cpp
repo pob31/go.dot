@@ -71,7 +71,7 @@ namespace
         into the user's application-data directory, which is engine behaviour
         and has no place in a toolchain proof.
 
-        DO NOT assert on the number this returns. At the v3.2.0 tag it still
+        DO NOT assert on the number this returns. At the develop (3.5.0) tag it still
         reports "Tracktion Engine v3.1.0" — measured, not inferred. The tests
         assert the prefix only; see tests/ToolchainTests.cpp.
     */

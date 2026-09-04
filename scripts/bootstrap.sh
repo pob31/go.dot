@@ -38,11 +38,11 @@
 # on every CI runner and on any clone by someone without an SSH key registered
 # with GitHub, three levels down, in a message that names neither Go.dot nor
 # Tracktion Engine. Go.dot pins JUCE itself, at ThirdParty/JUCE, at the exact
-# SHA TE v3.2.0 records in that gitlink — so TE's vendored copy is redundant, is
+# SHA TE develop (3.5.0) records in that gitlink — so TE's vendored copy is redundant, is
 # never entered by our CMake (we add tracktion_engine/modules only), and may
 # stay empty forever.
 #
-# It is also NOT `--depth 1`. Our JUCE pin (19edd538, JUCE 8.0.6+19) is not the
+# It is also NOT `--depth 1`. Our JUCE pin (19edd538, JUCE 8.0.13+19) is not the
 # tip of develop, and a shallow submodule fetch fails with
 #     fatal: reference is not a tree: 19edd538429c93d277bf95b55aaa7e3eb545f951
 # ===========================================================================

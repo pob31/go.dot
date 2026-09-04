@@ -80,7 +80,7 @@ namespace
         "Launcher clip to arbitrary multichannel bus routing at target channel counts.";
 
     constexpr auto extraFlags =
-        " [--bus-width=1|2] [--mono=N --stereo=M] [--pace] [--wide-source-channels=N]";
+        " [--bus-width=N] [--mono=N --stereo=M] [--pace] [--wide-check=N]";
 
     constexpr double firstTransientAt = 0.5;
     constexpr double transientSpacing = 0.15;
@@ -160,6 +160,140 @@ namespace
     }
 
     //==============================================================================
+    // Forward declaration: runWideCheck below uses this, and it is defined further
+    // down with the other analysis helpers.
+    std::optional<choc::buffer::FrameCount>
+    firstNonZeroOnBus (const choc::buffer::ChannelArrayBuffer<float>&, int, int, float);
+
+    //==============================================================================
+    /*  Does one track carry N DISCRETE channels, or N copies of the same thing?
+
+        Every other measurement in this spike uses a source whose channels are
+        identical, which cannot tell those two apart - a 4-channel device fed a
+        duplicated signal looks exactly like a 4-channel device working. Under
+        TE 3.2 the question did not arise, because getTrackNumChannels() was a
+        constexpr 2 and wider simply was not possible. TE 3.5 removed that, so it
+        has to be asked properly.
+
+        So: one file where channel c has its transient at a DIFFERENT time
+        (0.5 + 0.1*c). Each output channel is then checked against its own
+        channel's time. Duplication would put every channel's transient at
+        channel 0's time and fail immediately.
+    */
+    struct WideCheck
+    {
+        int channels = 0;
+        int channelsCorrect = 0;
+        bool measured = false;
+    };
+
+    WideCheck runWideCheck (spike::HeadlessEngine& harness, const spike::Args& args, int width)
+    {
+        WideCheck result;
+        result.channels = width;
+
+        auto& engine = *harness;
+
+        HostedAudioDeviceInterface::Parameters params;
+        params.sampleRate     = static_cast<double> (args.sampleRate);
+        params.blockSize      = static_cast<int> (args.buffer);
+        params.inputChannels  = 2;
+        params.outputChannels = width;
+
+        harness.behaviour->describeWaveDevicesFn =
+            [width] (std::vector<WaveDeviceDescription>& descs, juce::AudioIODevice&, bool isInput)
+            {
+                descs.clear();
+                descs.push_back (WaveDeviceDescription::withNumChannels (
+                                     isInput ? "spike-in" : "wide-bus", 0,
+                                     static_cast<uint32_t> (isInput ? 2 : width), true));
+            };
+
+        auto edit = test_utilities::createTestEdit (engine, 1, Edit::EditRole::forEditing);
+        auto tracks = getAudioTracks (*edit);
+
+        if (tracks.isEmpty())
+            return result;
+
+        // Channel c's transient at 0.5 + 0.1*c seconds - its identity.
+        const double len = 0.5 + 0.1 * width + 1.0;
+        const auto numSamples = static_cast<int> (params.sampleRate * len);
+        juce::AudioBuffer<float> buf (width, numSamples);
+        buf.clear();
+
+        for (int c = 0; c < width; ++c)
+        {
+            const auto at = static_cast<int> (params.sampleRate * (0.5 + 0.1 * c));
+
+            if (at < numSamples)
+                buf.setSample (c, at, 0.5f);
+        }
+
+        auto file = spike::writeWav (buf, params.sampleRate);
+
+        if (file == nullptr)
+            return result;
+
+        const AudioFile audio (engine, file->getFile());
+        insertWaveClip (*tracks[0], {}, file->getFile(),
+                        { { 0_tp, TimeDuration::fromSeconds (len) } }, DeleteExistingClips::no);
+
+        bool mappedOk = false;
+        auto player = spike::createPlayerWithDeadline (*edit, params, { audio }, mappedOk);
+
+        if (player == nullptr || ! mappedOk)
+            return result;
+
+        {
+            auto& dm = engine.getDeviceManager();
+
+            if (dm.getNumWaveOutDevices() < 1)
+                return result;
+
+            tracks[0]->getOutput().setOutputToDeviceID (dm.getWaveOutDevice (0)->getDeviceID());
+            edit->dispatchPendingUpdatesSynchronously();
+        }
+
+        const auto blocks = static_cast<int> (((len + 1.0) * params.sampleRate) / params.blockSize);
+
+        for (int i = 0; i < blocks; ++i)
+            player->process (params.blockSize);
+
+        const auto out = player->getOutput();
+
+        // Channel 0 is the reference; every other channel must be 0.1 s later
+        // than the one before it.
+        std::optional<choc::buffer::FrameCount> ref;
+
+        for (int c = 0; c < width; ++c)
+        {
+            const auto f = firstNonZeroOnBus (out, c, 1, 1.0e-4f);
+
+            if (! f)
+                continue;
+
+            if (c == 0)
+            {
+                ref = f;
+                ++result.channelsCorrect;
+                continue;
+            }
+
+            if (! ref)
+                continue;
+
+            const auto elapsed = (static_cast<double> (*f) - static_cast<double> (*ref))
+                                   / params.sampleRate;
+
+            if (std::abs (elapsed - 0.1 * c) < 0.01)
+                ++result.channelsCorrect;
+        }
+
+        result.measured = true;
+        return result;
+    }
+
+    //==============================================================================
     struct BusReading
     {
         std::optional<choc::buffer::FrameCount> firstNonZero;
@@ -179,7 +313,7 @@ namespace
     std::optional<choc::buffer::FrameCount>
     firstNonZeroOnBus (const choc::buffer::ChannelArrayBuffer<float>& b,
                        int firstChannel, int width,
-                       float threshold = 1.0e-4f)
+                       float threshold)
     {
         for (choc::buffer::FrameCount f = 0; f < b.getNumFrames(); ++f)
             for (int c = firstChannel; c < firstChannel + width; ++c)
@@ -282,7 +416,7 @@ namespace
 
                 if (isInput)
                 {
-                    descs.emplace_back ("spike-in", 0, 1, true);
+                    descs.push_back (WaveDeviceDescription::withNumChannels ("spike-in", 0, 2, true));
                     return;
                 }
 
@@ -290,29 +424,25 @@ namespace
                 {
                     const auto& b = layout[i];
 
-                    if (b.width == 1)
-                    {
-                        /*  A MONO direct out - one hardware channel, one object.
+                    /*  ONE call for any width, mono included.
 
-                            This is the shape a spatial rig actually asks for: one
-                            mono source per object, straight out to WFS / L-ISA /
-                            whatever is doing the spatialisation, with no stereo
-                            pairing anywhere in the path.
+                        TE 3.5 replaced the old (name, leftChan, rightChan, bool)
+                        and (name, ChannelIndex*, count, bool) constructors with a
+                        ChannelConfiguration-based one plus this factory. A mono
+                        direct out is numChannels = 1 and needs no special case at
+                        all - which is a better answer than the old API's, where
+                        mono had to be built from a channel array and the class
+                        still carried an isStereoPair() notion.
 
-                            TE supports it: WaveDeviceDescription takes a channel
-                            ARRAY, WaveOutputDevice::getRightChannel() returns -1
-                            for a one-channel device, and the only isStereoPair()
-                            assertion in the class guards reverseChannels(), a UI
-                            convenience that is never on the playback path.
-                        */
-                        const ChannelIndex ch { b.firstChannel, juce::AudioChannelSet::left };
-                        descs.emplace_back ("mono" + juce::String (int (i)), &ch, 1, true);
-                    }
-                    else
-                    {
-                        descs.emplace_back ("bus" + juce::String (int (i)),
-                                            b.firstChannel, b.firstChannel + 1, true);
-                    }
+                        This is the shape a spatial rig asks for: one mono source
+                        per object, straight out to WFS / L-ISA, no stereo pairing
+                        anywhere in the path.
+                    */
+                    descs.push_back (WaveDeviceDescription::withNumChannels (
+                                         (b.width == 1 ? "mono" : "bus") + juce::String (int (i)),
+                                         static_cast<uint32_t> (b.firstChannel),
+                                         static_cast<uint32_t> (b.width),
+                                         true));
                 }
             };
 
@@ -412,7 +542,8 @@ namespace
         for (int i = 0; i < numTracks; ++i)
             firsts.push_back (firstNonZeroOnBus (output,
                                                  layout[static_cast<size_t> (i)].firstChannel,
-                                                 layout[static_cast<size_t> (i)].width));
+                                                 layout[static_cast<size_t> (i)].width,
+                                                 1.0e-4f));
 
         // Bus 0 carries track 0, whose transient is the earliest by construction.
         const auto reference = firsts.empty() ? std::optional<choc::buffer::FrameCount>{}
@@ -522,6 +653,25 @@ int main (int argc, char** argv)
         report.value ("layout", "uniform");
         report.value ("bus_width", busWidth);
         report.value ("output_channels", busWidth * args.tracks);
+    }
+
+    if (const auto wide = spike::valueFor (argc, argv, "--wide-check="))
+    {
+        const auto w = static_cast<int> (*wide);
+        const auto wc = runWideCheck (engine, args, w);
+
+        if (! wc.measured)
+            return report.cannotMeasure ("could not set up the wide-channel check");
+
+        report.value ("wide_check.channels", wc.channels);
+        report.value ("wide_check.channels_discrete", wc.channelsCorrect);
+
+        const bool allDiscrete = wc.channelsCorrect == wc.channels;
+
+        return report.verdict (allDiscrete,
+                               allDiscrete
+                                 ? "every channel of a wide track carried its own distinct content - discrete, not duplicated"
+                                 : "a wide track did not carry discrete per-channel content");
     }
 
     const auto run = runOnce (engine, args, wideChannels, busWidth, numMono, numStereo,

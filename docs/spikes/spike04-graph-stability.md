@@ -45,7 +45,7 @@ is a storm rather than a quiet one.
 
 ```
 build:   Debug and Release, MSVC 19.51.36256 (VS 2026), Windows 11
-engine:  Tracktion Engine v3.1.0 (the string v3.2.0 reports at runtime), JUCE v8.0.6
+engine:  Tracktion Engine v3.1.0 (the string v3.2.0 reports at runtime), JUCE v8.0.13
 command: spike04_graph_stability --tracks=N --sample-rate=SR --buffer=B [--validate-instrument]
 device:  none — TE hosted audio device interface, no hardware opened
 ```

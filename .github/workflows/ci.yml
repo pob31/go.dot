@@ -73,7 +73,7 @@ jobs:
           # "Permission denied (publickey)" three levels down, in a message that
           # names neither Go.dot nor Tracktion Engine.
           #
-          # We pin JUCE ourselves at ThirdParty/JUCE (at the exact SHA TE v3.2.0
+          # We pin JUCE ourselves at ThirdParty/JUCE (at the exact SHA TE develop (3.5.0)
           # names in its own gitlink), our CMake adds
           # ThirdParty/tracktion_engine/modules only, and TE's vendored JUCE is
           # never entered. It may stay empty forever. scripts/check-pins.py

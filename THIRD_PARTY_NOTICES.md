@@ -16,7 +16,7 @@ itself, and no dependency here is fetched at configure time — the pins are in
 ## JUCE Framework
 
 - **Website**: https://juce.com
-- **Version**: 8.0.6+19 (`develop`), commit `19edd538429c93d277bf95b55aaa7e3eb545f951`
+- **Version**: 8.0.13+7 (`develop`), commit `19edd538429c93d277bf95b55aaa7e3eb545f951`
 - **Licence**: AGPLv3 or commercial JUCE Licence
 - **Copyright**: Raw Material Software Limited
 
@@ -43,7 +43,7 @@ every Go.dot binary through `juce_graphics` are listed separately below. See
 ## Tracktion Engine
 
 - **Website**: https://github.com/Tracktion/tracktion_engine
-- **Version**: v3.2.0, commit `0a5f4e6a5f53d09c89b414a44386a12df7fa1ec6`
+- **Version**: develop (3.5.0), commit `0a5f4e6a5f53d09c89b414a44386a12df7fa1ec6`
 - **Licence**: GPLv3 or commercial Tracktion licence
 - **Copyright**: Tracktion Corporation
 

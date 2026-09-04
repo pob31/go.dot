@@ -122,3 +122,29 @@ author's:
 Note that `scripts/check-pins.py` anticipated exactly this: check (b) asserts our JUCE pin
 matches TE's own, and `--allow-skew` exists so that moving JUCE ahead of Tracktion has to be
 said out loud rather than happening quietly.
+
+## Engine version these results were measured against
+
+All seven spikes were first written and measured against **Tracktion Engine v3.2.0** with
+**JUCE 8.0.6**, then re-run after the project moved to Tracktion's **develop** branch
+(**3.5.0**) with **JUCE 8.0.13**.
+
+| finding | v3.2.0 | develop 3.5.0 |
+|---|---|---|
+| #4 graph stability — zero rebuilds | PASS | **PASS, unchanged** |
+| #2 offset honoured to the nearest sample | PASS | **PASS, unchanged** |
+| #3 join sample-accurate, 40-sample artefact | PASS | **PASS, unchanged** |
+| #3 overlapping copies sample-aligned | PASS | **PASS, unchanged** |
+| #6 PDC delays the whole graph | FAIL | **FAIL, unchanged** |
+| #7 proxy sandbox, deadline and kill path | PASS | **PASS, unchanged** |
+| #1 **track width capped at 2 channels** | hard `constexpr` limit | **REMOVED — discrete multichannel, verified to 8** |
+| #1/#6 **mono into a wider destination** | stays in channel 1 | **canonically upmixed** |
+
+Only the last two moved, and both are consequences of 3.5.0's new
+`ChannelConfiguration` / `BusLayout` system. Everything the polyphony model rests on is
+unchanged across 404 commits of engine development, which is a useful thing to know
+independently of the findings themselves.
+
+Two API migrations were needed in the spike code itself, and the `spikes` CI job is what
+would have caught them: `WaveDeviceDescription`'s constructors were replaced by
+`withNumChannels(...)`, and `Plugin::getBusses()` became pure virtual.
