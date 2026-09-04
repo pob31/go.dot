@@ -110,8 +110,25 @@ Attempted, measured, reverted:
 - **Upstream Tracktion is not there either.** `develop` is 404 commits ahead of `v3.2.0` and
   still pins JUCE **8.0.13**; the single commit mentioning JUCE 9 touches only its *Examples*.
 
-So JUCE 9 needs a Tracktion release that supports it. Three options, and the choice is the
-author's:
+### What JUCE 9 buys, and why it is worth waiting for rather than forcing
+
+**Linux native multitouch**, which is not a nice-to-have for this project — PRD §8 makes Linux
+a required platform, and a booth touchscreen is a plausible Go.dot surface. Verified by
+comparing the two trees rather than taken on trust:
+
+| | JUCE 8.0.13 (current pin) | JUCE 9.0.1 |
+|---|---|---|
+| `JUCE_USE_XINPUT` config flag | **absent** | present, defaults to `1` |
+| `XI_TouchBegin` / `XIDeviceEvent` handling | **absent** | `juce_XWindowSystem_linux.cpp` |
+
+So multitouch on a Linux desktop is gated on Tracktion adopting JUCE 9 — it cannot be
+unlocked from our side without forking TE. When that lands, `scripts/install-linux-deps.sh`
+will additionally need **`libxi-dev`**, which is why WFS-DIY's apt line already carries it.
+
+Nothing else in the current findings depends on JUCE 9. The sensible position is to stay on
+8.0.13, let Tracktion adopt 9 once it has had a few patches, and pick it up then.
+
+### The three options, if the wait ever needs shortcutting
 
 | | what it buys | what it costs |
 |---|---|---|
