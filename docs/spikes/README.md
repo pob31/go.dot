@@ -57,3 +57,68 @@ git clone --recurse-submodules https://github.com/pob31/go.dot.git   # or: bash 
 cmake --preset spikes && cmake --build --preset spikes-release
 bash spikes/run-spikes.sh --full build/spikes/spikes-bin/Release
 ```
+
+## Audio workgroups, and the JUCE 9 question
+
+Two related questions came up while reading these results: whether **audio workgroups** would
+stabilise the timing, and whether the project should be on **JUCE 9.0.1**. Both were checked
+against the actual sources rather than reasoned about, and the answers are independent.
+
+### Workgroups: yes, and they are available now — TE has them, switched off
+
+Tracktion already supports them, and the plumbing is complete:
+
+```
+EditPlaybackContext.cpp:38   static bool useAudioWorkgroup = false;      // OFF by default
+EditPlaybackContext.h:158    static void enableAudioWorkgroup (bool);    // the opt-in
+EditPlaybackContext.cpp:47   e.getDeviceManager().deviceManager.getDeviceAudioWorkgroup()
+LockFreeMultiThreadedNodePlayer.cpp:233
+                             threadPool->createThreads (numThreadsToUse, audioWorkgroup);
+```
+
+So when enabled, TE takes the workgroup from the audio device and creates its **graph worker
+threads inside it** — which is exactly the right place, since those threads are what a hybrid
+scheduler would otherwise migrate onto efficiency cores.
+
+**It is one call, `EditPlaybackContext::enableAudioWorkgroup(true)`, and it needs no JUCE
+upgrade** — `juce::AudioWorkgroup`, `AudioIODevice::getWorkgroup()` and
+`AudioWorkgroup::join(WorkgroupToken&)` are all present at the pinned JUCE 8.0.6.
+
+**But it will not change any number in these reports.**
+`JUCE_AUDIOWORKGROUP_TYPES_AVAILABLE` is defined in `juce_AudioWorkgroup_mac.h` and is 0
+everywhere else, so on this Windows laptop `AudioWorkgroup` is an empty shell and enabling it
+is a no-op. It matters on **Apple Silicon**, which is precisely where the Mac mini cross-check
+would run — and it is the reason that cross-check should enable it rather than measure the
+default.
+
+On Windows the comparable lever is not a workgroup at all but MMCSS
+(`AvSetMmThreadCharacteristics` with "Pro Audio"), which is a different mechanism with a
+different owner.
+
+### JUCE 9.0.1: not possible today, and the blocker is Tracktion, not us
+
+Attempted, measured, reverted:
+
+- JUCE moved to **9.0.1**, configure succeeded, and the build failed with **20 errors across 5
+  Tracktion source files** — `PluginManager.cpp`, `ExternalPlugin.cpp`,
+  `AudioFormatManager.cpp`, `FloatAudioFileFormat.h`, `PluginScanHelpers.h`.
+- The causes are documented JUCE 9 removals, not accidents. The JUCE docs for
+  `AudioPluginFormatManager::addDefaultFormats` read: *"This function has been removed. To add
+  default formats to the manager, use one of the new functions `addDefaultFormatsToManager()`
+  or `addHeadlessDefaultFormatsToManager()`."* `AudioProcessor::TrackProperties` and
+  `AudioFormat::createWriterFor` changed shape likewise.
+- **Upstream Tracktion is not there either.** `develop` is 404 commits ahead of `v3.2.0` and
+  still pins JUCE **8.0.13**; the single commit mentioning JUCE 9 touches only its *Examples*.
+
+So JUCE 9 needs a Tracktion release that supports it. Three options, and the choice is the
+author's:
+
+| | what it buys | what it costs |
+|---|---|---|
+| **stay at JUCE 8.0.6** (current) | matches TE v3.2.0's own pin exactly; known-good | no JUCE 9 |
+| **TE `develop` + JUCE 8.0.13** | 404 commits of fixes, including real bug fixes visible in the log (a data race in `Oscillators`, a `toBitSet()` bug) | tracking a non-release branch |
+| **patch TE for JUCE 9** | JUCE 9 now | forking TE; 20 errors is only what the compiler reached before stopping |
+
+Note that `scripts/check-pins.py` anticipated exactly this: check (b) asserts our JUCE pin
+matches TE's own, and `--allow-skew` exists so that moving JUCE ahead of Tracktion has to be
+said out loud rather than happening quietly.

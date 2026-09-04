@@ -187,6 +187,17 @@ platform that CI currently only *builds* on - is the cheapest way to separate th
   problem spike #6 found. Worth stating explicitly, since the obvious implementation (declaring
   the round trip as latency) would delay the entire show.
 
+**Audio workgroups are the missing half of this on Apple Silicon.** The deadline measured
+here is met by a bounded spin on a thread the OS is free to move. Apple's audio workgroups
+exist precisely for this case — a helper *process* that must meet the host's audio deadline is
+the problem AUv3 out-of-process plugins have, and workgroups are Apple's answer to it. TE
+already supports them (`EditPlaybackContext::enableAudioWorkgroup`, off by default) for its own
+graph threads, but a proxy sandbox would additionally need the **child** process to join the
+same workgroup, which is a separate piece of work and is not covered by this probe.
+
+On Windows there is no equivalent; the nearest lever is MMCSS "Pro Audio" thread
+characteristics. See `docs/spikes/README.md` for the detail.
+
 ## Open questions for the author
 
 1. **What is the deadline, and what is the maximum number of simultaneously failed strips?**
