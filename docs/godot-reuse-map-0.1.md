@@ -19,7 +19,7 @@ CI enforces it, so amendments go into the PRD by the author, citing this map.
 |---|---|---|---|
 | **WFS-DIY** | the shipping wave-field-synthesis app; JUCE 9.0.1, Projucer-built | GPL-3 | production |
 | **spatcore** (`WFS_DIY_v1/spatcore`, pinned at `7e7ed63`) | the shared real-time core extracted from WFS-DIY: `rt/`, `dsp/`, `wfs/`, `reverb/`, `gpu/`, `control/{osc,state,mcp}`, `controllers/`, `ui/`, `io/` | GPL-3 (added 2026-09-04, `7e1a8ad`) | consumed by WFS-DIY at source level; CMake targets exist for XOA / Tight-WFS |
-| **juce_simpleweb** (`benkuper/juce_simpleweb`; `pob31/juce_simpleweb` is a fork of it) | JUCE module: HTTP + WebSocket server on one port, WebSocket client; Simple-Web-Server (MIT) over standalone asio (BSL-1.0); TLS optional | GPL-3 | **three lineages, none of them a superset of the others** — see the section below before pinning anything |
+| **juce_simpleweb** (`pob31/juce_simpleweb`, a fork of `benkuper/juce_simpleweb`) | JUCE module: HTTP + WebSocket server on one port, WebSocket client; Simple-Web-Server (MIT) over standalone asio (BSL-1.0); TLS optional | GPL-3 | **converged 2026-09-05** on `b953ada` = upstream + the TLS-off guard + the Windows fixes; WFS-DIY, XOA and Tight-WFS vendor the same code |
 
 XOA and Tight-WFS were looked at only for conventions; both are under construction and
 nothing here depends on them.
@@ -67,7 +67,7 @@ over is the drift.
 
 | Need | Reuse | Status |
 |---|---|---|
-| HTTP + WebSocket transport for OSCQuery | `juce_simpleweb` (`SimpleWebSocketServer`, `SimpleWebSocketClient`) | **blocked on a rebase, not on a PR** — see *Which juce_simpleweb to pin* below |
+| HTTP + WebSocket transport for OSCQuery | `juce_simpleweb` (`SimpleWebSocketServer`, `SimpleWebSocketClient`) | **ready** — pin `pob31/juce_simpleweb` at `b953ada` or later; see *Which juce_simpleweb to pin* |
 | OSCQuery server shape | `WFS_DIY_v1/Source/Network/OSCQueryServer.{h,cpp}`: HOST_INFO, full tree, attribute queries, LISTEN/IGNORE, 30 ms coalesced binary pushes, PATH_CHANGED, per-IP echo suppression | **pattern only** — the transport shell is generic, the namespace builders are WFS-specific, and its HTTP handler walks the live ValueTree from a worker thread (a race Go.dot's snapshot removes). Go.dot's server is written in-tree behind a namespace-provider seam |
 | OSC codec | `spatcore/control/osc/{OSCParser,OSCSerializer}.h` | **not usable**: it drops bundle time tags, cannot serialise `T`/`F`, decodes them as an int32 `1`/`0`, and throws on an unknown tag. Go.dot writes its own full OSC 1.1 codec, shaped so it can be lifted into spatcore. *(Draft 0.1 also called it JUCE-9-only. That was wrong — see the correction below.)* |
 | UDP/TCP receivers with sender IP | `spatcore/control/osc/{OSCReceiverWithSenderIP,OSCTCPReceiver}` (raw-data callback path) | **shape reused** (raw datagram + sender IP:port), code not: their legacy path pulls `OSCParser.h` in |
@@ -103,47 +103,45 @@ spatcore is known today, so §2 above now says to compile a header rather than t
 its APIs. And it means anyone porting `OSCParser.h` to JUCE 8 should expect it to build and
 then be wrong, which is the harder failure to notice.
 
-### Which juce_simpleweb to pin
+### Which juce_simpleweb to pin — settled 2026-09-05
 
-Checked on 2026-09-05, because the OPTIONS patch reaching Ben's master looked like it
-unblocked pinning upstream directly. It half does, and the half that remains is the half
-Go.dot needs.
+**Pin `pob31/juce_simpleweb` master at `b953ada` or later.** It is upstream master plus two
+commits, and every copy in the family now holds the same code.
 
-**Three lineages, and none contains the others.**
+How it got there, because the starting position was worse than it looked. There were five
+trees and none was a superset of the others: upstream `benkuper/juce_simpleweb` had nine
+commits nobody else had, while WFS-DIY, XOA and Tight-WFS vendored byte-identical copies of a
+private lineage — old upstream plus three Windows/TLS patches that existed in no git repository at
+all. The fork itself was simply nine commits behind and carried none of the patches.
 
-| | `benkuper/juce_simpleweb` master (`af01ca4`) | `pob31/juce_simpleweb` (`eb45198`) | vendored in WFS-DIY |
-|---|---|---|---|
-| OPTIONS through `default_resource` | **yes** (PR #5) | yes | yes |
-| error code forwarded to `connectionError` | **yes** (PR #8) | no | no |
-| WebSocket client timeout argument | **yes** (PR #7) | no | no |
-| deadlock fix when stopping the server | **yes** (PR #9) | no | no |
-| `#ifndef SIMPLEWEB_SECURE_SUPPORTED` guard | **no** | no | **yes** |
-| `NOGDI` removed | no | no | **yes** |
-| `_WIN32_WINNT 0x0A00` unconditionally | no | no | **yes** |
+The fork turned out to need a fast-forward rather than a rebase: it had zero commits
+upstream lacked, because its one contribution (the OPTIONS fix) had already been merged as
+upstream PR #5. On top of that go two commits carrying what only the vendored copies had:
 
-So the OPTIONS patch is upstream and the local copy of it can go. **The TLS-off guard is
-not**, and it is the one that decides whether Go.dot can build at all without OpenSSL:
-upstream's header still says `#define SIMPLEWEB_SECURE_SUPPORTED 1` unconditionally, so
-spatcore's recipe — `target_compile_definitions(juce_simpleweb INTERFACE
-SIMPLEWEB_SECURE_SUPPORTED=0)` — is redefined by the header it is trying to configure.
-The result is a macro redefinition and TLS still on, not a build with TLS off.
+- **the TLS-off guard** — `#ifndef SIMPLEWEB_SECURE_SUPPORTED` around the define. Without
+  it a consumer passing `-DSIMPLEWEB_SECURE_SUPPORTED=0` gets a macro redefinition and TLS
+  anyway, so spatcore's recipe was configuring a header that overrode it. This is the one
+  Go.dot needs, and it is backwards-compatible for everyone who does not set the macro —
+  the obvious next pull request to Ben.
+- **the Windows fixes** — `NOGDI` no longer defined, since it hides `LOGFONTW` and `RGBQUAD`
+  from any consumer that also links a JUCE GUI module; and `_WIN32_WINNT 0x0A00` set before
+  anything reaches `<winsock2.h>`, unconditionally rather than only in the TLS branch, where
+  a TLS-off build never saw it.
 
-**Two consequences worth knowing before the work starts.**
+What upstream brought that the family did not have, and the reason this was worth doing now
+rather than at Phase 1.9: **a deadlock when stopping the server while it waited for the
+MessageManager lock** — a hang at shutdown, which in a theatre means during get-out. Also a
+WebSocket handshake key sometimes computed wrong and refused by some clients, an error code
+passed to `connectionError`, and a request timeout on the client.
 
-Upstream's three newer fixes are worth having: a deadlock when stopping the server while it
-waits for the message-manager lock is exactly the failure a show would hit at get-out. So
-the target is upstream master *plus* the three Windows/TLS patches, not one or the other.
+**One signature changed**, and Go.dot should write against the new one from its first line:
+`connectionError` now carries an `int status` before the message. WFS-DIY's two overrides
+moved with it. Because both were marked `override`, the mismatch was a compile error rather
+than a callback that silently stopped being called.
 
-And upstream changed a virtual's signature: `connectionError` now carries an `int status`.
-WFS-DIY's `OSCQueryServer::connectionError (id, message)` is marked `override`, so it will
-fail to compile rather than silently stop being called — loud, which is the good outcome,
-but it means moving WFS-DIY to upstream is a small edit rather than a pin bump. Go.dot
-should write against the new signature from its first line.
-
-**What would settle it:** rebase `pob31/juce_simpleweb` onto upstream master and re-apply
-the four local patches. The `#ifndef` guard is a one-line, entirely backwards-compatible
-change — every existing consumer keeps TLS on — so it is also the obvious next PR to Ben,
-and if it lands, Go.dot can pin upstream directly and the fork can go away.
+Verified before pushing: the module compiles both TLS-off and at its default alongside
+`juce_gui_basics`; WFS-DIY rebuilt Debug x64 clean; XOA and Tight-WFS rebuilt clean; the
+plugin's `OscQueryClient` compiles against the new signature.
 
 ### Phase 2 — first sound (the next phase)
 
@@ -215,9 +213,9 @@ Go.dot embeds this server or bridges MCP → OSCQuery externally. The port block
   decode as an int32 `1`/`0`, because `OSCArgument (true)` promotes to the `int32` overload —
   on **both** JUCE 8 and JUCE 9, so this is a live defect in WFS-DIY today rather than the
   version gate draft 0.1 called it. Go.dot's codec could be lifted into spatcore.
-- The three juce_simpleweb lineages have diverged in both directions; the detail is in
-  *Which juce_simpleweb to pin* above, and the short version is that the fork needs a rebase
-  before anything can pin it.
+- ~~The juce_simpleweb lineages have diverged in both directions.~~ **Closed 2026-09-05**:
+  all five trees hold `b953ada`. What remains is a pull request to Ben for the TLS-off
+  guard, after which Go.dot could pin upstream directly and the fork could go away.
 
 - `SpatcoreConsumer.cmake` strips `libssl libcrypto z` from juce_simpleweb's interface
   link libraries — the macOS/Windows spellings. The module also declares `linuxLibs:
