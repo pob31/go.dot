@@ -205,7 +205,7 @@ if(MSVC)
     # reads them as the system codepage and mangles every non-ASCII string literal.
 endif()
 
-# --- libatomic on Linux -----------------------------------------------------------
+# --- libatomic ---------------------------------------------------------------------
 # Tracktion has at least one atomic that is far too large to be lock-free:
 #
 #     struct AudioClipPlayhead::State { std::optional<TimePosition> position;
@@ -213,30 +213,62 @@ endif()
 #     std::atomic<State> state;                        (tracktion_AudioClipBase.h:49-55)
 #
 # About 24 bytes, so GCC cannot do it in hardware and emits calls to __atomic_store /
-# __atomic_load, which live in libatomic. MSVC provides those inline, which is exactly
-# why this failed on Linux ONLY, and only after the move to TE develop where that type
-# was introduced:
+# __atomic_load, which live in libatomic. MSVC provides those inline and Apple's libc++
+# carries them, which is why this was a Linux-only link failure, and only after the move
+# to TE develop where that type was introduced:
 #
 #     undefined reference to `__atomic_store'
 #       std::atomic<tracktion::engine::AudioClipPlayhead::State>::store(...)
 #
-# An earlier version of this file DECLINED TE's own `-latomic` line, on the reasoning
-# that JUCE's JUCECheckAtomic.cmake probe and juce::juce_atomic_wrapper had already
-# handled it. They had not: JUCE's probe tests JUCE's atomics, not Tracktion's.
+# TWO WRONG ANSWERS WERE TRIED BEFORE THIS ONE, AND BOTH ARE INSTRUCTIVE:
 #
-# find_library rather than a bare `-latomic` because the original objection to TE's
-# line still stands - it is unconditional, and hard-fails on platforms and
-# architectures where libatomic does not exist as a separate library (it is folded
-# into libc on some). Linking it only when it is actually there keeps both properties.
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    find_library(WFG_LIBATOMIC NAMES atomic)
+#  1. Declining TE's own `-latomic` line, on the reasoning that JUCE's
+#     JUCECheckAtomic.cmake probe and juce::juce_atomic_wrapper had already handled it.
+#     They had not - JUCE's probe tests JUCE's atomics, not Tracktion's.
+#
+#  2. find_library(atomic). It reports NOT FOUND on a perfectly ordinary Ubuntu runner,
+#     because GCC ships libatomic.so inside its own private directory
+#     (/usr/lib/gcc/x86_64-linux-gnu/13/) which CMake does not search - while `-latomic`
+#     via the compiler driver works fine. Asking the filesystem was the wrong question.
+#
+# So: ask the TOOLCHAIN, with a probe that reproduces the actual failure shape rather
+# than a token atomic. If a large atomic links unaided, add nothing; if it needs
+# -latomic, add exactly that; if neither works, fail at configure with the reason
+# instead of at link with a mangled symbol.
+if(NOT MSVC)
+    include(CheckCXXSourceCompiles)
 
-    if(WFG_LIBATOMIC)
-        target_link_libraries(wfg_deps INTERFACE "${WFG_LIBATOMIC}")
-        message(STATUS "wfg: linking libatomic at ${WFG_LIBATOMIC}")
+    set(WFG_BIG_ATOMIC_PROBE "
+        #include <atomic>
+        #include <optional>
+        struct Big { std::optional<double> position; unsigned lastUpdateMs; };
+        int main()
+        {
+            std::atomic<Big> a;
+            a.store (Big{});
+            return a.load().lastUpdateMs == 0u ? 0 : 1;
+        }")
+
+    check_cxx_source_compiles("${WFG_BIG_ATOMIC_PROBE}" WFG_BIG_ATOMIC_LINKS_UNAIDED)
+
+    if(NOT WFG_BIG_ATOMIC_LINKS_UNAIDED)
+        set(CMAKE_REQUIRED_LIBRARIES atomic)
+        check_cxx_source_compiles("${WFG_BIG_ATOMIC_PROBE}" WFG_BIG_ATOMIC_NEEDS_LIBATOMIC)
+        unset(CMAKE_REQUIRED_LIBRARIES)
+
+        if(WFG_BIG_ATOMIC_NEEDS_LIBATOMIC)
+            target_link_libraries(wfg_deps INTERFACE atomic)
+            message(STATUS "wfg: large std::atomic needs libatomic - linking it")
+        else()
+            message(FATAL_ERROR
+                "wfg: a large std::atomic links neither unaided nor with -latomic on this "
+                "toolchain.\n"
+                "Tracktion needs one (AudioClipPlayhead::State, ~24 bytes), so the build "
+                "would fail at link with an undefined reference to __atomic_store.\n"
+                "Install the toolchain's libatomic, or report which platform this is.")
+        endif()
     else()
-        message(STATUS "wfg: no separate libatomic found - assuming the toolchain "
-                       "provides __atomic_* intrinsics in libc")
+        message(STATUS "wfg: large std::atomic links unaided - libatomic not required")
     endif()
 endif()
 
@@ -260,12 +292,10 @@ if(APPLE)
 endif()
 
 # DECLINED from TE's examples/TestRunner/CMakeLists.txt, so nobody "fixes" it later:
-#  * -latomic AS TE WRITES IT (l.115-121) — but see the libatomic block above: we now
-#    link it, conditionally. The original reasoning here was that JUCE's
-#    JUCECheckAtomic.cmake probes and juce::juce_atomic_wrapper had already solved it.
-#    That was WRONG, and Linux CI proved it on the move to TE develop: JUCE's probe
-#    tests JUCE's own atomics, not Tracktion's. What TE's line gets right is the need;
-#    what it gets wrong is being unconditional.
+#  * -latomic AS TE WRITES IT (l.115-121) — see the libatomic probe above. TE's line
+#    is right about the NEED and wrong about being unconditional; we detect it with a
+#    try_compile instead. Two of our own earlier answers were also wrong and are
+#    recorded up there, because both looked correct.
 #  * -m64 as a LINK option keyed off CMAKE_HOST_SYSTEM_PROCESSOR (l.119) — reads the
 #    HOST processor to decide a TARGET flag, so it breaks cross-compiles and
 #    Apple-silicon-to-x86 builds.
