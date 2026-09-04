@@ -17,6 +17,7 @@
 #include <wfg/engine/Console.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/log/Replay.h>
 
 /*  juce_core and juce_events are named directly even though tracktion_engine.h
@@ -236,6 +237,80 @@ namespace
                   << " record(s) reproduced exactly" << std::endl;
         return 0;
     }
+
+    //==============================================================================
+    /*  `wfg canon <file>` - read a show document, write it back canonically.
+
+        The point is that canonical form is REACHABLE by hand. Someone editing a
+        show file in a text editor, or generating one from a spreadsheet, can run
+        this and get the spelling the engine would have produced - so a later
+        diff shows what they changed rather than how they typed it.
+
+        It also refuses. An unknown attribute, a number out of range, a duplicate
+        identifier: each is reported with the element it is in, and nothing is
+        written. A file that half-canonicalises would be worse than one that did
+        not, because the parts that failed would look like the parts that worked.
+
+        --in-place rewrites the file; without it the result goes to stdout, which
+        is what makes `wfg canon a.xml | diff - a.xml` a one-line check.
+    */
+    int runCanon (const juce::ArgumentList& args)
+    {
+        const auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
+
+        if (path.isEmpty())
+        {
+            std::cerr << "wfg canon: give me a show document to canonicalise" << std::endl;
+            return 2;
+        }
+
+        const juce::File file { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
+
+        if (! file.existsAsFile())
+        {
+            std::cerr << "wfg canon: cannot read " << file.getFullPathName().toStdString() << std::endl;
+            return 2;
+        }
+
+        wfg::doc::ReadResult result;
+        const auto canonical = wfg::doc::CanonicalXml::canonicalise (
+            file.loadFileAsString().toStdString(), result);
+
+        if (! result.ok)
+        {
+            std::cerr << "wfg canon: " << file.getFileName().toStdString()
+                      << " is not a valid show document:" << std::endl;
+
+            for (const auto& problem : result.problems)
+                std::cerr << "    " << problem << std::endl;
+
+            return 1;
+        }
+
+        if (args.containsOption ("--in-place"))
+        {
+            /*  Written as raw bytes, not with juce::File::replaceWithText: that
+                would translate newlines on Windows and the canonical form says
+                "
+" everywhere. A show file that differs between platforms is
+                not canonical. */
+            juce::FileOutputStream stream { file };
+
+            if (! stream.openedOk())
+            {
+                std::cerr << "wfg canon: cannot write " << file.getFullPathName().toStdString() << std::endl;
+                return 2;
+            }
+
+            stream.setPosition (0);
+            stream.truncate();
+            stream.write (canonical.data(), canonical.size());
+            return 0;
+        }
+
+        std::cout << canonical << std::flush;
+        return 0;
+    }
 }
 
 //==============================================================================
@@ -273,6 +348,16 @@ int wfg::runConsole (int argc, char** argv)
                       "Lists every named command the engine exposes",
                       {},
                       [] (const juce::ArgumentList&) { listCommands(); } });
+
+    app.addCommand ({ "canon",
+                      "canon <file> [--in-place]",
+                      "Rewrites a show document in canonical form, or reports why it cannot",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runCanon (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
 
     app.addCommand ({ "replay",
                       "replay <log>",

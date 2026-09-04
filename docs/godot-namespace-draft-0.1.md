@@ -108,7 +108,7 @@ focused list's standby answers `standby.next`/`previous`.
 
 | Node | Type | Access | Meaning |
 |---|---|---|---|
-| `/godot/cue/<id>/kind` | `s` | ro | `memo` \| `group` (Phase 1 has no media; `memo` is a cue with no output) |
+| `/godot/cue/<id>/kind` | `s` | ro | `memo` \| `group`. Derived from the element, never stored: a Group *is* a group, so a client cannot turn one into the other by writing here |
 | `/godot/cue/<id>/number` | `s` | rw | the decimal cue number, a *string* (`12`, `12.5`, `12.5.1`), mutable, human protocol (§3.5) |
 | `/godot/cue/<id>/name` | `s` | rw | |
 | `/godot/cue/<id>/notes` | `s` | rw | |
@@ -119,8 +119,8 @@ focused list's standby answers `standby.next`/`previous`.
 | `/godot/cue/<id>/order` | `s` | ro | groups only: child IDs in order |
 | `/godot/cue/<id>/mode` | `s` | rw | groups only: `timeline` \| `sequence` (§3.6) |
 | `/godot/cue/<id>/advance` | `s` | rw | groups only: `auto` \| `manual` |
-| `/godot/cue/<id>/preWait` | `d` | rw | seconds |
-| `/godot/cue/<id>/postWait` | `d` | rw | seconds |
+| `/godot/cue/<id>/preWait` | `d` | rw | seconds; any cue, not only a group |
+| `/godot/cue/<id>/postWait` | `d` | rw | seconds; §3.6's "how long after completion this cue reports done to its parent" |
 
 Groups carry no outputs, media or parameters (§4.12); Phase 1 stores their structure and
 attributes so fixtures can nest, and nothing more. question C in §9 fixes what
@@ -237,6 +237,12 @@ UTF-8, `\n` line endings, one element per line, two-space indent, attributes sor
 name, attributes at their default omitted, numbers in the shortest form that reads
 back identically (see §9), booleans `true`/`false`.
 
+That last one has a visible consequence worth stating: `1.0` is written `1`, and
+`1000000` is written `1e+06`. The value is exact either way — the shortest form is
+chosen precisely because it round-trips — and every quantity a show actually carries
+(seconds, decibels, metres, hertz) is inside the range where the plain form is
+shorter, so the exponent only appears for values no cue would have.
+
 ### 6.2 `show.xml`
 
 Attributes come from [`parameters/godot-parameters.csv`](parameters/godot-parameters.csv)
@@ -248,8 +254,8 @@ grammar, and it grows with it.
 | `Show` | `formatVersion` int (1) | `Lists`, `Mounts` |
 | `Lists` | — | `List*` |
 | `List` | `id`, `name` string | `(Cue \| Group)*` |
-| `Cue` | `id`; `number` string; `name` string; `kind` enum (`memo`); `notes` string; `enabled` bool (true); `colour` string; `preWait`, `postWait` double seconds (0, cap 6) | — |
-| `Group` | `id`; `number`; `name`; `notes`; `enabled`; `colour`; `mode` enum (`sequence`); `advance` enum (`manual`); `preWait`, `postWait` | `(Cue \| Group)*` |
+| `Cue` | `id`; `number` string; `name` string; `notes` string; `enabled` bool (true); `colour` string; `preWait`, `postWait` double seconds (0) | — |
+| `Group` | every `Cue` attribute, plus `mode` enum (`sequence`) and `advance` enum (`manual`) | `(Cue \| Group)*` |
 | `Mounts` | — | `Mount*` |
 | `Mount` | `id`; `prefix` string; `transport` enum (`udp`); `namespace` string; `rateCap` double Hz (50, cap 3); `anticipatable` bool (false); `panic` enum (`park`) | — |
 

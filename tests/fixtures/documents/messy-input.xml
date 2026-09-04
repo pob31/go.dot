@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Show formatVersion="1">
+      <Lists>
+    <List name="Main" id="7K2QM9X4">
+        <Cue number="1" id="B3N8R5TW" name="House to half" enabled="true"/>
+   <Group name="Preshow" id="D9FH2JKA" number="2" advance="manual" mode="sequence" preWait="0.0">
+              <Cue id="E4GP6QSC" name="Walk-in" number="2.1" notes="check the door"/>
+     <Cue id="F7HR8TVD" number="2.2" name="Announce" postWait="1.5"/>
+   </Group>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="G1JS4VWE" prefix="/wfs" namespace="namespaces/wfs-diy.json" rateCap="50.0"/>
+  </Mounts>
+</Show>

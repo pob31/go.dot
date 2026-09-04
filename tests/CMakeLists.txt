@@ -67,7 +67,14 @@ add_executable(wfg_tests
     OscValueTests.cpp
     CommandTests.cpp
     EventLogTests.cpp
-    EngineTests.cpp)
+    EngineTests.cpp
+    DocumentTests.cpp)
+
+# Where the hand-authored fixtures live. Passed as a definition rather than
+# copied next to the binary: the fixtures are inputs to read, not artefacts to
+# ship, and a copy step is one more thing that can be stale.
+target_compile_definitions(wfg_tests PRIVATE
+    WFG_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
 
 target_link_libraries(wfg_tests PRIVATE wfg::engine wfg::warnings)
 
@@ -128,3 +135,20 @@ add_test(NAME wfg.replay.C
 add_test(NAME wfg.replay.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/skeleton.wfglog"
                  --wfg-locale=${WFG_LOCALE_FR})
+
+# `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
+# checking the exit code and the unit suite checks the bytes; what this adds is
+# that the PRODUCT BINARY can read a show document under either locale, which a
+# library test cannot prove.
+add_test(NAME wfg.canon.C
+         COMMAND wfg canon "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/documents/messy-input.xml"
+                 --wfg-locale=C)
+add_test(NAME wfg.canon.fr_FR
+         COMMAND wfg canon "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/documents/messy-input.xml"
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# The generated schema header against the parameter table it comes from. Two
+# things that must agree need something that checks they do; this is the same
+# gate as check-claude-md.py, for the same reason.
+add_test(NAME schema.generated
+         COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/generate-schema.py" --check)

@@ -39,6 +39,9 @@
 #
 #   osc/      the value type of the whole control plane (OSC 1.1), and the one
 #             number formatter every text surface writes through
+#   document/ the show document: the schema generated from the parameter table,
+#             stable identifiers, canonical XML, and the commands that are the
+#             only way any of it changes
 #   command/  named commands, their signatures, and the single ordered queue
 #             every mutation arrives on
 #   log/      the tick-indexed flight recorder (PRD §3.15) and deterministic
@@ -56,6 +59,18 @@ add_library(wfg_engine STATIC
     wfg/engine/Console.cpp
     wfg/engine/Console.h
     wfg/engine/clock/SampleClock.h
+    wfg/engine/document/CanonicalXml.cpp
+    wfg/engine/document/CanonicalXml.h
+    wfg/engine/document/DocumentCommands.cpp
+    wfg/engine/document/DocumentCommands.h
+    wfg/engine/document/Ids.cpp
+    wfg/engine/document/Ids.h
+    wfg/engine/document/Schema.cpp
+    wfg/engine/document/Schema.h
+    wfg/engine/document/SchemaTable.generated.h
+    wfg/engine/document/SchemaTypes.h
+    wfg/engine/document/ShowDocument.cpp
+    wfg/engine/document/ShowDocument.h
     wfg/engine/command/Command.h
     wfg/engine/command/CommandRegistry.cpp
     wfg/engine/command/CommandRegistry.h

@@ -1,0 +1,14 @@
+<Show>
+  <Lists>
+    <List id="7K2QM9X4" name="Main">
+      <Cue id="B3N8R5TW" name="House to half" number="1"/>
+      <Group id="D9FH2JKA" name="Preshow" number="2">
+        <Cue id="E4GP6QSC" name="Walk-in" notes="check the door" number="2.1"/>
+        <Cue id="F7HR8TVD" name="Announce" number="2.2" postWait="1.5"/>
+      </Group>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="G1JS4VWE" namespace="namespaces/wfs-diy.json" prefix="/wfs"/>
+  </Mounts>
+</Show>

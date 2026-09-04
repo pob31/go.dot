@@ -43,6 +43,12 @@ CMakeLists.txt text eol=lf
 # (EventLog opens its file in binary mode for exactly this reason).
 *.wfglog text eol=lf
 
+# Show documents, and the canonical fixtures in particular. The writer emits LF
+# on every platform and a test compares its output with the committed file byte
+# for byte; letting Git hand a Windows checkout CRLF would make "byte for byte"
+# mean two different things on two machines.
+*.xml    text eol=lf
+
 # The parameter table, for the same reason and one more: it is generated FROM
 # and read BY the build, and a spreadsheet round trip on Windows would otherwise
 # rewrite every line of the diff to say nothing.

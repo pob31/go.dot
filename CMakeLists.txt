@@ -203,6 +203,16 @@ include(WfgThirdParty)
 # harness rather than an empty one that reports success.
 if(WFG_BUILD_TESTS)
     enable_testing()
+
+    # Python is a HARD requirement once tests are on, not a nicety. It runs the
+    # gate that keeps the generated schema header honest against the parameter
+    # table, and a gate that silently does not run is worse than no gate — the
+    # same reasoning as the locale rule, where a skipped test reports green.
+    #
+    # It is NOT required to BUILD: the generated header is committed, so a clone
+    # with no Python compiles and ships. Only checking it needs the interpreter.
+    find_package(Python3 COMPONENTS Interpreter REQUIRED)
+    set(WFG_PYTHON "${Python3_EXECUTABLE}")
 endif()
 
 add_subdirectory(src)
