@@ -1,0 +1,180 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 22,
+    "patch": 0
+  },
+
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "description": "Common settings. Hidden: never configure this directly. binaryDir uses ${presetName}, so every preset gets its own build tree under build/ and switching presets never re-configures on top of another generator's cache.",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+
+    {
+      "name": "dev",
+      "inherits": "base",
+      "displayName": "dev (Ninja Multi-Config)",
+      "description": "The everyday local preset on all three platforms. Ninja Multi-Config so Debug and Release share one configure; pick the config at build time with dev-debug / dev-release. On Windows this needs an x64 Native Tools for VS command prompt (or VS's Open Folder), because Ninja does not find cl.exe by itself — use the vs preset if you would rather not open one.",
+      "generator": "Ninja Multi-Config"
+    },
+
+    {
+      "name": "vs",
+      "inherits": "base",
+      "displayName": "vs (Visual Studio, host default)",
+      "description": "Windows-only, for the Visual Studio IDE and for any shell that is not a Native Tools prompt. No generator string on purpose: 'Visual Studio 18 2026' rots on the next VS release, and with no generator CMake picks the newest Visual Studio it finds installed.",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Windows"
+      }
+    },
+
+    {
+      "name": "ci-linux",
+      "inherits": "dev",
+      "displayName": "ci-linux",
+      "description": "What the Linux CI job configures. Identical to dev plus ccache; scripts/install-linux-deps.sh installs both ninja-build and ccache, so this preset works locally too.",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      }
+    },
+
+    {
+      "name": "ci-macos",
+      "inherits": "dev",
+      "displayName": "ci-macos",
+      "description": "What the macOS CI job configures. brew install ccache ninja first. CMAKE_OSX_DEPLOYMENT_TARGET (11.0) and CMAKE_OSX_ARCHITECTURES are deliberately NOT set here - the root CMakeLists sets the deployment target as a normal cache STRING so a preset or a -D can still override it, and the architecture is left to the host.",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      }
+    },
+
+    {
+      "name": "ci-windows",
+      "inherits": "vs",
+      "displayName": "ci-windows",
+      "description": "What the Windows CI job configures. No compiler-cache launcher: sccache with MSVC needs /Z7, and juce::juce_recommended_config_flags injects /Zi in debug configs. Unblocking that means raising the CMake floor to 3.25 and setting CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded under CMP0141 - recorded here rather than shipping a cache that silently never hits."
+    },
+
+    {
+      "name": "strict",
+      "inherits": "dev",
+      "displayName": "strict (-Werror on our code only)",
+      "description": "WFG_WARNINGS_AS_ERRORS=ON. The flag reaches wfg::warnings, which is linked to wfg_engine / wfg / wfg_tests / the spikes and NEVER to wfg_thirdparty - so a JUCE or Tracktion header warning under a future compiler cannot redden this. It inherits dev, NOT ci-linux, on purpose: this is the preset the Contributing section asks every contributor to run before opening a PR, and ci-linux pins CMAKE_CXX_COMPILER_LAUNCHER=ccache, which is not a Windows prerequisite - a Windows contributor got 'CreateProcess failed' on the first compile. The ccache launchers now live in strict-ci, which is what the Linux CI job runs. Same Ninja Multi-Config caveat as dev on Windows: x64 Native Tools prompt, or configure vs by hand with -DWFG_WARNINGS_AS_ERRORS=ON.",
+      "cacheVariables": {
+        "WFG_WARNINGS_AS_ERRORS": "ON"
+      }
+    },
+
+    {
+      "name": "strict-ci",
+      "inherits": "strict",
+      "displayName": "strict-ci (strict + ccache, Linux CI)",
+      "description": "The CI variant of strict: identical settings plus the two ccache launchers. The Linux job runs this as a second build over the ccache already warmed by ci-linux-debug and ci-linux-release, which makes it nearly free. It exists so that `strict` itself stays runnable on a bare Windows or macOS box - and because strict-ci inherits strict, CI exercising this preset exercises every cache variable of that one, so neither can rot.",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER_LAUNCHER": "ccache",
+        "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+      }
+    },
+
+    {
+      "name": "spikes",
+      "inherits": "ci-linux",
+      "displayName": "spikes (throwaway PRD 6.1 programs)",
+      "description": "WFG_BUILD_SPIKES=ON. Its own build tree and its own CI job, so a rotted throwaway reddens a clearly labelled job instead of the product build. CI builds the spikes and never runs them - a spike ends in a written human pass/fail in docs/spikes/, not an exit code.",
+      "cacheVariables": {
+        "WFG_BUILD_SPIKES": "ON"
+      }
+    }
+  ],
+
+  "buildPresets": [
+    {
+      "name": "dev-debug",
+      "configurePreset": "dev",
+      "configuration": "Debug"
+    },
+    {
+      "name": "dev-release",
+      "configurePreset": "dev",
+      "configuration": "Release"
+    },
+    {
+      "name": "vs-debug",
+      "configurePreset": "vs",
+      "configuration": "Debug"
+    },
+    {
+      "name": "ci-linux-debug",
+      "configurePreset": "ci-linux",
+      "configuration": "Debug"
+    },
+    {
+      "name": "ci-linux-release",
+      "configurePreset": "ci-linux",
+      "configuration": "Release"
+    },
+    {
+      "name": "ci-macos-debug",
+      "configurePreset": "ci-macos",
+      "configuration": "Debug"
+    },
+    {
+      "name": "ci-windows-debug",
+      "configurePreset": "ci-windows",
+      "configuration": "Debug"
+    },
+    {
+      "name": "strict-debug",
+      "configurePreset": "strict",
+      "configuration": "Debug"
+    },
+    {
+      "name": "strict-ci-debug",
+      "configurePreset": "strict-ci",
+      "configuration": "Debug"
+    },
+    {
+      "name": "spikes-debug",
+      "configurePreset": "spikes",
+      "configuration": "Debug"
+    }
+  ],
+
+  "testPresets": [
+    {
+      "name": "ci-linux",
+      "configurePreset": "ci-linux",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-macos",
+      "configurePreset": "ci-macos",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    },
+    {
+      "name": "ci-windows",
+      "configurePreset": "ci-windows",
+      "configuration": "Debug",
+      "output": {
+        "outputOnFailure": true
+      }
+    }
+  ]
+}

@@ -1,0 +1,87 @@
+# ---------------------------------------------------------------------------
+# CMake build trees
+#
+# Every preset in CMakePresets.json puts its build tree at build/<presetName>,
+# so `build/` alone covers dev, vs, ci-linux, ci-macos, ci-windows, strict,
+# strict-ci and spikes. `out/` is what Visual Studio's "Open Folder" mode uses
+# instead when it ignores the preset binaryDir, and cmake-build*/ is CLion's.
+build/
+out/
+cmake-build*/
+
+# In-source-configure droppings. The root CMakeLists refuses an in-source build,
+# but a `cmake .` typed before that guard existed still leaves these behind, and
+# nobody should have to notice them in `git status` while cleaning up.
+#
+# Note there is deliberately NO bare `Makefile` rule here (WFS-DIY carries one):
+# it would silently hide a hand-written top-level Makefile, and this repo has no
+# generated one to hide — the presets all use Ninja or Visual Studio.
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# CMakeUserPresets.json is the per-developer companion to the TRACKED
+# CMakePresets.json: the file where you put your own generator, your local
+# toolchain path, your -D overrides. It must never be committed — a committed
+# one overrides everyone else's environment with yours.
+CMakeUserPresets.json
+
+# ---------------------------------------------------------------------------
+# Compile-database / indexer output
+#
+# CMAKE_EXPORT_COMPILE_COMMANDS=ON is set in the `base` preset, so every build
+# tree has a compile_commands.json; the top-level one is the symlink or copy
+# people make for clangd.
+compile_commands.json
+.cache/
+
+# ccache, when CCACHE_DIR is pointed at the workspace (as CI does)
+.ccache/
+
+# ---------------------------------------------------------------------------
+# IDE and editor
+.vs/
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Agent working files, untracked by policy. Note this ignores the `.claude/`
+# DIRECTORY only — a top-level CLAUDE.md is a tracked project document (the
+# devplan makes it PRD 4 verbatim) and must be able to land.
+.claude/
+tmpclaude-*
+**/tmpclaude-*
+
+# ---------------------------------------------------------------------------
+# Python (scripts/check-pins.py and whatever joins it)
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# ---------------------------------------------------------------------------
+# OS cruft
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ---------------------------------------------------------------------------
+# Forward-looking: the Phase 7 tablet client (PRD 3.17) gets its own toolchain
+# under clients/tablet/ and is never an add_subdirectory of this build. These two
+# rules exist NOW so that the first `npm install` run in that tree cannot be
+# committed by accident — a node_modules/ in the history is permanent.
+node_modules/
+dist/
+
+# ---------------------------------------------------------------------------
+# NOT ignored, on purpose — if you are about to add one of these, don't:
+#   docs/**    the PRD and the devplan are the spec and are tracked
+#   *.md       ditto, plus README / THIRD_PARTY_NOTICES / the spike reports
+#   /CLAUDE*   see above
+#   ThirdParty/  the submodule gitlinks are tracked; the working trees are not
+#                files git sees, so no rule is needed for them either way

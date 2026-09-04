@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------------------
+# Line endings
+#
+# The author develops on Windows, where `core.autocrlf=true` is the Git for
+# Windows default: it converts LF to CRLF on checkout and back to LF on commit.
+# That default is a setting, not a guarantee — a contributor (or the same author
+# on a differently-configured box) with `core.autocrlf=false` and an editor that
+# saves CRLF would commit CRLF into these files, and nothing in the tree would
+# object.
+#
+# The failure that causes is remote from its cause. CI runs
+# `bash scripts/install-linux-deps.sh`; with CRLF in the file, bash reads the
+# trailing \r as part of every command and dies with
+#
+#     scripts/install-linux-deps.sh: line 2: $'\r': command not found
+#
+# which names no line ending and points at the wrong line. `text eol=lf` pins
+# the working-tree form for anything a POSIX shell or a shebang has to read,
+# regardless of who cloned it or how their Git is configured.
+*.sh   text eol=lf
+*.py   text eol=lf
+
+# CMake, YAML and JSON are read by tools that do not care about CRLF, but they
+# are also the files most often diffed across platforms, and a whole-file diff
+# caused by a line-ending flip hides the one line that actually changed.
+*.cmake        text eol=lf
+CMakeLists.txt text eol=lf
+*.yml          text eol=lf
+*.json         text eol=lf
+
+# Our own sources. Not a correctness matter — MSVC, GCC and Clang all read CRLF
+# — but the same "keep diffs honest" reason as above.
+*.h    text eol=lf
+*.cpp  text eol=lf
+*.md   text eol=lf
+
+# PowerShell too. It is Windows-only by definition and CRLF would be the more
+# conventional choice there, but bootstrap.ps1 is LF on disk today, PowerShell
+# 5.1 and 7 both read LF without complaint, and one rule for the whole tree beats
+# an exception nobody remembers the reason for.
+*.ps1  text eol=lf
+
+# Nothing here reaches ThirdParty/: those are two gitlinks, and Git does not
+# apply a superproject's attributes across a submodule boundary. JUCE and
+# Tracktion Engine carry their own.

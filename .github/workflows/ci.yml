@@ -1,0 +1,339 @@
+# Go.dot — Copyright (C) 2026 Pierre-Olivier Boulant
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+name: CI
+
+# What this workflow is for, in Phase 0 terms: "it configures, it links, and the
+# binary boots on three platforms". Nothing else. There is no signing, no
+# packaging, no notarization and no artefact upload here — that is a future
+# release.yml, and mixing the two is how a release pipeline ends up running on
+# every push.
+#
+# Beyond "it compiled", CI asserts exactly five things:
+#   1. the two submodule pins are coherent and TE's vendored JUCE is empty  (job `pins`)
+#   2. configure emits no CMake Warning originating outside ThirdParty/      (job `linux`)
+#   3. the product binary RUNS: `wfg --version` and `wfg selftest` exit 0    (ctest, 3 platforms)
+#   4. the unit suite passes under BOTH `C` and `fr_FR`, and fails loudly
+#      if the locale is unavailable                                          (ctest, 3 platforms)
+#   5. our own code compiles clean under -Werror with JUCE's recommended
+#      warning set                                                           (job `linux`, strict step)
+#
+# Five separate jobs rather than one `strategy.matrix` over the three OSes:
+# each platform's steps genuinely differ (apt vs brew vs nothing, ccache vs no
+# cache, an extra strict build on Linux only), and separate jobs give the same
+# "one platform failing does not cancel the others" property that
+# `fail-fast: false` gives a matrix, without pretending the steps are uniform.
+#
+# CACHING, INCLUDING THE DECISIONS NOT TO CACHE:
+#   * ccache is cached per platform, keyed on the two submodule SHAs. hashFiles()
+#     cannot see a gitlink, so the SHAs are resolved with `git rev-parse` into a
+#     step output and interpolated into the key by hand — a JUCE or TE bump must
+#     invalidate the cache, and nothing in the working tree changes when it does.
+#   * we do NOT cache the submodule working trees. checkout's post-run cleanup
+#     gets confused by a restored .git/modules, and restoring ~1 GB is no faster
+#     than letting checkout fetch them.
+#   * we do NOT cache the CMake build tree. JUCE's exported helper paths are
+#     absolute; a build tree is not relocatable between runners, and a restored
+#     one produces configure errors that look like source bugs.
+#   * Windows has NO compiler cache at all — see the comment on that job.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Job 1 — the pin gate. ~15 s, no compiler, and everything else `needs:` it.
+  #
+  # A skewed JUCE/TE pair, or a second JUCE checked out under
+  # tracktion_engine/modules/juce, must not burn three platforms' worth of
+  # compile minutes to be discovered. This repo is private until alpha, so those
+  # minutes are billed.
+  # ---------------------------------------------------------------------------
+  pins:
+    name: pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          # NON-RECURSIVE, and this is the single most load-bearing line in the
+          # file. WFS-DIY's ci.yml says `submodules: recursive`; copying it here
+          # breaks this repo on the first run.
+          #
+          # tracktion_engine's own .gitmodules points modules/juce at
+          # git@github.com:juce-framework/JUCE.git — an SSH URL. No GitHub runner
+          # has an SSH key for it, so recursion fails with
+          # "Permission denied (publickey)" three levels down, in a message that
+          # names neither Go.dot nor Tracktion Engine.
+          #
+          # We pin JUCE ourselves at ThirdParty/JUCE (at the exact SHA TE v3.2.0
+          # names in its own gitlink), our CMake adds
+          # ThirdParty/tracktion_engine/modules only, and TE's vendored JUCE is
+          # never entered. It may stay empty forever. scripts/check-pins.py
+          # asserts all three of those facts, including this line.
+          submodules: true
+
+      - name: Check submodule pins
+        run: python3 scripts/check-pins.py
+
+  # ---------------------------------------------------------------------------
+  # Job 2 — Linux. The busiest job: it is the cheapest runner, so it carries the
+  # configure-warning gate, the Release build and the strict (-Werror) build in
+  # addition to the Debug build + tests.
+  # ---------------------------------------------------------------------------
+  linux:
+    name: build + test (Linux)
+    needs: pins
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true          # NON-recursive — see the job `pins` comment
+
+      - name: Resolve submodule SHAs (for cache key)
+        id: subs
+        shell: bash
+        # hashFiles() cannot see a gitlink, so a JUCE or TE bump changes nothing
+        # it can hash. Resolve both SHAs explicitly and put them in the key.
+        run: |
+          echo "juce=$(git rev-parse HEAD:ThirdParty/JUCE)" >> "$GITHUB_OUTPUT"
+          echo "te=$(git rev-parse HEAD:ThirdParty/tracktion_engine)" >> "$GITHUB_OUTPUT"
+
+      - name: Install build deps
+        # CI runs the same script a contributor runs. That is the point: an apt
+        # list written inline in a workflow rots the moment someone installs a
+        # package by hand to unblock a local build.
+        run: bash scripts/install-linux-deps.sh
+
+      - name: Generate the fr_FR.UTF-8 locale
+        # The runner image ships C/C.UTF-8/en_US only. Without this,
+        # setlocale(LC_ALL, "fr_FR.UTF-8") returns nullptr and tests/TestMain.cpp
+        # exits 2 rather than reporting a green suite it never ran — which is the
+        # correct behaviour, and this step is what keeps it from triggering.
+        run: |
+          sudo locale-gen fr_FR.UTF-8
+          sudo update-locale
+
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          key: ccache-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ github.sha }}
+          restore-keys: |
+            ccache-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-
+            ccache-linux-${{ steps.subs.outputs.juce }}-
+            ccache-linux-
+
+      - name: Configure (ci-linux) + no-warnings-outside-ThirdParty gate
+        shell: bash
+        # `set -o pipefail` is not optional here: piping cmake into tee makes the
+        # step's exit status tee's, so a failed configure would be reported green.
+        #
+        # The gate looks at lines STARTING with "CMake Warning" and ignores the
+        # ones whose location is inside ThirdParty/ — we do not own JUCE's or
+        # TE's warnings and cannot fix them here. Everything else is ours,
+        # including WfgGuards' warning about a populated
+        # tracktion_engine/modules/juce, which is exactly the nudge intended.
+        run: |
+          set -euo pipefail
+          cmake --preset ci-linux 2>&1 | tee configure.log
+          if grep '^CMake Warning' configure.log | grep -v 'ThirdParty/'; then
+            echo "::error::configure emitted warnings outside ThirdParty/"
+            exit 1
+          fi
+
+      - name: Build (Debug)
+        run: cmake --build --preset ci-linux-debug
+
+      - name: Test (Debug — C and fr_FR)
+        # No xvfb, deliberately. ScopedJuceInitialiser_GUI only calls
+        # MessageManager::getInstance() and opens no X display (verified against
+        # juce_MessageManager.cpp). If a "cannot open display" error ever appears
+        # here, the fix is to prefix this line with `xvfb-run -a` and note the
+        # date in scripts/install-linux-deps.sh next to the xvfb entry.
+        run: ctest --preset ci-linux
+
+      - name: Build (Release)
+        run: cmake --build --preset ci-linux-release
+
+      - name: Configure + build strict (-Werror on our code only)
+        # Folded into this job rather than given its own: the ccache is already
+        # warm from the two builds above, and wfg_thirdparty compiles identically
+        # (WFG_WARNINGS_AS_ERRORS never reaches it), so this costs little more
+        # than recompiling our own handful of TUs.
+        #
+        # `strict-ci`, not `strict`. They differ by exactly the two ccache
+        # launchers. `strict` is the preset README's Contributing section asks
+        # every contributor to run before opening a PR, on whatever platform they
+        # are on, so it must not pin CMAKE_CXX_COMPILER_LAUNCHER=ccache — ccache
+        # is not a Windows prerequisite and the symptom there is a CreateProcess
+        # failure on the first compile, not a missing-tool message. strict-ci
+        # inherits strict, so running this here still exercises every cache
+        # variable of that preset and neither can rot.
+        run: |
+          cmake --preset strict-ci
+          cmake --build --preset strict-ci-debug
+
+      - name: ccache statistics
+        # `|| true`: this is diagnostics, and it runs even after a failure above
+        # (where ccache may not be installed yet). A red X here would point at
+        # the wrong step.
+        if: always()
+        run: ccache --show-stats || true
+
+  # ---------------------------------------------------------------------------
+  # Job 3 — macOS.
+  # ---------------------------------------------------------------------------
+  macos:
+    name: build + test (macOS)
+    needs: pins
+    runs-on: macos-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true          # NON-recursive — see the job `pins` comment
+
+      - name: Resolve submodule SHAs (for cache key)
+        id: subs
+        shell: bash
+        run: |
+          echo "juce=$(git rev-parse HEAD:ThirdParty/JUCE)" >> "$GITHUB_OUTPUT"
+          echo "te=$(git rev-parse HEAD:ThirdParty/tracktion_engine)" >> "$GITHUB_OUTPUT"
+
+      - name: Install ccache and ninja
+        # ninja because the ci-macos preset inherits dev's Ninja Multi-Config
+        # generator; the image ships Xcode but not necessarily ninja.
+        # No `locale-gen` equivalent: macOS carries fr_FR.UTF-8 out of the box.
+        run: brew install ccache ninja
+
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          # Its own key namespace so it can never evict the Linux job's cache.
+          key: ccache-macos-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ github.sha }}
+          restore-keys: |
+            ccache-macos-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-
+            ccache-macos-${{ steps.subs.outputs.juce }}-
+            ccache-macos-
+
+      - name: Configure (ci-macos)
+        # macos-latest is arm64. CMAKE_OSX_ARCHITECTURES is deliberately unset,
+        # so this builds a single-arch binary for the host — a universal binary
+        # is a release concern, not a "does it link" concern.
+        run: cmake --preset ci-macos
+
+      - name: Build (Debug)
+        run: cmake --build --preset ci-macos-debug
+
+      - name: Test (Debug — C and fr_FR)
+        run: ctest --preset ci-macos
+
+      - name: ccache statistics
+        if: always()
+        run: ccache --show-stats || true
+
+  # ---------------------------------------------------------------------------
+  # Job 4 — Windows.
+  # ---------------------------------------------------------------------------
+  windows:
+    name: build + test (Windows)
+    needs: pins
+    # windows-2025 = the VS2026 / v145 image, which matches the author's dev box
+    # (MSVC 14.51 + 14.44). Pinned rather than windows-latest so a future image
+    # repoint stays a deliberate choice made when someone reads a failure.
+    #
+    # The asymmetry with the other two jobs is intentional: Linux and macOS stay
+    # on -latest because their toolchains are the ones we want early warning
+    # about, while the Windows toolset is the one the author builds against by
+    # hand. Do not "tidy" this by pinning all three.
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true          # NON-recursive — see the job `pins` comment
+
+      # No compiler cache on this job, and no cache-key step to feed one. The
+      # trap, recorded rather than papered over with a cache that silently never
+      # hits: sccache with MSVC requires /Z7, and
+      # juce::juce_recommended_config_flags injects /Zi into debug configs.
+      # Unblocking it means raising our cmake_minimum_required floor to 3.25 and
+      # setting CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded under CMP0141 —
+      # a real change to the build policy, not a CI tweak.
+
+      - name: Configure (ci-windows)
+        # The ci-windows preset inherits `vs`, which names no generator, so CMake
+        # picks the newest Visual Studio installed on the image. Hard-coding
+        # "Visual Studio 18 2026" here would rot on the next image bump.
+        run: cmake --preset ci-windows
+
+      - name: Build (Debug)
+        run: cmake --build --preset ci-windows-debug
+
+      - name: Test (Debug — C and fr-FR)
+        # fr-FR, not fr_FR.UTF-8: the Windows UCRT does not accept the glibc
+        # spelling. WFG_LOCALE_FR carries the right name per platform, which is
+        # why no test hard-codes it.
+        run: ctest --preset ci-windows
+
+  # ---------------------------------------------------------------------------
+  # Job 5 — the spikes, built and never run.
+  #
+  # Isolated from the three product jobs on purpose: the spikes are throwaway
+  # programs (devplan: "spikes are throwaway ... never migrate into src/"), and a
+  # rotted one must redden its own clearly-labelled job rather than the build
+  # everyone else reads. Building them is what keeps them from bit-rotting
+  # silently; RUNNING them is not CI's business — a spike ends in a written human
+  # pass/fail in docs/spikes/, not an exit code, which is why spikes/CMakeLists.txt
+  # registers no add_test().
+  # ---------------------------------------------------------------------------
+  spikes:
+    name: spikes (Linux, build only)
+    needs: pins
+    runs-on: ubuntu-latest
+    env:
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true          # NON-recursive — see the job `pins` comment
+
+      - name: Resolve submodule SHAs (for cache key)
+        id: subs
+        shell: bash
+        run: |
+          echo "juce=$(git rev-parse HEAD:ThirdParty/JUCE)" >> "$GITHUB_OUTPUT"
+          echo "te=$(git rev-parse HEAD:ThirdParty/tracktion_engine)" >> "$GITHUB_OUTPUT"
+
+      - name: Install build deps
+        run: bash scripts/install-linux-deps.sh
+
+      - name: Cache ccache
+        uses: actions/cache@v5
+        with:
+          path: ${{ github.workspace }}/.ccache
+          # Its own namespace: a spike rebuild must never evict the product
+          # job's cache, and the two build trees share no objects anyway.
+          key: ccache-spikes-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ github.sha }}
+          restore-keys: |
+            ccache-spikes-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-
+            ccache-spikes-linux-${{ steps.subs.outputs.juce }}-
+            ccache-spikes-linux-
+
+      - name: Configure (spikes)
+        run: cmake --preset spikes
+
+      - name: Build (Debug)
+        # Spikes not yet written are skipped by spikes/CMakeLists.txt with a
+        # STATUS message, so this stays green as the seven land one at a time.
+        run: cmake --build --preset spikes-debug
