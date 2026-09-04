@@ -108,6 +108,12 @@ then be wrong, which is the harder failure to notice.
 **Pin `pob31/juce_simpleweb` master at `b953ada` or later.** It is upstream master plus two
 commits, and every copy in the family now holds the same code.
 
+**The fork is the answer, not a stopgap** (author, 2026-09-05: "let's stick with the fork
+for now"). The TLS-off guard is going to Ben as a pull request, but that is the author's to
+send and its outcome changes nothing here: if it is merged, pinning upstream instead becomes
+possible and optional; if it is not, the fork carries it indefinitely and nothing breaks.
+Either way PR 1.D pins the fork, and this is not a decision waiting on anybody.
+
 How it got there, because the starting position was worse than it looked. There were five
 trees and none was a superset of the others: upstream `benkuper/juce_simpleweb` had nine
 commits nobody else had, while WFS-DIY, XOA and Tight-WFS vendored byte-identical copies of a
@@ -122,7 +128,7 @@ upstream PR #5. On top of that go two commits carrying what only the vendored co
   it a consumer passing `-DSIMPLEWEB_SECURE_SUPPORTED=0` gets a macro redefinition and TLS
   anyway, so spatcore's recipe was configuring a header that overrode it. This is the one
   Go.dot needs, and it is backwards-compatible for everyone who does not set the macro —
-  the obvious next pull request to Ben.
+  the obvious pull request to Ben, which the author is sending. Go.dot does not wait on it.
 - **the Windows fixes** — `NOGDI` no longer defined, since it hides `LOGFONTW` and `RGBQUAD`
   from any consumer that also links a JUCE GUI module; and `_WIN32_WINNT 0x0A00` set before
   anything reaches `<winsock2.h>`, unconditionally rather than only in the TLS branch, where
@@ -214,8 +220,9 @@ Go.dot embeds this server or bridges MCP → OSCQuery externally. The port block
   on **both** JUCE 8 and JUCE 9, so this is a live defect in WFS-DIY today rather than the
   version gate draft 0.1 called it. Go.dot's codec could be lifted into spatcore.
 - ~~The juce_simpleweb lineages have diverged in both directions.~~ **Closed 2026-09-05**:
-  all five trees hold `b953ada`. What remains is a pull request to Ben for the TLS-off
-  guard, after which Go.dot could pin upstream directly and the fork could go away.
+  all five trees hold `b953ada`, and Go.dot pins the fork. A pull request to Ben for the
+  TLS-off guard is with the author; if it lands, pinning upstream directly becomes an option
+  rather than a need.
 
 - `SpatcoreConsumer.cmake` strips `libssl libcrypto z` from juce_simpleweb's interface
   link libraries — the macOS/Windows spellings. The module also declares `linuxLibs:
