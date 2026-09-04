@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-This file is **PRD §4, reproduced verbatim** from `docs/godot-prd-draft-0.7.md`. It is the
+This file is **PRD §4, reproduced verbatim** from `docs/godot-prd-draft-0.8.md`. It is the
 review criterion for every pull request.
 
 **If this file and the PRD disagree, the PRD wins and this file is stale. Fix it by copying,
@@ -49,7 +49,7 @@ is exact. Every `§` reference points into the PRD, which is where §3.3 and the
 
 ## Where to look
 
-- **`docs/godot-prd-draft-0.7.md`** — the full Product Requirements Document; the source of
+- **`docs/godot-prd-draft-0.8.md`** — the full Product Requirements Document; the source of
   everything above, and of the `§` references inside it.
 - **`docs/godot-devplan-draft-0.1.md`** — the phase plan: what is being built now, what is
   deferred, and which decisions are the author's rather than the implementer's.

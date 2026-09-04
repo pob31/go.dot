@@ -1,6 +1,7 @@
 # Go.dot — Development Plan (suggestion for Claude Code)
 
-**Draft 0.1**, derived from PRD draft 0.7. A proposed phase order, not a
+**Draft 0.1**, derived from PRD draft 0.7 (still current against 0.8 — the 0.8
+amendments record spike results and change no phase ordering). A proposed phase order, not a
 schedule. Each phase ends with something runnable and a replay-log fixture that
 becomes a regression test. Phases will be broken into subphases as they go.
 

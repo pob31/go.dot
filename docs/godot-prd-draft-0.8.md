@@ -1,12 +1,25 @@
 # Go.dot — Product Requirements Document
 
-**Draft 0.7** — **audio engine decided: Tracktion Engine** (§3.25). Go.dot owns
-time; TE is a sample-accurate polyphonic player with a plugin graph. Spikes in
-§6.1 rewritten as validation of that model; the `OSCClip` fork and MidiClip
-smuggling are removed.
+**Draft 0.8** — **the §6.1 spikes have been run.** All seven, with one report each
+in `docs/spikes/`. Six pass; **#6 (PDC on live tracks) fails** and is the single
+result needing a design decision, in §3.25. §9.2's rule — the polyphony model
+stands unless #2 or #4 fails — is satisfied: **the model stands**, and §3.25's
+"fixed graph, dynamic content" is now measured rather than assumed.
+
+Amendments carry an *Amended in 0.8* marker naming the report they come from, so
+any changed claim can be traced to the measurement that changed it. Item #2's
+premise turned out to be false in Go.dot's favour; the stereo ceiling recorded
+during the spikes was removed by a Tracktion update before this draft was
+written, and no amendment for it survives.
+
+Draft 0.7 was: audio engine decided: Tracktion Engine (§3.25). Go.dot owns time;
+TE is a sample-accurate polyphonic player with a plugin graph. Spikes in §6.1
+rewritten as validation of that model; the `OSCClip` fork and MidiClip smuggling
+are removed.
 Binary/package name: `wfg`. Repo: `github.com/pob31/go.dot` (private until
 alpha). Licence: **GPL-3.0** (`LICENSE` in place).
-Status: pre-implementation, spikes pending. D700 Rack arriving.
+Engine: Tracktion Engine **develop (3.5.0)** with **JUCE 8.0.13**, both pinned as
+submodules. Status: Phase 0 complete; Phase 1 next.
 
 **Reading convention:** *(proposed)* marks a design I put forward that has not
 been explicitly confirmed. Everything unmarked traces to a stated decision.
@@ -127,6 +140,25 @@ for zipper noise).
 
 Launches quantise to the tick: every message belonging to one GO leaves in the
 same frame.
+
+*Amended in 0.8 — `docs/spikes/spike04-graph-stability.md`,
+`spike05-param-50hz.md`.* Two measured facts bear on this clock.
+
+**Tracktion's own launch instant is not reproducible.** Its sync point is
+influenced by transport start rather than purely by processed blocks, so the same
+launch lands on a different sample between runs. Go.dot therefore cannot delegate
+launch timing to the engine and expect determinism — the tick-quantised GO
+described here has to be enforced on Go.dot's side, which this section already
+implies and which is now a requirement rather than a preference.
+
+**Plugin parameters can only be written from the message thread.** Tracktion
+asserts it unconditionally, so a tick that touches a plugin parameter must hand
+over from the tick thread to the message thread. Measured, that handover is
+affordable — 512 parameters at 50 Hz cost about an eighth of a 20 ms tick in a
+release build, roughly 4 µs per write, with the message thread's responsiveness
+indistinguishable from idle. The cost is the ValueTree write itself, not
+notification, so there is nothing to be gained by rate-limiting notifications.
+What the measurement does *not* remove is the need for the handover.
 
 ### 3.5 Cue model and pointers
 
@@ -412,7 +444,14 @@ Rules:
 - **Destinations are a list, not a choice.** A cue may hold a slot *and* a bus
   routing simultaneously — a source into WFS plus a stereo feed to foldback is
   ordinary.
-- **Width is explicit, never automatic.** A stereo cue may occupy one stereo slot
+- **Width is explicit, never automatic** *(qualified in 0.8 —
+  `docs/spikes/spike01-bus-routing.md`, `spike06-rack-latency-pdc.md`)*. This
+  remains Go.dot's rule, but it is **no longer true of the engine underneath**:
+  Tracktion now canonically upmixes a mono source into a wider destination, where
+  it previously left the extra channels silent. A mono *destination* still stays
+  mono. So Go.dot must declare destination widths explicitly rather than relying
+  on the engine to leave them alone.
+- A stereo cue may occupy one stereo slot
   *or* two mono slots *(proposed)* — two independently positionable objects is a
   legitimate and often better choice in WFS. Offer both; refuse silent downmix or
   upmix.
@@ -778,8 +817,9 @@ separate processes: when a plugin dies, the show survives. Therefore:
   to inline.
 - **Synchronous** cross-process: shared-memory buffers, audio thread signals the
   plugin process and waits with a **hard deadline**. In time → zero added
-  latency. Missed → last buffer or silence, strip marked failed. Degradation
-  instead of dropout.
+  latency. Missed → last buffer or silence, **strip marked failed** —
+  and marking it failed must *stop calling the proxy*, not merely annotate the
+  UI; see the amendment below. Degradation instead of dropout.
 - **Plugin scanning is always out-of-process** — that is where most plugin
   crashes actually happen, and a rescan taking down the app during a get-in is
   the classic failure.
@@ -788,6 +828,47 @@ separate processes: when a plugin dies, the show survives. Therefore:
   must say so loudly rather than smear timing silently.
 
 Also: **crude timeline groups** for simple editing (topping and tailing media).
+
+*Amended in 0.8 — `docs/spikes/spike07-proxy-plugin.md`.* The architecture above
+is **feasible, and the healthy-case cost is negligible.** A custom Tracktion
+plugin type wrapping a shared-memory round trip to a second process measured
+**0.9 µs at p50** — three hundredths of one percent of a 128-frame block at
+48 kHz — with zero missed deadlines, and playback survived the child process
+being killed mid-run, degrading to passthrough exactly as described.
+
+The wait is a **bounded spin on a lock-free atomic**, which is the only shape
+that satisfies §4.2: a condition variable, semaphore or sleep all enter the
+kernel. No allocation, no lock, no exception, no syscall — the sole concession is
+reading a clock once every sixty-four spins. So §3.18 and §4.2 do not collide,
+which was the open risk.
+
+**The deadline is the price of failure, not of success**, and this is what the
+"stated latency budget" below has to account for. The healthy round trip costs
+0.9 µs *whatever the deadline is*; a **dead** child costs the **full deadline on
+every block, indefinitely**, because nothing in the mechanism notices it has
+died:
+
+| deadline | cost per block while healthy | cost per block once dead |
+|---|---|---|
+| 100 µs | 0.9 µs | 3.8 % of the block |
+| 250 µs | 0.9 µs | 9.4 % |
+| 500 µs | 0.9 µs | 18.8 % |
+
+Five failed strips at 500 µs consume the entire block. Hence the requirement
+added above: **"strip marked failed" must disable the call**, or one crashed
+plugin quietly eats the audio budget of the whole show. And the budget is
+properly stated as *deadline × maximum simultaneously-failed strips*, not as a
+single number.
+
+Choosing the deadline follows from the same table — the smallest value that
+misses nothing while healthy, since that value is also what a failure costs. On
+the development machine 100 µs already missed occasionally and 250 µs did not.
+
+Two things the probe deliberately did not cover: the child applies a gain rather
+than hosting a real plugin, so the figures are the *transport*, not the
+processing; and on Apple Silicon a sandbox would additionally need the **child
+process** inside the audio workgroup, which is the problem Apple designed
+workgroups for and is separate work.
 
 ### 3.19 Video
 
@@ -1128,6 +1209,21 @@ video move together (§3.19d).
   tail.
 - Frame-accurate equivalents for video.
 
+*Amended in 0.8 — `docs/spikes/spike03-join-quality.md`.* Sample-accurate loop
+points are **confirmed**. The crossfade is **not obtainable from Tracktion**, and
+not merely unexposed: what exists at a follow-action boundary is a one-sided
+decay of the *outgoing* clip that **overwrites** the incoming audio (a fixed
+≤40-sample ramp, assigned rather than mixed), and clip fade nodes are skipped
+entirely for launcher clips. It is a click suppressor and does that job well.
+
+So a crossfaded join has to be built by Go.dot: two slots playing simultaneously
+with a §3.10 curve on each. That is **measured to work** — two overlapping copies
+of the same file are sample-aligned, so the sum is exactly twice the source with
+no comb filtering, which is the failure mode that would have made the idea
+unusable. The *(proposed)* crossfade is therefore a **cost** decision rather than
+a capability question: one extra slot and one curve per crossfaded boundary, out
+of §3.9c's allocator budget. Still awaiting a yes or no.
+
 #### Running view and solver
 
 - A range-looping cue is **one run pointer** with an internal position: its strip
@@ -1178,7 +1274,46 @@ load and only slot contents change.
   out: prepare loads the clip into a free slot, GO launches it. Same object, no
   translation.
 
+*Amended in 0.8 — `docs/spikes/spike04-graph-stability.md`, `spike01-bus-routing.md`.*
+Both halves are now measured rather than assumed.
+
+- **"Launching into an existing slot does not change the playback graph" is
+  confirmed**, and it is provable rather than merely observed:
+  `EditNodeBuilder::insertOptionalLastStageNode` is called on every graph build,
+  so a counter on it measures rebuilds directly. Sustained launching into a fixed
+  track set produced **zero rebuilds** at every track count, sample rate and
+  buffer size tested, and already-playing material came back bit-for-bit
+  identical. `Edit::TreeWatcher` is the exhaustive list of what *does* force a
+  rebuild, and `TransportControl::ReallocationInhibitor` suppresses one while a
+  batch of edits lands.
+- **The ceiling has no width component.** Tracktion capped a track at two
+  channels until v3.2.0; on the pinned engine that cap is gone and a track
+  carries discrete multichannel content (verified to 8 channels, each carrying
+  its own distinct signal). So a cue wider than stereo is still **one** cue in
+  **one** slot, and "same object, no translation" holds for mono, stereo and wide
+  cues alike.
+- **The fixed-track-set discipline extends to routing.** Changing a track's
+  output device is a structural edit and does rebuild the graph, so destinations
+  are assigned at show load along with the track set, not per cue.
+
 #### Ranges map onto follow actions
+
+*Amended in 0.8 — `docs/spikes/spike03-join-quality.md`.* Measured, with three
+results and one of them awkward:
+
+- **The join is sample-accurate.** Two clips that are consecutive halves of one
+  file reconstruct that file exactly across a follow-action boundary.
+- **There is no `advance` verb in Tracktion.** Its follow-action vocabulary is
+  rich but entirely self-triggered; nothing fires one programmatically. So
+  `advance` is Go.dot calling launch on the next range's clip, which means a
+  range list is *N* clips in *N* slots rather than one clip with *N* regions.
+  §3.24's "nothing restarts, so the slot, fader binding, grade and bindings all
+  persist" still holds — but that persistence is **Go.dot's**, not the engine's.
+- **The boundary corrupts a short window of audio.** The switch happens on a
+  block boundary while the *position* stays sample-accurate, so the damaged span
+  is up to one block plus a fixed ~40-sample click-suppression fade — 0.67 ms at
+  a 32-frame buffer, **3.5 ms at 256**. It scales with buffer size, so the range
+  boundary's audible quality is coupled to the latency budget rather than free.
 
 A range (§3.24) is a launcher clip over a region of the file; "loop N then next"
 is a follow action; `advance` is a programmatic launch of the next clip. The
@@ -1193,6 +1328,46 @@ custom plugin types, so the **out-of-process host is a proxy plugin wrapping the
 IPC** — real work that TE permits rather than prevents. **Watch PDC on live
 input**: TE may insert delay to align a live track with the rest of the graph,
 which is exactly what the rack path must not have (§6.1 #6).
+
+*Amended in 0.8 — `docs/spikes/spike06-rack-latency-pdc.md`,
+`spike07-proxy-plugin.md`.* **The PDC warning is confirmed, and it is the most
+consequential finding of the seven spikes.**
+
+Delay compensation is **global**. A plugin declaring 250 ms of latency on **one**
+track delays **every other track's file playback by exactly 250 ms** — measured
+at 50, 100 and 250 ms, identical whether the plugin sits bare on the track or
+inside a Rack. The tracks stay perfectly aligned with each other, which is PDC
+working precisely as designed; the problem is that "aligned" is achieved by
+making everything late. **This collides with §4.1** — a reverb on a live
+microphone would put its latency between the GO button and every cue in the
+system.
+
+Two things that look like escapes and are not:
+
+- `Edit::setLowLatencyMonitoring` left the shift unchanged. Its mechanism is to
+  shrink the device buffer and **bypass** the listed plugins, i.e. remove the
+  latency by removing the plugin — incompatible with a rack whose purpose is to
+  be in circuit.
+- `tracktion_graph` *can* disable compensation
+  (`LockFreeMultiThreadedNodePlayer::setNode`'s `disableLatencyCompensation`,
+  honoured in `SummingNode`, `ConnectedNode` and `RackReturnNode`) — but
+  `EditPlaybackContext` calls the three-argument overload, so it is always
+  `false` and nothing in the Edit layer ever passes `true`.
+
+So the capability Go.dot needs exists in the graph library and is **unreachable
+through the public engine API**. Three routes, and the choice is architectural:
+reach below the Edit API to disable compensation (consistent with this section's
+own inversion — Go.dot owns time, so Go.dot owns alignment); keep latency-bearing
+plugins out of the shared Edit; or accept the latency on the GO path, which §4.1
+forbids. **Undecided — this is the one spike result that requires a design
+decision before Phase 9.**
+
+The proxy plugin itself is **feasible and cheap**: a custom TE plugin type
+wrapping a shared-memory round trip to a second process measured **0.9 µs** at
+p50, held a hard deadline inside the audio callback, and survived the child being
+killed mid-playback — degrading to passthrough exactly as §3.18 describes. It
+declares **zero** latency deliberately, since by the paragraph above any latency
+it declared would delay the whole show.
 
 #### Rate, video, timecode
 
@@ -1223,6 +1398,26 @@ in-file offset, load-to-time has a real gap (§6.1 #2). The alternative —
 hand-rolling streaming, stretch, plugin hosting, PDC and multichannel routing on
 bare JUCE — is the two-to-three years, and the existing RT experience is in
 rendering, not DAW-style playback graphs.
+
+*Amended in 0.8 — `docs/spikes/spike02-launch-offset.md`.* **The in-file offset
+risk is withdrawn: the capability is present.** The launcher path passes the
+clip's offset through (`EditNodeBuilder`, launcher branch), and a measured ladder
+of offsets landed on the **nearest sample** to the requested position at both
+48 and 96 kHz. Load-to-time can place a cue anywhere in a file and trust the
+result.
+
+What replaces it is a **cost**, not a gap, and it shapes where the work happens:
+`IDs::offset` is in `Edit::TreeWatcher`'s restart list, so **setting an offset
+during playback rebuilds the graph**, once per output device.
+`LaunchHandle::nudge` does not. So load-to-time sets offsets **in prepare**
+(§3.12) and uses nudge for anything already playing — which gives the prepare
+step a second, mechanical reason to exist beyond anticipation.
+
+The JUCE version coupling proved real in the other direction too: Tracktion
+v3.2.0 does not build against JUCE 9, and Tracktion's own development branch was
+still on JUCE 8 at the time of writing. Linux native multitouch is a JUCE 9
+feature (`JUCE_USE_XINPUT`, XInput2 touch events), so **that surface is gated on
+Tracktion adopting JUCE 9** and cannot be unlocked from Go.dot's side.
 
 ---
 
@@ -1304,6 +1499,18 @@ its edges. All seven are answerable in about a fortnight.
    understood (it may insert alignment delay exactly where none is wanted).
 7. The proxy-plugin sandbox as a custom TE plugin type wrapping the IPC.
 
+*Amended in 0.8.* All seven were run; reports are in `docs/spikes/`, one file per
+spike, and the index there carries the verdicts and the machine they were measured
+on. In summary: **#1, #2, #3, #4, #5 and #7 pass**; **#6 fails** and is the one
+result requiring a design decision (see §3.25). Item 2's premise was false — the
+offset capability is present, so the "one genuine gap" it names does not exist —
+and item 6's parenthesis was correct. §9.2's rule that "the polyphony model stands
+unless #2 or #4 fails" is therefore satisfied: **the model stands.**
+
+Neither of the two unnumbered items below was addressed by any spike, and both
+remain fully open. MTC needs a real or virtual MIDI port; the multiple-Edits
+question was never exercised.
+
 Also verify: TE transport chasing MTC; multiple active Edits summed by the
 DeviceManager (fallback if the single-Edit model proves insufficient).
 
@@ -1315,6 +1522,22 @@ never enter the audio graph (§3.25), so neither is needed.
 Destination model, slot allocation and lifecycle are now in §3.9b–c. Still open:
 file playback channel counts, live input handling, device management, and the
 interface channel pool that footers recycle.
+
+*Amended in 0.8 — `docs/spikes/spike01-bus-routing.md`.* **File playback channel
+counts are closed, and by hardware rather than preference:** the target interface
+(RME Digiface Dante) presents **64 channels**, shared between mono direct outs,
+stereo sources and mix tracks. A mixed rig of that shape — 32 mono direct outs
+interleaved with 16 stereo buses — routes exactly, with every track reaching its
+own destination and nothing leaking elsewhere. Mono destinations stay mono; a
+track can carry discrete multichannel content where wanted.
+
+One narrower question replaces it: at **96 kHz** the measured ceiling on
+*simultaneously launched* streaming clips fell to around 40 on the development
+laptop, against roughly 72 at 48 kHz. That tracks total sample throughput rather
+than channel count, was not fixed by pacing the render to real time, and has not
+been reproduced on other hardware — so it is recorded as a property of that
+machine under that load, not as an engine limit. **It wants confirming on the
+show machine before a rig is planned around it.**
 
 ### 6.3 Video — DeckLink vs GPU
 

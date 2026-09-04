@@ -30,7 +30,7 @@ That sentence is worth nothing unless something checks it.
 
 WHY IT ANCHORS ON THE HEADING, NOT LINE NUMBERS
 
-§4 sits at docs/godot-prd-draft-0.7.md:1183-1217 today. It will not tomorrow:
+§4 sat at docs/godot-prd-draft-0.7.md:1183-1217 when this was written. It will not tomorrow:
 the spike reports amend §3.24, §3.25 and §6.1, and every one of those edits
 moves §4. A line-number gate would fail on the first amendment and be deleted by
 the third. So both sides are extracted the same way — from the heading line to

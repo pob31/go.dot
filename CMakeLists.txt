@@ -13,7 +13,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 
 # Go.dot — cross-platform show control for theatre, dance and live music.
-# Product requirements: docs/godot-prd-draft-0.7.md
+# Product requirements: docs/godot-prd-draft-0.8.md
 # Phase plan:           docs/godot-devplan-draft-0.1.md
 #
 # This file ORCHESTRATES. It defines no source target of its own: the target

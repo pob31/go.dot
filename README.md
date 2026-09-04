@@ -21,7 +21,7 @@ It is **not** a DAW, not a lighting console, and not a spatial renderer.
 
 The specification lives in `docs/`, and it is the spec — not background reading:
 
-- **[`docs/godot-prd-draft-0.7.md`](docs/godot-prd-draft-0.7.md)** — Product
+- **[`docs/godot-prd-draft-0.8.md`](docs/godot-prd-draft-0.8.md)** — Product
   Requirements. Anything marked *(proposed)* in it is a design put forward and
   **not yet confirmed**; it does not get built without an explicit yes.
 - **[`docs/godot-devplan-draft-0.1.md`](docs/godot-devplan-draft-0.1.md)** — the
