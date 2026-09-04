@@ -29,9 +29,20 @@ The specification lives in `docs/`, and it is the spec — not background readin
 
 ---
 
-## Status: Phase 0
+## Status: Phase 1 in progress
 
-Phase 0 is *"a repo that builds on three platforms"*, and that is all it is.
+Phase 0 — *"a repo that builds on three platforms"* — is complete, and the seven
+Tracktion Engine validation spikes have been run (`docs/spikes/`; all pass). Phase 1, the
+headless engine that loads a show document and exposes it over OSCQuery, has started with
+its two documents:
+
+- **[`docs/godot-namespace-draft-0.1.md`](docs/godot-namespace-draft-0.1.md)** — the
+  `/godot` parameter-tree namespace, the node metadata schema, the command list, the
+  show-document schema, the event-log format and the seven questions Phase 1 puts to the
+  author. Nothing under `/godot` is built until it is approved.
+- **[`docs/godot-reuse-map-0.1.md`](docs/godot-reuse-map-0.1.md)** — what WFS-DIY,
+  spatcore and juce_simpleweb already provide, per phase, and what stops each piece being
+  used as-is.
 
 **What exists**
 
@@ -51,7 +62,12 @@ Phase 0 is *"a repo that builds on three platforms"*, and that is all it is.
 
 **What does not exist yet** — no engine subsystems at all: no parameter tree, no
 OSCQuery server, no cue model, no tick clock, no document format, no UI, no
-plugin hosting, no video. Phase 1 starts the document and the tree.
+plugin hosting, no video. Phase 1 builds the first five, in this order: the engine
+skeleton (commands, tick-indexed event log, replay), the document, the tick clock, the
+parameter tree with mounted namespaces as stubs, the cue list with one standby pointer,
+and last the OSCQuery server on `juce_simpleweb`. Two further submodules arrive with it —
+`ThirdParty/juce_simpleweb` and `ThirdParty/spatcore` — the first for the HTTP+WebSocket
+transport, the second consumed at source level for its real-time helpers.
 
 **Open questions, deliberately unanswered anywhere in this tree**
 
