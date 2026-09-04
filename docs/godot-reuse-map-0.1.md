@@ -16,7 +16,7 @@ CI enforces it, so amendments go into the PRD by the author, citing this map.
 | Source | What it is | Licence | State |
 |---|---|---|---|
 | **WFS-DIY** | the shipping wave-field-synthesis app; JUCE 9.0.1, Projucer-built | GPL-3 | production |
-| **spatcore** (`WFS_DIY_v1/spatcore`, pinned at `7e7ed63`) | the shared real-time core extracted from WFS-DIY: `rt/`, `dsp/`, `wfs/`, `reverb/`, `gpu/`, `control/{osc,state,mcp}`, `controllers/`, `ui/`, `io/` | **no LICENSE file** ("core code follows the consumer projects' licensing") | consumed by WFS-DIY at source level; CMake targets exist for XOA / Tight-WFS |
+| **spatcore** (`WFS_DIY_v1/spatcore`, pinned at `7e7ed63`) | the shared real-time core extracted from WFS-DIY: `rt/`, `dsp/`, `wfs/`, `reverb/`, `gpu/`, `control/{osc,state,mcp}`, `controllers/`, `ui/`, `io/` | GPL-3 (added 2026-09-04, `7e1a8ad`) | consumed by WFS-DIY at source level; CMake targets exist for XOA / Tight-WFS |
 | **juce_simpleweb** (`pob31/juce_simpleweb`, fork of `benkuper/juce_simpleweb`) | JUCE module: HTTP + WebSocket server on one port, WebSocket client; Simple-Web-Server (MIT) over standalone asio (BSL-1.0); TLS optional | GPL-3 | **the copy vendored inside WFS-DIY is ahead of the fork** (see below) |
 
 XOA and Tight-WFS were looked at only for conventions; both are under construction and
@@ -39,6 +39,19 @@ nothing here depends on them.
 
 ## Per phase
 
+### A lesson taken rather than a component
+
+WFS-DIY defines its parameters in per-tab CSVs and generates its MCP tool surface from
+them — but its OSC address map and its OSCQuery namespace are hand-written C++, so there
+are **three independently-maintained surfaces** kept honest only by a runtime auditor that
+logs drift after the fact. `MCPOSCQueryAuditor` exists for that reason, and spatcore's own
+boundary proposal recommends collapsing the three into one registry.
+
+Go.dot starts collapsed: [`../parameters/godot-parameters.csv`](../parameters/godot-parameters.csv)
+is the single source for the document schema, the parameter tree, the RELAX NG schema and
+the OSCQuery reply. The CSV convention is WFS-DIY's, and a good one; what is not carried
+over is the drift.
+
 ### Phase 1 — document and tree (this phase)
 
 | Need | Reuse | Status |
@@ -51,6 +64,7 @@ nothing here depends on them.
 | Tick-thread priority | `spatcore/rt/RtThreadPriority.h` (MMCSS "Pro Audio" via runtime-loaded avrt, mach time-constraint, SCHED_FIFO; JUCE-free) | **used as-is** |
 | Black-box test convention | `WFS_DIY_v1/tools/validation/control-replay/` (`common.py`, `osc_replay.py`, `oscquery_echo_check.py`, `session_roundtrip.py`): stdlib Python, goldens, exit codes 0/1/2/3, launch the app, write over OSC, read back over OSCQuery | **adopted**; the RFC 6455 client in `oscquery_echo_check.py` seeds `tests/blackbox/` |
 | XML persistence | `spatcore/control/state/XmlPersistence` | **not usable**: writes a `<!-- Created: -->` timestamp header (which is why WFS-DIY's harness has to normalise) and uses JUCE's default XML formatting; Go.dot's document must be canonical and byte-identical |
+| Number formatting | JUCE's `String (double)` and `var (double).toString()` | **not usable, measured**: over 19 993 random doubles the JUCE writer loses 9 214 of them (46%) to a save-and-load round trip, because it stops at fifteen significant digits; its reader is not correctly rounded either, losing about one in four hundred. Go.dot writes with `std::to_chars` and reads with a classic-locale stream — zero failures. This is what put the macOS floor at 13.3, and it is worth knowing before any sibling project trusts a JUCE-written number to survive a file |
 
 ### Phase 2 — first sound
 
@@ -112,7 +126,9 @@ Go.dot embeds this server or bridges MCP → OSCQuery externally. The port block
   `NOGDI` removed), `SimpleWebSocketServer.{h,cpp}` (`#if SIMPLEWEB_SECURE_SUPPORTED` around
   the HTTPS `serveFile`). `spatcore/cmake/SpatcoreConsumer.cmake` relies on the guard; the
   fork cannot build TLS-off without it. Push the patches; upstream to benkuper.
-- `spatcore` has no LICENSE file.
+- ~~`spatcore` has no LICENSE file.~~ **Done, 2026-09-04** (`7e1a8ad`): GPL-3, matching
+  where the code came from and everywhere it goes. WFS-DIY's gitlink still points at the
+  commit before it, so a pin bump there is the author's to make when convenient.
 - `SpatcoreConsumer.cmake` strips `libssl libcrypto z` from juce_simpleweb's interface
   link libraries — the macOS/Windows spellings. The module also declares `linuxLibs:
   ssl,crypto`, which JUCE turns into `-lssl -lcrypto`, so a TLS-off Linux build still links

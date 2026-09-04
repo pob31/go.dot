@@ -1,0 +1,40 @@
+owner,address,type,access,default,range,unit,kind,rate_cap,anticipatable,panic,persist,description
+engine,product,s,r,Go.dot,,,state,1,no,park,none,The product name.
+engine,version,s,r,,,,state,1,no,park,none,The running build's version.
+engine,tick,h,r,0,,tick,state,5,no,park,none,The current tick index.
+engine,sampleRate,i,r,0,,Hz,state,1,no,park,none,The clock's sample rate. Observed from the device from Phase 2; not a setting.
+engine,blockSize,i,r,0,,samples,state,1,no,park,none,The audio block size the clock is being advanced by.
+engine,samplesPerTick,i,r,0,,samples,state,1,no,park,none,Samples per 50 Hz tick; the sample rate divided by 50.
+engine,lateness,i,r,0,,samples,state,5,no,park,none,How late the last tick was processed, in samples.
+engine,latenessMax,i,r,0,,samples,state,5,no,park,none,The worst lateness since the engine started.
+engine,clock,s,r,dummy,dummy|device,,state,1,no,park,none,Which clock is advancing the sample counter.
+engine,errorCount,i,r,0,,,state,5,no,park,none,Commands rejected since the engine started.
+engine,lastError,s,r,,,,state,5,no,park,none,The most recent rejection: tick, sequence, origin, reason and command. The only way an OSC client can learn that its write was refused.
+document,path,s,r,,,,state,1,no,park,none,The open bundle's folder.
+document,name,s,r,,,,state,1,no,park,none,The open bundle's name.
+document,formatVersion,i,r,1,,,state,1,no,park,show,The show format this document was written against.
+document,dirty,T,r,false,,,state,5,no,park,none,Whether there are unsaved changes.
+list,name,s,rw,,,,state,50,no,park,show,The cue list's name.
+list,order,s,r,,,,state,50,no,park,none,The identifiers of the list's top-level children, in order, space-separated.
+list,standby,s,rw,,,,state,50,no,park,state,The cue GO will act on. One per list; moved only by a standby command, never by selection or scrolling.
+cue,kind,s,r,memo,memo|group,,state,50,no,park,show,What kind of cue this is. Phase 1 has memo (a cue with no output) and group.
+cue,number,s,rw,,,,state,50,no,park,show,The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.
+cue,name,s,rw,,,,state,50,no,park,show,The cue's name, as the operator reads it.
+cue,notes,s,rw,,,,state,50,no,park,show,Free text for the designer.
+cue,enabled,T,rw,true,,,state,50,no,park,show,Whether the cue runs at all. A disabled cue is skipped, not deleted.
+cue,colour,s,rw,,,,state,50,no,park,show,A #RRGGBB decoration. Never the sole carrier of information.
+cue,parent,s,r,,,,state,50,no,park,none,The identifier of the containing list or group.
+cue,index,i,r,0,,,state,50,no,park,none,Position among siblings, zero-based.
+group,order,s,r,,,,state,50,no,park,none,The identifiers of the group's children, in order, space-separated.
+group,mode,s,rw,sequence,timeline|sequence,,state,50,no,park,show,Whether members are scheduled at entry or run one after another.
+group,advance,s,rw,manual,auto|manual,,state,50,no,park,show,Whether a member starts when the previous completes or on GO.
+group,preWait,d,rw,0,0..,s,state,50,no,park,show,How long after entry before the group starts.
+group,postWait,d,rw,0,0..,s,state,50,no,park,show,How long after completion before the group reports done to its parent.
+mount,prefix,s,r,,,,state,1,no,park,show,The address the foreign namespace is mounted at.
+mount,transport,s,r,udp,udp|tcp|ws,,state,1,no,park,show,How the mounted target is reached. Declared now; used from Phase 2.
+mount,namespace,s,r,,,,state,1,no,park,show,The bundle-relative OSCQuery namespace file describing the target.
+mount,rateCap,d,r,50,0..,Hz,state,1,no,park,show,Default outbound rate cap for the mounted nodes.
+mount,anticipatable,T,r,false,,,state,1,no,park,show,Whether the mounted nodes may be pre-sent before GO. False for third parties.
+mount,panic,s,r,park,park|snap,,state,1,no,park,show,Default resting state for the mounted nodes.
+mount,loaded,T,r,false,,,state,1,no,park,none,Whether the namespace file has been read.
+mount,nodeCount,i,r,0,,,state,1,no,park,none,How many nodes the mount contributed.
