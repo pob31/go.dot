@@ -451,6 +451,39 @@ namespace spike
         Returns false if there is no handle or no sync point yet, so a caller can
         tell "could not launch" from "launched and nothing happened".
     */
+    /*  Launch at an explicit MonotonicBeat, so several clips can be queued at
+        DIFFERENT known beats from one reading of the sync point.
+
+        launchAtNextWholeBeat re-reads the sync point per call, which is right when
+        everything launches together but useless when two clips must start a known
+        distance apart: the second read may land past the beat the first one chose.
+        Reading once and deriving both beats from it makes the spacing exact.
+    */
+    inline bool launchAtBeatOffset (tracktion::engine::Clip& clip, double wholeBeatsAhead)
+    {
+        auto handle = clip.getLaunchHandle();
+
+        if (handle == nullptr)
+            return false;
+
+        auto* context = clip.edit.getTransport().getCurrentPlaybackContext();
+
+        if (context == nullptr)
+            return false;
+
+        const auto syncPoint = context->getSyncPoint();
+
+        if (! syncPoint)
+            return false;
+
+        const auto current = syncPoint->monotonicBeat.v.inBeats();
+        const tracktion::engine::MonotonicBeat launchAt
+            { tracktion::BeatPosition::fromBeats (std::floor (current) + wholeBeatsAhead) };
+
+        handle->play (launchAt);
+        return true;
+    }
+
     inline bool launchAtNextWholeBeat (tracktion::engine::Clip& clip)
     {
         auto handle = clip.getLaunchHandle();

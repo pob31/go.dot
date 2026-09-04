@@ -81,7 +81,7 @@ namespace
         "Follow-action join quality: sample-accurate? crossfade at the boundary "
         "achievable without a custom clip?";
 
-    constexpr auto extraFlags = " [--validate-instrument]";
+    constexpr auto extraFlags = " [--overlap] [--dump=PATH]";
 
     constexpr double fileLengthSeconds = 4.0;
     constexpr double chirpStartHz = 200.0;
@@ -203,6 +203,196 @@ namespace
                                && best.residual * 4.0 < secondBest);
 
         return best;
+    }
+
+    //==============================================================================
+    /*  THE OVERLAP TEST — the precondition for Go.dot building its own crossfade.
+
+        The join measured above is a BUTT join: A stops, B starts, nothing
+        overlaps. Since §6.1 #3's crossfade turns out not to exist in Tracktion,
+        Go.dot has to build one from two slots playing at once - and that is a
+        different risk entirely. Two copies of the SAME file, overlapping, are
+        only safe if they are sample-aligned with each other. Misalign them by a
+        few samples and the sum is comb-filtered, which is far worse than the butt
+        join it was meant to improve on.
+
+        So: two clips on two tracks, summed to one bus, arranged so that during
+        the overlap they are reading the SAME source samples.
+
+          A: source [0, 3 s),  launched at beat N
+          B: source [2 s, 4 s), launched at beat N+2
+
+        At 60 bpm one beat is one second, so B starts exactly 2 s after A. During
+        [N+2, N+3) A is playing source 2-3 s and B is playing source 0-1 s of its
+        own view, which IS source 2-3 s. Identical material, in phase.
+
+        If they are aligned the sum is exactly 2x the source. If they are off by
+        N samples the sum is source(t) + source(t-N), which is a comb filter, and
+        the residual against 2x source measures precisely that error.
+
+        Both launches are derived from ONE reading of the sync point, so the two
+        beats are exactly two apart rather than two separate roundings.
+    */
+    struct OverlapResult
+    {
+        double maxDevFromDouble = 0.0;   // max |out - 2*ref| inside the overlap
+        double peakInOverlap = 0.0;
+        long long bestLagSamples = 0;    // lag that best explains the sum, 0 = aligned
+        long long clipAOriginFrame = 0;
+        bool measured = false;
+    };
+
+    OverlapResult runOverlap (spike::HeadlessEngine& harness, const spike::Args& args,
+                              const std::vector<float>& chirp)
+    {
+        OverlapResult result;
+        auto& engine = *harness;
+
+        HostedAudioDeviceInterface::Parameters params;
+        params.sampleRate     = static_cast<double> (args.sampleRate);
+        params.blockSize      = static_cast<int> (args.buffer);
+        params.inputChannels  = 2;
+        params.outputChannels = 2;
+
+        auto edit = test_utilities::createTestEdit (engine, 2, Edit::EditRole::forEditing);
+        auto tracks = getAudioTracks (*edit);
+
+        if (tracks.size() < 2)
+            return result;
+
+        juce::AudioBuffer<float> buf (2, static_cast<int> (chirp.size()));
+
+        for (int c = 0; c < 2; ++c)
+            std::copy (chirp.begin(), chirp.end(), buf.getWritePointer (c));
+
+        auto file = spike::writeWav (buf, params.sampleRate);
+
+        if (file == nullptr)
+            return result;
+
+        const AudioFile audio (engine, file->getFile());
+
+        Clip::Ptr clips[2];
+
+        for (int t = 0; t < 2; ++t)
+        {
+            auto& list = tracks[t]->getClipSlotList();
+            list.ensureNumberOfSlots (1);
+
+            auto c = insertWaveClip (*list.getClipSlots()[0], {}, file->getFile(),
+                                     { { 0_tp, TimeDuration::fromSeconds (t == 0 ? 3.0 : 2.0) } },
+                                     DeleteExistingClips::no);
+
+            if (c == nullptr)
+                return result;
+
+            // Disable looping BEFORE setting the offset - disableLooping()
+            // overwrites it (AudioClipBase.cpp:916).
+            c->disableLooping();
+
+            if (t == 1)
+                c->setOffset (TimeDuration::fromSeconds (2.0));
+
+            clips[t] = c;
+        }
+
+        bool mappedOk = false;
+        auto player = spike::createPlayerWithDeadline (*edit, params, { audio }, mappedOk);
+
+        if (player == nullptr || ! mappedOk)
+            return result;
+
+        const auto blockSize = params.blockSize;
+        player->process (blockSize);
+
+        // Both derived from one sync-point read: exactly two beats apart.
+        if (! spike::launchAtBeatOffset (*clips[0], 1.0)) return result;
+        if (! spike::launchAtBeatOffset (*clips[1], 3.0)) return result;
+
+        const auto blocks = static_cast<int> ((8.0 * params.sampleRate) / blockSize);
+
+        for (int i = 0; i < blocks; ++i)
+            player->process (blockSize);
+
+        const auto out = player->getOutput();
+
+        /*  LOCATE A rather than assuming where it starts.
+
+            A is launched at beat 1, which at 60 bpm "should" be 1 s - but
+            assuming that turns any launch offset into an apparent lag, and the
+            first version of this test duly reported -2 samples of comb filtering
+            that was really -2 samples of my own arithmetic. Align the solo region
+            (before B enters) against the reference and derive everything from
+            what is measured.
+        */
+        const auto sr = params.sampleRate;
+        const auto win = static_cast<size_t> (sr * 0.05);
+
+        const auto aStart = alignWindow (out, 0, chirp,
+                                         static_cast<size_t> (sr * 0.5), win,
+                                         static_cast<choc::buffer::FrameCount> (sr * 1.5),
+                                         static_cast<long long> (sr * 1.4));
+
+        if (! aStart.confident)
+            return result;
+
+        // aStart.offset is where source 0.5 s appears, so A's origin is that
+        // minus 0.5 s of source.
+        const auto aOrigin = aStart.offset - static_cast<long long> (sr * 0.5);
+        result.clipAOriginFrame = aOrigin;
+
+        // The overlap is [aOrigin + 2 s, aOrigin + 3 s); both play source 2-3 s.
+        const auto from = static_cast<choc::buffer::FrameCount> (aOrigin + static_cast<long long> (sr * 2.05));
+        const auto to   = static_cast<choc::buffer::FrameCount> (aOrigin + static_cast<long long> (sr * 2.95));
+        const auto refBase = static_cast<size_t> (sr * 2.05);
+
+        double worst = 0.0, peak = 0.0;
+
+        for (auto f = from; f < std::min (to, out.getNumFrames()); ++f)
+        {
+            const auto r = refBase + static_cast<size_t> (f - from);
+
+            if (r >= chirp.size())
+                break;
+
+            const auto o = static_cast<double> (out.getSample (0, f));
+            peak = std::max (peak, std::abs (o));
+            worst = std::max (worst, std::abs (o - 2.0 * chirp[r]));
+        }
+
+        result.maxDevFromDouble = worst;
+        result.peakInOverlap = peak;
+
+        /*  If they were misaligned, out(t) = ref(t) + ref(t-lag). Search the lag
+            that best explains the sum; 0 means aligned. This distinguishes "in
+            sync" from "in sync by luck of the residual threshold".
+        */
+        double bestScore = std::numeric_limits<double>::max();
+
+        for (long long lag = -64; lag <= 64; ++lag)
+        {
+            double score = 0.0;
+
+            for (auto f = from; f < std::min (to, out.getNumFrames()); f += 4)
+            {
+                const auto r = static_cast<long long> (refBase) + static_cast<long long> (f - from);
+                const auto rl = r - lag;
+
+                if (r < 0 || rl < 0 || static_cast<size_t> (r) >= chirp.size()
+                     || static_cast<size_t> (rl) >= chirp.size())
+                    continue;
+
+                const auto model = static_cast<double> (chirp[static_cast<size_t> (r)])
+                                     + chirp[static_cast<size_t> (rl)];
+                const auto d = static_cast<double> (out.getSample (0, f)) - model;
+                score += d * d;
+            }
+
+            if (score < bestScore) { bestScore = score; result.bestLagSamples = lag; }
+        }
+
+        result.measured = true;
+        return result;
     }
 
     //==============================================================================
@@ -380,6 +570,28 @@ int main (int argc, char** argv)
     const auto chirp = makeChirp (static_cast<double> (args.sampleRate), fileLengthSeconds);
     const auto sr = static_cast<double> (args.sampleRate);
     const auto halfSamples = static_cast<size_t> (sr * fileLengthSeconds / 2.0);
+
+    if (spike::hasFlag (argc, argv, "--overlap"))
+    {
+        const auto ov = runOverlap (engine, args, chirp);
+
+        if (! ov.measured)
+            return report.cannotMeasure ("could not set up the overlap pair");
+
+        report.value ("overlap.max_dev_from_2x_source", ov.maxDevFromDouble);
+        report.value ("overlap.peak_in_overlap", ov.peakInOverlap);
+        report.value ("overlap.best_lag_samples", ov.bestLagSamples);
+        report.value ("overlap.clipA_origin_frame", ov.clipAOriginFrame);
+
+        // Aligned means the sum IS 2x the source and the best-fit lag is zero.
+        // A non-zero lag here is comb filtering, and the lag is its period.
+        const bool aligned = ov.bestLagSamples == 0 && ov.maxDevFromDouble < 0.01;
+
+        return report.verdict (aligned,
+                               aligned
+                                 ? "two overlapping copies of the same file are sample-aligned: the sum is 2x the source, no comb filtering"
+                                 : "overlapping copies are NOT aligned - see overlap.best_lag_samples, this is comb filtering");
+    }
 
     const auto run = runOnce (engine, args, chirp, true);
 

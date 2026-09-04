@@ -12,10 +12,15 @@ a follow-action boundary — residual 8 × 10⁻¹², which is 24-bit quantisati
 is actively the wrong shape. Tracktion applies a **one-sided decay of the outgoing clip that
 overwrites the incoming audio**. It is not a crossfade and cannot be configured into one.
 
-And a third thing, which nobody asked for and which matters most in practice: **the audio
-artefact at the join is buffer-size dependent**, because the clip switch happens on a block
-boundary while the *position* stays sample-accurate. At 256 frames it is 168 samples — 3.5 ms
-of wrong audio at every range boundary.
+And two things nobody asked for.
+
+**The audio artefact at the join is buffer-size dependent**, because the clip switch happens
+on a block boundary while the *position* stays sample-accurate. At 256 frames it is 168
+samples — 3.5 ms of wrong audio at every range boundary.
+
+**Two overlapping copies of the same file ARE sample-aligned**, so a crossfade Go.dot builds
+itself will not comb-filter. That is the precondition for the crossfade being buildable at
+all, and it is measured rather than assumed.
 
 ## Criterion
 
@@ -137,6 +142,47 @@ number Phase 3 has to design around when it decides what a range boundary sounds
 the spike reports `HARNESS-ERROR` rather than a number — the same non-reproducibility spikes
 #1 and #4 found under load.
 
+## The overlap test — can Go.dot build its own crossfade safely?
+
+Since Tracktion offers no crossfade, Go.dot has to make one from two slots playing at once.
+That introduces a risk the butt join does not have: **two copies of the same file, overlapping
+and misaligned, comb-filter** — which is considerably worse than the boundary artefact it was
+meant to remove. A 3.5 ms *timing* offset of a crossfade is harmless; the two sides being out
+of sync with each other is not.
+
+So the alignment is measured directly. Two clips on two tracks, summed to one bus:
+
+```
+A: source [0, 3 s),   launched at beat N
+B: source [2 s, 4 s), launched at beat N+2      (60 bpm, so exactly 2 s later)
+```
+
+During `[N+2, N+3)` both are reading the **same source samples**. If they are aligned the sum
+is exactly `2 x source`; if they are off by *k* samples the sum is `source(t) + source(t-k)`,
+a comb filter whose period is *k*. Both launches are derived from **one** reading of the sync
+point, so the spacing is exactly two beats rather than two independent roundings.
+
+| configuration | best-fit lag | max &#124;out − 2×source&#124; | peak in overlap |
+|---|---|---|---|
+| 48 kHz / 128 | **0** | 2.37 × 10⁻⁷ | 1.000 |
+| 96 kHz / 128 | **0** | 2.37 × 10⁻⁷ | 1.000 |
+| 48 kHz / 256 | **0** | 2.37 × 10⁻⁷ | 1.000 |
+
+`2.37 × 10⁻⁷` is twice the 24-bit quantisation step — exactly what summing two quantised
+copies produces, and therefore zero to the precision the file format allows. Peak 1.000 is
+exactly `2 × 0.5`.
+
+**Verdict: overlapping copies of the same file are sample-aligned. A Go.dot-built crossfade
+will not comb-filter.**
+
+One caveat about how this number was obtained, because the first attempt got it wrong in the
+usual direction. The test originally *assumed* A starts at 1 s (beat 1 at 60 bpm) and computed
+the reference index from that. It reported a lag of −2 samples and a confident FAIL. The −2
+was the launch offset, not a misalignment: A's origin is measured, not assumed, in the version
+above, and it comes out at exactly 48000 frames at 48 kHz and 96000 at 96 kHz. Every spike in
+this set has now produced at least one false FAIL from assuming a position instead of
+measuring it.
+
 ## Consequences for the PRD
 
 - **§3.24, "Joins"** — *"Sample-accurate loop points, with an optional short crossfade at the
@@ -150,7 +196,8 @@ the spike reports `HARNESS-ERROR` rather than a number — the same non-reproduc
   Anything that depends on a clean boundary must either accept that or own the transition.
 - **§3.9c, the allocator** — if crossfaded joins are wanted, a range with *N* crossfaded
   boundaries needs a second slot live across each one. That is allocator budget the current
-  model does not account for.
+  model does not account for. The measurement above says that spending it *works*: the two
+  slots will be sample-aligned, so the crossfade is a real option rather than a trap.
 
 ## Open questions for the author
 
@@ -158,8 +205,9 @@ the spike reports `HARNESS-ERROR` rather than a number — the same non-reproduc
    It shrinks with the buffer (0.67 ms at 32 frames), so the choice interacts with the latency
    budget rather than being free. This is a product decision about what a range boundary is
    allowed to sound like.
-2. **Are crossfaded joins worth a slot each?** §3.24 marks them *(proposed)*; they are
-   achievable but only by spending allocator budget. Withdraw, or accept the cost?
+2. **Are crossfaded joins worth a slot each?** §3.24 marks them *(proposed)*. They are now
+   known to be both achievable and safe — two slots overlap in sync — but they cost a slot
+   and a curve per boundary out of §3.9c's budget. Withdraw, or accept the cost?
 3. **Is the artefact audible on real material?** Everything here is measured against a chirp,
    which is the right instrument for *detecting* it and the wrong one for judging it. Worth a
    listen on real programme material before deciding question 1.
