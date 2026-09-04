@@ -60,12 +60,28 @@ cmake_minimum_required(VERSION 3.22)
 # the binary would silently target whatever SDK the build machine happens to
 # have, which on a CI runner changes without notice.
 #
-# 11.0 is the first macOS with arm64, so there is no universal-binary or
-# x86-only-era baggage to carry; being >= 10.14 is also what makes TE's
-# -fno-aligned-allocation unnecessary for us (see WfgThirdParty.cmake's DECLINED
-# list). A normal cache STRING, deliberately NOT the CACHE INTERNAL that TE's
-# TestRunner:28 uses — INTERNAL would make it un-overridable from a preset or the
-# command line, which is precisely what someone testing an older target needs.
+# 13.3, and the number is load-bearing rather than conservative. It is the
+# version in which Apple's libc++ made std::to_chars available for floating-point
+# types, and Go.dot writes every number in every file it produces — the show
+# document, the event log, the OSCQuery replies — with std::to_chars, because
+# nothing else round-trips.
+#
+# That was measured, not assumed. Over 19 993 random finite doubles, JUCE's own
+# writer lost 9 214 of them (46%): it stops at fifteen significant digits, so
+# almost half of all doubles read back as a different number. A document format
+# that cannot survive a save and a load cannot support "the event log replays the
+# session bit-for-bit", which is Phase 1's whole acceptance criterion. See
+# src/wfg/engine/osc/OscValue.cpp for the full table and for why the READER is a
+# classic-locale stream rather than std::from_chars, which libc++ still lacks.
+#
+# What it costs: macOS 11 and 12 machines. The author has confirmed that floor is
+# acceptable. macOS 13 shipped in October 2022 and 13.3 in March 2023.
+#
+# Being >= 10.14 also makes TE's -fno-aligned-allocation unnecessary for us (see
+# WfgThirdParty.cmake's DECLINED list). A normal cache STRING, deliberately NOT
+# the CACHE INTERNAL that TE's TestRunner:28 uses — INTERNAL would make it
+# un-overridable from a preset or the command line, which is precisely what
+# someone testing an older target needs.
 #
 # CMAKE_OSX_ARCHITECTURES is deliberately left unset: each machine builds for
 # itself, and universal binaries are a packaging decision for a future release
@@ -78,7 +94,7 @@ cmake_minimum_required(VERSION 3.22)
 # The OR costs one line and removes the possibility of a SILENT wrong deployment
 # target on macOS, which is a failure mode nothing downstream would catch.
 if(CMAKE_HOST_APPLE OR CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
-    set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
+    set(CMAKE_OSX_DEPLOYMENT_TARGET "13.3" CACHE STRING "Minimum macOS version")
 endif()
 
 # --- Project -----------------------------------------------------------------

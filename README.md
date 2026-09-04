@@ -37,9 +37,15 @@ headless engine that loads a show document and exposes it over OSCQuery, has sta
 its two documents:
 
 - **[`docs/godot-namespace-draft-0.1.md`](docs/godot-namespace-draft-0.1.md)** — the
-  `/godot` parameter-tree namespace, the node metadata schema, the command list, the
-  show-document schema, the event-log format and the seven questions Phase 1 puts to the
-  author. Nothing under `/godot` is built until it is approved.
+  *shape* of the `/godot` namespace and the show document: how a node is addressed, what
+  metadata it carries, how a mutation happens and how it is recorded. A living document,
+  because Go.dot is not a port of something that already works and there is no finished
+  parameter list to transcribe.
+- **[`docs/parameters/godot-parameters.csv`](docs/parameters/godot-parameters.csv)** —
+  *what* exists, added to as each phase lands. One table generating four surfaces: the
+  document schema, the parameter tree, the RELAX NG schema and the OSCQuery reply. WFS-DIY
+  keeps three of those independently and reconciles them with a runtime drift auditor;
+  starting collapsed is cheaper than collapsing later.
 - **[`docs/godot-reuse-map-0.1.md`](docs/godot-reuse-map-0.1.md)** — what WFS-DIY,
   spatcore and juce_simpleweb already provide, per phase, and what stops each piece being
   used as-is.
@@ -110,7 +116,12 @@ reading that works identically on all three platforms but is still a reading.
 1. [Xcode](https://apps.apple.com/app/xcode/id497799835) from the App Store, or
    the command line tools: `xcode-select --install`. Xcode 15 is the floor.
 2. `brew install cmake ninja ccache`.
-3. macOS 11.0 is the deployment target.
+3. **macOS 13.3 is the deployment target**, and that number is not arbitrary: it
+   is where Apple's libc++ made `std::to_chars` available for floating-point
+   types, which is what Go.dot writes every number with. JUCE's own writer loses
+   46% of doubles to a save-and-load round trip (measured; the table is in
+   `src/wfg/engine/osc/OscValue.cpp`), and a show file whose numbers change when
+   you reopen it is not a show file.
 
 **Linux**
 

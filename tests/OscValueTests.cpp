@@ -47,16 +47,66 @@ TEST_CASE ("osc value: the number formatter is locale-independent")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
 
+    /*  Shortest round-trip, so an integral double is "1" rather than "1.0" and
+        a half is "0.5" rather than "0.500000". The type is never carried by the
+        text - the log tags its atoms and the document schema declares its
+        attributes - so the shortest form loses nothing. */
     CHECK (formatDouble (0.5) == "0.5");
     CHECK (formatDouble (-0.25) == "-0.25");
-    CHECK (formatDouble (0.0) == "0.0");
-    CHECK (formatDouble (1.0) == "1.0");
+    CHECK (formatDouble (0.0) == "0");
+    CHECK (formatDouble (1.0) == "1");
+    CHECK (formatDouble (-1.5) == "-1.5");
+
+    // A float is written from the float, not from its double promotion: 0.1f
+    // promoted and written exactly is 0.10000000149011612, which is true and
+    // useless. Both forms read back as the same float.
+    CHECK (formatFloat (0.1f) == "0.1");
+    CHECK (formatFloat (0.5f) == "0.5");
 
     // The round trip matters as much as the formatting: a reader that honoured
     // the locale would parse "0.5" as 0 on a French machine.
     const auto parsed = parseDouble ("0.5");
     REQUIRE (parsed.has_value());
     CHECK (*parsed == doctest::Approx (0.5));
+}
+
+TEST_CASE ("osc value: a double survives the round trip exactly, whatever its bits")
+{
+    /*  The measurement that chose the formatter, kept as a test. JUCE's own
+        writer fails this at a rate of 46%: it stops at fifteen significant
+        digits, so nearly half of all doubles read back as a different number.
+        A show document and an event log both depend on this being zero. */
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    std::mt19937_64 rng { 20260904u };
+    std::uniform_int_distribution<std::uint64_t> bits;
+
+    int tested = 0;
+
+    for (int i = 0; i < 20000; ++i)
+    {
+        const auto pattern = bits (rng);
+        double d;
+        std::memcpy (&d, &pattern, sizeof (d));
+
+        if (! std::isfinite (d))
+            continue;
+
+        ++tested;
+
+        const auto text = formatDouble (d);
+        const auto back = parseDouble (text);
+
+        REQUIRE (back.has_value());
+
+        if (std::memcmp (&d, &*back, sizeof (d)) != 0)
+        {
+            INFO ("bit pattern " << pattern << " wrote " << text);
+            FAIL ("a double did not survive the round trip");
+        }
+    }
+
+    CHECK (tested > 15000);
 }
 
 TEST_CASE ("osc value: the parser refuses what is not a number")
@@ -268,3 +318,4 @@ TEST_CASE ("osc value: the type tag string is the OSC one")
     CHECK (typeTagString (args) == "ifsTFN");
     CHECK (typeTagString ({}) == "");
 }
+

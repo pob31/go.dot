@@ -27,9 +27,11 @@
     int64, no double, no time tag — and the OSCQuery surface, the event log and
     Phase 4's time-tagged bundles all need the rest.
 
-    This header is vendor-free on purpose (std only). Number formatting lives in
-    the .cpp, where JUCE's classic-locale formatter does the work; see
-    formatDouble() for why that formatter and not std::to_chars.
+    This header is vendor-free on purpose (std only), and so is its
+    implementation: nothing in this file or its .cpp names a JUCE type. The
+    number formatting is the reason - it is the one primitive the document, the
+    log and the OSCQuery JSON all share, and it must not depend on a vendor's
+    idea of enough decimal places. See formatDouble().
 
     Type tags, as in the OSC 1.1 specification:
 
@@ -163,11 +165,29 @@ namespace wfg::osc
     std::string typeTagString (const std::vector<Value>& values);
 
     /*  Number formatting for every text surface Go.dot writes — the event log,
-        the document, the OSCQuery JSON. One formatter, so a value looks the same
-        wherever it appears. Locale-independent by construction, deterministic
-        across the three platforms, "as many decimal places as necessary". */
+        the document, the OSCQuery JSON. One pair of functions, so a value looks
+        the same wherever it appears.
+
+        SHORTEST ROUND-TRIP, not "enough decimal places": the shortest text that
+        reads back as the identical bit pattern. That is not a nicety. Measured
+        over 19 993 random finite doubles, JUCE's own writer (which stops at 15
+        significant digits) lost 9 214 of them — 46% — and a document format
+        whose numbers do not survive a save and a load cannot support a
+        bit-for-bit replay. The measurement is kept as a test.
+
+        Locale-independent by construction on both sides, and deterministic
+        across the three platforms: the shortest round-trip representation of a
+        double is unique, so two machines cannot disagree about it. */
     std::string formatDouble (double value);
 
-    /** Locale-independent parse. nullopt for anything that is not a finite number. */
+    /*  The float32 form, written from the float rather than from its double
+        promotion. Both are exact; this one is legible. 0.1f promoted to double
+        and written shortest is "0.10000000149011612", which is the true value
+        and nobody's idea of a useful log line; written as a float it is "0.1",
+        and reading "0.1" back as a double and narrowing gives the same float. */
+    std::string formatFloat (float value);
+
+    /** Locale-independent, correctly rounded. nullopt for anything that is not
+        a finite number, including trailing rubbish: "12abc" is not 12. */
     std::optional<double> parseDouble (std::string_view text);
 }

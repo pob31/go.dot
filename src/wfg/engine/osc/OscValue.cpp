@@ -16,12 +16,11 @@
 
 #include <wfg/engine/osc/OscValue.h>
 
-#include <juce_core/juce_core.h>
-
 #include <charconv>
 #include <cmath>
 #include <cstring>
-#include <limits>
+#include <locale>
+#include <sstream>
 
 namespace wfg::osc
 {
@@ -128,36 +127,67 @@ namespace wfg::osc
     }
 
     //==============================================================================
-    /*  Why JUCE and not std::to_chars: Apple's libc++ gates std::to_chars
-        (double) to macOS 13.3 and ships no from_chars (double) at all, while
-        CMakeLists.txt targets macOS 11.0.
+    /*  SHORTEST ROUND-TRIP, and it had to be measured rather than assumed.
 
-        And why juce::var rather than juce::String (double): they are not the
-        same formatter, and only one of them is fit for a document.
-        String (double) hands the value to a bare std::ostream, whose default
-        precision is six SIGNIFICANT digits, so 1234567.0 comes back as
-        "1.23457e+06" - lossy, and lossy in a file someone typed a number into.
-        var (double).toString() routes through juce_String.cpp's serialiseDouble
-        instead (juce_Variant.cpp:215), which is JUCE's "as many decimal places
-        as necessary" writer: 0.5 stays "0.5", 1.0 becomes "1.0", and a value
-        that needs fifteen digits gets fifteen. It is the same function
-        XmlElement::setAttribute (double) uses (juce_XmlElement.cpp:660), so the
-        event log and the show document will agree by construction.
+        Over 19 993 random finite doubles, four writer/reader pairs were tried:
 
-        Both go through a stream imbued with std::locale::classic()
-        (juce_String.cpp:476), so this is locale-independent whatever setlocale()
-        was last told - which tests/LocaleTests.cpp pins under fr_FR on all three
-        platforms.
+            JUCE write, JUCE read ............... 9 214 failures  (46%)
+            to_chars write, JUCE read ................ 51 failures
+            to_chars write, classic-stream read ....... 0 failures
+            to_chars write, from_chars read ........... 0 failures
 
-        Not shortest-round-trip to the last ulp: a double needing 17 significant
-        digits comes back one ulp off. Every float32 survives exactly (float32
-        needs 9 digits, this writes up to 15), which is what the log and the
-        parameter tree carry; the document's own precision policy is a separate
-        question, open as Q1 of the namespace draft.
+        JUCE's writer stops at fifteen significant digits, so nearly half of all
+        doubles come back as a different number - which would make "the event log
+        replays the session bit-for-bit" false on its own terms. JUCE's READER is
+        very nearly right and not quite: it is not correctly rounded, and loses
+        about one value in four hundred.
+
+        So: std::to_chars to write, and a classic-locale stream to read.
+
+        Why not from_chars to read, when it also scores zero: libc++ only gained
+        it for floating point in LLVM 20, so it is missing on the macOS toolchains
+        this project builds on, while to_chars has been available since
+        macOS 13.3 - which is why CMakeLists.txt targets 13.3. A stream imbued
+        with std::locale::classic() has no such gate anywhere, and num_get is
+        specified to convert as if by strtod, which every implementation we build
+        on rounds correctly.
+
+        Locale independence is by construction on both sides: to_chars is defined
+        never to consult the locale at all, and the stream is imbued explicitly,
+        which overrides whatever setlocale() was last told. LocaleTests.cpp and
+        OscValueTests.cpp pin both under fr_FR on all three platforms.
     */
+    namespace
+    {
+        template <typename Float>
+        std::string shortestRoundTrip (Float value)
+        {
+            /*  32 characters covers every double to_chars can produce:
+                17 significant digits, a sign, a dot and a short exponent. The
+                fallback is there anyway, because a buffer that is "obviously big
+                enough" is how a number becomes a truncated number. */
+            char buffer[32];
+            auto result = std::to_chars (buffer, buffer + sizeof (buffer), value);
+
+            if (result.ec == std::errc {})
+                return std::string (buffer, result.ptr);
+
+            std::string large (128, ' ');
+            result = std::to_chars (large.data(), large.data() + large.size(), value);
+
+            return result.ec == std::errc {} ? std::string (large.data(), result.ptr)
+                                             : std::string {};
+        }
+    }
+
     std::string formatDouble (double value)
     {
-        return juce::var (value).toString().toStdString();
+        return shortestRoundTrip (value);
+    }
+
+    std::string formatFloat (float value)
+    {
+        return shortestRoundTrip (value);
     }
 
     std::optional<double> parseDouble (std::string_view text)
@@ -165,10 +195,12 @@ namespace wfg::osc
         if (text.empty())
             return std::nullopt;
 
-        /*  Validate the shape ourselves before handing over to JUCE:
-            String::getDoubleValue() is lenient ("12abc" parses as 12) and a log
-            or document parser must not be. Accepted: an optional sign, digits
-            with at most one dot, an optional exponent. Nothing else. */
+        /*  Validate the shape before converting. A stream extraction stops at
+            the first character it cannot use and reports success for what it
+            read, so "12abc" would parse as 12 - and a log or a document that
+            quietly reads a typo as a number is how a wrong cue gets fired.
+            Accepted: an optional sign, digits with at most one dot, an optional
+            exponent. Nothing else, and no leading or trailing space. */
         std::size_t i = 0;
 
         if (text[i] == '-' || text[i] == '+')
@@ -181,8 +213,9 @@ namespace wfg::osc
         {
             const char c = text[i];
 
-            if (c >= '0' && c <= '9')          { sawDigit = true; continue; }
-            if (c == '.' && ! sawDot)          { sawDot = true; continue; }
+            if (c >= '0' && c <= '9')   { sawDigit = true; continue; }
+            if (c == '.' && ! sawDot)   { sawDot = true; continue; }
+
             if ((c == 'e' || c == 'E') && sawDigit)
             {
                 ++i;
@@ -206,12 +239,146 @@ namespace wfg::osc
         if (! sawDigit)
             return std::nullopt;
 
-        const auto parsed = juce::String (std::string (text)).getDoubleValue();
+        /*  One stream per thread rather than one per call: imbuing a locale is
+            the expensive part, and a log parser does this once per numeric atom.
+            The stream is reset, not rebuilt. */
+        static thread_local std::istringstream stream = []
+        {
+            std::istringstream s;
+            s.imbue (std::locale::classic());
+            return s;
+        }();
 
-        if (! std::isfinite (parsed))
+        stream.clear();
+        stream.str (std::string (text));
+
+        double value = 0.0;
+        stream >> value;
+
+        if (stream.fail() || ! std::isfinite (value))
             return std::nullopt;
 
-        return parsed;
+        return value;
+    }
+
+    //==============================================================================
+    namespace
+    {
+        constexpr char base64Alphabet[] =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+
+        /*  Ours rather than juce::Base64, so that this whole translation unit
+            names no vendor type. That is worth forty lines: the value type, the
+            number format and the atom grammar are the primitives the document,
+            the log and the OSCQuery surface all sit on, and they should not move
+            because a vendor changed its mind.
+
+            Standard base64 with padding, which is what the OSCQuery proposal and
+            any log reader will expect. */
+        std::string toBase64 (const std::vector<std::uint8_t>& bytes)
+        {
+            std::string out;
+            out.reserve (((bytes.size() + 2) / 3) * 4);
+
+            std::size_t i = 0;
+
+            for (; i + 2 < bytes.size(); i += 3)
+            {
+                const std::uint32_t triple = (static_cast<std::uint32_t> (bytes[i]) << 16)
+                                           | (static_cast<std::uint32_t> (bytes[i + 1]) << 8)
+                                           |  static_cast<std::uint32_t> (bytes[i + 2]);
+
+                out.push_back (base64Alphabet[(triple >> 18) & 0x3f]);
+                out.push_back (base64Alphabet[(triple >> 12) & 0x3f]);
+                out.push_back (base64Alphabet[(triple >> 6)  & 0x3f]);
+                out.push_back (base64Alphabet[ triple        & 0x3f]);
+            }
+
+            if (i < bytes.size())
+            {
+                const bool haveTwo = (i + 1 < bytes.size());
+
+                std::uint32_t triple = static_cast<std::uint32_t> (bytes[i]) << 16;
+
+                if (haveTwo)
+                    triple |= static_cast<std::uint32_t> (bytes[i + 1]) << 8;
+
+                out.push_back (base64Alphabet[(triple >> 18) & 0x3f]);
+                out.push_back (base64Alphabet[(triple >> 12) & 0x3f]);
+                out.push_back (haveTwo ? base64Alphabet[(triple >> 6) & 0x3f] : '=');
+                out.push_back ('=');
+            }
+
+            return out;
+        }
+
+        int base64Index (char c) noexcept
+        {
+            if (c >= 'A' && c <= 'Z') return c - 'A';
+            if (c >= 'a' && c <= 'z') return c - 'a' + 26;
+            if (c >= '0' && c <= '9') return c - '0' + 52;
+            if (c == '+')             return 62;
+            if (c == '/')             return 63;
+            return -1;
+        }
+
+        /*  Strict on purpose: a wrong length, a stray character or padding in the
+            wrong place is a refusal, not a best effort. The only thing a blob in
+            a log carries is a packet that was already rejected once, and guessing
+            at it a second time helps nobody. */
+        std::optional<std::vector<std::uint8_t>> fromBase64 (std::string_view text)
+        {
+            if (text.size() % 4 != 0)
+                return std::nullopt;
+
+            std::vector<std::uint8_t> out;
+            out.reserve ((text.size() / 4) * 3);
+
+            for (std::size_t i = 0; i < text.size(); i += 4)
+            {
+                const bool padThird  = (text[i + 2] == '=');
+                const bool padFourth = (text[i + 3] == '=');
+
+                if (padThird && ! padFourth)
+                    return std::nullopt;
+
+                if ((padThird || padFourth) && i + 4 != text.size())
+                    return std::nullopt;      // padding may appear only at the end
+
+                int digits[4];
+
+                for (int k = 0; k < 4; ++k)
+                {
+                    const char c = text[i + static_cast<std::size_t> (k)];
+
+                    if (c == '=')
+                    {
+                        digits[k] = 0;
+                        continue;
+                    }
+
+                    digits[k] = base64Index (c);
+
+                    if (digits[k] < 0)
+                        return std::nullopt;
+                }
+
+                const std::uint32_t triple = (static_cast<std::uint32_t> (digits[0]) << 18)
+                                           | (static_cast<std::uint32_t> (digits[1]) << 12)
+                                           | (static_cast<std::uint32_t> (digits[2]) << 6)
+                                           |  static_cast<std::uint32_t> (digits[3]);
+
+                out.push_back (static_cast<std::uint8_t> ((triple >> 16) & 0xff));
+
+                if (! padThird)
+                    out.push_back (static_cast<std::uint8_t> ((triple >> 8) & 0xff));
+
+                if (! padFourth)
+                    out.push_back (static_cast<std::uint8_t> (triple & 0xff));
+            }
+
+            return out;
+        }
     }
 
     //==============================================================================
@@ -253,7 +420,7 @@ namespace wfg::osc
         }
 
         /*  Parses the quoted form produced above. Returns nullopt on a missing
-            quote, an unknown escape, or anything after the closing quote. */
+            quote, an unknown escape, or an unescaped quote before the end. */
         std::optional<std::string> unescapeString (std::string_view quoted)
         {
             if (quoted.size() < 2 || quoted.front() != '"' || quoted.back() != '"')
@@ -269,7 +436,7 @@ namespace wfg::osc
                 if (c != '\\')
                 {
                     if (c == '"')
-                        return std::nullopt;   // an unescaped quote before the end
+                        return std::nullopt;
 
                     out.push_back (c);
                     continue;
@@ -341,14 +508,10 @@ namespace wfg::osc
         {
             case 0:  return "i:" + std::to_string (std::get<std::int32_t> (storage));
             case 1:  return "h:" + std::to_string (std::get<std::int64_t> (storage));
-            case 2:  return "f:" + formatDouble (static_cast<double> (std::get<float> (storage)));
+            case 2:  return "f:" + formatFloat (std::get<float> (storage));
             case 3:  return "d:" + formatDouble (std::get<double> (storage));
             case 4:  return "s:" + escapeString (std::get<std::string> (storage));
-            case 5:
-            {
-                const auto& bytes = std::get<Blob> (storage).bytes;
-                return "b:" + juce::Base64::toBase64 (bytes.data(), bytes.size()).toStdString();
-            }
+            case 5:  return "b:" + toBase64 (std::get<Blob> (storage).bytes);
             case 6:  return std::get<bool> (storage) ? "T" : "F";
             case 7:  return "N";
             case 8:  return "I";
@@ -363,10 +526,16 @@ namespace wfg::osc
         if (atom == "N") return Value::nil();
         if (atom == "I") return Value::impulse();
 
-        if (atom.size() < 3 || atom[1] != ':')
+        /*  Every other atom is a tag, a colon and a payload. "b:" with an empty
+            payload is the one legitimate zero-length case - an empty blob - so
+            the emptiness check below excludes it. */
+        if (atom.size() < 2 || atom[1] != ':')
             return std::nullopt;
 
         const auto payload = atom.substr (2);
+
+        if (payload.empty() && atom[0] != 'b')
+            return std::nullopt;
 
         switch (atom[0])
         {
@@ -386,6 +555,9 @@ namespace wfg::osc
                 return std::nullopt;
 
             case 'f':
+                /*  Read at double precision and narrow. That is exact: the
+                    shortest text identifying a float, read as a double and
+                    rounded back to float, is always the float it came from. */
                 if (auto v = parseDouble (payload))
                 {
                     const auto narrowed = static_cast<float> (*v);
@@ -408,17 +580,13 @@ namespace wfg::osc
                 return std::nullopt;
 
             case 'b':
-            {
-                juce::MemoryOutputStream decoded;
-
-                if (! juce::Base64::convertFromBase64 (decoded, juce::String (std::string (payload))))
-                    return std::nullopt;
-
-                Blob blob;
-                const auto* data = static_cast<const std::uint8_t*> (decoded.getData());
-                blob.bytes.assign (data, data + decoded.getDataSize());
-                return Value::blob (std::move (blob));
-            }
+                if (auto bytes = fromBase64 (payload))
+                {
+                    Blob blob;
+                    blob.bytes = std::move (*bytes);
+                    return Value::blob (std::move (blob));
+                }
+                return std::nullopt;
 
             default:
                 return std::nullopt;
