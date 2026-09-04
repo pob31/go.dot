@@ -199,6 +199,22 @@ this is adjacent to something the polyphony model depends on. Nothing observed h
 actually happening — spike #4 reported zero rebuilds and a bit-identical witness in all 64
 runs — but the mechanism is there.
 
+**Not reported upstream, and not a regression.** A search of Tracktion's issues and PRs finds
+nothing for the collision, the assertion, or the hash. The one issue in the same area is
+[#367](https://github.com/Tracktion/tracktion_engine/issues/367), *"Launcher clips click on
+every playback-graph rebuild — node state transfer never engages inside SlotControlNode"*, and
+it is a **different root cause**: there the child nodes were *excluded* from the flat
+`sortedNodes` list, so `findNodeWithID` found nothing; here they are present but ambiguous.
+Its fix (`d760ce8c1bd`, exposing `SlotControlNode` children as internal nodes) **is** in our
+pin. Since that fix changes what `getInternalNodes()` returns, and
+`ArrangerLauncherSwitchingNode` folds those IDs into its own, it was a plausible culprit —
+so it was checked by building against `d760ce8c1bd~1`: the collision is present there too, at
+the same track counts and the same count of three. It predates that fix.
+
+Worth noting alongside it: #367 is about damage done *when a rebuild occurs*, and spike #4
+recorded zero rebuilds in all 64 runs — so nothing here has exercised that path. The two sit
+next to each other in the same mechanism, and both bear on §6.1 #4's guarantee.
+
 This looks like an upstream Tracktion issue rather than a Go.dot one, and it is left
 unfixed deliberately. Reproduce with:
 
