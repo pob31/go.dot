@@ -203,7 +203,44 @@ if(MSVC)
     # format limit". The fix belongs here, not in JUCE.
     # /utf-8: our sources are UTF-8 and contain accented French text; without it MSVC
     # reads them as the system codepage and mangles every non-ASCII string literal.
-elseif(APPLE)
+endif()
+
+# --- libatomic on Linux -----------------------------------------------------------
+# Tracktion has at least one atomic that is far too large to be lock-free:
+#
+#     struct AudioClipPlayhead::State { std::optional<TimePosition> position;
+#                                       uint32_t lastUpdateMs; };
+#     std::atomic<State> state;                        (tracktion_AudioClipBase.h:49-55)
+#
+# About 24 bytes, so GCC cannot do it in hardware and emits calls to __atomic_store /
+# __atomic_load, which live in libatomic. MSVC provides those inline, which is exactly
+# why this failed on Linux ONLY, and only after the move to TE develop where that type
+# was introduced:
+#
+#     undefined reference to `__atomic_store'
+#       std::atomic<tracktion::engine::AudioClipPlayhead::State>::store(...)
+#
+# An earlier version of this file DECLINED TE's own `-latomic` line, on the reasoning
+# that JUCE's JUCECheckAtomic.cmake probe and juce::juce_atomic_wrapper had already
+# handled it. They had not: JUCE's probe tests JUCE's atomics, not Tracktion's.
+#
+# find_library rather than a bare `-latomic` because the original objection to TE's
+# line still stands - it is unconditional, and hard-fails on platforms and
+# architectures where libatomic does not exist as a separate library (it is folded
+# into libc on some). Linking it only when it is actually there keeps both properties.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    find_library(WFG_LIBATOMIC NAMES atomic)
+
+    if(WFG_LIBATOMIC)
+        target_link_libraries(wfg_deps INTERFACE "${WFG_LIBATOMIC}")
+        message(STATUS "wfg: linking libatomic at ${WFG_LIBATOMIC}")
+    else()
+        message(STATUS "wfg: no separate libatomic found - assuming the toolchain "
+                       "provides __atomic_* intrinsics in libc")
+    endif()
+endif()
+
+if(APPLE)
     # libc++ hardening: bounds and precondition checks in the standard library, at
     # full strength in Debug and in the cheap "fast" mode otherwise.
     #
@@ -223,10 +260,12 @@ elseif(APPLE)
 endif()
 
 # DECLINED from TE's examples/TestRunner/CMakeLists.txt, so nobody "fixes" it later:
-#  * -latomic (l.115-121) — JUCE runs try_compile probes in JUCECheckAtomic.cmake:33-125
-#    and links it through juce::juce_atomic_wrapper, which juce_core links
-#    unconditionally (JUCEModuleSupport.cmake:521). Copying TE's line hard-fails on
-#    arches where libatomic is absent, to fix a problem JUCE already solved.
+#  * -latomic AS TE WRITES IT (l.115-121) — but see the libatomic block above: we now
+#    link it, conditionally. The original reasoning here was that JUCE's
+#    JUCECheckAtomic.cmake probes and juce::juce_atomic_wrapper had already solved it.
+#    That was WRONG, and Linux CI proved it on the move to TE develop: JUCE's probe
+#    tests JUCE's own atomics, not Tracktion's. What TE's line gets right is the need;
+#    what it gets wrong is being unconditional.
 #  * -m64 as a LINK option keyed off CMAKE_HOST_SYSTEM_PROCESSOR (l.119) — reads the
 #    HOST processor to decide a TARGET flag, so it breaks cross-compiles and
 #    Apple-silicon-to-x86 builds.
