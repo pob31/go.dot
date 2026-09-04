@@ -13,7 +13,7 @@ PRD §9.2 gives the decision rule for the whole set:
 | 2 | Launcher start at an arbitrary in-file offset | **PASS** — honoured to the nearest sample; §6.1's "one genuine gap" premise is false | [spike02-launch-offset.md](spike02-launch-offset.md) |
 | 1 | Launcher clip → multichannel bus routing | **PASS** — mono, stereo and mixed 64-ch rigs all exact; limit is throughput (~72 objects @48k, ~40 @96k) | [spike01-bus-routing.md](spike01-bus-routing.md) |
 | 3 | Follow-action join quality | **PASS** on sample-accuracy; **NO** crossfade without a custom clip; artefact is buffer-dependent; overlapping copies are sample-aligned (no comb filtering) | [spike03-join-quality.md](spike03-join-quality.md) |
-| 5 | External parameter control at 50 Hz | **PASS** — 512 params = 13% of a 20 ms tick (Release); ~4 µs per write | [spike05-param-50hz.md](spike05-param-50hz.md) |
+| 5 | External parameter control at 50 Hz | **PASS on Windows only** — 512 params = 13% of a 20 ms tick (Release); ~4 µs per write. On macOS the spike measures nothing and still reports PASS — see [cross-check-m4pro.md](cross-check-m4pro.md) | [spike05-param-50hz.md](spike05-param-50hz.md) |
 | 6 | Live-input latency through a Rack, PDC | **PASS** — PDC is global and ON by default, but `Edit::setLatencyCompensationEnabled(false)` removes it entirely | [spike06-rack-latency-pdc.md](spike06-rack-latency-pdc.md) |
 | 7 | Proxy-plugin sandbox as a custom TE plugin type | **PASS** — 0.9 µs round trip, survives the child being killed | [spike07-proxy-plugin.md](spike07-proxy-plugin.md) |
 | — | *Also verify*: TE transport chasing MTC | not yet run | — |
@@ -25,9 +25,11 @@ numbering: #4 first because it is what the polyphony model rests on.
 ## Running them
 
 ```
-cmake --preset spikes && cmake --build --preset spikes-debug
-bash spikes/run-spikes.sh --ci   build/spikes/spikes-bin/Debug     # what CI runs
-bash spikes/run-spikes.sh --full build/spikes/spikes-bin/Release   # the author's sweep
+cmake --preset spikes
+cmake --build --preset spikes-debug                             # what CI builds
+bash spikes/run-spikes.sh --ci   build/spikes/spikes/Debug      # what CI runs
+cmake --build --preset spikes-release
+bash spikes/run-spikes.sh --full build/spikes/spikes/Release    # the author's sweep
 ```
 
 Spikes take `--tracks`, `--sample-rate` and `--buffer` with **no defaults**: the
@@ -36,8 +38,10 @@ fixed track count and the target rates and buffer sizes are open author decision
 
 ## Where these numbers came from, and which of them are portable
 
-All runs so far are on a **Lenovo laptop with an Intel Core Ultra 7 255H** — 16 cores, hybrid
-performance/efficiency, Windows 11, with ordinary desktop background load.
+The seven reports in this directory were measured on a **Lenovo laptop with an Intel Core
+Ultra 7 255H** — 16 cores, hybrid performance/efficiency, Windows 11, with ordinary desktop
+background load. They have since been re-run on a **Mac mini M4 Pro**; see
+[cross-check-m4pro.md](cross-check-m4pro.md).
 
 Findings split into two kinds, and the distinction matters when reading any report here:
 
@@ -47,15 +51,16 @@ Findings split into two kinds, and the distinction matters when reading any repo
 - **Machine-dependent.** Throughput ceilings, reproducibility under load, and every timing
   figure. A hybrid-core mobile CPU migrates threads between P- and E-cores under scheduler and
   thermal pressure, which is the most likely cause of the intermittent non-reproducibility seen
-  at 96 kHz in spikes 01, 03 and 04.
+  at 96 kHz in spikes 01, 03 and 04. **The M4 Pro cross-check confirms this**: none of that
+  non-reproducibility survives on desktop silicon, in either build configuration.
 
-The machine-dependent half is worth re-running on a **Mac mini M4 Pro** — desktop thermals, a
+The machine-dependent half was re-run on a **Mac mini M4 Pro** — desktop thermals, a
 different scheduler, and the macOS platform CI currently only builds on:
 
 ```
 git clone --recurse-submodules https://github.com/pob31/go.dot.git   # or: bash scripts/bootstrap.sh
 cmake --preset spikes && cmake --build --preset spikes-release
-bash spikes/run-spikes.sh --full build/spikes/spikes-bin/Release
+bash spikes/run-spikes.sh --full build/spikes/spikes/Release
 ```
 
 ## Audio workgroups, and the JUCE 9 question

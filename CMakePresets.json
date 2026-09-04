@@ -148,6 +148,11 @@
       "name": "spikes-debug",
       "configurePreset": "spikes",
       "configuration": "Debug"
+    },
+    {
+      "name": "spikes-release",
+      "configurePreset": "spikes",
+      "configuration": "Release"
     }
   ],
 
