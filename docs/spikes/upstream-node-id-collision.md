@@ -3,10 +3,14 @@
 Everything below the rule is a **post written for the JUCE Forum, Tracktion Engine category**, kept
 here verbatim so the finding does not live only in a browser tab.
 
-**Status: drafted, not yet posted.** Tracktion do not accept third-party pull requests — *"We don't
-accept third party GitHub pull requests directly due to copyright restrictions but if you would like
-to contribute any changes please contact us"* — so the forum is the route, and this reports the
-problem rather than proposing a patch.
+**Status: posted 2026-09-04.**
+<https://forum.juce.com/t/duplicate-playback-graph-node-ids-from-tracktion-hash-combine/69430>
+— no replies yet.
+
+Tracktion do not accept third-party pull requests — *"We don't accept third party GitHub pull
+requests directly due to copyright restrictions but if you would like to contribute any changes
+please contact us"* — so the forum is the route, and this reports the problem rather than proposing
+a patch.
 
 The finding, the measurements behind it, and the reasons a candidate fix was built and then
 deliberately **not** proposed are in [cross-check-m4pro.md](cross-check-m4pro.md). The short version:
@@ -16,7 +20,9 @@ their sum — which collides `MidiInputDeviceNode`'s `hash (midiSourceID, target
 and `PatternGenerator`'s hash is persisted in the Edit file, so changing the mixer silently stops
 pattern auto-update in previously-saved documents. Both are Tracktion's calls to make, not ours.
 
-If this is ever posted and answered, record the outcome here.
+Record Tracktion's answer here when it comes — in particular whether they treat `hash_combine`'s
+output as a compatibility surface across versions, since that is the question the report puts to
+them and the one that decides what a fix can look like.
 
 ---
 
