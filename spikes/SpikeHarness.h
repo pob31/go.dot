@@ -70,6 +70,7 @@
 #endif
 
 #include <atomic>
+#include <algorithm>
 #include <cmath>
 #include <charconv>
 #include <chrono>
@@ -492,6 +493,56 @@ namespace spike
         handle->play (launchAt);
         return true;
     }
+
+    //==============================================================================
+    /*  Paces a render to wall-clock real time.
+
+        EnginePlayer::process advances the graph as fast as the CPU allows, which
+        is MUCH faster than real time. TE's audio-file readers are background
+        threads sized for real-time playback, so a free-running render can outrun
+        them and produce silence or stale data - which looks exactly like an
+        engine defect and is not one.
+
+        This matters for what a spike is allowed to CONCLUDE. "TE cannot route 64
+        channels at 96 kHz" and "TE cannot route 64 channels at 96 kHz when asked
+        to render them in a fraction of real time" are different sentences, and
+        only the second is supported by a free-running harness.
+
+        Construct one before the block loop and call waitForBlock() after each
+        process() call. Costs exactly as much wall clock as the audio is long,
+        which is why it is opt-in.
+    */
+    class RealTimePacer
+    {
+    public:
+        RealTimePacer (double sampleRate, int blockSize)
+            : blockDuration (std::chrono::duration<double> (blockSize / sampleRate)),
+              startedAt (std::chrono::steady_clock::now())
+        {}
+
+        void waitForBlock()
+        {
+            ++blocksDone;
+            const auto due = startedAt + std::chrono::duration_cast<std::chrono::steady_clock::duration> (
+                                             blockDuration * blocksDone);
+
+            for (;;)
+            {
+                const auto now = std::chrono::steady_clock::now();
+
+                if (now >= due)
+                    return;
+
+                std::this_thread::sleep_for (std::min (std::chrono::duration_cast<std::chrono::microseconds> (due - now),
+                                                       std::chrono::microseconds (500)));
+            }
+        }
+
+    private:
+        std::chrono::duration<double> blockDuration;
+        std::chrono::steady_clock::time_point startedAt;
+        long long blocksDone = 0;
+    };
 
     //==============================================================================
     /*  Counts audio-graph rebuilds.

@@ -74,7 +74,8 @@ namespace
     constexpr auto criterion =
         "Launcher clip to arbitrary multichannel bus routing at target channel counts.";
 
-    constexpr auto extraFlags = " [--bus-width=1|2] [--wide-source-channels=N]";
+    constexpr auto extraFlags =
+        " [--bus-width=1|2] [--mono=N --stereo=M] [--pace] [--wide-source-channels=N]";
 
     constexpr double firstTransientAt = 0.5;
     constexpr double transientSpacing = 0.15;
@@ -97,6 +98,60 @@ namespace
     double fileLengthFor (int numTracks)
     {
         return transientTimeFor (numTracks - 1) + 1.0;
+    }
+
+    //==============================================================================
+    /*  A bus layout: one entry per destination, each with its width and the
+        hardware channel it starts at.
+
+        A real rig is NOT uniform. The author's Digiface Dante presents 64
+        channels total, shared between mono direct outs (one object each, straight
+        into a spatial processor), stereo sources, and stereo mix tracks. So the
+        interesting question is not "does mono work" or "does stereo work" - both
+        are answered - but whether they stay exact when they COEXIST and share one
+        channel pool.
+
+        The two kinds are INTERLEAVED rather than grouped, so mono buses do not all
+        sit at low channel indices and stereo pairs do not all start on even ones.
+        A routing bug that only shows up when a stereo pair starts at an odd
+        hardware channel would hide completely behind a grouped layout.
+    */
+    struct Bus
+    {
+        int width = 2;
+        int firstChannel = 0;
+    };
+
+    std::vector<Bus> makeLayout (int numMono, int numStereo, int uniformWidth, int numTracks)
+    {
+        std::vector<int> widths;
+
+        if (numMono > 0 || numStereo > 0)
+        {
+            // Interleave, so neither kind occupies a contiguous index range.
+            int m = numMono, st = numStereo;
+
+            while (m > 0 || st > 0)
+            {
+                if (m > 0)  { widths.push_back (1); --m; }
+                if (st > 0) { widths.push_back (2); --st; }
+            }
+        }
+        else
+        {
+            widths.assign (static_cast<size_t> (numTracks), uniformWidth);
+        }
+
+        std::vector<Bus> layout;
+        int channel = 0;
+
+        for (auto w : widths)
+        {
+            layout.push_back ({ w, channel });
+            channel += w;
+        }
+
+        return layout;
     }
 
     //==============================================================================
@@ -178,25 +233,36 @@ namespace
     };
 
     RunResult runOnce (spike::HeadlessEngine& harness, const spike::Args& args,
-                       int wideChannels, int busWidth)
+                       int wideChannels, int busWidth, int numMono, int numStereo,
+                       bool paceToRealTime)
     {
         RunResult result;
         auto& engine = *harness;
 
-        const auto numTracks = static_cast<int> (args.tracks);
+        const auto layout = makeLayout (numMono, numStereo, busWidth,
+                                        static_cast<int> (args.tracks));
+        const auto numTracks = static_cast<int> (layout.size());
+
+        if (numTracks == 0)
+            return result;
+
+        int totalChannels = 0;
+
+        for (const auto& b : layout)
+            totalChannels += b.width;
 
         HostedAudioDeviceInterface::Parameters params;
         params.sampleRate     = static_cast<double> (args.sampleRate);
         params.blockSize      = static_cast<int> (args.buffer);
         params.inputChannels  = 2;
-        params.outputChannels = busWidth * numTracks;
+        params.outputChannels = totalChannels;
 
         // One stereo bus per track, at ascending hardware channel indices. This
         // is the "arbitrary multichannel bus" the criterion is about: the device
         // is carved into as many stereo destinations as there are tracks.
         harness.behaviour->describeWaveDevicesFn =
-            [numTracks, busWidth] (std::vector<WaveDeviceDescription>& descs,
-                                   juce::AudioIODevice&, bool isInput)
+            [layout] (std::vector<WaveDeviceDescription>& descs,
+                      juce::AudioIODevice&, bool isInput)
             {
                 descs.clear();
 
@@ -206,11 +272,13 @@ namespace
                     return;
                 }
 
-                for (int i = 0; i < numTracks; ++i)
+                for (size_t i = 0; i < layout.size(); ++i)
                 {
-                    if (busWidth == 1)
+                    const auto& b = layout[i];
+
+                    if (b.width == 1)
                     {
-                        /*  A MONO direct out - one hardware channel per track.
+                        /*  A MONO direct out - one hardware channel, one object.
 
                             This is the shape a spatial rig actually asks for: one
                             mono source per object, straight out to WFS / L-ISA /
@@ -223,12 +291,13 @@ namespace
                             assertion in the class guards reverseChannels(), a UI
                             convenience that is never on the playback path.
                         */
-                        const ChannelIndex ch { i, juce::AudioChannelSet::left };
-                        descs.emplace_back ("mono" + juce::String (i), &ch, 1, true);
+                        const ChannelIndex ch { b.firstChannel, juce::AudioChannelSet::left };
+                        descs.emplace_back ("mono" + juce::String (int (i)), &ch, 1, true);
                     }
                     else
                     {
-                        descs.emplace_back ("bus" + juce::String (i), i * 2, i * 2 + 1, true);
+                        descs.emplace_back ("bus" + juce::String (int (i)),
+                                            b.firstChannel, b.firstChannel + 1, true);
                     }
                 }
             };
@@ -250,7 +319,8 @@ namespace
         for (int i = 0; i < numTracks; ++i)
         {
             auto f = spike::makeTransientFile (params.sampleRate, fileLength,
-                                               transientTimeFor (i), 0.5f, busWidth);
+                                               transientTimeFor (i), 0.5f,
+                                               layout[static_cast<size_t> (i)].width);
 
             if (f == nullptr)
                 return result;
@@ -297,8 +367,18 @@ namespace
         // Long enough for the last transient plus the beat the launch quantised to.
         const auto blocks = static_cast<int> (((fileLength + 2.0) * params.sampleRate) / blockSize);
 
+        std::optional<spike::RealTimePacer> pacer;
+
+        if (paceToRealTime)
+            pacer.emplace (params.sampleRate, blockSize);
+
         for (int i = 0; i < blocks; ++i)
+        {
             player->process (blockSize);
+
+            if (pacer)
+                pacer->waitForBlock();
+        }
 
         const auto output = player->getOutput();
 
@@ -316,7 +396,7 @@ namespace
         std::vector<std::optional<choc::buffer::FrameCount>> firsts;
 
         for (int i = 0; i < numTracks; ++i)
-            firsts.push_back (firstNonZeroOnChannel (output, static_cast<choc::buffer::ChannelCount> (i * busWidth)));
+            firsts.push_back (firstNonZeroOnChannel (output, static_cast<choc::buffer::ChannelCount> (layout[static_cast<size_t> (i)].firstChannel)));
 
         // Bus 0 carries track 0, whose transient is the earliest by construction.
         const auto reference = firsts.empty() ? std::optional<choc::buffer::FrameCount>{}
@@ -330,7 +410,7 @@ namespace
         {
             BusReading r;
             r.firstNonZero = firsts[static_cast<size_t> (i)];
-            r.peakDbfs = peakDbfsOnChannel (output, static_cast<choc::buffer::ChannelCount> (i * busWidth));
+            r.peakDbfs = peakDbfsOnChannel (output, static_cast<choc::buffer::ChannelCount> (layout[static_cast<size_t> (i)].firstChannel));
 
             if (r.firstNonZero && reference)
             {
@@ -378,7 +458,7 @@ namespace
 
         for (int i = 0; i < numTracks; ++i)
             if (result.buses[static_cast<size_t> (i)].firstNonZero)
-                if (strayNonZeroSamples (output, static_cast<choc::buffer::ChannelCount> (i * busWidth),
+                if (strayNonZeroSamples (output, static_cast<choc::buffer::ChannelCount> (layout[static_cast<size_t> (i)].firstChannel),
                                          *result.buses[static_cast<size_t> (i)].firstNonZero,
                                          tolerance, analysisEnd) > 0)
                     result.buses[static_cast<size_t> (i)].identifiedTrack = -2;   // contaminated
@@ -418,6 +498,8 @@ int main (int argc, char** argv)
     const auto args = *parsed;
     const auto wideChannels = static_cast<int> (spike::valueFor (argc, argv, "--wide-source-channels=").value_or (6));
     const auto busWidth     = static_cast<int> (spike::valueFor (argc, argv, "--bus-width=").value_or (2));
+    const auto numMono      = static_cast<int> (spike::valueFor (argc, argv, "--mono=").value_or (0));
+    const auto numStereo    = static_cast<int> (spike::valueFor (argc, argv, "--stereo=").value_or (0));
 
     spike::HeadlessEngine engine;
     spike::Report report ("spike01_bus_routing", argc, argv);
@@ -425,10 +507,22 @@ int main (int argc, char** argv)
     report.value ("tracks", args.tracks);
     report.value ("sample_rate", args.sampleRate);
     report.value ("buffer", args.buffer);
-    report.value ("bus_width", busWidth);
-    report.value ("output_channels", busWidth * args.tracks);
+    if (numMono > 0 || numStereo > 0)
+    {
+        report.value ("layout", "mixed");
+        report.value ("mono_buses", numMono);
+        report.value ("stereo_buses", numStereo);
+        report.value ("output_channels", numMono + 2 * numStereo);
+    }
+    else
+    {
+        report.value ("layout", "uniform");
+        report.value ("bus_width", busWidth);
+        report.value ("output_channels", busWidth * args.tracks);
+    }
 
-    const auto run = runOnce (engine, args, wideChannels, busWidth);
+    const auto run = runOnce (engine, args, wideChannels, busWidth, numMono, numStereo,
+                             spike::hasFlag (argc, argv, "--pace"));
 
     if (! run.measured)
         return report.cannotMeasure ("could not set up the routing matrix");
@@ -441,6 +535,7 @@ int main (int argc, char** argv)
         const auto tag = "bus" + std::to_string (i);
 
         report.value (tag + ".peak_dbfs", b.peakDbfs);
+        report.value (tag + ".first_frame", b.firstNonZero ? static_cast<long long> (*b.firstNonZero) : -1LL);
         report.value (tag + ".identified_track", b.identifiedTrack);
 
         if (! b.firstNonZero)              { ++silent; }
