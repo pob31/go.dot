@@ -74,7 +74,7 @@ namespace
     constexpr auto criterion =
         "Launcher clip to arbitrary multichannel bus routing at target channel counts.";
 
-    constexpr auto extraFlags = " [--wide-source-channels=N]";
+    constexpr auto extraFlags = " [--bus-width=1|2] [--wide-source-channels=N]";
 
     constexpr double firstTransientAt = 0.5;
     constexpr double transientSpacing = 0.15;
@@ -177,7 +177,8 @@ namespace
         bool measured = false;
     };
 
-    RunResult runOnce (spike::HeadlessEngine& harness, const spike::Args& args, int wideChannels)
+    RunResult runOnce (spike::HeadlessEngine& harness, const spike::Args& args,
+                       int wideChannels, int busWidth)
     {
         RunResult result;
         auto& engine = *harness;
@@ -188,13 +189,14 @@ namespace
         params.sampleRate     = static_cast<double> (args.sampleRate);
         params.blockSize      = static_cast<int> (args.buffer);
         params.inputChannels  = 2;
-        params.outputChannels = 2 * numTracks;
+        params.outputChannels = busWidth * numTracks;
 
         // One stereo bus per track, at ascending hardware channel indices. This
         // is the "arbitrary multichannel bus" the criterion is about: the device
         // is carved into as many stereo destinations as there are tracks.
         harness.behaviour->describeWaveDevicesFn =
-            [numTracks] (std::vector<WaveDeviceDescription>& descs, juce::AudioIODevice&, bool isInput)
+            [numTracks, busWidth] (std::vector<WaveDeviceDescription>& descs,
+                                   juce::AudioIODevice&, bool isInput)
             {
                 descs.clear();
 
@@ -205,7 +207,30 @@ namespace
                 }
 
                 for (int i = 0; i < numTracks; ++i)
-                    descs.emplace_back ("bus" + juce::String (i), i * 2, i * 2 + 1, true);
+                {
+                    if (busWidth == 1)
+                    {
+                        /*  A MONO direct out - one hardware channel per track.
+
+                            This is the shape a spatial rig actually asks for: one
+                            mono source per object, straight out to WFS / L-ISA /
+                            whatever is doing the spatialisation, with no stereo
+                            pairing anywhere in the path.
+
+                            TE supports it: WaveDeviceDescription takes a channel
+                            ARRAY, WaveOutputDevice::getRightChannel() returns -1
+                            for a one-channel device, and the only isStereoPair()
+                            assertion in the class guards reverseChannels(), a UI
+                            convenience that is never on the playback path.
+                        */
+                        const ChannelIndex ch { i, juce::AudioChannelSet::left };
+                        descs.emplace_back ("mono" + juce::String (i), &ch, 1, true);
+                    }
+                    else
+                    {
+                        descs.emplace_back ("bus" + juce::String (i), i * 2, i * 2 + 1, true);
+                    }
+                }
             };
 
         auto edit = test_utilities::createTestEdit (engine, numTracks, Edit::EditRole::forEditing);
@@ -225,7 +250,7 @@ namespace
         for (int i = 0; i < numTracks; ++i)
         {
             auto f = spike::makeTransientFile (params.sampleRate, fileLength,
-                                               transientTimeFor (i), 0.5f, 2);
+                                               transientTimeFor (i), 0.5f, busWidth);
 
             if (f == nullptr)
                 return result;
@@ -291,7 +316,7 @@ namespace
         std::vector<std::optional<choc::buffer::FrameCount>> firsts;
 
         for (int i = 0; i < numTracks; ++i)
-            firsts.push_back (firstNonZeroOnChannel (output, static_cast<choc::buffer::ChannelCount> (i * 2)));
+            firsts.push_back (firstNonZeroOnChannel (output, static_cast<choc::buffer::ChannelCount> (i * busWidth)));
 
         // Bus 0 carries track 0, whose transient is the earliest by construction.
         const auto reference = firsts.empty() ? std::optional<choc::buffer::FrameCount>{}
@@ -305,7 +330,7 @@ namespace
         {
             BusReading r;
             r.firstNonZero = firsts[static_cast<size_t> (i)];
-            r.peakDbfs = peakDbfsOnChannel (output, static_cast<choc::buffer::ChannelCount> (i * 2));
+            r.peakDbfs = peakDbfsOnChannel (output, static_cast<choc::buffer::ChannelCount> (i * busWidth));
 
             if (r.firstNonZero && reference)
             {
@@ -353,7 +378,7 @@ namespace
 
         for (int i = 0; i < numTracks; ++i)
             if (result.buses[static_cast<size_t> (i)].firstNonZero)
-                if (strayNonZeroSamples (output, static_cast<choc::buffer::ChannelCount> (i * 2),
+                if (strayNonZeroSamples (output, static_cast<choc::buffer::ChannelCount> (i * busWidth),
                                          *result.buses[static_cast<size_t> (i)].firstNonZero,
                                          tolerance, analysisEnd) > 0)
                     result.buses[static_cast<size_t> (i)].identifiedTrack = -2;   // contaminated
@@ -392,6 +417,7 @@ int main (int argc, char** argv)
 
     const auto args = *parsed;
     const auto wideChannels = static_cast<int> (spike::valueFor (argc, argv, "--wide-source-channels=").value_or (6));
+    const auto busWidth     = static_cast<int> (spike::valueFor (argc, argv, "--bus-width=").value_or (2));
 
     spike::HeadlessEngine engine;
     spike::Report report ("spike01_bus_routing", argc, argv);
@@ -399,9 +425,10 @@ int main (int argc, char** argv)
     report.value ("tracks", args.tracks);
     report.value ("sample_rate", args.sampleRate);
     report.value ("buffer", args.buffer);
-    report.value ("output_channels", 2 * args.tracks);
+    report.value ("bus_width", busWidth);
+    report.value ("output_channels", busWidth * args.tracks);
 
-    const auto run = runOnce (engine, args, wideChannels);
+    const auto run = runOnce (engine, args, wideChannels, busWidth);
 
     if (! run.measured)
         return report.cannotMeasure ("could not set up the routing matrix");
