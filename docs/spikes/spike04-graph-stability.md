@@ -4,10 +4,11 @@
 
 **PASS** on the half that gates the polyphony model: sustained launching into a fixed
 track set causes **no audio-graph rebuild at all**, at every track count, sample rate and
-buffer size measured. The second half — no crossfade tax on already-playing material — is
-**PASS wherever the harness is demonstrably deterministic**, and **undetermined** at one
-high-load point where it is not. The spike reports that as `HARNESS-ERROR`, not as a
-failure, and the reasoning is recorded below rather than smoothed over.
+buffer size measured, in both Debug and Release. The second half — no crossfade tax on
+already-playing material — is **PASS at 48 kHz** and **undetermined at 96 kHz**, where the
+experiment stops being reproducible for reasons that have nothing to do with launching.
+The spike reports that as `HARNESS-ERROR`, not as a failure, and the reasoning is recorded
+below rather than smoothed over.
 
 PRD §9.2 says *"The polyphony model stands unless #2 or #4 fails."* Spike #2's premise
 turned out to be false in the other direction (the launcher **does** honour an arbitrary
@@ -36,8 +37,9 @@ PRD §6.1 item 4, verbatim:
 - The whole thing runs on TE's `HostedAudioDeviceInterface` via `EnginePlayer`, so it
   opens **no audio hardware** and advances the graph exactly `blockSize` samples per call.
 
-Each configuration runs the experiment **three** times: storm, quiet, and a second quiet
-**control**. See "the instrument" below for why the third run exists.
+Each configuration runs the experiment **three** times: storm, quiet, and a **second
+storm** as the control. See "the instrument" below for why the third run exists and why it
+is a storm rather than a quiet one.
 
 ## How it was run
 
@@ -57,7 +59,8 @@ device:  none — TE hosted audio device interface, no hardware opened
 | 8  | 48 000 | 32  | **0** | −inf | −inf | PASS |
 | 16 | 48 000 | 64  | **0** | −inf | −inf | PASS |
 | 64 | 48 000 | 256 | **0** | −inf | −inf | PASS |
-| 32 | 96 000 | 128 | **0** | −inf (Debug) / +5.69 (Release) | +5.97 / +5.31 | undetermined |
+| 32 | 96 000 | 128 | **0** | not reproducible | — | undetermined |
+| 8  | 96 000 | 64  | **0** | not reproducible | — | undetermined |
 
 `−inf` means **bit-identical** — not "below a threshold", but not one differing sample.
 
@@ -110,24 +113,32 @@ right, and both failures produced confident, plausible, false results:
   between two full-scale sines, and indistinguishable from a real crossfade tax. Fixed by
   putting the witness on the timeline, where its start is fixed by construction.
 
-The **control run** — quiet versus quiet, which must be bit-identical — is what caught the
-second one, and it is why the spike now runs three times instead of two.
+The **control run** is what caught the second one, and it is why the spike runs three times
+instead of two. It also had to be fixed once itself: the control was originally *quiet vs
+quiet*, which answers "is this reproducible?" for the wrong run. The storm run is the one
+under load, and load is what makes TE's file streaming non-reproducible — so a quiet
+control came back clean at 96 kHz / 64 frames while the storm run was not, and the spike
+reported another confident FAIL. The control is now **storm vs storm**, so both comparisons
+share the same load and anything left over is attributable to launching.
 
-One configuration remains **undetermined**, and the control is what makes that an honest
-answer rather than a false FAIL. At 32 tracks / 96 kHz / 128 frames the control itself
-differs in a Release build (+5.69 dBFS), so at that load point the harness is not
-deterministic and the witness comparison is measuring the harness. The spike detects this
-and exits `HARNESS-ERROR` (3) rather than `FAIL` (1) — the distinction exists precisely
-for this case.
+**At 96 kHz the experiment stops being reproducible, and the spike says so.** With the
+storm-vs-storm control in place, 96 kHz configurations report `HARNESS-ERROR` (exit 3)
+rather than a verdict — repeatably, three runs out of three. 48 kHz configurations are
+bit-identical across all three runs at every track count measured.
 
-My first reading of it was that Debug's `-O0` was starving the file reader. The Release
-run disproved that: the nondeterminism is still there with optimisation on. The likelier
-cause is that `EnginePlayer` is deterministic in *graph processing* — it advances exactly
-`blockSize` samples per call — but TE's audio-file streaming runs on background threads,
-so how much data is ready when a block is processed depends on real time once the load is
-high enough. That is worth knowing independently of this spike: **a deterministic replay
-harness (devplan Phase 12) cannot be built on `EnginePlayer` alone** without pinning or
-pre-loading the file reader.
+My first reading was that Debug's `-O0` was starving the file reader. A Release run
+disproved that: the nondeterminism survives optimisation. The cause is that `EnginePlayer`
+is deterministic in *graph processing* — it advances exactly `blockSize` samples per call —
+but TE's audio-file streaming runs on **background threads**, so how much data is ready
+when a block is processed depends on real time once the throughput demand is high enough.
+Doubling the sample rate doubles that demand.
+
+Two consequences worth carrying forward, neither of them a verdict on §6.1 #4:
+
+- **The crossfade-tax half is confirmed at 48 kHz and undetermined at 96 kHz.** Not failed:
+  undetermined. Closing it needs the file reader pinned or the material pre-loaded.
+- **Deterministic replay (devplan Phase 12) cannot be built on `EnginePlayer` alone.**
+  Block-accurate processing does not make a render reproducible while file I/O is async.
 
 What this does **not** cast doubt on is the gating observable. `rebuilds.delta` was 0 in
 that configuration too, in both Debug and Release, and the rebuild counter does not depend
@@ -152,9 +163,10 @@ on audio content at all.
 1. **Default fixed track count** (devplan:49) — still open, deliberately. This spike found
    no ceiling: 64 tracks behaved exactly as 8 did, with zero rebuilds. The number is a
    product decision about polyphony, not something these measurements settle.
-2. The 96 kHz / 32-track nondeterminism is a harness limit, not an engine finding, but it
-   points at a Phase 12 question worth raising early: deterministic replay will need the
-   file reader pinned or pre-loaded, because block-accurate processing alone does not make
-   a render reproducible under load.
+2. The 96 kHz nondeterminism is a harness limit, not an engine finding, but it points at a
+   Phase 12 question worth raising early: deterministic replay will need the file reader
+   pinned or pre-loaded, because block-accurate processing alone does not make a render
+   reproducible while file I/O is asynchronous. Worth deciding whether closing that is
+   Phase 0 work or Phase 12's.
 3. Whether §6.1's unnumbered "multiple active Edits" item is answered inside this spike
    (`--edits=K`) or deserves its own, is your call per `spikes/CMakeLists.txt:68-73`.

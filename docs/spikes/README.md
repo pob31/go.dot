@@ -10,7 +10,7 @@ PRD §9.2 gives the decision rule for the whole set:
 | # | Spike | Verdict | Report |
 |---|---|---|---|
 | 4 | Graph stability under sustained launching | **PASS** — zero rebuilds at every configuration | [spike04-graph-stability.md](spike04-graph-stability.md) |
-| 2 | Launcher start at an arbitrary in-file offset | not yet run | — |
+| 2 | Launcher start at an arbitrary in-file offset | **PASS** — sub-sample accurate; §6.1's "one genuine gap" premise is false | [spike02-launch-offset.md](spike02-launch-offset.md) |
 | 1 | Launcher clip → multichannel bus routing | not yet run | — |
 | 3 | Follow-action join quality | not yet run | — |
 | 5 | External parameter control at 50 Hz | not yet run | — |

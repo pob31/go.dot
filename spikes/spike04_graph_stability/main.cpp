@@ -434,23 +434,26 @@ int main (int argc, char** argv)
     // Channels 0-1 only: the witness bus. See the routing comment in runOnce().
     const auto witnessDiffDb = maxAbsDiffDbfs (stormRun.output, quietRun.output, 2);
 
-    /*  CONTROL. Two runs that are identical in every respect - both quiet - and
-        whose witness channels must therefore be bit-identical if this experiment
-        is deterministic at all.
+    /*  CONTROL: a SECOND STORM run, not a second quiet one.
 
-        Without it the witness metric cannot be interpreted. A non-zero
-        storm-vs-quiet difference means "launching perturbed already-playing
-        material" ONLY if quiet-vs-quiet is zero; otherwise it means the harness
-        is noisy and the number is measuring the harness. The first sweep of this
-        spike produced -inf at one track count and +6 dBFS at the next, which is
-        not how a crossfade tax behaves and is exactly what prompted this.
+        The control exists to answer "is this experiment reproducible at all?"
+        before the witness number is allowed to mean anything. A quiet-vs-quiet
+        control answers that question for the wrong run: the storm run is the one
+        under load, and load is what makes TE's asynchronous file streaming
+        non-reproducible. A quiet control was clean at 96 kHz / 64 frames while
+        the storm run was not, and the spike duly reported a confident FAIL that
+        was measuring the harness.
+
+        So: storm-vs-storm is the control (must be bit-identical), and
+        storm-vs-quiet is the measurement. Both comparisons now share the same
+        load, so anything left over is attributable to launching.
     */
-    const auto controlRun = runOnce (engine, args, slots, launches, false);
+    const auto controlRun = runOnce (engine, args, slots, launches, true);
 
     if (! controlRun.measured)
         return report.cannotMeasure ("control run could not be set up");
 
-    const auto controlDiffDb = maxAbsDiffDbfs (quietRun.output, controlRun.output, 2);
+    const auto controlDiffDb = maxAbsDiffDbfs (stormRun.output, controlRun.output, 2);
 
     report.value ("rebuilds.delta", stormRun.rebuildDelta);
     report.value ("rebuilds.delta_reference", quietRun.rebuildDelta);
@@ -483,8 +486,8 @@ int main (int argc, char** argv)
 
     if (! deterministic)
         return report.cannotMeasure (
-            "two identical quiet runs differ, so the witness metric is measuring the "
-            "harness, not the engine - the rebuild count above is still valid");
+            "two identical storm runs differ, so the witness metric is measuring the "
+            "harness under load, not the engine - the rebuild count above is still valid");
 
     return report.verdict (noRebuild && noCrossfade,
                            noRebuild
