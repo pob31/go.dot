@@ -39,21 +39,14 @@
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include "TestSupport.h"
+
 #include <juce_core/juce_core.h>
 
 #include <clocale>
 #include <cstdio>
 #include <string>
 
-namespace wfgtest
-{
-    /*  Defined in TestMain.cpp. Re-declared rather than #included: Phase 0 has
-        three test TUs and one shared symbol between them, which is not enough
-        to justify a tests/ header. Add tests/TestSupport.h at the fourth TU,
-        not before.
-    */
-    const char* appliedLocaleName();
-}
 
 //==============================================================================
 TEST_CASE ("locale: the requested locale actually took effect")

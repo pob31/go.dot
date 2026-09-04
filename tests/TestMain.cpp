@@ -32,6 +32,8 @@
 #define DOCTEST_CONFIG_IMPLEMENT
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include "TestSupport.h"
+
 #include <clocale>
 #include <cstring>
 #include <iostream>
@@ -45,13 +47,7 @@ namespace wfgtest
         std::string appliedLocale { "C" };
     }
 
-    /*  Defined here, re-declared (not #included) in LocaleTests.cpp.
-
-        Phase 0 has no tests/ header and should not grow one for a single
-        function: three source files and one shared symbol is not a library.
-        If a fourth test TU ever needs this, that is the moment to add
-        tests/TestSupport.h — not before.
-    */
+    /*  Declared in TestSupport.h, which the other test TUs include. */
     const char* appliedLocaleName()
     {
         return appliedLocale.c_str();

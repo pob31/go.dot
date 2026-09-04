@@ -1,0 +1,14 @@
+# wfg-log 1
+# fixture skeleton — the Phase 1 engine skeleton, hand-written and hand-checked.
+# Every record here is one the engine must reproduce exactly when replayed:
+# an applied command, a rejection of each kind the skeleton can produce, and a
+# dropped packet keeping its place in the sequence. Nothing in it needs a
+# document, so it is the earliest possible test of the replay guarantee.
+A 0 0 cli noop
+A 0 1 ws:192.168.1.20:51234 noop
+R 0 2 udp:192.168.1.7:9000 unknown-command no.such.command i:1 s:"with arguments"
+X 0 3 udp:192.168.1.7:9000 malformed-packet b:LyIvAAAsZgAA
+A 12 4 cli noop
+R 12 5 ws:192.168.1.20:51234 arity noop i:7
+R 25 6 cli unknown-command cue.create s:"House to half"
+A 25 7 udp:10.0.0.5:9000 noop

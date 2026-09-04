@@ -61,8 +61,13 @@
 # -----------------------------------------------------------------------------
 add_executable(wfg_tests
     TestMain.cpp
+    TestSupport.h
     ToolchainTests.cpp
-    LocaleTests.cpp)
+    LocaleTests.cpp
+    OscValueTests.cpp
+    CommandTests.cpp
+    EventLogTests.cpp
+    EngineTests.cpp)
 
 target_link_libraries(wfg_tests PRIVATE wfg::engine wfg::warnings)
 
@@ -95,3 +100,31 @@ add_test(NAME unit.fr_FR COMMAND wfg_tests --wfg-locale=${WFG_LOCALE_FR})
 # -----------------------------------------------------------------------------
 add_test(NAME wfg.version  COMMAND wfg --version)
 add_test(NAME wfg.selftest COMMAND wfg selftest)
+
+# -----------------------------------------------------------------------------
+# The CLI's own serialisation surfaces, run once per locale.
+#
+# The unit suite above already runs twice, but these exercise the PRODUCT
+# binary's verbs rather than the library, and `wfg replay` is the one that
+# decides whether Phase 1 met its "the event log replays the session
+# bit-for-bit" criterion. A verb that writes or reads anything a human or a
+# diff will see takes --wfg-locale for exactly this reason.
+#
+# `wfg commands` is registered too, and it is not a formality: PRD section 4.11
+# says every gesture-reachable action exists as a named command, and a list
+# nobody ever runs is a promise nobody ever checks.
+# -----------------------------------------------------------------------------
+add_test(NAME wfg.commands.C     COMMAND wfg commands --wfg-locale=C)
+add_test(NAME wfg.commands.fr_FR COMMAND wfg commands --wfg-locale=${WFG_LOCALE_FR})
+
+# The replay fixture: a hand-written, hand-checked log that the engine must
+# reproduce record for record. It is committed rather than generated, and that
+# is the point — a golden produced by the code under test only proves the code
+# agrees with itself. Its three exit codes are distinct on purpose: 0 matched,
+# 1 the engine diverged, 2 the log could not be read at all.
+add_test(NAME wfg.replay.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/skeleton.wfglog"
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/skeleton.wfglog"
+                 --wfg-locale=${WFG_LOCALE_FR})

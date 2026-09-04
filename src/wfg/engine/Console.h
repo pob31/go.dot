@@ -17,21 +17,16 @@
 #pragma once
 
 /*
-    PHASE 0 SCAFFOLD — replaced wholesale in Phase 1.
+    The `wfg` command line.
 
-    This header exists to prove one structural property of the build, and it
-    proves it by what it does NOT contain: there is no #include here, and no
-    JUCE or Tracktion type appears in the declared surface.
+    Replaces the Phase 0 Boot.h, whose job was to prove the toolchain; this one
+    drives the engine. The surface grows one verb per subphase - `serve`,
+    `validate`, `canon` and `schema` arrive with the document and the OSCQuery
+    server - and every verb that writes anything a human or a diff will read
+    accepts --wfg-locale, so the same binary can be run twice under two locales
+    and the results compared (the cross-cutting rule in the development plan).
 
-    That absence is load-bearing. It is what lets Phase 5's UI client and
-    Phase 9's plugin host / out-of-process plugin scanner link wfg::engine
-    without each of them dragging in — and recompiling — the whole JUCE and
-    Tracktion header set. The moment a juce::String or a tracktion::TimePosition
-    appears in a public signature here, every consumer of this library inherits
-    31 vendor translation units' worth of headers, and the boundary is gone.
-
-    Phase 1 will widen this surface. Keep the rule: vendor types stay on the
-    implementation side of it.
+    Vendor-free, like Engine.h, and for the same reason.
 */
 
 namespace wfg

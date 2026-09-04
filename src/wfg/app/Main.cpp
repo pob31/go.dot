@@ -15,12 +15,12 @@
 */
 
 /*
-    PHASE 0 SCAFFOLD — the entry point, and deliberately nothing else.
+    The entry point, and deliberately nothing else.
 
     The interesting thing about this file is the include list: one header, ours,
     and no JUCE. That is the proof that the src/ library boundary is real. If
     this file ever needs <juce_core/juce_core.h> to compile, something has
-    leaked a vendor type into wfg/engine/Boot.h and the boundary described
+    leaked a vendor type into wfg/engine/Console.h and the boundary described
     there has quietly stopped existing.
 
     Plain main(), not JUCE's START_JUCE_APPLICATION: we build with
@@ -30,7 +30,7 @@
     wfg::runConsole, by a scoped initialiser.
 */
 
-#include <wfg/engine/Boot.h>
+#include <wfg/engine/Console.h>
 
 int main (int argc, char** argv)
 {

@@ -35,32 +35,57 @@
 # -----------------------------------------------------------------------------
 # wfg_engine — the engine library.
 #
-# PHASE 0 SCAFFOLD. Boot.{h,cpp} is a toolchain proof and not an engine: it
-# exists so that a broken JUCE or Tracktion wiring fails at COMPILE time inside
-# OUR code rather than passing a hollow build in which nothing ever named a
-# vendor type. Phase 1 replaces the contents of these two files wholesale with
-# the document/tree layer; the TARGET stays exactly as it is here.
+# Phase 1 subsystems, in the order they depend on each other:
+#
+#   osc/      the value type of the whole control plane (OSC 1.1), and the one
+#             number formatter every text surface writes through
+#   command/  named commands, their signatures, and the single ordered queue
+#             every mutation arrives on
+#   log/      the tick-indexed flight recorder (PRD §3.15) and deterministic
+#             replay — built before there is anything to record, deliberately
+#   clock/    the sample counter every other clock derives from (PRD §3.4)
+#   Engine    the facade that ties them together; Console the command line
+#
+# Header-only files are listed as sources on purpose: without them an IDE's
+# project tree shows a library with three files in it, and the headers are
+# where most of the reasoning lives.
 # -----------------------------------------------------------------------------
 add_library(wfg_engine STATIC
-    wfg/engine/Boot.cpp
-    wfg/engine/Boot.h)
+    wfg/engine/Engine.cpp
+    wfg/engine/Engine.h
+    wfg/engine/Console.cpp
+    wfg/engine/Console.h
+    wfg/engine/clock/SampleClock.h
+    wfg/engine/command/Command.h
+    wfg/engine/command/CommandRegistry.cpp
+    wfg/engine/command/CommandRegistry.h
+    wfg/engine/command/Event.h
+    wfg/engine/command/EventQueue.cpp
+    wfg/engine/command/EventQueue.h
+    wfg/engine/log/EventLog.cpp
+    wfg/engine/log/EventLog.h
+    wfg/engine/log/Replay.cpp
+    wfg/engine/log/Replay.h
+    wfg/engine/osc/OscValue.cpp
+    wfg/engine/osc/OscValue.h)
 add_library(wfg::engine ALIAS wfg_engine)
 
 # PUBLIC, and pointed at src/ rather than at src/wfg/ — consumers therefore
-# write  #include <wfg/engine/Boot.h>  , a rooted path that cannot be ambiguous.
-# Do NOT add src/wfg/ or src/wfg/engine/ as an include directory as a
-# convenience: a bare #include <Boot.h> would then resolve against a search path
-# that also carries two whole vendor module trees, and the first vendor header
-# that ever takes the same name wins silently.
+# write  #include <wfg/engine/Engine.h>  , a rooted path that cannot be
+# ambiguous. Do NOT add src/wfg/ or src/wfg/engine/ as an include directory as a
+# convenience: a bare #include <Engine.h> would then resolve against a search
+# path that also carries two whole vendor module trees, and the first vendor
+# header that ever takes the same name wins silently.
 target_include_directories(wfg_engine PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
 
-# wfg::thirdparty is PUBLIC on purpose. Boot.h is JUCE-free today, but
-# wfg_tests links wfg::engine now and the Phase 5 UI and the Phase 9 plugin
-# host will too, and every one of them must compile against the SAME JUCE macro
-# environment. A PRIVATE link here would leave those consumers to assemble
-# their own — and a JUCE/Tracktion header seen under two different sets of
-# JUCE_* defines is an ODR violation that links cleanly and misbehaves at run
-# time. One PUBLIC edge here is what makes that impossible.
+# wfg::thirdparty is PUBLIC on purpose. The engine's own public headers name no
+# JUCE type — Engine.h and Console.h are vendor-free, and that is a rule, not an
+# accident (see the comment at the top of Engine.h) — but wfg_tests links
+# wfg::engine now and the Phase 5 UI and the Phase 9 plugin host will too, and
+# every one of them must compile against the SAME JUCE macro environment. A
+# PRIVATE link here would leave those consumers to assemble their own — and a
+# JUCE/Tracktion header seen under two different sets of JUCE_* defines is an
+# ODR violation that links cleanly and misbehaves at run time.
 #
 # wfg::warnings is PRIVATE, always. It carries -Werror under the `strict`
 # preset; propagating that would let a JUCE or Tracktion bump redden a
@@ -94,6 +119,5 @@ add_executable(wfg wfg/app/Main.cpp)
 target_link_libraries(wfg PRIVATE wfg::engine wfg::warnings)
 
 # NOTE: there is no add_test() in this file. Every add_test() in the project
-# lives in tests/CMakeLists.txt, including the two that run THIS binary
-# (wfg.version and wfg.selftest), so that the full list of what CI actually
-# executes can be read in one place. See tests/CMakeLists.txt.
+# lives in tests/CMakeLists.txt, including the ones that run THIS binary, so
+# that the full list of what CI actually executes can be read in one place.

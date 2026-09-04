@@ -34,6 +34,15 @@ CMakeLists.txt text eol=lf
 *.cpp  text eol=lf
 *.md   text eol=lf
 
+# Event-log fixtures, and this one IS a correctness matter. A replay fixture is
+# committed so the engine can be required to reproduce it byte for byte; if Git
+# handed a Windows checkout the same file with CRLF endings, "byte for byte"
+# would mean two different things on two platforms. The reader tolerates CRLF,
+# deliberately, so a log that has been through an editor still opens — but the
+# committed fixtures are LF everywhere, which is also what the writer emits
+# (EventLog opens its file in binary mode for exactly this reason).
+*.wfglog text eol=lf
+
 # PowerShell too. It is Windows-only by definition and CRLF would be the more
 # conventional choice there, but bootstrap.ps1 is LF on disk today, PowerShell
 # 5.1 and 7 both read LF without complaint, and one rule for the whole tree beats
