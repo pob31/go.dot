@@ -15,6 +15,7 @@
 
 #pragma once
 
+#include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/clock/SampleClock.h>
 
 #include <memory>
@@ -55,6 +56,16 @@ namespace wfg::audio
 
         /** Hardware output channels the graph is built to fill. */
         int outputChannels = 0;
+    };
+
+    /** The shape of the show's audio, read out of the document's <Audio>. */
+    struct EditSpec
+    {
+        /** The polyphony ceiling: N tracks is N simultaneous cues (PRD §3.25). */
+        int tracks = 0;
+
+        /** Channels per track, and so the width of a cue's source. */
+        int channelsPerTrack = 2;
     };
 
     //==============================================================================
@@ -112,6 +123,23 @@ namespace wfg::audio
             stereo pairs behind our back. */
         int waveOutputDeviceCount() const noexcept;
         int waveOutputDeviceWidth() const noexcept;
+
+        /*  Builds the Edit the show plays through: a fixed set of tracks, each
+            with one launcher slot, Go.dot's own output plugin, and a route to
+            the one wide device. Message thread, once, at load - PRD §3.25 fixes
+            the graph here and nothing after this changes its shape.
+
+            False if the engine is not running or the spec is unusable;
+            `lastError` says which. */
+        bool buildEdit (const EditSpec& spec);
+
+        /** How many tracks the generated Edit has. Zero before one is built. */
+        int trackCount() const noexcept;
+
+        /*  A track's output stage - its level and routing coefficients. This is
+            what a media cue writes when it is armed, and what a fade writes at
+            50 Hz. Null for an index no track answers to. */
+        CueMatrix* trackMatrix (int trackIndex) noexcept;
 
     private:
         struct Impl;

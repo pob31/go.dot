@@ -15,6 +15,7 @@
 
 #include <wfg/engine/audio/AudioHost.h>
 
+#include <wfg/engine/audio/CueOutputPlugin.h>
 #include <wfg/engine/clock/AudioClockSource.h>
 
 /*  juce_core and juce_events are named directly even though tracktion_engine.h
@@ -27,6 +28,7 @@
     mid-translation-unit. Nothing below is called VERSION.
 */
 #include <cstdint>
+#include <vector>
 
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
@@ -180,6 +182,11 @@ namespace wfg::audio
                                                    std::make_unique<te::UIBehaviour>(),
                                                    std::make_unique<Behaviour> (requested.outputChannels));
 
+            /*  Registered once, here. It only appends to a list and de-dupes on
+                the type string, so doing it after Engine construction is safe -
+                PluginManager::initialise has already run inside it. */
+            engine->getPluginManager().createBuiltInType<CueOutputPlugin>();
+
             auto& hosted = engine->getDeviceManager().getHostedAudioDeviceInterface();
 
             te::HostedAudioDeviceInterface::Parameters parameters;
@@ -215,8 +222,155 @@ namespace wfg::audio
             return true;
         }
 
+        bool buildEdit (const EditSpec& spec)
+        {
+            if (engine == nullptr || ! running)
+            {
+                error = "the engine is not running";
+                return false;
+            }
+
+            if (spec.tracks < 0 || spec.channelsPerTrack <= 0)
+            {
+                error = "a track count cannot be negative and a track must have channels";
+                return false;
+            }
+
+            edit.reset();
+            matrices.clear();
+
+            /*  createEmptyEdit touches no disk. Edit::createEdit is the only
+                non-test, non-preview factory; the Edit ctor and
+                createSingleTrackEdit both hard-code one track. */
+            te::Edit::Options options { *engine };
+            options.editState = te::createEmptyEdit (*engine);
+            options.editProjectItemID = te::ProjectItemID::createNewID (te::ProjectID{});
+
+            /*  forEditing is the role that plays. The bitmask also lets us turn
+                proxy rendering off structurally rather than per clip - Go.dot
+                streams the original file and writes nothing beside it. */
+            options.role = static_cast<te::Edit::EditRole> (te::Edit::proxiesDisabled);
+            options.loadContext = nullptr;
+
+            /*  The Edit is generated from the document and never saved (§3.25),
+                so there is nothing to undo in it and no file to resolve to. */
+            options.numUndoLevelsToStore = 1;
+            options.editFileRetriever = [] { return juce::File(); };
+            options.filePathResolver = [] (const juce::String& path) { return juce::File (path); };
+
+            options.numAudioTracks = spec.tracks;
+
+            /*  Tracktion's default is -3 dB on the master. A show that asked for
+                0 dB and got -3 would be quietly wrong by half a level. */
+            options.defaultMasterVolumedB = 0.0f;
+
+            edit = te::Edit::createEdit (std::move (options));
+
+            if (edit == nullptr)
+            {
+                error = "Tracktion could not create the Edit";
+                return false;
+            }
+
+            /*  Both of these call restartPlayback(), which is free while there
+                is no playback context and a full graph rebuild once there is.
+                They belong here, before any clip and before the transport. */
+            edit->setLatencyCompensationEnabled (false);
+
+            /*  60 bpm, so one beat is one second. Launch instants are expressed
+                as a MonotonicBeat, and Go.dot counts in samples and seconds -
+                this is what makes the conversion arithmetic rather than tempo. */
+            if (auto* tempo = edit->tempoSequence.getTempo (0))
+                tempo->setBpm (60.0);
+
+            const auto tracks = te::getAudioTracks (*edit);
+
+            for (auto* track : tracks)
+            {
+                if (track == nullptr)
+                    continue;
+
+                /*  Tracktion's own volume and meter plugins go. The volume one
+                    takes a spin lock on the audio thread for VCA support Go.dot
+                    does not use, and it is stereo-shaped - it would remap a
+                    mono cue to two channels before our matrix ever saw it,
+                    which is exactly the silent widening §3.9b forbids. */
+                if (auto* volume = track->getVolumePlugin())
+                    volume->removeFromParent();
+
+                if (auto* meter = track->getLevelMeterPlugin())
+                    meter->removeFromParent();
+
+                /*  One slot per track in Phase 2: one cue per track at a time,
+                    which is what the polyphony ceiling means. */
+                track->getClipSlotList().ensureNumberOfSlots (1);
+
+                auto plugin = track->pluginList.insertPlugin (
+                    CueOutputPlugin::create (spec.channelsPerTrack, current.outputChannels), -1);
+
+                auto* output = dynamic_cast<CueOutputPlugin*> (plugin.get());
+
+                if (output == nullptr)
+                {
+                    error = "the cue output plugin would not insert";
+                    edit.reset();
+                    matrices.clear();
+                    return false;
+                }
+
+                matrices.push_back (&output->matrix());
+
+                /*  Routed once, to the one wide device. This is the structural
+                    edit that never happens again. */
+                if (auto& manager = engine->getDeviceManager();
+                    manager.getNumWaveOutDevices() > 0)
+                    if (auto* wide = manager.getWaveOutDevice (0))
+                        track->getOutput().setOutputToDeviceID (wide->getDeviceID());
+            }
+
+            /*  The engine's own idiom before allocating a context: flush the
+                asynchronous updates the edits above queued, rather than pumping
+                a message loop and hoping. */
+            edit->dispatchPendingUpdatesSynchronously();
+
+            /*  THE TRANSPORT STARTS HERE AND IS NEVER STOPPED (PRD §3.25). It
+                is not a play button - it is the clock everything else is placed
+                against, and stopping it would be stopping time.
+
+                It also has to happen for the graph to exist at all: a plugin's
+                initialise() runs when the playback context is allocated, and
+                until then the output stages have no buffers and no sample rate.
+
+                The rate is checked rather than assumed. createNode falls back to
+                44100/256 if the device manager reports nothing, building a
+                complete and perfectly working graph at the wrong rate, with
+                nothing logged - which would show up as a show running slightly
+                fast and no clue why. */
+            auto& manager = engine->getDeviceManager();
+
+            if (manager.getSampleRate() <= 0.0 || manager.getBlockSize() <= 0)
+            {
+                error = "the device manager reports no sample rate, so the graph would"
+                        " be built at a fallback rate nobody asked for";
+                edit.reset();
+                matrices.clear();
+                return false;
+            }
+
+            auto& transport = edit->getTransport();
+
+            transport.ensureContextAllocated();
+            transport.play (false);
+
+            error.clear();
+            return true;
+        }
+
         void stop()
         {
+            edit.reset();
+            matrices.clear();
+
             if (engine != nullptr)
             {
                 /*  Tearing the engine down touches the same flag that starting
@@ -258,6 +412,8 @@ namespace wfg::audio
         juce::File storageFolder;
 
         std::unique_ptr<te::Engine> engine;
+        std::unique_ptr<te::Edit> edit;
+        std::vector<CueMatrix*> matrices;
         juce::AudioBuffer<float> scratch;
         juce::MidiBuffer midi;
 
@@ -293,6 +449,21 @@ namespace wfg::audio
 
     const SampleClock& AudioHost::clock() const noexcept   { return impl->samples; }
     const HostSettings& AudioHost::settings() const noexcept { return impl->current; }
+
+    bool AudioHost::buildEdit (const EditSpec& spec)  { return impl->buildEdit (spec); }
+
+    int AudioHost::trackCount() const noexcept
+    {
+        return static_cast<int> (impl->matrices.size());
+    }
+
+    CueMatrix* AudioHost::trackMatrix (int trackIndex) noexcept
+    {
+        if (trackIndex < 0 || trackIndex >= trackCount())
+            return nullptr;
+
+        return impl->matrices[static_cast<std::size_t> (trackIndex)];
+    }
 
     int AudioHost::waveOutputDeviceCount() const noexcept
     {

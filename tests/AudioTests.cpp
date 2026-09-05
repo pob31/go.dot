@@ -482,3 +482,118 @@ TEST_CASE ("audio host: the wide device follows the channel count it was asked f
         CHECK (rig.host.waveOutputDeviceWidth() == channels);
     }
 }
+
+//==============================================================================
+/*  The generated Edit: the fixed track set PRD 3.25 asks for, built from the
+    document rather than loaded from one. */
+namespace
+{
+    audio::HostSettings hostFor (int outputs)
+    {
+        audio::HostSettings settings;
+        settings.sampleRate = 48000;
+        settings.blockSize = 128;
+        settings.outputChannels = outputs;
+        return settings;
+    }
+}
+
+TEST_CASE ("edit: the track set is fixed at load, and every track carries an output stage")
+{
+    HostRig rig;
+    REQUIRE (rig.host.start (hostFor (8)));
+
+    audio::EditSpec spec;
+    spec.tracks = 4;
+    spec.channelsPerTrack = 2;
+
+    INFO ("build error: " << rig.host.lastError());
+    REQUIRE (rig.host.buildEdit (spec));
+
+    CHECK (rig.host.trackCount() == 4);
+
+    for (int track = 0; track < 4; ++track)
+    {
+        INFO ("track " << track);
+        auto* matrix = rig.host.trackMatrix (track);
+
+        REQUIRE (matrix != nullptr);
+        CHECK (matrix->numInputs() == 2);
+
+        /*  THE ASSERTION THIS FILE EXISTS FOR. The plugin is as wide as the
+            rig, not as wide as a stereo pair. Tracktion sizes a plugin node
+            from getNumOutputChannelsGivenInputs, whose default answers 2 - so
+            a 2 here would mean six of the eight outputs were being dropped
+            with nothing said about it. */
+        CHECK (matrix->numOutputs() == 8);
+    }
+
+    CHECK (rig.host.trackMatrix (-1) == nullptr);
+    CHECK (rig.host.trackMatrix (4) == nullptr);
+}
+
+TEST_CASE ("edit: the graph runs with the tracks in it")
+{
+    /*  Building the Edit puts four plugin nodes in the playback graph. If any
+        of them refused to initialise, or the plugin type were unregistered and
+        the insert returned null, this is where it would show. */
+    HostRig rig;
+    REQUIRE (rig.host.start (hostFor (4)));
+
+    audio::EditSpec spec;
+    spec.tracks = 3;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    for (int i = 0; i < 10; ++i)
+        rig.host.processBlock();
+
+    CHECK (rig.host.blocksProcessed() == 10);
+    CHECK (rig.host.clock().samplesElapsed() == 10 * 128);
+}
+
+TEST_CASE ("edit: a show with no audio builds an Edit with no tracks")
+{
+    /*  tracks=0 is a legal document (see the schema cases above): a video or
+        OSC-only show. It must produce a working engine with nothing in it,
+        not a refusal. */
+    HostRig rig;
+    REQUIRE (rig.host.start (hostFor (2)));
+
+    audio::EditSpec spec;
+    spec.tracks = 0;
+
+    REQUIRE (rig.host.buildEdit (spec));
+    CHECK (rig.host.trackCount() == 0);
+
+    rig.host.processBlock();
+    CHECK (rig.host.blocksProcessed() == 1);
+}
+
+TEST_CASE ("edit: building one before the engine is up is refused, with a reason")
+{
+    HostRig rig;
+
+    audio::EditSpec spec;
+    spec.tracks = 2;
+
+    CHECK_FALSE (rig.host.buildEdit (spec));
+    CHECK_FALSE (rig.host.lastError().empty());
+}
+
+TEST_CASE ("edit: the width follows the rig, from a stereo pair to sixty-four")
+{
+    for (const int outputs : { 2, 16, 64 })
+    {
+        INFO ("rig outputs: " << outputs);
+
+        HostRig rig;
+        REQUIRE (rig.host.start (hostFor (outputs)));
+
+        audio::EditSpec spec;
+        spec.tracks = 2;
+        REQUIRE (rig.host.buildEdit (spec));
+
+        REQUIRE (rig.host.trackMatrix (0) != nullptr);
+        CHECK (rig.host.trackMatrix (0)->numOutputs() == outputs);
+    }
+}
