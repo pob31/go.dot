@@ -387,6 +387,45 @@ namespace wfg::tree
                     }
                 }
             }
+            else if (containerName == "Audio")
+            {
+                /*  The one container that publishes attributes of its own.
+                    `tracks` is stored; the other three describe what the audio
+                    side is actually doing and are runtime state the document
+                    never holds - so they are supplied here from EngineState
+                    once PR 2.7 opens a device, and read their table defaults
+                    until then. Saying "stopped" with no device open is the
+                    truthful answer, not a placeholder. */
+                for (const auto* row : doc::Schema::rowsForOwner ("audio"))
+                {
+                    const doc::Attribute attribute { "Audio", row };
+                    const auto name = std::string (row->name);
+                    const auto text = row->persist == doc::Persist::none
+                                        ? std::string (row->defaultText)
+                                        : storedText (attribute, container);
+
+                    nodes.push_back (makeLeaf (std::string (godot) + "/audio/" + name,
+                                               *row, text));
+                }
+
+                for (const auto& bus : container)
+                {
+                    const auto id = bus[idProperty].toString().toStdString();
+
+                    if (id.empty())
+                        continue;
+
+                    const auto base = std::string (godot) + "/bus/" + id;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("bus"))
+                    {
+                        const doc::Attribute attribute { "Bus", row };
+
+                        nodes.push_back (makeLeaf (base + "/" + std::string (row->name),
+                                                   *row, storedText (attribute, bus)));
+                    }
+                }
+            }
         }
 
         //----------------------------------------------------------------------

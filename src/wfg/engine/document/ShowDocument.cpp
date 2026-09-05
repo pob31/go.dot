@@ -164,7 +164,9 @@ namespace wfg::doc
         if (element == "Cue" || element == "Group") return "cue";
         if (element == "List")                      return "list";
         if (element == "Mount")                     return "mount";
+        if (element == "Bus")                       return "bus";
         if (element == "Show")                      return "document";
+        if (element == "Audio")                     return "audio";
         return {};
     }
 
@@ -179,6 +181,15 @@ namespace wfg::doc
             than three. */
         showNode.addChild (juce::ValueTree ("Lists"), -1, nullptr);
         showNode.addChild (juce::ValueTree ("Mounts"), -1, nullptr);
+
+        /*  Audio is a container like the other two, but unlike them it carries
+            a value of its own, and that value has no default: `tracks` is the
+            polyphony ceiling and every show has to state it. A fresh document
+            says zero, which is a real answer - a show with no audio - and not
+            a placeholder standing in for one. */
+        juce::ValueTree audio { "Audio" };
+        audio.setProperty ("tracks", 0, nullptr);
+        showNode.addChild (audio, -1, nullptr);
     }
 
     void ShowDocument::adopt (juce::ValueTree newRoot, IdRegistry newRegistry)
@@ -234,13 +245,21 @@ namespace wfg::doc
         juce::ValueTree node;
         std::string attributeName;
 
-        if (owner == "document")
+        if (owner == "document" || owner == "audio")
         {
             if (parts.size() != 3)
                 return out;
 
-            node = showNode;
+            /*  The two owners that name an element rather than an object.
+                `document` is the root itself; `audio` is the one container
+                that carries attributes, because the track count is a fact
+                about the whole show and not about any bus in it. Neither has
+                an identifier to look up, so neither takes the id path. */
+            node = owner == "document" ? showNode : showNode.getChildWithName ("Audio");
             attributeName = parts[2];
+
+            if (! node.isValid())
+                return out;
         }
         else
         {

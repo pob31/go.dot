@@ -11,4 +11,5 @@
   <Mounts>
     <Mount id="G1JS4VWE" namespace="namespaces/wfs-diy.json" prefix="/wfs"/>
   </Mounts>
+  <Audio tracks="4"/>
 </Show>

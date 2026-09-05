@@ -12,4 +12,5 @@
   <Mounts>
     <Mount id="G1JS4VWE" prefix="/wfs" namespace="namespaces/wfs-diy.json" rateCap="50.0"/>
   </Mounts>
+      <Audio    tracks="4"/>
 </Show>

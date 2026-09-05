@@ -91,10 +91,18 @@ namespace wfg::doc
                       Group        <- a Cue that also holds Cues and Groups
                   Mounts
                     Mount          <- id, a foreign namespace
+                  Audio            <- tracks: the polyphony ceiling
+                    Bus            <- id, a named range of output channels
 
             Containers (Lists, Mounts) carry nothing and exist so the file has
             somewhere obvious to put a new List, and so a diff of one list does
             not touch the mounts.
+
+            Audio is not one of those: it carries `tracks` itself, because the
+            track count is one number about the whole show rather than a
+            property of any bus. It is the shape of the machine the show expects
+            to run on - which is a thing someone decided (§4.10), so it lives in
+            the document and not in a preference.
         */
         struct Containment
         {
@@ -107,13 +115,15 @@ namespace wfg::doc
         const std::vector<Containment>& containmentTable()
         {
             static const std::vector<Containment> table {
-                { "Show",   false, { "Lists", "Mounts" },  { "document" } },
+                { "Show",   false, { "Lists", "Mounts", "Audio" }, { "document" } },
                 { "Lists",  false, { "List" },             {} },
                 { "List",   true,  { "Cue", "Group" },     { "list" } },
                 { "Cue",    true,  {},                     { "cue" } },
                 { "Group",  true,  { "Cue", "Group" },     { "cue", "group" } },
                 { "Mounts", false, { "Mount" },            {} },
                 { "Mount",  true,  {},                     { "mount" } },
+                { "Audio",  false, { "Bus" },              { "audio" } },
+                { "Bus",    true,  {},                     { "bus" } },
             };
 
             return table;

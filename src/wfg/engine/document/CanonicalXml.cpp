@@ -335,6 +335,44 @@ namespace wfg::doc
                     }
                 }
 
+                /*  REQUIRED ATTRIBUTES, and the rule that decides which are.
+
+                    A row with a declared default is optional: absent means the
+                    default, and the canonical writer omits it precisely so that
+                    two files do not spell one show. A row with NO default has
+                    nothing to fall back on - so if its type can tell absence
+                    from emptiness, absence is a hole and not a value.
+
+                    That last clause is the whole rule. For a string, "" IS a
+                    value and an absent `notes` reads back as the empty note
+                    somebody meant; those rows are optional and always have
+                    been. For a number or a boolean there is no such reading:
+                    the formatter cannot produce "", so an absent one was never
+                    written by us and cannot be defaulted either.
+
+                    Today that makes exactly one attribute required, `Audio`'s
+                    `tracks`, which is the intent - the polyphony ceiling is a
+                    decision every show has to state and no number here could be
+                    right for every rig. The rule is general rather than a named
+                    exception so that the next such attribute needs a table row
+                    and nothing else. */
+                for (const auto& attribute : element->attributes)
+                {
+                    if (attribute.hasDefault() || attribute.persist() != Persist::show)
+                        continue;
+
+                    if (attribute.type() == ValueType::string
+                          || attribute.type() == ValueType::blob)
+                        continue;
+
+                    const juce::String attributeName { std::string (attribute.name()) };
+
+                    if (! xml.hasAttribute (attributeName))
+                        problems.push_back (here + ": <" + elementName + "> must carry \""
+                                            + std::string (attribute.name()) + "\", which has no"
+                                            " default to fall back on");
+                }
+
                 for (auto* child : xml.getChildIterator())
                 {
                     if (child->isTextElement())

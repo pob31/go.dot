@@ -39,6 +39,7 @@
       </optional>
       <ref name="Lists"/>
       <ref name="Mounts"/>
+      <ref name="Audio"/>
     </element>
   </define>
 
@@ -267,6 +268,52 @@
             <value>tcp</value>
             <value>ws</value>
           </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Audio">
+    <element name="Audio">
+      <optional>
+        <attribute name="tracks">
+          <a:documentation>The fixed number of audio tracks, and so the polyphony ceiling: N tracks is N simultaneous cues. Zero is legal and means a show with no audio. Required, and deliberately without a default - the number is a decision about the shape of a show, and no value here could be right for every rig.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <ref name="Bus"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Bus">
+    <element name="Bus">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="firstChannel">
+          <a:documentation>The first hardware output channel this bus occupies, counting from zero.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The bus name as the designer wrote it. Names are what appear in a dropdown and on a scribble strip; channel numbers are not.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="width">
+          <a:documentation>How many consecutive channels the bus occupies. Explicit and never inferred: the engine will not quietly widen or narrow a cue to make it fit.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+          </data>
         </attribute>
       </optional>
     </element>

@@ -72,6 +72,7 @@ add_executable(wfg_tests
     BundleTests.cpp
     ClockTests.cpp
     TreeTests.cpp
+    AudioTests.cpp
     MountTests.cpp
     JsonTests.cpp
     CueListTests.cpp

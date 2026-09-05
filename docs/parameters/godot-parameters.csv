@@ -38,3 +38,10 @@ mount,anticipatable,T,r,false,,,state,1,no,park,show,Whether the mounted nodes m
 mount,panic,s,r,park,park|snap,,state,1,no,park,show,Default resting state for the mounted nodes.
 mount,loaded,T,r,false,,,state,1,no,park,none,Whether the namespace file has been read.
 mount,nodeCount,i,r,0,,,state,1,no,park,none,How many nodes the mount contributed.
+audio,tracks,i,r,,0..,,state,1,no,park,show,"The fixed number of audio tracks, and so the polyphony ceiling: N tracks is N simultaneous cues. Zero is legal and means a show with no audio. Required, and deliberately without a default - the number is a decision about the shape of a show, and no value here could be right for every rig."
+audio,device,s,r,,,,state,1,no,park,none,"The audio device the engine has open, or empty when there is none."
+audio,outputs,i,r,0,0..,,state,1,no,park,none,How many hardware output channels are available to route to. A cue wider than this is refused when the show loads.
+audio,status,s,r,stopped,stopped|running|noClock,,state,5,no,park,none,"Whether audio is running. An unlocked device is present and producing nothing, which is a different failure from no device at all and wants a different remedy."
+bus,name,s,rw,,,,state,50,no,park,show,"The bus name as the designer wrote it. Names are what appear in a dropdown and on a scribble strip; channel numbers are not."
+bus,firstChannel,i,r,0,0..,,state,1,no,park,show,"The first hardware output channel this bus occupies, counting from zero."
+bus,width,i,r,1,1..,,state,1,no,park,show,"How many consecutive channels the bus occupies. Explicit and never inferred: the engine will not quietly widen or narrow a cue to make it fit."

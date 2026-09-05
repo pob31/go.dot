@@ -12,4 +12,8 @@
     <Mount id="G1JS4VWE" namespace="namespaces/wfs-diy.json" prefix="/wfs"/>
     <Mount id="H2KP7RTV" namespace="namespaces/console.json" prefix="/ext/console"/>
   </Mounts>
+  <Audio tracks="8">
+    <Bus id="J3MT5XYA" name="Main L/R" width="2"/>
+    <Bus id="K4NV6ZB1" firstChannel="2" name="Foldback" width="2"/>
+  </Audio>
 </Show>
