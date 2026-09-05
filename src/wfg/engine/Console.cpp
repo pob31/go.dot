@@ -180,7 +180,37 @@ namespace
     */
     void listCommands()
     {
-        const wfg::Engine engine;
+        /*  THE WHOLE SET, REGISTERED AGAINST AN EMPTY SHOW.
+
+            A bare Engine knows `noop` and nothing else, and this verb printed
+            exactly that until Phase 1's close-out - which made PRD 4.11's
+            promise the one thing nobody could check, in the verb that exists to
+            check it. ctest runs `wfg commands` under both locales for that
+            reason, and it was passing on a list of one.
+
+            Registering against an empty document is honest rather than a
+            workaround: the registry is construction-time (CommandRegistry has
+            no unregister), and WHICH commands exist does not depend on what is
+            in the show. Only whether they would succeed does, and this verb
+            does not run them.
+
+            document.save is registered against a folder that is deliberately
+            not written to. It appears in the list, which is the point, and
+            nothing here invokes it. */
+        wfg::Engine engine;
+
+        wfg::doc::ShowDocument document;
+        wfg::tree::TouchTable touches;
+        wfg::tree::MountTable mounts;
+        wfg::cue::Focus focus;
+
+        const auto nowhere = juce::File::getCurrentWorkingDirectory();
+
+        wfg::doc::registerDocumentCommands (engine.commands(), document);
+        wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::tree::registerTreeCommands (engine.commands(), touches);
+        wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
+        wfg::doc::registerBundleCommands (engine.commands(), document, nowhere);
 
         for (const auto& command : engine.commands().all())
         {
