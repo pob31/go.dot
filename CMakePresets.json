@@ -88,6 +88,20 @@
     },
 
     {
+      "name": "rtsan",
+      "inherits": "dev",
+      "displayName": "rtsan (Clang's real-time sanitizer)",
+      "description": "The second net under PRD 4.2, and it catches what the allocation counter cannot: locks, syscalls and anything else that can block, not just calls to operator new. It needs Clang 20 or newer - -fsanitize=realtime does not exist before it - so this preset is expected to fail to configure on the Windows box and on macOS's Apple Clang, and that is not a defect. It lands anyway because a preset nobody can run is still the record of how to run it, and because the Linux CI job needs something to name. Tracktion is suppressed rather than fixed: its device callback takes a shared lock every block by design, which src/wfg/engine/rt/RtCheck.h explains and /godot/engine/rtForeignAllocations publishes. The suppression list is tools/rtsan-suppressions.txt and is passed at RUN time through RTSAN_OPTIONS, not here.",
+      "cacheVariables": {
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_CXX_FLAGS": "-fsanitize=realtime",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=realtime",
+        "WFG_RT_CHECKS": "ON"
+      }
+    },
+
+    {
       "name": "spikes",
       "inherits": "ci-linux",
       "displayName": "spikes (throwaway PRD 6.1 programs)",
@@ -142,6 +156,11 @@
     {
       "name": "strict-ci-debug",
       "configurePreset": "strict-ci",
+      "configuration": "Debug"
+    },
+    {
+      "name": "rtsan-debug",
+      "configurePreset": "rtsan",
       "configuration": "Debug"
     },
     {

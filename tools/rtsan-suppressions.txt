@@ -1,0 +1,38 @@
+# Real-time sanitizer suppressions for Go.dot — https://github.com/pob31/go.dot
+#
+# Copyright (C) 2026 Pierre-Olivier Boulant
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Passed at RUN time, not build time:
+#
+#     RTSAN_OPTIONS=suppressions=tools/rtsan-suppressions.txt ./wfg_tests
+#
+# WHAT IS SUPPRESSED HERE AND WHY IT IS NOT A FIX.
+#
+# PRD §4.2 is Go.dot's rule about Go.dot's code. Tracktion Engine is a dependency
+# this project chose with its eyes open, and its audio callback blocks by design:
+# DeviceManager::audioDeviceIOCallbackInternal takes a std::shared_lock on
+# contextLock every block, and the node player's thread pool uses semaphores and
+# yields. None of that is a defect in Tracktion and none of it is Go.dot's to
+# repair. Suppressing it here is what makes the sanitizer's remaining output mean
+# something: without these, every block reports the same known lock and the one
+# new violation that mattered would be one line in ten thousand.
+#
+# The cost is not hidden by suppressing it. Go.dot counts Tracktion's allocations
+# separately at run time and publishes the number at
+# /godot/engine/rtForeignAllocations, measured at two per track per block on the
+# single-threaded node player. src/wfg/engine/rt/RtCheck.h carries the reasoning.
+#
+# NOTHING OF GO.DOT'S IS SUPPRESSED, and nothing of Go.dot's may be added below.
+# A suppression on our own symbol is a rule being deleted rather than enforced —
+# if Go.dot's code blocks on the audio thread, the answer is to stop it blocking.
+
+# ---------------------------------------------------------------------------
+# Tracktion Engine — the device callback and everything it calls.
+call-stack-contains:tracktion::engine::DeviceManager::audioDeviceIOCallback*
+call-stack-contains:tracktion::engine::EditPlaybackContext::fillNextNodeBlock*
+call-stack-contains:tracktion::graph::LockFreeMultiThreadedNodePlayer::*
+call-stack-contains:tracktion::graph::NodePlayer::*
+
+# JUCE's own audio device layer, which sits under the same callback.
+call-stack-contains:juce::AudioDeviceManager::audioDeviceIOCallback*
