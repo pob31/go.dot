@@ -508,6 +508,11 @@ namespace wfg::audio
             if (edit == nullptr || engine == nullptr)
                 return report;
 
+            auto* context = edit->getCurrentPlaybackContext();
+
+            if (context == nullptr)
+                return report;
+
             /*  A throwaway graph, built the way the playback context builds one,
                 purely to be inspected. Its PlayHead never runs; nothing here
                 touches the graph that is actually playing. */
@@ -522,7 +527,18 @@ namespace wfg::audio
             params.sampleRate = static_cast<double> (current.sampleRate);
             params.blockSize = current.blockSize;
 
-            auto node = te::createNodeForEdit (*edit, params);
+            /*  THE PLAYBACK-CONTEXT OVERLOAD, and the distinction is the whole
+                check. createNodeForEdit (Edit&, params) builds the tracks and
+                the master chain and stops there: no per-device summing node, no
+                click node, no ChannelRemappingNode at the device boundary, no
+                PlayHeadPositionNode. Measured on one track at eight outputs it
+                answers 9 nodes where the graph that actually plays has 15 - so
+                the six nodes nearest the hardware, the ones a wide device is
+                most likely to collide on, were exactly the ones not looked at.
+
+                This overload is what EditPlaybackContext itself calls. */
+            std::atomic<double> audibleTime { 0.0 };
+            auto node = te::createNodeForEdit (*context, audibleTime, params);
 
             if (node == nullptr)
                 return report;
