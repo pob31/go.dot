@@ -67,7 +67,7 @@ over is the drift.
 
 | Need | Reuse | Status |
 |---|---|---|
-| HTTP + WebSocket transport for OSCQuery | `juce_simpleweb` (`SimpleWebSocketServer`, `SimpleWebSocketClient`) | **pinned at `b953ada` in PR 1.D**, and proven on all three platforms by `SimpleWebToolchainTests.cpp`. One defect found doing it: `start(0)` cannot report its bound port — see *juce_simpleweb cannot bind an ephemeral port* |
+| HTTP + WebSocket transport for OSCQuery | `juce_simpleweb` (`SimpleWebSocketServer`, `SimpleWebSocketClient`) | **pinned at `b72ec94` since PR 1.10**, and proven on all three platforms by `SimpleWebToolchainTests.cpp`. One defect found and fixed upstream doing it: `start(0)` could not report its bound port — see below |
 | OSCQuery server shape | `WFS_DIY_v1/Source/Network/OSCQueryServer.{h,cpp}`: HOST_INFO, full tree, attribute queries, LISTEN/IGNORE, 30 ms coalesced binary pushes, PATH_CHANGED, per-IP echo suppression | **pattern only** — the transport shell is generic, the namespace builders are WFS-specific, and its HTTP handler walks the live ValueTree from a worker thread (a race Go.dot's snapshot removes). Go.dot's server is written in-tree behind a namespace-provider seam |
 | OSC codec | `spatcore/control/osc/{OSCParser,OSCSerializer}.h` | **not usable**: it drops bundle time tags, cannot serialise `T`/`F`, decodes them as an int32 `1`/`0`, and throws on an unknown tag. Go.dot writes its own full OSC 1.1 codec, shaped so it can be lifted into spatcore. *(Draft 0.1 also called it JUCE-9-only. That was wrong — see the correction below.)* |
 | UDP/TCP receivers with sender IP | `spatcore/control/osc/{OSCReceiverWithSenderIP,OSCTCPReceiver}` (raw-data callback path) | **shape reused** (raw datagram + sender IP:port), code not: their legacy path pulls `OSCParser.h` in |
@@ -155,11 +155,17 @@ so if JUCE ever fixes `parseNumber` the build says so and the question can be re
 Worth knowing in WFS-DIY and spatcore too: both parse OSCQuery replies with `juce::JSON`.
 The values at risk are range bounds and any large integer a target reports.
 
-### juce_simpleweb cannot bind an ephemeral port — found while building PR 1.D
+### juce_simpleweb could not bind an ephemeral port — found in PR 1.D, fixed in PR 1.10
 
-**`SimpleWebSocketServer::start(0)` binds successfully and then cannot tell you what it
-bound.** Confirmed by test, not by reading: `SimpleWebToolchainTests.cpp` pins the
-behaviour so that fixing it turns the test red.
+**Fixed upstream at `b72ec94`, and Go.dot is pinned there.** The account below is kept
+because the failure mode is worth recognising again, and because the same comparison
+appears in other people's start callbacks.
+
+`SimpleWebSocketServer::start(0)` used to bind successfully and then be unable to tell you
+what it bound. Confirmed by test, not by reading: `SimpleWebToolchainTests.cpp` pinned the
+broken behaviour with a note saying it would go red the day somebody fixed it. It did, and
+that test now asserts the opposite - it is the check that the fix is really in the pinned
+submodule, so a bad re-pin fails there rather than in the black-box harness.
 
 `SimpleWebSocketServer.cpp:374-377`:
 
@@ -176,7 +182,7 @@ the ephemeral request — they never agree, so `isConnected` stays `false` for t
 server that is in fact listening, and the one number anybody needs in order to reach it is
 discarded.
 
-**The fix is one line, and it is correct for both cases:**
+**The fix was two lines, applied to both servers:**
 
 ```cpp
 void SimpleWebSocketServer::httpStartCallback (unsigned short _port)
@@ -186,25 +192,26 @@ void SimpleWebSocketServer::httpStartCallback (unsigned short _port)
 }
 ```
 
-**This is not a test-only inconvenience.** The plan has `wfg serve --http-port=0` print its
-bound port so the black-box harness (PR 1.10) can drive it, and the same property is what
-lets two Go.dot instances coexist on one machine. PR 1.9 needs it. Meanwhile PR 1.D's tests
-work around it by binding a probe socket on port 0, reading the port the OS granted,
-releasing it and handing that number to the server — which has a real race between the
-release and the bind, and is why the workaround is not the answer.
+Which is what the comparison already meant for a fixed port, and the only way to learn the
+answer for an ephemeral one. `SecureWebSocketServer` carried the identical bug at `:666`
+and got the identical fix.
 
-It affects **every app in the family**, since all four vendor the same code, and none of
-them has noticed because all four pass a fixed port from configuration. `SecureWebSocketServer`
-carries the identical bug at `:666-669`.
+**It was never a test-only inconvenience.** `wfg serve --http-port=0` prints its bound port
+so the black-box harness can drive it, and binding 0 is how two Go.dot instances coexist on
+one machine. PR 1.D shipped with a workaround — borrow a port from the OS, release it, hand
+the number to the server — which carried a real race between the release and the bind. That
+workaround is gone.
 
-**Author decision needed:** this is a one-line commit to `pob31/juce_simpleweb` plus a
-re-pin here. It is not blocking PR 1.D, which is green with the workaround; it blocks the
-`--http-port=0` half of PR 1.9/1.10.
+**It affected every app in the family**, since all four vendor the same code, and none had
+noticed because all four pass a fixed port from configuration. WFS-DIY, XOA and Tight-WFS
+get the fix by moving to `b72ec94` whenever they next re-pin.
 
 ### Which juce_simpleweb to pin — settled 2026-09-05
 
-**Pin `pob31/juce_simpleweb` master at `b953ada` or later.** It is upstream master plus two
-commits, and every copy in the family now holds the same code.
+**Pin `pob31/juce_simpleweb` master at `b72ec94` or later.** It is upstream master plus
+three commits: the TLS-off guard, the Windows fixes, and the ephemeral-port fix below.
+Go.dot is on `b72ec94`; the other three apps hold `b953ada` until they next re-pin, and
+inherit the port fix when they do.
 
 **The fork is the answer, not a stopgap, and it is the answer FOR EVERY APP IN THE FAMILY**
 (author, 2026-09-05: stick with the fork of juce_simpleweb for all apps until further

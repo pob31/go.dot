@@ -77,7 +77,8 @@ add_executable(wfg_tests
     CueListTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
-    SpatcoreToolchainTests.cpp)
+    SpatcoreToolchainTests.cpp
+    OscQueryTests.cpp)
 
 # Where the hand-authored fixtures live. Passed as a definition rather than
 # copied next to the binary: the fixtures are inputs to read, not artefacts to

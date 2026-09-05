@@ -134,15 +134,19 @@ namespace wfg::oscquery
 
         /*  Binds and starts serving. `nameSpace` must outlive the server.
 
-            `port` MUST BE NON-ZERO, and that is a defect being worked around
-            rather than a design choice. juce_simpleweb's start callback
-            compares the port requested against the port granted
-            (SimpleWebSocketServer.cpp:374-377), so an ephemeral request binds
-            successfully and then reports failure for ever, discarding the
-            number. Until the fork carries `port = _port; isConnected = true;`,
-            a caller who wants an ephemeral port has to pick one itself.
-            docs/godot-reuse-map-0.1.md carries the finding and
-            SimpleWebToolchainTests.cpp pins the behaviour. */
+            `port` 0 binds an ephemeral one, and boundPort() then says which.
+            That is what every test uses and what `wfg serve --http-port=0`
+            gives the black-box harness: a fixed port makes a suite that cannot
+            run twice at once, and two Go.dot instances on one machine would
+            collide.
+
+            It did not always work. juce_simpleweb's start callback compared the
+            port REQUESTED against the port GRANTED, so an ephemeral request
+            bound successfully and then reported failure for ever, discarding
+            the number. Fixed upstream in the fork at b72ec94 and pinned here;
+            OscQueryTests has a case that binds 0 and reaches the port it is
+            told, so a regression in the submodule surfaces here rather than in
+            PR 1.10's harness. */
         bool start (int port, Namespace& nameSpace);
 
         void stop();

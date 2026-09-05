@@ -30,36 +30,21 @@ namespace wfg::oscquery
 {
     namespace
     {
-        /*  A request path and its query, split at the first `?`.
+        /*  THE QUERY COMES FROM `request->query_string`, NOT FROM THE PATH.
 
-            Parsed by hand rather than through juce::URL, and that is not
-            stubbornness: juce::URL re-encodes OSCQuery's bare `?HOST_INFO` as
-            `?HOST_INFO=`, and a server matching on the exact string then does
-            not match. WFS-DIY hit precisely this and had to abandon juce::URL
-            in its own OSCQuery client (recorded in the reuse map). The same
-            trap on the server side would make Go.dot unreachable from any
-            client that got it right. */
-        struct Request
-        {
-            std::string path;
-            std::string query;      // empty when there was no `?`
-        };
+            Simple-Web-Server splits them when it parses the request line
+            (common/utility.hpp:254-275): `path` is everything up to the `?` and
+            `query_string` is everything after it. An earlier version of this
+            file searched `path` for a `?`, found none, and therefore treated
+            every attribute query as a plain GET - `?VALUE` on a container came
+            back as 200 with the whole subtree instead of 204, and `?HOST_INFO`
+            returned the tree instead of the host block. Both looked like
+            working replies, which is what made it worth a comment.
 
-        Request splitQuery (const std::string& target)
-        {
-            Request out;
-            const auto mark = target.find ('?');
-
-            if (mark == std::string::npos)
-            {
-                out.path = target;
-                return out;
-            }
-
-            out.path = target.substr (0, mark);
-            out.query = target.substr (mark + 1);
-            return out;
-        }
+            Nothing here re-parses or re-encodes either field. juce::URL would
+            turn OSCQuery's bare `?HOST_INFO` into `?HOST_INFO=`, which no
+            server matching the spec will recognise; WFS-DIY hit exactly that
+            and abandoned juce::URL in its own OSCQuery client. */
 
         /*  An OSCQuery attribute query is a BARE key: `?VALUE`, not `?VALUE=`.
             Anything carrying a `=` or a `&` is a form submission, which this
@@ -111,10 +96,11 @@ namespace wfg::oscquery
                 return true;
             }
 
-            const auto req = splitQuery (request->path);
+            const auto& path = request->path;
+            const auto& query = request->query_string;
 
             //  ?HOST_INFO is a question about the SERVER, and takes no path.
-            if (req.query == "HOST_INFO")
+            if (query == "HOST_INFO")
             {
                 tree::OscQueryJson::HostInfo info;
                 info.oscPort = target->oscPort();
@@ -141,7 +127,7 @@ namespace wfg::oscquery
                 address to exactly one node; a client sending `/godot/cue/*` has
                 asked for something Go.dot does not do, rather than named a node
                 that is not there, and 404 would send it looking for a typo. */
-            if (osc::containsWildcard (req.path))
+            if (osc::containsWildcard (path))
             {
                 response->write (SimpleWeb::StatusCode::client_error_bad_request,
                                  "Go.dot does not dispatch address patterns\n",
@@ -149,15 +135,15 @@ namespace wfg::oscquery
                 return true;
             }
 
-            if (! req.query.empty())
-                return attributeQuery (response, snapshot, req);
+            if (! query.empty())
+                return attributeQuery (response, snapshot, path, query);
 
-            const auto json = tree::OscQueryJson::describe (*snapshot, req.path);
+            const auto json = tree::OscQueryJson::describe (*snapshot, path);
 
             if (json.empty())
             {
                 response->write (SimpleWeb::StatusCode::client_error_not_found,
-                                 "no such node: " + req.path + "\n",
+                                 "no such node: " + path + "\n",
                                  { { "Content-Type", textMime } });
                 return true;
             }
@@ -169,9 +155,10 @@ namespace wfg::oscquery
 
         bool attributeQuery (std::shared_ptr<HttpServer::Response> response,
                              const std::shared_ptr<const tree::TreeSnapshot>& snapshot,
-                             const Request& req)
+                             const std::string& path,
+                             const std::string& query)
         {
-            if (! isBareKey (req.query))
+            if (! isBareKey (query))
             {
                 response->write (SimpleWeb::StatusCode::client_error_bad_request,
                                  "an OSCQuery attribute query is a bare key, "
@@ -180,7 +167,7 @@ namespace wfg::oscquery
                 return true;
             }
 
-            const auto attribute = tree::OscQueryJson::attribute (*snapshot, req.path, req.query);
+            const auto attribute = tree::OscQueryJson::attribute (*snapshot, path, query);
 
             switch (attribute.result)
             {
@@ -191,13 +178,13 @@ namespace wfg::oscquery
 
                 case tree::OscQueryJson::AttributeResult::noSuchNode:
                     response->write (SimpleWeb::StatusCode::client_error_not_found,
-                                     "no such node: " + req.path + "\n",
+                                     "no such node: " + path + "\n",
                                      { { "Content-Type", textMime } });
                     return true;
 
                 case tree::OscQueryJson::AttributeResult::noSuchAttribute:
                     response->write (SimpleWeb::StatusCode::client_error_bad_request,
-                                     "not an OSCQuery attribute: " + req.query + "\n",
+                                     "not an OSCQuery attribute: " + query + "\n",
                                      { { "Content-Type", textMime } });
                     return true;
 
@@ -315,13 +302,7 @@ namespace wfg::oscquery
         if (running.load (std::memory_order_relaxed))
             return false;
 
-        /*  Zero is refused rather than passed through, because passing it
-            through would "succeed" and then never report connected. See the
-            header: the module compares the requested port against the granted
-            one, so an ephemeral request is a silent, permanent failure. A loud
-            one here is worth more than a working-looking server nobody can
-            find. */
-        if (portToBind <= 0)
+        if (portToBind < 0)
             return false;
 
         impl->target = &nameSpace;
@@ -342,7 +323,12 @@ namespace wfg::oscquery
             return false;
         }
 
-        port.store (portToBind, std::memory_order_relaxed);
+        /*  The port the server actually got, which is only the same as the one
+            asked for when a non-zero one was asked for. Read from the module
+            rather than echoed back from the argument: that echo is exactly the
+            bug the fork fix removed, and reproducing it here would put it back
+            one layer up. */
+        port.store (impl->server.port, std::memory_order_relaxed);
         running.store (true, std::memory_order_relaxed);
         return true;
     }

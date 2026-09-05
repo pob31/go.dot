@@ -103,41 +103,6 @@ static_assert (ASIO_HAS_STD_INVOKE_RESULT == 1,
 
 namespace
 {
-    /*  A port nothing else on this machine is using.
-
-        NOT `start(0)`, and that is not a preference. juce_simpleweb cannot be
-        asked for an ephemeral port: its httpStartCallback
-        (SimpleWebSocketServer.cpp:374-377) is handed the port asio actually
-        bound and does
-
-            isConnected = port == _port;
-
-        comparing the port that was REQUESTED against the one that was GRANTED.
-        Pass 0 and the server binds successfully, then reports isConnected =
-        false for ever and never records which port it got. The requested port
-        is the only one it can tell you about, so we have to be the one who
-        chooses it.
-
-        So: bind a socket on port 0, ask the OS what it picked, give it back,
-        and hand that number to the server. There is a window between the
-        release and the bind in which something else could take it, which is
-        precisely why the real answer is a one-line fix in the fork
-        (`port = _port; isConnected = true;`) rather than this. Recorded in
-        docs/godot-reuse-map-0.1.md; PR 1.9 needs it properly, because
-        `wfg serve --http-port=0` is a product requirement and not a test
-        convenience. */
-    int borrowAFreePort()
-    {
-        juce::DatagramSocket probe;
-
-        if (! probe.bindToPort (0))
-            return 0;
-
-        const auto granted = probe.getBoundPort();
-        probe.shutdown();
-        return granted;
-    }
-
     template <typename Predicate>
     bool waitUntil (Predicate predicate,
                     std::chrono::milliseconds timeout = std::chrono::milliseconds { 10000 })
@@ -233,18 +198,15 @@ namespace
 //==============================================================================
 TEST_CASE ("simpleweb: an HTTP GET on the loopback returns what the handler wrote")
 {
-    const auto port = borrowAFreePort();
-    REQUIRE (port > 0);
-
     EchoingServer rig;
     FixedResponse handler;
     rig.server.addHTTPRequestHandler (&handler);
 
-    rig.server.start (port);
+    rig.server.start (0);
 
     REQUIRE (waitUntil ([&rig] { return rig.server.isConnected; }));
 
-    const auto url = juce::URL ("http://127.0.0.1:" + juce::String (port) + "/");
+    const auto url = juce::URL ("http://127.0.0.1:" + juce::String (rig.server.port) + "/");
 
     auto stream = url.createInputStream (
         juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
@@ -260,53 +222,59 @@ TEST_CASE ("simpleweb: an HTTP GET on the loopback returns what the handler wrot
     CHECK (body == handler.body);
 }
 
-TEST_CASE ("simpleweb: start(0) binds, and then cannot tell you what it bound")
+TEST_CASE ("simpleweb: start(0) binds an ephemeral port and says which one")
 {
-    /*  A CHARACTERISATION TEST. It asserts what the module DOES, not what it
-        should do, and it is here so that the day somebody fixes the fork this
-        goes red and points at the workaround that can then be deleted.
+    /*  This test used to assert the opposite, and the flip is the point.
 
-        The defect, in full. Simple-Web-Server hands its start callback the port
-        asio actually bound. juce_simpleweb's callback
-        (SimpleWebSocketServer.cpp:374-377) is:
+        juce_simpleweb's start callback receives the port asio actually bound
+        and compared it against the one the caller had asked for:
 
-            void SimpleWebSocketServer::httpStartCallback (unsigned short _port)
-            {
-                isConnected = port == _port;
-            }
+            isConnected = port == _port;
 
-        `port` is what the caller ASKED for; `_port` is what the OS GRANTED. For
-        a fixed port the two agree and all is well. For port 0 - the ephemeral
-        request - they never agree, so a server that bound perfectly reports
-        isConnected == false for the rest of its life, and the one number that
-        would let anyone reach it is dropped on the floor.
+        For a fixed port the two agree. For port 0 they never do, so a server
+        that was listening perfectly well reported isConnected == false for the
+        rest of its life, and the one number needed to reach it was discarded.
+        PR 1.D shipped with that behaviour pinned by a characterisation test and
+        a note saying it would go red the day somebody fixed it.
 
-        The one-line fix is `port = _port; isConnected = true;`, which is
-        correct for both cases. It is not applied here because juce_simpleweb is
-        a submodule of a repository this PR only consumes.
+        Fixed in the fork at b72ec94 - `port = _port; isConnected = true;`,
+        which is what the comparison already meant for a fixed port and the only
+        way to learn the answer for an ephemeral one. This is now the test that
+        the fix is really in the pinned submodule, so a bad re-pin fails here
+        rather than in PR 1.10's harness.
 
-        THIS IS NOT A TEST-ONLY INCONVENIENCE. The plan has `wfg serve
-        --http-port=0` print the bound port for the black-box harness (PR 1.10),
-        and the same rule that keeps ctest runnable in parallel keeps two Go.dot
-        instances from colliding on a show machine. PR 1.9 needs it fixed.
-
-        Meanwhile borrowAFreePort() is the workaround, and the reason it is a
-        workaround rather than an answer is the gap between releasing the probe
-        socket and the server binding. */
+        It matters beyond tests: `wfg serve --http-port=0` prints its bound port
+        for the black-box driver, and binding 0 is how two Go.dot instances
+        coexist on one machine. */
     EchoingServer rig;
 
     rig.server.start (0);
 
-    /*  It really did bind - a GET would be answered if we knew where to send
-        it - but this never becomes true. Waiting is how the test proves the
-        failure is permanent rather than merely slow. */
-    CHECK_FALSE (waitUntil ([&rig] { return rig.server.isConnected; },
-                            std::chrono::milliseconds { 1500 }));
+    REQUIRE (waitUntil ([&rig] { return rig.server.isConnected; }));
 
-    //  And the port member is still the 0 we asked for, not the one it got.
-    CHECK (rig.server.port == 0);
+    const auto granted = rig.server.port;
 
+    INFO ("granted port: " << granted);
+    CHECK (granted > 0);
+    CHECK (granted != 0);
+
+    //  And it is reachable at the port it reported, which is the whole claim.
+    FixedResponse handler;
+    rig.server.addHTTPRequestHandler (&handler);
+
+    const auto url = juce::URL ("http://127.0.0.1:" + juce::String (granted) + "/");
+
+    auto stream = url.createInputStream (
+        juce::URL::InputStreamOptions (juce::URL::ParameterHandling::inAddress)
+            .withConnectionTimeoutMs (10000));
+
+    REQUIRE (stream != nullptr);
+    const auto body = stream->readEntireStreamAsString();
+
+    rig.server.removeHTTPRequestHandler (&handler);
     rig.server.stop();
+
+    CHECK (body == handler.body);
 }
 
 TEST_CASE ("simpleweb: a WebSocket message goes out and a reply comes back, on the same port")
@@ -314,16 +282,13 @@ TEST_CASE ("simpleweb: a WebSocket message goes out and a reply comes back, on t
     /*  ONE PORT FOR BOTH is the whole reason this module is a dependency.
         OSCQuery puts HTTP and WebSocket on the same port, and juce's own
         StreamingSocket cannot be talked into serving both. */
-    const auto port = borrowAFreePort();
-    REQUIRE (port > 0);
-
     EchoingServer rig;
-    rig.server.start (port);
+    rig.server.start (0);
 
     REQUIRE (waitUntil ([&rig] { return rig.server.isConnected; }));
 
     RecordingClient client;
-    client.client.start ("127.0.0.1:" + juce::String (port));
+    client.client.start ("127.0.0.1:" + juce::String (rig.server.port));
 
     REQUIRE (waitUntil ([&client] { return client.open.load(); }));
     REQUIRE (waitUntil ([&rig] { return rig.opened.load() > 0; }));

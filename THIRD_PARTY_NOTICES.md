@@ -165,7 +165,7 @@ is compatible with GPL-3.0. Full text in `ThirdParty/JUCE/LICENSE.md`.
 
 - **Website**: https://github.com/benkuper/juce_simpleweb
   (Go.dot pins the fork https://github.com/pob31/juce_simpleweb)
-- **Version**: commit `b953ada40073d8e7338fbc13aa6bccf3fe70087d`
+- **Version**: commit `b72ec947548654cdd0a7e72b71ab5826fe574847`
 - **Licence**: GPLv3
 - **Copyright**: Ben Kuper
 
@@ -179,9 +179,9 @@ TLS — and clears the module's declared OpenSSL link libraries outright. The
 `deps.no-openssl` test asserts that on the shipped binary, so this paragraph is
 checked rather than merely asserted. See `cmake/WfgThirdParty.cmake` section 2b.
 
-The pinned fork is upstream master plus two changes the author needed and has
-offered upstream: a build-time TLS-off guard, and a Windows fix. Full text:
-`ThirdParty/juce_simpleweb/LICENSE`.
+The pinned fork is upstream master plus three changes: a build-time TLS-off
+guard, a Windows fix, and a fix for a start callback that could not report an
+ephemeral bound port. Full text: `ThirdParty/juce_simpleweb/LICENSE`.
 
 ---
 
