@@ -82,6 +82,20 @@ None of them needs a document, a device or a Tracktion engine, which is the poin
 taken during a performance has to reproduce on a laptop with no sound card, or it is not a
 log.
 
+## `bundles/first-sound/` and `logs/first-go.wfglog`
+
+The phase's own guarantee, as a fixture: a cue fired, played and finished. The log is
+hand-written and hand-checked like the other two, and `wfg replay --bundle` re-applies every
+record of it with no Tracktion, no device and no sound.
+
+It needs the bundle because GO reads standby out of the show. It needs no media, and that is
+worth knowing rather than assuming: with no audio side there is nothing to arm, so the file is
+never looked for — which is why there is no WAV in `media/` and why the fixture stays valid
+whether or not anybody ever puts one there.
+
+The bundle is also a real two-cue show with two buses at different channel offsets, so it is
+the one to reach for when something needs a document with audio in it.
+
 ## `tree/cue-F7HR8TVD.json`
 
 The OSCQuery reply for one cue, written by hand rather than generated, so it can disagree

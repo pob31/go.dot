@@ -166,6 +166,20 @@ add_test(NAME wfg.replay.audio.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/edit-built.wfglog"
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The third replay fixture, and the phase's own guarantee: a cue fired, played
+# and finished. It needs the bundle because GO reads standby out of the show; it
+# needs no media, because a replay has no audio side to arm and never looks for
+# the file. That is the whole point — a performance recorded on a machine with an
+# interface reproduces, record for record, on one without.
+add_test(NAME wfg.replay.go.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/first-go.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/first-sound
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.go.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/first-go.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/first-sound
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a

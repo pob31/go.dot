@@ -1,0 +1,56 @@
+# wfg-log 1
+# fixture first-go — a cue fired, played and finished, hand-written and hand-checked.
+#
+# The guarantee this exists for is the one the whole Player interface was shaped
+# around: a performance recorded on a machine with an audio interface has to
+# reproduce, record for record, on one without. Every line below is either the
+# operator asking for something or the machine reporting what happened, and
+# `wfg replay --bundle` re-applies all of it with no Tracktion, no device and no
+# sound.
+#
+# It needs the bundle because GO reads standby out of the show. It does NOT need
+# the media: with no audio side there is nothing to arm, so the file is never
+# looked for — which is worth knowing, because it means this fixture stays valid
+# whether or not anybody commits a WAV beside it.
+#
+# The graph came up. Four voices, two outputs, thirty-six nodes.
+A 0 0 engine audio.editBuilt s:"hosted" i:4 i:2 i:36
+#
+# The operator armed the standby cue ahead of time, which is what a show does
+# while they read the next line. The run identifier is the argument the caller
+# left out and the engine drew, written back into the record so a replay
+# re-supplies it rather than drawing a different one.
+A 40 1 udp:10.0.0.5:9000 audio.arm s:"B3N8R5TW" s:"G7W9EF36"
+#
+# The audio side found it a voice.
+A 42 2 engine audio.armed s:"G7W9EF36" i:0
+#
+# GO. Standby advances to the second cue whatever happens next (§3.5), and the
+# run that was already armed is the one that launches — armed is not running.
+A 100 3 udp:10.0.0.5:9000 go s:"G7W9EF36"
+#
+# The sound started, two ticks later, which is the launch latency at this block
+# size and rate. Reported on the tick it was observed.
+A 102 4 engine run.started s:"G7W9EF36"
+#
+# A second GO, on the cue standby moved to. A different cue, so a different run
+# with an identifier of its own.
+A 140 5 udp:10.0.0.5:9000 go s:"M5TQ7XVA"
+#
+# It failed, and said which failure it was: the bundle has no rain.wav. An
+# APPLIED command that could not be honoured is not a rejected one - the request
+# was legal and the show was not in a state to do it - and a show with one
+# missing sound is still a show somebody has to run tonight.
+A 141 6 engine run.failed s:"M5TQ7XVA" s:"media-missing"
+#
+# A report about a run nobody created is refused rather than inventing one.
+R 150 7 cli unknown-id run.started s:"NOSUCHID"
+#
+# The first cue finished on its own, at the end of its file. Its voice is free
+# from this tick.
+A 260 8 engine run.ended s:"G7W9EF36"
+#
+# And killing something already finished is applied and does nothing. An
+# operator hitting the button twice has not made a mistake, and a client that
+# reconnected has no way to know what is still running.
+A 300 9 cli run.kill s:"G7W9EF36"

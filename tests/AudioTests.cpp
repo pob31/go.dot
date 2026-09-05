@@ -2084,3 +2084,322 @@ TEST_CASE ("first sound: GO reaches the outputs the cue names, at the level it n
         CHECK (sink[channel] < 0.001f);
     }
 }
+
+//==============================================================================
+/*  M5 - WHERE THE SOUND ACTUALLY STARTS.
+
+    Everything else about GO is arithmetic that can be checked on its own. This
+    is the one measurement that says the arithmetic and the graph agree: a
+    launch placed at sample N produces its first non-zero sample at N, in the
+    audio that came out.
+
+    It matters more than it looks. A launch that lands late does not merely
+    start late - Tracktion renders the block in hand from the head of the file
+    and back-dates only the blocks after it, so a late cue is late AND has a
+    hole in it. The failure is a click and a shortened cue, on a machine nobody
+    can reproduce it on, and the only way to know it is not happening is to
+    measure where the sound begins.
+
+    Five block sizes at three rates, including 44.1 kHz with 512-sample blocks,
+    where a tick is 882 samples and a block is more than half of one.
+*/
+namespace
+{
+    /*  Records every sample the rig produced, so a test can ask WHERE something
+        happened rather than only whether it did.
+
+        Sized once, before anything runs. Appending on the audio thread would
+        allocate, which is the rule this suite exists to protect. */
+    struct RecordingSink final : audio::BlockSink
+    {
+        void prepare (int numChannels, int numFrames)
+        {
+            buffer.setSize (numChannels, numFrames);
+            buffer.clear();
+            written = 0;
+        }
+
+        void blockProduced (const float* const* channels, int numChannels,
+                            int numSamples) noexcept override
+        {
+            const auto room = buffer.getNumSamples() - written;
+            const auto frames = std::min (numSamples, room);
+
+            if (frames <= 0)
+                return;
+
+            for (int channel = 0; channel < std::min (numChannels, buffer.getNumChannels()); ++channel)
+                juce::FloatVectorOperations::copy (buffer.getWritePointer (channel, written),
+                                                   channels[channel], frames);
+
+            written += frames;
+        }
+
+        /** The first frame whose magnitude clears the floor, or -1. */
+        int firstSoundAt (int channel, float floorLevel = 0.01f) const
+        {
+            const auto* samples = buffer.getReadPointer (channel);
+
+            for (int n = 0; n < written; ++n)
+                if (std::abs (samples[n]) > floorLevel)
+                    return n;
+
+            return -1;
+        }
+
+        juce::AudioBuffer<float> buffer;
+        int written = 0;
+    };
+
+    struct LandingResult
+    {
+        std::int64_t expected = 0;
+        std::int64_t actual = 0;
+        std::int64_t error() const { return actual - expected; }
+    };
+
+    /*  Places one launch at a sample of Go.dot's own choosing and reports where
+        the sound actually began. */
+    LandingResult measureLanding (int rate, int blockSize)
+    {
+        LandingResult result;
+
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = rate;
+        settings.blockSize = blockSize;
+        settings.outputChannels = 2;
+
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = 1;
+        spec.channelsPerTrack = 1;
+        REQUIRE (rig.host.buildEdit (spec));
+
+        const auto tone = writeSteadyTone (rig.storage.folder, 1, rate);
+        REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+        REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+        auto* matrix = rig.host.trackMatrix (0);
+        REQUIRE (matrix != nullptr);
+        matrix->setLevelDb (0.0f);
+        matrix->setGain (0, 0, 1.0f);
+        matrix->snapToTargets();
+
+        /*  A constant tone, so the first sample that is not zero IS the moment
+            the cue started - no attack to guess at and nothing to threshold. */
+        RecordingSink sink;
+        sink.prepare (settings.outputChannels, rate);       // one second is plenty
+
+        /*  The anchor needs blocks before it means anything. */
+        for (int i = 0; i < 8; ++i)
+            rig.host.processBlock();
+
+        rig.host.setBlockSink (&sink);
+
+        const auto recordingBegan = rig.host.clock().samplesElapsed();
+
+        /*  THE LAUNCH INSTANT, chosen the way the Runner chooses it: a whole
+            number of ticks ahead, at the rule's own distance. */
+        const auto samplesPerTick = rate / 50;
+        const auto ticksAhead = cue::launchLatencyTicks (blockSize, samplesPerTick);
+
+        result.expected = rig.host.clock().samplesElapsed()
+                            + static_cast<std::int64_t> (ticksAhead) * samplesPerTick;
+
+        REQUIRE (rig.host.launchTrackAt (0, rig.host.beatsAtSample (result.expected)));
+
+        const auto blocks = (rate / 2) / blockSize;
+
+        for (int i = 0; i < blocks; ++i)
+            rig.host.processBlock();
+
+        rig.host.setBlockSink (nullptr);
+
+        const auto found = sink.firstSoundAt (0);
+        REQUIRE (found >= 0);
+
+        result.actual = recordingBegan + found;
+        return result;
+    }
+}
+
+TEST_CASE ("M5: the sound starts on the sample the launch was placed at")
+{
+    /*  ONE BLOCK OF TOLERANCE, and not because the arithmetic is approximate.
+        Tracktion splits a launch inside a block to the nearest frame, so an
+        exactly-placed instant lands exactly - but the audio thread reads the
+        launch queue through a try-lock, and on a block where it misses, the
+        launch is seen one block later. That is the only slack in the system and
+        it is one-sided: a launch may be up to a block LATE and can never be
+        early. Anything outside that is a defect in the arithmetic. */
+    for (const int rate : { 44100, 48000, 96000 })
+    {
+        for (const int blockSize : { 64, 128, 256, 512, 1024 })
+        {
+            INFO ("at " << rate << " Hz with " << blockSize << "-sample blocks");
+
+            const auto landing = measureLanding (rate, blockSize);
+
+            INFO ("placed at " << landing.expected << ", started at " << landing.actual
+                   << ", error " << landing.error() << " samples ("
+                   << (1000.0 * static_cast<double> (landing.error()) / rate) << " ms)");
+
+            /*  Never early. A cue that started before it was asked to would
+                mean the instant was computed against the wrong clock. */
+            CHECK (landing.error() >= 0);
+
+            /*  And never more than one block late. */
+            CHECK (landing.error() <= blockSize);
+        }
+    }
+}
+
+//==============================================================================
+/*  M4 - DOES ARMING ONE CUE DISTURB ANOTHER THAT IS ALREADY SOUNDING?
+
+    It is the question the whole arming design rests on and the one nothing so
+    far has asked. Pointing a clip at a file writes a Tracktion ValueTree, and
+    that REBUILDS THE PLAYBACK GRAPH - every WaveNode and every file reader is
+    made again, while a cue is playing through the old one. Spike 04 measured
+    that a rebuild happens; what it never measured was what it does to audio in
+    flight.
+
+    A show does this constantly. Standby moves to the next cue while the last
+    one is still sounding, so an arm during playback is the ordinary case rather
+    than the awkward one - which means a dropout here would be a click in the
+    middle of every cue, on every show, and nobody would know where it came
+    from.
+
+    The method is a null test, which is the only kind that can answer it: render
+    the same cue twice, once with an arm in the middle and once without, and
+    subtract. Anything the rebuild did to the audio is what is left.
+*/
+namespace
+{
+    /*  Plays one cue and records it, optionally arming a second track partway
+        through. Everything is driven block by block, so the two runs differ in
+        exactly one thing. */
+    void renderWithOptionalArm (bool armDuringPlayback, RecordingSink& sink,
+                                juce::File& toneOut)
+    {
+        constexpr int rate = 48000;
+        constexpr int blockSize = 128;
+
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = rate;
+        settings.blockSize = blockSize;
+        settings.outputChannels = 2;
+
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = 2;
+        spec.channelsPerTrack = 1;
+        REQUIRE (rig.host.buildEdit (spec));
+
+        const auto tone = writeSteadyTone (rig.storage.folder, 1, rate);
+        toneOut = tone;
+
+        REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+        REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+        auto* matrix = rig.host.trackMatrix (0);
+        REQUIRE (matrix != nullptr);
+        matrix->setLevelDb (0.0f);
+        matrix->setGain (0, 0, 1.0f);
+        matrix->snapToTargets();
+
+        for (int i = 0; i < 8; ++i)
+            rig.host.processBlock();
+
+        /*  Launched at a fixed distance from where the counter is, so both runs
+            have the same shape however long the disk took to answer. */
+        const auto target = rig.host.clock().samplesElapsed() + 4 * (rate / 50);
+        REQUIRE (rig.host.launchTrackAt (0, rig.host.beatsAtSample (target)));
+
+        /*  Recording starts after the launch is placed and runs across it, so
+            the comparison covers the start of the cue as well as its middle. */
+        sink.prepare (settings.outputChannels, rate);
+        rig.host.setBlockSink (&sink);
+
+        constexpr int totalBlocks = 300;
+        constexpr int armAtBlock = 200;          // well inside the sounding part
+
+        for (int block = 0; block < totalBlocks; ++block)
+        {
+            if (armDuringPlayback && block == armAtBlock)
+            {
+                /*  THE THING BEING MEASURED. A ValueTree write on a second
+                    track, which rebuilds the graph the first one is playing
+                    through. */
+                REQUIRE (rig.host.setTrackSource (1, tone.getFullPathName().toStdString()));
+            }
+
+            rig.host.processBlock();
+        }
+
+        rig.host.setBlockSink (nullptr);
+
+        /*  The cue really was sounding for the whole comparison, or the null
+            test would be comparing two silences and passing. */
+        REQUIRE (rig.host.trackPlayState (0).playing);
+    }
+}
+
+TEST_CASE ("M4: arming a second cue does not disturb the one already playing")
+{
+    RecordingSink quiet, armed;
+    juce::File toneA, toneB;
+
+    renderWithOptionalArm (false, quiet, toneA);
+    renderWithOptionalArm (true, armed, toneB);
+
+    REQUIRE (quiet.written > 0);
+    REQUIRE (quiet.written == armed.written);
+
+    /*  The cue is audible in both, so a difference of zero means something. */
+    REQUIRE (quiet.firstSoundAt (0) >= 0);
+    REQUIRE (armed.firstSoundAt (0) >= 0);
+    CHECK (quiet.firstSoundAt (0) == armed.firstSoundAt (0));
+
+    /*  THE NULL TEST. Sample by sample, both channels. Whatever the graph
+        rebuild did to audio in flight is the difference, and there should not
+        be one. */
+    double worst = 0.0;
+    int worstAt = -1;
+
+    for (int channel = 0; channel < quiet.buffer.getNumChannels(); ++channel)
+    {
+        const auto* a = quiet.buffer.getReadPointer (channel);
+        const auto* b = armed.buffer.getReadPointer (channel);
+
+        for (int n = 0; n < quiet.written; ++n)
+        {
+            const auto difference = std::abs (static_cast<double> (a[n]) - b[n]);
+
+            if (difference > worst)
+            {
+                worst = difference;
+                worstAt = n;
+            }
+        }
+    }
+
+    INFO ("largest difference " << worst << " at sample " << worstAt
+           << " of " << quiet.written
+           << " (" << (worstAt >= 0 ? 1000.0 * worstAt / 48000.0 : 0.0) << " ms in)");
+
+    /*  BIT-IDENTICAL, and it is worth being exact about why that is the right
+        bar rather than "small". The two renders run the same graph over the
+        same file with the same coefficients; every sample is a copy or a
+        multiply by a constant. There is no summation order to differ and no
+        interpolation to round. If the rebuild has not touched the playing cue,
+        the two are the same numbers - and if they are merely CLOSE, something
+        happened and got smoothed over. */
+    CHECK (worst == 0.0);
+}

@@ -1,0 +1,17 @@
+<Show>
+  <Lists>
+    <List id="7K2QM9X4" name="Sound">
+      <Media id="B3N8R5TW" file="thunder.wav" name="Thunder" number="1">
+        <Route id="Z04EH7PH" bus="J3MT5XYA" gains="1 0 0 1"/>
+      </Media>
+      <Media id="E4GP6QSC" file="rain.wav" name="Rain" number="2">
+        <Route id="F7HR8TVD" bus="K4NV6ZB1" gains="0.5 0 0 0.5"/>
+      </Media>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="4">
+    <Bus id="J3MT5XYA" name="Main L/R" width="2"/>
+    <Bus id="K4NV6ZB1" firstChannel="2" name="Foldback" width="2"/>
+  </Audio>
+</Show>
