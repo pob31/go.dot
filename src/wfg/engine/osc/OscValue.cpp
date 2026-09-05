@@ -18,9 +18,26 @@
 
 #include <charconv>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
-#include <locale>
-#include <sstream>
+
+#if defined (_WIN32)
+ // _create_locale, _strtod_l and _locale_t.
+ #include <locale.h>
+#else
+ /*  <locale.h> rather than <clocale>: newlocale, locale_t and LC_NUMERIC_MASK
+     are POSIX-2008, not C, so <clocale> is not required to declare them. It
+     does on both of our platforms today - glibc gates them on __USE_XOPEN2K8,
+     which g++ enables by defining _GNU_SOURCE - but naming the header we
+     actually depend on is the difference between a build that works and a
+     build that works by accident. */
+ #include <locale.h>
+
+ #if __has_include (<xlocale.h>)
+  // macOS declares strtod_l here on older SDKs; glibc has it in <stdlib.h>.
+  #include <xlocale.h>
+ #endif
+#endif
 
 namespace wfg::osc
 {
@@ -142,23 +159,68 @@ namespace wfg::osc
         very nearly right and not quite: it is not correctly rounded, and loses
         about one value in four hundred.
 
-        So: std::to_chars to write, and a classic-locale stream to read.
+        So: std::to_chars to write, and strtod in an explicit C locale to read.
 
-        Why not from_chars to read, when it also scores zero: libc++ only gained
-        it for floating point in LLVM 20, so it is missing on the macOS toolchains
-        this project builds on, while to_chars has been available since
-        macOS 13.3 - which is why CMakeLists.txt targets 13.3. A stream imbued
-        with std::locale::classic() has no such gate anywhere, and num_get is
-        specified to convert as if by strtod, which every implementation we build
-        on rounds correctly.
+        The reader took two goes. std::from_chars would be the obvious answer and
+        scores zero above, but libc++ only gained it for floating point in
+        LLVM 20, so it is missing on the macOS toolchains this project builds on -
+        while to_chars has been there since macOS 13.3, which is why
+        CMakeLists.txt targets 13.3.
 
-        Locale independence is by construction on both sides: to_chars is defined
-        never to consult the locale at all, and the stream is imbued explicitly,
-        which overrides whatever setlocale() was last told. LocaleTests.cpp and
+        The second attempt was an istringstream imbued with std::locale::classic().
+        It passed on Windows and FAILED ON macOS, and the reason is worth keeping:
+        num_get is specified to set failbit when the conversion sets errno, and
+        strtod sets ERANGE on UNDERFLOW - which is what reading a subnormal is.
+        So every subnormal double came back as "unparseable" on libc++, and a
+        random-bit-pattern sweep finds one every couple of thousand values. The
+        writer was fine; the reader was throwing away perfectly good numbers.
+
+        strtod_l has no such ambiguity: it returns the correctly-rounded value,
+        including the subnormal, and reports range conditions through errno,
+        which this code ignores in favour of asking whether the RESULT is finite.
+        Overflow gives HUGE_VAL and is rejected there; underflow gives the right
+        answer and is kept.
+
+        Locale independence is by construction on both sides: to_chars never
+        consults the locale at all, and the parse uses a C locale created once
+        rather than whatever setlocale() was last told. LocaleTests.cpp and
         OscValueTests.cpp pin both under fr_FR on all three platforms.
     */
     namespace
     {
+        /*  strtod in the C locale, on all three platforms.
+
+            Every one of them has the call, under two spellings: POSIX 2008 gave
+            it as strtod_l with a locale_t from newlocale, and the Windows UCRT
+            spells the same thing _strtod_l with a _locale_t from _create_locale.
+
+            The handle is created once and never freed. It is process-lifetime
+            state of a few bytes, and freeing it at exit would mean ordering that
+            destruction against every other static in the program for no benefit
+            anyone could observe. */
+        double strtodClassic (const char* first, char** end)
+        {
+           #if defined (_WIN32)
+            static const _locale_t classic = _create_locale (LC_NUMERIC, "C");
+
+            if (classic != nullptr)
+                return _strtod_l (first, end, classic);
+           #else
+            static const locale_t classic = ::newlocale (LC_NUMERIC_MASK, "C",
+                                                         static_cast<locale_t> (nullptr));
+
+            if (classic != static_cast<locale_t> (nullptr))
+                return ::strtod_l (first, end, classic);
+           #endif
+
+            /*  Only reachable if the platform could not build a C locale, which
+                would mean something is very wrong with the installation. Falling
+                back to the global locale is worse (it is what this function
+                exists to avoid) but it is better than undefined behaviour, and
+                the locale tests would catch the consequence. */
+            return std::strtod (first, end);
+        }
+
         template <typename Float>
         std::string shortestRoundTrip (Float value)
         {
@@ -239,23 +301,19 @@ namespace wfg::osc
         if (! sawDigit)
             return std::nullopt;
 
-        /*  One stream per thread rather than one per call: imbuing a locale is
-            the expensive part, and a log parser does this once per numeric atom.
-            The stream is reset, not rebuilt. */
-        static thread_local std::istringstream stream = []
-        {
-            std::istringstream s;
-            s.imbue (std::locale::classic());
-            return s;
-        }();
+        /*  strtod needs a null-terminated string, and the shape check above has
+            already bounded the length to something small. */
+        const std::string buffer { text };
+        char* end = nullptr;
 
-        stream.clear();
-        stream.str (std::string (text));
+        const auto value = strtodClassic (buffer.c_str(), &end);
 
-        double value = 0.0;
-        stream >> value;
-
-        if (stream.fail() || ! std::isfinite (value))
+        /*  Two conditions, and neither is errno. The whole field has to have
+            been consumed - belt and braces, since the shape check would have
+            caught anything else - and the result has to be finite, which is what
+            rejects an overflow (strtod returns HUGE_VAL) while keeping an
+            underflow (strtod returns the correctly-rounded subnormal). */
+        if (end != buffer.c_str() + buffer.size() || ! std::isfinite (value))
             return std::nullopt;
 
         return value;
@@ -390,8 +448,15 @@ namespace wfg::osc
             out.reserve (s.size() + 2);
             out.push_back ('"');
 
-            for (const unsigned char c : s)
+            /*  Iterated as char and cast once, rather than as unsigned char.
+                A range-for over a std::string yields char, which is signed on
+                every platform we build for, and the implicit narrowing is what
+                -Wsign-conversion objects to under the strict preset - GCC
+                warns, MSVC does not, so this only ever showed up on Linux CI. */
+            for (const char raw : s)
             {
+                const auto c = static_cast<unsigned char> (raw);
+
                 switch (c)
                 {
                     case '\\': out += "\\\\"; break;

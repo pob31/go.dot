@@ -275,6 +275,66 @@ TEST_CASE ("osc value: float32 survives the log exactly, for any bit pattern")
     CHECK (tested > 4000);
 }
 
+TEST_CASE ("osc value: subnormals round-trip, which is where the reader first broke")
+{
+    /*  A REGRESSION TEST, and it names its own history.
+
+        The first reader was an istringstream imbued with the classic locale. It
+        passed on Windows and failed on macOS, because num_get sets failbit when
+        the conversion sets errno, and strtod sets ERANGE on UNDERFLOW - which is
+        exactly what reading a subnormal is. So libc++ reported every subnormal
+        as unparseable, and the random sweep below found one every couple of
+        thousand values, on one platform only.
+
+        These are the values that class is made of. If a future reader loses
+        them again, this says so by name rather than as a sweep that fails on a
+        seed nobody can picture. */
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    const double awkward[] = {
+        std::numeric_limits<double>::denorm_min(),          // the smallest there is
+        -std::numeric_limits<double>::denorm_min(),
+        std::numeric_limits<double>::min() / 2.0,           // squarely subnormal
+        std::numeric_limits<double>::min(),                 // the smallest normal
+        std::numeric_limits<double>::max(),
+        std::numeric_limits<double>::lowest(),
+        std::numeric_limits<double>::epsilon(),
+        0.0, -0.0
+    };
+
+    for (const double d : awkward)
+    {
+        const auto text = formatDouble (d);
+        INFO ("wrote " << text);
+
+        const auto back = parseDouble (text);
+        REQUIRE (back.has_value());
+        CHECK (std::memcmp (&d, &*back, sizeof (double)) == 0);
+    }
+
+    // And the float32 equivalents, which travel the same path.
+    const float awkwardFloats[] = {
+        std::numeric_limits<float>::denorm_min(),
+        -std::numeric_limits<float>::denorm_min(),
+        std::numeric_limits<float>::min() / 2.0f,
+        std::numeric_limits<float>::min(),
+        std::numeric_limits<float>::max()
+    };
+
+    for (const float f : awkwardFloats)
+    {
+        const auto atom = Value::float32 (f).toAtom();
+        INFO ("atom " << atom);
+
+        const auto back = Value::fromAtom (atom);
+        REQUIRE (back.has_value());
+        REQUIRE (back->isFloat32());
+
+        const auto recovered = back->getFloat32();
+        CHECK (std::memcmp (&f, &recovered, sizeof (float)) == 0);
+    }
+}
+
 TEST_CASE ("osc value: non-finite floats are refused, not written")
 {
     const auto nan = Value::float32 (std::numeric_limits<float>::quiet_NaN());

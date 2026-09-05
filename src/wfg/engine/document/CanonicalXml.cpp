@@ -41,8 +41,15 @@ namespace wfg::doc
             std::string out;
             out.reserve (text.size() + 8);
 
-            for (const unsigned char c : text)
+            /*  Iterated as char and cast once, rather than as unsigned char.
+                A range-for over a std::string yields char, which is signed on
+                every platform we build for, and the implicit narrowing is what
+                -Wsign-conversion objects to under the strict preset - GCC
+                warns, MSVC does not, so this only ever showed up on Linux CI. */
+            for (const char raw : text)
             {
+                const auto c = static_cast<unsigned char> (raw);
+
                 switch (c)
                 {
                     case '&':  out += "&amp;";  break;

@@ -190,9 +190,18 @@ jobs:
         # failure on the first compile, not a missing-tool message. strict-ci
         # inherits strict, so running this here still exercises every cache
         # variable of that preset and neither can rot.
+        #
+        # `-- -k 0` passes ninja's keep-going flag through. This step is a lint
+        # gate, and ninja's default is to stop scheduling after the first failed
+        # command - which on a -Werror build means one run reports one file and
+        # says nothing about the fifteen TUs it never got to. A contributor
+        # without GCC to hand (this is the only job that runs it) would then need
+        # one CI round trip per violation. Keep-going costs a few seconds of
+        # compile time on a red build and nothing at all on a green one; the exit
+        # code is still non-zero, so the gate bites exactly as hard.
         run: |
           cmake --preset strict-ci
-          cmake --build --preset strict-ci-debug
+          cmake --build --preset strict-ci-debug -- -k 0
 
       - name: ccache statistics
         # `|| true`: this is diagnostics, and it runs even after a failure above
