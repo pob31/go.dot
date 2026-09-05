@@ -99,6 +99,27 @@ namespace wfg::tree
         /*  One OSC value as a JSON scalar. Numbers through the project's own
             formatter, never through a stream or std::to_string on a double -
             see the header. */
+        std::string valueLiteral (const osc::Value& value);
+
+        /*  Every value a node holds, comma separated, for OSCQuery's VALUE
+            array. A node with one value writes one element, which is what every
+            node in Phase 1 did and still does - the array was always there in
+            the JSON, and this is what finally makes it able to hold two. */
+        std::string valueList (const std::vector<osc::Value>& values)
+        {
+            std::string out;
+
+            for (const auto& value : values)
+            {
+                if (! out.empty())
+                    out += ", ";
+
+                out += valueLiteral (value);
+            }
+
+            return out;
+        }
+
         std::string valueLiteral (const osc::Value& value)
         {
             if (value.isString())  return quoted (value.getString());
@@ -223,8 +244,8 @@ namespace wfg::tree
 
             lines.push_back (inner + "\"ACCESS\": " + std::to_string (static_cast<int> (node.access)));
 
-            if (node.value.has_value())
-                lines.push_back (inner + "\"VALUE\": [" + valueLiteral (*node.value) + "]");
+            if (! node.values.empty())
+                lines.push_back (inner + "\"VALUE\": [" + valueList (node.values) + "]");
 
             {
                 std::string range;
@@ -348,13 +369,13 @@ namespace wfg::tree
 
         if (name == "VALUE")
         {
-            if (! node->value.has_value())
+            if (node->values.empty())
             {
                 out.result = AttributeResult::notPresent;
                 return out;
             }
 
-            body = "\"VALUE\": [" + valueLiteral (*node->value) + "]";
+            body = "\"VALUE\": [" + valueList (node->values) + "]";
         }
         else if (name == "TYPE")
         {

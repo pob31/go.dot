@@ -141,7 +141,7 @@ namespace wfg::tree
             }
             else
             {
-                if ((*a)->value != (*b)->value)
+                if ((*a)->values != (*b)->values)
                     result.valueChanged.push_back ((*b)->address);
 
                 ++a;

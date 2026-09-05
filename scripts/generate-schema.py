@@ -68,6 +68,14 @@ VALUE_TYPES = {
     "b": "blob",
 }
 
+# A trailing `*` on the type tag means "a list of these", not a different type.
+# `d*` is a run of doubles: one attribute holding N numbers, space separated in
+# the document, N arguments on the wire. It is spelled as a suffix rather than as
+# its own tag because everything else about the row - the range, the unit, the
+# panic value - applies to each ELEMENT, and a separate type would have made all
+# of that ambiguous.
+LIST_SUFFIX = "*"
+
 ACCESS = {"r": "read", "w": "write", "rw": "readWrite"}
 KINDS = {"state": "state", "event": "event"}
 PERSIST = {"none": "none", "show": "show", "state": "state"}
@@ -202,8 +210,18 @@ def build(rows):
             fail("%s: empty address" % label)
 
         type_tag = row["type"].strip()
+        is_list = type_tag.endswith(LIST_SUFFIX)
+
+        if is_list:
+            type_tag = type_tag[:-len(LIST_SUFFIX)]
+
         if type_tag not in VALUE_TYPES:
             fail("%s: unknown type %r" % (label, type_tag))
+
+        # A list of booleans or blobs has no spelling in the document and no
+        # caller; refusing it here is cheaper than discovering it in RelaxNg.
+        if is_list and type_tag in ("T", "b"):
+            fail("%s: %r cannot be a list" % (label, type_tag + LIST_SUFFIX))
 
         access = row["access"].strip()
         if access not in ACCESS:
@@ -246,6 +264,7 @@ def build(rows):
                 "name": address,
                 "type": VALUE_TYPES[type_tag],
                 "typeTag": type_tag,
+                "isList": is_list,
                 "access": ACCESS[access],
                 "kind": KINDS[kind],
                 "default": default,
@@ -333,8 +352,9 @@ def render(entries):
     for e in entries:
         enum_literal = enum_arrays.get((e["owner"], e["name"]), "nullptr")
         add("        { %s, %s," % (cpp_string(e["owner"]), cpp_string(e["name"])))
-        add("          ValueType::%s, '%s', Access::%s, Kind::%s, Persist::%s,"
-            % (e["type"], e["typeTag"], e["access"], e["kind"], e["persist"]))
+        add("          ValueType::%s, '%s', %s, Access::%s, Kind::%s, Persist::%s,"
+            % (e["type"], e["typeTag"], "true" if e["isList"] else "false",
+               e["access"], e["kind"], e["persist"]))
         add("          %s, %s," % ("true" if e["hasDefault"] else "false", cpp_string(e["default"])))
         add("          %s, %s, %s, %s," % ("true" if e["hasMin"] else "false", number_literal(e["min"]),
                                            "true" if e["hasMax"] else "false", number_literal(e["max"])))

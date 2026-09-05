@@ -16,6 +16,8 @@
 
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <cctype>
+
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/Schema.h>
 
@@ -96,6 +98,66 @@ namespace wfg::tree
             }
         }
 
+        /*  The tokens of a list attribute, which is XSD's list lexical form:
+            values separated by whitespace, leading and trailing ignored, and an
+            empty string is zero values rather than one empty one. */
+        std::vector<std::string> splitList (const std::string& text)
+        {
+            std::vector<std::string> out;
+            std::size_t i = 0;
+
+            while (i < text.size())
+            {
+                while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) != 0)
+                    ++i;
+
+                const auto start = i;
+
+                while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) == 0)
+                    ++i;
+
+                if (i > start)
+                    out.push_back (text.substr (start, i - start));
+            }
+
+            return out;
+        }
+
+        /*  Every value the attribute holds: one for a scalar, one per element
+            for a list, and none at all when the text does not parse.
+
+            A LIST THAT FAILS ANYWHERE PUBLISHES NOTHING, rather than the
+            elements that happened to parse. Half a routing matrix is not a
+            smaller routing matrix, it is a different one, and a client given
+            three of four gains has been told something untrue about where a cue
+            goes. The document validator refuses such a file at load; this is
+            the same answer one layer up. */
+        std::vector<osc::Value> toOscValues (const doc::Attribute& attribute,
+                                             const std::string& text)
+        {
+            if (! attribute.isList())
+            {
+                if (auto single = toOscValue (attribute, text))
+                    return { *single };
+
+                return {};
+            }
+
+            std::vector<osc::Value> out;
+
+            for (const auto& token : splitList (text))
+            {
+                auto element = toOscValue (attribute, token);
+
+                if (! element.has_value())
+                    return {};
+
+                out.push_back (*element);
+            }
+
+            return out;
+        }
+
         Node makeContainer (std::string address)
         {
             Node node;
@@ -123,7 +185,7 @@ namespace wfg::tree
             node.address = std::move (address);
             node.kind = kindFor (row.kind);
             node.access = accessFor (row.access);
-            node.typeTags = std::string (1, row.oscTypeTag);
+            node.typeTags = std::string (1, row.oscTypeTag);   // widened below for a list
             node.description = std::string (row.description);
 
             node.hasMinimum = row.hasMin;
@@ -142,8 +204,20 @@ namespace wfg::tree
             /*  An event has no value at a given time (PRD §3.3), so it is given
                 none. A nil or a zero would be an answer to a question that has
                 none. */
+            /*  A LIST NODE PUBLISHES ONE VALUE PER ELEMENT, and its TYPE
+                string grows to match - `ddd` for three gains. That is ordinary
+                OSCQuery: TYPE is per node, and a node carrying a run of numbers
+                says so the same way a command carrying three arguments does.
+
+                It means the type string of a list node depends on its value,
+                which is unusual and worth naming. It is stable in practice:
+                `Route/@gains` is C_in x width, and both come from the document,
+                so it changes only when the show does. */
             if (node.kind != Kind::event)
-                node.value = toOscValue (attribute, valueText);
+            {
+                node.values = toOscValues (attribute, valueText);
+                node.typeTags = std::string (node.values.size(), row.oscTypeTag);
+            }
 
             return node;
         }

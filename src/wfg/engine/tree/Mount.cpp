@@ -261,7 +261,7 @@ namespace wfg::tree
                 when somebody pointed a browser at it, and PRD §4.10 keeps that
                 out of anything Go.dot treats as known. A mounted node has no
                 value until something writes one. */
-            built.value.reset();
+            built.values.clear();
 
             out.push_back (std::move (built));
 
@@ -434,7 +434,7 @@ namespace wfg::tree
             and that is the whole extent of what a stub does NOT do - the value
             is in the tree, the event is in the log, and a replay reproduces
             both. Phase 2 puts a socket after this line. */
-        node->value = *coerced;
+        node->values = { *coerced };
         return { true, {} };
     }
 
@@ -443,6 +443,6 @@ namespace wfg::tree
         auto* self = const_cast<MountTable*> (this);
         const auto* node = self->findNode (address);
 
-        return (node != nullptr && node->value.has_value()) ? &*node->value : nullptr;
+        return (node != nullptr && ! node->values.empty()) ? &node->values.front() : nullptr;
     }
 }

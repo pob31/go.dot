@@ -202,8 +202,8 @@ TEST_CASE ("audio: the tree publishes the track count and every bus")
 
     /*  Read out of the fixture rather than remembered, so that changing the
         bundle changes what this expects. */
-    REQUIRE (tracks->value.has_value());
-    CHECK (std::to_string (tracks->value->getInt32())
+    REQUIRE (tracks->soleValue().has_value());
+    CHECK (std::to_string (tracks->soleValue()->getInt32())
              == rig.document.getAttribute ("/godot/audio/tracks"));
 
     for (const auto& address : { "/godot/audio", "/godot/bus" })
@@ -219,8 +219,8 @@ TEST_CASE ("audio: the tree publishes the track count and every bus")
 
     REQUIRE (name != nullptr);
     CHECK (name->access == tree::Access::readWrite);
-    REQUIRE (name->value.has_value());
-    CHECK (name->value->getString() == "Main L/R");
+    REQUIRE (name->soleValue().has_value());
+    CHECK (name->soleValue()->getString() == "Main L/R");
 }
 
 TEST_CASE ("audio: the runtime nodes answer before anything has opened a device")
@@ -235,14 +235,14 @@ TEST_CASE ("audio: the runtime nodes answer before anything has opened a device"
     const auto* status = snapshot->find ("/godot/audio/status");
 
     REQUIRE (status != nullptr);
-    REQUIRE (status->value.has_value());
-    CHECK (status->value->getString() == "stopped");
+    REQUIRE (status->soleValue().has_value());
+    CHECK (status->soleValue()->getString() == "stopped");
 
     const auto* outputs = snapshot->find ("/godot/audio/outputs");
 
     REQUIRE (outputs != nullptr);
-    REQUIRE (outputs->value.has_value());
-    CHECK (outputs->value->getInt32() == 0);
+    REQUIRE (outputs->soleValue().has_value());
+    CHECK (outputs->soleValue()->getInt32() == 0);
 }
 
 TEST_CASE ("audio: a write to the track count is refused as read-only, not as unknown")

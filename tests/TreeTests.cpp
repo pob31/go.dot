@@ -211,8 +211,8 @@ TEST_CASE ("tree: the derived values come from the structure, not from the file"
     {
         const auto* node = snapshot->find (address);
         REQUIRE (node != nullptr);
-        REQUIRE (node->value.has_value());
-        return *node->value;
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
     };
 
     CHECK (valueAt (announce + "/kind") == osc::Value::string ("memo"));
@@ -241,8 +241,8 @@ TEST_CASE ("tree: a cue keeps its address when it moves, and its index changes")
     const auto after = rig.publish (1);
 
     REQUIRE (after->find (announce + "/index") != nullptr);
-    CHECK (*after->find (announce + "/index")->value == osc::Value::int32 (0));
-    CHECK (*after->find (preshow + "/order")->value == osc::Value::string ("F7HR8TVD E4GP6QSC"));
+    CHECK (*after->find (announce + "/index")->soleValue() == osc::Value::int32 (0));
+    CHECK (*after->find (preshow + "/order")->soleValue() == osc::Value::string ("F7HR8TVD E4GP6QSC"));
 
     /*  No path appeared or disappeared: the flat /godot/cue container holds the
         same cues it did, so a listener gets value pushes and no PATH_*. */
@@ -264,7 +264,7 @@ TEST_CASE ("tree: a published snapshot does not change when the next tick does")
 
     const auto* nameNode = first->find (announce + "/name");
     REQUIRE (nameNode != nullptr);
-    CHECK (*nameNode->value == osc::Value::string ("Announce"));
+    CHECK (*nameNode->soleValue() == osc::Value::string ("Announce"));
 
     const auto nodesBefore = first->size();
 
@@ -277,12 +277,12 @@ TEST_CASE ("tree: a published snapshot does not change when the next tick does")
     const auto second = rig.publish (2);
 
     // The new snapshot moved on.
-    CHECK (*second->find (announce + "/name")->value == osc::Value::string ("Renamed"));
+    CHECK (*second->find (announce + "/name")->soleValue() == osc::Value::string ("Renamed"));
     CHECK (second->size() > nodesBefore);
     CHECK (second->tick() == 2);
 
     // The old one did not, and still answers with what it was published with.
-    CHECK (*first->find (announce + "/name")->value == osc::Value::string ("Announce"));
+    CHECK (*first->find (announce + "/name")->soleValue() == osc::Value::string ("Announce"));
     CHECK (first->size() == nodesBefore);
     CHECK (first->tick() == 0);
 }
@@ -376,8 +376,8 @@ TEST_CASE ("tree: the engine's own numbers are published, and are runtime only")
     {
         const auto* node = snapshot->find (address);
         REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
-        REQUIRE (node->value.has_value());
-        return *node->value;
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
     };
 
     CHECK (valueAt ("/godot/engine/product") == osc::Value::string ("Go.dot"));
@@ -424,12 +424,12 @@ TEST_CASE ("tree: a rejected write is readable back, because OSC has no reply ch
 
     REQUIRE (count != nullptr);
     REQUIRE (last != nullptr);
-    CHECK (*count->value == osc::Value::int32 (1));
+    CHECK (*count->soleValue() == osc::Value::int32 (1));
 
     /*  kind is derived from the element: a client cannot turn a cue into a
         group by writing to it, and the read-back says which node and why. */
-    REQUIRE (last->value.has_value());
-    const auto text = last->value->getString();
+    REQUIRE (last->soleValue().has_value());
+    const auto text = last->soleValue()->getString();
 
     INFO ("lastError: " << text);
     CHECK (text.find ("read-only") != std::string::npos);
@@ -445,14 +445,14 @@ TEST_CASE ("tree: node.set takes the target's own type, not always a string")
                       { osc::Value::string (announce + "/preWait"),
                         osc::Value::float64 (2.5) }).applied == 1);
 
-    CHECK (*rig.publish (1)->find (announce + "/preWait")->value == osc::Value::float64 (2.5));
+    CHECK (*rig.publish (1)->find (announce + "/preWait")->soleValue() == osc::Value::float64 (2.5));
 
     // The same value sent as text lands identically: the schema decides the type.
     CHECK (rig.apply (2, "cli", "node.set",
                       { osc::Value::string (announce + "/preWait"),
                         osc::Value::string ("2.5") }).applied == 1);
 
-    CHECK (*rig.publish (2)->find (announce + "/preWait")->value == osc::Value::float64 (2.5));
+    CHECK (*rig.publish (2)->find (announce + "/preWait")->soleValue() == osc::Value::float64 (2.5));
 
     /*  And a word still cannot get into a number. The check moved one layer in,
         to where the type is actually known; it did not go away. */
@@ -465,7 +465,7 @@ TEST_CASE ("tree: node.set takes the target's own type, not always a string")
                       { osc::Value::string (announce + "/preWait"),
                         osc::Value::float64 (-1.0) }).rejected == 1);
 
-    CHECK (*rig.publish (4)->find (announce + "/preWait")->value == osc::Value::float64 (2.5));
+    CHECK (*rig.publish (4)->find (announce + "/preWait")->soleValue() == osc::Value::float64 (2.5));
 }
 
 //==============================================================================
@@ -576,7 +576,7 @@ TEST_CASE ("tree: commands are write-only method nodes, and node.set is not one"
     CHECK (create->kind == Kind::event);
     CHECK (create->access == Access::write);
     CHECK (create->typeTags == "sisss");        // parent, index, kind, name, [id]
-    CHECK_FALSE (create->value.has_value());    // an event has no value at a given time
+    CHECK_FALSE (create->soleValue().has_value());    // an event has no value at a given time
 
     CHECK (snapshot->find ("/godot/cmd/node/touch") != nullptr);
     CHECK (snapshot->find ("/godot/cmd/node/release") != nullptr);

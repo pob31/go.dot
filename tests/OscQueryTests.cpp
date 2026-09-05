@@ -116,7 +116,7 @@ namespace
             n.kind = tree::Kind::state;
             n.access = tree::Access::read;
             n.typeTags = "h";
-            n.value = osc::Value::int64 (12);
+            n.values = { osc::Value::int64 (12) };
             nodes->push_back (n);
         }
 
@@ -126,7 +126,7 @@ namespace
             n.kind = tree::Kind::state;
             n.access = tree::Access::readWrite;
             n.typeTags = "f";
-            n.value = osc::Value::float32 (0.25f);
+            n.values = { osc::Value::float32 (0.25f) };
             n.hasMinimum = true;
             n.minimum = 0.0;
             n.hasMaximum = true;

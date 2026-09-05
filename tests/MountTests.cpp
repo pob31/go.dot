@@ -177,7 +177,7 @@ TEST_CASE ("mount: a captured VALUE is dropped, because nobody decided it")
             continue;
 
         INFO ("address: " << node->address);
-        CHECK_FALSE (node->value.has_value());
+        CHECK_FALSE (node->soleValue().has_value());
         ++checked;
     }
 
@@ -244,7 +244,7 @@ TEST_CASE ("mount: a GODOT key overrides what inference would have said")
 
     CHECK (blackout->kind == Kind::event);
     CHECK (blackout->access == Access::readWrite);      // the access is still the file's
-    CHECK_FALSE (blackout->value.has_value());          // an event has no value at a given time
+    CHECK_FALSE (blackout->soleValue().has_value());          // an event has no value at a given time
 
     // And the other three declarations override the mount's defaults.
     const auto* master = snapshot->find ("/ext/console/masterLevel");
@@ -331,8 +331,8 @@ TEST_CASE ("mount: an accepted write lands, and goes no further")
     // And it reaches the tree.
     const auto* published = rig.publish (1)->find ("/wfs/input/1/positionX");
     REQUIRE (published != nullptr);
-    REQUIRE (published->value.has_value());
-    CHECK (*published->value == osc::Value::float32 (12.5f));
+    REQUIRE (published->soleValue().has_value());
+    CHECK (*published->soleValue() == osc::Value::float32 (12.5f));
 }
 
 TEST_CASE ("mount: a word cannot get into a number, and an int into a float can")
@@ -492,8 +492,8 @@ TEST_CASE ("mount: /godot/mount says whether it loaded and how much it brought")
     {
         const auto* node = tree->find (address);
         REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
-        REQUIRE (node->value.has_value());
-        return *node->value;
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
     };
 
     const auto snapshot = rig.publish (0);

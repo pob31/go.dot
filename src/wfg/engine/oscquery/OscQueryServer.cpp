@@ -383,14 +383,14 @@ namespace wfg::oscquery
         {
             const auto* node = current.find (address);
 
-            if (node == nullptr || ! node->value.has_value())
+            if (node == nullptr || node->values.empty())
                 continue;
 
             /*  ONE message per node per tick, carrying the value it HAS now -
                 not the succession it passed through during the tick. That is
                 the whole of the coalescing, and it falls out of reading the
                 published snapshot rather than the stream of writes. */
-            const auto packet = osc::Packet::message (address, { *node->value });
+            const auto packet = osc::Packet::message (address, node->values);
 
             std::string error;
             const auto encoded = osc::encode (packet, error);

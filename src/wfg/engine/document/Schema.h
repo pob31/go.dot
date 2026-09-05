@@ -70,6 +70,9 @@ namespace wfg::doc
         std::string_view description() const noexcept { return row->description; }
 
         bool isEnum() const noexcept                  { return row->numEnumValues > 0; }
+
+        /** Whether it holds a run of its type rather than one. See AttributeRow. */
+        bool isList() const noexcept                  { return row->isList; }
         bool isEnumValue (std::string_view v) const noexcept;
 
         /** True when the value is within the row's declared range, or when

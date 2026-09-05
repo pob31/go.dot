@@ -91,7 +91,31 @@ namespace wfg::doc
             here would admit a file our own writer can never produce, and the
             byte-comparison after a round trip would then be the thing that
             failed. */
+        void writeScalarDatatype (std::string& out, const Attribute& attribute, int depth);
+
         void writeDatatype (std::string& out, const Attribute& attribute, int depth)
+        {
+            /*  A LIST IS A WRAPPER, NOT A DATATYPE. RELAX NG's <list> splits the
+                attribute on whitespace and matches the pattern inside against
+                each token, so everything below - the bounds, the enum, the
+                closed boolean set - applies per element with no second spelling
+                of any of it. Zero values is a legal list: a cue routed nowhere
+                yet has an empty `gains`, and the grammar has no business
+                refusing a document the editor can produce. */
+            if (attribute.isList())
+            {
+                line (out, depth, "<list>");
+                line (out, depth + 1, "<zeroOrMore>");
+                writeScalarDatatype (out, attribute, depth + 2);
+                line (out, depth + 1, "</zeroOrMore>");
+                line (out, depth, "</list>");
+                return;
+            }
+
+            writeScalarDatatype (out, attribute, depth);
+        }
+
+        void writeScalarDatatype (std::string& out, const Attribute& attribute, int depth)
         {
             if (attribute.isEnum())
             {

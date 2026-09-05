@@ -97,12 +97,36 @@ namespace wfg::tree
         std::string panic = "park";
 
         //======================================================================
-        /*  The value, when the node has one. Absent for a container, and absent
-            for an event - which is the whole point of the distinction: asking
+        /*  The value, when the node has one. EMPTY for a container, and empty
+            for an event - which is the whole point of that distinction: asking
             an event for its value is a question with no answer, and a nil or a
-            zero would be an answer. */
-        std::optional<osc::Value> value;
+            zero would be an answer.
+
+            A VECTOR RATHER THAN AN OPTIONAL, and the reason is the protocol
+            rather than Go.dot. OSCQuery's VALUE is an array and always has
+            been - the JSON here has emitted `"VALUE": [x]` since Phase 1 - and
+            OSC carries as many arguments as the type tag string declares. A
+            node holding one value is the common case, not the only one:
+            `Route/@gains` is C_in x width numbers under a single address, and
+            modelling that as a string would have put a parser in every client.
+
+            So `typeTags` and this stay the same length, and a node with one
+            value has one of each. */
+        std::vector<osc::Value> values;
 
         bool isContainer() const noexcept { return kind == Kind::container; }
+
+        /*  The value, for a node that holds exactly one - which is almost all
+            of them. Empty for a container, for an event, and for a LIST, and
+            that last one is deliberate: a caller that meant "the value" and
+            meets four gains has asked a question with no single answer, and
+            handing back the first would be a wrong answer rather than none. */
+        std::optional<osc::Value> soleValue() const
+        {
+            if (values.size() != 1)
+                return std::nullopt;
+
+            return values.front();
+        }
     };
 }

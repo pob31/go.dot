@@ -89,6 +89,25 @@ namespace wfg::doc
 
         ValueType type;
         char oscTypeTag;               ///< the tag the tree and the wire use
+
+        /*  Whether this attribute holds a RUN of that type rather than one of
+            it. Written `d*` in the table.
+
+            Everything else on the row describes an ELEMENT: the range bounds
+            each value, the unit is each value's unit, the panic value is what
+            each one rests at. That is why it is a flag and not a seventh
+            ValueType - a `numberList` type would have made every one of those
+            columns ambiguous, and the first question anybody asked would have
+            been "the range of what?".
+
+            In the document it is a space-separated run, which is XSD's `list`
+            and what the generated RELAX NG emits. On the wire it is N arguments
+            of `oscTypeTag`, which is what OSC does natively and needs no
+            encoding of its own. The length is not declared anywhere: it is
+            whatever the document holds, and what makes it correct is the
+            element that carries it - `Route/@gains` is C_in x width because the
+            cue's channels and the bus's width say so. */
+        bool isList;
         Access access;
         Kind kind;
         Persist persist;
