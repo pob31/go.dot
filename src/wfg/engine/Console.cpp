@@ -17,7 +17,9 @@
 #include <wfg/engine/Console.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/log/Replay.h>
 
 /*  juce_core and juce_events are named directly even though tracktion_engine.h
@@ -34,10 +36,12 @@
 #include <juce_events/juce_events.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+#include <algorithm>
 #include <clocale>
 #include <cstring>
 #include <iostream>
 #include <string>
+#include <vector>
 
 namespace
 {
@@ -311,6 +315,229 @@ namespace
         std::cout << canonical << std::flush;
         return 0;
     }
+
+    //==============================================================================
+    /*  Where two files that must match stop matching.
+
+        "They differ" is not a useful thing to tell someone at the end of a CI
+        log. The line number and the two spellings of that line usually make the
+        cause obvious - a description edited in the CSV, a row moved, a range
+        widened - without anybody having to run a diff locally to find out. */
+    void reportFirstDifference (const std::string& committed, const std::string& generated)
+    {
+        const auto split = [] (const std::string& text)
+        {
+            std::vector<std::string> out;
+            std::string current;
+
+            for (const char c : text)
+            {
+                if (c == '\n')
+                {
+                    out.push_back (current);
+                    current.clear();
+                }
+                else
+                {
+                    current += c;
+                }
+            }
+
+            if (! current.empty())
+                out.push_back (current);
+
+            return out;
+        };
+
+        const auto left = split (committed);
+        const auto right = split (generated);
+
+        for (std::size_t i = 0; i < std::max (left.size(), right.size()); ++i)
+        {
+            const auto a = i < left.size()  ? left[i]  : std::string ("(end of file)");
+            const auto b = i < right.size() ? right[i] : std::string ("(end of file)");
+
+            if (a != b)
+            {
+                std::cerr << "    first difference at line " << (i + 1) << ':' << std::endl
+                          << "      committed: " << a << std::endl
+                          << "      generated: " << b << std::endl;
+                return;
+            }
+        }
+    }
+
+    /*  `wfg schema [--out=<file>] [--check=<file>]`
+
+        Bare, it writes the bundle's RELAX NG grammar to stdout, for reading.
+        With --out it writes that grammar to a file, which is how
+        docs/schema/show.rng is produced. With --check it compares a committed
+        file against what the parameter table generates NOW and fails if the two
+        have drifted apart.
+
+        The gate is the reason the verb exists. A grammar generated at build
+        time would always agree with the code and would prove nothing; a
+        committed one is a promise to everybody outside this repository about
+        what a show file may contain, and this is what keeps that promise
+        checkable.
+    */
+    int runSchema (const juce::ArgumentList& args)
+    {
+        const auto generated = wfg::doc::RelaxNg::generate();
+
+        /*  --out rather than a shell redirect, and the reason is Windows.
+            stdout is a TEXT stream there, so `wfg schema > show.rng` turns every
+            LF into CRLF and produces a file that --check then rejects on the
+            machine that just wrote it. Writing the bytes ourselves is the same
+            fix `canon --in-place` makes, for the same reason. */
+        if (args.containsOption ("--out"))
+        {
+            const auto outPath = args.getValueForOption ("--out");
+
+            if (outPath.isEmpty())
+            {
+                std::cerr << "wfg schema: --out=<file> needs a file to write" << std::endl;
+                return 2;
+            }
+
+            const juce::File out { juce::File::getCurrentWorkingDirectory().getChildFile (outPath) };
+
+            if (const auto created = out.getParentDirectory().createDirectory(); created.failed())
+            {
+                std::cerr << "wfg schema: cannot create "
+                          << out.getParentDirectory().getFullPathName().toStdString() << std::endl;
+                return 2;
+            }
+
+            juce::FileOutputStream stream { out };
+
+            if (! stream.openedOk())
+            {
+                std::cerr << "wfg schema: cannot write " << out.getFullPathName().toStdString()
+                          << std::endl;
+                return 2;
+            }
+
+            stream.setPosition (0);
+            stream.truncate();
+            stream.write (generated.data(), generated.size());
+            return 0;
+        }
+
+        if (! args.containsOption ("--check"))
+        {
+            std::cout << generated << std::flush;
+            return 0;
+        }
+
+        const auto path = args.getValueForOption ("--check");
+
+        if (path.isEmpty())
+        {
+            std::cerr << "wfg schema: --check=<file> needs the file to compare against" << std::endl;
+            return 2;
+        }
+
+        const juce::File file { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
+
+        /*  Raw bytes, not loadFileAsString: this is a byte comparison, and a
+            reader that normalised line endings would report a match between a
+            CRLF file and an LF one. The whole point is that they are the same
+            bytes on all three platforms. */
+        juce::MemoryBlock raw;
+
+        if (! file.existsAsFile() || ! file.loadFileAsData (raw))
+        {
+            std::cerr << "wfg schema: cannot read " << file.getFullPathName().toStdString()
+                      << std::endl;
+            return 2;
+        }
+
+        const std::string committed { static_cast<const char*> (raw.getData()), raw.getSize() };
+
+        if (committed == generated)
+            return 0;
+
+        std::cerr << "wfg schema: " << file.getFileName().toStdString()
+                  << " is not what the parameter table generates." << std::endl;
+
+        reportFirstDifference (committed, generated);
+
+        std::cerr << "    the table is the source; regenerate with:  wfg schema --out="
+                  << file.getFileName().toStdString() << std::endl;
+
+        return 1;
+    }
+
+    /*  `wfg validate <bundle-or-file>`
+
+        Takes a bundle folder or a bare show document, because both are things
+        someone has on disk and wants an opinion about.
+
+        Three exit codes, distinct on purpose and matching `wfg replay`:
+        0 nothing to say, 1 it loaded but something is wrong (or it did not
+        load), 2 there was nothing there to read. A script that treats "invalid
+        show" and "wrong path" the same way will eventually report a green build
+        for a directory that does not exist.
+
+        This is the INSIDE opinion, and it is only half the check: it runs the
+        engine's own schema against a document the engine's own reader parsed,
+        so it cannot catch a mistake both halves share. scripts/validate-show.py
+        runs the generated grammar through lxml for the other half.
+    */
+    int runValidate (const juce::ArgumentList& args)
+    {
+        const auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
+
+        if (path.isEmpty())
+        {
+            std::cerr << "wfg validate: give me a bundle folder or a show document" << std::endl;
+            return 2;
+        }
+
+        const juce::File target { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
+
+        wfg::doc::ShowDocument document;
+        wfg::doc::ReadResult result;
+        std::string what;
+
+        if (target.isDirectory())
+        {
+            what = "bundle " + target.getFileName().toStdString();
+            result = wfg::doc::Bundle::open (target, document);
+        }
+        else if (target.existsAsFile())
+        {
+            what = target.getFileName().toStdString();
+            result = wfg::doc::CanonicalXml::read (target.loadFileAsString().toStdString(),
+                                                  document);
+        }
+        else
+        {
+            std::cerr << "wfg validate: cannot read "
+                      << target.getFullPathName().toStdString() << std::endl;
+            return 2;
+        }
+
+        for (const auto& problem : result.problems)
+            std::cerr << "    " << problem << std::endl;
+
+        if (! result.ok)
+        {
+            std::cerr << "wfg validate: " << what << " could not be loaded" << std::endl;
+            return 1;
+        }
+
+        if (! result.problems.empty())
+        {
+            std::cerr << "wfg validate: " << what
+                      << " loaded, but the problems above need attention" << std::endl;
+            return 1;
+        }
+
+        std::cout << what << " is valid" << std::endl;
+        return 0;
+    }
 }
 
 //==============================================================================
@@ -356,6 +583,26 @@ int wfg::runConsole (int argc, char** argv)
                       [] (const juce::ArgumentList& args)
                       {
                           if (const auto code = runCanon (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
+    app.addCommand ({ "validate",
+                      "validate <bundle-or-file>",
+                      "Checks a bundle or a show document against the schema and reports every problem",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runValidate (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
+    app.addCommand ({ "schema",
+                      "schema [--out=<file>] [--check=<file>]",
+                      "Writes the bundle's RELAX NG grammar, or checks a committed copy against it",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runSchema (args); code != 0)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 

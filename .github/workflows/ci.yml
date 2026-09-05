@@ -237,6 +237,21 @@ jobs:
         # No `locale-gen` equivalent: macOS carries fr_FR.UTF-8 out of the box.
         run: brew install ccache ninja
 
+      - name: Install lxml
+        # The RELAX NG validator behind scripts/validate-show.py, and a HARD
+        # requirement: the root CMakeLists.txt refuses to configure the test
+        # build without it, because a validator that quietly does not run is
+        # the same failure as a locale test that quietly reports green.
+        #
+        # pip rather than brew: brew's python is not necessarily the one
+        # find_package(Python3) picks, and the probe and the ctest entry both
+        # go through that interpreter.
+        # The fallback is for a Homebrew python, which marks itself
+        # externally managed and refuses a plain install. Trying the
+        # ordinary form first keeps the tool-cache python, which is what
+        # the runner normally resolves, on the quiet path.
+        run: python3 -m pip install lxml || python3 -m pip install --break-system-packages lxml
+
       - name: Cache ccache
         uses: actions/cache@v5
         with:
@@ -291,6 +306,11 @@ jobs:
       # Unblocking it means raising our cmake_minimum_required floor to 3.25 and
       # setting CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded under CMP0141 —
       # a real change to the build policy, not a CI tweak.
+
+      - name: Install lxml
+        # See the macOS job for why this is a hard requirement rather than a
+        # nicety. The image ships Python; it does not ship lxml.
+        run: python -m pip install lxml
 
       - name: Configure (ci-windows)
         # The ci-windows preset inherits `vs`, which names no generator, so CMake

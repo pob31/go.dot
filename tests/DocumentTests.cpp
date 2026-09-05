@@ -299,6 +299,32 @@ TEST_CASE ("canonical xml: an attribute at its default is omitted, and still rea
 }
 
 //==============================================================================
+TEST_CASE ("canonical xml: clearing an attribute writes what never setting it would")
+{
+    /*  Canonical means one show has exactly one spelling, and this is the case
+        that nearly got away. For a row the table gives NO default - a name, a
+        note, a cue number - an absent attribute still reads back as the empty
+        string, because that is what getAttribute returns for one. So writing
+        `notes=""` would be a second file for a show already spelled by the file
+        without it, and load-save-compare would pass on both while a diff
+        between two people's copies showed a change nobody made.
+
+        The writer therefore takes its omit rule from what ABSENCE MEANS rather
+        than from whether a default was declared. Clearing a note and never
+        having written one are the same show. */
+    ShowDocument untouched;
+    REQUIRE (CanonicalXml::read (fixture ("canonical.xml"), untouched).ok);
+
+    ShowDocument cleared;
+    REQUIRE (CanonicalXml::read (fixture ("canonical.xml"), cleared).ok);
+    REQUIRE (cleared.setAttribute ("/godot/cue/B3N8R5TW/notes", "").ok);
+
+    const auto written = CanonicalXml::write (cleared);
+
+    CHECK (written == CanonicalXml::write (untouched));
+    CHECK (written.find ("notes=\"\"") == std::string::npos);
+}
+
 TEST_CASE ("canonical xml: a broken document is refused, and says why")
 {
     struct Case { const char* xml; const char* mentions; };

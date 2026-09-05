@@ -1,0 +1,24 @@
+{
+  "DESCRIPTION": "A WFS-DIY processor, as captured from GET / on its OSCQuery port.",
+  "FULL_PATH": "/",
+  "CONTENTS": {
+    "source": {
+      "FULL_PATH": "/source",
+      "CONTENTS": {
+        "1": {
+          "FULL_PATH": "/source/1",
+          "CONTENTS": {
+            "x": {
+              "DESCRIPTION": "Source position, metres, stage-left positive.",
+              "FULL_PATH": "/source/1/x",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [0.0],
+              "RANGE": [{"MIN": -50.0, "MAX": 50.0}]
+            }
+          }
+        }
+      }
+    }
+  }
+}

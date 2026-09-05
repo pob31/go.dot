@@ -47,6 +47,7 @@
 
 #include <wfg/engine/document/ShowDocument.h>
 
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -84,5 +85,17 @@ namespace wfg::doc
         /** Convenience: read, then write, without keeping the document. Used by
             `wfg canon` and by the round-trip tests. */
         std::string canonicalise (std::string_view text, ReadResult& result);
+
+        /*  One attribute of one node as canonical text, or nullopt when the
+            node does not carry it or carries exactly its default - which is
+            the rule that keeps both files sparse.
+
+            Public because state.xml needs the identical rule and must not grow
+            a second implementation of it. The two writers differ in WHICH
+            attributes they take (`persist=show` here, `persist=state` there)
+            and in the shape they arrange them in; how a value becomes text is
+            the same question in both, and it is answered once. */
+        std::optional<std::string> attributeText (const Attribute& attribute,
+                                                  const juce::ValueTree& node);
     }
 }

@@ -57,6 +57,21 @@ namespace wfg::doc
         /** The alphabet, in value order: index is the digit's value. */
         static constexpr std::string_view alphabet = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
+        /*  The same thing said as a regular expression, for consumers that
+            describe an identifier rather than check one - the RELAX NG grammar
+            is the first. Spelled as ranges because that is what a reader of the
+            grammar can take in at a glance, and the ranges are what the skipped
+            letters make awkward: I, L, O and U are absent because Crockford
+            drops the four that a person mistakes for 1, 1, 0 and V.
+
+            It restates both `length` and `alphabet`, so a test walks every
+            character of the alphabet through it and every skipped letter
+            against it. The static_assert below is the cheaper half of that:
+            change the length and this stops compiling. */
+        static constexpr std::string_view pattern = "[0-9A-HJKMNP-TV-Z]{8}";
+
+        static_assert (length == 8, "Id::pattern spells the length; update it too");
+
         /** True if `text` is a well-formed identifier. Case-sensitive: the
             canonical form is upper case, and accepting both would mean two
             spellings of one identity. */

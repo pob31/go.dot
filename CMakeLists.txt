@@ -213,6 +213,37 @@ if(WFG_BUILD_TESTS)
     # with no Python compiles and ships. Only checking it needs the interpreter.
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     set(WFG_PYTHON "${Python3_EXECUTABLE}")
+
+    # lxml, likewise hard. It runs the OUTSIDE opinion: the committed RELAX NG
+    # grammar against every fixture, through a validator that shares no code
+    # with the engine. Every other check on a show document is the engine
+    # agreeing with itself, so this is the only one that can catch a mistake our
+    # reader and our schema both make.
+    #
+    # Probed here rather than left to fail at test time, because the failure
+    # mode we are avoiding is the quiet one. scripts/validate-show.py exits 2
+    # instead of 0 when the import fails, and no test in this project carries
+    # SKIP_RETURN_CODE — the locale rule set that precedent and the reasoning
+    # carries over: a check that reports green without running is worse than a
+    # check that is not there, because nobody goes looking for it.
+    execute_process(COMMAND "${WFG_PYTHON}" -c "import lxml.etree"
+                    RESULT_VARIABLE WFG_LXML_RESULT
+                    OUTPUT_QUIET ERROR_QUIET)
+
+    if(NOT WFG_LXML_RESULT EQUAL 0)
+        message(FATAL_ERROR
+                "lxml is required to build the tests, and it is not importable by
+"
+                "  ${WFG_PYTHON}
+"
+                "It validates every show fixture against docs/schema/show.rng.
+"
+                "Install it:
+"
+                "  pip install lxml          (or: apt install python3-lxml)
+"
+                "or configure with -DWFG_BUILD_TESTS=OFF to build without the suite.")
+    endif()
 endif()
 
 add_subdirectory(src)

@@ -72,8 +72,8 @@ namespace wfg::doc
             Omitting defaults is what keeps a diff about decisions: a cue that
             nobody disabled has no `enabled` attribute, so enabling and
             re-disabling one leaves the file exactly as it was. */
-        std::optional<std::string> attributeText (const Attribute& attribute,
-                                                  const juce::ValueTree& node)
+        std::optional<std::string> attributeTextImpl (const Attribute& attribute,
+                                                      const juce::ValueTree& node)
         {
             const juce::Identifier property { juce::String (std::string (attribute.name())) };
 
@@ -107,7 +107,18 @@ namespace wfg::doc
                     return std::nullopt;
             }
 
-            if (attribute.hasDefault() && text == attribute.defaultText())
+            /*  No hasDefault() test, deliberately. ShowDocument::getAttribute
+                returns defaultText() for an ABSENT attribute whether or not the
+                table declares a default - so for a row with none, absence reads
+                back as the empty string, and writing `notes=""` would produce a
+                second file spelling one show. Clearing a note and never having
+                written one are the same show, and canonical means they are the
+                same bytes.
+
+                Sound for every type because the only rows without a declared
+                default are strings; for anything else "" is not a value the
+                formatter can produce, so the comparison simply never fires. */
+            if (text == attribute.defaultText())
                 return std::nullopt;
 
             return text;
@@ -140,7 +151,17 @@ namespace wfg::doc
 
                 for (const auto& attribute : element->attributes)
                 {
-                    if (auto text = attributeText (attribute, node))
+                    /*  show.xml carries what someone decided and nothing else
+                        (PRD §4.10). A `persist=state` attribute - a list's
+                        standby is the first - is what the machine happened to be
+                        doing, and it goes to state.xml, which EphemeralState
+                        writes using this same function. Without this line the
+                        two files would both claim the standby and a load would
+                        have to pick one. */
+                    if (attribute.persist() != Persist::show)
+                        continue;
+
+                    if (auto text = attributeTextImpl (attribute, node))
                         sorted.emplace (std::string (attribute.name()), std::move (*text));
                 }
 
@@ -173,6 +194,12 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    std::optional<std::string> CanonicalXml::attributeText (const Attribute& attribute,
+                                                            const juce::ValueTree& node)
+    {
+        return attributeTextImpl (attribute, node);
+    }
+
     std::string CanonicalXml::write (const ShowDocument& document)
     {
         /*  No XML declaration. It would carry an encoding the file already is
@@ -258,6 +285,19 @@ namespace wfg::doc
                     if (attribute == nullptr)
                     {
                         problems.push_back (here + ": unknown attribute \"" + name + "\"");
+                        continue;
+                    }
+
+                    /*  Refused rather than moved. A show.xml carrying a standby
+                        was either hand-edited or written by something that did
+                        not know the split, and silently relocating it would hide
+                        whichever of those it was - while silently keeping it
+                        would leave two files disagreeing about where GO is
+                        pointed. The message says where it goes. */
+                    if (attribute->persist() != Persist::show)
+                    {
+                        problems.push_back (here + ": \"" + name + "\" is engine state; it belongs"
+                                            " in state.xml, not in show.xml");
                         continue;
                     }
 

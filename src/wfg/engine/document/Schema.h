@@ -109,6 +109,14 @@ namespace wfg::doc
         /** The root element every show document starts with. */
         static constexpr std::string_view rootElement = "Show";
 
+        /*  The version every file in a bundle is written at: show.xml,
+            state.xml and the .wfg manifest all carry this one number.
+
+            Read from the parameter table rather than written here, because the
+            table already declares it as document/formatVersion's default. One
+            number, in one place, and bumping it is a CSV edit like any other. */
+        static int formatVersion();
+
         //======================================================================
         /*  Value handling, in one place so the reader, the writer and every
             command agree about what a value IS.

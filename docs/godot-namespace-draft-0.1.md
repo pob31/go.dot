@@ -300,14 +300,35 @@ Example, canonical:
 </Show>
 ```
 
-### 6.3 `state.xml` (question A)
+### 6.3 `state.xml`
+
+What the machine happened to be doing, which PRD §4.10 keeps out of the document. Its
+attributes come from the same table as show.xml's — the rows whose `persist` column is
+`state` rather than `show` — so adding a piece of ephemeral state is a CSV edit and no
+code changes.
+
+Flat, one entry per object that has something to remember, found by identifier:
 
 ```xml
 <State formatVersion="1">
-  <Focus list="7K2QM9X4"/>
-  <Standby cue="B3N8R5TW" list="7K2QM9X4"/>
+  <List id="7K2QM9X4" standby="B3N8R5TW"/>
 </State>
 ```
+
+An object with nothing to remember is left out entirely, so a show with four hundred cues
+and one standby is two lines.
+
+**This corrects draft 0.1**, which drew a single `<Standby cue= list=>` element and a
+`<Focus>` beside it. Standby is **one per list** — the parameter table has said so since the
+CSV was written, and its description says it in words — so it is an attribute of a `List`
+and not a document-level singleton. Focus is not in the table at all yet; it arrives as a
+row in PR 1.7, and lands in this file automatically when it does, because nothing here
+enumerates what state.xml may contain.
+
+The rule is enforced in both directions: the canonical writer refuses to put a `persist=state`
+attribute in show.xml, and the show reader refuses to read one, saying which file it belongs
+in rather than quietly moving it. A `standby` in show.xml was either hand-edited or written
+by something that did not know the split, and silently repairing it would hide which.
 
 ### 6.4 `MyShow.wfg`
 
@@ -317,10 +338,24 @@ Example, canonical:
 
 ### 6.5 RELAX NG
 
-`docs/schema/show.rng` is generated from the engine's `Schema` table by `wfg schema` and
-committed; CI fails if the committed file differs from the generated one.
-`scripts/validate-show.py` (lxml) validates any bundle and is the pre-commit hook §3.20
-asks for.
+[`docs/schema/show.rng`](schema/show.rng) is generated from the engine's `Schema` table by
+`wfg schema --out=<file>` and committed; `wfg schema --check=<file>` fails when the two have
+drifted apart, and CI runs it under both locales.
+
+**One grammar, three roots.** `start` is a choice of `Show`, `State` and `Bundle`, so a single
+file describes every XML file a bundle contains and one validator run covers all of them.
+
+**Why generate it at all**, when the engine already validates a document against its own
+schema: because that check and the schema are the same code, so it can prove the engine is
+self-consistent and nothing more. `scripts/validate-show.py` runs the published grammar
+through lxml, which shares no code with us — an outside opinion, and the only thing that
+can catch a mistake our reader and our schema both make. It is also the pre-commit hook
+§3.20 asks for, and it is what anybody outside this repository can run without building
+anything.
+
+Everything except `id` is optional in the grammar, and that is not laxness: the canonical
+writer omits an attribute holding its default, and an absent attribute reads back **as** its
+default. The grammar says which values are legal, not which are present.
 
 ## 7. The event log
 
@@ -412,6 +447,16 @@ back on if nobody feels strongly by then.
   instance continues. PRD §3.8's per-cue-type policy may revisit this later; restart and
   second-instance were the alternatives offered.
 
+- **A — Standby survives a save and a load** (settled 2026-09-05, in PR 1.3, the way the
+  plan recommended): a rehearsal reopened where it was left is the kinder default. It is one
+  column of one CSV row — `list/standby` carries `persist=state` — so reversing it is an edit
+  to the table and no change to any code.
+
+  The other half matters as much: LOSING `state.xml` COSTS ONLY THE STANDBY. A bundle
+  without one opens silently with every ephemeral value at its default, and an entry naming
+  an object the show no longer contains is reported and skipped. A show must never become
+  unopenable because of a file describing where somebody had got to in it.
+
 - **I — Audio backends as WFS-DIY builds them** (settled 2026-09-05): `JUCE_ASIO=1` behind a
   `WFG_ASIO_SDK` path variable (the SDK is not redistributable, so without a path the build
   is WASAPI/DirectSound only) and `JUCE_JACK=1` on Linux with `libjack-jackd2-dev` in the
@@ -421,15 +466,14 @@ back on if nobody feels strongly by then.
 
 | # | Question | Forced by | Fallback if undecided |
 |---|---|---|---|
-| A | Does **standby survive save/load**, or start empty every time? §3.20 lists ephemeral state without naming standby; §3.5 calls it engine state. | the cue list (PR 1.7) | persist it in `state.xml` — a rehearsal reopened where it was left is the kinder default, and it is one row of the CSV to reverse |
 | C | Does `standby.next` **descend into a group**, or step over it? §3.6 says the pointer descends into a manual sequence group; §3.5 says it lands after an automatic chain. Both are Phase 3 behaviour. | the cue list (PR 1.7) | step over it in Phase 1 and say so in the test, rather than implement half of Phase 3 |
 | D | The **touch-gating** vocabulary (§3.16 "required from day one"): `node.touch` / `node.release` per origin, pushes suppressed to the touching origin, released on disconnect. | the OSCQuery server (PR 1.9) | as described — it is the smallest thing that satisfies §3.16, and no surface exists yet to disagree with it |
 | E | Does the Phase 5 desktop UI run **in-process or as a separate client**? | Phase 5, but it shapes Phase 2's plugin-parameter handover | assume separate, because that is the stricter assumption and the one PRD §3.2 reads most naturally |
 | F | The **mount** attribute set: `transport` declared now and used from Phase 2, a mount-level `panic` default with per-node overrides. | mounts (PR 1.6) | as drawn in §2.5 |
 | J | **Should PRD §4.2 record what Tracktion does inside the callback?** Its device callback takes one uncontended `std::shared_lock` per block and its node-player pool uses semaphores; the lipogram can be *enforced* on Go.dot's code and only *measured* on Tracktion's (§11.5). A PRD amendment is the author's to make. | the lipogram test (PR 2.2) | enforce on Go.dot's scopes, report Tracktion's count separately, never hide it |
 
-None of these blocks the next subphase, and the one that was due soonest — B, tombstones —
-is now settled. J changes no code either way; it changes what §4.2 claims.
+None of these blocks the next subphase. B (tombstones) and A (standby persistence) were the
+two due soonest and both are now settled. J changes no code either way; it changes what §4.2 claims.
 
 ## 10. Not in Phase 1, by design
 

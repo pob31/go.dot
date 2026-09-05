@@ -10,7 +10,7 @@ One file, four surfaces. Every row generates all of:
 |---|---|
 | the show document schema | the element, its attribute, its type, its default, whether it is persisted at all |
 | the parameter tree | the node, its type, its access, and the four things PRD §3.3 says a node declares |
-| the RELAX NG schema | the attribute's pattern and whether it is required |
+| the RELAX NG schema | the attribute's datatype, its enumerated values or its range as a facet |
 | the OSCQuery reply | `TYPE`, `ACCESS`, `RANGE`, `DESCRIPTION`, and the `GODOT` metadata key |
 
 **Why one file rather than four.** WFS-DIY keeps three of these independently and
@@ -36,7 +36,7 @@ four places; if it is, it exists in all of them, spelled the same.
 | `rate_cap` | Hz, the cap on outbound dispatch for this node. |
 | `anticipatable` | whether it may be pre-sent before GO: imperceptible *and* revocable. Third-party defaults to `no`. |
 | `panic` | its defined resting state (PRD §4.6): `park`, `snap`, or a literal value. |
-| `persist` | `show` (someone decided it), `state` (the machine happened to be doing it), or `none` (runtime only, never written). This column is PRD §4.10 made mechanical, and it is also how a DERIVED value is marked — a cue's `index`, its `kind`, a list's `order` are computed from the tree, so storing them would be a second copy that eventually disagrees. A `none` row is not a document attribute at all. |
+| `persist` | `show` (someone decided it), `state` (the machine happened to be doing it), or `none` (runtime only, never written). It is also **which file the attribute lands in**: `show` goes to `show.xml` and `state` to `state.xml`, enforced in both directions — the canonical writer will not put a `state` attribute in the document, and the document reader refuses to read one, saying which file it belongs in. This column is PRD §4.10 made mechanical, and it is also how a DERIVED value is marked — a cue's `index`, its `kind`, a list's `order` are computed from the tree, so storing them would be a second copy that eventually disagrees. A `none` row is not a document attribute at all. |
 | `description` | one sentence, and it is the `DESCRIPTION` an OSCQuery client shows. Write it for the person reading it at 2 a.m. |
 
 RFC 4180 CSV: comma-separated, and a field containing a comma or a quote is

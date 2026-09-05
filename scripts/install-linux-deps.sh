@@ -83,6 +83,7 @@ $SUDO apt-get install -y --no-install-recommends \
     ninja-build \
     ccache \
     locales \
+    python3-lxml \
     libasound2-dev \
     libfreetype-dev \
     libfontconfig1-dev \
@@ -108,6 +109,14 @@ $SUDO apt-get install -y --no-install-recommends \
 #                        Every serialisation test runs under fr_FR as well as C
 #                        (devplan, cross-cutting), and tests/TestMain.cpp exits 2
 #                        rather than reporting green if the locale is absent.
+#   python3-lxml         the RELAX NG validator behind scripts/validate-show.py,
+#                        which is the only check on a show document that does
+#                        NOT come from the engine - every other one is our
+#                        reader and our schema agreeing with each other. The
+#                        distribution package rather than pip: it is the one
+#                        that arrives already built against libxml2, and a
+#                        source build of lxml on a CI runner is a slow way to
+#                        discover that a compiler flag changed.
 #   libasound2-dev       juce_audio_devices (ALSA)
 #   libfreetype-dev      juce_graphics
 #   libfontconfig1-dev   juce_graphics

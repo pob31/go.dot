@@ -1,0 +1,308 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The grammar of a Go.dot bundle: show.xml, state.xml and the .wfg manifest.
+
+  GENERATED. `wfg schema` writes this from the engine's schema table, which is
+  itself generated from docs/parameters/godot-parameters.csv. A test fails when
+  this committed copy and the generated one differ, so editing it by hand only
+  produces a red build. Add the parameter to the CSV instead.
+
+  Everything except `id` is optional, because the canonical writer omits an
+  attribute holding its default and an absent attribute reads back AS its
+  default. The grammar says which values are legal, not which are present.
+-->
+<grammar xmlns="http://relaxng.org/ns/structure/1.0"
+         xmlns:a="http://relaxng.org/ns/compatibility/annotations/1.0"
+         datatypeLibrary="http://www.w3.org/2001/XMLSchema-datatypes">
+
+  <start>
+    <choice>
+      <ref name="Show"/>
+      <ref name="State"/>
+      <ref name="Bundle"/>
+    </choice>
+  </start>
+
+  <define name="identifier">
+    <data type="string">
+      <param name="pattern">[0-9A-HJKMNP-TV-Z]{8}</param>
+    </data>
+  </define>
+
+  <define name="Show">
+    <element name="Show">
+      <optional>
+        <attribute name="formatVersion">
+          <a:documentation>The show format this document was written against.</a:documentation>
+          <data type="integer"/>
+        </attribute>
+      </optional>
+      <ref name="Lists"/>
+      <ref name="Mounts"/>
+    </element>
+  </define>
+
+  <define name="Lists">
+    <element name="Lists">
+      <zeroOrMore>
+        <ref name="List"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="List">
+    <element name="List">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue list&apos;s name.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <choice>
+          <ref name="Cue"/>
+          <ref name="Group"/>
+        </choice>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Cue">
+    <element name="Cue">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members own post-waits included; the groups post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Group">
+    <element name="Group">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="advance">
+          <a:documentation>Whether a member starts when the previous completes or on GO.</a:documentation>
+          <choice>
+            <value>auto</value>
+            <value>manual</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="mode">
+          <a:documentation>Whether members are scheduled at entry or run one after another.</a:documentation>
+          <choice>
+            <value>timeline</value>
+            <value>sequence</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members own post-waits included; the groups post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <choice>
+          <ref name="Cue"/>
+          <ref name="Group"/>
+        </choice>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Mounts">
+    <element name="Mounts">
+      <zeroOrMore>
+        <ref name="Mount"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Mount">
+    <element name="Mount">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="anticipatable">
+          <a:documentation>Whether the mounted nodes may be pre-sent before GO. False for third parties.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="namespace">
+          <a:documentation>The bundle-relative OSCQuery namespace file describing the target.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="panic">
+          <a:documentation>Default resting state for the mounted nodes.</a:documentation>
+          <choice>
+            <value>park</value>
+            <value>snap</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="prefix">
+          <a:documentation>The address the foreign namespace is mounted at.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="rateCap">
+          <a:documentation>Default outbound rate cap for the mounted nodes.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="transport">
+          <a:documentation>How the mounted target is reached. Declared now; used from Phase 2.</a:documentation>
+          <choice>
+            <value>udp</value>
+            <value>tcp</value>
+            <value>ws</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State">
+    <element name="State">
+      <attribute name="formatVersion">
+        <data type="integer"/>
+      </attribute>
+      <zeroOrMore>
+        <ref name="State.List"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="State.List">
+    <element name="List">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="standby">
+          <a:documentation>The cue GO will act on. One per list; moved only by a standby command</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Bundle">
+    <element name="Bundle">
+      <attribute name="formatVersion">
+        <data type="integer"/>
+      </attribute>
+    </element>
+  </define>
+
+</grammar>

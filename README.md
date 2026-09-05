@@ -65,9 +65,23 @@ documents come first, and they are the thing to read before the code:
   formatter that writes the shortest text reading back as the identical value. Measured:
   JUCE's own writer loses 46% of random doubles to a save-and-load round trip, which is what
   put the macOS floor at 13.3.
+- **The show document and the bundle it lives in.** A show is a folder: a manifest, a
+  canonical `show.xml` holding what someone decided, a `state.xml` holding where the engine
+  had got to, and the OSCQuery descriptions its mounts read. Which of the two files an
+  attribute lands in is the parameter table's `persist` column and nothing else, enforced in
+  both directions. Nothing in a bundle records when or where it was written, so opening one
+  and saving it again produces the same bytes — which is what lets a replay compare against
+  a saved show directly instead of through a normaliser.
+- **[`docs/schema/show.rng`](docs/schema/show.rng)**, the bundle's grammar in RELAX NG,
+  generated from the parameter table and committed. The engine validating a document against
+  its own schema can only prove it is self-consistent; this is what lets somebody else's
+  validator have an opinion, and it is what anyone can run against their own show file
+  without building the engine.
 - `wfg`, a console binary: `--version` prints the JUCE and TE versions it actually linked,
   `selftest` stands the JUCE message thread up headless, `commands` lists the registered
-  command set, `replay` re-executes a log and reports whether it reproduced itself.
+  command set, `canon` rewrites a show document in canonical form, `validate` checks a bundle
+  and reports every problem, `schema` writes or checks the grammar, and `replay` re-executes
+  a log and reports whether it reproduced itself.
 - `wfg_tests`, a doctest suite — the toolchain facts a green compile does not prove (the
   JUCE pin at *runtime*, the module configuration actually reaching our targets), plus the
   skeleton's own guarantees, every case run twice, under `C` and under `fr_FR`.
@@ -77,10 +91,12 @@ documents come first, and they are the thing to read before the code:
   They are throwaway by construction: they may link `wfg::thirdparty` and never
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
-**What does not exist yet.** Most of the engine. There is no document format and no bundle,
-no tick clock driving anything, no parameter tree, no mounted namespaces, no cue list or
-standby pointer, no OSC codec on the wire, no OSCQuery server, and therefore no `serve`: the
-skeleton is exercised by tests and by `wfg replay`, not by a client. Phase 1 adds those in
+**What does not exist yet.** Most of the engine. There is no tick clock driving anything, no
+parameter tree, no mounted namespaces (a bundle can declare one, and nothing reads it yet),
+no cue list traversal or standby movement — the standby is stored and restored, but only a
+command that does not exist yet can move it — no OSC codec on the wire, no OSCQuery server,
+and therefore no `serve`: what exists is exercised by tests and by the console verbs, not by
+a client. Phase 1 adds those in
 that order, and two further submodules arrive with them — `ThirdParty/juce_simpleweb` for
 the HTTP+WebSocket transport and `ThirdParty/spatcore`, consumed at source level for its
 real-time helpers. No audio, no UI, no plugin hosting, no video: audio is Phase 2, which is
@@ -120,13 +136,19 @@ reading that works identically on all three platforms but is still a reading.
 2. [Visual Studio 2026 Community](https://visualstudio.microsoft.com/) (free) —
    during install select the **"Desktop development with C++"** workload, which
    brings MSVC, CMake and Ninja. MSVC 19.30 (VS 2022 17.0) is the floor.
-3. Python 3 on `PATH`, for `scripts/check-pins.py`.
+3. Python 3 on `PATH`, plus `python -m pip install lxml`. Python runs
+   `scripts/check-pins.py` and the two generated-file gates; lxml runs the show
+   fixtures through the committed RELAX NG grammar, and the build **refuses to
+   configure the test suite without it** — a validator that quietly does not run
+   is the same failure as a locale test that quietly reports green. Configure
+   with `-DWFG_BUILD_TESTS=OFF` to build the product without the suite.
 
 **macOS**
 
 1. [Xcode](https://apps.apple.com/app/xcode/id497799835) from the App Store, or
    the command line tools: `xcode-select --install`. Xcode 15 is the floor.
-2. `brew install cmake ninja ccache`.
+2. `brew install cmake ninja ccache`, then `python3 -m pip install lxml`
+   (see the Windows note for why it is not optional).
 3. **macOS 13.3 is the deployment target**, and that number is not arbitrary: it
    is where Apple's libc++ made `std::to_chars` available for floating-point
    types, which is what Go.dot writes every number with. JUCE's own writer loses
@@ -138,7 +160,8 @@ reading that works identically on all three platforms but is still a reading.
 
 1. GCC 11 or newer (or Clang 14+), CMake 3.22 or newer.
 2. `bash scripts/install-linux-deps.sh` — that script *is* the package list, and
-   CI runs the same file, so it cannot rot.
+   CI runs the same file, so it cannot rot. It brings `python3-lxml` with it;
+   see the Windows note for why the build insists on it.
 
 ### Step by step
 
@@ -186,8 +209,11 @@ configure presets and run in *their* build trees, so `ctest --preset ci-linux`
 after `cmake --preset dev` looks for `build/ci-linux/` and reports that there is
 no test project there. Locally, point `ctest` at the tree you built.
 
-The suite runs four tests: the unit binary twice (once under `C`, once under
-`fr_FR`), and the product binary twice (`wfg --version`, `wfg selftest`).
+The suite runs the unit binary twice (once under `C`, once under `fr_FR`); the
+product binary once per serialising verb per locale (`canon`, `replay`, `schema`,
+`validate`, `commands`) plus `--version` and `selftest`; and two Python gates —
+the generated schema header against the parameter table, and every show fixture
+against the committed RELAX NG grammar through lxml.
 
 On **Windows**, `dev` needs an *x64 Native Tools Command Prompt for VS* (or a
 shell where `vcvars64.bat` has run) — Ninja cannot find `cl.exe` from a plain

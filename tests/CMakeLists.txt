@@ -68,13 +68,18 @@ add_executable(wfg_tests
     CommandTests.cpp
     EventLogTests.cpp
     EngineTests.cpp
-    DocumentTests.cpp)
+    DocumentTests.cpp
+    BundleTests.cpp)
 
 # Where the hand-authored fixtures live. Passed as a definition rather than
 # copied next to the binary: the fixtures are inputs to read, not artefacts to
 # ship, and a copy step is one more thing that can be stale.
 target_compile_definitions(wfg_tests PRIVATE
-    WFG_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures")
+    WFG_TEST_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    # The repository root, for the one committed artefact that is not a fixture:
+    # docs/schema/show.rng is published, so it lives where a reader of the docs
+    # will look for it rather than where the tests keep their input.
+    WFG_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 
 target_link_libraries(wfg_tests PRIVATE wfg::engine wfg::warnings)
 
@@ -152,3 +157,47 @@ add_test(NAME wfg.canon.fr_FR
 # gate as check-claude-md.py, for the same reason.
 add_test(NAME schema.generated
          COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/generate-schema.py" --check)
+
+# -----------------------------------------------------------------------------
+# The bundle: its grammar, and two opinions about whether a document obeys it.
+# -----------------------------------------------------------------------------
+
+# The committed RELAX NG against what the parameter table generates now. Same
+# gate as schema.generated and check-claude-md.py, one level further out: that
+# one keeps the generated HEADER honest, this one keeps the published GRAMMAR
+# honest, and the grammar is the half that people outside this repository read.
+#
+# Registered under both locales because it is a serialisation surface. A range
+# in the CSV reaches the grammar as a minInclusive facet written through the
+# number formatter, and a formatter that consulted the locale would put a comma
+# in it under fr_FR — which is exactly the class of bug the locale rule exists
+# to catch, and it would otherwise reach a published file.
+add_test(NAME wfg.schema.C
+         COMMAND wfg schema --check=${CMAKE_SOURCE_DIR}/docs/schema/show.rng
+                 --wfg-locale=C)
+add_test(NAME wfg.schema.fr_FR
+         COMMAND wfg schema --check=${CMAKE_SOURCE_DIR}/docs/schema/show.rng
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# The product binary opening a real bundle folder: manifest, show.xml, state.xml.
+# Exit 0 means it loaded AND had nothing to report, so a fixture that acquires a
+# stale standby fails here rather than being quietly tolerated.
+add_test(NAME wfg.validate.C
+         COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/minimal"
+                 --wfg-locale=C)
+add_test(NAME wfg.validate.fr_FR
+         COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/minimal"
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# THE OUTSIDE OPINION, and the reason the grammar is generated at all. Every
+# other check in this file is the engine agreeing with itself: our reader parsed
+# it, our schema approved it. This runs the published grammar through lxml,
+# which shares no code with us, over every fixture in the tree. When the two
+# disagree we get to find out which one is wrong.
+#
+# No SKIP_RETURN_CODE, and validate-show.py exits 2 rather than 0 when lxml is
+# missing. The root CMakeLists.txt refuses to configure without it for the same
+# reason: a check that reports success when it did not run is worse than no
+# check, because it also removes the pressure to fix it.
+add_test(NAME schema.fixtures
+         COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/validate-show.py")

@@ -149,6 +149,25 @@ namespace wfg::doc
         return schema;
     }
 
+    int Schema::formatVersion()
+    {
+        const auto* attribute = instance().attribute (rootElement, "formatVersion");
+
+        if (attribute == nullptr || ! attribute->hasDefault())
+            return 1;
+
+        const auto text = attribute->defaultText();
+        int value = 1;
+
+        /*  from_chars, not stoi: it does not throw, does not consult the
+            locale, and is present for integers on every toolchain here - the
+            floating-point overload is the one macOS is missing. */
+        const auto* first = text.data();
+        const auto result = std::from_chars (first, first + text.size(), value);
+
+        return result.ec == std::errc {} ? value : 1;
+    }
+
     const Element* Schema::element (std::string_view name) const
     {
         const auto it = std::find_if (elementList.begin(), elementList.end(),
