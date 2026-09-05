@@ -393,6 +393,27 @@ namespace wfg::tree
     }
 
     //==============================================================================
+    const Node* MountTable::nodeAt (const std::string& address) const
+    {
+        return const_cast<MountTable*> (this)->findNode (address);
+    }
+
+    void MountTable::noteReadback (const std::string& address, const osc::Value& value)
+    {
+        readbacks[address] = value;
+    }
+
+    const osc::Value* MountTable::readbackOf (const std::string& address) const
+    {
+        const auto found = readbacks.find (address);
+        return found == readbacks.end() ? nullptr : &found->second;
+    }
+
+    void MountTable::forgetReadback (const std::string& address)
+    {
+        readbacks.erase (address);
+    }
+
     const MountDeclaration* MountTable::declarationOf (const std::string& mountId) const
     {
         const auto found = mounts.find (mountId);

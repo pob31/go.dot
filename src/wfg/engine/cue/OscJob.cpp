@@ -27,6 +27,9 @@ namespace wfg::cue
             weaker promise of the two, which is the right way to be wrong: it
             reports done early rather than waiting for something that is not
             coming. */
+        if (text == "verified")
+            return OscWait::verified;
+
         return text == "sent" ? OscWait::sent : OscWait::none;
     }
 }

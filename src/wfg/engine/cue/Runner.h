@@ -66,6 +66,7 @@ namespace wfg
 
 namespace wfg::tree
 {
+    class MountProbe;
     class MountSender;
     class MountTable;
 }
@@ -278,10 +279,12 @@ namespace wfg::cue
             are two pointers and not one because a table with no sender is also
             real (a tree dump reads mounts and sends nothing), while a sender
             with no table has nothing to address. */
-        void setMounts (tree::MountTable* table, tree::MountSender* sender) noexcept
+        void setMounts (tree::MountTable* table, tree::MountSender* sender,
+                        tree::MountProbe* probe = nullptr) noexcept
         {
             mounts = table;
             sender_ = sender;
+            asker = probe;
         }
 
         /** Every network cue in flight. Diagnostics and tests. */
@@ -343,6 +346,11 @@ namespace wfg::cue
 
         tree::MountTable* mounts = nullptr;
         tree::MountSender* sender_ = nullptr;
+
+        /*  Who asks a target what a value is. Null everywhere a replay or
+            a tree dump runs, and a verified cue there finishes on its own
+            records rather than on an answer nobody went and got. */
+        tree::MountProbe* asker = nullptr;
 
         /*  Fades taken over by another fade since the last tick, whose runs
             have still to be ended. A queue rather than a submission at the

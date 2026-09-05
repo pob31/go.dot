@@ -1,0 +1,56 @@
+# wfg-log 1
+# fixture verified-chain — a closed loop, reproduced with nothing on the other
+# end of it.
+#
+# The seventh replay fixture, and the one that shows why a read-back had to be a
+# COMMAND rather than a return value. A verified cue asks a device what a value
+# is and waits for the answer; the asking happens on a thread of its own, over
+# HTTP, to a box that is not here. None of that can be replayed.
+#
+# What can be replayed is the ANSWER, because §3.15 makes it an event: somebody
+# else's machine said something, so it enters the model as a logged command
+# applied on the tick it arrived. A replay re-injects it and the cue reaches the
+# same verdict on the same tick, with no network, no device and no thread. A
+# probe that had handed its answer straight to the Runner would have made the
+# verified cue the one thing in the engine that could not be replayed.
+#
+# GO on a cue that waits to be told. Nothing has happened yet: the value is in
+# the tree, the datagram is queued, and the run is playing while it waits.
+A 40 0 udp:10.0.0.5:9000 cue.fire s:"P9XKC2WR" s:"H2K4M6NP"
+#
+# The desk answered, and agreed. Origin `mount:<id>` rather than `engine`,
+# because this is not Go.dot reporting about itself - it is a different machine
+# being quoted, and a log that could not tell those apart would be a log that
+# could not say whose fault anything was.
+#
+# The value is a float32 because the NODE is: the client coerced what the desk
+# said to the type the mounted description declares. Without that a reply of `1`
+# would be an integer, would not compare equal to the float that was written,
+# and a device doing exactly what it was told would be recorded as disagreeing.
+A 55 1 mount:K3PV7WRB mount.readback s:"K3PV7WRB" s:"/desk/fader" f:1
+A 56 2 engine run.ended s:"H2K4M6NP"
+#
+# THE NEXT CUE IN THE CHAIN, which is the whole point of `verified`: it was
+# written knowing the fader had actually arrived, rather than hoping. A sequence
+# built this way stops when a device stops, instead of carrying on into a scene
+# whose desk never heard the first instruction.
+A 100 3 udp:10.0.0.5:9000 cue.fire s:"V3XY5Z7B" s:"Q6RS8TW2"
+#
+# And this time the desk disagreed. It is there, it is listening, and it is not
+# doing what it was told - a clipped range, a mode that ignores the parameter, a
+# channel somebody re-patched at the weekend.
+#
+# `disagreed` and not `timeout`, and the distinction is the reason both words
+# exist: one sends somebody to look at the device, the other to look at the
+# network. A cue that reported "failed" and stopped there would send them to
+# look at both, at half past seven, with an audience in.
+A 118 4 mount:K3PV7WRB mount.readback s:"K3PV7WRB" s:"/desk/scene" i:3
+A 119 5 engine run.failed s:"Q6RS8TW2" s:"disagreed"
+#
+# The same cue again, and this time nothing answers at all. There is no record
+# of the silence, deliberately: a device that did not reply has told us nothing,
+# and a log of what did not happen would be a log of the network rather than of
+# the show. What IS a record is the cue running out of patience - two seconds,
+# a hundred ticks after it fired.
+A 200 6 udp:10.0.0.5:9000 cue.fire s:"V3XY5Z7B" s:"V3XY5Z7C"
+A 300 7 engine run.failed s:"V3XY5Z7C" s:"timeout"

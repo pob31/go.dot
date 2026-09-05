@@ -17,6 +17,7 @@
 #include <wfg/engine/cue/Runner.h>
 
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/MountSender.h>
 
 #include <wfg/engine/Engine.h>
@@ -607,11 +608,38 @@ namespace wfg::cue
             reproduces, and the socket is what the other box hears. A cue that
             updated one and not the other would be a lie in whichever direction
             somebody happened to look. */
-        if (sender_ != nullptr)
-            if (const auto* declaration = mounts->declarationOf (written.mountId))
-                job.ticket = sender_->queue (written.mountId,
-                                             { declaration->host, declaration->port },
-                                             address, written.value);
+        const auto* declaration = mounts->declarationOf (written.mountId);
+
+        if (sender_ != nullptr && declaration != nullptr)
+            job.ticket = sender_->queue (written.mountId,
+                                         { declaration->host, declaration->port },
+                                         address, written.value);
+
+        if (job.wait == OscWait::verified)
+        {
+            job.address = address;
+            job.mountId = written.mountId;
+            job.expected = written.value;
+
+            /*  FORGOTTEN BEFORE IT IS ASKED FOR, and this line is the whole
+                difference between verifying and appearing to. Without it an
+                answer the target gave to an earlier cue would still be sitting
+                there, would match, and every verified cue on that node would
+                report done without anybody being asked anything. */
+            mounts->forgetReadback (address);
+
+            if (const auto* node = mounts->nodeAt (address))
+                job.typeTag = node->typeTags;
+
+            if (declaration != nullptr)
+            {
+                job.host = declaration->host;
+                job.queryPort = declaration->queryPort;
+            }
+
+            const auto seconds = static_cast<double> (cue[juce::Identifier ("timeout")]);
+            job.ticksAllowed = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
+        }
 
         sending.push_back (job);
         return self;
@@ -640,6 +668,61 @@ namespace wfg::cue
             {
                 engine.submit (origin::engine, "run.ended", one (job.self));
                 job.finished = true;
+                continue;
+            }
+
+            /*  `verified` GOES AND ASKS, and keeps asking until the answer
+                matches or the cue runs out of patience.
+
+                The asking is somebody else's thread - an HTTP exchange with a
+                device that has gone away costs its whole timeout to find out,
+                and this is the tick thread. What arrives back is a
+                `mount.readback` command applied like any other, which is what
+                makes a verified cue replayable: the answer is in the log, and a
+                replay re-injects it and reaches the same verdict on the same
+                tick with no network in the room. */
+            if (job.wait == OscWait::verified)
+            {
+                ++job.ticksWaited;
+
+                if (const auto* answered = mounts != nullptr
+                                             ? mounts->readbackOf (job.address) : nullptr)
+                {
+                    /*  COMPARED AS THE NODE'S OWN TYPE, exactly. osc::Value's
+                        equality is identity and not numeric equivalence, so a
+                        float32 0.5 and a double 0.5 are different answers - and
+                        that is right: the client coerced what the target said
+                        to the type the node declared, so anything that still
+                        differs is a difference the device made. */
+                    const auto matched = *answered == job.expected;
+
+                    engine.submit (origin::engine,
+                                   matched ? "run.ended" : "run.failed",
+                                   matched ? one (job.self)
+                                           : std::vector<osc::Value> {
+                                               osc::Value::string (job.self),
+                                               osc::Value::string (oscError::disagreed) });
+
+                    job.finished = true;
+                    continue;
+                }
+
+                if (job.ticksWaited > job.ticksAllowed)
+                {
+                    engine.submit (origin::engine, "run.failed",
+                                   { osc::Value::string (job.self),
+                                     osc::Value::string (oscError::timeout) });
+                    job.finished = true;
+                    continue;
+                }
+
+                /*  Asked again every tick, and the probe drops the duplicate
+                    unless the last question has come back. "Keep one question
+                    outstanding" rather than "ask fifty times a second". */
+                if (asker != nullptr)
+                    asker->ask ({ job.mountId, job.host, job.queryPort,
+                                  job.address, job.typeTag });
+
                 continue;
             }
 

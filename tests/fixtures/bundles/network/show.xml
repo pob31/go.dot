@@ -4,10 +4,12 @@
       <Osc id="B3N8R5TW" address="/desk/fader" name="House to full" number="1" value="f:0.75" wait="sent"/>
       <Osc id="E4GP6QSC" address="/desk/nosuch" name="A typo somebody made" number="2" value="f:0.5"/>
       <Osc id="M5TQ7XVA" address="/desk/scene" name="Scene 4" number="3" value="i:4" wait="sent"/>
+      <Osc id="P9XKC2WR" address="/desk/fader" name="Confirmed to full" number="4" timeout="2" value="f:1" wait="verified"/>
+      <Osc id="V3XY5Z7B" address="/desk/scene" name="Confirmed scene 9" number="5" timeout="2" value="i:9" wait="verified"/>
     </List>
   </Lists>
   <Mounts>
-    <Mount id="K3PV7WRB" namespace="namespaces/desk.json" port="9000" prefix="/desk"/>
+    <Mount id="K3PV7WRB" namespace="namespaces/desk.json" port="9000" prefix="/desk" queryPort="5005" readback="oscquery"/>
   </Mounts>
   <Audio tracks="0"/>
 </Show>

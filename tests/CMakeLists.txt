@@ -76,6 +76,7 @@ add_executable(wfg_tests
     CueMatrixTests.cpp
     MountTests.cpp
     NetworkCueTests.cpp
+    VerifiedCueTests.cpp
     JsonTests.cpp
     CueListTests.cpp
     MediaCueTests.cpp
@@ -215,6 +216,24 @@ add_test(NAME wfg.replay.osc.C
                  --wfg-locale=C)
 add_test(NAME wfg.replay.osc.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/network-cue.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/network
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# The sixth replay fixture: a closed loop, reproduced with nothing on the other
+# end of it. A verified cue asks a device what a value is over HTTP, on a thread
+# of its own, and none of that can be replayed - but the ANSWER can, because
+# section 3.15 makes a read-back an event. The record is re-injected and the cue
+# reaches the same verdict on the same tick with no network in the room.
+#
+# It is the case that would have made a verified cue the one thing in the engine
+# that could not be replayed, if the probe had handed its answer straight to the
+# Runner instead of submitting it.
+add_test(NAME wfg.replay.verified.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/verified-chain.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/network
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.verified.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/verified-chain.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/network
                  --wfg-locale=${WFG_LOCALE_FR})
 

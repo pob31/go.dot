@@ -106,6 +106,25 @@ namespace wfg::tree
         int port = 0;
         std::string transport = "udp";
 
+        /*  WHETHER IT CAN BE ASKED, and where.
+
+            `transport` says how to send and says nothing about the other
+            direction, which is the gap that made `wait: verified` a cue that
+            could never succeed against most devices with nothing noticing until
+            the show. `none` is the honest default: OSCQuery was never
+            standardised, most boxes do not run a server, and a mounted
+            namespace is usually hand-written for something that will never
+            answer.
+
+            `queryPort` is a different number from `port` - WFS-DIY takes
+            messages on 8000 and describes itself on 5005 - which is why it is a
+            separate attribute and not an assumption. */
+        std::string readback = "none";
+        int queryPort = 0;
+
+        /** Whether a verified cue can be aimed at this target at all. */
+        bool canBeAsked() const noexcept { return readback == "oscquery" && queryPort > 0; }
+
         double rateCap = 50.0;
         bool anticipatable = false;
         std::string panic = "park";
@@ -187,6 +206,27 @@ namespace wfg::tree
         /** The current value of a mounted node, if it has been written. */
         const osc::Value* valueOf (const std::string& address) const;
 
+        /*  One mounted node, or nullptr. What a caller wants from it is
+            almost always the declared TYPE - a value read back off a
+            device has to be coerced to it before it can be compared with
+            what was written. */
+        const Node* nodeAt (const std::string& address) const;
+
+        /*  WHAT THE TARGET SAID, which is a different question from what was
+            written to it and is kept apart for exactly that reason.
+
+            A verified cue compares the two. Merging them - letting a read-back
+            overwrite the written value - would make every verification pass by
+            construction, because the thing being compared would be the answer
+            against itself. PRD §4.10 is the same rule one level up: what
+            somebody decided and what the machine is doing are never one field.
+
+            Cleared when the address is written, so a stale answer from an
+            earlier cue cannot satisfy a later one without anybody being asked. */
+        void noteReadback (const std::string& address, const osc::Value& value);
+        const osc::Value* readbackOf (const std::string& address) const;
+        void forgetReadback (const std::string& address);
+
         /** What a mount declared, or nullptr if it is not loaded. */
         const MountDeclaration* declarationOf (const std::string& mountId) const;
 
@@ -203,5 +243,10 @@ namespace wfg::tree
         Node* findNode (const std::string& address);
 
         std::map<std::string, Entry> mounts;   // by mount id, so the order is stable
+
+        /*  Read-backs, by address, separate from the nodes because they are a
+            different fact about the same thing and because a reload of the
+            namespace must not carry one across. */
+        std::map<std::string, osc::Value> readbacks;
     };
 }

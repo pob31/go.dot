@@ -73,6 +73,24 @@ namespace wfg::tree
                                                          const std::string& mountId);
 
     /** Reads that mount's namespace file out of the bundle and loads it. */
+    /*  Every network cue that asks for something its target cannot give.
+
+        QUESTION K, ANSWERED THE STRICT WAY (namespace draft §9). `transport`
+        says how to send and nothing says whether a box can be ASKED, so a cue
+        whose wait is `verified` aimed at a write-only device is a cue that can
+        never succeed - and without this check nothing notices until somebody is
+        standing in a theatre wondering why the list has stopped.
+
+        It is a check on the DOCUMENT and needs no mount table, no socket and no
+        device: the cue names an address, the address falls under a mount's
+        prefix, and the mount says whether it can answer. So it runs wherever a
+        show is read, including `wfg validate` on a laptop with nothing plugged
+        in - which is the machine somebody is actually sitting at when they have
+        time to fix it.
+
+        One message per offending cue, empty when the show is sound. */
+    std::vector<std::string> checkNetworkCues (const doc::ShowDocument&);
+
     MountResult loadMountFromBundle (const doc::ShowDocument& document, MountTable& mounts,
                                      const juce::File& bundleFolder, const std::string& mountId);
 

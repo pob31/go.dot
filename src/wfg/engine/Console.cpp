@@ -24,6 +24,7 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/RelaxNg.h>
+#include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/tree/ParameterTree.h>
@@ -844,6 +845,14 @@ namespace
             return 2;
         }
 
+        /*  THE CUES THAT ASK FOR SOMETHING THEIR TARGET CANNOT GIVE, checked
+            here as well as at mount-load time, because this is the verb
+            somebody runs on a laptop with nothing plugged in - and that is the
+            machine they are sitting at when they have time to fix it. It reads
+            the document and needs no device, no socket and no mount table. */
+        for (auto& problem : wfg::tree::checkNetworkCues (document))
+            result.problems.push_back (std::move (problem));
+
         for (const auto& problem : result.problems)
             std::cerr << "    " << problem << std::endl;
 
@@ -1125,6 +1134,14 @@ namespace
             exactly as it will afterwards, and sends nothing. */
         wfg::tree::MountSender sender;
 
+        /*  AND THE THREAD THAT ASKS. A verified cue reads a value back off the
+            target's own OSCQuery server, which is an HTTP exchange with a
+            deadline on it - seconds, when a device has gone away. The tick
+            thread cannot wait for that, so it does not: the question goes to
+            this thread and the answer comes back as a `mount.readback` command,
+            applied and logged like everything else the machine learns. */
+        wfg::tree::MountProbe probe { engine };
+
         wfg::doc::registerDocumentCommands (
             engine.commands(), document,
             [&mounts, &sender] (const std::string& address, const wfg::osc::Value& value)
@@ -1163,7 +1180,7 @@ namespace
         wfg::doc::registerBundleCommands (engine.commands(), document, target);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
 
-        runner.setMounts (&mounts, &sender);
+        runner.setMounts (&mounts, &sender, &probe);
 
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
             std::cerr << "    " << problem << std::endl;
@@ -1240,6 +1257,7 @@ namespace
             it, the same write reached the tree and the log and stopped. */
         sender.setSocket (udp);
         parameters.setSender (&sender);
+        probe.start();
 
         if (! udp.start (requestedOsc,
                          [&engine, &nameSpace] (wfg::osc::Datagram datagram)
@@ -1526,6 +1544,7 @@ namespace
             dummy->stop();
 
         server.stop();
+        probe.stop();
         udp.stop();
         engine.log().close();
 

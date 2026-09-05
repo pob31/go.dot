@@ -563,6 +563,14 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="timeout">
+          <a:documentation>How long verified waits for an answer before failing the run. Ignored by the other two waits. Five seconds because it is long enough for a device that is thinking and short enough that a cue which is never going to answer does not hold a show past the point anybody would have given up on it. Zero means the first reply or nothing.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="value">
           <a:documentation>What to write, spelled the way the log spells an argument - f:0.5 for a float, i:3 for an integer, T for true. One atom, because a mounted node holds one value; the type is in the text so that a cue meaning the float and a cue meaning the integer are different cues rather than the same cue read twice by two machines.</a:documentation>
           <data type="string"/>
@@ -570,10 +578,11 @@
       </optional>
       <optional>
         <attribute name="wait">
-          <a:documentation>How long the cue takes to be done. None finishes as soon as it is fired; sent finishes when the datagram has left the socket. A third, verified - the target is asked and has to answer with the value that was written - is what PRD 3.11 calls the default for Go.dot own processors, and it is deliberately absent from this list until it works: a grammar that accepted a word the engine ignores would be a show that looked like it was checking and was not.</a:documentation>
+          <a:documentation>How long the cue takes to be done. None finishes as soon as it is fired; sent finishes when the datagram has left the socket; verified finishes when the target has been asked and has answered with the value that was written. A sequence of verified cues is a chain that waits for each device instead of hoping (PRD 3.11), and it is the only one of the three that can tell you the device disagreed.</a:documentation>
           <choice>
             <value>none</value>
             <value>sent</value>
+            <value>verified</value>
           </choice>
         </attribute>
       </optional>
@@ -639,11 +648,29 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="queryPort">
+          <a:documentation>The port the target answers OSCQuery on, which is a different number from the one it listens for messages on - WFS-DIY takes messages on 8000 and describes itself on 5005. Zero means it was not declared, which is the only honest default: most devices do not run an OSCQuery server at all.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">65535</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="rateCap">
           <a:documentation>Default outbound rate cap for the mounted nodes.</a:documentation>
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="readback">
+          <a:documentation>Whether this target can be ASKED what a value is, and how. Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. None is the default because it is true of most devices: OSCQuery was never standardised, and a mounted namespace is usually hand-written for a box that will never answer. A verified cue aimed at a none is refused when the show loads, which is the whole point of declaring it.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>oscquery</value>
+          </choice>
         </attribute>
       </optional>
       <optional>

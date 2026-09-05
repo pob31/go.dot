@@ -133,6 +133,23 @@ plugged into the show network — so the replay wiring installs the mount write 
 no sender. The write has to happen (the tree must reach the state it reached live); the
 datagram must not.
 
+## `logs/verified-chain.wfglog`
+
+The seventh fixture, against the `network` bundle, and the one that shows why a read-back had
+to be a **command** rather than a return value. A verified cue asks a device what a value is,
+over HTTP, on a thread of its own, to a box that is not here — none of which can be replayed.
+What can is the *answer*, because §3.15 makes it an event: another machine said something, so
+it enters the model as a logged command applied on the tick it arrived. A replay re-injects it
+and the cue reaches the same verdict on the same tick.
+
+It covers the three endings a verified cue has, and the two failures are different words on
+purpose: `disagreed` means the device is there and is not doing what it was told; `timeout`
+means nothing answered. One sends somebody to look at the device, the other at the network.
+
+There is deliberately no record of the silence in the timeout case — a device that did not
+reply has told us nothing, and a log of what did not happen would be a log of the network
+rather than of the show.
+
 ## `tree/cue-F7HR8TVD.json`
 
 The OSCQuery reply for one cue, written by hand rather than generated, so it can disagree

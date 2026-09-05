@@ -741,7 +741,19 @@ back on if nobody feels strongly by then.
 |---|---|---|---|
 | E | Does the Phase 5 desktop UI run **in-process or as a separate client**? | Phase 5, but it shapes Phase 2's plugin-parameter handover | assume separate, because that is the stricter assumption and the one PRD §3.2 reads most naturally |
 | J | **Should PRD §4.2 record what Tracktion does inside the callback?** Its device callback takes one uncontended `std::shared_lock` per block and its node-player pool uses semaphores; the lipogram can be *enforced* on Go.dot's code and only *measured* on Tracktion's (§11.5). A PRD amendment is the author's to make. | the lipogram test (PR 2.2) | enforce on Go.dot's scopes, report Tracktion's count separately, never hide it |
-| K | **How does a mount declare what it can do?** `transport` says how to *send* and nothing says whether the target can be *asked*, so `wait: verified` against a write-only device is a cue that cannot succeed and nothing notices until the show. Chataigne carries two booleans per module, `hasInput` and `hasOutput`, for exactly this. Also: whether the answer names the *mechanism* (`oscquery` \| `poll` \| `subscribe` \| `none`) or only the capability. | `verified` (PR 2.6) | a mount-level `readback` enum defaulting to `none`, and a `verified` cue against `none` refused at load — the strictest reading, and the one that cannot fail silently |
+| ~~K~~ | *(settled 2026-09-06, in PR 2.6, the way this table recommended — see below)* **How does a mount declare what it can do?** `transport` says how to *send* and nothing says whether the target can be *asked*, so `wait: verified` against a write-only device is a cue that cannot succeed and nothing notices until the show. Chataigne carries two booleans per module, `hasInput` and `hasOutput`, for exactly this. Also: whether the answer names the *mechanism* (`oscquery` \| `poll` \| `subscribe` \| `none`) or only the capability. | `verified` (PR 2.6) | a mount-level `readback` enum defaulting to `none`, and a `verified` cue against `none` refused at load — the strictest reading, and the one that cannot fail silently |
+
+**K — settled 2026-09-06, in PR 2.6, exactly as the fallback drew it.** A mount declares
+`readback` (`none | oscquery`, default `none`) and `queryPort`, and a `verified` cue aimed at a
+mount that declares neither is refused when the show is read. `none` is the right default
+because it is true of most devices: OSCQuery was never standardised, and a mounted namespace is
+usually hand-written for a box that will never answer. The check is on the document alone — the
+cue names an address, the address falls under a mount's prefix, the mount says whether it can
+be asked — so it runs in `wfg validate` on a laptop with nothing plugged in, which is the
+machine somebody is sitting at when they have time to fix it. The answer names the MECHANISM
+rather than only the capability, so that Phase 4's three other ways of getting a value back
+(a polled get-convention, a subscription, a bespoke sync command) each become another word here
+rather than another boolean.
 
 None of these blocks the next subphase. B (tombstones) and A (standby persistence) were the
 two due soonest and both are now settled. J changes no code either way; it changes what §4.2
@@ -798,11 +810,9 @@ under `/godot/cue/<id>/`, `rw`, `persist = show`:
 | `stop` | `target` cue id; `verb` enum `hard \| fade`; `duration`; `curve` |
 | `osc` | `address` string, a mounted node; `value` string, one typed atom as the log writes it (`f:0.5`, `s:"…"`, `T`); `wait` enum `none \| sent \| verified`; `timeout` double s |
 
-**As PR 2.5 built it, `wait` is `none \| sent` and there is no `timeout` row.** `verified` and
-the timeout it needs land with the OSCQuery client in PR 2.6, and the enum grows then. The
-difference is deliberate rather than an omission: a grammar that accepted a word the engine
-ignored would be a show that looked like it was checking and was not, and `wait: verified`
-refused at load is the whole point of question K.
+**Built in two steps: `none \| sent` in PR 2.5, `verified` and its `timeout` in PR 2.6.** The
+enum grew only when the engine could honour the new word, because a grammar that accepted one
+it ignored would be a show that looked like it was checking and was not.
 
 A media cue's `level` is what was decided. The level a running instance is actually at is
 `/godot/run/<id>/level` (§11.3), which is what a fade writes. The two never merge (§4.10).

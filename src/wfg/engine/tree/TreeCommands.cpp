@@ -16,6 +16,8 @@
 
 #include <wfg/engine/tree/TreeCommands.h>
 
+#include <functional>
+
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -98,6 +100,17 @@ namespace wfg::tree
             if (const auto parsed = osc::parseDouble (*port))
                 declaration.port = static_cast<int> (*parsed);
 
+        /*  And whether anything can be asked of it. Read here rather than
+            inferred from the presence of a query port, because "it has a port"
+            and "it will answer" are different claims and the second is the one
+            a verified cue rests on. */
+        declaration.readback = document.getAttribute (base + "readback")
+                                 .value_or (std::string ("none"));
+
+        if (const auto queryPort = document.getAttribute (base + "queryPort"))
+            if (const auto parsed = osc::parseDouble (*queryPort))
+                declaration.queryPort = static_cast<int> (*parsed);
+
         return declaration;
     }
 
@@ -171,6 +184,78 @@ namespace wfg::tree
                 problems.push_back (problem);
         }
 
+        /*  And the cues that depend on them, checked here so that every verb
+            which opens a show gets it: serve, tree, replay. `wfg validate`
+            calls it directly, because it reads a document and never mounts
+            anything. */
+        for (auto& problem : checkNetworkCues (document))
+            problems.push_back (std::move (problem));
+
+        return problems;
+    }
+
+    //==============================================================================
+    std::vector<std::string> checkNetworkCues (const doc::ShowDocument& document)
+    {
+        std::vector<std::string> problems;
+
+        /*  The mounts first, as prefix and capability, so the cue walk below is
+            a lookup rather than a second document traversal per cue. */
+        struct Target
+        {
+            std::string id;
+            std::string prefix;
+            bool canBeAsked = false;
+        };
+
+        std::vector<Target> targets;
+
+        for (const auto& id : declaredMountIds (document))
+            if (const auto declaration = mountDeclarationFor (document, id))
+                targets.push_back ({ id, declaration->prefix, declaration->canBeAsked() });
+
+        /*  Walked here rather than through a document accessor, because
+            there is no "every cue" accessor and adding one for this would put a
+            traversal in ShowDocument that only this cares about. */
+        const std::function<void (const juce::ValueTree&)> visit =
+            [&] (const juce::ValueTree& node)
+        {
+            for (const auto& child : node)
+                visit (child);
+
+            if (node.getType().toString() != "Osc")
+                return;
+
+            if (node[juce::Identifier ("wait")].toString() != "verified")
+                return;
+
+            const auto id = node[juce::Identifier ("id")].toString().toStdString();
+            const auto address = node[juce::Identifier ("address")].toString().toStdString();
+
+            const Target* owner = nullptr;
+
+            for (const auto& target : targets)
+                if (address.size() > target.prefix.size()
+                      && address.compare (0, target.prefix.size(), target.prefix) == 0
+                      && address[target.prefix.size()] == '/')
+                    owner = &target;
+
+            if (owner == nullptr)
+            {
+                problems.push_back (id + ": \"" + address + "\" is under no mounted namespace,"
+                                         " so nothing can be asked about it");
+                return;
+            }
+
+            if (! owner->canBeAsked)
+                problems.push_back (id + ": waits for verification from " + owner->id
+                                       + ", which declares no readback. A cue that cannot"
+                                         " succeed is worse than one that fails, because it"
+                                         " holds the list");
+        };
+
+        visit (document.root());
+
         return problems;
     }
 
@@ -178,6 +263,28 @@ namespace wfg::tree
     void registerMountCommands (CommandRegistry& registry, const doc::ShowDocument& document,
                                 MountTable& mounts, const juce::File& bundleFolder)
     {
+        /*  WHAT A TARGET SAID, arriving as a command like everything else the
+            machine learns (§3.15). Origin `mount:<id>`, applied on the tick it
+            reached the tick thread, and in the log - which is what lets a
+            verified cue replay on a laptop with no network: the answer is
+            re-injected from the record and the comparison comes out the same.
+
+            It is written by MountProbe's thread and by nothing else in
+            production. There is no origin check on it, for the same reason
+            there is none on `run.started` or `audio.armed` - the namespace
+            draft calls for one and no engine-origin command has ever had it, so
+            adding it to this one alone would be a rule with one member. */
+        registry.add ({ "mount.readback",
+                        "What a mounted target said one of its nodes currently holds.",
+                        { { "mount", 's', false }, { "address", 's', false },
+                          { "value", '*', false } },
+                        true,
+                        [&mounts] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            mounts.noteReadback (args[1].getString(), args[2]);
+                            return Outcome::ok (args);
+                        } });
+
         registry.add ({ "mount.load",
                         "Re-reads a mount's OSCQuery description from the bundle.",
                         { { "id", 's', false } },

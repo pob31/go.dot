@@ -37,13 +37,14 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_fade_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_stop_verb[] = { "hard", "fade" };
     inline constexpr std::string_view enum_stop_curve[] = { "linear", "sCurve" };
-    inline constexpr std::string_view enum_osc_wait[] = { "none", "sent" };
+    inline constexpr std::string_view enum_osc_wait[] = { "none", "sent", "verified" };
     inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc" };
     inline constexpr std::string_view enum_run_state[] = { "armed", "playing", "stopping", "done", "failed" };
     inline constexpr std::string_view enum_group_mode[] = { "timeline", "sequence" };
     inline constexpr std::string_view enum_group_advance[] = { "auto", "manual" };
     inline constexpr std::string_view enum_mount_transport[] = { "udp", "tcp", "ws" };
     inline constexpr std::string_view enum_mount_panic[] = { "park", "snap" };
+    inline constexpr std::string_view enum_mount_readback[] = { "none", "oscquery" };
     inline constexpr std::string_view enum_audio_status[] = { "stopped", "running", "noClock" };
 
     inline constexpr AttributeRow attributes[] =
@@ -374,9 +375,16 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "none",
           false, 0.0, false, 0.0,
-          enum_osc_wait, 2,
+          enum_osc_wait, 3,
           "", 50.0, false, "park",
-          "How long the cue takes to be done. None finishes as soon as it is fired; sent finishes when the datagram has left the socket. A third, verified - the target is asked and has to answer with the value that was written - is what PRD 3.11 calls the default for Go.dot own processors, and it is deliberately absent from this list until it works: a grammar that accepted a word the engine ignores would be a show that looked like it was checking and was not." },
+          "How long the cue takes to be done. None finishes as soon as it is fired; sent finishes when the datagram has left the socket; verified finishes when the target has been asked and has answered with the value that was written. A sequence of verified cues is a chain that waits for each device instead of hoping (PRD 3.11), and it is the only one of the three that can tell you the device disagreed." },
+        { "osc", "timeout",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
+          true, "5",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "s", 50.0, false, "park",
+          "How long verified waits for an answer before failing the run. Ignored by the other two waits. Five seconds because it is long enough for a device that is thinking and short enough that a cue which is never going to answer does not hold a show past the point anybody would have given up on it. Zero means the first reply or nothing." },
         { "run", "cue",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
@@ -432,7 +440,7 @@ namespace wfg::doc::generated
           false, 0.0, false, 0.0,
           nullptr, 0,
           "", 50.0, false, "park",
-          "Why it failed, when it did: no-track when every voice was busy, media-missing when the file is not in the bundle, bad-route when the destination cannot be honoured, send-failed when a message could not be put on the wire, and the write refusals - bad-address, read-only, type-mismatch - when a network cue names a node the target does not have or will not take. Empty otherwise. A failed run was still an APPLIED command - the request was legal and the show could not honour it, which is a different thing from a request that was malformed." },
+          "Why it failed, when it did: no-track when every voice was busy, media-missing when the file is not in the bundle, bad-route when the destination cannot be honoured, send-failed when a message could not be put on the wire, and the write refusals - bad-address, read-only, type-mismatch - when a network cue names a node the target does not have or will not take. timeout when a verified cue asked and nothing answered in time, and disagreed when something answered with a different value, which is the one failure that means the device is there and is not doing what it was told. Empty otherwise. A failed run was still an APPLIED command - the request was legal and the show could not honour it, which is a different thing from a request that was malformed." },
         { "group", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
@@ -524,6 +532,20 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 1.0, false, "park",
           "How many nodes the mount contributed." },
+        { "mount", "queryPort",
+          ValueType::integer, 'i', false, Access::read, Kind::state, Persist::show,
+          true, "0",
+          true, 0.0, true, 65535.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "The port the target answers OSCQuery on, which is a different number from the one it listens for messages on - WFS-DIY takes messages on 8000 and describes itself on 5005. Zero means it was not declared, which is the only honest default: most devices do not run an OSCQuery server at all." },
+        { "mount", "readback",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::show,
+          true, "none",
+          false, 0.0, false, 0.0,
+          enum_mount_readback, 2,
+          "", 1.0, false, "park",
+          "Whether this target can be ASKED what a value is, and how. Transport says how to send and says nothing about the other direction, so without this a cue whose wait is verified against a write-only device is a cue that can never succeed and nothing notices until the show. None is the default because it is true of most devices: OSCQuery was never standardised, and a mounted namespace is usually hand-written for a box that will never answer. A verified cue aimed at a none is refused when the show loads, which is the whole point of declaring it." },
         { "mount", "sent",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
           true, "0",

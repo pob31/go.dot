@@ -153,11 +153,15 @@ add_library(wfg_engine STATIC
     wfg/engine/osc/UdpEndpoint.h
     wfg/engine/oscquery/EngineNamespace.cpp
     wfg/engine/oscquery/EngineNamespace.h
+    wfg/engine/oscquery/OscQueryClient.h
+    wfg/engine/oscquery/OscQueryClient.cpp
     wfg/engine/oscquery/OscQueryServer.cpp
     wfg/engine/oscquery/OscQueryServer.h
     wfg/engine/oscquery/Subscriptions.cpp
     wfg/engine/oscquery/Subscriptions.h
     wfg/engine/tree/Mount.cpp
+    wfg/engine/tree/MountProbe.h
+    wfg/engine/tree/MountProbe.cpp
     wfg/engine/tree/MountSender.h
     wfg/engine/tree/MountSender.cpp
     wfg/engine/tree/Mount.h
