@@ -290,7 +290,7 @@
       </attribute>
       <optional>
         <attribute name="standby">
-          <a:documentation>The cue GO will act on. One per list; moved only by a standby command, never by selection or scrolling.</a:documentation>
+          <a:documentation>The cue GO will act on. One per list, and always one of that list&apos;s own top-level children or empty; moved only by a standby command, a write to this node, or the repair when the cue it names is deleted or moved away. Never by selection or scrolling.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

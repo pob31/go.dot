@@ -129,6 +129,32 @@ downstream has to special-case it.
 One standby per list, engine state, never moved by selection or scrolling (§3.5). Only the
 focused list's standby answers `standby.next`/`previous`.
 
+**What PR 1.7 built, and what it deliberately did not.**
+
+- **`/godot/list/<id>/standby` is real, and now carries an invariant**: it names one of *that
+  list's own top-level children*, or is empty. Enforced at `ShowDocument::setAttribute`,
+  which is the document's single write door — so the standby commands, a client's
+  `node.set`, and `state.xml` restoring a saved show are all checked identically. Before
+  this the row was a bare string and `node.set … standby banana` was accepted in silence.
+- **A direct write is accepted on *any* list**, focused or not. The load path depends on it:
+  restoring a show writes every list's standby with no focus involved, and making the node
+  writable on only one list would break opening a show with two.
+- **`/godot/list/order` and `/godot/list/focus` are NOT built.** They need a parameter-table
+  row for the `/godot/list` container itself, which needs a new owner token, a containment
+  entry, container-level address resolution and a root-attribute case in both the state
+  writer and the RELAX NG generator. The author settled focus as **runtime only** for Phase 1
+  (2026-09-06) — the smallest thing that makes `standby.next` unambiguous — because the
+  development plan puts the focus model in Phase 3, with parallel lists. Focus is therefore
+  engine state, resolved rather than stored: the requested list if it still exists, otherwise
+  the first list. Nothing has to maintain it, and "exactly one list is focused whenever a
+  list exists" is true by construction. **Phase 3 publishes both nodes**; until then a client
+  cannot read or write the focus, and the roster is only visible as the shape of the tree.
+- **The standby moves when the show moves under it.** Deleting the cue it is parked on
+  advances it to the next remaining top-level sibling, or empties it if there is none;
+  moving that cue out of the list's top level clears it. Both happen *inside the applied
+  command*, so a replay reproduces them with no repair record in the log. Reordering within
+  the list moves nothing: the pointer stores an identifier.
+
 ### 2.4 `/godot/cue` — every cue and every group, flat, by ID
 
 | Node | Type | Access | Meaning |
@@ -239,6 +265,32 @@ to the node invokes the command; the same names are what the CLI and the event l
 
 Decision recorded here: the plan listed `list.set`, `group.set`, `cue.set`; they collapse
 into `node.set`, since a property edit is a node write and one path is better than two.
+
+**The standby commands as PR 1.7 built them** (author decisions, 2026-09-06):
+
+| Command | Applied when | Refused when |
+|---|---|---|
+| `standby.set` `s` cue | the cue is a top-level child of the focused list — a Group is a legal target, since a Group is a Cue. Setting the one it already holds is applied | `unknown-id` if nothing has that identifier, or it names a list or a mount rather than a cue; `not-in-list` if the cue exists but is nested or belongs to another list, or if there is no list at all |
+| `standby.clear` | always, including when it is already empty — an empty standby is a resting state (§3.5), not a failure | `not-in-list` when the show has no list |
+| `standby.next` | always, **including when it does not move**: at the end of a list, and from an empty standby, the pointer stays put and the record is `A`. There is a list and the command did what it does | `not-in-list` when the show has no list |
+| `standby.previous` | the mirror of `next` | as `next` |
+| `list.focus` `s` list | the identifier names a list. Exclusive by construction: focus is one value, so there is no flag to leave set | `unknown-id` if nothing has that identifier or it is not a list. A refused request leaves the previous focus exactly where it was |
+
+**`next` and `previous` stay put from empty** — only `standby.set` arms a list. There is no
+wrap at either end, which is what the end-of-list rule is for.
+
+**A disabled cue is not skipped** in Phase 1. A disabled cue is still a row in the list, and
+skipping is a running-behaviour decision that Phase 1 has no runner to justify; Phase 3
+revisits it when a GO that does nothing becomes a real failure rather than a hypothetical.
+
+**Two rejection codes gained cases**, recorded here because §2.6 calls these rules fixed:
+
+- **`not-in-list`** now also means *there is no list to act on* (the argument-less standby
+  commands on a show with no lists) and *that cue is not at the top level of the list being
+  written* (both the command and the `node.set` door). It was previously unused.
+- **`unknown-id`** now also covers *a known identifier naming the wrong kind of object* —
+  `standby.set` given a mount, `list.focus` given a cue. The alternative was to invent a
+  code for it, and "there is no cue with that id" is what the caller needs to hear.
 
 **Rejection rules** (fixed, because the log records outcomes): unknown command, unknown
 id, bad address, read-only node, type mismatch other than `i`↔`f`, `standby.set` outside
@@ -498,6 +550,13 @@ back on if nobody feels strongly by then.
 - **Identifiers — 8-character Crockford base32.** `[0-9A-HJKMNP-TV-Z]{8}`, 40 bits from
   `std::random_device`, unique within the document at creation.
 
+- **C — A group is an opaque sibling in Phase 1** (settled 2026-09-06, in PR 1.7): the
+  standby pointer steps over a group rather than descending into it. PRD §3.6 says the
+  pointer descends into a manual sequence group, and Phase 3 implements that — a Phase 1
+  group has no runtime behaviour to descend into, and §2.6's `standby.set` constraint already
+  requires a top-level child. The test that asserts it is named for the choice rather than
+  for a rule, so that when Phase 3 makes it fail, the failure is the point.
+
 - **B — Deleted identifiers are not retired** (settled 2026-09-05): "reusing is not such a
   problem, we can skip tombstones". So there is no `Retired` element, deletion forgets, and
   the document carries nothing to record what is no longer in it.
@@ -540,7 +599,6 @@ back on if nobody feels strongly by then.
 
 | # | Question | Forced by | Fallback if undecided |
 |---|---|---|---|
-| C | Does `standby.next` **descend into a group**, or step over it? §3.6 says the pointer descends into a manual sequence group; §3.5 says it lands after an automatic chain. Both are Phase 3 behaviour. | the cue list (PR 1.7) | step over it in Phase 1 and say so in the test, rather than implement half of Phase 3 |
 | D | The **touch-gating** vocabulary (§3.16 "required from day one"): `node.touch` / `node.release` per origin, pushes suppressed to the touching origin, released on disconnect. | the OSCQuery server (PR 1.9) | as described — it is the smallest thing that satisfies §3.16, and no surface exists yet to disagree with it |
 | E | Does the Phase 5 desktop UI run **in-process or as a separate client**? | Phase 5, but it shapes Phase 2's plugin-parameter handover | assume separate, because that is the stricter assumption and the one PRD §3.2 reads most naturally |
 | F | The **mount** attribute set: `transport` declared now and used from Phase 2, a mount-level `panic` default with per-node overrides. | mounts (PR 1.6) | as drawn in §2.5 |

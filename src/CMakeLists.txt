@@ -52,6 +52,9 @@
 #             every mutation arrives on
 #   log/      the tick-indexed flight recorder (PRD §3.15) and deterministic
 #             replay — built before there is anything to record, deliberately
+#   cue/      the cue list's pointer: where GO will act, which list it acts on,
+#             and the commands that move it. It owns no data - the standby is an
+#             attribute of the show; this is the arithmetic of moving it
 #   clock/    the sample counter every other clock derives from (PRD §3.4), the
 #             50 Hz tick derived from it, and the thread that turns one into the
 #             other - plus a paced stand-in for the audio device Phase 2 brings
@@ -69,6 +72,10 @@ add_library(wfg_engine STATIC
     wfg/engine/Engine.h
     wfg/engine/Console.cpp
     wfg/engine/Console.h
+    wfg/engine/cue/CueCommands.cpp
+    wfg/engine/cue/CueCommands.h
+    wfg/engine/cue/CueList.cpp
+    wfg/engine/cue/CueList.h
     wfg/engine/clock/AudioClockSource.h
     wfg/engine/clock/DummyAudioClock.cpp
     wfg/engine/clock/DummyAudioClock.h

@@ -293,13 +293,17 @@ TEST_CASE ("state never appears in show.xml, and decisions never appear in state
         cannot end up in the state. */
     ShowDocument document;
     REQUIRE (Bundle::open (fixtureBundle(), document).ok);
-    REQUIRE (document.setAttribute (standbyAddress, "F7HR8TVD").ok);
+    /*  D9FH2JKA, the Preshow GROUP, because it is a TOP-LEVEL child of the
+        list. This said F7HR8TVD until PR 1.7, which is a cue nested inside
+        that group - a standby the referential invariant now refuses, and
+        rightly: the pointer names something GO can act on. */
+    REQUIRE (document.setAttribute (standbyAddress, "D9FH2JKA").ok);
 
     const auto show = CanonicalXml::write (document);
     const auto state = EphemeralState::write (document);
 
     CHECK (show.find ("standby") == std::string::npos);
-    CHECK (state.find ("standby=\"F7HR8TVD\"") != std::string::npos);
+    CHECK (state.find ("standby=\"D9FH2JKA\"") != std::string::npos);
 
     CHECK (show.find ("House to half") != std::string::npos);
     CHECK (state.find ("House to half") == std::string::npos);
@@ -338,7 +342,7 @@ TEST_CASE ("state.xml: an ephemeral value survives a save and a load")
 {
     ShowDocument document;
     REQUIRE (Bundle::open (fixtureBundle(), document).ok);
-    REQUIRE (document.setAttribute (standbyAddress, "E4GP6QSC").ok);
+    REQUIRE (document.setAttribute (standbyAddress, "D9FH2JKA").ok);
 
     TempBundle temp { "minimal" };
     REQUIRE (Bundle::save (temp.folder, document).ok);
@@ -346,7 +350,7 @@ TEST_CASE ("state.xml: an ephemeral value survives a save and a load")
     ShowDocument reopened;
     REQUIRE (Bundle::open (temp.folder, reopened).ok);
 
-    CHECK (reopened.getAttribute (standbyAddress) == std::string ("E4GP6QSC"));
+    CHECK (reopened.getAttribute (standbyAddress) == std::string ("D9FH2JKA"));
 }
 
 //==============================================================================

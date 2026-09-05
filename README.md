@@ -113,6 +113,13 @@ documents come first, and they are the thing to read before the code:
   different number. A namespace file's numbers are somebody else's range bounds, and a bound
   that changes on the way in is one Go.dot would enforce against a target that never declared
   it.
+- **The standby pointer** (PRD §3.5): where GO will act, one per cue list, and the commands
+  that move it. It stores an identifier rather than an index or a cue number, so reordering
+  the list moves nothing and renumbering during tech moves nothing. A list's standby must
+  name one of that list's own top-level children, enforced at the document's single write
+  door — so the commands, a client's direct write, and restoring a saved show are all checked
+  identically. Deleting the cue it is parked on advances it to the next one; moving that cue
+  elsewhere clears it, both inside the applied command so a replay reproduces them for free.
 - `wfg`, a console binary: `--version` prints the JUCE and TE versions it actually linked,
   `selftest` stands the JUCE message thread up headless, `commands` lists the registered
   command set, `canon` rewrites a show document in canonical form, `validate` checks a bundle
@@ -129,10 +136,11 @@ documents come first, and they are the thing to read before the code:
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
 **What does not exist yet.** Nothing is *sent* to a mounted target: writes land in the tree
-and the log and stop there, because there is no transport until Phase 2. There is no cue list
-traversal or standby movement — the standby is stored, restored and published, but only a
-command that does not exist yet can move it; no OSC codec on the wire, no OSCQuery server,
-and therefore no `serve`: the tree can be printed but not subscribed to, and what exists is
+and the log and stop there, because there is no transport until Phase 2. Nothing *fires* a
+cue, so the standby is a pointer with nothing at the end of it yet. A group is an opaque
+sibling to that pointer, and descending into one is Phase 3, along with parallel lists and
+the published focus node. There is no OSC codec on the wire, no OSCQuery server, and
+therefore no `serve`: the tree can be printed but not subscribed to, and what exists is
 exercised by tests and by the console verbs rather than by a client. Phase 1 adds those in
 that order, and two further submodules arrive with them — `ThirdParty/juce_simpleweb` for
 the HTTP+WebSocket transport and `ThirdParty/spatcore`, consumed at source level for its

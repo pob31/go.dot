@@ -16,7 +16,7 @@ document,formatVersion,i,r,1,,,state,1,no,park,show,The show format this documen
 document,dirty,T,r,false,,,state,5,no,park,none,Whether there are unsaved changes.
 list,name,s,rw,,,,state,50,no,park,show,The cue list's name.
 list,order,s,r,,,,state,50,no,park,none,"The identifiers of the list's top-level children, in order, space-separated."
-list,standby,s,rw,,,,state,50,no,park,state,"The cue GO will act on. One per list; moved only by a standby command, never by selection or scrolling."
+list,standby,s,rw,,,,state,50,no,park,state,"The cue GO will act on. One per list, and always one of that list's own top-level children or empty; moved only by a standby command, a write to this node, or the repair when the cue it names is deleted or moved away. Never by selection or scrolling."
 cue,kind,s,r,memo,memo|group,,state,50,no,park,none,"What kind of cue this is, derived from the element rather than stored: a Group is a group. Phase 1 has memo (a cue with no output) and group."
 cue,number,s,rw,,,,state,50,no,park,show,"The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity."
 cue,name,s,rw,,,,state,50,no,park,show,"The cue's name, as the operator reads it."

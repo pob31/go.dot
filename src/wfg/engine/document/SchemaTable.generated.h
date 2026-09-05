@@ -166,7 +166,7 @@ namespace wfg::doc::generated
           false, 0.0, false, 0.0,
           nullptr, 0,
           "", 50.0, false, "park",
-          "The cue GO will act on. One per list; moved only by a standby command, never by selection or scrolling." },
+          "The cue GO will act on. One per list, and always one of that list's own top-level children or empty; moved only by a standby command, a write to this node, or the repair when the cue it names is deleted or moved away. Never by selection or scrolling." },
         { "cue", "kind",
           ValueType::string, 's', Access::read, Kind::state, Persist::none,
           true, "memo",

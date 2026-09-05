@@ -19,6 +19,7 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/tree/OscQueryJson.h>
@@ -528,8 +529,10 @@ namespace
         wfg::Engine engine;
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
+        wfg::cue::Focus focus;
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
+        wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
 

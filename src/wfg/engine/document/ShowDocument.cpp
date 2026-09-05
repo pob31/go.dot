@@ -26,6 +26,51 @@ namespace wfg::doc
     namespace
     {
         const juce::Identifier idProperty { "id" };
+        const juce::Identifier standbyProperty { "standby" };
+
+        /*  Whether a value is a legal standby for this list: one of THAT list's
+            own immediate children, or nothing at all.
+
+            Named for the question rather than for the shape, because
+            cue::isTopLevelChild answers the shape question and answers it
+            differently - the empty string is not a top-level child of anything,
+            but it IS a legal standby. Two same-named predicates disagreeing on
+            the empty string is a trap, so only one of them carries that name. */
+        bool isLegalStandbyFor (const juce::ValueTree& list, const std::string& cueId)
+        {
+            if (cueId.empty())
+                return true;             // empty is the resting value, always legal
+
+            for (const auto& child : list)
+                if (child.hasProperty (idProperty)
+                    && child[idProperty].toString().toStdString() == cueId)
+                    return true;
+
+            return false;
+        }
+
+        /*  The identifier after `cueId` among a container's children, or empty
+            when it is the last one or is not there. */
+        std::string siblingAfter (const juce::ValueTree& container, const std::string& cueId)
+        {
+            bool found = false;
+
+            for (const auto& child : container)
+            {
+                if (! child.hasProperty (idProperty))
+                    continue;
+
+                const auto childId = child[idProperty].toString().toStdString();
+
+                if (found)
+                    return childId;
+
+                if (childId == cueId)
+                    found = true;
+            }
+
+            return {};
+        }
 
         /*  THE ONE PLACE a typed value becomes a juce::var, and the reason this
             function exists rather than being inlined at three call sites.
@@ -257,6 +302,28 @@ namespace wfg::doc
         if (! parsed.ok)
             return EditResult::failed (reason::typeMismatch);
 
+        /*  ONE REFERENTIAL INVARIANT, and it is named rather than generalised.
+
+            A list's standby must name one of that list's own top-level children
+            or be empty. The schema can say a value is a string in range; it has
+            no way to say a value must be the identifier of a child of the
+            element carrying it, and adding a referential column to the
+            parameter table for a single attribute would be building the
+            generalisation before there are two cases to generalise. Phase 3's
+            run pointer is the second case; that is when the column earns
+            itself.
+
+            IT LIVES HERE because here is the only door. The standby commands,
+            a client's node.set and EphemeralState restoring a saved show all
+            arrive through setAttribute, and a check anywhere else would guard
+            one of those three and miss the other two - the load path in
+            particular, which is where a state file written against a different
+            show shows up. */
+        if (target.attribute->name() == "standby"
+            && target.node.getType().toString() == "List"
+            && ! isLegalStandbyFor (target.node, value.getString()))
+            return EditResult::failed (reason::notInList);
+
         /*  nullptr is the UndoManager, and it stays nullptr until Phase 5 — see
             the header for the two measured reasons. */
         target.node.setProperty (juce::Identifier (juce::String (std::string (target.attribute->name()))),
@@ -425,10 +492,31 @@ namespace wfg::doc
         std::vector<std::string> released;
         collectIds (node, released);
 
+        /*  If the list this cue belongs to is parked on it, work out where the
+            standby goes BEFORE the cue disappears - afterwards there is no
+            sequence left to ask.
+
+            It advances to the next remaining sibling rather than clearing
+            (author, 2026-09-06): during tech, deleting the cue you are parked
+            on should leave you parked on the next one. Done inside the applied
+            command rather than as a second event, so a replay reproduces it for
+            free and the log does not need a repair record nobody sent. */
+        std::string repairList, repairStandby;
+
+        if (parent.getType().toString() == "List"
+            && parent[standbyProperty].toString().toStdString() == id)
+        {
+            repairList = parent[idProperty].toString().toStdString();
+            repairStandby = siblingAfter (parent, id);
+        }
+
         parent.removeChild (node, nullptr);
 
         for (const auto& released_id : released)
             registry.release (released_id);
+
+        if (! repairList.empty())
+            setAttribute ("/godot/list/" + repairList + "/standby", repairStandby);
 
         return EditResult::succeeded (id);
     }
@@ -464,6 +552,25 @@ namespace wfg::doc
 
         auto oldParent = node.getParent();
 
+        /*  A move WITHIN one list's top level is a reorder, and a reorder never
+            moves the standby: it still names the same cue, which is still a
+            top-level child, and PRD §3.5 is explicit that the pointer does not
+            follow the shape of the list around.
+
+            A move OUT of that top level is different. The cue is no longer
+            somewhere the standby is allowed to point - into a group, or into
+            another list entirely - so the list it left is cleared rather than
+            advanced. Advancing would be guessing that the operator meant to
+            stay where they were; clearing says plainly that what they were
+            parked on has gone somewhere else. */
+        const auto leavingTopLevel = oldParent != newParent
+                                       && oldParent.getType().toString() == "List"
+                                       && oldParent[standbyProperty].toString().toStdString() == id;
+
+        const auto vacatedList = leavingTopLevel
+                                   ? oldParent[idProperty].toString().toStdString()
+                                   : std::string {};
+
         if (oldParent == newParent)
         {
             const auto from = newParent.indexOf (node);
@@ -475,6 +582,9 @@ namespace wfg::doc
             oldParent.removeChild (node, nullptr);
             newParent.addChild (node, std::min (newIndex, newParent.getNumChildren()), nullptr);
         }
+
+        if (! vacatedList.empty())
+            setAttribute ("/godot/list/" + vacatedList + "/standby", "");
 
         return EditResult::succeeded (id);
     }
