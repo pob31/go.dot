@@ -41,7 +41,7 @@ namespace wfg::audio
             file.getParentDirectory().createDirectory();
             file.deleteFile();
 
-            std::unique_ptr<juce::FileOutputStream> stream { file.createOutputStream() };
+            std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
 
             if (stream == nullptr)
                 return;
@@ -51,16 +51,18 @@ namespace wfg::audio
             /*  Float, not 16-bit. The render is a MEASUREMENT - PR 2.4 asserts
                 that a fade reaches -120 dB, and 16 bits cannot express that.
                 Quantising the evidence to make the file smaller would be
-                measuring the quantiser. */
-            std::unique_ptr<juce::AudioFormatWriter> writer {
-                format.createWriterFor (stream.get(), static_cast<double> (sampleRate),
-                                        static_cast<unsigned int> (channels), 32,
-                                        {}, 0) };
+                measuring the quantiser. `floatingPoint` has to be asked for
+                explicitly: 32 bits alone is ambiguous and the writer's own
+                default for it is integral. */
+            auto writer = format.createWriterFor (stream,
+                                                  juce::AudioFormatWriterOptions{}
+                                                    .withSampleRate (static_cast<double> (sampleRate))
+                                                    .withNumChannels (channels)
+                                                    .withBitsPerSample (32)
+                                                    .withSampleFormat (juce::AudioFormatWriterOptions::SampleFormat::floatingPoint));
 
             if (writer == nullptr)
                 return;
-
-            stream.release();
 
             backgroundThread.startThread (juce::Thread::Priority::normal);
 

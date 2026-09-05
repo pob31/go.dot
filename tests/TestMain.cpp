@@ -34,6 +34,8 @@
 
 #include "TestSupport.h"
 
+#include <juce_events/juce_events.h>
+
 #include <clocale>
 #include <cstring>
 #include <iostream>
@@ -57,6 +59,23 @@ namespace wfgtest
 //==============================================================================
 int main (int argc, char** argv)
 {
+    /*  JUCE IS INITIALISED ONCE, FOR THE WHOLE PROCESS, and this is a fix
+        rather than tidiness.
+
+        Tracktion reaches MessageManager::getInstance() while it builds, so
+        every audio case needs JUCE up. Each of them used to bring it up and
+        tear it down again around its own rig - which meant initialiseJuce_GUI
+        and shutdownJuce_GUI ran dozens of times in one process. JUCE's own
+        documentation says to do it once, and macOS is where it stopped being
+        advice: the OSCQuery cases that run after the audio ones began failing
+        there, on different assertions each run, while Windows and Linux stayed
+        green. A non-deterministic failure in a Phase 1 test caused by a Phase 2
+        test standing something up and knocking it down again.
+
+        Held for the life of main, so nothing in the suite can observe JUCE
+        being absent and nothing has to remember to bring it up. */
+    const juce::ScopedJuceInitialiser_GUI juceForTheWholeSuite;
+
     /*  --wfg-locale=<name> is OURS, not doctest's. doctest would treat an
         unrecognised argument as a test-name filter, so it is stripped from the
         vector before applyCommandLine ever sees it. Everything else is passed

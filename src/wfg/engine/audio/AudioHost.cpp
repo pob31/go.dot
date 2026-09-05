@@ -254,7 +254,11 @@ namespace wfg::audio
             /*  createEmptyEdit touches no disk. Edit::createEdit is the only
                 non-test, non-preview factory; the Edit ctor and
                 createSingleTrackEdit both hard-code one track. */
-            te::Edit::Options options { *engine };
+            /*  Every member named, because GCC's -Wmissing-field-initializers
+                is an error in the strict build and because a partially braced
+                aggregate is a trap: adding a field upstream would silently
+                value-initialise it here. */
+            te::Edit::Options options { *engine, {}, {} };
             options.editState = te::createEmptyEdit (*engine);
             options.editProjectItemID = te::ProjectItemID::createNewID (te::ProjectID{});
 
@@ -270,7 +274,7 @@ namespace wfg::audio
             options.editFileRetriever = [] { return juce::File(); };
             options.filePathResolver = [] (const juce::String& path) { return juce::File (path); };
 
-            options.numAudioTracks = spec.tracks;
+            options.numAudioTracks = static_cast<std::uint32_t> (std::max (0, spec.tracks));
 
             /*  Tracktion's default is -3 dB on the master. A show that asked for
                 0 dB and got -3 would be quietly wrong by half a level. */
@@ -481,21 +485,25 @@ namespace wfg::audio
             storageFolder.createDirectory();
 
             juce::WavAudioFormat format;
-            std::unique_ptr<juce::FileOutputStream> stream { file.createOutputStream() };
+            std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
 
             if (stream == nullptr)
                 return {};
 
             const auto rate = current.sampleRate > 0 ? current.sampleRate : 48000;
 
-            std::unique_ptr<juce::AudioFormatWriter> writer {
-                format.createWriterFor (stream.get(), rate, static_cast<unsigned int> (channels),
-                                        16, {}, 0) };
+            /*  The options overload, not the six-argument one: JUCE deprecated
+                that at this pin and the strict build is -Werror. It also takes
+                ownership through the unique_ptr, so there is no release() to
+                forget. */
+            auto writer = format.createWriterFor (stream,
+                                                  juce::AudioFormatWriterOptions{}
+                                                    .withSampleRate (static_cast<double> (rate))
+                                                    .withNumChannels (channels)
+                                                    .withBitsPerSample (16));
 
             if (writer == nullptr)
                 return {};
-
-            stream.release();
 
             juce::AudioBuffer<float> silence { channels, rate };
             silence.clear();

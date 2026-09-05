@@ -296,13 +296,15 @@ namespace
         juce::File folder;
     };
 
-    /*  Tracktion reaches MessageManager::getInstance() while it builds. This
-        opens no display on Linux, which is why the CI job needs no xvfb - the
-        same reasoning `wfg selftest` records. */
+    /*  Tracktion reaches MessageManager::getInstance() while it builds. JUCE is
+        up for the whole process - TestMain.cpp holds one initialiser for the
+        life of main - because bringing it up and down around each rig is what
+        broke the OSCQuery cases on macOS. This opens no display on Linux, which
+        is why the CI job needs no xvfb, the same reasoning `wfg selftest`
+        records. */
     struct HostRig
     {
         ScopedStorage storage;
-        juce::ScopedJuceInitialiser_GUI juceInitialiser;
         audio::AudioHost host { storage.path() };
     };
 }
@@ -714,19 +716,19 @@ namespace
         folder.createDirectory();
 
         juce::WavAudioFormat format;
-        std::unique_ptr<juce::FileOutputStream> stream { file.createOutputStream() };
+        std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
 
         if (stream == nullptr)
             return {};
 
-        std::unique_ptr<juce::AudioFormatWriter> writer {
-            format.createWriterFor (stream.get(), rate, static_cast<unsigned int> (channels),
-                                    16, {}, 0) };
+        auto writer = format.createWriterFor (stream,
+                                              juce::AudioFormatWriterOptions{}
+                                                .withSampleRate (static_cast<double> (rate))
+                                                .withNumChannels (channels)
+                                                .withBitsPerSample (16));
 
         if (writer == nullptr)
             return {};
-
-        stream.release();
 
         juce::AudioBuffer<float> buffer { channels, rate * 2 };
 
@@ -1138,7 +1140,6 @@ namespace
 TEST_CASE ("hosted driver: the blocks come from a graph, and the counter cannot tell")
 {
     ScopedStorage storage;
-    juce::ScopedJuceInitialiser_GUI juce;
 
     audio::HostedAudioDriver driver { storage.folder.getFullPathName().toStdString() };
 
@@ -1184,7 +1185,6 @@ TEST_CASE ("hosted driver: the blocks come from a graph, and the counter cannot 
 TEST_CASE ("hosted driver: a show with nothing playing renders digital silence")
 {
     ScopedStorage storage;
-    juce::ScopedJuceInitialiser_GUI juce;
 
     const auto render = storage.folder.getChildFile ("render.wav");
 
@@ -1235,7 +1235,6 @@ TEST_CASE ("hosted driver: the render is readable even if nobody closed it")
         the harness will: is the file on disk readable while the process that
         is writing it is still alive? */
     ScopedStorage storage;
-    juce::ScopedJuceInitialiser_GUI juce;
 
     const auto render = storage.folder.getChildFile ("unclosed.wav");
 
@@ -1272,7 +1271,6 @@ TEST_CASE ("hosted driver: the render is readable even if nobody closed it")
 TEST_CASE ("hosted driver: unusable settings are refused, and say so")
 {
     ScopedStorage storage;
-    juce::ScopedJuceInitialiser_GUI juce;
 
     audio::HostedAudioDriver driver { storage.folder.getFullPathName().toStdString() };
 
@@ -1309,7 +1307,6 @@ TEST_CASE ("hosted driver: unusable settings are refused, and say so")
 TEST_CASE ("hosted driver: stopping twice, and stopping without starting, are quiet")
 {
     ScopedStorage storage;
-    juce::ScopedJuceInitialiser_GUI juce;
 
     audio::HostedAudioDriver driver { storage.folder.getFullPathName().toStdString() };
 
