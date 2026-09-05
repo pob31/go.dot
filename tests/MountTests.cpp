@@ -41,6 +41,7 @@
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/cue/Run.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
@@ -118,7 +119,8 @@ namespace
         Engine engine;
         doc::ShowDocument document;
         MountTable mounts;
-        ParameterTree parameters { document, engine.commands(), mounts };
+        cue::RunTable runs;
+        ParameterTree parameters { document, engine.commands(), mounts, runs };
     };
 }
 
@@ -467,6 +469,7 @@ TEST_CASE ("mount.load: a declared mount whose file is broken says so specifical
     REQUIRE (doc::Bundle::open (scratch, document).ok);
 
     MountTable mounts;
+        cue::RunTable runs;
     Engine engine;
     registerMountCommands (engine.commands(), document, mounts, scratch);
 

@@ -416,10 +416,12 @@ namespace wfg::tree
     //==============================================================================
     ParameterTree::ParameterTree (const doc::ShowDocument& documentToProject,
                                   const CommandRegistry& commandsToDescribe,
-                                  const MountTable& mountsToPublish)
+                                  const MountTable& mountsToPublish,
+                                  const cue::RunTable& runsToPublish)
         : document (documentToProject),
           commands (commandsToDescribe),
-          mounts (mountsToPublish)
+          mounts (mountsToPublish),
+          runs (runsToPublish)
     {
     }
 
@@ -677,6 +679,41 @@ namespace wfg::tree
             else                         text = std::string (row->defaultText);
 
             engineValue (*row, "audio", text);
+        }
+
+        /*  EVERY RUN, EVERY TICK. A run changes several times a second while
+            nothing about the show does, which is exactly why it is here and not
+            in the cached half: published from there it would have been frozen
+            at whatever it read the last time somebody edited a cue.
+
+            Finished runs are published too, and keep their addresses. A client
+            that asked what happened can still be told, and Phase 3 is where
+            pruning becomes a real question because a group's several runs make
+            "which one" worth asking. */
+        for (const auto& run : runs.all())
+        {
+            if (run.id.empty())
+                continue;
+
+            const auto base = std::string (godot) + "/run/" + run.id;
+
+            for (const auto* row : doc::Schema::rowsForOwner ("run"))
+            {
+                const auto name = std::string (row->name);
+                std::string text;
+
+                if (name == "cue")            text = run.cue;
+                else if (name == "kind")      text = run.kind;
+                else if (name == "state")     text = run.state;
+                else if (name == "track")     text = std::to_string (run.track);
+                else if (name == "position")  text = osc::formatDouble (run.position);
+                else if (name == "level")     text = osc::formatDouble (run.level);
+                else if (name == "late")      text = std::to_string (run.late);
+                else if (name == "error")     text = run.error;
+                else                          text = std::string (row->defaultText);
+
+                runtime.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
         }
 
         /*  "/", "/godot" and "/godot/document" belong to the document half, so

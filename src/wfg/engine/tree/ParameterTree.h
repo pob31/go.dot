@@ -51,6 +51,7 @@
 
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/cue/Run.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
@@ -115,14 +116,21 @@ namespace wfg::tree
     class ParameterTree
     {
     public:
-        /*  None of the three references may outlive the tree.
+        /*  None of the four references may outlive the tree.
 
             The mounts are the part of the namespace Go.dot did not write: they
             arrive at their own prefixes rather than under /godot, because
-            /godot/mount holds the DECLARATION and /wfs holds the target. */
+            /godot/mount holds the DECLARATION and /wfs holds the target.
+
+            The runs are the only one read on the RUNTIME side. Mounts and the
+            document are rebuilt when the show changes; a run changes several
+            times a second while nothing about the show does, so publishing it
+            from the cached half would have frozen every run at whatever it read
+            the last time somebody edited a cue. */
         ParameterTree (const doc::ShowDocument& documentToProject,
                        const CommandRegistry& commandsToDescribe,
-                       const MountTable& mountsToPublish);
+                       const MountTable& mountsToPublish,
+                       const cue::RunTable& runsToPublish);
 
         /*  Tick thread only. Rebuilds the document side if it has been marked
             stale, then publishes an immutable snapshot and returns it. */
@@ -142,6 +150,7 @@ namespace wfg::tree
         const doc::ShowDocument& document;
         const CommandRegistry& commands;
         const MountTable& mounts;
+        const cue::RunTable& runs;
 
         std::shared_ptr<const std::vector<Node>> documentPart;
         bool stale = true;

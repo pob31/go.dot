@@ -78,6 +78,7 @@ add_executable(wfg_tests
     JsonTests.cpp
     CueListTests.cpp
     MediaCueTests.cpp
+    RunTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp

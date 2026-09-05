@@ -36,6 +36,7 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/cue/Run.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/tree/ParameterTree.h>
@@ -120,7 +121,8 @@ namespace
             MountTests covers what somebody else's namespace adds. An empty
             table is a valid one. */
         MountTable mounts;
-        ParameterTree parameters { document, engine.commands(), mounts };
+        cue::RunTable runs;
+        ParameterTree parameters { document, engine.commands(), mounts, runs };
     };
 
     const std::string announce = "/godot/cue/F7HR8TVD";       // the second cue of the Preshow group
@@ -638,7 +640,8 @@ TEST_CASE ("tree: an empty tree is still a tree")
     Engine engine;
     doc::ShowDocument document;
     MountTable mounts;
-    ParameterTree parameters { document, engine.commands(), mounts };
+        cue::RunTable runs;
+    ParameterTree parameters { document, engine.commands(), mounts, runs };
 
     const auto empty = parameters.snapshot();
 

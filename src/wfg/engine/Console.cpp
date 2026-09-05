@@ -20,9 +20,11 @@
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/tree/OscQueryJson.h>
+#include <wfg/engine/cue/Run.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <wfg/engine/audio/AudioCommands.h>
@@ -205,6 +207,14 @@ namespace
         wfg::doc::ShowDocument document;
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
+        wfg::cue::RunTable runs;
+
+        /*  Runs draw from their own registry rather than the document's.
+            A run is not an object in the show - it is what the machine is
+            doing - and the identifier it draws is written into the log as
+            the argument the caller left out, so a replay re-supplies it
+            rather than having to draw the same number again. */
+        auto runIds = wfg::doc::IdRegistry::withSystemEntropy();
         wfg::cue::Focus focus;
         wfg::audio::AudioState audioState;
 
@@ -212,6 +222,7 @@ namespace
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::cue::registerRunCommands (engine.commands(), document, runs, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
         wfg::doc::registerBundleCommands (engine.commands(), document, nowhere);
@@ -299,6 +310,14 @@ namespace
         wfg::doc::ShowDocument document;
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
+        wfg::cue::RunTable runs;
+
+        /*  Runs draw from their own registry rather than the document's.
+            A run is not an object in the show - it is what the machine is
+            doing - and the identifier it draws is written into the log as
+            the argument the caller left out, so a replay re-supplies it
+            rather than having to draw the same number again. */
+        auto runIds = wfg::doc::IdRegistry::withSystemEntropy();
         wfg::cue::Focus focus;
         wfg::audio::AudioState audioState;
 
@@ -308,6 +327,13 @@ namespace
             as applied on a machine with no sound card and no show, which is
             exactly the guarantee the event exists to provide. */
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
+
+        /*  The run lifecycle, unconditionally and for the same reason. Only
+            `audio.arm` reads the document, and it answers unknown-id against an
+            empty one - which is the right answer. Everything else is the
+            machine reporting what happened to a run, and a log of a performance
+            has to replay on a laptop with no show open. */
+        wfg::cue::registerRunCommands (engine.commands(), document, runs, runIds);
 
         const auto bundlePath = args.containsOption ("--bundle")
                                   ? args.getValueForOption ("--bundle")
@@ -664,11 +690,20 @@ namespace
         wfg::Engine engine;
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
+        wfg::cue::RunTable runs;
+
+        /*  Runs draw from their own registry rather than the document's.
+            A run is not an object in the show - it is what the machine is
+            doing - and the identifier it draws is written into the log as
+            the argument the caller left out, so a replay re-supplies it
+            rather than having to draw the same number again. */
+        auto runIds = wfg::doc::IdRegistry::withSystemEntropy();
         wfg::cue::Focus focus;
         wfg::audio::AudioState audioState;
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::cue::registerRunCommands (engine.commands(), document, runs, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
@@ -683,7 +718,7 @@ namespace
                    wfg::tree::loadAllMountsFromBundle (document, mounts, target))
                 std::cerr << "    " << problem << std::endl;
 
-        wfg::tree::ParameterTree parameters { document, engine.commands(), mounts };
+        wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;
@@ -1012,11 +1047,20 @@ namespace
         wfg::Engine engine;
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
+        wfg::cue::RunTable runs;
+
+        /*  Runs draw from their own registry rather than the document's.
+            A run is not an object in the show - it is what the machine is
+            doing - and the identifier it draws is written into the log as
+            the argument the caller left out, so a replay re-supplies it
+            rather than having to draw the same number again. */
+        auto runIds = wfg::doc::IdRegistry::withSystemEntropy();
         wfg::cue::Focus focus;
         wfg::audio::AudioState audioState;
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::cue::registerRunCommands (engine.commands(), document, runs, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::doc::registerBundleCommands (engine.commands(), document, target);
@@ -1025,7 +1069,7 @@ namespace
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
             std::cerr << "    " << problem << std::endl;
 
-        wfg::tree::ParameterTree parameters { document, engine.commands(), mounts };
+        wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;

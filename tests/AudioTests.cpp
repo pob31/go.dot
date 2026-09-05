@@ -39,6 +39,7 @@
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/cue/Run.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
@@ -104,7 +105,8 @@ namespace
         doc::ShowDocument document;
         tree::TouchTable touches;
         tree::MountTable mounts;
-        tree::ParameterTree parameters { document, engine.commands(), mounts };
+        cue::RunTable runs;
+        tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
     };
 }
 
