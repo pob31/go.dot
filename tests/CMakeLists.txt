@@ -75,7 +75,9 @@ add_executable(wfg_tests
     MountTests.cpp
     JsonTests.cpp
     CueListTests.cpp
-    OscCodecTests.cpp)
+    OscCodecTests.cpp
+    SimpleWebToolchainTests.cpp
+    SpatcoreToolchainTests.cpp)
 
 # Where the hand-authored fixtures live. Passed as a definition rather than
 # copied next to the binary: the fixtures are inputs to read, not artefacts to
@@ -221,3 +223,24 @@ add_test(NAME wfg.tree.fr_FR
 # check, because it also removes the pressure to fix it.
 add_test(NAME schema.fixtures
          COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/validate-show.py")
+
+# -----------------------------------------------------------------------------
+# The shipped binary links no OpenSSL.
+#
+# juce_simpleweb declares libssl and libcrypto as link dependencies on all three
+# platforms, and Go.dot compiles it with SIMPLEWEB_SECURE_SUPPORTED=0 and calls
+# no TLS code at all. WfgThirdParty.cmake section 2b clears the module's
+# INTERFACE_LINK_LIBRARIES to keep them off the link line.
+#
+# This asks the BINARY rather than trusting that property to have stayed edited.
+# It is not a hypothetical regression: the upstream recipe we transcribed filters
+# the list by the names `libssl libcrypto z`, which are the macOS and Windows
+# spellings — the module spells them `ssl,crypto` on Linux, so that filter leaves
+# a Linux build linking an OpenSSL it never calls. A gate that reads the property
+# would have agreed with the bug; one that reads the ELF cannot.
+#
+# $<TARGET_FILE:wfg> rather than a constructed path: the multi-config Windows
+# generator puts the binary under Debug/ and the single-config Ninja jobs do not.
+add_test(NAME deps.no-openssl
+         COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/check-no-openssl.py"
+                 $<TARGET_FILE:wfg>)

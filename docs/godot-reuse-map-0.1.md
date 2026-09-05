@@ -67,7 +67,7 @@ over is the drift.
 
 | Need | Reuse | Status |
 |---|---|---|
-| HTTP + WebSocket transport for OSCQuery | `juce_simpleweb` (`SimpleWebSocketServer`, `SimpleWebSocketClient`) | **ready** — pin `pob31/juce_simpleweb` at `b953ada` or later; see *Which juce_simpleweb to pin* |
+| HTTP + WebSocket transport for OSCQuery | `juce_simpleweb` (`SimpleWebSocketServer`, `SimpleWebSocketClient`) | **pinned at `b953ada` in PR 1.D**, and proven on all three platforms by `SimpleWebToolchainTests.cpp`. One defect found doing it: `start(0)` cannot report its bound port — see *juce_simpleweb cannot bind an ephemeral port* |
 | OSCQuery server shape | `WFS_DIY_v1/Source/Network/OSCQueryServer.{h,cpp}`: HOST_INFO, full tree, attribute queries, LISTEN/IGNORE, 30 ms coalesced binary pushes, PATH_CHANGED, per-IP echo suppression | **pattern only** — the transport shell is generic, the namespace builders are WFS-specific, and its HTTP handler walks the live ValueTree from a worker thread (a race Go.dot's snapshot removes). Go.dot's server is written in-tree behind a namespace-provider seam |
 | OSC codec | `spatcore/control/osc/{OSCParser,OSCSerializer}.h` | **not usable**: it drops bundle time tags, cannot serialise `T`/`F`, decodes them as an int32 `1`/`0`, and throws on an unknown tag. Go.dot writes its own full OSC 1.1 codec, shaped so it can be lifted into spatcore. *(Draft 0.1 also called it JUCE-9-only. That was wrong — see the correction below.)* |
 | UDP/TCP receivers with sender IP | `spatcore/control/osc/{OSCReceiverWithSenderIP,OSCTCPReceiver}` (raw-data callback path) | **shape reused** (raw datagram + sender IP:port), code not: their legacy path pulls `OSCParser.h` in |
@@ -154,6 +154,52 @@ so if JUCE ever fixes `parseNumber` the build says so and the question can be re
 
 Worth knowing in WFS-DIY and spatcore too: both parse OSCQuery replies with `juce::JSON`.
 The values at risk are range bounds and any large integer a target reports.
+
+### juce_simpleweb cannot bind an ephemeral port — found while building PR 1.D
+
+**`SimpleWebSocketServer::start(0)` binds successfully and then cannot tell you what it
+bound.** Confirmed by test, not by reading: `SimpleWebToolchainTests.cpp` pins the
+behaviour so that fixing it turns the test red.
+
+`SimpleWebSocketServer.cpp:374-377`:
+
+```cpp
+void SimpleWebSocketServer::httpStartCallback (unsigned short _port)
+{
+    isConnected = port == _port;
+}
+```
+
+Simple-Web-Server hands that callback the port asio **actually bound**. `port` is the one
+the caller **asked for**. For a fixed port the two agree and nothing is wrong. For port 0 —
+the ephemeral request — they never agree, so `isConnected` stays `false` for the life of a
+server that is in fact listening, and the one number anybody needs in order to reach it is
+discarded.
+
+**The fix is one line, and it is correct for both cases:**
+
+```cpp
+void SimpleWebSocketServer::httpStartCallback (unsigned short _port)
+{
+    port = _port;
+    isConnected = true;
+}
+```
+
+**This is not a test-only inconvenience.** The plan has `wfg serve --http-port=0` print its
+bound port so the black-box harness (PR 1.10) can drive it, and the same property is what
+lets two Go.dot instances coexist on one machine. PR 1.9 needs it. Meanwhile PR 1.D's tests
+work around it by binding a probe socket on port 0, reading the port the OS granted,
+releasing it and handing that number to the server — which has a real race between the
+release and the bind, and is why the workaround is not the answer.
+
+It affects **every app in the family**, since all four vendor the same code, and none of
+them has noticed because all four pass a fixed port from configuration. `SecureWebSocketServer`
+carries the identical bug at `:666-669`.
+
+**Author decision needed:** this is a one-line commit to `pob31/juce_simpleweb` plus a
+re-pin here. It is not blocking PR 1.D, which is green with the workaround; it blocks the
+`--http-port=0` half of PR 1.9/1.10.
 
 ### Which juce_simpleweb to pin — settled 2026-09-05
 

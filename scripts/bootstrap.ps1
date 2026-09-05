@@ -53,8 +53,20 @@ Push-Location $Root
 try {
     Write-Host "==> Initialising submodules (first run pulls ~1 GB; be patient)"
     Write-Host "    NOT --recursive, NOT --depth 1 - see the header of this script."
-    git submodule update --init ThirdParty/JUCE ThirdParty/tracktion_engine
+    git submodule update --init ThirdParty/JUCE ThirdParty/tracktion_engine ThirdParty/spatcore
     if ($LASTEXITCODE -ne 0) { throw "git submodule update failed with exit code $LASTEXITCODE" }
+
+    # juce_simpleweb, WITH a scoped --recursive, because it has a nested asio it
+    # cannot compile without. This is the one path in the tree where recursion is
+    # both safe and required: benkuper/asio is an HTTPS URL, unlike TE's vendored
+    # JUCE, which is the SSH one the line above is careful to keep out of.
+    #
+    # Scoped by NAME rather than by a blanket --recursive: the blanket form would
+    # also descend into tracktion_engine/modules/juce and fail on any machine
+    # without a GitHub SSH key. check-pins.py asserts both halves - (c) that TE's
+    # copy stayed empty, (f) that this one did not.
+    git submodule update --init --recursive ThirdParty/juce_simpleweb
+    if ($LASTEXITCODE -ne 0) { throw "git submodule update (juce_simpleweb) failed with exit code $LASTEXITCODE" }
 
     # ----------------------------------------------------------------------
     # Neutralise TE's nested SSH submodule.

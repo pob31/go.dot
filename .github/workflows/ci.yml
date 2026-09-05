@@ -80,6 +80,19 @@ jobs:
           # asserts all three of those facts, including this line.
           submodules: true
 
+      - name: Populate juce_simpleweb's nested asio
+        # `submodules: true` above is NON-recursive, deliberately and
+        # permanently: a blanket recursion descends into tracktion_engine's
+        # modules/juce, whose URL is SSH, and dies on every keyless runner.
+        # check-pins.py check (e) forbids the blanket form outright.
+        #
+        # But juce_simpleweb has a nested asio of its own that the module cannot
+        # compile without, and whose URL is HTTPS. So the rule is not "never
+        # recurse" - it is "recurse into exactly one path, named here". That path
+        # is asserted populated by check (f), so a job that loses this step fails
+        # in the pins gate with a message that says what to do, rather than in a
+        # compiler somewhere inside asio.hpp.
+        run: git submodule update --init --recursive ThirdParty/juce_simpleweb
       - name: Check submodule pins
         run: python3 scripts/check-pins.py
 
@@ -110,14 +123,35 @@ jobs:
         with:
           submodules: true          # NON-recursive — see the job `pins` comment
 
+      - name: Populate juce_simpleweb's nested asio
+        # `submodules: true` above is NON-recursive, deliberately and
+        # permanently: a blanket recursion descends into tracktion_engine's
+        # modules/juce, whose URL is SSH, and dies on every keyless runner.
+        # check-pins.py check (e) forbids the blanket form outright.
+        #
+        # But juce_simpleweb has a nested asio of its own that the module cannot
+        # compile without, and whose URL is HTTPS. So the rule is not "never
+        # recurse" - it is "recurse into exactly one path, named here". That path
+        # is asserted populated by check (f), so a job that loses this step fails
+        # in the pins gate with a message that says what to do, rather than in a
+        # compiler somewhere inside asio.hpp.
+        run: git submodule update --init --recursive ThirdParty/juce_simpleweb
       - name: Resolve submodule SHAs (for cache key)
         id: subs
         shell: bash
-        # hashFiles() cannot see a gitlink, so a JUCE or TE bump changes nothing
-        # it can hash. Resolve both SHAs explicitly and put them in the key.
+        # hashFiles() cannot see a gitlink, so a submodule bump changes nothing
+        # it can hash. Resolve the SHAs explicitly and put them in the key.
+        #
+        # THREE of the four, not all four. juce_simpleweb compiles two
+        # translation units into wfg_thirdparty, so a bump must invalidate the
+        # cache. spatcore compiles nothing at all - it is consumed as headers
+        # with no CMake target - so its SHA is left out on purpose: adding it
+        # would throw away a warm cache for a change that cannot alter one
+        # object file.
         run: |
           echo "juce=$(git rev-parse HEAD:ThirdParty/JUCE)" >> "$GITHUB_OUTPUT"
           echo "te=$(git rev-parse HEAD:ThirdParty/tracktion_engine)" >> "$GITHUB_OUTPUT"
+          echo "sw=$(git rev-parse HEAD:ThirdParty/juce_simpleweb)" >> "$GITHUB_OUTPUT"
 
       - name: Install build deps
         # CI runs the same script a contributor runs. That is the point: an apt
@@ -138,8 +172,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: ${{ github.workspace }}/.ccache
-          key: ccache-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ github.sha }}
+          key: ccache-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ steps.subs.outputs.sw }}-${{ github.sha }}
           restore-keys: |
+            ccache-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ steps.subs.outputs.sw }}-
             ccache-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-
             ccache-linux-${{ steps.subs.outputs.juce }}-
             ccache-linux-
@@ -224,12 +259,26 @@ jobs:
         with:
           submodules: true          # NON-recursive — see the job `pins` comment
 
+      - name: Populate juce_simpleweb's nested asio
+        # `submodules: true` above is NON-recursive, deliberately and
+        # permanently: a blanket recursion descends into tracktion_engine's
+        # modules/juce, whose URL is SSH, and dies on every keyless runner.
+        # check-pins.py check (e) forbids the blanket form outright.
+        #
+        # But juce_simpleweb has a nested asio of its own that the module cannot
+        # compile without, and whose URL is HTTPS. So the rule is not "never
+        # recurse" - it is "recurse into exactly one path, named here". That path
+        # is asserted populated by check (f), so a job that loses this step fails
+        # in the pins gate with a message that says what to do, rather than in a
+        # compiler somewhere inside asio.hpp.
+        run: git submodule update --init --recursive ThirdParty/juce_simpleweb
       - name: Resolve submodule SHAs (for cache key)
         id: subs
         shell: bash
         run: |
           echo "juce=$(git rev-parse HEAD:ThirdParty/JUCE)" >> "$GITHUB_OUTPUT"
           echo "te=$(git rev-parse HEAD:ThirdParty/tracktion_engine)" >> "$GITHUB_OUTPUT"
+          echo "sw=$(git rev-parse HEAD:ThirdParty/juce_simpleweb)" >> "$GITHUB_OUTPUT"
 
       - name: Install ccache and ninja
         # ninja because the ci-macos preset inherits dev's Ninja Multi-Config
@@ -257,8 +306,9 @@ jobs:
         with:
           path: ${{ github.workspace }}/.ccache
           # Its own key namespace so it can never evict the Linux job's cache.
-          key: ccache-macos-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ github.sha }}
+          key: ccache-macos-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ steps.subs.outputs.sw }}-${{ github.sha }}
           restore-keys: |
+            ccache-macos-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ steps.subs.outputs.sw }}-
             ccache-macos-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-
             ccache-macos-${{ steps.subs.outputs.juce }}-
             ccache-macos-
@@ -307,6 +357,19 @@ jobs:
       # setting CMAKE_MSVC_DEBUG_INFORMATION_FORMAT=Embedded under CMP0141 —
       # a real change to the build policy, not a CI tweak.
 
+      - name: Populate juce_simpleweb's nested asio
+        # `submodules: true` above is NON-recursive, deliberately and
+        # permanently: a blanket recursion descends into tracktion_engine's
+        # modules/juce, whose URL is SSH, and dies on every keyless runner.
+        # check-pins.py check (e) forbids the blanket form outright.
+        #
+        # But juce_simpleweb has a nested asio of its own that the module cannot
+        # compile without, and whose URL is HTTPS. So the rule is not "never
+        # recurse" - it is "recurse into exactly one path, named here". That path
+        # is asserted populated by check (f), so a job that loses this step fails
+        # in the pins gate with a message that says what to do, rather than in a
+        # compiler somewhere inside asio.hpp.
+        run: git submodule update --init --recursive ThirdParty/juce_simpleweb
       - name: Install lxml
         # See the macOS job for why this is a hard requirement rather than a
         # nicety. The image ships Python; it does not ship lxml.
@@ -358,12 +421,26 @@ jobs:
         with:
           submodules: true          # NON-recursive — see the job `pins` comment
 
+      - name: Populate juce_simpleweb's nested asio
+        # `submodules: true` above is NON-recursive, deliberately and
+        # permanently: a blanket recursion descends into tracktion_engine's
+        # modules/juce, whose URL is SSH, and dies on every keyless runner.
+        # check-pins.py check (e) forbids the blanket form outright.
+        #
+        # But juce_simpleweb has a nested asio of its own that the module cannot
+        # compile without, and whose URL is HTTPS. So the rule is not "never
+        # recurse" - it is "recurse into exactly one path, named here". That path
+        # is asserted populated by check (f), so a job that loses this step fails
+        # in the pins gate with a message that says what to do, rather than in a
+        # compiler somewhere inside asio.hpp.
+        run: git submodule update --init --recursive ThirdParty/juce_simpleweb
       - name: Resolve submodule SHAs (for cache key)
         id: subs
         shell: bash
         run: |
           echo "juce=$(git rev-parse HEAD:ThirdParty/JUCE)" >> "$GITHUB_OUTPUT"
           echo "te=$(git rev-parse HEAD:ThirdParty/tracktion_engine)" >> "$GITHUB_OUTPUT"
+          echo "sw=$(git rev-parse HEAD:ThirdParty/juce_simpleweb)" >> "$GITHUB_OUTPUT"
 
       - name: Install build deps
         run: bash scripts/install-linux-deps.sh
@@ -374,8 +451,9 @@ jobs:
           path: ${{ github.workspace }}/.ccache
           # Its own namespace: a spike rebuild must never evict the product
           # job's cache, and the two build trees share no objects anyway.
-          key: ccache-spikes-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ github.sha }}
+          key: ccache-spikes-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ steps.subs.outputs.sw }}-${{ github.sha }}
           restore-keys: |
+            ccache-spikes-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-${{ steps.subs.outputs.sw }}-
             ccache-spikes-linux-${{ steps.subs.outputs.juce }}-${{ steps.subs.outputs.te }}-
             ccache-spikes-linux-${{ steps.subs.outputs.juce }}-
             ccache-spikes-linux-

@@ -24,13 +24,15 @@
 #   wfg::warnings    INTERFACE  the warning policy. Linked to OUR targets only,
 #                               never to vendor sources. This separation is the
 #                               entire reason WFG_WARNINGS_AS_ERRORS can exist.
-#   wfg::thirdparty  STATIC     the ONE place the JUCE and TE module sources
-#                               compile. Links wfg::deps PUBLIC, so anything that
-#                               links wfg::thirdparty gets the headers too.
+#   wfg::thirdparty  STATIC     the ONE place the JUCE, TE and juce_simpleweb
+#                               module sources compile. Links wfg::deps PUBLIC, so
+#                               anything that links wfg::thirdparty gets the
+#                               headers too.
 #
-# Nothing outside this file may name a juce:: or tracktion:: target. src/, tests/
-# and spikes/ link wfg::thirdparty (or wfg::engine, which re-exports it) and get
-# the whole environment; that is deliberate, and DO-NOT #5 in the build contract.
+# Nothing outside this file may name a juce::, tracktion:: or juce_simpleweb
+# target. src/, tests/ and spikes/ link wfg::thirdparty (or wfg::engine, which
+# re-exports it) and get the whole environment; that is deliberate, and DO-NOT #5
+# in the build contract.
 #
 # There are no functions or macros here. Author-A exposes targets and variables
 # only: a target you forget to link fails loudly at your first #include, whereas a
@@ -97,6 +99,72 @@ set(JUCE_VERSION "${WFG_PIN_JUCE}")
 add_subdirectory("${CMAKE_SOURCE_DIR}/ThirdParty/tracktion_engine/modules" tracktion_modules)
 
 # ---------------------------------------------------------------------------
+# 2b. juce_simpleweb — HTTP and WebSocket on one port, with the TLS ripped out
+# ---------------------------------------------------------------------------
+# Ben Kuper's JUCE module (GPL-3), pinned at pob31/juce_simpleweb. It is what
+# carries OSCQuery: the spec puts HTTP and WebSocket on the SAME port, which is
+# the one thing juce::StreamingSocket cannot be talked into doing.
+#
+# TRANSCRIBED, NOT INCLUDED. spatcore ships this recipe as a function,
+# spatcore_add_juce_simpleweb() in cmake/SpatcoreConsumer.cmake, and including
+# it would be the obvious move. Two reasons not to. First, the no-functions rule
+# at the top of this file: a helper you forget to call gives you a TU compiled
+# with different definitions from every other one. Second, and concretely, that
+# function is WRONG ON LINUX - see the link-libraries note below.
+juce_add_module("${CMAKE_SOURCE_DIR}/ThirdParty/juce_simpleweb")
+
+# CLEARED OUTRIGHT, not filtered, and this is the divergence worth reading.
+#
+# The module declares its OpenSSL dependency three times, once per platform, and
+# NOT in the same spelling (juce_simpleweb.h:25-27):
+#
+#     linuxLibs:    ssl,crypto            <- bare
+#     OSXLibs:      libssl,libcrypto,z    <- lib-prefixed
+#     windowsLibs:  libssl,libcrypto      <- lib-prefixed
+#
+# JUCE turns whichever line matches the platform into INTERFACE link libraries
+# (JUCEModuleSupport.cmake:610-643). spatcore's function then removes the items
+# `libssl libcrypto z` - which matches macOS and Windows exactly, and misses
+# Linux entirely, because there the items are `ssl` and `crypto`. The result is
+# `-lssl -lcrypto` on the link line of a build that compiles no TLS at all: it
+# needs an OpenSSL SDK present to link, and links a library it never calls.
+#
+# A REMOVE_ITEM list that has to be kept in step with three vendor spellings is a
+# gate that fails open. Clearing the property says what we mean - this module
+# contributes no link libraries - and it stays true if a fourth spelling appears.
+# It is safe in full: juce_simpleweb declares no `dependencies:` and no
+# `searchpaths:`, so those OpenSSL names are the ONLY thing in the property.
+# `deps.no-openssl` (tests/CMakeLists.txt) asserts the outcome on the shipped
+# binary rather than trusting this comment.
+set_target_properties(juce_simpleweb PROPERTIES INTERFACE_LINK_LIBRARIES "")
+
+# The module's .cpp files #include <JuceHeader.h>, which only the Projucer
+# generates. This directory holds a two-line stub and is put on the interface of
+# THIS TARGET ONLY, so `#include <JuceHeader.h>` anywhere in src/ or tests/ stays
+# the error it should be.
+target_include_directories(juce_simpleweb INTERFACE
+    "${CMAKE_SOURCE_DIR}/cmake/JuceHeaderStub")
+
+# ---------------------------------------------------------------------------
+# 2c. spatcore — headers only, and no add_subdirectory
+# ---------------------------------------------------------------------------
+# spatcore (GPL-3, pob31/spatcore) is the author's shared control plane. It is
+# consumed at SOURCE level: `#include <spatcore/rt/RtThreadPriority.h>` and
+# nothing more. There is deliberately no add_subdirectory().
+#
+# Its own CMakeLists builds targets that call juce_add_modules() again, which
+# would compile JUCE a SECOND time in this build tree and break the one-compile
+# rule this whole file exists to hold (section 5). The headers Phase 1 and
+# Phase 2 want - rt/RtThreadPriority.h, later rt/RtSnapshot.h - need no library:
+# the first is JUCE-free, the second is juce_core-only.
+#
+# So spatcore needs exactly one thing from the build, and it is the ThirdParty
+# include root added in section 3 below. Most of spatcore's control/ tree is
+# JUCE-9-only today (its OSCParser.h constructs juce::OSCArgument(true), which
+# JUCE 8 has no constructor for) and is not reachable from here; Go.dot's own
+# osc/ codec exists for that reason.
+
+# ---------------------------------------------------------------------------
 # 3. wfg::deps — the compile environment, and nothing that compiles
 # ---------------------------------------------------------------------------
 add_library(wfg_deps INTERFACE)
@@ -123,9 +191,18 @@ target_compile_features(wfg_deps INTERFACE cxx_std_20)
 #     #include <3rd_party/doctest/tracktion_doctest.hpp>
 # with no extra wiring, no submodule and no FetchContent: doctest is vendored inside
 # TE's modules directory and is reachable the moment that directory is on the path.
+# ThirdParty itself is the third entry, and it is what makes
+#     #include <juce_simpleweb/juce_simpleweb.h>
+#     #include <spatcore/rt/RtThreadPriority.h>
+# resolve. juce_add_module attaches the module's PARENT directory to the MODULE
+# target, but that target is linked PRIVATE below, so its interface reaches
+# nothing of ours; and spatcore has no target at all. SYSTEM for the same reason
+# as the other two: it keeps somebody else's warnings out of the -Werror
+# baseline that wfg::warnings puts on our code.
 target_include_directories(wfg_deps SYSTEM INTERFACE
     "${CMAKE_SOURCE_DIR}/ThirdParty/JUCE/modules"
-    "${CMAKE_SOURCE_DIR}/ThirdParty/tracktion_engine/modules")
+    "${CMAKE_SOURCE_DIR}/ThirdParty/tracktion_engine/modules"
+    "${CMAKE_SOURCE_DIR}/ThirdParty")
 
 target_compile_definitions(wfg_deps INTERFACE
     # --- Replicated from JUCE's own module INTERFACE, because we link the modules
@@ -159,6 +236,7 @@ target_compile_definitions(wfg_deps INTERFACE
     JUCE_MODULE_AVAILABLE_juce_dsp=1
     JUCE_MODULE_AVAILABLE_juce_osc=1
     JUCE_MODULE_AVAILABLE_juce_cryptography=1
+    JUCE_MODULE_AVAILABLE_juce_simpleweb=1
     JUCE_MODULE_AVAILABLE_juce_graphics=1
     JUCE_MODULE_AVAILABLE_juce_gui_basics=1
     JUCE_MODULE_AVAILABLE_juce_gui_extra=1
@@ -175,6 +253,20 @@ target_compile_definitions(wfg_deps INTERFACE
     JUCE_MODAL_LOOPS_PERMITTED=0    # all 20 TE uses are #if-guarded; a modal loop in a show engine is a hang
     JUCE_JACK=0                     # already the default; explicit because it is what keeps libjack-jackd2-dev off the apt line
     JUCE_PLUGINHOST_LADSPA=0        # already the default; explicit because it is what keeps ladspa-sdk off the apt line
+
+    # --- juce_simpleweb, TLS off.
+    #     Upstream defaults SECURE support ON, which compiles asio's OpenSSL
+    #     paths and then fails at link with unresolved SSL symbols in a build
+    #     that ships no OpenSSL. It is set HERE, on wfg::deps, rather than on the
+    #     module target as spatcore sets it, and one line of reasoning covers
+    #     both places it has to reach: wfg_thirdparty links wfg::deps PUBLIC, so
+    #     the module .cpp files compiled into it get this define, and so does
+    #     every TU of ours that includes a juce_simpleweb header. spatcore needs
+    #     the define on the module because it links the module PUBLIC and the
+    #     .cpps are therefore recompiled in each consumer; we link it PRIVATE, so
+    #     they compile exactly once, here.
+    #     SimpleWebToolchainTests.cpp static_asserts that it arrived.
+    SIMPLEWEB_SECURE_SUPPORTED=0
 
     # --- Ours. NEVER call a macro VERSION or __TEXT: tracktion_engine_playback.cpp:124-153
     #     #undefs and redefines VERSION mid-TU, and tracktion_engine.h:72 bare-#undefs __TEXT.
@@ -415,6 +507,12 @@ target_link_libraries(wfg_thirdparty
         # X11, freetype and fontconfig even though Phase 0 ships no UI. They are NOT
         # listed here because the validated configuration does not list them.
         #
+        juce_simpleweb                  # HTTP + WebSocket on one port, for OSCQuery.
+                                        # Not namespaced juce:: - it is a module added
+                                        # by us in section 2b, not one of JUCE's own.
+                                        # PRIVATE like everything else here, which is
+                                        # what makes its four .cpp files compile once.
+
         tracktion::tracktion_core       # header-only in a non-unit-test build (verified:
                                         # tracktion_core.cpp contains only .test.cpp
                                         # includes), but linked for parity with TE's own

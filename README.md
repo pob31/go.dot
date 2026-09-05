@@ -54,8 +54,9 @@ documents come first, and they are the thing to read before the code:
 
 **What exists**
 
-- CMake build wired to JUCE and Tracktion Engine as pinned submodules, with the
-  vendor sources compiled exactly once into `wfg_thirdparty`.
+- CMake build wired to JUCE, Tracktion Engine and juce_simpleweb as pinned submodules,
+  with the vendor sources compiled exactly once into `wfg_thirdparty`. spatcore is a
+  fourth pin, consumed as headers with no CMake target of its own.
 - **The engine skeleton**: one road in (`Engine::submit` from any thread), one ordered path
   out (`processTick`, which applies every event in arrival order on the tick thread), a
   named-command registry, and a tick-indexed event log that a session can be replayed from
@@ -142,8 +143,9 @@ sibling to that pointer, and descending into one is Phase 3, along with parallel
 the published focus node. There is no OSC codec on the wire, no OSCQuery server, and
 therefore no `serve`: the tree can be printed but not subscribed to, and what exists is
 exercised by tests and by the console verbs rather than by a client. Phase 1 adds those in
-that order, and two further submodules arrive with them — `ThirdParty/juce_simpleweb` for
-the HTTP+WebSocket transport and `ThirdParty/spatcore`, consumed at source level for its
+that order. The two further submodules they need have now landed —
+`ThirdParty/juce_simpleweb` for the HTTP+WebSocket transport, proven end to end by
+`SimpleWebToolchainTests.cpp`, and `ThirdParty/spatcore`, consumed at source level for its
 real-time helpers. No audio, no UI, no plugin hosting, no video: audio is Phase 2, which is
 planned but not started, and everything else is later.
 
@@ -218,21 +220,35 @@ cd go.dot
 ./scripts/bootstrap.sh          # scripts\bootstrap.ps1 on Windows
 ```
 
-`bootstrap` is idempotent — re-run it any time. It initialises the two
-submodules, checks the pins, and disarms Tracktion Engine's nested SSH JUCE
-submodule so the recursive command below cannot bite you later.
+`bootstrap` is idempotent — re-run it any time. It initialises the four
+submodules, populates the one nested submodule that is wanted, checks the pins,
+and disarms Tracktion Engine's nested SSH JUCE submodule so the blanket
+recursive command below cannot bite you later.
 
-> **Important:** do **not** use `--recursive` on the submodule update, and do not
-> use `--depth 1`.
+> **Important:** do **not** use a **blanket** `--recursive` on the submodule
+> update, and do not use `--depth 1`.
 >
-> `git submodule update --init --recursive` descends into
-> `tracktion_engine/modules/juce`, whose URL in TE's own `.gitmodules` is
+> `git submodule update --init --recursive` — with no path after it — descends
+> into `tracktion_engine/modules/juce`, whose URL in TE's own `.gitmodules` is
 > `git@github.com:juce-framework/JUCE.git` — SSH. Without a registered SSH key it
 > fails with `Permission denied (publickey)` three levels down, in a message that
 > names neither Go.dot nor Tracktion Engine. Every CI runner is in exactly that
 > position. Go.dot pins JUCE itself, so TE's vendored copy is redundant: our
 > CMake adds `ThirdParty/tracktion_engine/modules` and never TE's root, and that
 > directory can stay empty forever.
+>
+> **There is exactly one exception, and it is scoped by name:**
+>
+> ```bash
+> git submodule update --init --recursive ThirdParty/juce_simpleweb
+> ```
+>
+> `juce_simpleweb` has a nested `asio` of its own that the module cannot compile
+> without, and *its* URL is HTTPS (`benkuper/asio`), so recursing into that one
+> path is both safe and required. `bootstrap` already does it. The rule is
+> therefore not "never recurse" but **"recurse into exactly one path, and name
+> it"** — and `check-pins.py` asserts both halves: check (c) that TE's vendored
+> JUCE stayed empty, check (f) that `juce_simpleweb/asio` did not.
 >
 > `--depth 1` fails differently: our JUCE pin is not the tip of `develop`, and a
 > shallow fetch reports `fatal: reference is not a tree: 19edd538…`.
@@ -343,9 +359,11 @@ equality true is the whole job of `scripts/check-pins.py`.
    skewed pair.
 
 Never `git submodule update --remote` — it moves a pin to a branch tip behind
-your back, which is the one thing a pin exists to prevent. Never `--recursive`,
-anywhere. A deliberate JUCE bump ahead of TE is possible, but the person doing it
-says so out loud: `check-pins.py --allow-skew`.
+your back, which is the one thing a pin exists to prevent. Never a **blanket**
+`--recursive`; the only recursion in this repo is the one scoped to
+`ThirdParty/juce_simpleweb`, explained above. A deliberate JUCE bump ahead of TE
+is possible, but the person doing it says so out loud:
+`check-pins.py --allow-skew`.
 
 If JUCE's version number changes, update `WFG_PIN_JUCE` in
 `cmake/WfgOptions.cmake` too — `wfg_tests` asserts at **runtime** that
@@ -377,7 +395,8 @@ scripts/             bootstrap, the Linux package list, the pin gate
 src/                 wfg_engine (the library) and wfg (the binary)
 tests/               the doctest suite and every add_test() in the project
 spikes/              throwaway PRD §6.1 validation programs
-ThirdParty/          JUCE and tracktion_engine submodules
+ThirdParty/          JUCE, tracktion_engine, juce_simpleweb (+ its nested asio)
+                     and spatcore, all pinned submodules
 ```
 
 Two directories that do **not** exist here, and will not:

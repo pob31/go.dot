@@ -35,13 +35,23 @@ Nothing in git enforces that. This script does — as the first CI job, so a
 skewed pair costs fifteen seconds instead of three platforms' worth of compile
 minutes on a repo that is private, and therefore billed, until alpha.
 
-THE FIVE CHECKS
+THE SIX CHECKS
 
- (a) both submodules are checked out at the SHA their gitlink names
+ (a) every submodule is checked out at the SHA its gitlink names
  (b) TE's own modules/juce gitlink == our ThirdParty/JUCE gitlink
  (c) ThirdParty/tracktion_engine/modules/juce/ is EMPTY on disk
  (d) no CMake file of ours does add_subdirectory() of TE's ROOT
  (e) no workflow uses `submodules: recursive`
+ (f) ThirdParty/juce_simpleweb/asio/ is POPULATED on disk
+
+(c) and (f) are the same question with opposite answers, and the pair is the
+whole submodule policy in two lines. There are two nested submodules in this
+tree. TE's vendored JUCE must stay EMPTY, because its URL is SSH and recursing
+into it breaks every keyless clone. juce_simpleweb's asio must be POPULATED,
+because the module does not compile without it and its URL is HTTPS. So the
+rule is not "never recurse" but "recurse into exactly one path, by name" — which
+is why (e) still forbids the blanket `submodules: recursive` while every job
+runs a scoped `git submodule update --init --recursive ThirdParty/juce_simpleweb`.
 
 (b) is the one with an escape hatch: --allow-skew (or WFG_ALLOW_PIN_SKEW=1)
 downgrades it to a warning, for the deliberate case of moving JUCE ahead of TE.
@@ -60,7 +70,22 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 JUCE = "ThirdParty/JUCE"
 TE = "ThirdParty/tracktion_engine"
+SIMPLEWEB = "ThirdParty/juce_simpleweb"
+SPATCORE = "ThirdParty/spatcore"
 TE_VENDORED_JUCE = "ThirdParty/tracktion_engine/modules/juce"
+SIMPLEWEB_ASIO = "ThirdParty/juce_simpleweb/asio"
+
+# How to repair each submodule, which is NOT the same command for all of them:
+# juce_simpleweb has a nested asio and needs a scoped --recursive, and the other
+# three must never be given one. The wrong advice in a failure message is worse
+# than none, because it is the advice that gets pasted.
+FIX_HINT = {
+    JUCE: "git submodule update --init " + JUCE,
+    TE: "git submodule update --init " + TE,
+    SPATCORE: "git submodule update --init " + SPATCORE,
+    SIMPLEWEB: "git submodule update --init --recursive " + SIMPLEWEB
+               + "   (the --recursive is SCOPED to this path, and required: asio)",
+}
 
 # Directories we never scan for checks (d) and (e): vendor trees and build
 # output. A match inside ThirdParty/ is TE's or JUCE's own CMake, which is
@@ -108,8 +133,8 @@ def checked_out_head(path: str):
 
 
 def check_a(failures):
-    """Both submodules are checked out at the SHA their gitlink names."""
-    for path in (JUCE, TE):
+    """Every submodule is checked out at the SHA its gitlink names."""
+    for path in (JUCE, TE, SIMPLEWEB, SPATCORE):
         recorded, err = recorded_gitlink(path)
         if err:
             failures.append(err)
@@ -118,8 +143,9 @@ def check_a(failures):
         if actual is None:
             failures.append(
                 f"{path} is not checked out (gitlink says {recorded}).\n"
-                f"    Fix: scripts/bootstrap.sh   (or: git submodule update --init {path})\n"
-                f"    Do NOT add --recursive and do NOT add --depth 1 — see the README."
+                f"    Fix: scripts/bootstrap.sh   (or: {FIX_HINT[path]})\n"
+                f"    Do NOT add a BLANKET --recursive and do NOT add --depth 1 —\n"
+                f"    see the README."
             )
             continue
         if actual != recorded:
@@ -127,7 +153,7 @@ def check_a(failures):
                 f"{path} is at the wrong commit.\n"
                 f"    gitlink says : {recorded}\n"
                 f"    working tree : {actual}\n"
-                f"    Fix: git submodule update --init {path}   (or commit the move deliberately)"
+                f"    Fix: {FIX_HINT[path]}   (or commit the move deliberately)"
             )
         else:
             print(f"  ok  (a) {path} @ {recorded[:12]}")
@@ -192,6 +218,33 @@ def check_c(failures):
         )
     else:
         print(f"  ok  (c) {TE_VENDORED_JUCE}/ is empty")
+
+
+def check_f(failures):
+    """juce_simpleweb's nested asio IS populated — the inverse of check (c).
+
+    The one nested submodule this build actually needs. juce_simpleweb.h
+    includes asio.hpp unconditionally, so an unpopulated asio/ is not a
+    degraded build, it is a compile error some way into the module — and on a
+    fresh clone the cause looks like a broken module rather than a missing
+    checkout step.
+
+    Its URL is HTTPS (benkuper/asio), which is exactly why recursing into THIS
+    path is safe when recursing into TE's vendored JUCE is not.
+    """
+    d = REPO_ROOT / SIMPLEWEB_ASIO
+    entries = sorted(p.name for p in d.iterdir()) if d.is_dir() else []
+    if not entries:
+        failures.append(
+            f"{SIMPLEWEB_ASIO}/ is empty.\n"
+            "    juce_simpleweb includes asio.hpp unconditionally and will not\n"
+            "    compile without it. `submodules: true` and a plain\n"
+            "    `git submodule update --init` do NOT populate it, because it is\n"
+            "    nested one level down.\n"
+            f"    Fix: {FIX_HINT[SIMPLEWEB]}"
+        )
+    else:
+        print(f"  ok  (f) {SIMPLEWEB_ASIO}/ is populated ({len(entries)} entries)")
 
 
 def our_files(suffixes=None, names=None, under=None):
@@ -283,6 +336,7 @@ def main() -> int:
     check_c(failures)
     check_d(failures)
     check_e(failures)
+    check_f(failures)
 
     if failures:
         print("\ncheck-pins: FAILED\n")

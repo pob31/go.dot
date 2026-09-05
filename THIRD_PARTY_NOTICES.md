@@ -7,16 +7,17 @@ This file records notice obligations, per dependency. Go.dot's own licence, and
 how it relates to its dependencies', is discussed once in
 [`README.md`](README.md#a-note-on-juce) and nowhere else in this tree.
 
-Two submodules supply everything below. Nothing else is vendored by Go.dot
-itself, and no dependency here is fetched at configure time — the pins are in
-`.gitmodules` and enforced by `scripts/check-pins.py`.
+Four submodules supply everything below, plus one nested inside another
+(`asio`, under `juce_simpleweb`). Nothing else is vendored by Go.dot itself, and
+no dependency here is fetched at configure time — the pins are in `.gitmodules`
+and enforced by `scripts/check-pins.py`.
 
 ---
 
 ## JUCE Framework
 
 - **Website**: https://juce.com
-- **Version**: 8.0.13+7 (`develop`), commit `19edd538429c93d277bf95b55aaa7e3eb545f951`
+- **Version**: 8.0.13+7 (`develop`), commit `37c894f83d379179b2070d437ccd0f1cd9af9576`
 - **Licence**: AGPLv3 or commercial JUCE Licence
 - **Copyright**: Raw Material Software Limited
 
@@ -43,7 +44,7 @@ every Go.dot binary through `juce_graphics` are listed separately below. See
 ## Tracktion Engine
 
 - **Website**: https://github.com/Tracktion/tracktion_engine
-- **Version**: develop (3.5.0), commit `0a5f4e6a5f53d09c89b414a44386a12df7fa1ec6`
+- **Version**: develop (3.5.0), commit `b88a6ee51913668cb53e911e030ab736b13342cf`
 - **Licence**: GPLv3 or commercial Tracktion licence
 - **Copyright**: Tracktion Corporation
 
@@ -160,6 +161,116 @@ is compatible with GPL-3.0. Full text in `ThirdParty/JUCE/LICENSE.md`.
 
 ---
 
+## juce_simpleweb
+
+- **Website**: https://github.com/benkuper/juce_simpleweb
+  (Go.dot pins the fork https://github.com/pob31/juce_simpleweb)
+- **Version**: commit `b953ada40073d8e7338fbc13aa6bccf3fe70087d`
+- **Licence**: GPLv3
+- **Copyright**: Ben Kuper
+
+A JUCE module wrapping Simple-Web-Server, serving HTTP and WebSocket on a single
+port. That is not a convenience: the OSCQuery specification requires both on the
+same port, and it is the reason this dependency exists rather than
+`juce::StreamingSocket`.
+
+Go.dot compiles it with `SIMPLEWEB_SECURE_SUPPORTED=0` — plain HTTP and WS, no
+TLS — and clears the module's declared OpenSSL link libraries outright. The
+`deps.no-openssl` test asserts that on the shipped binary, so this paragraph is
+checked rather than merely asserted. See `cmake/WfgThirdParty.cmake` section 2b.
+
+The pinned fork is upstream master plus two changes the author needed and has
+offered upstream: a build-time TLS-off guard, and a Windows fix. Full text:
+`ThirdParty/juce_simpleweb/LICENSE`.
+
+---
+
+## Simple-Web-Server
+
+- **Website**: https://gitlab.com/eidheim/Simple-Web-Server
+- **Version**: vendored inside `ThirdParty/juce_simpleweb/` (`webserver/`, `websocket/`,
+  `common/`)
+- **Licence**: MIT
+- **Copyright**: Ole Christian Eidheim
+
+The HTTP and WebSocket server implementation that juce_simpleweb wraps. Reaches
+a Go.dot binary as compiled code — `SimpleWeb::Server<HTTP>` is what answers
+every OSCQuery request.
+
+**The vendored copy carries no licence header or notice file of its own.** The
+attribution above is from the upstream project, which the code is otherwise
+identifiable as (the `SimpleWeb` namespace, the `SIMPLE_WEB_SERVER_*_HPP`
+include guards). That is a notice-obligation gap in the module rather than in
+Go.dot, and it is recorded here rather than quietly papered over: the fork is
+`pob31/juce_simpleweb`, so it is fixable at the source by adding upstream's
+LICENSE file to the vendored directory.
+
+`common/crypto.hpp` is part of this copy and calls OpenSSL's `SHA1()` directly.
+It is unreachable in a Go.dot build — the WebSocket handshake goes through
+`WSCrypto::calcSha1` instead (`websocket/server_ws.hpp:565`), which is the
+self-contained implementation listed below — and `deps.no-openssl` is what keeps
+that true rather than assumed.
+
+---
+
+## asio (standalone)
+
+- **Website**: https://think-async.com/Asio/
+- **Version**: commit `6caa38aa03246140d745f36207892713895d245e`, as
+  `ThirdParty/juce_simpleweb/asio` (the fork `benkuper/asio`)
+- **Licence**: Boost Software License 1.0
+- **Copyright**: Christopher M. Kohlhoff
+
+The networking layer under Simple-Web-Server, used **standalone** — without
+Boost. This is the one nested submodule Go.dot deliberately populates: it is
+required to compile juce_simpleweb at all, its URL is HTTPS (unlike Tracktion
+Engine's vendored JUCE), and `scripts/check-pins.py` check (f) asserts it is
+present.
+
+The licence is stated in the banner of every header — e.g.
+`ThirdParty/juce_simpleweb/asio/basic_socket.hpp:1-9` — which points at an
+accompanying `LICENSE_1_0.txt`. **That file is not in this checkout**: the fork
+vendors asio's headers without its repository root. The canonical text is at
+https://www.boost.org/LICENSE_1_0.txt and the banners themselves satisfy BSL-1.0
+clause 1, which requires the notice to travel with the source.
+
+---
+
+## SHA-1 implementation (in juce_simpleweb's WSCrypto)
+
+- **Licence**: BSD 3-Clause
+- **Copyright**: Micael Hildenborg
+
+`ThirdParty/juce_simpleweb/common/WSCrypto.h` and `.cpp`, whose notice is
+reproduced in full at the top of the header.
+
+The WebSocket handshake hashes the client key with SHA-1, because RFC 6455
+requires exactly that: it is a protocol constant, not a security choice, and no
+part of Go.dot uses SHA-1 for anything else. This is the implementation the
+handshake actually calls (`WSCrypto::calcSha1`), which is how the build manages
+to need no OpenSSL.
+
+---
+
+## spatcore
+
+- **Website**: https://github.com/pob31/spatcore
+- **Version**: commit `7e1a8adf063cffcd8f33c7b2be7ad515693e5dd3`
+- **Licence**: GPLv3
+- **Copyright**: Pierre-Olivier Boulant
+
+The author's shared control-plane and real-time support code, also used by
+WFS-DIY, XOA and Tight-WFS. Consumed at **source level** — there is no
+`add_subdirectory`, because spatcore's own CMake targets call
+`juce_add_modules()` and would compile JUCE a second time in this build tree.
+
+Phase 1 compiles exactly one header from it, `rt/RtThreadPriority.h`, which is
+JUCE-free. Phase 2 is expected to add `rt/RtSnapshot.h` (juce_core only). Most of
+`control/` requires JUCE 9 and is unreachable from this build, which is why
+Go.dot has an OSC codec of its own. Full text: `ThirdParty/spatcore/LICENSE`.
+
+---
+
 ## Not present, and why it is worth saying
 
 - **RubberBand** is *not* a dependency. Enabling it would mean a licence decision
@@ -173,3 +284,12 @@ is compatible with GPL-3.0. Full text in `ThirdParty/JUCE/LICENSE.md`.
 - **The LV2 SDK** (lilv, serd, sord, sratom) *is* vendored by JUCE and attached
   automatically. When Phase 9 turns plugin hosting on, LV2 costs one compile
   definition and zero system packages on all three platforms.
+- **OpenSSL** is *not* a dependency, and keeping it that way took deliberate
+  work. `juce_simpleweb` declares `libssl` and `libcrypto` as link libraries on
+  all three platforms — and in two different spellings, bare on Linux and
+  `lib`-prefixed elsewhere — even though Go.dot compiles it with TLS off and
+  calls no TLS code. `cmake/WfgThirdParty.cmake` clears that property outright
+  rather than filtering it by name, and the `deps.no-openssl` ctest inspects the
+  built binary's actual dynamic dependencies on every platform. A Go.dot that
+  linked OpenSSL would refuse to start on a machine without the runtime, in
+  service of a feature it does not have.
