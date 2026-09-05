@@ -378,6 +378,14 @@ back on if nobody feels strongly by then.
   the text (the log tags its atoms, the CSV declares its attributes), so nothing is lost.
   This is what put the macOS floor at 13.3.
 
+  The reader is a separate trap and cost a red CI run to find. `std::from_chars` is absent
+  for floating point on the macOS toolchains this project builds on, and the obvious
+  substitute — an `istringstream` imbued with `std::locale::classic()` — rejects every
+  subnormal on libc++, because `num_get` is specified to set `failbit` when the conversion
+  sets `errno`, and `strtod` sets `ERANGE` on underflow. Go.dot parses with `strtod_l`
+  against a C locale created once, and asks whether the result is finite and the whole
+  field was consumed rather than whether a stream flag is set.
+
 - **Identifiers — 8-character Crockford base32.** `[0-9A-HJKMNP-TV-Z]{8}`, 40 bits from
   `std::random_device`, unique within the document at creation.
 
