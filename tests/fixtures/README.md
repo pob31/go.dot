@@ -69,6 +69,19 @@ Hand-written, hand-checked, and older than the document: every record in it is o
 must reproduce exactly on replay, and none of them needs a show to exist. It is the earliest
 possible test of the replay guarantee.
 
+## `logs/edit-built.wfglog`
+
+Hand-written and hand-checked, like the skeleton, and for the same guarantee seen from the
+other side. Go.dot's rule is that state transitions are events and continuous readouts are
+not, so the playback graph coming into being arrives as a logged command rather than as a
+variable somebody set. This fixture is that rule, replayed: seven records — the report
+applied, applied again, applied for a show with no audio at all, refused for a mangled count,
+refused for a mistyped argument, sent from a UDP client, and refused for missing arguments.
+
+None of them needs a document, a device or a Tracktion engine, which is the point. A log
+taken during a performance has to reproduce on a laptop with no sound card, or it is not a
+log.
+
 ## `tree/cue-F7HR8TVD.json`
 
 The OSCQuery reply for one cue, written by hand rather than generated, so it can disagree

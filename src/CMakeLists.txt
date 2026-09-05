@@ -77,6 +77,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/CueCommands.h
     wfg/engine/cue/CueList.cpp
     wfg/engine/cue/CueList.h
+    wfg/engine/audio/AudioCommands.h
+    wfg/engine/audio/AudioCommands.cpp
     wfg/engine/audio/AudioHost.h
     wfg/engine/audio/AudioHost.cpp
     wfg/engine/audio/CueMatrix.h

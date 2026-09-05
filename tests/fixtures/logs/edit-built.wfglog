@@ -1,0 +1,41 @@
+# wfg-log 1
+# fixture edit-built — the audio side reporting itself, hand-written and hand-checked.
+#
+# Go.dot's rule is that state transitions are events and continuous readouts are
+# not: the Edit coming into being is something a decision depends on, so it
+# arrives as a logged command applied on the tick it was observed, exactly like a
+# cue being created. This fixture is that rule, replayable.
+#
+# What it must prove is that the transition reproduces on a machine with no audio
+# at all. Every record here replays against an engine holding no Tracktion, no
+# device and no show — and if it did not, a log taken during a performance would
+# be reproducible only on the machine that recorded it, which is not a log.
+#
+# Nothing here needs a document, deliberately, so it can run in the one-argument
+# form beside the skeleton fixture.
+A 0 0 engine audio.editBuilt s:"hosted" i:8 i:4 i:64
+#
+# Applying it again is applying it, not a conflict. The graph is fixed at show
+# load (PRD §3.25) so in a real session this happens once — but a handler that
+# stored what it was told and nothing else is what makes a log replayed twice,
+# or replayed after a session that already ran, converge on the same state.
+A 12 1 engine audio.editBuilt s:"hosted" i:8 i:4 i:64
+#
+# A show with no audio is a real show, and zero is a real answer. This is the
+# case a range check written in a hurry refuses.
+A 25 2 engine audio.editBuilt s:"" i:0 i:0 i:0
+#
+# A graph with minus four nodes is a message that got mangled on the way in.
+# Refused rather than clamped: storing 0 would put a number nobody measured in
+# front of every client reading the tree.
+R 37 3 engine type-mismatch audio.editBuilt s:"hosted" i:8 i:4 i:-4
+#
+# The device is a string and the counts are integers, and the registry checks
+# both before any handler sees them.
+R 37 4 engine type-mismatch audio.editBuilt s:"hosted" s:"eight" i:4 i:64
+#
+# Reported by the audio side, but sendable by anyone — including a replay, which
+# is the point. A command only the inside of the process could send would be a
+# command this file could not contain.
+A 50 5 udp:10.0.0.5:9000 audio.editBuilt s:"device" i:32 i:64 i:456
+R 50 6 cli arity audio.editBuilt s:"hosted" i:8

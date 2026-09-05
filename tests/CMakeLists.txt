@@ -152,6 +152,17 @@ add_test(NAME wfg.replay.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/skeleton.wfglog"
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The second replay fixture: the audio side reporting the shape of the graph it
+# built. What it proves is that a transition observed on a machine with an audio
+# interface reproduces on one without — the whole reason the report is a logged
+# command rather than a variable somebody set.
+add_test(NAME wfg.replay.audio.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/edit-built.wfglog"
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.audio.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/edit-built.wfglog"
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a

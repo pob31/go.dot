@@ -25,6 +25,7 @@
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
@@ -204,6 +205,7 @@ namespace
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
         wfg::cue::Focus focus;
+        wfg::audio::AudioState audioState;
 
         const auto nowhere = juce::File::getCurrentWorkingDirectory();
 
@@ -212,6 +214,7 @@ namespace
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
         wfg::doc::registerBundleCommands (engine.commands(), document, nowhere);
+        wfg::audio::registerAudioCommands (engine.commands(), audioState);
 
         for (const auto& command : engine.commands().all())
         {
@@ -296,6 +299,14 @@ namespace
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
         wfg::cue::Focus focus;
+        wfg::audio::AudioState audioState;
+
+        /*  REGISTERED WHETHER OR NOT A BUNDLE WAS GIVEN, unlike everything
+            below. `audio.editBuilt` needs no document - it is the machine
+            reporting the shape of a graph - and a log carrying one must replay
+            as applied on a machine with no sound card and no show, which is
+            exactly the guarantee the event exists to provide. */
+        wfg::audio::registerAudioCommands (engine.commands(), audioState);
 
         const auto bundlePath = args.containsOption ("--bundle")
                                   ? args.getValueForOption ("--bundle")
@@ -653,11 +664,13 @@ namespace
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
         wfg::cue::Focus focus;
+        wfg::audio::AudioState audioState;
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
+        wfg::audio::registerAudioCommands (engine.commands(), audioState);
 
         /*  The mounts are loaded before the first publish, so what this prints
             includes somebody else's namespace at its own prefix. A mount that
@@ -999,12 +1012,14 @@ namespace
         wfg::tree::TouchTable touches;
         wfg::tree::MountTable mounts;
         wfg::cue::Focus focus;
+        wfg::audio::AudioState audioState;
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::doc::registerBundleCommands (engine.commands(), document, target);
+        wfg::audio::registerAudioCommands (engine.commands(), audioState);
 
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
             std::cerr << "    " << problem << std::endl;
@@ -1194,20 +1209,32 @@ namespace
                 is a defect rather than a warning - two nodes sharing an id
                 adopt one another's state across a rebuild - so it stops the
                 show here instead of during it. */
-            if (const auto ids = driver->host().inspectNodeIds(); ! ids.ok())
+            if (const auto duplicates = driver->host().inspectNodeIds(); ! duplicates.ok())
             {
                 std::cerr << "wfg serve --hosted: the playback graph has "
-                          << ids.duplicates << " duplicated node identities out of "
-                          << ids.nodes << std::endl;
+                          << duplicates.duplicates << " duplicated node identities out of "
+                          << duplicates.nodes << std::endl;
                 return 2;
             }
 
-            state.audioDevice = "hosted";
-            state.audioOutputs = shape.outputs;
-            state.audioStatus = "running";
+            /*  THE GRAPH EXISTS, AND THAT IS AN EVENT, not a variable being
+                set. State transitions enter the model as logged commands
+                applied on the tick they were observed (PRD §3.15, §4.11); a
+                replay of this session re-injects this one at the same tick,
+                with no engine and no sound card, and produces the same
+                `/godot/audio` a client saw live. Setting the fields here
+                instead would make the tree depend on when a message thread
+                happened to run, and leave nothing in the log to reproduce. */
+            const auto ids = driver->host().inspectNodeIds();
+
+            engine.submit ("engine", "audio.editBuilt",
+                           { wfg::osc::Value::string ("hosted"),
+                             wfg::osc::Value::int32 (shape.tracks),
+                             wfg::osc::Value::int32 (shape.outputs),
+                             wfg::osc::Value::int32 (ids.nodes) });
 
             std::cout << "wfg: audio hosted " << shape.tracks << " tracks "
-                      << shape.outputs << " outputs" << std::endl;
+                      << shape.outputs << " outputs " << ids.nodes << " nodes" << std::endl;
 
             blockSource = &driver->clock();
         }
@@ -1232,6 +1259,14 @@ namespace
                                     first hand-run of this verb did, and it
                                     looks exactly like a stopped clock. */
                                 state.tick = outcome.tick;
+
+                                /*  The audio side's own model, as the tick
+                                    thread left it. Both are read here, on that
+                                    thread, and go into the same snapshot. */
+                                state.audioDevice = audioState.device;
+                                state.audioOutputs = audioState.outputs;
+                                state.audioStatus = audioState.status;
+
                                 state.lateness = ticks.lateness();
                                 state.latenessMax = ticks.latenessMax();
                                 state.errorCount = engine.errorCount();

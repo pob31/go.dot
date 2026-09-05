@@ -30,6 +30,7 @@
 #include <wfg/engine/Engine.h>
 #include <juce_audio_formats/juce_audio_formats.h>
 
+#include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/audio/AudioHost.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -1331,4 +1332,110 @@ TEST_CASE ("hosted driver: stopping twice, and stopping without starting, are qu
     driver.stop();
 
     CHECK (! driver.isRunning());
+}
+
+//==============================================================================
+/*  audio.editBuilt - the audio side reporting itself as a command.
+
+    The replay fixture proves the RECORDS reproduce. These prove the STATE does:
+    that what a client reads at /godot/audio after the event is what the event
+    said, on a machine with no audio in it at all.
+*/
+TEST_CASE ("audio commands: the report becomes the state a client reads")
+{
+    Engine engine;
+    audio::AudioState state;
+    audio::registerAudioCommands (engine.commands(), state);
+
+    CHECK (state.status == "stopped");
+    CHECK (state.device.empty());
+    CHECK (state.outputs == 0);
+
+    REQUIRE (engine.submit ("engine", "audio.editBuilt",
+                            { osc::Value::string ("hosted"), osc::Value::int32 (8),
+                              osc::Value::int32 (4), osc::Value::int32 (64) }));
+    engine.processTick (0);
+
+    CHECK (state.device == "hosted");
+    CHECK (state.tracks == 8);
+    CHECK (state.outputs == 4);
+    CHECK (state.nodes == 64);
+    CHECK (state.status == "running");
+}
+
+TEST_CASE ("audio commands: reporting the same graph twice leaves the same state")
+{
+    /*  The graph is fixed at show load (PRD §3.25), so in a real session this
+        happens once. It has to be idempotent anyway: a log replayed twice, or
+        replayed after a session that already ran, must converge - otherwise
+        "reproduces the session" would depend on what the engine had been doing
+        beforehand. */
+    Engine engine;
+    audio::AudioState state;
+    audio::registerAudioCommands (engine.commands(), state);
+
+    const std::vector<osc::Value> report { osc::Value::string ("hosted"), osc::Value::int32 (8),
+                                           osc::Value::int32 (4), osc::Value::int32 (64) };
+
+    REQUIRE (engine.submit ("engine", "audio.editBuilt", report));
+    engine.processTick (0);
+
+    const auto once = state;
+
+    REQUIRE (engine.submit ("engine", "audio.editBuilt", report));
+    engine.processTick (1);
+
+    CHECK (state.device == once.device);
+    CHECK (state.tracks == once.tracks);
+    CHECK (state.outputs == once.outputs);
+    CHECK (state.nodes == once.nodes);
+    CHECK (state.status == once.status);
+}
+
+TEST_CASE ("audio commands: a show with no audio is a real show, and reports zero")
+{
+    /*  Show/Audio/@tracks is required and has no default precisely so that a
+        show can say zero and mean it. A range check written in a hurry refuses
+        exactly this case. */
+    Engine engine;
+    audio::AudioState state;
+    audio::registerAudioCommands (engine.commands(), state);
+
+    REQUIRE (engine.submit ("engine", "audio.editBuilt",
+                            { osc::Value::string (""), osc::Value::int32 (0),
+                              osc::Value::int32 (0), osc::Value::int32 (0) }));
+
+    const auto outcome = engine.processTick (0);
+
+    CHECK (outcome.applied == 1);
+    CHECK (state.tracks == 0);
+    CHECK (state.outputs == 0);
+    CHECK (state.status == "running");
+}
+
+TEST_CASE ("audio commands: a mangled count is refused rather than clamped")
+{
+    /*  A graph with minus four nodes is a message that got damaged on the way
+        in. Storing 0 would put a number nobody measured in front of every
+        client reading the tree, and it would look exactly like a graph that
+        had been measured and found empty. */
+    Engine engine;
+    audio::AudioState state;
+    audio::registerAudioCommands (engine.commands(), state);
+
+    REQUIRE (engine.submit ("engine", "audio.editBuilt",
+                            { osc::Value::string ("hosted"), osc::Value::int32 (8),
+                              osc::Value::int32 (4), osc::Value::int32 (-4) }));
+
+    const auto outcome = engine.processTick (0);
+
+    CHECK (outcome.applied == 0);
+    CHECK (outcome.rejected == 1);
+
+    /*  And nothing was written. A handler that refused after storing three of
+        its four arguments would leave the tree describing a graph that never
+        existed. */
+    CHECK (state.device.empty());
+    CHECK (state.tracks == 0);
+    CHECK (state.status == "stopped");
 }
