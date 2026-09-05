@@ -95,6 +95,16 @@ namespace wfg::tree
         std::uint64_t errorCount = 0;
         std::string lastError;
 
+        /*  The lipogram, as a number a client can read (PRD §4.2). Violations
+            is Go.dot's own code allocating on the audio thread and must be
+            zero; the foreign count is Tracktion's, published beside it rather
+            than folded in, because our rule cannot honestly cover code we did
+            not write. Both read zero in a build with the checks compiled out -
+            which is why `wfg_tests` asks whether anybody was looking before it
+            believes a zero. */
+        std::uint64_t rtViolations = 0;
+        std::uint64_t rtForeignAllocations = 0;
+
         //======================================================================
         // Which bundle is open. Runtime, not document: PRD §4.10.
         std::string documentPath;

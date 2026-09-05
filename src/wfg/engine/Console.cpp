@@ -26,6 +26,7 @@
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <wfg/engine/audio/AudioCommands.h>
+#include <wfg/engine/rt/RtCheck.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
@@ -1270,6 +1271,12 @@ namespace
                                 state.lateness = ticks.lateness();
                                 state.latenessMax = ticks.latenessMax();
                                 state.errorCount = engine.errorCount();
+
+                                /*  Published every tick, from the tick thread,
+                                    like the lateness beside it. The audio
+                                    thread only ever increments them. */
+                                state.rtViolations = wfg::rt::violations();
+                                state.rtForeignAllocations = wfg::rt::foreignAllocations();
 
                                 /*  ANYTHING APPLIED MEANS THE DOCUMENT MAY HAVE
                                     MOVED, so the projection is rebuilt.

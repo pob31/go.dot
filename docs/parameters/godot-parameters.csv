@@ -9,6 +9,8 @@ engine,lateness,i,r,0,,samples,state,5,no,park,none,"How late the last tick was 
 engine,latenessMax,i,r,0,,samples,state,5,no,park,none,The worst lateness since the engine started.
 engine,clock,s,r,dummy,dummy|device,,state,1,no,park,none,Which clock is advancing the sample counter.
 engine,errorCount,i,r,0,,,state,5,no,park,none,Commands rejected since the engine started.
+engine,rtViolations,i,r,0,0..,,state,5,no,park,none,"Allocations Go.dot's own code made on the audio thread since the engine started. Zero is the only acceptable value: PRD 4.2 forbids allocation there, and an allocation is a lock inside the allocator taken while a block is due. Reads zero in a build configured without the real-time checks, where nobody is looking."
+engine,rtForeignAllocations,i,r,0,0..,,state,5,no,park,none,"Allocations Tracktion made inside the audio callback since the engine started, counted separately and never hidden. Tracktion takes a shared lock every block by design; this is a measured fact about a dependency, not a defect in it."
 engine,lastError,s,r,,,,state,5,no,park,none,"The most recent rejection: tick, sequence, origin, reason and command. The only way an OSC client can learn that its write was refused."
 document,path,s,r,,,,state,1,no,park,none,The open bundle's folder.
 document,name,s,r,,,,state,1,no,park,none,The open bundle's name.

@@ -15,6 +15,8 @@
 
 #include <wfg/engine/audio/AudioHost.h>
 
+#include <wfg/engine/rt/RtCheck.h>
+
 #include <wfg/engine/audio/CueOutputPlugin.h>
 #include <wfg/engine/clock/AudioClockSource.h>
 
@@ -421,6 +423,15 @@ namespace wfg::audio
             if (! running)
                 return;
 
+            /*  THE LIPOGRAM, IN TWO PARTS (PRD §4.2). Everything Go.dot does in
+                this function is inside `ours` and must allocate nothing; the
+                Tracktion call is inside `foreign`, whose allocations are
+                counted and published rather than judged. TE's device callback
+                takes a shared lock every block by design, and pretending our
+                rule covers code we did not write would make the number
+                meaningless in the one direction that matters. */
+            const rt::ScopedRealtimeCheck goDotsOwnBlock { rt::Region::ours };
+
             /*  Denormals off for the block and only for the block - see the
                 note in start(). The audio wants the flag; whatever formats a
                 number after this returns must not inherit it. */
@@ -429,7 +440,11 @@ namespace wfg::audio
             scratch.clear();
             midi.clear();
 
-            engine->getDeviceManager().getHostedAudioDeviceInterface().processBlock (scratch, midi);
+            {
+                const rt::ScopedRealtimeCheck tracktionsBlock { rt::Region::foreign };
+
+                engine->getDeviceManager().getHostedAudioDeviceInterface().processBlock (scratch, midi);
+            }
 
             if (sink != nullptr)
                 sink->blockProduced (scratch.getArrayOfReadPointers(),

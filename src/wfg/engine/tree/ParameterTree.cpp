@@ -509,6 +509,9 @@ namespace wfg::tree
             else if (name == "latenessMax")    text = std::to_string (state.latenessMax);
             else if (name == "clock")          text = state.clock;
             else if (name == "errorCount")     text = std::to_string (state.errorCount);
+            else if (name == "rtViolations")   text = std::to_string (state.rtViolations);
+            else if (name == "rtForeignAllocations")
+                                               text = std::to_string (state.rtForeignAllocations);
             else if (name == "lastError")      text = state.lastError;
             else                               text = std::string (row->defaultText);
 

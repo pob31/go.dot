@@ -15,6 +15,8 @@
 
 #include <wfg/engine/audio/CueOutputPlugin.h>
 
+#include <wfg/engine/rt/RtCheck.h>
+
 #include <algorithm>
 
 namespace wfg::audio
@@ -124,6 +126,12 @@ namespace wfg::audio
     //==============================================================================
     void CueOutputPlugin::applyToBuffer (const te::PluginRenderContext& context)
     {
+        /*  Go.dot's code, running inside Tracktion's block (PRD §4.2). Without
+            this scope every allocation made here would be charged to `foreign`
+            and quietly excused as somebody else's - which is exactly the shape
+            of mistake a lipogram is meant to catch. */
+        const rt::ScopedRealtimeCheck goDotsOwnPlugin { rt::Region::ours };
+
         if (context.destBuffer == nullptr || context.bufferNumSamples <= 0)
             return;
 

@@ -87,6 +87,10 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/CueOutputPlugin.cpp
     wfg/engine/audio/HostedAudioDriver.h
     wfg/engine/audio/HostedAudioDriver.cpp
+    wfg/engine/rt/RtCheck.h
+    wfg/engine/rt/RtCheck.cpp
+    wfg/engine/rt/RtCounters.h
+    wfg/engine/rt/RtAllocatorHook.cpp
     wfg/engine/clock/AudioClockSource.h
     wfg/engine/clock/DummyAudioClock.cpp
     wfg/engine/clock/DummyAudioClock.h

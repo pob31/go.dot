@@ -31,6 +31,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <wfg/engine/audio/AudioCommands.h>
+#include <wfg/engine/rt/RtCheck.h>
 #include <wfg/engine/audio/AudioHost.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -1438,4 +1439,210 @@ TEST_CASE ("audio commands: a mangled count is refused rather than clamped")
     CHECK (state.device.empty());
     CHECK (state.tracks == 0);
     CHECK (state.status == "stopped");
+}
+
+//==============================================================================
+/*  PRD §4.2 made checkable: "the audio thread is a lipogram - no allocation, no
+    locks, no exceptions, no syscalls, no logging."
+
+    These are the enforcement, and every PR from here adds its scenario to them.
+*/
+
+TEST_CASE ("rt: the counter can count, which is the first thing to establish")
+{
+    /*  A test that only ever asserted zero would pass beautifully against an
+        instrument that was not plugged in. So before anything is proved silent,
+        the instrument is made to make a noise. */
+    REQUIRE (rt::isCounting());
+
+    rt::resetCounts();
+    CHECK (rt::violations() == 0);
+
+    {
+        const rt::ScopedRealtimeCheck inside { rt::Region::ours };
+
+        /*  volatile so the optimiser cannot decide this allocation is
+            unobservable and remove it, which in a release build it otherwise
+            would - taking the test's whole subject with it. */
+        volatile auto* leaked = new int (7);
+        delete leaked;
+    }
+
+    CHECK (rt::violations() >= 1);
+
+    /*  And outside a scope nothing is counted, or every allocation the process
+        made while loading a show would land on the audio thread's tally. */
+    const auto after = rt::violations();
+
+    {
+        volatile auto* elsewhere = new int (9);
+        delete elsewhere;
+    }
+
+    CHECK (rt::violations() == after);
+}
+
+TEST_CASE ("rt: a dependency's allocations are counted apart from ours, and the inner region wins")
+{
+    /*  Tracktion's block runs INSIDE Go.dot's callback. Without restoring the
+        previous region on the way out, either every allocation TE makes would
+        be charged to us, or the epilogue after TE returns would be charged to
+        TE - and the epilogue is Go.dot's code and the part that must be zero. */
+    REQUIRE (rt::isCounting());
+    rt::resetCounts();
+
+    {
+        const rt::ScopedRealtimeCheck outer { rt::Region::ours };
+
+        {
+            const rt::ScopedRealtimeCheck inner { rt::Region::foreign };
+
+            volatile auto* theirs = new int (1);
+            delete theirs;
+        }
+
+        /*  Back in our region, because the inner scope restored it rather than
+            clearing it. This allocation is ours. */
+        volatile auto* ours = new int (2);
+        delete ours;
+    }
+
+    CHECK (rt::violations() >= 1);
+    CHECK (rt::foreignAllocations() >= 1);
+    CHECK (rt::foreignRegions() == 1);
+}
+
+TEST_CASE ("rt: Go.dot allocates nothing on the audio thread, and Tracktion's cost is reported")
+{
+    /*  THE ONE THAT MATTERS. A whole graph, running, with the counter armed.
+
+        What is ASSERTED is that Go.dot's own regions - the callback's prologue
+        and epilogue, and CueOutputPlugin::applyToBuffer inside Tracktion's own
+        block - allocate nothing at all.
+
+        What is REPORTED is Tracktion's. It is not asserted, and hiding it would
+        be worse than either: Tracktion's device callback takes a shared lock
+        every block by design and its node player uses semaphores, which is a
+        fact about a dependency Go.dot chose rather than a defect in it. The
+        number is published at /godot/engine/rtForeignAllocations for the same
+        reason. Whether PRD §4.2 should say so is the author's amendment.
+    */
+    REQUIRE (rt::isCounting());
+
+    /*  Three track counts, because the question the number has to answer is not
+        "how many" but "how many MORE at sixty-four tracks". A per-block cost
+        that grows with the show is a different conversation from a fixed one. */
+    juce::String report;
+
+    for (const int tracks : { 1, 4, 16 })
+    {
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = 48000;
+        settings.blockSize = 128;
+        settings.outputChannels = 8;
+
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = tracks;
+        REQUIRE (rig.host.buildEdit (spec));
+
+        /*  Warmed up before the counter is reset. The first blocks through a
+            new graph allocate for reasons that are not steady state - buffers
+            being sized, nodes being prepared - and a baseline taken across them
+            would describe a rig that had just started rather than one running. */
+        for (int i = 0; i < 200; ++i)
+            rig.host.processBlock();
+
+        rt::resetCounts();
+
+        constexpr int blocks = 500;
+
+        for (int i = 0; i < blocks; ++i)
+            rig.host.processBlock();
+
+        const auto ours = rt::violations();
+        const auto theirs = rt::foreignAllocations();
+        const auto regions = rt::foreignRegions();
+
+        report << juce::String (tracks).paddedLeft (' ', 3) << " tracks: "
+               << juce::String (regions > 0 ? static_cast<double> (theirs)
+                                                / static_cast<double> (regions) : 0.0, 2)
+               << " Tracktion allocations per block (" << (int) theirs << " over "
+               << (int) regions << ")" << juce::newLine;
+
+        INFO ("at " << tracks << " tracks, Go.dot's own regions allocated "
+               << ours << " times in " << blocks << " blocks");
+
+        /*  ZERO. Not small, not typical - none. */
+        CHECK (ours == 0);
+
+        /*  The measurement covered the blocks it claims to have covered. */
+        CHECK (regions == blocks);
+    }
+
+    MESSAGE ("Tracktion steady state, 8 outputs at 48 kHz / 128:" << juce::newLine << report);
+}
+
+TEST_CASE ("rt: a cue playing through the matrix still allocates nothing of ours")
+{
+    /*  The idle graph is the easy case. This one has a clip playing, the output
+        plugin doing its copy and its matrix, and coefficients being changed
+        underneath it - which is what a fade will do at 50 Hz from Phase 3, and
+        exactly where an allocation would hide. */
+    REQUIRE (rt::isCounting());
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 8;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSteadyTone (rig.storage.folder, 1, settings.sampleRate);
+    REQUIRE (tone.existsAsFile());
+    REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+
+    auto* matrix = rig.host.trackMatrix (0);
+    REQUIRE (matrix != nullptr);
+    matrix->setGain (0, 3, 1.0f);
+    matrix->snapToTargets();
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+    REQUIRE (rig.host.launchTrack (0));
+
+    for (int i = 0; i < 100; ++i)
+        rig.host.processBlock();
+
+    REQUIRE (rig.host.trackInputPeak (0) > 0.0f);
+
+    rt::resetCounts();
+
+    for (int i = 0; i < 300; ++i)
+    {
+        /*  Written from this thread while the block runs, which is what the
+            tick thread will be doing during a fade. Every setter is one relaxed
+            atomic store and must stay that way. */
+        matrix->setLevelDb (-6.0f + static_cast<float> (i % 12));
+        matrix->setGain (0, 3, 0.5f + 0.01f * static_cast<float> (i % 20));
+
+        rig.host.processBlock();
+    }
+
+    INFO ("Go.dot's own regions allocated " << rt::violations()
+           << " times while a cue was playing and its matrix was moving");
+
+    CHECK (rt::violations() == 0);
 }
