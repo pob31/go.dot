@@ -80,6 +80,18 @@ namespace wfg
 
         static Check checkArgs (const Command& command, const std::vector<osc::Value>& args);
 
+        /*  One value against one declared OSC type tag, coerced where the
+            rejection rules allow it and nullopt where they do not: the numeric
+            family converts within itself, a boolean accepts an int 0 or 1
+            because a great many senders cannot emit T or F, and `*` takes
+            whatever it was given.
+
+            Public because a mounted node has a declared type too, and a second
+            copy of these rules living in the mount reader is a second copy that
+            would eventually disagree with the log's idea of what a
+            type-mismatch is. */
+        static std::optional<osc::Value> coerceToTag (char declaredTag, const osc::Value& value);
+
     private:
         std::vector<Command> commands;
         std::map<std::string, std::size_t, std::less<>> byName;

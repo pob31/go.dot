@@ -103,5 +103,12 @@ namespace wfg
         inline constexpr const char* notInList       = "not-in-list";
         inline constexpr const char* retiredId       = "retired-id";
         inline constexpr const char* malformedPacket = "malformed-packet";
+
+        /*  A mount's namespace file could not be read, or is not a usable
+            OSCQuery description. Distinct from bad-address on purpose: the
+            mount exists and was named correctly, and what failed is the file it
+            points at - which is somebody else's, and is the thing to go and
+            look at. */
+        inline constexpr const char* badNamespace   = "bad-namespace";
     }
 }

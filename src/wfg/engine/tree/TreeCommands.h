@@ -40,10 +40,55 @@
 */
 
 #include <wfg/engine/command/CommandRegistry.h>
+#include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/Touches.h>
+
+#include <juce_core/juce_core.h>
+
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace wfg::tree
 {
     /** Adds node.touch and node.release, both bound to `touches`. */
     void registerTreeCommands (CommandRegistry& registry, TouchTable& touches);
+
+    //==============================================================================
+    /*  Mounts, read out of the document and loaded off disk.
+
+        The declaration lives in the show - `/godot/mount/<id>` says where a
+        target is mounted and which file describes it - and the description
+        lives in the bundle's `namespaces/`. These four put the two together;
+        MountTable itself never touches a filesystem, which is what keeps every
+        rule in Mount.h testable against a string literal.
+    */
+
+    /** Every mount the document declares, in document order. */
+    std::vector<std::string> declaredMountIds (const doc::ShowDocument& document);
+
+    /** One mount's declaration, or nullopt when the document has no such mount. */
+    std::optional<MountDeclaration> mountDeclarationFor (const doc::ShowDocument& document,
+                                                         const std::string& mountId);
+
+    /** Reads that mount's namespace file out of the bundle and loads it. */
+    MountResult loadMountFromBundle (const doc::ShowDocument& document, MountTable& mounts,
+                                     const juce::File& bundleFolder, const std::string& mountId);
+
+    /*  All of them, in document order. Returns every problem, each already
+        saying which mount it came from. A mount that fails does not stop the
+        others: one unreadable description should cost that one target, not the
+        show. */
+    std::vector<std::string> loadAllMountsFromBundle (const doc::ShowDocument& document,
+                                                      MountTable& mounts,
+                                                      const juce::File& bundleFolder);
+
+    /*  Adds `mount.load`, which re-reads one mount's description.
+
+        `bundleFolder` is held BY REFERENCE and read at call time, because which
+        bundle is open changes while the engine runs and the command has to
+        follow it. The caller owns that File and updates it on load. */
+    void registerMountCommands (CommandRegistry& registry, const doc::ShowDocument& document,
+                                MountTable& mounts, const juce::File& bundleFolder);
 }

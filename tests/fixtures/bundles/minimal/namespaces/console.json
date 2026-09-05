@@ -1,0 +1,45 @@
+{
+  "FULL_PATH": "/",
+  "ACCESS": 0,
+  "DESCRIPTION": "A lighting console. Written by hand, not captured from anything.",
+  "CONTENTS": {
+    "blackout": {
+      "FULL_PATH": "/blackout",
+      "TYPE": "T",
+      "ACCESS": 3,
+      "VALUE": [false],
+      "DESCRIPTION": "Kill every output now. One-shot: asking what it is set to means nothing.",
+      "GODOT": {"KIND": "event"}
+    },
+    "cueNumber": {
+      "FULL_PATH": "/cueNumber",
+      "TYPE": "s",
+      "ACCESS": 1,
+      "VALUE": ["12.5"],
+      "DESCRIPTION": "The cue the console is standing by on."
+    },
+    "go": {
+      "FULL_PATH": "/go",
+      "ACCESS": 2,
+      "DESCRIPTION": "Fire the console's standby cue."
+    },
+    "masterLevel": {
+      "FULL_PATH": "/masterLevel",
+      "TYPE": "f",
+      "ACCESS": 3,
+      "VALUE": [0.0],
+      "RANGE": [{"MIN": -60.0, "MAX": 0.0}],
+      "UNIT": ["dB"],
+      "DESCRIPTION": "Grand master, in decibels.",
+      "GODOT": {"RATE_CAP": 25, "ANTICIPATABLE": true, "PANIC": "snap"}
+    },
+    "mode": {
+      "FULL_PATH": "/mode",
+      "TYPE": "s",
+      "ACCESS": 3,
+      "VALUE": ["run"],
+      "RANGE": [{"VALS": ["blind", "run", "program"]}],
+      "DESCRIPTION": "Which mode the console is in."
+    }
+  }
+}

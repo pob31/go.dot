@@ -10,5 +10,6 @@
   </Lists>
   <Mounts>
     <Mount id="G1JS4VWE" namespace="namespaces/wfs-diy.json" prefix="/wfs"/>
+    <Mount id="H2KP7RTV" namespace="namespaces/console.json" prefix="/ext/console"/>
   </Mounts>
 </Show>

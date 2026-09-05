@@ -44,6 +44,10 @@
 #             only way any of it changes; then the bundle it lives in - what
 #             someone decided, what the engine was doing, and the RELAX NG
 #             grammar that lets somebody else's validator have an opinion
+#   json/     JSON, read. Ours rather than JUCE's, and measured: JUCE's parser
+#             overflows an int64 on a long integer literal and returns a
+#             different number (see JsonValue.h). Mounts read other people's
+#             range bounds through this
 #   command/  named commands, their signatures, and the single ordered queue
 #             every mutation arrives on
 #   log/      the tick-indexed flight recorder (PRD §3.15) and deterministic
@@ -99,12 +103,16 @@ add_library(wfg_engine STATIC
     wfg/engine/command/Event.h
     wfg/engine/command/EventQueue.cpp
     wfg/engine/command/EventQueue.h
+    wfg/engine/json/JsonValue.cpp
+    wfg/engine/json/JsonValue.h
     wfg/engine/log/EventLog.cpp
     wfg/engine/log/EventLog.h
     wfg/engine/log/Replay.cpp
     wfg/engine/log/Replay.h
     wfg/engine/osc/OscValue.cpp
     wfg/engine/osc/OscValue.h
+    wfg/engine/tree/Mount.cpp
+    wfg/engine/tree/Mount.h
     wfg/engine/tree/Node.h
     wfg/engine/tree/OscQueryJson.cpp
     wfg/engine/tree/OscQueryJson.h

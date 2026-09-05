@@ -19,7 +19,11 @@
 #include <wfg/engine/document/EphemeralState.h>
 #include <wfg/engine/document/Schema.h>
 
+#include <juce_cryptography/juce_cryptography.h>
+
+#include <algorithm>
 #include <string>
+#include <vector>
 
 namespace wfg::doc
 {
@@ -188,6 +192,71 @@ namespace wfg::doc
 
         result.ok = true;
         return result;
+    }
+
+    //==============================================================================
+    std::string Bundle::contentHash (const juce::File& folder)
+    {
+        if (! folder.isDirectory())
+            return {};
+
+        /*  Sorted, so two machines listing the same folder hash it the same
+            way. A directory listing is in whatever order the filesystem feels
+            like, and a hash that depended on that would differ between the
+            machine that recorded a log and the machine replaying it. */
+        std::vector<juce::File> files;
+
+        for (const auto& name : { showFileName, stateFileName })
+            if (const auto file = folder.getChildFile (name); file.existsAsFile())
+                files.push_back (file);
+
+        if (const auto namespaces = namespacesFolder (folder); namespaces.isDirectory())
+        {
+            juce::Array<juce::File> found;
+            namespaces.findChildFiles (found, juce::File::findFiles, false);
+
+            for (const auto& file : found)
+                files.push_back (file);
+        }
+
+        std::sort (files.begin(), files.end(),
+                   [&folder] (const juce::File& a, const juce::File& b)
+                   {
+                       return a.getRelativePathFrom (folder).toStdString()
+                                < b.getRelativePathFrom (folder).toStdString();
+                   });
+
+        juce::MemoryOutputStream combined;
+
+        for (const auto& file : files)
+        {
+            juce::MemoryBlock bytes;
+
+            if (! file.loadFileAsData (bytes))
+                return {};
+
+            /*  Path, length, bytes. The path is in so a rename changes the
+                hash; the length is in so no two files can be concatenated into
+                something that hashes like a different pair. Forward slashes on
+                every platform, or the same bundle would hash differently on
+                Windows. */
+            auto relative = file.getRelativePathFrom (folder);
+            relative = relative.replaceCharacter ('\\', '/');
+
+            combined.writeString (relative);
+            combined.writeInt64 (static_cast<juce::int64> (bytes.getSize()));
+            combined.write (bytes.getData(), bytes.getSize());
+        }
+
+        return juce::SHA256 (combined.getData(), combined.getDataSize()).toHexString().toStdString();
+    }
+
+    std::vector<std::string> Bundle::logHeaderLines (const juce::File& folder)
+    {
+        const auto hash = contentHash (folder);
+
+        return { "bundle " + folder.getFileName().toStdString()
+                   + " sha256:" + (hash.empty() ? std::string ("unreadable") : hash) };
     }
 
     //==============================================================================

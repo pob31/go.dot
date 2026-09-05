@@ -99,6 +99,20 @@ documents come first, and they are the thing to read before the code:
   echoing it back. Holding and releasing are commands like everything else, because a replay
   that did not re-apply them would send a different set of messages from the session it
   claims to reproduce.
+- **Mounts**: somebody else's namespace, read from an OSCQuery description in the bundle and
+  published at its own prefix. PRD §3.22 makes the template format *be* an OSCQuery
+  description, so a capture from a running processor and a file written by hand are the same
+  kind of thing to the engine — the fixtures are one of each, and they go through one reader.
+  Phase 1 reads a mount, publishes it, accepts writes to it, logs them and sends nothing;
+  what keeps that stub honest is that a captured value is dropped rather than believed, a
+  read-only node still refuses a write, and every mounted node carries the four declarations
+  PRD §3.3 requires.
+- **A JSON reader of our own**, because JUCE's accumulates a plain integer literal into an
+  `int64` and only switches to the correctly-rounded path when it meets a `.` or an `e`. A
+  longer literal overflows in silence: measured, 142 of 19 993 random doubles came back as a
+  different number. A namespace file's numbers are somebody else's range bounds, and a bound
+  that changes on the way in is one Go.dot would enforce against a target that never declared
+  it.
 - `wfg`, a console binary: `--version` prints the JUCE and TE versions it actually linked,
   `selftest` stands the JUCE message thread up headless, `commands` lists the registered
   command set, `canon` rewrites a show document in canonical form, `validate` checks a bundle
@@ -114,12 +128,12 @@ documents come first, and they are the thing to read before the code:
   They are throwaway by construction: they may link `wfg::thirdparty` and never
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
-**What does not exist yet.** There are no mounted namespaces (a bundle can declare one, and
-nothing reads it yet); no cue list traversal or standby movement — the standby is stored,
-restored and published, but only a command that does not exist yet can move it; no OSC codec
-on the wire, no OSCQuery server, and therefore no `serve`: the tree can be printed but not
-subscribed to, and what exists is exercised by tests and by the console verbs rather than by
-a client. Phase 1 adds those in
+**What does not exist yet.** Nothing is *sent* to a mounted target: writes land in the tree
+and the log and stop there, because there is no transport until Phase 2. There is no cue list
+traversal or standby movement — the standby is stored, restored and published, but only a
+command that does not exist yet can move it; no OSC codec on the wire, no OSCQuery server,
+and therefore no `serve`: the tree can be printed but not subscribed to, and what exists is
+exercised by tests and by the console verbs rather than by a client. Phase 1 adds those in
 that order, and two further submodules arrive with them — `ThirdParty/juce_simpleweb` for
 the HTTP+WebSocket transport and `ThirdParty/spatcore`, consumed at source level for its
 real-time helpers. No audio, no UI, no plugin hosting, no video: audio is Phase 2, which is

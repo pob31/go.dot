@@ -16,6 +16,9 @@
 
 #include <wfg/engine/tree/TreeCommands.h>
 
+#include <wfg/engine/document/Bundle.h>
+#include <wfg/engine/osc/OscValue.h>
+
 #include <string>
 
 namespace wfg::tree
@@ -37,6 +40,133 @@ namespace wfg::tree
         }
     }
 
+    //==============================================================================
+    std::vector<std::string> declaredMountIds (const doc::ShowDocument& document)
+    {
+        std::vector<std::string> ids;
+
+        const juce::Identifier idProperty { "id" };
+
+        for (const auto& container : document.root())
+        {
+            if (container.getType().toString() != "Mounts")
+                continue;
+
+            for (const auto& mount : container)
+                if (mount.hasProperty (idProperty))
+                    ids.push_back (mount[idProperty].toString().toStdString());
+        }
+
+        return ids;
+    }
+
+    std::optional<MountDeclaration> mountDeclarationFor (const doc::ShowDocument& document,
+                                                         const std::string& mountId)
+    {
+        const auto base = "/godot/mount/" + mountId + "/";
+        const auto prefix = document.getAttribute (base + "prefix");
+
+        if (! prefix.has_value())
+            return std::nullopt;
+
+        MountDeclaration declaration;
+        declaration.id = mountId;
+        declaration.prefix = *prefix;
+        declaration.namespaceFile = document.getAttribute (base + "namespace").value_or (std::string {});
+        declaration.panic = document.getAttribute (base + "panic").value_or (std::string ("park"));
+
+        if (const auto rateCap = document.getAttribute (base + "rateCap"))
+            if (const auto parsed = osc::parseDouble (*rateCap))
+                declaration.rateCap = *parsed;
+
+        declaration.anticipatable =
+            document.getAttribute (base + "anticipatable").value_or (std::string ("false")) == "true";
+
+        return declaration;
+    }
+
+    //==============================================================================
+    MountResult loadMountFromBundle (const doc::ShowDocument& document, MountTable& mounts,
+                                     const juce::File& bundleFolder, const std::string& mountId)
+    {
+        const auto declaration = mountDeclarationFor (document, mountId);
+
+        if (! declaration.has_value())
+            return MountResult::failed ("no mount " + mountId + " in this show");
+
+        if (declaration->namespaceFile.empty())
+            return MountResult::failed (mountId + " declares no namespace file");
+
+        /*  Bundle-relative, and it has to STAY inside the bundle. A namespace
+            path of "../../etc/passwd" is not a threat model Phase 1 has, but a
+            show that reads a file from outside its own folder is not a show
+            anybody can hand to somebody else and expect to work. */
+        const auto file = bundleFolder.getChildFile (juce::String (declaration->namespaceFile));
+
+        if (! file.isAChildOf (bundleFolder))
+            return MountResult::failed (mountId + ": \"" + declaration->namespaceFile
+                                        + "\" points outside the bundle");
+
+        if (! file.existsAsFile())
+            return MountResult::failed (mountId + ": no " + declaration->namespaceFile
+                                        + " in this bundle");
+
+        juce::MemoryBlock bytes;
+
+        if (! file.loadFileAsData (bytes))
+            return MountResult::failed (mountId + ": cannot read " + declaration->namespaceFile);
+
+        return mounts.load (*declaration,
+                            std::string_view (static_cast<const char*> (bytes.getData()),
+                                              bytes.getSize()));
+    }
+
+    std::vector<std::string> loadAllMountsFromBundle (const doc::ShowDocument& document,
+                                                      MountTable& mounts,
+                                                      const juce::File& bundleFolder)
+    {
+        std::vector<std::string> problems;
+
+        for (const auto& id : declaredMountIds (document))
+        {
+            const auto result = loadMountFromBundle (document, mounts, bundleFolder, id);
+
+            for (const auto& problem : result.problems)
+                problems.push_back (problem);
+        }
+
+        return problems;
+    }
+
+    //==============================================================================
+    void registerMountCommands (CommandRegistry& registry, const doc::ShowDocument& document,
+                                MountTable& mounts, const juce::File& bundleFolder)
+    {
+        registry.add ({ "mount.load",
+                        "Re-reads a mount's OSCQuery description from the bundle.",
+                        { { "id", 's', false } },
+                        true,
+                        [&document, &mounts, &bundleFolder]
+                        (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto& id = args[0].getString();
+                            const auto result = loadMountFromBundle (document, mounts,
+                                                                     bundleFolder, id);
+
+                            if (result.ok)
+                                return Outcome::ok (args);
+
+                            /*  bad-namespace rather than unknown-id, because the
+                                mount was named correctly and what failed is the
+                                file it points at - which is somebody else's, and
+                                is the thing to go and look at. */
+                            return Outcome::rejected (mountDeclarationFor (document, id).has_value()
+                                                        ? reason::badNamespace
+                                                        : reason::unknownId);
+                        } });
+    }
+
+    //==============================================================================
     void registerTreeCommands (CommandRegistry& registry, TouchTable& touches)
     {
         //----------------------------------------------------------------------

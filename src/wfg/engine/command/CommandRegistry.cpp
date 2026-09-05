@@ -44,7 +44,7 @@ namespace wfg
         /*  Coerce a value to the declared tag, or return nullopt when the two
             are not compatible. The numeric family (i h f d) converts within
             itself and nowhere else; a bool parameter accepts T, F and an int.  */
-        std::optional<osc::Value> coerce (char declared, const osc::Value& v)
+        std::optional<osc::Value> coerceImpl (char declared, const osc::Value& v)
         {
             switch (declared)
             {
@@ -105,6 +105,11 @@ namespace wfg
         }
     }
 
+    std::optional<osc::Value> CommandRegistry::coerceToTag (char declaredTag, const osc::Value& value)
+    {
+        return coerceImpl (declaredTag, value);
+    }
+
     CommandRegistry::Check CommandRegistry::checkArgs (const Command& command,
                                                        const std::vector<osc::Value>& args)
     {
@@ -133,7 +138,7 @@ namespace wfg
                 return result;
             }
 
-            auto coerced = coerce (command.params[i].typeTag, args[i]);
+            auto coerced = coerceImpl (command.params[i].typeTag, args[i]);
 
             if (! coerced)
             {

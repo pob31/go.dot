@@ -188,6 +188,27 @@ nothing in a parallel parent, because nothing is waiting to be told.
 
 The mounted namespace itself appears at the prefix (`/wfs/…`), not under `/godot/mount`.
 
+**Settled while building PR 1.6:**
+
+- **The prefix is where the description's ROOT lands, and a description may be of a
+  subtree.** WFS-DIY publishes everything under a `/wfs` container of its own, so a capture
+  of `GET /` mounted at `/wfs` would give `/wfs/wfs/input/1/positionX`. Capturing `GET /wfs`
+  gives a description whose root is `/wfs`, and mounting that at `/wfs` gives the addresses
+  anybody expects. The reader takes either; the mounted address is always the prefix plus the
+  nesting, and the root's own `FULL_PATH` is used only to check the file against its own
+  shape.
+- **A prefix of `/` is refused**, along with a relative one, a trailing slash and an empty
+  segment. Mounting at the root would put somebody else's namespace on top of `/godot`.
+- **`RANGE` entry zero is the one that is kept** for a multi-argument node. `RANGE` carries
+  one entry per argument, so entry zero really is the first argument's — for WFS-DIY's
+  `EQgain`, typed `if`, that is the band index and not the gain. Correct rather than a
+  simplification, though arguments two onwards lose their bounds.
+- **A reload forgets whatever was written to that mount.** The namespace may have changed
+  shape underneath, and carrying a value across would assert something nobody checked.
+- **`bad-namespace`** joins the reason codes: the mount was named correctly and what failed
+  is the file it points at, which is somebody else's and is the thing to go and look at.
+  Distinct from `unknown-id` and from `bad-address` for that reason.
+
 ### 2.6 `/godot/cmd` — commands as write-only method nodes
 
 `TYPE` is the parameter signature; `DESCRIPTION` is the command's. Sending an OSC message
@@ -221,8 +242,9 @@ into `node.set`, since a property edit is a node write and one path is better th
 
 **Rejection rules** (fixed, because the log records outcomes): unknown command, unknown
 id, bad address, read-only node, type mismatch other than `i`↔`f`, `standby.set` outside
-the focused list, a retired id offered to `create` → the event is rejected, logged as `R`
-with a reason code, and surfaced at `/godot/engine/lastError`.
+the focused list, a retired id offered to `create`, a mount whose namespace file will not
+read (`bad-namespace`) → the event is rejected, logged as `R` with a reason code, and
+surfaced at `/godot/engine/lastError`.
 
 **Three things PR 1.5 settled while building this** (built and tested; say so here if any
 should be otherwise):

@@ -103,16 +103,65 @@ spatcore is known today, so §2 above now says to compile a header rather than t
 its APIs. And it means anyone porting `OSCParser.h` to JUCE 8 should expect it to build and
 then be wrong, which is the harder failure to notice.
 
+### What WFS-DIY's OSCQuery reply actually looks like — read 2026-09-06
+
+Read out of `Source/Network/OSCQueryServer.cpp` for PR 1.6's fixture, and worth keeping
+because Phase 2's OSCQuery **client** will parse exactly this.
+
+- **Keys, in the order it emits them.** A container: `FULL_PATH, ACCESS, DESCRIPTION,
+  CONTENTS`. A parameter: `FULL_PATH, TYPE, ACCESS, VALUE, [RANGE, CLIPMODE,] DESCRIPTION`.
+  `CLIPMODE` is always `["both"]` and appears only alongside `RANGE`. `RANGE` is an array of
+  one object with `MIN` and `MAX` — never `VALS`. **There is no `UNIT` key anywhere**, even
+  though the documentation CSVs carry units.
+- **`ACCESS` takes three values only**: `0` on containers, `3` on parameters, and `1` on
+  exactly one node in the whole tree, `/wfs/input/<n>/channelType`. It never emits `2`.
+- **The address space is `/wfs/input|output|reverb|config`, channel-indexed.** Source
+  position is three scalar nodes (`positionX`, `positionY`, `positionZ`) — there is no
+  vector node, no `/source/…`, and no `xyz`. Input children are keyed by the PERMANENT
+  channel number, so `1, 2, 3, 7, 12` is a legitimate capture after deletions.
+- **EQ band nodes deviate from the spec**: `TYPE "if"`, no `VALUE`, and a two-entry `RANGE`
+  (band index, then value). Go.dot keeps entry zero, which is the band index — correct,
+  since `RANGE` is per argument.
+- **Floats widen to double on the way out**, so `0.1f` serialises as `0.100000001490116`.
+  That is the bound the target really enforces, and a reader that rounded it to `0.1` would
+  have Go.dot enforcing a bound nobody declared.
+- **Not published at all**: `masterLevel`, `speedOfSound`, `temperature`, `haasEffect`, and
+  the whole of `/wfs/cluster` and `/wfs/network`. There is no global or master container.
+- `HOST_INFO` is a separate `?HOST_INFO` query, not part of `GET /`. It carries `NAME`,
+  `OSC_PORT`, `OSC_TRANSPORT "UDP"`, `WS_PORT` (the same port as HTTP) and an `EXTENSIONS`
+  object of booleans.
+
+### JUCE's JSON parser cannot be trusted with a number — measured 2026-09-06
+
+`juce_JSON.cpp`'s `parseNumber` accumulates a plain integer literal into an `int64`, one
+digit at a time, and only abandons that for the correctly-rounded `readDoubleValue` path
+when it meets a `.` or an `e`. A literal with neither, and more digits than an `int64` holds,
+**overflows in silence**. Measured over 19 993 random doubles written in their shortest
+round-trip form: **142 came back as a different number**, one in 140. The first was
+`-40595640456200454144`, which returned as `-3702152308781350912`.
+
+Go.dot therefore has its own reader (`src/wfg/engine/json/JsonValue.h`), which measures the
+token out by JSON's grammar and hands it to the same `strtod`-in-a-C-locale conversion the
+document, the log and the OSC atoms already use. The test that found this keeps both halves,
+so if JUCE ever fixes `parseNumber` the build says so and the question can be reopened.
+
+Worth knowing in WFS-DIY and spatcore too: both parse OSCQuery replies with `juce::JSON`.
+The values at risk are range bounds and any large integer a target reports.
+
 ### Which juce_simpleweb to pin — settled 2026-09-05
 
 **Pin `pob31/juce_simpleweb` master at `b953ada` or later.** It is upstream master plus two
 commits, and every copy in the family now holds the same code.
 
-**The fork is the answer, not a stopgap** (author, 2026-09-05: "let's stick with the fork
-for now"). The TLS-off guard is going to Ben as a pull request, but that is the author's to
-send and its outcome changes nothing here: if it is merged, pinning upstream instead becomes
-possible and optional; if it is not, the fork carries it indefinitely and nothing breaks.
-Either way PR 1.D pins the fork, and this is not a decision waiting on anybody.
+**The fork is the answer, not a stopgap, and it is the answer FOR EVERY APP IN THE FAMILY**
+(author, 2026-09-05: stick with the fork of juce_simpleweb for all apps until further
+notice). Go.dot, WFS-DIY, XOA and Tight-WFS all vendor `pob31/juce_simpleweb`, and there is
+no plan for any of them to move back to upstream.
+
+The TLS-off guard is going to Ben as a pull request, but that is the author's to send and
+its outcome changes nothing here: if it is merged, pinning upstream instead becomes possible
+and optional; if it is not, the fork carries it indefinitely and nothing breaks. Either way
+PR 1.D pins the fork, and this is not a decision waiting on anybody.
 
 How it got there, because the starting position was worse than it looked. There were five
 trees and none was a superset of the others: upstream `benkuper/juce_simpleweb` had nine

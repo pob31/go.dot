@@ -290,8 +290,11 @@ namespace wfg::tree
 
     //==============================================================================
     ParameterTree::ParameterTree (const doc::ShowDocument& documentToProject,
-                                  const CommandRegistry& commandsToDescribe)
-        : document (documentToProject), commands (commandsToDescribe)
+                                  const CommandRegistry& commandsToDescribe,
+                                  const MountTable& mountsToPublish)
+        : document (documentToProject),
+          commands (commandsToDescribe),
+          mounts (mountsToPublish)
     {
     }
 
@@ -363,13 +366,24 @@ namespace wfg::tree
                     for (const auto* row : doc::Schema::rowsForOwner ("mount"))
                     {
                         const doc::Attribute attribute { "Mount", row };
+                        const auto name = std::string (row->name);
 
                         /*  `loaded` and `nodeCount` describe what the engine did
-                            with the mount, not what the file says, and nothing
-                            reads a namespace file until PR 1.6 - so they report
-                            their defaults, which is the truth: nothing loaded. */
-                        nodes.push_back (makeLeaf (base + "/" + std::string (row->name),
-                                                   *row, storedText (attribute, mount)));
+                            with the mount rather than what the file says, so
+                            they come from the mount table and not from the
+                            document. They are the honest answer to "did that
+                            actually work", which is the question somebody asks
+                            when a target is not responding. */
+                        std::string text;
+
+                        if (name == "loaded")
+                            text = mounts.isLoaded (id) ? "true" : "false";
+                        else if (name == "nodeCount")
+                            text = std::to_string (mounts.nodeCount (id));
+                        else
+                            text = storedText (attribute, mount);
+
+                        nodes.push_back (makeLeaf (base + "/" + name, *row, text));
                     }
                 }
             }
@@ -398,6 +412,14 @@ namespace wfg::tree
 
             nodes.push_back (std::move (node));
         }
+
+        /*  Somebody else's namespace, at its own prefix. It is part of the
+            document half rather than the runtime half because it changes only
+            when a mount is loaded or written to, both of which mark the tree
+            stale - and because a show with four mounted processors has rather
+            more mounted nodes than it has cues. */
+        for (auto& mounted : mounts.allNodes())
+            nodes.push_back (std::move (mounted));
 
         addContainers (nodes, {}, true);
         sortByAddress (nodes);

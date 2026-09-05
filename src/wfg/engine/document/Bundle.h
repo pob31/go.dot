@@ -81,5 +81,30 @@ namespace wfg::doc
             be claiming an authorship it does not have. A bundle opened and
             saved keeps whatever was in that folder, untouched. */
         ReadResult save (const juce::File& folder, const ShowDocument& document);
+
+        //======================================================================
+        /*  A SHA-256 over everything a session READ: show.xml, state.xml and
+            every file in namespaces/.
+
+            The event log's header carries it so a replay can REFUSE a log that
+            was recorded against a different show. Without it, replaying the
+            wrong log against the right bundle produces divergence after
+            divergence and says nothing about the cause; with it, the first
+            line of the file says the two do not belong together.
+
+            The namespace files are in it because they are read too. A mount
+            describes somebody else's box, and a session that read one
+            description behaves differently from one that read another - so a
+            replay against a changed description is not a replay.
+
+            Deterministic: files in sorted order, each contributing its
+            bundle-relative path, its length and its bytes. The path is in there
+            so that renaming a namespace file changes the hash; the length is in
+            there so that no concatenation of two files can look like another
+            pair. Empty when the folder cannot be read. */
+        std::string contentHash (const juce::File& folder);
+
+        /** The `# ` header lines an event log should carry for this bundle. */
+        std::vector<std::string> logHeaderLines (const juce::File& folder);
     }
 }

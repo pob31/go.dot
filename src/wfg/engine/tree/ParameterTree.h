@@ -51,6 +51,7 @@
 
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <cstdint>
@@ -92,9 +93,14 @@ namespace wfg::tree
     class ParameterTree
     {
     public:
-        /** Neither reference may outlive the tree. */
+        /*  None of the three references may outlive the tree.
+
+            The mounts are the part of the namespace Go.dot did not write: they
+            arrive at their own prefixes rather than under /godot, because
+            /godot/mount holds the DECLARATION and /wfs holds the target. */
         ParameterTree (const doc::ShowDocument& documentToProject,
-                       const CommandRegistry& commandsToDescribe);
+                       const CommandRegistry& commandsToDescribe,
+                       const MountTable& mountsToPublish);
 
         /*  Tick thread only. Rebuilds the document side if it has been marked
             stale, then publishes an immutable snapshot and returns it. */
@@ -113,6 +119,7 @@ namespace wfg::tree
 
         const doc::ShowDocument& document;
         const CommandRegistry& commands;
+        const MountTable& mounts;
 
         std::shared_ptr<const std::vector<Node>> documentPart;
         bool stale = true;

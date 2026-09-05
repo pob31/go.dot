@@ -1,20 +1,131 @@
 {
-  "DESCRIPTION": "A WFS-DIY processor, as captured from GET / on its OSCQuery port.",
-  "FULL_PATH": "/",
+  "FULL_PATH": "/wfs",
+  "ACCESS": 0,
+  "DESCRIPTION": "WFS Parameters",
   "CONTENTS": {
-    "source": {
-      "FULL_PATH": "/source",
+    "input": {
+      "FULL_PATH": "/wfs/input",
+      "ACCESS": 0,
+      "DESCRIPTION": "Input Channels",
       "CONTENTS": {
         "1": {
-          "FULL_PATH": "/source/1",
+          "FULL_PATH": "/wfs/input/1",
+          "ACCESS": 0,
+          "DESCRIPTION": "Input 1",
           "CONTENTS": {
-            "x": {
-              "DESCRIPTION": "Source position, metres, stage-left positive.",
-              "FULL_PATH": "/source/1/x",
+            "LSshape": {
+              "FULL_PATH": "/wfs/input/1/LSshape",
+              "TYPE": "i",
+              "ACCESS": 3,
+              "VALUE": [0],
+              "RANGE": [{"MIN": 0.0, "MAX": 3.0}],
+              "CLIPMODE": ["both"],
+              "DESCRIPTION": "LSshape"
+            },
+            "attenuation": {
+              "FULL_PATH": "/wfs/input/1/attenuation",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [-5.0],
+              "RANGE": [{"MIN": -92.0, "MAX": 0.0}],
+              "CLIPMODE": ["both"],
+              "DESCRIPTION": "attenuation"
+            },
+            "channelType": {
+              "FULL_PATH": "/wfs/input/1/channelType",
+              "TYPE": "s",
+              "ACCESS": 1,
+              "VALUE": ["mono"],
+              "DESCRIPTION": "channelType"
+            },
+            "distanceRatio": {
+              "FULL_PATH": "/wfs/input/1/distanceRatio",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [1.0],
+              "RANGE": [{"MIN": 0.100000001490116, "MAX": 10.0}],
+              "CLIPMODE": ["both"],
+              "DESCRIPTION": "distanceRatio"
+            },
+            "name": {
+              "FULL_PATH": "/wfs/input/1/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": ["input 1"],
+              "DESCRIPTION": "name"
+            },
+            "positionX": {
+              "FULL_PATH": "/wfs/input/1/positionX",
               "TYPE": "f",
               "ACCESS": 3,
               "VALUE": [0.0],
-              "RANGE": [{"MIN": -50.0, "MAX": 50.0}]
+              "RANGE": [{"MIN": -50.0, "MAX": 50.0}],
+              "CLIPMODE": ["both"],
+              "DESCRIPTION": "positionX"
+            },
+            "positionY": {
+              "FULL_PATH": "/wfs/input/1/positionY",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [2.5],
+              "RANGE": [{"MIN": -50.0, "MAX": 50.0}],
+              "CLIPMODE": ["both"],
+              "DESCRIPTION": "positionY"
+            },
+            "trackingID": {
+              "FULL_PATH": "/wfs/input/1/trackingID",
+              "TYPE": "i",
+              "ACCESS": 3,
+              "VALUE": [1],
+              "RANGE": [{"MIN": 1.0, "MAX": 32.0}],
+              "CLIPMODE": ["both"],
+              "DESCRIPTION": "trackingID"
+            }
+          }
+        }
+      }
+    },
+    "output": {
+      "FULL_PATH": "/wfs/output",
+      "ACCESS": 0,
+      "DESCRIPTION": "Output Channels",
+      "CONTENTS": {
+        "1": {
+          "FULL_PATH": "/wfs/output/1",
+          "ACCESS": 0,
+          "DESCRIPTION": "Output 1",
+          "CONTENTS": {
+            "EQgain": {
+              "FULL_PATH": "/wfs/output/1/EQgain",
+              "TYPE": "if",
+              "ACCESS": 3,
+              "DESCRIPTION": "EQgain (first arg: band index 0-5)",
+              "RANGE": [{"MIN": 0, "MAX": 5}, {"MIN": -24.0, "MAX": 24.0}]
+            },
+            "attenuation": {
+              "FULL_PATH": "/wfs/output/1/attenuation",
+              "TYPE": "f",
+              "ACCESS": 3,
+              "VALUE": [0.0],
+              "RANGE": [{"MIN": -92.0, "MAX": 0.0}],
+              "CLIPMODE": ["both"],
+              "DESCRIPTION": "attenuation"
+            },
+            "name": {
+              "FULL_PATH": "/wfs/output/1/name",
+              "TYPE": "s",
+              "ACCESS": 3,
+              "VALUE": ["output 1"],
+              "DESCRIPTION": "name"
+            },
+            "orientation": {
+              "FULL_PATH": "/wfs/output/1/orientation",
+              "TYPE": "i",
+              "ACCESS": 3,
+              "VALUE": [0],
+              "RANGE": [{"MIN": -180.0, "MAX": 180.0}],
+              "CLIPMODE": ["both"],
+              "DESCRIPTION": "orientation"
             }
           }
         }

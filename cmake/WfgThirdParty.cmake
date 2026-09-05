@@ -158,6 +158,7 @@ target_compile_definitions(wfg_deps INTERFACE
     JUCE_MODULE_AVAILABLE_juce_audio_utils=1
     JUCE_MODULE_AVAILABLE_juce_dsp=1
     JUCE_MODULE_AVAILABLE_juce_osc=1
+    JUCE_MODULE_AVAILABLE_juce_cryptography=1
     JUCE_MODULE_AVAILABLE_juce_graphics=1
     JUCE_MODULE_AVAILABLE_juce_gui_basics=1
     JUCE_MODULE_AVAILABLE_juce_gui_extra=1
@@ -400,6 +401,14 @@ target_link_libraries(wfg_thirdparty
         juce::juce_audio_utils          # required by tracktion_engine
         juce::juce_dsp                  # required by tracktion_engine
         juce::juce_osc                  # required by tracktion_engine; PRD 3.17 OSCQuery
+        juce::juce_cryptography         # SHA256, for the event log's bundle hash. The log
+                                        # header records a hash over show.xml, state.xml and
+                                        # namespaces/*, so a replay can refuse a log that was
+                                        # recorded against a different show rather than
+                                        # reproducing it against the wrong one and calling
+                                        # the difference a divergence. PR 1.D needs this
+                                        # module anyway: juce_simpleweb includes it
+                                        # unconditionally.
         # juce_graphics, juce_gui_basics and juce_gui_extra arrive TRANSITIVELY via
         # juce_audio_processors -> juce_gui_extra -> juce_gui_basics -> juce_graphics.
         # That chain is unbreakable in JUCE 8 and is why the Linux apt line carries

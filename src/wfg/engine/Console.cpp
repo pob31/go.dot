@@ -527,11 +527,23 @@ namespace
             client would get rather than an approximation of it. */
         wfg::Engine engine;
         wfg::tree::TouchTable touches;
+        wfg::tree::MountTable mounts;
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
+        wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
 
-        wfg::tree::ParameterTree parameters { document, engine.commands() };
+        /*  The mounts are loaded before the first publish, so what this prints
+            includes somebody else's namespace at its own prefix. A mount that
+            fails is reported and costs only that target: an unreadable
+            description of one processor must not stop a person reading the
+            rest of their show. */
+        if (target.isDirectory())
+            for (const auto& problem :
+                   wfg::tree::loadAllMountsFromBundle (document, mounts, target))
+                std::cerr << "    " << problem << std::endl;
+
+        wfg::tree::ParameterTree parameters { document, engine.commands(), mounts };
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;
