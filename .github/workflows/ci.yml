@@ -96,6 +96,12 @@ jobs:
       - name: Check submodule pins
         run: python3 scripts/check-pins.py
 
+      - name: Check no comment delimiter is hidden inside a comment
+        # -Wcomment is GCC-only and an ERROR under the strict preset, so an OSC
+        # pattern written literally in a block comment builds clean on Windows
+        # and reddens Linux twenty minutes later. Fifteen seconds here instead.
+        run: python3 scripts/check-comments.py
+
       - name: Check CLAUDE.md has not drifted from PRD section 4
         # CLAUDE.md is the review criterion for every PR and the devplan makes it
         # "= PRD 4" verbatim. Two documents saying the same thing can disagree, and

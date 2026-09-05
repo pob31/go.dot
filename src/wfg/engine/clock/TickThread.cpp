@@ -141,6 +141,12 @@ namespace wfg
 
                 engine.processTick (action.tick);
 
+                /*  Before `processed` is advanced, so that a reader which sees
+                    the new index knows the tree for it has been published and
+                    its pushes sent - not merely that the engine finished. */
+                if (afterTick != nullptr)
+                    afterTick (action.tick);
+
                 /*  Published only after the engine has finished with it, so a
                     reader that sees this index knows that tick's work is done
                     rather than merely started. */

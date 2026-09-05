@@ -224,5 +224,41 @@ namespace wfg::tree
                             touches.release (*origin, address);
                             return Outcome::ok (args);
                         } });
+
+        //----------------------------------------------------------------------
+        /*  Everything this origin holds, in one command, because a DISCONNECT
+            is one event and not a list of them.
+
+            PRD 3.16 requires it: a surface that crashed mid-gesture must not
+            leave a node gated against everybody for the rest of the show. The
+            server calls it when a WebSocket closes.
+
+            IT IS A NAMED COMMAND rather than the server reaching into the touch
+            table, and for two reasons that both matter. The table belongs to
+            the tick thread and a disconnect arrives on a socket thread, so a
+            direct call would be the one place in the engine where a server
+            thread writes to the model - and it would race the flush that reads
+            the same table. And PRD 3.15 wants the log to record what happened:
+            a surface dropping mid-show IS what happened, and a replay that
+            skipped it would diverge from the session it claims to reproduce.
+
+            Applied even when the origin held nothing. A client reconnecting
+            after a drop has no idea what the engine still thinks it holds, and
+            refusing would punish exactly the client trying to get back in
+            step - the same reasoning as node.release above. */
+        registry.add ({ "node.releaseAll",
+                        "Gives back everything one origin is holding. Sent when it disconnects.",
+                        {},
+                        true,
+                        [&touches] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto* origin = originOf (context);
+
+                            if (origin == nullptr)
+                                return Outcome::rejected (reason::badAddress);
+
+                            touches.releaseAll (*origin);
+                            return Outcome::ok (args);
+                        } });
     }
 }

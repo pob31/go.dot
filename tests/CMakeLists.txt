@@ -245,3 +245,17 @@ add_test(NAME schema.fixtures
 add_test(NAME deps.no-openssl
          COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/check-no-openssl.py"
                  $<TARGET_FILE:wfg>)
+
+# -----------------------------------------------------------------------------
+# No comment delimiter hidden inside a comment.
+#
+# Go.dot's comments explain OSC addresses, and address PATTERNS use `*`. Two
+# spellings are booby-trapped inside a C block comment and this project has hit
+# both: a star followed by a slash ENDS the comment early, and a slash followed
+# by a star inside one is -Wcomment, an error under the strict preset.
+#
+# The first cost three debugging sessions in Phase 1; the second cost a CI round
+# trip, because -Wcomment is GCC-only and MSVC says nothing. This gate is fifteen
+# seconds and runs everywhere, which is the whole argument for it.
+add_test(NAME source.comments
+         COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/check-comments.py")

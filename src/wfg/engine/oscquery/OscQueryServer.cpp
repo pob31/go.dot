@@ -124,9 +124,10 @@ namespace wfg::oscquery
 
             /*  A pattern is refused before anything looks it up, and with a
                 reason that says which thing was wrong. Phase 1 resolves an
-                address to exactly one node; a client sending `/godot/cue/*` has
-                asked for something Go.dot does not do, rather than named a node
-                that is not there, and 404 would send it looking for a typo. */
+                address to exactly one node; a client that put a star where a
+                cue identifier belongs has asked for something Go.dot does not
+                do, rather than named a node that is not there, and 404 would
+                send it looking for a typo. */
             if (osc::containsWildcard (path))
             {
                 response->write (SimpleWeb::StatusCode::client_error_bad_request,

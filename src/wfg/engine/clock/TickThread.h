@@ -54,6 +54,7 @@
 #include <wfg/engine/clock/TickClock.h>
 
 #include <atomic>
+#include <functional>
 #include <condition_variable>
 #include <cstdint>
 #include <mutex>
@@ -123,6 +124,27 @@ namespace wfg
         TickThread (const TickThread&) = delete;
         TickThread& operator= (const TickThread&) = delete;
 
+        /*  Run on the tick thread immediately after each processTick, before
+            the next one is considered.
+
+            THIS IS WHERE THE TREE IS PUBLISHED AND THE PUSHES GO OUT. Both
+            belong on this thread and in this order - the snapshot has to be the
+            finished answer to the tick that just ran, and a push carrying a
+            value from a tick that is still in progress is a push of something
+            nobody decided.
+
+            Set before start() and never while running: it is read by the tick
+            thread with no synchronisation, exactly like UdpEndpoint's handler
+            and for the same reason. A setter that could be called mid-flight
+            would be a data race with a very quiet failure mode.
+
+            The clock knows nothing about what the hook does. It does not
+            include a tree header, and `serve` is the only caller that sets
+            one. */
+        using AfterTick = std::function<void (std::int64_t tick)>;
+
+        void setAfterTick (AfterTick hook) { afterTick = std::move (hook); }
+
         /** Starts at tick 0 and works forwards. Calling it twice does nothing
             the second time. */
         void start();
@@ -171,6 +193,8 @@ namespace wfg
         }
 
     private:
+        AfterTick afterTick;
+
         void run();
 
         Engine& engine;
