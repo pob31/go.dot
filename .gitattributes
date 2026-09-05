@@ -70,6 +70,14 @@ CMakeLists.txt text eol=lf
 # rewrite every line of the diff to say nothing.
 *.csv    text eol=lf
 
+# The sanitizer suppression list, and this is a correctness matter rather than a
+# tidiness one. RTSAN_OPTIONS=suppressions=... is read by the Clang runtime on
+# Linux, which matches each line as a pattern; a trailing  would be part of the
+# symbol being matched and every suppression would silently stop suppressing -
+# leaving a CI job that reports thousands of known Tracktion locks and looks like
+# a real-time failure that had just appeared.
+*.txt  text eol=lf
+
 # PowerShell too. It is Windows-only by definition and CRLF would be the more
 # conventional choice there, but bootstrap.ps1 is LF on disk today, PowerShell
 # 5.1 and 7 both read LF without complaint, and one rule for the whole tree beats
