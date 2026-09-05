@@ -25,6 +25,7 @@
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
@@ -841,7 +842,76 @@ namespace
         watchdog.join();
     }
 
-    /*  `wfg serve <bundle> --sample-rate=N --buffer=N [--http-port=N] [--osc-port=N]`
+    /*  What shape the show's audio is, read off the document rather than
+        guessed at.
+
+        The track count is Show/Audio/@tracks - the polyphony ceiling, required
+        and with no default anywhere, because a new show must say. The rig's
+        width is the furthest channel any bus reaches, because a bus is where
+        the author declared that a channel exists: PRD §3.9b says a width is
+        stated and never inferred, and this is that statement being read back.
+
+        A show with tracks and no buses is refused rather than given a silent
+        stereo rig. It is a show that says "play audio" and does not say where,
+        and the honest answer to that is a message, not a guess. */
+    /*  Where the engine keeps what is its own rather than the show's:
+        Tracktion's settings, and the silent placeholder WAV that every resident
+        clip sits on until a cue is armed onto it. Per user, shared between
+        runs, and outside every bundle. */
+    juce::File engineCacheFolder()
+    {
+        return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                 .getChildFile ("Go.dot")
+                 .getChildFile ("engine");
+    }
+
+    struct AudioShape
+    {
+        int tracks = 0;
+        int outputs = 0;
+        std::string problem;
+    };
+
+    AudioShape audioShapeOf (const wfg::doc::ShowDocument& document)
+    {
+        AudioShape shape;
+
+        const auto audio = document.root().getChildWithName ("Audio");
+
+        if (! audio.isValid())
+        {
+            shape.problem = "the show has no <Audio> element";
+            return shape;
+        }
+
+        shape.tracks = static_cast<int> (audio["tracks"]);
+
+        for (const auto bus : audio)
+        {
+            const auto first = static_cast<int> (bus["firstChannel"]);
+            const auto width = static_cast<int> (bus["width"]);
+
+            shape.outputs = std::max (shape.outputs, first + width);
+        }
+
+        if (shape.tracks > 0 && shape.outputs <= 0)
+        {
+            shape.problem = "the show has audio tracks and no buses, so there is"
+                            " nowhere for them to go";
+            return shape;
+        }
+
+        /*  A show with no audio still needs an interface to exist, because the
+            hosted device is what advances the clock. Two channels, carrying
+            silence, is what a show with nothing to play sounds like. */
+        if (shape.outputs <= 0)
+            shape.outputs = 2;
+
+        return shape;
+    }
+
+    /*  `wfg serve <bundle> --sample-rate=N --buffer=N [--hosted [--render=<wav>]]`
+        `                     [--http-port=N] [--osc-port=N] [--log=<file>]`
 
         The whole of Phase 1, running: a document loaded, a tree published every
         tick, an OSCQuery server answering, a UDP socket taking OSC, and an
@@ -862,6 +932,15 @@ namespace
 
             wfg: http 51234
             wfg: osc 51235
+
+        `--hosted` PUTS THE AUDIO GRAPH UNDER THE CLOCK. Without it the blocks
+        come from Phase 1's dummy clock, which advances a counter and makes no
+        sound. With it they come from a real Tracktion playback graph, generated
+        from this show's own <Audio> element, paced on the same schedule -
+        `--render=<wav>` then writes what came out, which is how a machine with
+        no audio interface can be shown that a cue made a sound. The width of
+        the imaginary rig is not a flag: it is the furthest channel the show's
+        buses reach, because that is where the author said a channel exists.
 
         THE MAIN THREAD RUNS THE JUCE DISPATCH LOOP and nothing else. Phase 2
         needs it there - plugin scanning and device callbacks are message-thread
@@ -889,6 +968,7 @@ namespace
 
         const auto sampleRate = args.getValueForOption ("--sample-rate").getIntValue();
         const auto blockSize = args.getValueForOption ("--buffer").getIntValue();
+        const auto hosted = args.containsOption ("--hosted");
 
         const juce::File target { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
 
@@ -1049,8 +1129,95 @@ namespace
         std::cout << "wfg: osc " << udp.boundPort() << std::endl;
 
         //  --- the clock ------------------------------------------------------
-        wfg::DummyAudioClock audio { sampleRate, blockSize };
-        wfg::TickThread ticks { engine, audio.clock(), *schedule };
+        /*  TWO BLOCK SOURCES, ONE COUNTER, AND NOTHING ABOVE THEM KNOWS WHICH.
+
+            Phase 1's dummy clock advances a sample counter on a paced thread
+            and produces no audio. `--hosted` advances the SAME counter by
+            running a real block through a real playback graph, on the same
+            schedule, and can write what comes out to a WAV - which is the only
+            way a runner with no audio interface can be shown that a cue made a
+            sound. TickThread takes a SampleClock either way and cannot tell
+            them apart, which is what makes the hosted mode a rehearsal of the
+            device mode rather than a simulation of it. */
+        std::unique_ptr<wfg::DummyAudioClock> dummy;
+        std::unique_ptr<wfg::audio::HostedAudioDriver> driver;
+        const wfg::SampleClock* blockSource = nullptr;
+
+        if (hosted)
+        {
+            const auto shape = audioShapeOf (document);
+
+            if (! shape.problem.empty())
+            {
+                std::cerr << "wfg serve --hosted: " << shape.problem << std::endl;
+                return 2;
+            }
+
+            /*  THE PER-USER CACHE, NEVER THE BUNDLE. Tracktion keeps its own
+                settings here and Go.dot writes the silent placeholder every
+                resident clip starts on. Neither is anything the author
+                decided, so neither belongs in the show folder: a bundle is
+                copied between machines, hashed, and put under version control,
+                and a directory that appeared inside it the first time somebody
+                pressed play would travel with it. */
+            driver = std::make_unique<wfg::audio::HostedAudioDriver> (
+                         engineCacheFolder().getFullPathName().toStdString());
+
+            wfg::audio::HostedAudioDriver::Settings hostSettings;
+            hostSettings.sampleRate = sampleRate;
+            hostSettings.blockSize = blockSize;
+            hostSettings.outputChannels = shape.outputs;
+            hostSettings.renderFile = args.containsOption ("--render")
+                                        ? args.getValueForOption ("--render").toStdString()
+                                        : std::string();
+
+            if (! driver->open (hostSettings))
+            {
+                std::cerr << "wfg serve --hosted: " << driver->lastError() << std::endl;
+                return 2;
+            }
+
+            /*  THE EDIT IS BUILT HERE AND NEVER AGAIN. PRD §3.25: the graph is
+                fixed at show load, and this is show load. It happens before a
+                single block goes through, because building it while the pump
+                ran would be a structural edit racing the graph that reads it. */
+            wfg::audio::EditSpec spec;
+            spec.tracks = shape.tracks;
+
+            if (! driver->host().buildEdit (spec))
+            {
+                std::cerr << "wfg serve --hosted: " << driver->host().lastError() << std::endl;
+                return 2;
+            }
+
+            /*  Asked once, at load, about the graph that will play. A duplicate
+                is a defect rather than a warning - two nodes sharing an id
+                adopt one another's state across a rebuild - so it stops the
+                show here instead of during it. */
+            if (const auto ids = driver->host().inspectNodeIds(); ! ids.ok())
+            {
+                std::cerr << "wfg serve --hosted: the playback graph has "
+                          << ids.duplicates << " duplicated node identities out of "
+                          << ids.nodes << std::endl;
+                return 2;
+            }
+
+            state.audioDevice = "hosted";
+            state.audioOutputs = shape.outputs;
+            state.audioStatus = "running";
+
+            std::cout << "wfg: audio hosted " << shape.tracks << " tracks "
+                      << shape.outputs << " outputs" << std::endl;
+
+            blockSource = &driver->clock();
+        }
+        else
+        {
+            dummy = std::make_unique<wfg::DummyAudioClock> (sampleRate, blockSize);
+            blockSource = &dummy->clock();
+        }
+
+        wfg::TickThread ticks { engine, *blockSource, *schedule };
 
         /*  Publish then flush, on the tick thread, once per tick, in that
             order. The snapshot has to be the finished answer to the tick that
@@ -1106,7 +1273,19 @@ namespace
                                 previous = std::move (current);
                             });
 
-        audio.start();
+        if (driver != nullptr)
+        {
+            if (! driver->start())
+            {
+                std::cerr << "wfg serve --hosted: " << driver->lastError() << std::endl;
+                return 2;
+            }
+        }
+        else
+        {
+            dummy->start();
+        }
+
         ticks.start();
 
         /*  The main thread from here on is JUCE's, and only JUCE's. Phase 2
@@ -1115,7 +1294,12 @@ namespace
         runMessageLoopUntilInterrupted();
 
         ticks.stop();
-        audio.stop();
+
+        if (driver != nullptr)
+            driver->stop();
+        else
+            dummy->stop();
+
         server.stop();
         udp.stop();
         engine.log().close();
@@ -1200,7 +1384,8 @@ int wfg::runConsole (int argc, char** argv)
                       } });
 
     app.addCommand ({ "serve",
-                      "serve <bundle> --sample-rate=N --buffer=N [--http-port=N] [--osc-port=N] [--log=<file>]",
+                      "serve <bundle> --sample-rate=N --buffer=N [--hosted [--render=<wav>]]"
+                      " [--http-port=N] [--osc-port=N] [--log=<file>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
                       [] (const juce::ArgumentList& args)

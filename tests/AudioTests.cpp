@@ -31,6 +31,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
@@ -1075,4 +1076,259 @@ TEST_CASE ("M3: thirty-two cues into sixty-four outputs, at ninety-six kilohertz
         be asserted honestly. The cost itself is reported above and carried into
         the PR rather than pinned to a number this machine happened to produce. */
     CHECK (wide.microsecondsPerBlock > 0.0);
+}
+
+//==============================================================================
+/*  The hosted driver: the dummy clock with a playback graph in the middle.
+
+    What these establish is that it is a BLOCK SOURCE, indistinguishable from
+    Phase 1's dummy clock to everything above it, and that the render it writes
+    is a file somebody can actually open.
+*/
+namespace
+{
+    /** Reads a WAV back as it stands on disk, header and all. */
+    struct RenderedFile
+    {
+        explicit RenderedFile (const juce::File& file)
+        {
+            juce::WavAudioFormat format;
+            std::unique_ptr<juce::AudioFormatReader> reader {
+                format.createReaderFor (file.createInputStream().release(), true) };
+
+            if (reader == nullptr)
+                return;
+
+            channels = static_cast<int> (reader->numChannels);
+            sampleRate = static_cast<int> (reader->sampleRate);
+            frames = reader->lengthInSamples;
+            isFloat = reader->usesFloatingPointData;
+
+            if (frames <= 0)
+                return;
+
+            juce::AudioBuffer<float> buffer { channels, static_cast<int> (frames) };
+            reader->read (&buffer, 0, static_cast<int> (frames), 0, true, true);
+
+            for (int channel = 0; channel < channels; ++channel)
+                peak = std::max (peak, buffer.getMagnitude (channel, 0, static_cast<int> (frames)));
+
+            readable = true;
+        }
+
+        bool readable = false;
+        bool isFloat = false;
+        int channels = 0;
+        int sampleRate = 0;
+        std::int64_t frames = 0;
+        float peak = 0.0f;
+    };
+
+    /*  Pumps the driver's own paced thread for a while. Wall clock, because
+        that is what the driver runs on - it is pacing itself against a real
+        deadline, which is the whole point of it. */
+    void letItRunFor (int milliseconds)
+    {
+        juce::Thread::sleep (milliseconds);
+    }
+}
+
+TEST_CASE ("hosted driver: the blocks come from a graph, and the counter cannot tell")
+{
+    ScopedStorage storage;
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    audio::HostedAudioDriver driver { storage.folder.getFullPathName().toStdString() };
+
+    audio::HostedAudioDriver::Settings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 512;
+    settings.outputChannels = 4;
+
+    REQUIRE (driver.open (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 2;
+    REQUIRE (driver.host().buildEdit (spec));
+
+    /*  Nothing has been pumped yet. open() brings the engine up and stops
+        there, deliberately: the Edit is built between the two calls, and
+        building it while blocks went through would be a structural edit racing
+        the graph that reads it. */
+    CHECK (driver.blocksDelivered() == 0);
+    CHECK (driver.clock().samplesElapsed() == 0);
+
+    REQUIRE (driver.start());
+    letItRunFor (400);
+    driver.stop();
+
+    const auto blocks = driver.blocksDelivered();
+
+    INFO ("blocks in 400 ms at 48 kHz / 512: " << blocks
+           << ", counter " << driver.clock().samplesElapsed());
+
+    /*  PACED, not free-running. 400 ms at 48 kHz and 512 frames is about 37
+        blocks; a loop with no deadline would deliver thousands, which is a
+        difference no scheduler jitter can disguise. The bounds are wide
+        because what is being asserted is the pacing, not the scheduler. */
+    CHECK (blocks > 5);
+    CHECK (blocks < 400);
+
+    /*  And the counter is the blocks. Everything above this reads a
+        SampleClock and must not be able to tell which source filled it. */
+    CHECK (driver.clock().samplesElapsed() == blocks * settings.blockSize);
+}
+
+TEST_CASE ("hosted driver: a show with nothing playing renders digital silence")
+{
+    ScopedStorage storage;
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    const auto render = storage.folder.getChildFile ("render.wav");
+
+    audio::HostedAudioDriver driver { storage.folder.getFullPathName().toStdString() };
+
+    audio::HostedAudioDriver::Settings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 256;
+    settings.outputChannels = 4;
+    settings.renderFile = render.getFullPathName().toStdString();
+
+    REQUIRE (driver.open (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 4;
+    REQUIRE (driver.host().buildEdit (spec));
+    REQUIRE (driver.start());
+
+    letItRunFor (400);
+    driver.stop();
+
+    const RenderedFile rendered { render };
+
+    REQUIRE (rendered.readable);
+    CHECK (rendered.channels == 4);
+    CHECK (rendered.sampleRate == 48000);
+
+    /*  Float, because the render is a MEASUREMENT. PR 2.4 asserts that a fade
+        reaches -120 dB and sixteen bits cannot express that; quantising the
+        evidence to make the file smaller would be measuring the quantiser. */
+    CHECK (rendered.isFloat);
+
+    CHECK (rendered.frames > 0);
+
+    /*  EXACTLY zero, not nearly. Four tracks are in the graph, each with a
+        resident clip and an output plugin, and none of them has been fired -
+        so every one of those outputs must be silent in the sense a mixing desk
+        means it. Anything else is a leak. */
+    CHECK (juce::exactlyEqual (rendered.peak, 0.0f));
+}
+
+TEST_CASE ("hosted driver: the render is readable even if nobody closed it")
+{
+    /*  A WAV's header carries its length, so it is only right once the file is
+        closed - and the black-box harness stops the server with terminate(),
+        which on Windows runs no destructor at all. The writer rewrites the
+        header as it goes for exactly that reason, so this asks the question
+        the harness will: is the file on disk readable while the process that
+        is writing it is still alive? */
+    ScopedStorage storage;
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    const auto render = storage.folder.getChildFile ("unclosed.wav");
+
+    audio::HostedAudioDriver driver { storage.folder.getFullPathName().toStdString() };
+
+    audio::HostedAudioDriver::Settings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 256;
+    settings.outputChannels = 2;
+    settings.renderFile = render.getFullPathName().toStdString();
+
+    REQUIRE (driver.open (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    REQUIRE (driver.host().buildEdit (spec));
+    REQUIRE (driver.start());
+
+    /*  Past two flush intervals' worth of wall clock, so at least one header
+        rewrite has certainly happened. */
+    letItRunFor (2500);
+
+    const RenderedFile whileRunning { render };
+
+    INFO ("frames visible while still recording: " << whileRunning.frames);
+
+    CHECK (whileRunning.readable);
+    CHECK (whileRunning.frames > 0);
+    CHECK (whileRunning.channels == 2);
+
+    driver.stop();
+}
+
+TEST_CASE ("hosted driver: unusable settings are refused, and say so")
+{
+    ScopedStorage storage;
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    audio::HostedAudioDriver driver { storage.folder.getFullPathName().toStdString() };
+
+    SUBCASE ("nothing was asked for")
+    {
+        CHECK (! driver.open ({}));
+        CHECK (! driver.lastError().empty());
+    }
+
+    SUBCASE ("started before it was opened")
+    {
+        CHECK (! driver.start());
+        CHECK (! driver.lastError().empty());
+    }
+
+    SUBCASE ("a render nobody can write")
+    {
+        audio::HostedAudioDriver::Settings settings;
+        settings.sampleRate = 48000;
+        settings.blockSize = 256;
+        settings.outputChannels = 2;
+
+        /*  A directory, not a file. The failure has to arrive as a refusal
+            with a reason, not as a server that runs happily and records
+            nothing anybody will find. */
+        settings.renderFile = storage.folder.getFullPathName().toStdString();
+
+        REQUIRE (driver.open (settings));
+        CHECK (! driver.start());
+        CHECK (! driver.lastError().empty());
+    }
+}
+
+TEST_CASE ("hosted driver: stopping twice, and stopping without starting, are quiet")
+{
+    ScopedStorage storage;
+    juce::ScopedJuceInitialiser_GUI juce;
+
+    audio::HostedAudioDriver driver { storage.folder.getFullPathName().toStdString() };
+
+    driver.stop();
+
+    audio::HostedAudioDriver::Settings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 256;
+    settings.outputChannels = 2;
+
+    REQUIRE (driver.open (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    REQUIRE (driver.host().buildEdit (spec));
+    REQUIRE (driver.start());
+
+    letItRunFor (100);
+
+    driver.stop();
+    driver.stop();
+
+    CHECK (! driver.isRunning());
 }

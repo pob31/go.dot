@@ -77,8 +77,20 @@ namespace wfg::tree
         std::int64_t lateness = 0;
         std::int64_t latenessMax = 0;
 
-        /** `dummy` in Phase 1, `device` from Phase 2. */
+        /** `dummy` in Phase 1, `hosted` or `device` from Phase 2. */
         std::string clock = "dummy";
+
+        //======================================================================
+        /*  What the audio actually is right now, as against what the document
+            decided (PRD §4.10). `/godot/audio/tracks` and every bus node under
+            `/godot/bus` are the document's; these three are the machine's, and
+            they read
+            their table defaults - no device, no outputs, stopped - until
+            something opens one. Saying "stopped" with nothing open is the
+            truthful answer rather than a placeholder. */
+        std::string audioDevice;
+        int audioOutputs = 0;
+        std::string audioStatus = "stopped";
 
         std::uint64_t errorCount = 0;
         std::string lastError;

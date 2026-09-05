@@ -389,23 +389,28 @@ namespace wfg::tree
             }
             else if (containerName == "Audio")
             {
-                /*  The one container that publishes attributes of its own.
-                    `tracks` is stored; the other three describe what the audio
-                    side is actually doing and are runtime state the document
-                    never holds - so they are supplied here from EngineState
-                    once PR 2.7 opens a device, and read their table defaults
-                    until then. Saying "stopped" with no device open is the
-                    truthful answer, not a placeholder. */
+                /*  The one container that publishes attributes of its own -
+                    but only the STORED one. `tracks` is what the author
+                    decided, so it belongs to this half, which is rebuilt when
+                    the document changes.
+
+                    `device`, `outputs` and `status` are what the machine
+                    happens to be doing (PRD §4.10), and this half is CACHED:
+                    published from here they would be frozen at whatever they
+                    were when the document last changed, which for a show that
+                    is running and not being edited means for ever. They are
+                    emitted on the runtime side instead, beside the tick and
+                    the lateness, exactly like /godot/document's runtime half. */
                 for (const auto* row : doc::Schema::rowsForOwner ("audio"))
                 {
-                    const doc::Attribute attribute { "Audio", row };
-                    const auto name = std::string (row->name);
-                    const auto text = row->persist == doc::Persist::none
-                                        ? std::string (row->defaultText)
-                                        : storedText (attribute, container);
+                    if (row->persist == doc::Persist::none)
+                        continue;
 
-                    nodes.push_back (makeLeaf (std::string (godot) + "/audio/" + name,
-                                               *row, text));
+                    const doc::Attribute attribute { "Audio", row };
+
+                    nodes.push_back (makeLeaf (std::string (godot) + "/audio/"
+                                                 + std::string (row->name),
+                                               *row, storedText (attribute, container)));
                 }
 
                 for (const auto& bus : container)
@@ -484,8 +489,8 @@ namespace wfg::tree
                                              std::string_view owner,
                                              const std::string& text)
         {
-            const auto prefix = owner == std::string_view ("engine") ? "/engine/" : "/document/";
-            runtime.push_back (makeLeaf (std::string (godot) + prefix + std::string (row.name),
+            runtime.push_back (makeLeaf (std::string (godot) + "/" + std::string (owner) + "/"
+                                           + std::string (row.name),
                                          row, text));
         };
 
@@ -526,6 +531,26 @@ namespace wfg::tree
             engineValue (*row, "document", text);
         }
 
+        /*  What the audio actually is. Absent a driver these are the table's
+            own defaults - no device, no outputs, stopped - and that is the
+            truthful reading of a process that has not opened one, not a
+            placeholder standing in for a number nobody took. */
+        for (const auto* row : doc::Schema::rowsForOwner ("audio"))
+        {
+            if (row->persist != doc::Persist::none)
+                continue;
+
+            const auto name = std::string (row->name);
+            std::string text;
+
+            if (name == "device")        text = state.audioDevice;
+            else if (name == "outputs")  text = std::to_string (state.audioOutputs);
+            else if (name == "status")   text = state.audioStatus;
+            else                         text = std::string (row->defaultText);
+
+            engineValue (*row, "audio", text);
+        }
+
         /*  "/", "/godot" and "/godot/document" belong to the document half, so
             the runtime half must not carry them too - `find` looks in one and
             then the other, and a duplicate would make the answer depend on
@@ -533,7 +558,8 @@ namespace wfg::tree
             "/godot/engine". */
         addContainers (runtime,
                        { std::string (rootAddress), std::string (godot),
-                         std::string (godot) + "/document" },
+                         std::string (godot) + "/document",
+                         std::string (godot) + "/audio" },
                        false);
         sortByAddress (runtime);
 
