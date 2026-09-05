@@ -80,6 +80,27 @@ static_assert (SIMPLEWEB_SECURE_SUPPORTED == 0,
                "Go.dot builds juce_simpleweb with TLS off and ships no OpenSSL; "
                "see cmake/WfgThirdParty.cmake section 2b");
 
+/*
+    And the define that lets asio compile as C++20 at all.
+
+    std::result_of was removed in C++20. asio still reaches for it and gates its
+    own switch to std::invoke_result on `defined(ASIO_MSVC)` rather than on the
+    language version, so clang and GCC never take that branch on their own. The
+    first PR 1.D run proved the asymmetry: Windows green, macOS a wall of "no
+    template named 'result_of'" from inside asio, on identical source.
+
+    Guarded here as well as set in wfg::deps because the two failures look
+    nothing alike. Losing the define is a hundred errors deep inside a vendor
+    header; this is one line naming the cause.
+*/
+#ifndef ASIO_HAS_STD_INVOKE_RESULT
+ #error "ASIO_HAS_STD_INVOKE_RESULT did not reach this TU - asio will use std::result_of, which C++20 removed. See cmake/WfgThirdParty.cmake"
+#endif
+
+static_assert (ASIO_HAS_STD_INVOKE_RESULT == 1,
+               "asio must use std::invoke_result: std::result_of is gone in C++20, "
+               "and TE requires C++20");
+
 namespace
 {
     /*  A port nothing else on this machine is using.

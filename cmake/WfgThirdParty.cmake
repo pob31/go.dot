@@ -268,6 +268,35 @@ target_compile_definitions(wfg_deps INTERFACE
     #     SimpleWebToolchainTests.cpp static_asserts that it arrived.
     SIMPLEWEB_SECURE_SUPPORTED=0
 
+    # --- asio, built as C++20.
+    #     std::result_of was deprecated in C++17 and REMOVED in C++20. This asio
+    #     (2020-era, pinned through juce_simpleweb) still reaches for it, and its
+    #     own switch away from it is gated on the compiler rather than on the
+    #     language version - config.hpp:934-943 is, in full:
+    #
+    #         #if !defined(ASIO_HAS_STD_INVOKE_RESULT)
+    #         # if !defined(ASIO_DISABLE_STD_INVOKE_RESULT)
+    #         #  if defined(ASIO_MSVC)
+    #         #   if (_MSC_VER >= 1911 && _MSVC_LANG >= 201703)
+    #         #    define ASIO_HAS_STD_INVOKE_RESULT 1
+    #
+    #     MSVC only. On clang and GCC it is never defined, so detail/type_traits.h
+    #     falls through to `using std::result_of;` and every asio header that
+    #     touches it fails to compile.
+    #
+    #     That asymmetry is exactly why this is set here and not left to chance:
+    #     the Windows build of PR 1.D was green and the macOS build was not, with
+    #     dozens of "no template named 'result_of'" from inside asio. Linux
+    #     happens to survive because libstdc++ still ships the removed template
+    #     as a deprecated extension - which is luck, not support, and would end
+    #     at any libstdc++ release.
+    #
+    #     Defining it makes asio use std::invoke_result on all three, which is
+    #     what the macro is for. TE requires C++20 (cxx_std_20 above), so
+    #     compiling this module at C++17 instead is not an option, and mixing
+    #     standards across TUs of one target is an ODR hazard rather than a fix.
+    ASIO_HAS_STD_INVOKE_RESULT=1
+
     # --- Ours. NEVER call a macro VERSION or __TEXT: tracktion_engine_playback.cpp:124-153
     #     #undefs and redefines VERSION mid-TU, and tracktion_engine.h:72 bare-#undefs __TEXT.
     #     A macro of either name would be silently erased partway through the build with
