@@ -312,11 +312,28 @@ namespace wfg::oscquery
 
         /*  isConnected is set from the server's own thread once asio has bound.
             Waited on rather than assumed: a caller that started making requests
-            immediately would race the bind and see connection refused. */
-        for (int i = 0; i < 2000 && ! impl->server.isConnected; ++i)
+            immediately would race the bind and see connection refused.
+
+            The port is waited on SEPARATELY, and it is not redundant.
+            isConnected is set in the server thread's body immediately after
+            http->start() has POSTED httpStartCallback - before ioService->run()
+            has had a chance to dispatch it, and that callback is the only thing
+            that ever writes the granted port. So a caller released by
+            isConnected alone can read the port asked for rather than the one
+            granted, which for an ephemeral bind is 0. It then reports success
+            with a port nobody is listening on, and every request against it
+            fails with a status of 0 - which is what reddened macOS CI, at
+            whichever test case happened to lose the race.
+
+            Only 0 has to be excluded. A caller that named a port already has it
+            in `port` before the thread starts, so this waits on nothing extra;
+            a granted port is never 0. */
+        const auto ready = [this] { return impl->server.isConnected && impl->server.port != 0; };
+
+        for (int i = 0; i < 2000 && ! ready(); ++i)
             juce::Thread::sleep (5);
 
-        if (! impl->server.isConnected)
+        if (! ready())
         {
             impl->server.stop();
             impl->server.removeHTTPRequestHandler (impl.get());
