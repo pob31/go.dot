@@ -105,6 +105,14 @@ namespace wfg::audio
         /** The settings the interface was opened with. Zeroed when stopped. */
         const HostSettings& settings() const noexcept;
 
+        /*  How many wave output devices the engine sees, and how wide the first
+            one is. Go.dot describes exactly one, spanning the whole rig, so
+            these answer 1 and the hardware channel count - and a test that
+            reads something else has found the device layout being carved into
+            stereo pairs behind our back. */
+        int waveOutputDeviceCount() const noexcept;
+        int waveOutputDeviceWidth() const noexcept;
+
     private:
         struct Impl;
         std::unique_ptr<Impl> impl;

@@ -438,3 +438,47 @@ TEST_CASE ("audio host: hosting Tracktion does not change how this thread does a
     volatile float stillTiny = smallest;
     CHECK (stillTiny > 0.0f);
 }
+
+TEST_CASE ("audio host: the rig is one wide output device, not a row of stereo pairs")
+{
+    /*  Tracktion's default is to carve the hardware into stereo pairs. Go.dot
+        describes one device the whole rig wide, because spike 04 measured that
+        changing a track's OUTPUT DEVICE rebuilds the playback graph - so if a
+        cue's destination were a device, every destination change would rebuild.
+        With one wide device the destination is a coefficient instead.
+
+        This is also the check that would notice the description being ignored:
+        a device list built before describeWaveDevices was consulted comes back
+        as pairs, and this reads 4 devices of 2 rather than 1 of 8. */
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 8;
+
+    REQUIRE (rig.host.start (settings));
+
+    CHECK (rig.host.waveOutputDeviceCount() == 1);
+    CHECK (rig.host.waveOutputDeviceWidth() == 8);
+}
+
+TEST_CASE ("audio host: the wide device follows the channel count it was asked for")
+{
+    HostRig rig;
+
+    for (const int channels : { 2, 6, 16, 64 })
+    {
+        INFO ("output channels: " << channels);
+
+        audio::HostSettings settings;
+        settings.sampleRate = 48000;
+        settings.blockSize = 64;
+        settings.outputChannels = channels;
+
+        REQUIRE (rig.host.start (settings));
+
+        CHECK (rig.host.waveOutputDeviceCount() == 1);
+        CHECK (rig.host.waveOutputDeviceWidth() == channels);
+    }
+}

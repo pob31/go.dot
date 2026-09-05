@@ -26,6 +26,8 @@
     tracktion_engine_playback.cpp:124-153 #undefs and redefines VERSION
     mid-translation-unit. Nothing below is called VERSION.
 */
+#include <cstdint>
+
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
 #include <tracktion_engine/tracktion_engine.h>
@@ -45,6 +47,45 @@ namespace wfg::audio
             that grabs the machine's soundcard while CI runs. */
         struct Behaviour final : te::EngineBehaviour
         {
+            explicit Behaviour (int outputChannels) : wideDeviceChannels (outputChannels) {}
+
+            /*  ONE WIDE OUTPUT DEVICE, spanning every hardware channel.
+
+                Tracktion's default is to carve the hardware into stereo pairs.
+                Go.dot wants the opposite: one device the whole rig wide, with
+                every track routed to it at load, so that where a cue actually
+                goes is a coefficient in its output plugin rather than a change
+                of output device - which spike 04 measured as a graph rebuild.
+
+                This must be answered before the first playback context exists.
+                A wave-device layout changed afterwards destroys the running
+                graph and rebuilds the device list, which during a show is not a
+                thing to do. */
+            bool isDescriptionOfWaveDevicesSupported() override { return true; }
+
+            void describeWaveDevices (std::vector<te::WaveDeviceDescription>& descriptions,
+                                      juce::AudioIODevice& device,
+                                      bool isInput) override
+            {
+                descriptions.clear();
+
+                if (isInput)
+                    return;
+
+                const auto available = device.getOutputChannelNames().size();
+                const auto width = std::min (wideDeviceChannels, available);
+
+                if (width <= 0)
+                    return;
+
+                descriptions.push_back (
+                    te::WaveDeviceDescription::withNumChannels ("Go.dot outputs", 0u,
+                                                                static_cast<std::uint32_t> (width),
+                                                                true));
+            }
+
+            int wideDeviceChannels = 0;
+
             /*  We open the device, or in tests nobody does. PRD §6.2 makes the
                 sample rate an observed property rather than a setting, so the
                 engine must not go and pick one before we have looked. */
@@ -137,7 +178,7 @@ namespace wfg::audio
                 the mere existence of a host that never runs. */
             engine = std::make_unique<te::Engine> (std::make_unique<Storage> (storageFolder),
                                                    std::make_unique<te::UIBehaviour>(),
-                                                   std::make_unique<Behaviour>());
+                                                   std::make_unique<Behaviour> (requested.outputChannels));
 
             auto& hosted = engine->getDeviceManager().getHostedAudioDeviceInterface();
 
@@ -155,6 +196,11 @@ namespace wfg::audio
 
             hosted.initialise (parameters);
             hosted.prepareToPlay (requested.sampleRate, requested.blockSize);
+
+            /*  The device list is built asynchronously. Flushing it here means
+                the wide device exists before anything asks for it, rather than
+                one message-loop turn later. */
+            engine->getDeviceManager().dispatchPendingUpdates();
 
             /*  Sized once, here, and reused for every block. Allocating inside
                 processBlock would be the first violation of §4.2 in a file
@@ -247,4 +293,27 @@ namespace wfg::audio
 
     const SampleClock& AudioHost::clock() const noexcept   { return impl->samples; }
     const HostSettings& AudioHost::settings() const noexcept { return impl->current; }
+
+    int AudioHost::waveOutputDeviceCount() const noexcept
+    {
+        if (impl->engine == nullptr)
+            return 0;
+
+        return impl->engine->getDeviceManager().getNumWaveOutDevices();
+    }
+
+    int AudioHost::waveOutputDeviceWidth() const noexcept
+    {
+        if (impl->engine == nullptr)
+            return 0;
+
+        auto& manager = impl->engine->getDeviceManager();
+
+        if (manager.getNumWaveOutDevices() < 1)
+            return 0;
+
+        auto* device = manager.getWaveOutDevice (0);
+
+        return device != nullptr ? device->getChannels().size() : 0;
+    }
 }

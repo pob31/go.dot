@@ -81,6 +81,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/AudioHost.cpp
     wfg/engine/audio/CueMatrix.h
     wfg/engine/audio/CueMatrix.cpp
+    wfg/engine/audio/CueOutputPlugin.h
+    wfg/engine/audio/CueOutputPlugin.cpp
     wfg/engine/clock/AudioClockSource.h
     wfg/engine/clock/DummyAudioClock.cpp
     wfg/engine/clock/DummyAudioClock.h
