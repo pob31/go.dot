@@ -59,5 +59,51 @@ namespace wfg::tree
             Empty when the address names nothing. `"/"` gives the whole tree,
             which is what `GET /` asks for. */
         std::string describe (const TreeSnapshot& snapshot, std::string_view address);
+
+        //======================================================================
+        /*  One attribute of one node - what `GET /godot/engine/tick?VALUE`
+            asks for.
+
+            THREE OUTCOMES, NOT TWO, because OSCQuery gives each of them a
+            different HTTP status and a client is entitled to tell them apart:
+
+              * `found`      - here is the attribute, as a JSON object carrying
+                               just that one key.
+              * `noSuchNode` - nothing lives at that address.            (404)
+              * `noSuchAttribute` - the name is not one OSCQuery defines. (400)
+              * `notPresent` - the node is real and the attribute is real, but
+                               this node does not carry it: a container has no
+                               VALUE, a string has no RANGE.             (204)
+
+            The last is the one worth being careful about. Answering 404 for it
+            would tell a client the node does not exist, and answering `null`
+            would tell it the value IS null; 204 No Content is the only honest
+            one of the three. */
+        enum class AttributeResult { found, noSuchNode, noSuchAttribute, notPresent };
+
+        struct Attribute
+        {
+            AttributeResult result = AttributeResult::noSuchNode;
+            std::string json;           // only when `result` is `found`
+        };
+
+        Attribute attribute (const TreeSnapshot& snapshot,
+                             std::string_view address,
+                             std::string_view key);
+
+        /*  The reply to `?HOST_INFO`: who this is and where to reach it.
+
+            A separate query rather than part of `GET /`, which is how the
+            proposal has it and how WFS-DIY's client expects it. The ports are
+            passed in rather than read from anywhere, because the server binds
+            them and this file must not know what a socket is. */
+        struct HostInfo
+        {
+            std::string name = "Go.dot";
+            int oscPort = 0;            // UDP, where OSC messages are received
+            int wsPort = 0;             // the HTTP+WS port, which is one port
+        };
+
+        std::string hostInfo (const HostInfo& info);
     }
 }

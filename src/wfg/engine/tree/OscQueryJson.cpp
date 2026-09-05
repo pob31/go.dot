@@ -17,6 +17,8 @@
 #include <wfg/engine/tree/OscQueryJson.h>
 
 #include <map>
+#include <set>
+#include <string>
 #include <vector>
 
 namespace wfg::tree
@@ -305,6 +307,163 @@ namespace wfg::tree
         std::string out;
         writeNode (*root, children, 0, out);
         out += "\n";
+
+        return out;
+    }
+
+    //==========================================================================
+    OscQueryJson::Attribute OscQueryJson::attribute (const TreeSnapshot& snapshot,
+                                                     std::string_view address,
+                                                     std::string_view key)
+    {
+        /*  The attribute names OSCQuery defines and Go.dot answers. A name
+            outside this set is a client asking for something the protocol does
+            not have, which is a 400 and not a 404: the node may well exist. */
+        static const std::set<std::string> known {
+            "VALUE", "TYPE", "RANGE", "ACCESS", "DESCRIPTION", "CLIPMODE", "UNIT", "HOST_INFO"
+        };
+
+        Attribute out;
+        const std::string name { key };
+
+        if (known.find (name) == known.end())
+        {
+            out.result = AttributeResult::noSuchAttribute;
+            return out;
+        }
+
+        const auto* node = snapshot.find (address);
+
+        if (node == nullptr)
+        {
+            out.result = AttributeResult::noSuchNode;
+            return out;
+        }
+
+        /*  Built through the SAME helpers describe() uses, deliberately. Two
+            code paths writing the same attribute two ways is how `GET /` and
+            `GET /x?VALUE` come to disagree about a number, and the locale test
+            only covers whichever one it happens to call. */
+        std::string body;
+
+        if (name == "VALUE")
+        {
+            if (! node->value.has_value())
+            {
+                out.result = AttributeResult::notPresent;
+                return out;
+            }
+
+            body = "\"VALUE\": [" + valueLiteral (*node->value) + "]";
+        }
+        else if (name == "TYPE")
+        {
+            if (node->typeTags.empty())
+            {
+                out.result = AttributeResult::notPresent;
+                return out;
+            }
+
+            body = "\"TYPE\": " + quoted (node->typeTags);
+        }
+        else if (name == "ACCESS")
+        {
+            //  Every node has one, including a container, which is why this is
+            //  the one attribute that can never answer 204.
+            body = "\"ACCESS\": " + std::to_string (static_cast<int> (node->access));
+        }
+        else if (name == "DESCRIPTION")
+        {
+            if (node->description.empty())
+            {
+                out.result = AttributeResult::notPresent;
+                return out;
+            }
+
+            body = "\"DESCRIPTION\": " + quoted (node->description);
+        }
+        else if (name == "UNIT")
+        {
+            if (node->unit.empty())
+            {
+                out.result = AttributeResult::notPresent;
+                return out;
+            }
+
+            body = "\"UNIT\": [" + quoted (node->unit) + "]";
+        }
+        else if (name == "RANGE")
+        {
+            std::string range;
+
+            if (! writeRange (*node, 1, range))
+            {
+                out.result = AttributeResult::notPresent;
+                return out;
+            }
+
+            //  writeRange indents for the tree writer; this reply has no tree.
+            body = range.substr (range.find_first_not_of (' '));
+        }
+        else if (name == "CLIPMODE")
+        {
+            /*  Deliberately never present. CLIPMODE says what a target does to
+                a value outside its RANGE, and Go.dot does not clip: a write out
+                of range is REJECTED and logged as an `R`, because a cue that
+                silently became a different cue is worse than one that refused.
+                Answering 204 says "this node has no clip mode", which is true.
+                Answering "none" would be a claim about clipping behaviour that
+                a client might then rely on. */
+            out.result = AttributeResult::notPresent;
+            return out;
+        }
+        else    // HOST_INFO, which is a query about the SERVER, not about a node
+        {
+            out.result = AttributeResult::noSuchAttribute;
+            return out;
+        }
+
+        out.result = AttributeResult::found;
+        out.json = "{\n  " + body + "\n}\n";
+        return out;
+    }
+
+    //==========================================================================
+    std::string OscQueryJson::hostInfo (const HostInfo& info)
+    {
+        /*  EXTENSIONS lists what this server ACTUALLY implements, and the
+            absent ones are as load-bearing as the present ones - a client reads
+            this to decide what not to try.
+
+            `CRITICAL` is false: it means guaranteed delivery over TCP, and
+            Phase 1 speaks OSC over UDP only. `PATH_RENAMED` is false because
+            Go.dot never renames a path - objects are identity-addressed, so a
+            rename changes a `name` VALUE and the address is unaffected, which
+            is the whole reason a client's LISTEN survives an edit. */
+        std::string out;
+
+        out += "{\n";
+        out += "  \"NAME\": " + quoted (info.name) + ",\n";
+        out += "  \"OSC_PORT\": " + std::to_string (info.oscPort) + ",\n";
+        out += "  \"OSC_TRANSPORT\": \"UDP\",\n";
+        out += "  \"WS_PORT\": " + std::to_string (info.wsPort) + ",\n";
+        out += "  \"EXTENSIONS\": {\n";
+        out += "    \"ACCESS\": true,\n";
+        out += "    \"CLIPMODE\": false,\n";
+        out += "    \"CRITICAL\": false,\n";
+        out += "    \"DESCRIPTION\": true,\n";
+        out += "    \"LISTEN\": true,\n";
+        out += "    \"PATH_ADDED\": true,\n";
+        out += "    \"PATH_CHANGED\": true,\n";
+        out += "    \"PATH_REMOVED\": true,\n";
+        out += "    \"PATH_RENAMED\": false,\n";
+        out += "    \"RANGE\": true,\n";
+        out += "    \"TAGS\": false,\n";
+        out += "    \"TYPE\": true,\n";
+        out += "    \"UNIT\": true,\n";
+        out += "    \"VALUE\": true\n";
+        out += "  }\n";
+        out += "}\n";
 
         return out;
     }
