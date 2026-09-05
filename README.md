@@ -29,12 +29,19 @@ The specification lives in `docs/`, and it is the spec — not background readin
 
 ---
 
-## Status: Phase 1 in progress
+## Status: Phase 1 complete
 
 Phase 0 — *"a repo that builds on three platforms"* — is complete, and the seven
-Tracktion Engine validation spikes have been run (`docs/spikes/`; all pass). Phase 1, the
-headless engine that loads a show document and exposes it over OSCQuery, is under way. Its
-documents come first, and they are the thing to read before the code:
+Tracktion Engine validation spikes have been run (`docs/spikes/`; all pass).
+
+**Phase 1 is complete.** Its criterion was that an external OSCQuery client can load a
+document, read and write nodes, move standby, and that the event log replays the session
+bit-for-bit; `tests/blackbox/phase1_session.py` is that sentence as a program, and it runs
+in CI on three platforms under two locales. There is a headless engine, a show document,
+a parameter tree, a 50 Hz clock, a cue list, an OSC codec, an OSCQuery server and a
+`serve` verb that puts them together. There is no audio.
+
+The documents come first, and they are the thing to read before the code:
 
 - **[`docs/godot-namespace-draft-0.1.md`](docs/godot-namespace-draft-0.1.md)** — the
   *shape* of the `/godot` namespace and the show document: how a node is addressed, what
@@ -127,9 +134,28 @@ documents come first, and they are the thing to read before the code:
   and reports every problem, `schema` writes or checks the grammar, `tree` prints the
   parameter tree as OSCQuery JSON with no server in the way, and `replay` re-executes a log
   and reports whether it reproduced itself.
+- **The OSC 1.1 codec and a UDP endpoint that says who sent each datagram.** Written
+  rather than borrowed, because a decoder reads somebody else's bytes: every read is
+  bounds-checked and refuses, an element is parsed against its own extent and not the whole
+  packet, the size bound cannot overflow, nesting is capped, and a refusal carries a stable
+  atom the log can group by as well as a sentence a person can read. Each of those is a
+  defect in the parser it replaces, named in the header beside the rule.
+- **An OSCQuery server on one port**, HTTP and WebSocket, with `LISTEN`/`IGNORE`, binary
+  OSC both ways, per-tick coalescing, and pushes withheld from the client that caused them
+  and from anyone holding the node. Four HTTP answers to four different questions, because
+  a server that collapses them into 200-or-404 makes a client guess.
+- **`wfg serve`** — the whole of Phase 1 running. Both ports take 0, bind an ephemeral one
+  and print what they got, which is what lets two instances share a machine.
 - `wfg_tests`, a doctest suite — the toolchain facts a green compile does not prove (the
   JUCE pin at *runtime*, the module configuration actually reaching our targets), plus the
   skeleton's own guarantees, every case run twice, under `C` and under `fr_FR`.
+- **[`tests/blackbox/phase1_session.py`](tests/blackbox/phase1_session.py)**, the phase's
+  done-when clause as a program: it launches the shipped binary on a throwaway bundle,
+  talks to it over HTTP, WebSocket and UDP, saves, and then makes the engine reproduce its
+  own log. Stdlib Python, nothing of ours imported. It found two bugs no unit test could —
+  a first tree published after the socket opened, and a parameter tree nobody marked stale,
+  which made every write invisible to every client while still being logged as applied and
+  written to disk.
 - GitHub Actions CI for Linux, macOS and Windows, plus a pin gate and an
   isolated job that builds the spikes.
 - `spikes/`, for the seven Tracktion Engine validation programs of PRD §6.1.
@@ -137,17 +163,21 @@ documents come first, and they are the thing to read before the code:
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
 **What does not exist yet.** Nothing is *sent* to a mounted target: writes land in the tree
-and the log and stop there, because there is no transport until Phase 2. Nothing *fires* a
-cue, so the standby is a pointer with nothing at the end of it yet. A group is an opaque
-sibling to that pointer, and descending into one is Phase 3, along with parallel lists and
-the published focus node. There is no OSC codec on the wire, no OSCQuery server, and
-therefore no `serve`: the tree can be printed but not subscribed to, and what exists is
-exercised by tests and by the console verbs rather than by a client. Phase 1 adds those in
-that order. The two further submodules they need have now landed —
-`ThirdParty/juce_simpleweb` for the HTTP+WebSocket transport, proven end to end by
-`SimpleWebToolchainTests.cpp`, and `ThirdParty/spatcore`, consumed at source level for its
-real-time helpers. No audio, no UI, no plugin hosting, no video: audio is Phase 2, which is
-planned but not started, and everything else is later.
+and the log and stop there, because there is no transport to a target until Phase 2.
+Nothing *fires* a cue, so the standby is a pointer with nothing at the end of it yet. A
+group is an opaque sibling to that pointer, and descending into one is Phase 3, along with
+parallel lists and the published focus node.
+
+The OSCQuery server does not advertise itself over mDNS — clients are pointed at a host and
+a port, and `juce::NetworkServiceDiscovery` is not mDNS. It speaks no TLS, and
+`deps.no-openssl` asserts on the shipped binary that no OpenSSL came with it. It resolves an
+address to exactly one node: a client sending a pattern is told so, in its own words, rather
+than told the node does not exist. Bundle time tags are carried and preserved but not
+scheduled — Phase 4's state solver is where a time tag starts meaning something, and
+honouring one now would tell a client its timing had been respected when it had not.
+
+No audio, no UI, no plugin hosting, no video: audio is Phase 2, which is planned but not
+started, and everything else is later.
 
 **Open questions, deliberately unanswered anywhere in this tree**
 

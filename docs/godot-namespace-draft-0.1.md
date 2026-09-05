@@ -537,6 +537,93 @@ chooses.
 The payload rides along as a `b:` atom. It is the only copy — the datagram is gone, and a
 post-mortem with no packet in it is a guess.
 
+## 7a. The OSCQuery surface, as PR 1.9 built it
+
+This draft described the tree and never the protocol that carries it. What follows is what
+was built; say so here if any of it should be otherwise.
+
+**`GET <path>`** returns that node and everything under it, as the JSON of §2. `GET /` is
+the whole tree. **`GET <path>?<ATTR>`** returns one attribute as a JSON object holding just
+that key.
+
+**Four answers, not two**, because OSCQuery asks four different questions and a client is
+entitled to tell them apart:
+
+| Status | Means |
+|---|---|
+| **200** | here is the node, or the attribute |
+| **404** | nothing lives at that address |
+| **400** | that is not an OSCQuery attribute — the node may be perfectly real |
+| **204** | the node is real, the attribute is real, and this node does not carry it |
+
+The last is the one worth being careful about. A container has no `VALUE`; a string has no
+`RANGE`. Answering 404 would tell a client the node had gone away, and a JSON `null` would
+tell it the value *is* null. 204 is the only honest one of the three.
+
+**`ACCESS` is the one attribute that can never answer 204** — every node has one, including
+a container.
+
+**`CLIPMODE` is permanently 204, and that is a statement.** Go.dot does not clip: a write
+outside a declared range is REJECTED and logged as an `R`, because a cue that silently
+became a different cue is worse than one that refused. Answering `"none"` would be a claim
+about clipping behaviour a client might then rely on.
+
+**A pattern is refused as a pattern** (400), never as a missing node. Phase 1 resolves an
+address to exactly one node, so a client that put a star where a cue identifier belongs has
+asked for something Go.dot does not do — and 404 would send it hunting for a typo in an
+address that is spelled correctly.
+
+**`?HOST_INFO`** carries `NAME`, `OSC_PORT`, `OSC_TRANSPORT "UDP"`, `WS_PORT` (the same
+port as HTTP) and `EXTENSIONS`. The absent extensions are as load-bearing as the present
+ones, because a client reads that block to decide what not to try: `CRITICAL` is false
+(Phase 1 speaks OSC over UDP only) and `PATH_RENAMED` is false because Go.dot never renames
+a path — objects are identity-addressed, so a rename changes a `name` VALUE and the address
+is untouched, which is the whole reason a client's `LISTEN` survives an edit.
+
+**The WebSocket** is the same port. Text frames are `{"COMMAND": "LISTEN"|"IGNORE", "DATA":
+"<address>"}`; binary frames are OSC, in both directions. A write arriving on it takes the
+same road as one arriving over UDP: `/godot/cmd/…` is a command, anything else is
+`node.set`, and there is no third case.
+
+**Pushes are coalesced to the tick** and carry the value the node HAS at that tick, not the
+succession it passed through during it — a node written forty times in one tick produces
+one push. They are withheld from the origin that caused the change, and from any origin
+holding the node.
+
+**Suppression needs a single cause, and says so when there is not one.** The engine reports
+the origin of a tick's applied events only when they all share one. With two writers in one
+tick there is no single cause, and blaming either would withhold a change it did not make —
+leaving a surface stale with nothing to correct it. So: suppress when the cause is
+unambiguous, send to everybody when it is not. The cost of being wrong that way is one
+redundant push. Per-address attribution would remove even that and belongs with Phase 6's
+real surfaces.
+
+**A malformed frame is dropped and never forwarded.** It never became a command, so there
+is nothing to reject; it becomes an `X` record carrying the sender, the refusal atom and
+the bytes.
+
+**mDNS is not implemented.** Clients are pointed at a host and a port.
+`juce::NetworkServiceDiscovery` is not mDNS and would advertise to nothing that speaks
+OSCQuery.
+
+**Three commands this draft did not list**, added because the things they name are things
+that happen:
+
+- **`node.releaseAll`** — everything one origin holds, in one command. §3.16 requires a
+  disconnect to release what a surface held, or one that crashed mid-gesture leaves a node
+  gated against everybody for the rest of the show. `node.release` takes one address, and a
+  disconnect is one event rather than a list of them. Routed through the queue like any
+  other command, so the release is in the log and a replay reproduces it.
+- **`document.save`** — writing the show back out. §4.11 admits no exceptions and saving is
+  a gesture; it is also the one an OSCQuery client has no other way to ask for, since there
+  is no node whose value is "saved". A failed write is REJECTED rather than reported: `A`
+  means it happened, and a save that did not reach the disk did not happen.
+- **`document.load`** is still not built. `serve` takes its bundle on the command line, and
+  loading a second show into a running engine is a Phase 5 question about what happens to
+  everything pointing at the first.
+
+---
+
 ## 8. Ports (decided, overrule early)
 
 | Purpose | Port | Why this number |
@@ -608,6 +695,16 @@ back on if nobody feels strongly by then.
   instance continues. PRD §3.8's per-cue-type policy may revisit this later; restart and
   second-instance were the alternatives offered.
 
+- **D — Touch gating as described** (settled 2026-09-05, in PR 1.9): `node.touch` and
+  `node.release` per origin, pushes withheld from the touching origin, `node.releaseAll` on
+  disconnect. Built as drawn, with one addition the draft had not anticipated: the same
+  question decides echo suppression, so both live behind one call rather than in two files
+  that could come to disagree.
+
+- **F — The mount attribute set as drawn** (settled 2026-09-05, in PR 1.6): `transport`
+  declared now and used from Phase 2, a mount-level `panic` default with per-node
+  overrides. Nothing in building it argued for a different set.
+
 - **A — Standby survives a save and a load** (settled 2026-09-05, in PR 1.3, the way the
   plan recommended): a rehearsal reopened where it was left is the kinder default. It is one
   column of one CSV row — `list/standby` carries `persist=state` — so reversing it is an edit
@@ -627,9 +724,7 @@ back on if nobody feels strongly by then.
 
 | # | Question | Forced by | Fallback if undecided |
 |---|---|---|---|
-| D | The **touch-gating** vocabulary (§3.16 "required from day one"): `node.touch` / `node.release` per origin, pushes suppressed to the touching origin, released on disconnect. | the OSCQuery server (PR 1.9) | as described — it is the smallest thing that satisfies §3.16, and no surface exists yet to disagree with it |
 | E | Does the Phase 5 desktop UI run **in-process or as a separate client**? | Phase 5, but it shapes Phase 2's plugin-parameter handover | assume separate, because that is the stricter assumption and the one PRD §3.2 reads most naturally |
-| F | The **mount** attribute set: `transport` declared now and used from Phase 2, a mount-level `panic` default with per-node overrides. | mounts (PR 1.6) | as drawn in §2.5 |
 | J | **Should PRD §4.2 record what Tracktion does inside the callback?** Its device callback takes one uncontended `std::shared_lock` per block and its node-player pool uses semaphores; the lipogram can be *enforced* on Go.dot's code and only *measured* on Tracktion's (§11.5). A PRD amendment is the author's to make. | the lipogram test (PR 2.2) | enforce on Go.dot's scopes, report Tracktion's count separately, never hide it |
 
 None of these blocks the next subphase. B (tombstones) and A (standby persistence) were the
