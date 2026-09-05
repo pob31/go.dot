@@ -17,8 +17,10 @@
 #include <wfg/engine/cue/Runner.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
+#include <cctype>
 
 namespace wfg::cue
 {
@@ -47,9 +49,29 @@ namespace wfg::cue
             return { osc::Value::string (text) };
         }
 
-        std::vector<osc::Value> two (const std::string& text, std::int32_t number)
+        /** The numbers of a gains list, in the document's own spelling. */
+        std::vector<double> gainsOf (const juce::ValueTree& route)
         {
-            return { osc::Value::string (text), osc::Value::int32 (number) };
+            std::vector<double> out;
+
+            const auto text = route[juce::Identifier ("gains")].toString().toStdString();
+            std::size_t i = 0;
+
+            while (i < text.size())
+            {
+                while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) != 0)
+                    ++i;
+
+                const auto start = i;
+
+                while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) == 0)
+                    ++i;
+
+                if (i > start)
+                    out.push_back (osc::parseDouble (text.substr (start, i - start)).value_or (0.0));
+            }
+
+            return out;
         }
     }
 
@@ -170,13 +192,118 @@ namespace wfg::cue
             return id;
         }
 
+        /*  Where it goes, resolved through the buses the show declares, so the
+            audio side never has to know what a bus is. */
+        std::string problem;
+        const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem);
+
+        if (! problem.empty())
+        {
+            engine.submit (origin::engine, "run.failed",
+                           { osc::Value::string (id),
+                             osc::Value::string (runError::badRoute) });
+            return id;
+        }
+
         /*  Reserved from here, so a second arm on the same tick cannot pick the
             same voice. The audio side confirms with audio.armed once the graph
             and the disk are ready; until then the run is armed and silent. */
         run->track = track;
 
-        audio->requestArm (id, track, file);
+        ArmRequest request;
+        request.runId = id;
+        request.track = track;
+        request.mediaFile = file;
+        request.levelDb = static_cast<double> (cue[juce::Identifier ("level")]);
+        request.routing = routing;
+
+        run->level = request.levelDb;
+
+        audio->requestArm (request);
         return id;
+    }
+
+    //==============================================================================
+    std::vector<Coefficient> Runner::resolveRouting (const juce::ValueTree& cue,
+                                                     int trackChannels,
+                                                     std::string& problem) const
+    {
+        std::vector<Coefficient> out;
+        problem.clear();
+
+        const auto audioNode = document.root().getChildWithName ("Audio");
+
+        for (const auto& route : cue)
+        {
+            if (route.getType().toString() != "Route")
+                continue;
+
+            const auto busId = route[juce::Identifier ("bus")].toString().toStdString();
+            const auto bus = document.findById (busId);
+
+            /*  A destination naming a bus the show does not have is a routing
+                the rig cannot honour. It fails the run rather than the load: a
+                show with one mis-pointed cue is still a show somebody has to
+                run tonight. */
+            if (! bus.isValid() || bus.getType().toString() != "Bus"
+                  || bus.getParent() != audioNode)
+            {
+                problem = "route names no bus of this show";
+                return {};
+            }
+
+            const auto firstChannel = static_cast<int> (bus[juce::Identifier ("firstChannel")]);
+            const auto width = static_cast<int> (bus[juce::Identifier ("width")]);
+
+            if (width <= 0)
+            {
+                problem = "a bus of no width";
+                return {};
+            }
+
+            const auto gains = gainsOf (route);
+
+            /*  A cue routed nowhere yet is an ordinary state for a show being
+                written, and it is silent rather than wrong. */
+            if (gains.empty())
+                continue;
+
+            /*  THE SHAPE IS THE CHECK. A gains list is the cue's channels times
+                the bus's width, row by row, so a length that does not divide by
+                the width is not a shorter routing - it is a different one, and
+                a client that wrote it meant something the show cannot do. */
+            if (gains.size() % static_cast<std::size_t> (width) != 0)
+            {
+                problem = "gains do not divide by the bus width";
+                return {};
+            }
+
+            const auto inputs = static_cast<int> (gains.size()) / width;
+
+            if (inputs > trackChannels)
+            {
+                problem = "the cue is wider than a track";
+                return {};
+            }
+
+            for (int input = 0; input < inputs; ++input)
+                for (int channel = 0; channel < width; ++channel)
+                {
+                    const auto gain = gains[static_cast<std::size_t> (input * width + channel)];
+
+                    /*  Zero coefficients are dropped rather than written. The
+                        matrix starts silent, so a zero says nothing new - and a
+                        destination list of a hundred mostly-zero numbers would
+                        otherwise cost a hundred atomic stores per arm. */
+                    if (gain == 0.0)
+                        continue;
+
+                    out.push_back ({ input, firstChannel + channel,
+                                     static_cast<float> (gain) });
+                }
+        }
+
+        return out;
     }
 
     //==============================================================================

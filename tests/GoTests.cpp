@@ -52,20 +52,14 @@ namespace
         and the media being ready is a race, and here it is a decision. */
     struct FakePlayer final : cue::Player
     {
-        struct ArmRequest
-        {
-            std::string runId, file;
-            int track = -1;
-        };
-
         int trackCount() const override            { return tracks; }
         std::int64_t samplesElapsed() const override { return samples; }
         int blockSize() const override             { return block; }
+        int channelsPerTrack() const override      { return channels; }
 
-        void requestArm (const std::string& runId, int track,
-                         const std::string& mediaFile) override
+        void requestArm (const cue::ArmRequest& request) override
         {
-            arms.push_back ({ runId, mediaFile, track });
+            arms.push_back (request);
         }
 
         bool launchAtSample (int track, std::int64_t sample) override
@@ -98,9 +92,10 @@ namespace
 
         int tracks = 4;
         int block = 128;
+        int channels = 2;
         std::int64_t samples = 0;
 
-        std::vector<ArmRequest> arms;
+        std::vector<cue::ArmRequest> arms;
         std::vector<std::pair<int, std::int64_t>> launches;
         std::set<int> playing;
     };
@@ -272,7 +267,7 @@ TEST_CASE ("go: a media cue asks for a voice, and launches once the disk answers
         as the disk takes, with the run reporting itself as playing throughout. */
     REQUIRE (rig.runs.all().size() == 1u);
     REQUIRE (rig.audio.arms.size() == 1u);
-    CHECK (rig.audio.arms[0].file == "thunder.wav");
+    CHECK (rig.audio.arms[0].mediaFile == "thunder.wav");
     CHECK (rig.audio.arms[0].track == 0);
     CHECK (rig.audio.launches.empty());
 
@@ -495,4 +490,250 @@ TEST_CASE ("go: the run identifier reaches the log, so a replay draws no numbers
 
     REQUIRE_FALSE (id.empty());
     CHECK (rig.runs.find (id) != nullptr);
+}
+
+//==============================================================================
+/*  ROUTING: from what the designer wrote to what the matrix multiplies.
+
+    The document says a destination in terms of a BUS, because a bus is where
+    the author said a channel exists - and a show moved to another rig re-points
+    its buses rather than every one of its cues. The Runner resolves that into
+    absolute hardware channels, which is the only place that arithmetic lives,
+    and the only place it could be wrong in a way that sends a cue somewhere
+    nobody asked for.
+*/
+namespace
+{
+    /** A show with two buses, so a destination has somewhere to be resolved to. */
+    struct RoutedRig : Rig
+    {
+        RoutedRig()
+        {
+            auto audioNode = document.root().getChildWithName ("Audio");
+            audioNode.setProperty (juce::Identifier ("tracks"), 4, nullptr);
+
+            main = addBus ("Main L/R", 0, 2);
+            foldback = addBus ("Foldback", 4, 2);
+        }
+
+        std::string addBus (const char* name, int firstChannel, int width)
+        {
+            auto audioNode = document.root().getChildWithName ("Audio");
+
+            juce::ValueTree bus { "Bus" };
+            const auto id = runIds.generate();
+
+            bus.setProperty (juce::Identifier ("id"), juce::String (id), nullptr);
+            bus.setProperty (juce::Identifier ("name"), name, nullptr);
+            bus.setProperty (juce::Identifier ("firstChannel"), firstChannel, nullptr);
+            bus.setProperty (juce::Identifier ("width"), width, nullptr);
+
+            audioNode.appendChild (bus, nullptr);
+            return id;
+        }
+
+        void addRoute (const std::string& cueId, const std::string& busId,
+                       const char* gains)
+        {
+            auto cue = document.findById (cueId);
+
+            juce::ValueTree route { "Route" };
+            route.setProperty (juce::Identifier ("id"),
+                               juce::String (runIds.generate()), nullptr);
+            route.setProperty (juce::Identifier ("bus"), juce::String (busId), nullptr);
+            route.setProperty (juce::Identifier ("gains"), gains, nullptr);
+
+            cue.appendChild (route, nullptr);
+        }
+
+        std::vector<cue::Coefficient> routingOf (const std::string& cueId,
+                                                 std::string& problem)
+        {
+            return runner.resolveRouting (document.findById (cueId), 2, problem);
+        }
+
+        std::string main, foldback;
+    };
+}
+
+TEST_CASE ("routing: a bus is a place on the rig, and the cue never names a channel")
+{
+    /*  Foldback starts at hardware channel 4, so a cue routed to it lands on 4
+        and 5 - and the cue itself says nothing about either number. Re-point the
+        bus and every cue feeding it moves, which is the whole reason a
+        destination is a bus. */
+    RoutedRig rig;
+
+    rig.addRoute (rig.mediaId, rig.foldback, "1 0 0 1");
+
+    std::string problem;
+    const auto routing = rig.routingOf (rig.mediaId, problem);
+
+    INFO (problem);
+    CHECK (problem.empty());
+    REQUIRE (routing.size() == 2u);
+
+    CHECK (routing[0].input == 0);
+    CHECK (routing[0].output == 4);
+    CHECK (routing[0].gain == doctest::Approx (1.0f));
+
+    CHECK (routing[1].input == 1);
+    CHECK (routing[1].output == 5);
+    CHECK (routing[1].gain == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("routing: destinations are a list, and a cue reaches all of them")
+{
+    /*  PRD §3.9b. A source into a spatial processor AND a stereo feed to
+        foldback is the ordinary case, not the exotic one. */
+    RoutedRig rig;
+
+    rig.addRoute (rig.mediaId, rig.main, "1 0 0 1");
+    rig.addRoute (rig.mediaId, rig.foldback, "0.5 0 0 0.5");
+
+    std::string problem;
+    const auto routing = rig.routingOf (rig.mediaId, problem);
+
+    CHECK (problem.empty());
+    REQUIRE (routing.size() == 4u);
+
+    CHECK (routing[0].output == 0);
+    CHECK (routing[1].output == 1);
+    CHECK (routing[2].output == 4);
+    CHECK (routing[3].output == 5);
+    CHECK (routing[3].gain == doctest::Approx (0.5f));
+}
+
+TEST_CASE ("routing: the gains are read row by row, input then channel")
+{
+    /*  A mono cue spread across a stereo bus at different gains: one input, two
+        channels, and the order is the thing that would be silently wrong. */
+    RoutedRig rig;
+
+    rig.addRoute (rig.mediaId, rig.main, "0.25 0.75");
+
+    std::string problem;
+    const auto routing = rig.routingOf (rig.mediaId, problem);
+
+    REQUIRE (routing.size() == 2u);
+
+    CHECK (routing[0].input == 0);
+    CHECK (routing[0].output == 0);
+    CHECK (routing[0].gain == doctest::Approx (0.25f));
+
+    CHECK (routing[1].input == 0);
+    CHECK (routing[1].output == 1);
+    CHECK (routing[1].gain == doctest::Approx (0.75f));
+}
+
+TEST_CASE ("routing: a zero coefficient is silence already, so it is not written")
+{
+    /*  The matrix starts silent, so a zero says nothing new - and a destination
+        list of mostly-zero numbers across a wide rig would otherwise cost an
+        atomic store per zero on every arm. */
+    RoutedRig rig;
+
+    rig.addRoute (rig.mediaId, rig.main, "1 0 0 0");
+
+    std::string problem;
+    const auto routing = rig.routingOf (rig.mediaId, problem);
+
+    REQUIRE (routing.size() == 1u);
+    CHECK (routing[0].input == 0);
+    CHECK (routing[0].output == 0);
+}
+
+TEST_CASE ("routing: a cue routed nowhere yet is silent rather than wrong")
+{
+    /*  An ordinary state for a show being written. It resolves to nothing and
+        says no problem, because there is none. */
+    RoutedRig rig;
+
+    std::string problem;
+    CHECK (rig.routingOf (rig.mediaId, problem).empty());
+    CHECK (problem.empty());
+
+    rig.addRoute (rig.mediaId, rig.main, "");
+
+    CHECK (rig.routingOf (rig.mediaId, problem).empty());
+    CHECK (problem.empty());
+}
+
+TEST_CASE ("routing: a shape the rig cannot honour is refused, and says so")
+{
+    RoutedRig rig;
+
+    SUBCASE ("a bus this show does not have")
+    {
+        rig.addRoute (rig.mediaId, "NOSUCHID", "1 0 0 1");
+
+        std::string problem;
+        CHECK (rig.routingOf (rig.mediaId, problem).empty());
+        CHECK_FALSE (problem.empty());
+    }
+
+    SUBCASE ("gains that do not divide by the bus width")
+    {
+        /*  Three numbers across a stereo bus is not a shorter routing, it is a
+            different one, and the client that wrote it meant something the show
+            cannot do. */
+        rig.addRoute (rig.mediaId, rig.main, "1 0 1");
+
+        std::string problem;
+        CHECK (rig.routingOf (rig.mediaId, problem).empty());
+        CHECK_FALSE (problem.empty());
+    }
+
+    SUBCASE ("a cue wider than the track that would carry it")
+    {
+        /*  §3.9b: no silent up- or downmix. Four inputs across a stereo bus on
+            a two-channel track is refused rather than folded down. */
+        rig.addRoute (rig.mediaId, rig.main, "1 0 0 1 1 0 0 1");
+
+        std::string problem;
+        CHECK (rig.routingOf (rig.mediaId, problem).empty());
+        CHECK_FALSE (problem.empty());
+    }
+}
+
+TEST_CASE ("go: a cue that cannot be routed fails its run, never the load")
+{
+    /*  A show with one mis-pointed cue is still a show somebody has to run
+        tonight. The GO is APPLIED - the request was legal - and the run says
+        bad-route. */
+    RoutedRig rig;
+
+    rig.addRoute (rig.mediaId, "NOSUCHID", "1 0 0 1");
+    rig.setStandby (rig.mediaId);
+
+    const auto outcome = rig.submitAndTick ("go");
+    rig.tickOnce();
+
+    CHECK (outcome.applied == 1);
+    REQUIRE (rig.runs.all().size() == 1u);
+    CHECK (rig.runs.all().front().state == cue::runState::failed);
+    CHECK (rig.runs.all().front().error == cue::runError::badRoute);
+}
+
+TEST_CASE ("go: the arm carries the level and the destinations the cue was written with")
+{
+    RoutedRig rig;
+
+    rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/level", "-6");
+    rig.addRoute (rig.mediaId, rig.foldback, "1 0 0 1");
+    rig.setStandby (rig.mediaId);
+
+    rig.submitAndTick ("go");
+
+    REQUIRE (rig.audio.arms.size() == 1u);
+
+    const auto& arm = rig.audio.arms.front();
+    CHECK (arm.mediaFile == "thunder.wav");
+    CHECK (arm.levelDb == doctest::Approx (-6.0));
+    REQUIRE (arm.routing.size() == 2u);
+    CHECK (arm.routing[0].output == 4);
+
+    /*  And the run carries the level it was armed at, which is what a fade will
+        move - the cue's own level stays where the designer left it. */
+    CHECK (rig.runs.all().front().level == doctest::Approx (-6.0));
 }

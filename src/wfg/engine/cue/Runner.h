@@ -55,6 +55,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace wfg
 {
@@ -88,6 +89,42 @@ namespace wfg::cue
     int launchLatencyTicks (int blockSize, int samplesPerTick) noexcept;
 
     //==============================================================================
+    /*  One coefficient of a cue's output stage: from one of the cue's own
+        channels to one HARDWARE output channel, at a gain.
+
+        ABSOLUTE OUTPUT CHANNELS, resolved before this struct exists. The
+        document says a destination in terms of a bus, because a bus is where
+        the author said a channel exists and a show moved to another rig
+        re-points buses rather than every cue. The Runner does that resolution -
+        it has the document - so the audio side never has to know what a bus is.
+    */
+    struct Coefficient
+    {
+        int input = 0;
+        int output = 0;
+        float gain = 0.0f;
+    };
+
+    /*  Everything the audio side needs to make one cue ready.
+
+        A VALUE, carrying no document reference, because it crosses a thread
+        boundary: the tick thread fills it in and the message thread acts on it,
+        and a reference into a ValueTree that the tick thread may edit meanwhile
+        is exactly the bug that would be found on a show night.
+    */
+    struct ArmRequest
+    {
+        std::string runId;
+        int track = -1;
+        std::string mediaFile;
+
+        /** The cue's authored level, in dB. Not what a fade will write. */
+        double levelDb = 0.0;
+
+        /** Where it goes. Empty is legal and means a cue routed nowhere yet. */
+        std::vector<Coefficient> routing;
+    };
+
     /*  The audio side, as the cue layer sees it.
 
         NAMES NO TRACKTION TYPE, deliberately: this header is included by the
@@ -103,14 +140,13 @@ namespace wfg::cue
         /** The polyphony ceiling. Zero when the show has no audio. */
         virtual int trackCount() const = 0;
 
-        /*  Makes a track ready to play a file, and RETURNS IMMEDIATELY. The
-            work is a graph rebuild and a wait on the disk, so it happens
-            somewhere else; the implementation reports completion by submitting
+        /*  Makes a track ready to play a cue, and RETURNS IMMEDIATELY. The work
+            is a graph rebuild and a wait on the disk, so it happens somewhere
+            else; the implementation reports completion by submitting
             `audio.armed <run> <track>`, which is what moves the run on.
 
             Called from the tick thread. It must not block there. */
-        virtual void requestArm (const std::string& runId, int track,
-                                 const std::string& mediaFile) = 0;
+        virtual void requestArm (const ArmRequest&) = 0;
 
         /*  Places a launch at one of Go.dot's own sample positions. Tick
             thread, and the whole of what GO does to the audio side. */
@@ -127,6 +163,9 @@ namespace wfg::cue
 
         /** Samples per audio block, for the launch-instant arithmetic. */
         virtual int blockSize() const = 0;
+
+        /** How many channels a track carries, which is a cue's input width. */
+        virtual int channelsPerTrack() const = 0;
     };
 
     //==============================================================================
@@ -169,6 +208,22 @@ namespace wfg::cue
         /*  Arms a cue without firing it: the standby path. Same return. */
         std::string arm (Engine& engine, const std::string& cueId,
                          const std::string& runId);
+
+        /*  Where a cue's destinations land on the rig, resolved through the
+            buses the show declares.
+
+            Public because it is worth testing on its own: it is the one piece
+            of arithmetic between "the designer said main and foldback" and "the
+            matrix multiplies these numbers", and getting it wrong sends a cue
+            somewhere nobody asked for.
+
+            `problem` is empty when it resolved. It is filled in rather than
+            thrown because a cue that cannot be routed fails its RUN - the
+            request was legal and the show cannot honour it - and never the
+            load. */
+        std::vector<Coefficient> resolveRouting (const juce::ValueTree& cue,
+                                                 int trackChannels,
+                                                 std::string& problem) const;
 
     private:
         std::string armInternal (Engine& engine, const std::string& cueId,
