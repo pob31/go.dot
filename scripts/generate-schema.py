@@ -126,19 +126,61 @@ def parse_range(text, row_label):
             bool(high), number(high) if high else 0.0, [])
 
 
+# Where csv.DictReader files the fields of a row that has too many of them. It
+# has to be given a name, because the default is None and a row with too FEW
+# fields uses None as its missing VALUES - so without this the two cases would
+# be indistinguishable.
+OVERFLOW = "__overflow__"
+
+
 def read_rows():
     if not CSV_PATH.is_file():
         fail("no parameter table at %s" % CSV_PATH)
 
     with CSV_PATH.open(newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
+        reader = csv.DictReader(handle, restkey=OVERFLOW, restval=None)
         expected = ["owner", "address", "type", "access", "default", "range",
                     "unit", "kind", "rate_cap", "anticipatable", "panic",
                     "persist", "description"]
         if reader.fieldnames != expected:
             fail("the table's columns changed.\n    expected: %s\n    found:    %s"
                  % (",".join(expected), ",".join(reader.fieldnames or [])))
-        return list(reader)
+        rows = list(reader)
+
+    # THE FIELD COUNT, and this check exists because its absence cost nine
+    # truncated descriptions before anyone noticed.
+    #
+    # `description` is the last column and it is prose, so it is the one that
+    # attracts commas. RFC 4180 says a field containing one must be quoted;
+    # DictReader does not object when it is not. It files everything past the
+    # last column under restkey and hands back a description cut off at the
+    # first comma, and the row still looks perfectly well formed.
+    #
+    # Those descriptions are not decoration. They become the DESCRIPTION an
+    # OSCQuery client shows someone at 2 a.m. and the documentation in the
+    # published RELAX NG grammar, and a sentence that stops mid-clause is
+    # exactly the kind of wrong that reads as deliberate.
+    for number, row in enumerate(rows, start=2):     # line 1 is the header
+        label = "%s:%d" % (CSV_PATH.name, number)
+
+        if OVERFLOW in row:
+            fail("%s: %d fields, expected %d.\n"
+                 "    A field containing a comma must be double-quoted (RFC 4180).\n"
+                 "    kept: %r\n"
+                 "    lost: %r\n"
+                 "    fix:  wrap the whole description in double quotes."
+                 % (label, len(reader.fieldnames) + len(row[OVERFLOW]),
+                    len(reader.fieldnames), row["description"],
+                    ",".join(row[OVERFLOW])))
+
+        short = [name for name, value in row.items() if value is None]
+
+        if short:
+            fail("%s: %d fields, expected %d. Missing: %s"
+                 % (label, len(reader.fieldnames) - len(short),
+                    len(reader.fieldnames), ", ".join(short)))
+
+    return rows
 
 
 def build(rows):

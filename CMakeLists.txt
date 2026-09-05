@@ -211,8 +211,25 @@ if(WFG_BUILD_TESTS)
     #
     # It is NOT required to BUILD: the generated header is committed, so a clone
     # with no Python compiles and ships. Only checking it needs the interpreter.
+    # LOCATION, not CMake's default of VERSION, and this is a correctness
+    # choice rather than a preference.
+    #
+    # The default picks the HIGHEST version it can find anywhere - PATH, the
+    # Windows registry, the macOS frameworks. Somebody who types
+    # `pip install lxml` installs into the interpreter their SHELL resolves, so
+    # the two disagree the moment a machine has more than one Python, and the
+    # symptom is a configure failure saying a module is missing that the person
+    # can see is installed.
+    #
+    # Measured, on the Windows CI runner: `python` is 3.12 and CMake chose a
+    # 3.14.7 out of the tool cache, so the lxml the workflow had just installed
+    # was invisible to the probe below. LOCATION searches PATH first and takes
+    # the first match, which is the same interpreter the shell would run.
+    set(Python3_FIND_STRATEGY LOCATION)
+
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     set(WFG_PYTHON "${Python3_EXECUTABLE}")
+    message(STATUS "Go.dot: Python for the test gates: ${WFG_PYTHON}")
 
     # lxml, likewise hard. It runs the OUTSIDE opinion: the committed RELAX NG
     # grammar against every fixture, through a validator that shares no code

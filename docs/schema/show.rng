@@ -83,7 +83,7 @@
       </optional>
       <optional>
         <attribute name="enabled">
-          <a:documentation>Whether the cue runs at all. A disabled cue is skipped</a:documentation>
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>
@@ -92,7 +92,7 @@
       </optional>
       <optional>
         <attribute name="name">
-          <a:documentation>The cue&apos;s name</a:documentation>
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -104,7 +104,7 @@
       </optional>
       <optional>
         <attribute name="number">
-          <a:documentation>The decimal cue number. A string</a:documentation>
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -149,7 +149,7 @@
       </optional>
       <optional>
         <attribute name="enabled">
-          <a:documentation>Whether the cue runs at all. A disabled cue is skipped</a:documentation>
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>
@@ -167,7 +167,7 @@
       </optional>
       <optional>
         <attribute name="name">
-          <a:documentation>The cue&apos;s name</a:documentation>
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -179,7 +179,7 @@
       </optional>
       <optional>
         <attribute name="number">
-          <a:documentation>The decimal cue number. A string</a:documentation>
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -290,7 +290,7 @@
       </attribute>
       <optional>
         <attribute name="standby">
-          <a:documentation>The cue GO will act on. One per list; moved only by a standby command</a:documentation>
+          <a:documentation>The cue GO will act on. One per list; moved only by a standby command, never by selection or scrolling.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

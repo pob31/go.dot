@@ -76,6 +76,17 @@ CMakeLists.txt text eol=lf
 # an exception nobody remembers the reason for.
 *.ps1  text eol=lf
 
+# Git's own metadata files and the licence. Git parses .gitattributes and
+# .gitmodules with either line ending, so this is not a correctness matter - it
+# is the last four tracked files that had no rule, and leaving them out meant
+# `git add` kept printing a conversion warning that everyone would learn to
+# scroll past. A warning nobody reads is worse than no warning, because the next
+# real one looks the same.
+.gitattributes text eol=lf
+.gitignore     text eol=lf
+.gitmodules    text eol=lf
+LICENSE        text eol=lf
+
 # Nothing here reaches ThirdParty/: those are two gitlinks, and Git does not
 # apply a superproject's attributes across a submodule boundary. JUCE and
 # Tracktion Engine carry their own.
