@@ -78,6 +78,8 @@ namespace wfg::audio
 
         bool launchAtSample (int track, std::int64_t sample) override;
         bool stop (int track) override;
+        bool stopAtSample (int track, std::int64_t sample) override;
+        void setLevelDb (int track, double levelDb) override;
         bool isPlaying (int track) const override;
         bool isArmReady (int track) const override;
 

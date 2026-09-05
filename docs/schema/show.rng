@@ -67,6 +67,8 @@
           <ref name="Cue"/>
           <ref name="Group"/>
           <ref name="Media"/>
+          <ref name="Fade"/>
+          <ref name="Stop"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -206,6 +208,8 @@
           <ref name="Cue"/>
           <ref name="Group"/>
           <ref name="Media"/>
+          <ref name="Fade"/>
+          <ref name="Stop"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -313,6 +317,184 @@
               <data type="double"/>
             </zeroOrMore>
           </list>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Fade">
+    <element name="Fade">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="curve">
+          <a:documentation>The shape it takes between the two levels. Linear in the dB domain, which is what a fader feels like; sCurve eases out of the start and into the end, for a fade that should not announce itself. Two shapes until the curve editor of Phase 5.</a:documentation>
+          <choice>
+            <value>linear</value>
+            <value>sCurve</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="duration">
+          <a:documentation>How long it takes. Zero is a jump, and it is the default so that a fade nobody has finished writing does something obvious rather than something slow and mysterious.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="level">
+          <a:documentation>Where the fade ends, in dB. -120 is silence rather than a very small number, and it is the default because a fade to silence is what most fades are - a fresh fade cue is a slow cut to nothing, which is a real thing to want and can only ever make the show quieter.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-120</param>
+            <param name="maxInclusive">12</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="target">
+          <a:documentation>The cue whose sound this fade moves. It targets the CUE and finds its live run when it fires, because a cue is what somebody wrote down and a run is what happens to be playing - and the show has to say the first without knowing the second.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Stop">
+    <element name="Stop">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="curve">
+          <a:documentation>The shape of that fade. Ignored by a hard stop.</a:documentation>
+          <choice>
+            <value>linear</value>
+            <value>sCurve</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="duration">
+          <a:documentation>How long the fade half takes, when the verb is fade. Ignored by a hard stop.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="target">
+          <a:documentation>The cue this stops. As with a fade it names the cue and finds the run, and a target that is not running is a no-op that is applied rather than refused.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="verb">
+          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident.</a:documentation>
+          <choice>
+            <value>hard</value>
+            <value>fade</value>
+          </choice>
         </attribute>
       </optional>
     </element>

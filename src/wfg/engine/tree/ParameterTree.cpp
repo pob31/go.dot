@@ -350,6 +350,8 @@ namespace wfg::tree
             const auto element = node.getType().toString().toStdString();
             const auto isGroup = element == "Group";
             const auto isMedia = element == "Media";
+            const auto isFade = element == "Fade";
+            const auto isStop = element == "Stop";
             const auto id = node[idProperty].toString().toStdString();
 
             if (id.empty())
@@ -372,6 +374,14 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("media"))
                     rows.push_back (row);
 
+            if (isFade)
+                for (auto* row : doc::Schema::rowsForOwner ("fade"))
+                    rows.push_back (row);
+
+            if (isStop)
+                for (auto* row : doc::Schema::rowsForOwner ("stop"))
+                    rows.push_back (row);
+
             for (const auto* row : rows)
             {
                 const doc::Attribute attribute { element, row };
@@ -381,7 +391,11 @@ namespace wfg::tree
 
                 /*  Derived from the element, never stored - which is what makes
                     it read-only in a way a client cannot argue with. */
-                if (name == "kind")        text = isGroup ? "group" : isMedia ? "media" : "memo";
+                if (name == "kind")        text = isGroup ? "group"
+                                                  : isMedia ? "media"
+                                                  : isFade  ? "fade"
+                                                  : isStop  ? "stop"
+                                                            : "memo";
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
                 else if (name == "order")  text = orderOf (node);

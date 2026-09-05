@@ -122,6 +122,19 @@ namespace wfg::audio
 
     bool HostPlayer::stop (int track)           { return audioHost.stopTrack (track); }
 
+    bool HostPlayer::stopAtSample (int track, std::int64_t sample)
+    {
+        return audioHost.stopTrackAt (track, audioHost.beatsAtSample (sample));
+    }
+
+    void HostPlayer::setLevelDb (int track, double levelDb)
+    {
+        /*  The tick thread, fifty times a second while a fade runs. One relaxed
+            atomic store; the audio side interpolates between the values. */
+        if (auto* matrix = audioHost.trackMatrix (track))
+            matrix->setLevelDb (static_cast<float> (levelDb));
+    }
+
     bool HostPlayer::isPlaying (int track) const
     {
         return audioHost.trackPlayState (track).playing;

@@ -66,6 +66,25 @@ namespace wfg::audio
         /** How long a changed coefficient takes to arrive, in seconds. */
         static constexpr double slewSeconds = 0.05;
 
+        /*  How long a changed LEVEL takes, and it is one control tick rather
+            than the 50 ms above.
+
+            The difference is not a preference, it is what the two values are
+            for. A coefficient changes in STEPS - an arm points a cue somewhere
+            new - and 50 ms is the WFS-DIY convention for making a step
+            inaudible. A level is written by a FADE, fifty times a second (PRD
+            §3.4), and a smoother whose ramp is longer than the interval between
+            values never arrives at any of them: the output would lag the fade
+            by tens of milliseconds and the curve a designer drew would come out
+            low-passed into a different one.
+
+            At exactly one tick each value is reached precisely as the next
+            arrives, so the audio is a piecewise-linear interpolation of the
+            intended curve with no lag and no shape of its own. It is still
+            20 ms, which is well inside the range that makes a step change
+            click-free, so nothing is lost for the step case either. */
+        static constexpr double levelSlewSeconds = 1.0 / 50.0;
+
         /*  Sizes everything. Message thread, before the audio thread can see
             this object. Calling it again re-sizes and snaps every smoother to
             its target, which is what makes a device change safe: the matrix

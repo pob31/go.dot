@@ -49,6 +49,7 @@
 
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -155,6 +156,20 @@ namespace wfg::cue
         /** Stops a track's cue now. Tick thread. */
         virtual bool stop (int track) = 0;
 
+        /*  Stops it at one of Go.dot's own sample positions, the way a launch
+            is placed. Tick thread.
+
+            Tracktion treats a queued stop exactly as it treats a queued play -
+            a beat inside the block splits the block to the sample, a beat
+            already past stops for the whole block - so a stop is as placeable
+            as a start, which is what lets a hard stop land where the show says
+            rather than wherever the next block happened to begin. */
+        virtual bool stopAtSample (int track, std::int64_t sample) = 0;
+
+        /*  The level a track's cue is playing at, in dB. Tick thread, once per
+            tick while a fade runs, and one relaxed atomic store. */
+        virtual void setLevelDb (int track, double levelDb) = 0;
+
         /** Whether that track's cue is sounding. Tick thread. */
         virtual bool isPlaying (int track) const = 0;
 
@@ -244,9 +259,33 @@ namespace wfg::cue
                                                  int trackChannels,
                                                  std::string& problem) const;
 
+        /** Every fade in flight. Diagnostics and tests; the Runner drives them. */
+        const std::vector<FadeJob>& fades() const noexcept { return running; }
+
     private:
         std::string armInternal (Engine& engine, const std::string& cueId,
                                  const std::string& runId, bool fireAtOnce);
+
+        /*  A fade or a stop cue firing. Both act on a run that already exists,
+            which is what makes them different from a media cue: they create a
+            run of their own to report what they did, and they change one that
+            somebody else started. */
+        std::string fireFade (Engine& engine, const juce::ValueTree& cue,
+                              const std::string& runId);
+        std::string fireStop (Engine& engine, const juce::ValueTree& cue,
+                              const std::string& runId);
+
+        /*  `selfCueId` is the fade or stop cue being fired; `targetCueId` is
+            the cue it acts on. They are two arguments and not one because the
+            run being created belongs to the FIRST - a run says which cue it
+            instantiates - while the level being moved belongs to the second.
+            Conflating them made liveRunOf answer with the fade's own run. */
+        std::string beginFade (Engine& engine, const std::string& selfCueId,
+                               const std::string& targetCueId,
+                               const std::string& selfRunId, const std::string& kind,
+                               double toDb, double seconds, FadeCurve, bool stopWhenDone);
+
+        void advanceFades (Engine& engine);
 
         void launchIfDue (Engine& engine, std::int64_t tick);
         void observeEdges (Engine& engine);
@@ -259,6 +298,8 @@ namespace wfg::cue
         Player* audio = nullptr;
         int samplesPerTick = 0;
         std::string mediaFolder;
+
+        std::vector<FadeJob> running;
     };
 
     //==============================================================================

@@ -2069,12 +2069,21 @@ TEST_CASE ("first sound: GO reaches the outputs the cue names, at the level it n
         A cue that replayed itself at the end - or summed with itself - would be
         the worst kind of show fault, because it happens after the moment
         anybody is watching. */
+    /*  PUMPED UNTIL IT FINISHES RATHER THAN FOR A FIXED COUNT, and the
+        difference is a flake this caught. A tick here is 960 samples and a
+        block is 128, so the loop pumps seven blocks where a tick is seven and a
+        half - it runs 7% slow, and a fixed count that was just enough passed
+        one run in two. Waiting for the condition says what the case means and
+        does not depend on arithmetic about the test. */
+    for (int i = 0; i < 500 && ! runs.all().front().isFinished(); ++i)
+        oneTick();
+
+    REQUIRE (runs.all().front().isFinished());
+
     sink.reset (settings.outputChannels);
 
     for (int i = 0; i < 90; ++i)
         oneTick();
-
-    REQUIRE (runs.all().front().isFinished());
 
     INFO ("after the cue finished: " << sink[4] << " " << sink[5]);
 

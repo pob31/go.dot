@@ -118,9 +118,9 @@ namespace wfg::doc
             static const std::vector<Containment> table {
                 { "Show",   false, { "Lists", "Mounts", "Audio" }, { "document" } },
                 { "Lists",  false, { "List" },             {} },
-                { "List",   true,  { "Cue", "Group", "Media" }, { "list" } },
+                { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop" }, { "list" } },
                 { "Cue",    true,  {},                     { "cue" } },
-                { "Group",  true,  { "Cue", "Group", "Media" }, { "cue", "group" } },
+                { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop" }, { "cue", "group" } },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
                     pattern a Group already set. `kind` stays derived from the
@@ -144,6 +144,15 @@ namespace wfg::doc
                     a position: deleting the first route would silently
                     re-point a client holding the second. */
                 { "Route",  true,  {},                     { "route" } },
+
+                /*  A FADE AND A STOP ARE CUES, and elements of their own for
+                    the reason a Media is: `kind` stays derived and read-only,
+                    and the grammar can refuse a `duration` on a cue that has
+                    nothing to fade. Neither carries a Route - they act on a run
+                    that already has one, which is the whole difference between
+                    them and a media cue. */
+                { "Fade",   true,  {},                     { "cue", "fade" } },
+                { "Stop",   true,  {},                     { "cue", "stop" } },
                 { "Mounts", false, { "Mount" },            {} },
                 { "Mount",  true,  {},                     { "mount" } },
                 { "Audio",  false, { "Bus" },              { "audio" } },

@@ -34,6 +34,8 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/audio/CueMatrix.h>
+#include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -71,7 +73,19 @@ namespace
         bool stop (int track) override
         {
             playing.erase (track);
+            stopped.push_back (track);
             return true;
+        }
+
+        bool stopAtSample (int track, std::int64_t sample) override
+        {
+            stopsAt.push_back ({ track, sample });
+            return true;
+        }
+
+        void setLevelDb (int track, double levelDb) override
+        {
+            levels.push_back ({ track, levelDb });
         }
 
         bool isPlaying (int track) const override
@@ -107,6 +121,9 @@ namespace
         std::vector<std::pair<int, std::int64_t>> launches;
         std::set<int> playing;
         std::set<int> ready;
+        std::vector<int> stopped;
+        std::vector<std::pair<int, std::int64_t>> stopsAt;
+        std::vector<std::pair<int, double>> levels;
     };
 
     //==========================================================================
@@ -745,4 +762,385 @@ TEST_CASE ("go: the arm carries the level and the destinations the cue was writt
     /*  And the run carries the level it was armed at, which is what a fade will
         move - the cue's own level stays where the designer left it. */
     CHECK (rig.runs.all().front().level == doctest::Approx (-6.0));
+}
+
+//==============================================================================
+/*  FADE AND STOP: what happens to a cue after it has started.
+
+    A fade targets the CUE and finds its live run when it fires, because the
+    show has to say which sound it means without knowing which instance is
+    playing. It interpolates in the dB domain at control rate, and its per-tick
+    values are never logged - §3.15 keeps continuous readouts out of the log,
+    and a replay recomputes them from the GO and the document.
+*/
+namespace
+{
+    /*  The rig above, plus a fade cue and a stop cue pointed at the media one. */
+    struct FadeRig : Rig
+    {
+        FadeRig()
+        {
+            fadeId = document.createCue (listId, 2, "fade", "Under").id;
+            stopId = document.createCue (listId, 3, "stop", "Out").id;
+
+            setCue (fadeId, "target", mediaId);
+            setCue (fadeId, "level", "-20");
+            setCue (fadeId, "duration", "1");
+
+            setCue (stopId, "target", mediaId);
+        }
+
+        void setCue (const std::string& id, const char* name, const std::string& value)
+        {
+            document.setAttribute ("/godot/cue/" + id + "/" + name, value);
+        }
+
+        /** GO on one cue, without disturbing standby. */
+        Engine::TickResult fire (const std::string& id)
+        {
+            return submitAndTick ("cue.fire", { osc::Value::string (id) });
+        }
+
+        /** Plays the media cue and leaves it sounding. */
+        std::string startMedia()
+        {
+            fire (mediaId);
+            audio.completeArms (engine);
+            tickOnce();
+            tickOnce();
+
+            const auto id = runs.all().front().id;
+            audio.playing.insert (runs.find (id)->track);
+            tickOnce();
+
+            return id;
+        }
+
+        std::string fadeId, stopId;
+    };
+}
+
+TEST_CASE ("fade curve: dB, monotonic, and it arrives exactly")
+{
+    /*  The arithmetic on its own, because it is the part a rendered envelope
+        cannot tell you is wrong - a curve that overshot by a hair would look
+        like a fade in a plot and be a level nobody asked for. */
+    using cue::fadeLevelDb;
+    using cue::FadeCurve;
+
+    for (const auto curve : { FadeCurve::linear, FadeCurve::sCurve })
+    {
+        INFO ("curve " << (curve == FadeCurve::linear ? "linear" : "sCurve"));
+
+        /*  Both ends exactly. A fade that ended at -119.97 dB would leave a
+            cue very slightly audible for the rest of the show. */
+        CHECK (fadeLevelDb (0.0, -120.0, 0.0, curve) == doctest::Approx (0.0));
+        CHECK (fadeLevelDb (0.0, -120.0, 1.0, curve) == doctest::Approx (-120.0));
+
+        /*  Clamped, so a caller that overshot by a tick gets the destination
+            rather than a level beyond it. */
+        CHECK (fadeLevelDb (0.0, -120.0, 1.5, curve) == doctest::Approx (-120.0));
+        CHECK (fadeLevelDb (0.0, -120.0, -0.5, curve) == doctest::Approx (0.0));
+
+        /*  MONOTONIC ALL THE WAY DOWN, which is what stops a curve putting a
+            level somewhere nobody asked for on its way past. */
+        auto previous = fadeLevelDb (0.0, -120.0, 0.0, curve);
+
+        for (int step = 1; step <= 100; ++step)
+        {
+            const auto now = fadeLevelDb (0.0, -120.0, step / 100.0, curve);
+            REQUIRE (now <= previous);
+            previous = now;
+        }
+    }
+
+    /*  Linear is straight: halfway through is halfway down, in dB. */
+    CHECK (fadeLevelDb (0.0, -20.0, 0.5, FadeCurve::linear) == doctest::Approx (-10.0));
+
+    /*  And the sCurve is not, but agrees at the middle - smoothstep is
+        symmetric, so it is slower at both ends and steeper in the middle. */
+    CHECK (fadeLevelDb (0.0, -20.0, 0.5, FadeCurve::sCurve) == doctest::Approx (-10.0));
+    CHECK (fadeLevelDb (0.0, -20.0, 0.25, FadeCurve::sCurve)
+             > fadeLevelDb (0.0, -20.0, 0.25, FadeCurve::linear));
+    CHECK (fadeLevelDb (0.0, -20.0, 0.75, FadeCurve::sCurve)
+             < fadeLevelDb (0.0, -20.0, 0.75, FadeCurve::linear));
+
+    /*  A word nobody recognises is linear rather than a refusal: this is read
+        from a document the grammar already checked, and a cue that did nothing
+        because of a hand edit would be a cue that fails on a show night. */
+    CHECK (cue::fadeCurveFrom ("sCurve") == FadeCurve::sCurve);
+    CHECK (cue::fadeCurveFrom ("linear") == FadeCurve::linear);
+    CHECK (cue::fadeCurveFrom ("wobble") == FadeCurve::linear);
+}
+
+//==============================================================================
+TEST_CASE ("fade: it moves the run's level, one value a tick, and arrives")
+{
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+    CHECK (rig.runs.find (mediaRun)->level == doctest::Approx (0.0));
+
+    rig.fire (rig.fadeId);
+
+    /*  A one-second fade at fifty ticks a second is fifty values. */
+    for (int i = 0; i < 25; ++i)
+        rig.tickOnce();
+
+    const auto halfway = rig.runs.find (mediaRun)->level;
+    INFO ("halfway: " << halfway << " dB");
+
+    CHECK (halfway < -5.0);
+    CHECK (halfway > -15.0);
+
+    for (int i = 0; i < 30; ++i)
+        rig.tickOnce();
+
+    /*  Arrived exactly, and stopped there. */
+    CHECK (rig.runs.find (mediaRun)->level == doctest::Approx (-20.0));
+
+    /*  The MEDIA run is untouched - it is still playing, at a lower level. A
+        fade changes what is happening, not what was decided. */
+    CHECK (rig.runs.find (mediaRun)->state == cue::runState::playing);
+
+    /*  And the audio side was told, once a tick rather than once. */
+    INFO ("level writes: " << rig.audio.levels.size());
+    CHECK (rig.audio.levels.size() >= 40u);
+    CHECK (rig.audio.levels.back().second == doctest::Approx (-20.0));
+}
+
+TEST_CASE ("fade: the fade's own run finishes when the fade does")
+{
+    /*  A fade is a cue, so GO on it makes a run like any other - and a group
+        will need that run to finish before it calls itself complete (§3.6). */
+    FadeRig rig;
+
+    rig.startMedia();
+    rig.fire (rig.fadeId);
+
+    REQUIRE (rig.runs.all().size() == 2u);
+    const auto fadeRun = rig.runs.all().back().id;
+
+    CHECK (rig.runs.find (fadeRun)->kind == "fade");
+    CHECK_FALSE (rig.runs.find (fadeRun)->isFinished());
+
+    for (int i = 0; i < 60; ++i)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (fadeRun)->state == cue::runState::done);
+}
+
+TEST_CASE ("fade: a target that is not running is a no-op, applied rather than refused")
+{
+    /*  §3.8. Fading a cue that ended earlier than expected is what an operator
+        does, not a mistake they made - there is simply nothing to fade. The
+        fade's run reports done at once so a group waiting on it is not held up. */
+    FadeRig rig;
+
+    const auto outcome = rig.fire (rig.fadeId);
+
+    CHECK (outcome.applied == 1);
+    CHECK (outcome.rejected == 0);
+
+    REQUIRE (rig.runs.all().size() == 1u);
+    rig.tickOnce();
+
+    CHECK (rig.runs.all().front().state == cue::runState::done);
+    CHECK (rig.audio.levels.empty());
+}
+
+TEST_CASE ("fade: a fade takes over from where the level has got to")
+{
+    /*  Starting a second fade must not jump. It begins from where the level IS,
+        not from where the first fade started - anything else is a click on a PA
+        and a mistake nobody can account for afterwards. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+
+    rig.fire (rig.fadeId);
+
+    for (int i = 0; i < 25; ++i)
+        rig.tickOnce();
+
+    const auto interrupted = rig.runs.find (mediaRun)->level;
+    INFO ("interrupted at " << interrupted << " dB");
+    REQUIRE (interrupted < -1.0);
+
+    /*  A second fade, back up to unity. */
+    const auto second = rig.document.createCue (rig.listId, 4, "fade", "Back").id;
+    rig.setCue (second, "target", rig.mediaId);
+    rig.setCue (second, "level", "0");
+    rig.setCue (second, "duration", "1");
+
+    rig.fire (second);
+
+    /*  Only one fade is in flight: the first was taken over, not left to fight
+        the second over the same level. */
+    REQUIRE (rig.runner.fades().size() == 1u);
+
+    /*  THE ASSERTION THAT MATTERS, and it is about where the new fade STARTS
+        rather than about the next value it produces. It begins from the level
+        the first fade had reached - not from 0 dB, where that fade began, which
+        would be a jump of ten decibels and a click.
+
+        Read off the job rather than inferred from a sample, because a sample
+        comparison would have to know how many ticks each fade had had, and that
+        is arithmetic about the test rather than about the fade. */
+    const auto& takeover = rig.runner.fades().front();
+
+    INFO ("took over at " << takeover.fromDb << " dB, heading for " << takeover.toDb);
+
+    CHECK (takeover.fromDb < -1.0);
+    CHECK (takeover.fromDb == doctest::Approx (rig.runs.find (mediaRun)->level).epsilon (0.01));
+    CHECK (takeover.toDb == doctest::Approx (0.0));
+
+    /*  And it climbs from there. */
+    const auto before = rig.runs.find (mediaRun)->level;
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (mediaRun)->level > before);
+
+    for (int i = 0; i < 60; ++i)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (mediaRun)->level == doctest::Approx (0.0));
+}
+
+TEST_CASE ("fade: when the thing being faded ends, the fade stops writing to it")
+{
+    /*  A cue can finish on its own halfway through a fade. Writing levels into
+        a voice that has moved on to another cue would be riding a fader that
+        belongs to somebody else. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+    rig.fire (rig.fadeId);
+
+    for (int i = 0; i < 10; ++i)
+        rig.tickOnce();
+
+    const auto writesBefore = rig.audio.levels.size();
+
+    rig.audio.playing.erase (0);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (rig.runs.find (mediaRun)->isFinished());
+
+    const auto writesAfter = rig.audio.levels.size();
+
+    for (int i = 0; i < 20; ++i)
+        rig.tickOnce();
+
+    INFO ("writes before " << writesBefore << ", at the end " << writesAfter
+           << ", now " << rig.audio.levels.size());
+
+    CHECK (rig.audio.levels.size() == writesAfter);
+    CHECK (rig.runner.fades().empty());
+}
+
+//==============================================================================
+TEST_CASE ("stop: a hard stop says stopping at once and stops on the next tick")
+{
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+    rig.fire (rig.stopId);
+
+    /*  Asked, and saying so. `done` here would publish a silence that has not
+        happened. */
+    CHECK (rig.runs.find (mediaRun)->state == cue::runState::stopping);
+    CHECK (rig.audio.stopped.empty());
+
+    rig.tickOnce();
+
+    CHECK (rig.audio.stopped.size() == 1u);
+    CHECK (rig.audio.stopped.front() == 0);
+}
+
+TEST_CASE ("stop: the fade verb reaches silence before it stops anything")
+{
+    /*  The whole reason a fade-and-stop is two things in that order: by the
+        time the clip stops the level is already at silence, so Tracktion's own
+        click suppression has nothing left to suppress. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "1");
+
+    rig.fire (rig.stopId);
+
+    for (int i = 0; i < 25; ++i)
+        rig.tickOnce();
+
+    /*  Halfway: on its way down, and NOT stopped. A stop that landed here would
+        cut the sound off mid-fade. */
+    INFO ("halfway down: " << rig.runs.find (mediaRun)->level << " dB");
+    CHECK (rig.runs.find (mediaRun)->level < -20.0);
+    CHECK (rig.audio.stopped.empty());
+
+    for (int i = 0; i < 30; ++i)
+        rig.tickOnce();
+
+    /*  Silent, and only then stopped. */
+    CHECK (rig.runs.find (mediaRun)->level == doctest::Approx (-120.0));
+    REQUIRE (rig.audio.stopped.size() == 1u);
+
+    /*  The level reached silence before the stop was issued, which is the
+        ordering this case exists for. */
+    REQUIRE_FALSE (rig.audio.levels.empty());
+    CHECK (rig.audio.levels.back().second == doctest::Approx (-120.0));
+}
+
+TEST_CASE ("stop: a target that is not running is a no-op too")
+{
+    FadeRig rig;
+
+    const auto outcome = rig.fire (rig.stopId);
+
+    CHECK (outcome.applied == 1);
+    CHECK (rig.audio.stopped.empty());
+
+    rig.tickOnce();
+    CHECK (rig.runs.all().front().state == cue::runState::done);
+}
+
+TEST_CASE ("stop: minus a hundred and twenty decibels is digital silence, not nearly")
+{
+    /*  A fade that left a cue at -119.9 dB would leave it in the sum for the
+        rest of the show, sixty-four times over on a big rig. The floor is a
+        real zero. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "0.2");
+
+    rig.fire (rig.stopId);
+
+    for (int i = 0; i < 20; ++i)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (mediaRun)->level == doctest::Approx (-120.0));
+
+    audio::CueMatrix matrix;
+    matrix.prepare (1, 1, 48000.0, 64);
+    matrix.setGain (0, 0, 1.0f);
+    matrix.setLevelDb (static_cast<float> (rig.runs.find (mediaRun)->level));
+    matrix.snapToTargets();
+
+    juce::AudioBuffer<float> in { 1, 64 }, out { 1, 64 };
+    in.clear();
+    out.clear();
+
+    for (int n = 0; n < 64; ++n)
+        in.setSample (0, n, 1.0f);
+
+    matrix.process (in.getArrayOfReadPointers(), 1, out.getArrayOfWritePointers(), 1, 64);
+
+    for (int n = 0; n < 64; ++n)
+        REQUIRE (juce::exactlyEqual (out.getSample (0, n), 0.0f));
 }

@@ -154,6 +154,8 @@ namespace wfg::doc
         if (kind == "memo")  return "Cue";
         if (kind == "group") return "Group";
         if (kind == "media") return "Media";
+        if (kind == "fade")  return "Fade";
+        if (kind == "stop")  return "Stop";
         return {};
     }
 
@@ -162,7 +164,8 @@ namespace wfg::doc
         /*  A Group is a Cue (PRD §3.6), so both are addressed as `cue` — a
             client that has an identifier does not have to know which it got,
             and a cue that becomes a group keeps its address. */
-        if (element == "Cue" || element == "Group" || element == "Media") return "cue";
+        if (element == "Cue" || element == "Group" || element == "Media"
+              || element == "Fade" || element == "Stop")            return "cue";
         if (element == "Route")                     return "route";
         if (element == "List")                      return "list";
         if (element == "Mount")                     return "mount";

@@ -21,12 +21,19 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 
 namespace wfg::cue
 {
     namespace
     {
         const juce::Identifier idProperty { "id" };
+
+        /*  Silence, spelled as the parameter table spells it. Written here
+            rather than included from CueMatrix because this is the cue layer
+            and it names no audio type - one number repeated is cheaper than a
+            dependency that would let a Tracktion header in. */
+        constexpr double silenceDb = -120.0;
 
         std::string kindOfCue (const juce::ValueTree& cue)
         {
@@ -35,6 +42,8 @@ namespace wfg::cue
             if (element == "Cue")   return "memo";
             if (element == "Group") return "group";
             if (element == "Media") return "media";
+            if (element == "Fade")  return "fade";
+            if (element == "Stop")  return "stop";
 
             return {};
         }
@@ -124,6 +133,15 @@ namespace wfg::cue
             return {};
 
         const auto kind = kindOfCue (cue);
+
+        /*  A fade and a stop act on a run somebody else started, so they take
+            their own path - and they only make sense fired, never armed: there
+            is nothing to make ready. */
+        if (kind == "fade")
+            return fireAtOnce ? fireFade (engine, cue, runId) : std::string {};
+
+        if (kind == "stop")
+            return fireAtOnce ? fireStop (engine, cue, runId) : std::string {};
 
         /*  A memo is a line in the book and a group has no runner until Phase 3.
             Both are legal things to press GO on; neither makes a run. */
@@ -320,8 +338,176 @@ namespace wfg::cue
     }
 
     //==============================================================================
+    std::string Runner::fireFade (Engine& engine, const juce::ValueTree& cue,
+                                  const std::string& runId)
+    {
+        return beginFade (engine,
+                          cue[idProperty].toString().toStdString(),
+                          cue[juce::Identifier ("target")].toString().toStdString(),
+                          runId, "fade",
+                          static_cast<double> (cue[juce::Identifier ("level")]),
+                          static_cast<double> (cue[juce::Identifier ("duration")]),
+                          fadeCurveFrom (cue[juce::Identifier ("curve")].toString().toStdString()),
+                          false);
+    }
+
+    std::string Runner::fireStop (Engine& engine, const juce::ValueTree& cue,
+                                  const std::string& runId)
+    {
+        const auto verb = cue[juce::Identifier ("verb")].toString();
+
+        /*  A HARD STOP IS A FADE OF NO LENGTH THAT ALSO STOPS. Saying it that
+            way rather than writing a second code path means the two verbs
+            cannot drift apart: the ordering, the reporting and the
+            target-not-running case are written once and behave the same. */
+        const auto seconds = verb == "fade"
+                               ? static_cast<double> (cue[juce::Identifier ("duration")])
+                               : 0.0;
+
+        return beginFade (engine,
+                          cue[idProperty].toString().toStdString(),
+                          cue[juce::Identifier ("target")].toString().toStdString(),
+                          runId, "stop",
+                          silenceDb, seconds,
+                          fadeCurveFrom (cue[juce::Identifier ("curve")].toString().toStdString()),
+                          true);
+    }
+
+    std::string Runner::beginFade (Engine& engine, const std::string& selfCueId,
+                                   const std::string& targetCueId,
+                                   const std::string& selfRunId, const std::string& kind,
+                                   double toDb, double seconds, FadeCurve curve,
+                                   bool stopWhenDone)
+    {
+        /*  The fade cue gets a run of its own whatever happens next, because a
+            fade IS a cue: pressing GO on it is a thing that happened, it needs
+            an address while it runs, and a group will need it to finish (§3.6). */
+        auto self = selfRunId;
+
+        if (self.empty())
+            self = ids.generate();
+
+        /*  THE RUN BELONGS TO THE FADE CUE, not to the cue it is fading. A run
+            says which cue it instantiates, and getting that wrong made
+            liveRunOf answer with the fade's own run when asked about the media
+            it was supposed to be moving - so the fade faded itself. */
+        runs.create (self, selfCueId, kind);
+
+        if (runs.find (self) == nullptr)
+            return self;
+
+        /*  A TARGET THAT IS NOT RUNNING IS A SILENT NO-OP, applied rather than
+            refused (§3.8). Fading something that already finished is what an
+            operator does when a cue ended earlier than they expected, and it is
+            not a mistake - there is simply nothing to fade. The fade's own run
+            reports done at once, so a group waiting on it is not held up. */
+        const auto* target = runs.liveRunOf (targetCueId);
+
+        if (target == nullptr)
+        {
+            engine.submit (origin::engine, "run.ended", one (self));
+            return self;
+        }
+
+        const auto targetId = target->id;
+        const auto fromDb = target->level;
+
+        /*  A FADE TAKES OVER FROM A FADE, from where the level HAS GOT TO and
+            not from where the first one started. Anything else is a jump, and a
+            jump on a PA is a click nobody can account for afterwards. */
+        running.erase (std::remove_if (running.begin(), running.end(),
+                                       [&targetId] (const FadeJob& job)
+                                       {
+                                           return job.target == targetId;
+                                       }),
+                       running.end());
+
+        FadeJob job;
+        job.target = targetId;
+        job.self = self;
+        job.fromDb = fromDb;
+        job.toDb = toDb;
+        job.ticksTotal = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
+        job.curve = curve;
+        job.stopWhenDone = stopWhenDone;
+
+        /*  A cue on its way out says so from the moment it is asked, not when
+            the sound goes. `done` here would publish a silence that has not
+            happened yet. */
+        if (stopWhenDone)
+            if (auto* stopping = runs.find (targetId))
+                stopping->state = runState::stopping;
+
+        running.push_back (job);
+        return self;
+    }
+
+    void Runner::advanceFades (Engine& engine)
+    {
+        for (auto& job : running)
+        {
+            ++job.ticksDone;
+
+            auto* target = runs.find (job.target);
+
+            /*  What was being faded has gone - it ended on its own, or somebody
+                killed it. The fade has nothing left to do and says so, rather
+                than writing levels into a voice that has moved on to another
+                cue. */
+            if (target == nullptr || (target->isFinished() && ! job.stopWhenDone))
+            {
+                job.ticksDone = job.ticksTotal;
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                continue;
+            }
+
+            const auto level = job.currentDb();
+
+            /*  THE MODEL AND THE SOUND, both every tick. The run's level is
+                what a client watches; the atomic is what the audio interpolates
+                between. NEITHER IS LOGGED - §3.15 keeps continuous readouts out
+                of the log, and a replay recomputes them from the GO that
+                started the fade and the document it read. */
+            target->level = level;
+
+            if (audio != nullptr && target->track >= 0)
+                audio->setLevelDb (target->track, level);
+
+            if (! job.isFinished())
+                continue;
+
+            if (job.stopWhenDone)
+            {
+                /*  SILENT FIRST, THEN STOPPED, and the order is the whole point
+                    of the fade verb: by the time the clip stops the level is
+                    already at silence, so Tracktion's own click suppression has
+                    nothing left to suppress. */
+                if (audio != nullptr && target->track >= 0)
+                    audio->stop (target->track);
+
+                /*  With no audio side the sound cannot report its own end, so
+                    the stop says it. A replay has to reach the same state as
+                    the session it reproduces. */
+                if (audio == nullptr)
+                    engine.submit (origin::engine, "run.ended", one (target->id));
+            }
+
+            engine.submit (origin::engine, "run.ended", one (job.self));
+        }
+
+        running.erase (std::remove_if (running.begin(), running.end(),
+                                       [] (const FadeJob& job) { return job.isFinished(); }),
+                       running.end());
+    }
+
+    //==============================================================================
     void Runner::beforeTick (Engine& engine, std::int64_t tick)
     {
+        /*  Fades run whether or not there is an audio side. A replay has none
+            and must still move the run's level and finish the fade's run on the
+            same ticks, or it would not reproduce the session it is replaying. */
+        advanceFades (engine);
+
         if (audio == nullptr)
             return;
 

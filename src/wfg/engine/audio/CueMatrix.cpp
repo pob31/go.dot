@@ -57,7 +57,7 @@ namespace wfg::audio
         for (auto& smoother : gainSmoothers)
             smoother.reset (rate, slewSeconds);
 
-        levelSmoother.reset (rate, slewSeconds);
+        levelSmoother.reset (rate, levelSlewSeconds);
 
         snapToTargets();
     }
