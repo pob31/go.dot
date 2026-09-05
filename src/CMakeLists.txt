@@ -48,7 +48,9 @@
 #             every mutation arrives on
 #   log/      the tick-indexed flight recorder (PRD §3.15) and deterministic
 #             replay — built before there is anything to record, deliberately
-#   clock/    the sample counter every other clock derives from (PRD §3.4)
+#   clock/    the sample counter every other clock derives from (PRD §3.4), the
+#             50 Hz tick derived from it, and the thread that turns one into the
+#             other - plus a paced stand-in for the audio device Phase 2 brings
 #   Engine    the facade that ties them together; Console the command line
 #
 # Header-only files are listed as sources on purpose: without them an IDE's
@@ -60,7 +62,16 @@ add_library(wfg_engine STATIC
     wfg/engine/Engine.h
     wfg/engine/Console.cpp
     wfg/engine/Console.h
+    wfg/engine/clock/AudioClockSource.h
+    wfg/engine/clock/DummyAudioClock.cpp
+    wfg/engine/clock/DummyAudioClock.h
     wfg/engine/clock/SampleClock.h
+    wfg/engine/clock/SampleTime.cpp
+    wfg/engine/clock/SampleTime.h
+    wfg/engine/clock/TickClock.cpp
+    wfg/engine/clock/TickClock.h
+    wfg/engine/clock/TickThread.cpp
+    wfg/engine/clock/TickThread.h
     wfg/engine/document/Bundle.cpp
     wfg/engine/document/Bundle.h
     wfg/engine/document/CanonicalXml.cpp

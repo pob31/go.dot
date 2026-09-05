@@ -69,7 +69,8 @@ add_executable(wfg_tests
     EventLogTests.cpp
     EngineTests.cpp
     DocumentTests.cpp
-    BundleTests.cpp)
+    BundleTests.cpp
+    ClockTests.cpp)
 
 # Where the hand-authored fixtures live. Passed as a definition rather than
 # copied next to the binary: the fixtures are inputs to read, not artefacts to

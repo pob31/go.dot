@@ -195,6 +195,17 @@ target_compile_definitions(wfg_deps INTERFACE
 # in debug configs is precisely what stops sccache working with MSVC, which needs /Z7.
 target_link_libraries(wfg_deps INTERFACE juce::juce_recommended_config_flags)
 
+# std::thread, std::mutex and std::condition_variable, which the tick clock uses.
+#
+# Named rather than left to arrive by accident. JUCE's juce_core does declare
+# pthread among its Linux libraries, so this would probably link without it
+# today - but "probably, through somebody else's dependency" is not a thing to
+# rest a thread on. Threads::Threads is the portable spelling: -pthread on
+# Linux, and nothing at all on Windows and macOS, where the standard library
+# needs no help.
+find_package(Threads REQUIRED)
+target_link_libraries(wfg_deps INTERFACE Threads::Threads)
+
 if(MSVC)
     target_compile_options(wfg_deps INTERFACE /bigobj /utf-8)
     # /bigobj: JUCE attaches it INTERFACE to only juce_gui_basics|juce_audio_processors|

@@ -82,6 +82,31 @@ commands `ACCESS 2`. Booleans are `T`/`F` nodes (an `i` 0/1 written to one is ac
 
 `GODOT.RATE_CAP` is 5 Hz on this whole container: these are diagnostics, not control.
 
+**What those three clock numbers actually promise** (built in PR 1.4):
+
+- **Tick *n* sits at sample *n* × `samplesPerTick`, exactly.** `samplesPerTick` is
+  `sampleRate / 50` with no remainder, and a rate where that division is not exact is
+  *refused* rather than rounded — a tick at 882.02 samples drifts a whole sample every
+  fifty ticks, so an hour-long show would end 3600 samples from where its log says it was.
+  Every rate anybody uses divides exactly, so the refusal costs nothing.
+- **`tick` never skips.** Ticks are processed one at a time, in order, with no gaps,
+  however far behind the thread falls. The index is the event log's ordering key and a gap
+  in it would be a gap in the record of the show. Several ticks coming due at once — one
+  long block, one scheduling stall — are processed back to back; the first drains the event
+  queue, so the rest usually cost nothing.
+- **`lateness` is the part that is *not* exact, and it is reported rather than hidden.**
+  The tick thread can only observe the sample counter between blocks, so tick *n* runs
+  after the first block whose end reaches its position: late by up to one block, plus
+  however long the thread took to wake. The index and the sample position are never wrong;
+  this number says how long after the fact the work happened, and `latenessMax` keeps the
+  worst rather than an average, because the one tick that ran 40 ms late is the one
+  somebody noticed.
+
+A sample-rate change under a running show (§6.2's Dante domain moving) **rebases** the
+ratio from a given tick onwards. The tick it lands on stays at the sample it was already
+at, so the index sequence stays gapless and increasing across the change and nothing
+downstream has to special-case it.
+
 ### 2.2 `/godot/document`
 
 | Node | Type | Access | Meaning |

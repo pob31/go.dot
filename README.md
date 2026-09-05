@@ -77,6 +77,14 @@ documents come first, and they are the thing to read before the code:
   its own schema can only prove it is self-consistent; this is what lets somebody else's
   validator have an opinion, and it is what anyone can run against their own show file
   without building the engine.
+- **The 50 Hz tick** (PRD §3.4). One sample counter that never goes backwards, a tick
+  index derived from it by exact integer division, and a thread of its own that waits on
+  the counter rather than on the wall clock. It never skips a tick, because the index is
+  the event log's ordering key; it measures its own lateness in samples and keeps the
+  worst, because that is the number an operator wants when a show feels loose. Not a
+  `juce::Timer`: spike 05 measured that instrument's own idle floor at 0.76 ms median and
+  2.60 ms at the 99th percentile, before doing any work. A paced stand-in for the audio
+  device drives it until Phase 2 brings a real one.
 - `wfg`, a console binary: `--version` prints the JUCE and TE versions it actually linked,
   `selftest` stands the JUCE message thread up headless, `commands` lists the registered
   command set, `canon` rewrites a show document in canonical form, `validate` checks a bundle
@@ -91,12 +99,12 @@ documents come first, and they are the thing to read before the code:
   They are throwaway by construction: they may link `wfg::thirdparty` and never
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
-**What does not exist yet.** Most of the engine. There is no tick clock driving anything, no
-parameter tree, no mounted namespaces (a bundle can declare one, and nothing reads it yet),
-no cue list traversal or standby movement — the standby is stored and restored, but only a
-command that does not exist yet can move it — no OSC codec on the wire, no OSCQuery server,
-and therefore no `serve`: what exists is exercised by tests and by the console verbs, not by
-a client. Phase 1 adds those in
+**What does not exist yet.** Most of the engine. There is no parameter tree, so the clock's
+own numbers are not published anywhere a client could read them; no mounted namespaces (a
+bundle can declare one, and nothing reads it yet); no cue list traversal or standby movement
+— the standby is stored and restored, but only a command that does not exist yet can move
+it; no OSC codec on the wire, no OSCQuery server, and therefore no `serve`: what exists is
+exercised by tests and by the console verbs, not by a client. Phase 1 adds those in
 that order, and two further submodules arrive with them — `ThirdParty/juce_simpleweb` for
 the HTTP+WebSocket transport and `ThirdParty/spatcore`, consumed at source level for its
 real-time helpers. No audio, no UI, no plugin hosting, no video: audio is Phase 2, which is
