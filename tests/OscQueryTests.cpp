@@ -642,6 +642,95 @@ TEST_CASE ("oscquery: a client is not told what it just did")
     REQUIRE (waitUntil ([&client] { return client.binaryCount() == 2; }));
 }
 
+TEST_CASE ("oscquery: two clients get two origins, and only one of them is echoed")
+{
+    /*  The plan named this case and the earlier tests did not cover it: they
+        used ONE WebSocket client and blamed a non-WebSocket writer, which
+        exercises the comparison but never the thing that makes it safe.
+
+        WHAT IS ACTUALLY BEING CHECKED is that two connections get DIFFERENT
+        origins. Every origin here is `ws:<ip>:<port>`, and both clients arrive
+        from the same loopback address - so the port is the only thing telling
+        them apart. Drop it, key suppression on the address alone, and two
+        surfaces on one machine (or two behind one NAT, which is the case that
+        actually happens in a venue) become one client: a fader moved on the
+        first would go silent on the second, which reads as a dropped message
+        and is nearly impossible to diagnose from either end.
+
+        So: both listen, one writes, and the OTHER must hear about it. */
+    Rig rig;
+    REQUIRE (rig.started);
+
+    Client first;
+    Client second;
+
+    first.connect (rig.port());
+    second.connect (rig.port());
+
+    REQUIRE (waitUntil ([&first] { return first.open.load(); }));
+    REQUIRE (waitUntil ([&second] { return second.open.load(); }));
+
+    first.socket.send (juce::String (
+        "{\"COMMAND\": \"LISTEN\", \"DATA\": \"/godot/engine/tick\"}"));
+    second.socket.send (juce::String (
+        "{\"COMMAND\": \"LISTEN\", \"DATA\": \"/godot/engine/tick\"}"));
+
+    REQUIRE (waitUntil ([&rig] { return rig.server.connectionCount() == 2; }));
+
+    //  Learn what the FIRST connection is called, the way the engine does.
+    std::string error;
+    const auto encoded = osc::encode (osc::Packet::message ("/godot/cmd/standby/next"), error);
+    REQUIRE (encoded.has_value());
+
+    first.socket.send (reinterpret_cast<const char*> (encoded->data()),
+                       static_cast<int> (encoded->size()));
+
+    REQUIRE (waitUntil ([&rig] { return rig.nameSpace.writeCount() == 1; }));
+
+    std::string firstOrigin;
+    {
+        const std::lock_guard<std::mutex> lock { rig.nameSpace.mutex };
+        firstOrigin = rig.nameSpace.writes.front().first;
+    }
+
+    //  And the second, so the two can be compared.
+    second.socket.send (reinterpret_cast<const char*> (encoded->data()),
+                        static_cast<int> (encoded->size()));
+
+    REQUIRE (waitUntil ([&rig] { return rig.nameSpace.writeCount() == 2; }));
+
+    std::string secondOrigin;
+    {
+        const std::lock_guard<std::mutex> lock { rig.nameSpace.mutex };
+        secondOrigin = rig.nameSpace.writes.back().first;
+    }
+
+    INFO ("first:  " << firstOrigin);
+    INFO ("second: " << secondOrigin);
+
+    CHECK (firstOrigin.rfind ("ws:", 0) == 0);
+    CHECK (secondOrigin.rfind ("ws:", 0) == 0);
+
+    /*  The whole point. Same address, different port, therefore different
+        origin - and this is the assertion that fails first if the port ever
+        stops being part of it. */
+    CHECK (firstOrigin != secondOrigin);
+
+    //  Now blame the first. The second must still be told.
+    tree::TreeDiff diff;
+    diff.valueChanged.push_back ("/godot/engine/tick");
+
+    rig.server.publishChanges (diff, *rig.nameSpace.tree, firstOrigin);
+
+    REQUIRE (waitUntil ([&second] { return second.binaryCount() >= 1; }));
+
+    CHECK (second.binaryCount() >= 1);
+    CHECK (first.binaryCount() == 0);
+
+    first.socket.stop();
+    second.socket.stop();
+}
+
 TEST_CASE ("oscquery: a binary frame becomes a write, and a malformed one does not")
 {
     Rig rig;
