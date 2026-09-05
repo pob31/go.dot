@@ -354,9 +354,18 @@ TEST_CASE ("mount: a word cannot get into a number, and an int into a float can"
 
 TEST_CASE ("mount: a write to an address no mount holds is refused")
 {
+    /*  The three subjects are chosen so that no capture can accidentally contain
+        them. An earlier version used input channel 9, which was absent from the
+        hand-written placeholder this suite began with and is present in the real
+        capture that replaced it - the assertion passed for a reason that had
+        nothing to do with what it was testing. A leaf nobody named, a channel
+        past the maximum WFS-DIY can be configured for, and an address under no
+        prefix at all cannot go the same way. */
     Rig rig;
 
-    CHECK (rig.mounts.write ("/wfs/input/9/positionX", osc::Value::float32 (0.0f)).reason
+    CHECK (rig.mounts.write ("/wfs/input/1/noSuchParameter", osc::Value::float32 (0.0f)).reason
+             == reason::badAddress);
+    CHECK (rig.mounts.write ("/wfs/input/999/positionX", osc::Value::float32 (0.0f)).reason
              == reason::badAddress);
     CHECK (rig.mounts.write ("/nowhere", osc::Value::float32 (0.0f)).reason == reason::badAddress);
 }

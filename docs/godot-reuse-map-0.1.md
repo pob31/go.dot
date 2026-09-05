@@ -110,11 +110,15 @@ because Phase 2's OSCQuery **client** will parse exactly this.
 
 - **Keys, in the order it emits them.** A container: `FULL_PATH, ACCESS, DESCRIPTION,
   CONTENTS`. A parameter: `FULL_PATH, TYPE, ACCESS, VALUE, [RANGE, CLIPMODE,] DESCRIPTION`.
-  `CLIPMODE` is always `["both"]` and appears only alongside `RANGE`. `RANGE` is an array of
+  `CLIPMODE` is always `["both"]` and appears only alongside `RANGE` — but not every `RANGE`
+  brings one: *measured on the capture*, 2 032 scalar parameters carry both, while the 170
+  band nodes carry `RANGE` and neither `CLIPMODE` nor `VALUE`. `RANGE` is an array of
   one object with `MIN` and `MAX` — never `VALS`. **There is no `UNIT` key anywhere**, even
   though the documentation CSVs carry units.
 - **`ACCESS` takes three values only**: `0` on containers, `3` on parameters, and `1` on
-  exactly one node in the whole tree, `/wfs/input/<n>/channelType`. It never emits `2`.
+  `/wfs/input/<n>/channelType` — which is one node per input channel, so *fourteen* of them
+  in the committed capture rather than one. It never emits `2`, so **nothing mounted from
+  WFS-DIY is ever inferred as an event**.
 - **The address space is `/wfs/input|output|reverb|config`, channel-indexed.** Source
   position is three scalar nodes (`positionX`, `positionY`, `positionZ`) — there is no
   vector node, no `/source/…`, and no `xyz`. Input children are keyed by the PERMANENT
@@ -127,6 +131,9 @@ because Phase 2's OSCQuery **client** will parse exactly this.
   have Go.dot enforcing a bound nobody declared.
 - **Not published at all**: `masterLevel`, `speedOfSound`, `temperature`, `haasEffect`, and
   the whole of `/wfs/cluster` and `/wfs/network`. There is no global or master container.
+  Confirmed against the capture, which adds `irFile` to that list and finds nine
+  `/wfs/config/stage` parameters published that no table documents — see *What a real
+  WFS-DIY namespace turned out to be* below.
 - `HOST_INFO` is a separate `?HOST_INFO` query, not part of `GET /`. It carries `NAME`,
   `OSC_PORT`, `OSC_TRANSPORT "UDP"`, `WS_PORT` (the same port as HTTP) and an `EXTENSIONS`
   object of booleans.
@@ -218,6 +225,85 @@ C++17, so nothing in it needs a language-level exception either.
 | Protective ramp on a test signal | `spatcore/io/TestSignalGenerator.h` — a 500 ms ramp declared a safety property rather than a nicety, plus a 10 ms declick, and it *replaces* rather than mixes into its target channel | **not needed in Phase 2**; recorded for whenever Go.dot grows a test tone |
 | The observed sample rate | WFS-DIY reads it only from the live device (`device->getCurrentSampleRate()`, 48 kHz fallback when none is open) and **never exposes it over OSCQuery** — its namespace is built by walking the ValueTree, which holds no audio-device node, so the rate reaches no client at all | **shape reused, scope widened.** Go.dot publishes rate, block size and clock source under `/godot/engine` and `/godot/audio`, because §6.2 makes "no clock" and "no interface" two failures an operator has to tell apart at a glance |
 | RT-safety instrumentation | — | **none exists** anywhere in the author's repos: no malloc hook, no `operator new` override, no `-fsanitize=realtime`, no allocation counter. The only instrument is `JUCE_ASSERT_MESSAGE_THREAD`, asserted at the *non*-real-time end of each seam. Go.dot's PR 2.2 is new work, and the first place §4.2's lipogram is enforced by anything other than review |
+
+### What a real WFS-DIY namespace turned out to be (captured 2026-09-05)
+
+The `/wfs` mount fixture is no longer a hand-written stand-in: it is
+`GET http://127.0.0.1:5005/wfs` from a running WFS-DIY, committed at
+`tests/fixtures/bundles/minimal/namespaces/wfs-diy.json` with its provenance in
+`tests/fixtures/README.md`. Session: 12 mono + 2 stereo inputs, 24 outputs, 9 reverbs.
+**2 480 nodes, 1.04 MB, nesting depth 3**, and Go.dot's mount reader accepts it unmodified —
+every `FULL_PATH` consistent, no duplicate address, no unusable node name.
+
+What it costs, measured by replacing a 17-node placeholder with it: the unit suite goes from
+**1.2 s to 4.2 s** and the whole suite from **3.2 s to 9.9 s**. Most of that is re-parsing a
+megabyte of JSON once per mount test case, not the parameter tree's rebuild.
+
+**Shape.** 54 containers, 2 426 states, **no events** — `ACCESS` is 0 on containers and 3 on
+parameters, with exactly one exception: `channelType`, published read-only, one per input.
+Type tags are `f` (1 107), `i` (1 065), `s` (84) and `if` (170); the `if` nodes are the EQ
+bands, whose `RANGE` carries one entry per argument, band index first. No `UNIT` key and no
+`VALS` enumeration appear anywhere in the tree.
+
+**Three things the tables have that the server does not send.** This is the useful half of
+the tables, and each one is a thing WFS-DIY could fix at its own end rather than something
+Go.dot should work around:
+
+1. **Descriptions.** `DESCRIPTION` on a parameter is its own leaf name — `"attenuation"` —
+   for 2 256 of 2 426 leaves; only the 170 band parameters differ, and only by a synthesised
+   `" (first arg: band index 0-5)"`. The tables carry real prose for the same parameters
+   (`"Input Channel Attenuation."`) and it is already written. Sending the hover text as
+   `DESCRIPTION` would cost nothing and improve every OSCQuery client.
+2. **Enumerations.** An enumerated parameter is published as a bare integer span. `algoType`
+   is `MIN 0, MAX 2`; the tables say `SDN ; FDN ; IR`. A client can set it and cannot name it.
+3. **Units.** Seventeen distinct units in the tables, none in the tree.
+
+**The reverb models: measured, because the shape might have depended on them.** It does not.
+Three captures taken with the algorithm switched to SDN, FDN and IR are **identical at 2 480
+nodes** — nothing added, nothing removed, and not one `TYPE`, `ACCESS` or `RANGE` changed.
+Exactly one value differs between them, `/wfs/config/reverb/algoType`. So **one capture covers
+all three models**, which is what makes a single committed fixture legitimate.
+
+The interesting part is what that means for a client. The UI hides most of the panel when the
+model changes — under IR it drops RT60, both crossovers, diffusion and the size control
+altogether and shows an IR file chooser instead — but **OSCQuery keeps publishing all 29
+reverb parameters as writable with full ranges regardless**. `sdnScale` and `fdnSize` are two
+always-present nodes of which at most one is ever live. A client can write `rt60` while IR is
+selected, and nothing in the description says it will do nothing. The tables know
+(`Visible only for SDN`, `Visible only for FDN`, `Visible only for IR`); the namespace does
+not. Likewise `irLength` and `irTrim` publish their hard caps of 30 s and 30 000 ms, while
+the tables record that the effective maximum is the loaded file's duration — a constraint no
+client can see.
+
+**What the capture publishes that the tables do not, and the reverse.** Compared leaf by leaf
+per family, against the 265 `/wfs` rows in `Documentation/*.csv`:
+
+| family | published | in the tables | documented, not published | published, not documented |
+|---|---|---|---|---|
+| `input` | 111 | 142 | **39** | 8 |
+| `output` | 25 | 28 | 4 | 1 |
+| `reverb` (per channel) | 26 | 30 | 4 | 0 |
+| `config/reverb` | 29 | 30 | 1 | 0 |
+| `config/stage` | 9 | 0 | 0 | **9** |
+| `cluster` | **0** | 34 | **34** | 0 |
+
+- **The whole `/wfs/cluster` family — 34 addresses — is documented and not published at all.**
+  Clusters are invisible to any OSCQuery client, so nothing Go.dot mounts can reach them.
+- The 39 unpublished input addresses are mostly one feature: **24 of them are the Sampler**
+  (per-cell and per-set), plus the otomo transport and the map-visibility controls.
+- **`irFile` is documented and not published**, so the impulse response cannot be chosen over
+  the network — the IR panel's only real control is unreachable.
+- **`config/stage` is published and undocumented** — nine geometry parameters in the tree that
+  no table mentions.
+- Three **rename drifts**, where both sides mean the same parameter: the tables say
+  `FRactive`, `LFOactive`, `LSactive` and `samplerActiveSet`; the server publishes `FRenable`,
+  `LFOenable`, `LSenable` and `samplerSet`. And one **casing typo**: the tables' `Eqfreq`
+  against the server's `EQfreq`.
+
+None of this is Go.dot's to fix, and none of it blocks anything: it is what `MCPOSCQueryAuditor`
+exists to catch, measured once from the outside. For Go.dot the operative facts are that the
+capture is honest about a narrower surface than the application has, and that a Phase 2
+`verified` cue can only target what is actually published.
 
 ### Phase 2/4 — closed-loop cues and mock targets
 
