@@ -29,7 +29,7 @@ The specification lives in `docs/`, and it is the spec — not background readin
 
 ---
 
-## Status: Phase 1 complete
+## Status: Phase 1 complete, Phase 2 begun
 
 Phase 0 — *"a repo that builds on three platforms"* — is complete, and the seven
 Tracktion Engine validation spikes have been run (`docs/spikes/`; all pass).
@@ -39,7 +39,24 @@ document, read and write nodes, move standby, and that the event log replays the
 bit-for-bit; `tests/blackbox/phase1_session.py` is that sentence as a program, and it runs
 in CI on three platforms under two locales. There is a headless engine, a show document,
 a parameter tree, a 50 Hz clock, a cue list, an OSC codec, an OSCQuery server and a
-`serve` verb that puts them together. There is no audio.
+`serve` verb that puts them together.
+
+**Phase 2 is under way.** PR 2.1 has landed, which is the audio graph and nothing above it:
+Tracktion Engine hosted with no device, one Edit *generated* from the show document and never
+saved, a fixed set of tracks each holding a resident clip in a launcher slot, and Go.dot's own
+output plugin at the end of every one of them carrying a level and a routing matrix. One
+output device spans the whole rig, so where a cue goes is a coefficient rather than a rewiring
+of the graph. `wfg serve --hosted` runs a show with the graph under the clock and no hardware
+attached, and `--render=<wav>` writes what came out, which is how a machine with no audio
+interface can be shown that something made a sound.
+
+It is measured rather than asserted: a cue reaches the outputs it names at the gains it names
+and reaches no others, from one channel into two up to eight channels into sixty-four; and one
+block of thirty-two cues into sixty-four outputs at 96 kHz costs a third of its real-time
+budget, so the wide device fits with room. The numbers, and the two defects the measurement
+found, are in §11.8 of the namespace draft.
+
+There is no GO yet: nothing fires a cue, so the render is silence. That is PR 2.3.
 
 The documents come first, and they are the thing to read before the code:
 
@@ -145,7 +162,11 @@ The documents come first, and they are the thing to read before the code:
   and from anyone holding the node. Four HTTP answers to four different questions, because
   a server that collapses them into 200-or-404 makes a client guess.
 - **`wfg serve`** — the whole of Phase 1 running. Both ports take 0, bind an ephemeral one
-  and print what they got, which is what lets two instances share a machine.
+  and print what they got, which is what lets two instances share a machine. `--hosted` puts
+  a real playback graph under the clock with no hardware attached, generated from the show's
+  own `<Audio>`; `--render=<wav>` writes what came out of it. The width of that imaginary rig
+  is not a flag — it is the furthest channel the show's buses reach, because that is where the
+  author said a channel exists.
 - `wfg_tests`, a doctest suite — the toolchain facts a green compile does not prove (the
   JUCE pin at *runtime*, the module configuration actually reaching our targets), plus the
   skeleton's own guarantees, every case run twice, under `C` and under `fr_FR`.
@@ -176,8 +197,8 @@ than told the node does not exist. Bundle time tags are carried and preserved bu
 scheduled — Phase 4's state solver is where a time tag starts meaning something, and
 honouring one now would tell a client its timing had been respected when it had not.
 
-No audio, no UI, no plugin hosting, no video: audio is Phase 2, which is planned but not
-started, and everything else is later.
+No UI, no third-party plugin hosting, no video. There is an audio graph, and it is exact
+and measured, but nothing fires a cue into it yet: GO is PR 2.3.
 
 **Open questions, deliberately unanswered anywhere in this tree**
 

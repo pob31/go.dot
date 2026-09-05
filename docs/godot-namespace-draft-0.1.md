@@ -1,10 +1,12 @@
 # Go.dot — Parameter-tree namespace and document schema
 
-**Draft 0.3** — the PRD §9.3 "parameter-tree namespace and node metadata schema". It also
+**Draft 0.4** — the PRD §9.3 "parameter-tree namespace and node metadata schema". It also
 fixes the show-document schema, because the document is the other half of the same
 namespace: every node under `/godot/cue` is a projection of an attribute in `show.xml`.
-Draft 0.3 adds §11, the shape Phase 2 gives the tree, written ahead of its code so that the
-Phase 2 pull requests have something to be reviewed against.
+Draft 0.3 added §11, the shape Phase 2 gives the tree, written ahead of its code so that the
+Phase 2 pull requests have something to be reviewed against. **Draft 0.4 adds §11.8**, which
+is the other direction: what PR 2.1 measured once that code existed, including the two things
+it made the design change its mind about.
 
 **This is a living document, and deliberately so.** Go.dot is not a port of something that
 already works, the way WFS-DIY was a port of a Max patch — there is no finished parameter
@@ -882,3 +884,70 @@ implements the OSCQuery path, which is what PRD §3.11 already scopes `verified`
 calls it the *default for own processors*. Question K is how a mount says which it is, so that
 a `verified` cue against a target that can never answer is refused when the show loads rather
 than discovered during it. The survey behind this is in `docs/godot-reuse-map-0.1.md`.
+
+### 11.8 What PR 2.1 measured, and the two things it changed its mind about
+
+Everything below is measured on the graph that plays, on the Windows box, at the pin. The
+numbers are here rather than in a commit message because the next three PRs are built on
+them.
+
+**M1 — routing exactness.** A file whose every sample is a known constant, a different
+constant per channel, through a rig assembled from the show document: a destination either
+carries its coefficient exactly or carries nothing. One channel into eight outputs, unity into
+two, a stereo cue splitting and summing, and eight channels into sixty-four with destinations
+near the top of the range. All exact; every output nobody named is digital silence, not
+"small". The eight-into-sixty-four case is the one the architecture rests on, and it is why
+`CueOutputPlugin` overrides `getNumOutputChannelsGivenInputs`: sized from `getBusses()`
+instead, the buffer would be stereo and that case would be silent everywhere.
+
+**M3 — what a block costs**, at 96 kHz and 64 frames where the budget is 667 µs, every track
+audible while it was timed, Release:
+
+| configuration | µs/block | of real time |
+|---|---|---|
+| 32 tracks × 64 outputs | 221 | 33 % |
+| 32 tracks × 8 outputs | 78 | 12 % |
+| 1 track × 64 outputs | 19 | 3 % |
+
+**So the wide device and the per-track matrix fit, with room, at the polyphony ceiling and the
+widest rig the design admits.** The per-destination fallback spike 01 built and the plan wrote
+down is not needed, and stays written down. The Debug figure is 242 %, which is why none of
+this is asserted as a threshold: a wall-clock gate on a shared runner is a flaky test, and the
+Debug number is not one any show runs at.
+
+**M2 — node identities.** 1 to 64 tracks, every slot holding a resident clip, on the graph
+`EditPlaybackContext` itself builds: 15 nodes at one track, 456 at sixty-four, zero
+unidentified and zero duplicated. The upstream collision does not appear in Go.dot's generated
+Edit, so the check ships and the jittered-identifier lattice the plan reserved does not.
+
+#### The two things this changed its mind about
+
+**The Edit runs at 60 bpm, and that is now load-bearing rather than tidy.** A launcher clip is
+played through auto-tempo: Tracktion stretches it so its length in *beats*, taken from the loop
+info the file was scanned with, fits the tempo map. The resident clip is created against a
+one-second placeholder, so it says one beat; pointing it at a two-second cue changes the source
+and not the beat count, and the file is squeezed into one second. At one second the cue goes
+quiet **while the launch handle still reports that it is playing** — which is the worst shape a
+failure can have, because nothing looks wrong. Turning auto-tempo off is not the fix: with no
+beat length there is nothing for the launcher to schedule and the clip plays nothing at all.
+Measured in both directions. At 60 bpm one beat is one second, so setting a clip's beat count
+from its length in seconds makes the stretch exactly 1:1 — the tempo map is the identity, and a
+cue plays at the rate it was recorded at.
+
+**A cue is not audible the moment it is launched.** A wave clip is silent until the audio file
+cache holds a mapped Reader for its file, and the cache only maps a file while something holds
+one; measured at about 0.4 s for a local file. Firing a cue before that plays silence for as
+long as the disk takes, with the run reporting itself as playing throughout. This is why
+`AudioHost::waitForTrackSourceReady` is on the host rather than in a test: **PR 2.3's arm calls
+it from standby**, so the disk is waited on while the operator reads the next line rather than
+after they press GO. It also means arming is not free and its cost is a disk, which the
+prepare/commit design in Phase 4 should assume rather than discover.
+
+#### Deferred out of 2.1, on purpose
+
+`TeSession` and `ItemIds` were listed in the plan for this PR and are not in it. `TeSession`
+exists to keep the tick thread from holding a raw pointer into a playback context that a
+**device change** destroys and recreates; there is no device until PR 2.7 and no way to
+exercise a generation swap before it, so it lands there, with the code that makes it necessary.
+`ItemIds` was the jittered identifier lattice, and M2 is the reason it is not here: it was a
+workaround for a collision that does not occur.
