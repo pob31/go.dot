@@ -148,8 +148,31 @@ namespace wfg::audio
 
             So Go.dot checks its own generated Edit rather than trusting either
             the hash or the report. Message thread, at load, on a graph that is
-            thrown away. False means this Edit would be unsafe to play. */
-        bool nodeIdsAreUnique() const;
+            thrown away. */
+        struct NodeIdReport
+        {
+            int nodes = 0;
+
+            /*  Nodes carrying id 0 - built from no EditItem, so with no identity
+                to collide with. Tracktion's own assertion ignores them, and so
+                does `duplicates`. Counted separately because a check that
+                ignores most of the graph is not the check it appears to be. */
+            int zeroIds = 0;
+
+            /** Non-zero ids that appear more than once. Any is a defect. */
+            int duplicates = 0;
+
+            bool ok() const noexcept { return duplicates == 0; }
+        };
+
+        /** Builds the graph offline and counts what is in it. */
+        NodeIdReport inspectNodeIds() const;
+
+        /*  How many tracks hold a resident clip in their slot. Should equal the
+            track count: a slot with no clip means that track's launcher node -
+            and with it the track's whole output stage - is absent from the
+            playback graph, silently. */
+        int residentClipCount() const;
 
         /*  A track's output stage - its level and routing coefficients. This is
             what a media cue writes when it is armed, and what a fade writes at

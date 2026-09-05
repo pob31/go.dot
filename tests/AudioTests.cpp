@@ -624,6 +624,37 @@ TEST_CASE ("edit: every node in the generated graph has an identity of its own")
         spec.tracks = tracks;
 
         REQUIRE (rig.host.buildEdit (spec));
-        CHECK (rig.host.nodeIdsAreUnique());
+
+        const auto report = rig.host.inspectNodeIds();
+
+        /*  Reported, not just asserted. A graph whose ids were mostly zero
+            would pass a duplicate check while telling us nothing, so the shape
+            of what was inspected is printed with the verdict. */
+        INFO ("nodes " << report.nodes << ", zero ids " << report.zeroIds
+                        << ", duplicates " << report.duplicates);
+
+        CHECK (report.duplicates == 0);
+
+        /*  The check must actually be looking at something. If Tracktion ever
+            stopped giving these nodes identities, `duplicates == 0` would go on
+            passing for the wrong reason. */
+        CHECK (report.nodes > tracks);
+        CHECK (report.nodes - report.zeroIds > tracks);
     }
+}
+
+TEST_CASE ("edit: every track holds a resident clip, so no track is missing from the graph")
+{
+    /*  A launcher clip whose slot is empty means no SlotControlNode, and the
+        track's output stage goes with it - silently, with the track simply not
+        heard. The resident placeholder is what a track sounds like before its
+        first cue: silent, and present. */
+    HostRig rig;
+    REQUIRE (rig.host.start (hostFor (4)));
+
+    audio::EditSpec spec;
+    spec.tracks = 6;
+
+    REQUIRE (rig.host.buildEdit (spec));
+    CHECK (rig.host.residentClipCount() == 6);
 }

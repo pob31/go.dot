@@ -38,6 +38,8 @@
 /*  Not reachable through the umbrella header: the Edit-side graph builder is an
     internal header, while the graph-side utilities (createNodeGraph,
     areNodeIDsUnique) are already public through tracktion_graph.h. */
+#include <juce_audio_formats/juce_audio_formats.h>
+
 #include <tracktion_engine/playback/graph/tracktion_TracktionEngineNode.h>
 #include <tracktion_engine/playback/graph/tracktion_EditNodeBuilder.h>
 
@@ -290,6 +292,7 @@ namespace wfg::audio
             if (auto* tempo = edit->tempoSequence.getTempo (0))
                 tempo->setBpm (60.0);
 
+            const auto placeholder = ensureSilentPlaceholder (spec.channelsPerTrack);
             const auto tracks = te::getAudioTracks (*edit);
 
             for (auto* track : tracks)
@@ -311,6 +314,21 @@ namespace wfg::audio
                 /*  One slot per track in Phase 2: one cue per track at a time,
                     which is what the polyphony ceiling means. */
                 track->getClipSlotList().ensureNumberOfSlots (1);
+
+                /*  The resident clip. It stays for the life of the show; arming
+                    a cue later points it at real media. Without one the slot is
+                    empty, the launcher node is not built, and the track's output
+                    stage is not in the graph at all. */
+                if (placeholder.existsAsFile())
+                {
+                    const auto slots = track->getClipSlotList().getClipSlots();
+
+                    if (! slots.isEmpty() && slots[0] != nullptr)
+                        te::insertWaveClip (*slots[0], "resident", placeholder,
+                                            { { tracktion::TimePosition(),
+                                                tracktion::TimeDuration::fromSeconds (1.0) } },
+                                            te::DeleteExistingClips::yes);
+                }
 
                 auto plugin = track->pluginList.insertPlugin (
                     CueOutputPlugin::create (spec.channelsPerTrack, current.outputChannels), -1);
@@ -418,10 +436,77 @@ namespace wfg::audio
 
         juce::File storageFolder;
 
-        bool nodeIdsAreUnique() const
+        /*  A second of silence, written once into the folder Tracktion already
+            uses for its own cache.
+
+            WHY A FILE AT ALL. A clip slot holds a clip for the life of the show
+            so that arming a cue changes a source rather than adding a node - but
+            a launcher clip whose source names nothing readable is dropped from
+            the graph entirely, taking its track's output stage with it. The
+            placeholder is what a track sounds like before its first cue: silent,
+            and present.
+
+            It is in the cache and never in the bundle. A show is what somebody
+            decided (§4.10); a second of silence is not. */
+        juce::File ensureSilentPlaceholder (int channels)
         {
+            const auto file = storageFolder.getChildFile ("silence.wav");
+
+            if (file.existsAsFile())
+                return file;
+
+            storageFolder.createDirectory();
+
+            juce::WavAudioFormat format;
+            std::unique_ptr<juce::FileOutputStream> stream { file.createOutputStream() };
+
+            if (stream == nullptr)
+                return {};
+
+            const auto rate = current.sampleRate > 0 ? current.sampleRate : 48000;
+
+            std::unique_ptr<juce::AudioFormatWriter> writer {
+                format.createWriterFor (stream.get(), rate, static_cast<unsigned int> (channels),
+                                        16, {}, 0) };
+
+            if (writer == nullptr)
+                return {};
+
+            stream.release();
+
+            juce::AudioBuffer<float> silence { channels, rate };
+            silence.clear();
+            writer->writeFromAudioSampleBuffer (silence, 0, rate);
+
+            return file;
+        }
+
+        int residentClipCount() const
+        {
+            if (edit == nullptr)
+                return 0;
+
+            int found = 0;
+
+            for (auto* track : te::getAudioTracks (*edit))
+            {
+                if (track == nullptr)
+                    continue;
+
+                for (auto* slot : track->getClipSlotList().getClipSlots())
+                    if (slot != nullptr && slot->getClip() != nullptr)
+                        ++found;
+            }
+
+            return found;
+        }
+
+        AudioHost::NodeIdReport inspectNodeIds() const
+        {
+            AudioHost::NodeIdReport report;
+
             if (edit == nullptr || engine == nullptr)
-                return true;
+                return report;
 
             /*  A throwaway graph, built the way the playback context builds one,
                 purely to be inspected. Its PlayHead never runs; nothing here
@@ -440,11 +525,53 @@ namespace wfg::audio
             auto node = te::createNodeForEdit (*edit, params);
 
             if (node == nullptr)
-                return true;
+                return report;
 
-            /*  Zero ids are ignored, as Tracktion's own assertion does: a node
-                built from no EditItem has no identity to collide with. */
-            return tracktion::graph::node_player_utils::areNodeIDsUnique (*node, true);
+
+            /*  THROUGH createNodeGraph, and that is the whole point of this
+                function rather than a detail of it.
+
+                The obvious check - areNodeIDsUnique (Node&, bool) - walks the
+                graph with visitNodes, which follows getDirectInputNodes() and
+                NEVER getInternalNodes(). The collision this project reported
+                upstream is in ArrangerLauncherSwitchingNode, which folds its
+                INTERNAL children's ids into its own; a launcher clip's nodes are
+                exactly the ones that walk misses. So that overload would have
+                answered "unique" without ever having looked.
+
+                What Tracktion itself asserts on is nodeGraph->orderedNodes, from
+                createNodeGraph (NodePlayerUtilities.h:122). This asks the same
+                question of the same collection. */
+            auto graph = tracktion::graph::createNodeGraph (std::move (node), true);
+
+            if (graph == nullptr)
+                return report;
+
+            std::vector<std::size_t> ids;
+
+            for (auto* n : graph->orderedNodes)
+                if (n != nullptr)
+                    ids.push_back (n->getNodeProperties().nodeID);
+
+            report.nodes = static_cast<int> (ids.size());
+
+            std::vector<std::size_t> nonZero;
+
+            for (const auto id : ids)
+            {
+                if (id == 0)
+                    ++report.zeroIds;
+                else
+                    nonZero.push_back (id);
+            }
+
+            std::sort (nonZero.begin(), nonZero.end());
+
+            for (std::size_t i = 1; i < nonZero.size(); ++i)
+                if (nonZero[i] == nonZero[i - 1])
+                    ++report.duplicates;
+
+            return report;
         }
 
         std::unique_ptr<te::Engine> engine;
@@ -501,7 +628,8 @@ namespace wfg::audio
         return impl->matrices[static_cast<std::size_t> (trackIndex)];
     }
 
-    bool AudioHost::nodeIdsAreUnique() const  { return impl->nodeIdsAreUnique(); }
+    AudioHost::NodeIdReport AudioHost::inspectNodeIds() const  { return impl->inspectNodeIds(); }
+    int AudioHost::residentClipCount() const { return impl->residentClipCount(); }
 
     int AudioHost::waveOutputDeviceCount() const noexcept
     {
