@@ -136,6 +136,21 @@ namespace wfg::audio
         /** How many tracks the generated Edit has. Zero before one is built. */
         int trackCount() const noexcept;
 
+        /*  Builds the playback graph a second time, offline, and asks whether
+            every node in it has a unique identifier.
+
+            WHY THIS EXISTS. Tracktion derives a node's id by hash-combining the
+            ids of the items it is built from, and that combine barely mixes its
+            value argument - this project reported it upstream after observing
+            duplicate ids at 24 of 63 track counts, where two nodes on unrelated
+            tracks then adopt one another's state across a graph rebuild. It is
+            a debug assertion in Tracktion and silent in release.
+
+            So Go.dot checks its own generated Edit rather than trusting either
+            the hash or the report. Message thread, at load, on a graph that is
+            thrown away. False means this Edit would be unsafe to play. */
+        bool nodeIdsAreUnique() const;
+
         /*  A track's output stage - its level and routing coefficients. This is
             what a media cue writes when it is armed, and what a fade writes at
             50 Hz. Null for an index no track answers to. */

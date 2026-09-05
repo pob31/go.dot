@@ -597,3 +597,33 @@ TEST_CASE ("edit: the width follows the rig, from a stereo pair to sixty-four")
         CHECK (rig.host.trackMatrix (0)->numOutputs() == outputs);
     }
 }
+
+TEST_CASE ("edit: every node in the generated graph has an identity of its own")
+{
+    /*  THE UPSTREAM BUG THIS ANSWERS. Tracktion derives a node's id by
+        hash-combining the ids of the items it is built from, and that combine
+        barely mixes its value argument. This project reported it upstream
+        (docs/spikes/upstream-node-id-collision.md) after seeing duplicate ids
+        at 24 of 63 track counts on a rig whose EditItemIDs fell on a regular
+        lattice. Two same-type nodes sharing an id adopt one another's state
+        across a graph rebuild, on tracks with no dependency between them.
+
+        Tracktion checks this itself, in a debug assertion, and says nothing in
+        release. Go.dot asks the question about its OWN generated Edit instead
+        of trusting either the hash or the report - and asks it at every track
+        count a show might plausibly use, because the failure is a resonance
+        between id strides and appears at some counts and not others. */
+    HostRig rig;
+    REQUIRE (rig.host.start (hostFor (8)));
+
+    for (const int tracks : { 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 24, 31, 32, 48, 63, 64 })
+    {
+        INFO ("tracks: " << tracks);
+
+        audio::EditSpec spec;
+        spec.tracks = tracks;
+
+        REQUIRE (rig.host.buildEdit (spec));
+        CHECK (rig.host.nodeIdsAreUnique());
+    }
+}

@@ -33,6 +33,13 @@
 #include <juce_core/juce_core.h>
 #include <juce_events/juce_events.h>
 #include <tracktion_engine/tracktion_engine.h>
+#include <tracktion_graph/tracktion_graph.h>
+
+/*  Not reachable through the umbrella header: the Edit-side graph builder is an
+    internal header, while the graph-side utilities (createNodeGraph,
+    areNodeIDsUnique) are already public through tracktion_graph.h. */
+#include <tracktion_engine/playback/graph/tracktion_TracktionEngineNode.h>
+#include <tracktion_engine/playback/graph/tracktion_EditNodeBuilder.h>
 
 namespace wfg::audio
 {
@@ -411,6 +418,35 @@ namespace wfg::audio
 
         juce::File storageFolder;
 
+        bool nodeIdsAreUnique() const
+        {
+            if (edit == nullptr || engine == nullptr)
+                return true;
+
+            /*  A throwaway graph, built the way the playback context builds one,
+                purely to be inspected. Its PlayHead never runs; nothing here
+                touches the graph that is actually playing. */
+            tracktion::graph::PlayHead playHead;
+            tracktion::graph::PlayHeadState playHeadState { playHead };
+
+            /*  The TempoSequence overload is not optional - CombiningNode
+                asserts on a ProcessState that has none. */
+            te::ProcessState processState { playHeadState, edit->tempoSequence };
+
+            te::CreateNodeParams params { processState };
+            params.sampleRate = static_cast<double> (current.sampleRate);
+            params.blockSize = current.blockSize;
+
+            auto node = te::createNodeForEdit (*edit, params);
+
+            if (node == nullptr)
+                return true;
+
+            /*  Zero ids are ignored, as Tracktion's own assertion does: a node
+                built from no EditItem has no identity to collide with. */
+            return tracktion::graph::node_player_utils::areNodeIDsUnique (*node, true);
+        }
+
         std::unique_ptr<te::Engine> engine;
         std::unique_ptr<te::Edit> edit;
         std::vector<CueMatrix*> matrices;
@@ -464,6 +500,8 @@ namespace wfg::audio
 
         return impl->matrices[static_cast<std::size_t> (trackIndex)];
     }
+
+    bool AudioHost::nodeIdsAreUnique() const  { return impl->nodeIdsAreUnique(); }
 
     int AudioHost::waveOutputDeviceCount() const noexcept
     {
