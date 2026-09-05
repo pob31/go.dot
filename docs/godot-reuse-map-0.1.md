@@ -358,6 +358,98 @@ exists to catch, measured once from the outside. For Go.dot the operative facts 
 capture is honest about a narrower surface than the application has, and that a Phase 2
 `verified` cue can only target what is actually published.
 
+### The world that does not speak OSCQuery — surveyed 2026-09-05
+
+PRD §3.22 says a device that speaks OSCQuery describes itself, and that templates are only
+needed for devices that cannot. **The author's correction, and it inverts the emphasis: the
+devices that cannot are the normal case.** OSCQuery was never standardised, so most vendors
+have not implemented it and will not until there is a final specification to implement.
+WFS-DIY is capturable only because the same person wrote both ends. Everything else Go.dot
+mounts will be hand-written, and at best its values can be asked for over OSC by some
+device-specific convention.
+
+The format decision is untouched by this — a hand-written and a captured description are the
+same file and the engine cannot tell them apart, which is exactly what §3.22 bought. What
+changes is where descriptions come from, and what `verified` (§3.11) can mean.
+
+**Chataigne is the place to look**, because it has solved this for a decade in the open: its
+modules are hand-written device definitions, and its author, Ben Kuperberg, also wrote the
+`juce_simpleweb` module Go.dot pins for its own HTTP and WebSocket transport. The community
+index (`benkuper/Chataigne-community-modules`) lists **108 modules by 44 authors**, eleven of
+them Ben's. 87 were readable when surveyed; **21 of the 108 URLs no longer fetch**, which is
+worth knowing before anyone plans to harvest them.
+
+#### What a Chataigne module is, and how it differs from an OSCQuery node
+
+Three disjoint parts. `parameters` configure the module itself. `commands` are outgoing
+actions, each a name with typed arguments and a callback into a script. `values` are a
+separate tree of incoming feedback. **The two trees need not correspond at all.**
+
+This is the important structural difference. An OSCQuery node is one address that is both
+readable and writable, carrying `ACCESS`. A Chataigne module has things you can *do* and,
+separately, things you may *learn* — and most devices really are shaped that way. WFS-DIY's
+own documentation tables have the same shape (`/wfs/output/attenuation <ID> <value>` is a
+call signature, not a node), which is why they could not be converted into a namespace.
+
+Commands also take the object index as an **argument**, not a path segment: all 35 ADM-OSC
+commands take a `Source index`, grandMA3 takes `Page`, `Executor` and `Offset`. Go.dot's
+reader already keeps `RANGE` per argument for multi-argument nodes, so the machinery half
+exists — but whoever hand-writes a template must decide whether an indexed family becomes
+N nodes or one node with an index argument, and that choice decides what `verified` can mean
+for it.
+
+#### Four ways the ecosystem gets a value back, and three of them are the author's work
+
+| mechanism | seen in | what it costs |
+|---|---|---|
+| **Self-description and query** — ask any node | OSCQuery targets only: WFS-DIY, ossia | nothing; this is the case Go.dot already implements |
+| **A protocol get-convention, polled** | **ADM-OSC**: 35 commands, 3 static feedback values, and module *parameters* that are polling toggles — "Get Sound Objects positions XYZ", "Get gain", "Get mute", plus a "Get update Rate" | the module must know the convention and run a poll loop |
+| **Subscribe, then listen** | **ETC Eos**: six feedback values, populated because the console pushes after `/eos/subscribe` | the device must offer it |
+| **A bespoke sync command** | **grandMA3**: "Add Executor to SyncList" and "Sync Executors", written by the module author because the console will not volunteer state | invented per device |
+| **Nothing** | 32 of 87 modules declare no feedback values at all; 11 more declare output without input | state is tracked locally or not at all |
+
+#### The numbers, and one thing they do not say
+
+- **Protocols**: OSC 35, MIDI 19, WebSocket 9, TCP 7, HTTP 5, Serial 5, then a tail. OSC is
+  40% of what Chataigne covers; Go.dot's mount model is OSC-shaped.
+- **Direction**: 71 modules both send and receive, **11 send without receiving**, 3 receive
+  without sending, 2 do neither.
+- **Every one of the 87 has a script.** Not one module in the sample is purely declarative.
+  Whatever Go.dot's template format is, the ecosystem's evidence is that the static half is
+  never sufficient by itself.
+- In aggregate there are more feedback values (5 526) than commands (1 822), but that is
+  skewed and should not be read as "feedback is common": **SPAT Revolution alone contributes
+  3 215**, and MIDI control surfaces are feedback-heavy because every button reports — which
+  is input arriving, not device state that can confirm a write.
+
+**The closest analogue to what Go.dot mounts is in there.** Flux's **SPAT Revolution** module
+is OSC, 3 215 feedback values, 102 commands — and it is hand-enumerated longhand, "Source 1",
+"Source 2", each with its own parameter block, and the same for rooms. That is the
+hand-written equivalent of what WFS-DIY's server generates. It also puts the 2 480-node
+WFS-DIY capture in proportion: that is an ordinary size for a real spatial-processor
+template, not an outlier.
+
+#### What Go.dot should take from it
+
+- **A mount must be able to declare what it can do.** Chataigne solves this with two booleans,
+  `hasInput` and `hasOutput`. Go.dot's mount declares `transport`, which says how to *send*,
+  and nothing about whether the target can be *asked*. So a cue with `wait: verified` against
+  a write-only target is a cue that cannot succeed, and today nothing would notice until the
+  show. This is question K in the namespace draft.
+- **`verified` needs designing against four mechanisms, not one.** Phase 2 implements the
+  OSCQuery one, which covers the author's own processors — which is what PRD §3.11 already
+  scopes it to when it says "default for own processors". The other three are Phase 4 or
+  later, and the mount capability is what keeps the difference honest in the meantime.
+- **PRD §3.11's opening premise, "Targets speak OSCQuery", overstates what is true.** Its own
+  parenthesis already scopes the mechanism correctly. An amendment is the author's to make;
+  it is recorded here rather than edited there.
+- **Harvesting Chataigne or Bitfocus Companion definitions later is realistic**, and the
+  conversion is a generator job of the shape `scripts/generate-schema.py` already models: a
+  committed output plus a `--check` drift gate. Two cautions. Each module lives in its own
+  repository under its own licence, so it is a per-module check rather than one decision. And
+  deriving a namespace from a *published protocol specification* — as ADM-OSC is, and as PRD
+  §3.22 says ships built in — is a cleaner path than copying a module that implements it.
+
 ### Phase 2/4 — closed-loop cues and mock targets
 
 | Need | Reuse | Status |

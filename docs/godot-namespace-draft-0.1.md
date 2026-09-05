@@ -726,9 +726,16 @@ back on if nobody feels strongly by then.
 |---|---|---|---|
 | E | Does the Phase 5 desktop UI run **in-process or as a separate client**? | Phase 5, but it shapes Phase 2's plugin-parameter handover | assume separate, because that is the stricter assumption and the one PRD §3.2 reads most naturally |
 | J | **Should PRD §4.2 record what Tracktion does inside the callback?** Its device callback takes one uncontended `std::shared_lock` per block and its node-player pool uses semaphores; the lipogram can be *enforced* on Go.dot's code and only *measured* on Tracktion's (§11.5). A PRD amendment is the author's to make. | the lipogram test (PR 2.2) | enforce on Go.dot's scopes, report Tracktion's count separately, never hide it |
+| K | **How does a mount declare what it can do?** `transport` says how to *send* and nothing says whether the target can be *asked*, so `wait: verified` against a write-only device is a cue that cannot succeed and nothing notices until the show. Chataigne carries two booleans per module, `hasInput` and `hasOutput`, for exactly this. Also: whether the answer names the *mechanism* (`oscquery` \| `poll` \| `subscribe` \| `none`) or only the capability. | `verified` (PR 2.6) | a mount-level `readback` enum defaulting to `none`, and a `verified` cue against `none` refused at load — the strictest reading, and the one that cannot fail silently |
 
 None of these blocks the next subphase. B (tombstones) and A (standby persistence) were the
-two due soonest and both are now settled. J changes no code either way; it changes what §4.2 claims.
+two due soonest and both are now settled. J changes no code either way; it changes what §4.2
+claims. K does change code, but not before PR 2.6, and its fallback is the safe direction.
+
+One more that is the author's rather than a question for this document: **PRD §3.11 opens
+"Targets speak OSCQuery"**, which states as a premise something true of Go.dot's own
+processors and untrue of most third-party devices. The section's own parenthesis already
+scopes the mechanism correctly, so this is a sentence to amend rather than a design to change.
 
 ## 10. Not in Phase 1, by design
 
@@ -865,3 +872,13 @@ The log header gains one line per media file the show references — `# media <p
 
 Mounts send over UDP (their declared `transport`); 8011 stays reserved for OSC over TCP, and
 `verified` reads back over the target's OSCQuery HTTP port. Nothing new is opened.
+
+**That last clause is true of a minority of targets, and deliberately so in Phase 2.** OSCQuery
+was never standardised, so most devices do not implement it: a mounted namespace will usually
+be hand-written, and getting a value back from such a target needs one of the other three
+mechanisms the ecosystem uses — a protocol get-convention that is polled, a subscription, or a
+sync command somebody wrote for that one device. Those are Phase 4 or later. Phase 2
+implements the OSCQuery path, which is what PRD §3.11 already scopes `verified` to when it
+calls it the *default for own processors*. Question K is how a mount says which it is, so that
+a `verified` cue against a target that can never answer is refused when the show loads rather
+than discovered during it. The survey behind this is in `docs/godot-reuse-map-0.1.md`.
