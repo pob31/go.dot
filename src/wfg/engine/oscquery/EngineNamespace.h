@@ -48,6 +48,7 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/tree/Touches.h>
 
 #include <memory>
@@ -58,10 +59,18 @@ namespace wfg::oscquery
     class EngineNamespace final : public Namespace
     {
     public:
+        /*  The UDP endpoint rather than its port number, and that is what
+                makes the wiring order work rather than a style preference. The
+                socket's handler needs this object, and this object needs the
+                socket's port for HOST_INFO - circular while the port is a
+                value. Holding the endpoint breaks it: the endpoint is
+                constructed before it is started, so the namespace can be built
+                between the two, and boundPort() is atomic and reads correctly
+                from the server thread once it is. */
         EngineNamespace (Engine& engineToDrive,
                          tree::ParameterTree& treeToRead,
                          tree::TouchTable& touchesToConsult,
-                         int udpPort);
+                         const osc::UdpEndpoint& udpEndpoint);
 
         //  --- Namespace -------------------------------------------------------
         std::shared_ptr<const tree::TreeSnapshot> snapshot() const override;
@@ -72,7 +81,7 @@ namespace wfg::oscquery
                          const std::string& address,
                          const std::string& causedBy) const override;
 
-        int oscPort() const override { return udp; }
+        int oscPort() const override { return udp.boundPort(); }
 
         //======================================================================
         /*  `/godot/cmd/standby/next` -> `standby.next`, and an empty string for
@@ -88,6 +97,6 @@ namespace wfg::oscquery
         Engine& engine;
         tree::ParameterTree& parameters;
         tree::TouchTable& touches;
-        int udp = 0;
+        const osc::UdpEndpoint& udp;
     };
 }

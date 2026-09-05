@@ -53,6 +53,10 @@
 #include <wfg/engine/clock/SampleClock.h>
 #include <wfg/engine/clock/TickClock.h>
 
+/*  The whole definition, not a forward declaration: AfterTick names
+    Engine::TickResult by value. */
+#include <wfg/engine/Engine.h>
+
 #include <atomic>
 #include <functional>
 #include <condition_variable>
@@ -138,10 +142,14 @@ namespace wfg
             and for the same reason. A setter that could be called mid-flight
             would be a data race with a very quiet failure mode.
 
+            It is handed the TickResult rather than the tick index, because the
+            result carries `soleOrigin` - who caused this tick's changes - and
+            echo suppression cannot be done without it.
+
             The clock knows nothing about what the hook does. It does not
             include a tree header, and `serve` is the only caller that sets
             one. */
-        using AfterTick = std::function<void (std::int64_t tick)>;
+        using AfterTick = std::function<void (const Engine::TickResult&)>;
 
         void setAfterTick (AfterTick hook) { afterTick = std::move (hook); }
 

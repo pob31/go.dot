@@ -174,7 +174,21 @@ namespace wfg
 
             switch (r.kind)
             {
-                case LogRecord::Kind::applied:  ++result.applied;  break;
+                case LogRecord::Kind::applied:
+                    ++result.applied;
+
+                    /*  One origin, or none. Empty is safe as the "no single
+                        cause" value because no real origin is empty - every one
+                        is `ws:<ip>:<port>`, `udp:<ip>:<port>`, `cli` or
+                        `replay` - so it can never match a client and withhold
+                        a push from it. */
+                    if (result.applied == 1)
+                        result.soleOrigin = r.origin;
+                    else if (result.soleOrigin != r.origin)
+                        result.soleOrigin.clear();
+
+                    break;
+
                 case LogRecord::Kind::rejected: ++result.rejected; break;
                 case LogRecord::Kind::dropped:  ++result.dropped;  break;
             }

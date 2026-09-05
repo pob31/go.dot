@@ -29,11 +29,11 @@ namespace wfg::oscquery
     EngineNamespace::EngineNamespace (Engine& engineToDrive,
                                       tree::ParameterTree& treeToRead,
                                       tree::TouchTable& touchesToConsult,
-                                      int udpPort)
+                                      const osc::UdpEndpoint& udpEndpoint)
         : engine (engineToDrive),
           parameters (treeToRead),
           touches (touchesToConsult),
-          udp (udpPort)
+          udp (udpEndpoint)
     {
     }
 

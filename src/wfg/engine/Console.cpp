@@ -24,6 +24,12 @@
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/tree/ParameterTree.h>
+
+#include <wfg/engine/clock/DummyAudioClock.h>
+#include <wfg/engine/clock/TickThread.h>
+#include <wfg/engine/osc/UdpEndpoint.h>
+#include <wfg/engine/oscquery/EngineNamespace.h>
+#include <wfg/engine/oscquery/OscQueryServer.h>
 #include <wfg/engine/tree/TreeCommands.h>
 #include <wfg/engine/log/Replay.h>
 
@@ -44,6 +50,10 @@
 #include <algorithm>
 #include <clocale>
 #include <cstring>
+#include <atomic>
+#include <chrono>
+#include <thread>
+#include <csignal>
 #include <iostream>
 #include <string>
 #include <vector>
@@ -642,6 +652,329 @@ namespace
     }
 }
 
+    //==========================================================================
+    /*  Ctrl-C, and the one flag a signal handler may touch.
+
+        `volatile sig_atomic_t` is not superstition here: it is the only type
+        the C standard permits a handler to write and the rest of the program to
+        read. Everything else - a std::atomic, a mutex, a call into JUCE - is
+        undefined behaviour inside a signal handler, however well it appears to
+        work. The handler sets this; the message loop notices. */
+    volatile std::sig_atomic_t interrupted = 0;
+
+    extern "C" void onInterrupt (int) { interrupted = 1; }
+
+#if JUCE_MAC
+    /*  DECLARED HERE because JUCE does not declare it in a header.
+        juce_ApplicationBase.cpp:195 has it as a bare `extern` inside its own
+        translation unit, and JUCEApplicationBase::main calls it (:243) before
+        running the loop. Without it, runDispatchLoop - which is [NSApp run]
+        (juce_MessageManager_mac.mm:323-351) - runs against an NSApplication
+        that was never created.
+
+        A console binary that never shows a window still needs it, because the
+        run loop itself is NSApplication's. */
+    namespace juce { void initialiseNSApplication(); }
+#endif
+
+    /*  The JUCE dispatch loop on the MAIN thread, until interrupted.
+
+        Phase 2 needs a message thread - plugin scanning and device callbacks
+        are message-thread work - so it is stood up now rather than retrofitted
+        around a loop of our own later. Nothing in Phase 1 posts to it; it waits.
+
+        RUN, NOT runUntil. runDispatchLoopUntil is inside
+        `#if JUCE_MODAL_LOOPS_PERMITTED` (juce_MessageManager.h:99-106) and this
+        build sets that to 0 on purpose - a modal loop in a show engine is a
+        hang. runDispatchLoop itself is not gated, so that is what runs.
+
+        WHICH MAKES THE WATCHDOG NECESSARY, and it is not ceremony. A signal
+        handler may do exactly one thing portably: write a
+        `volatile sig_atomic_t`. It may not call stopDispatchLoop, allocate, or
+        touch a mutex, however reliably that appears to work. So the handler
+        sets the flag, an ordinary thread notices it and calls stopDispatchLoop
+        - which is thread-safe, and posts the quit message the loop is waiting
+        for. */
+    void runMessageLoopUntilInterrupted()
+    {
+       #if JUCE_MAC
+        juce::initialiseNSApplication();
+       #endif
+
+        std::signal (SIGINT, onInterrupt);
+        std::signal (SIGTERM, onInterrupt);
+
+        auto* manager = juce::MessageManager::getInstance();
+
+        std::atomic<bool> watching { true };
+
+        std::thread watchdog { [manager, &watching]
+                               {
+                                   while (watching.load (std::memory_order_relaxed))
+                                   {
+                                       if (interrupted != 0)
+                                       {
+                                           manager->stopDispatchLoop();
+                                           return;
+                                       }
+
+                                       std::this_thread::sleep_for (
+                                           std::chrono::milliseconds { 50 });
+                                   }
+                               } };
+
+        manager->runDispatchLoop();
+
+        watching.store (false, std::memory_order_relaxed);
+        watchdog.join();
+    }
+
+    /*  `wfg serve <bundle> --sample-rate=N --buffer=N [--http-port=N] [--osc-port=N]`
+
+        The whole of Phase 1, running: a document loaded, a tree published every
+        tick, an OSCQuery server answering, a UDP socket taking OSC, and an
+        event log recording every one of it.
+
+        THE CLOCK PARAMETERS HAVE NO DEFAULTS, deliberately, exactly as the
+        spikes had none. A sample rate Go.dot picked for itself is a sample rate
+        nobody chose, and Phase 2 replaces this flag with the rate the device
+        actually reports - at which point a default here would be a number
+        silently disagreeing with the hardware.
+
+        PORT 0 IS THE INTERESTING CASE and the reason a fix went upstream: both
+        ports accept 0, bind an ephemeral one, and PRINT THE NUMBER THEY GOT.
+        That is what lets the black-box harness run several instances at once,
+        and what lets a second Go.dot start on a machine already running one.
+        The two lines are written to stdout in a fixed shape because a driver
+        parses them:
+
+            wfg: http 51234
+            wfg: osc 51235
+
+        THE MAIN THREAD RUNS THE JUCE DISPATCH LOOP and nothing else. Phase 2
+        needs it there - plugin scanning and device callbacks are message-thread
+        work - and standing it up now means Phase 2 does not restructure this
+        verb. The model belongs to the tick thread; this one waits.
+    */
+    int runServe (const juce::ArgumentList& args)
+    {
+        const auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
+
+        if (path.isEmpty())
+        {
+            std::cerr << "wfg serve: give me a bundle folder" << std::endl;
+            return 2;
+        }
+
+        if (! args.containsOption ("--sample-rate") || ! args.containsOption ("--buffer"))
+        {
+            std::cerr << "wfg serve: --sample-rate=N and --buffer=N are both required.\n"
+                         "    They have no defaults on purpose: a rate Go.dot chose for\n"
+                         "    itself is a rate nobody chose. Phase 2 reads it from the device."
+                      << std::endl;
+            return 2;
+        }
+
+        const auto sampleRate = args.getValueForOption ("--sample-rate").getIntValue();
+        const auto blockSize = args.getValueForOption ("--buffer").getIntValue();
+
+        const juce::File target { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
+
+        if (! target.isDirectory())
+        {
+            std::cerr << "wfg serve: not a bundle folder: "
+                      << target.getFullPathName() << std::endl;
+            return 2;
+        }
+
+        //  --- the document -----------------------------------------------
+        wfg::doc::ShowDocument document;
+        const auto result = wfg::doc::Bundle::open (target, document);
+
+        if (! result.ok)
+        {
+            std::cerr << "wfg serve: " << target.getFileName().toStdString()
+                      << " could not be loaded:" << std::endl;
+
+            for (const auto& problem : result.problems)
+                std::cerr << "    " << problem << std::endl;
+
+            return 2;
+        }
+
+        //  --- the engine and everything it needs --------------------------
+        wfg::Engine engine;
+        wfg::tree::TouchTable touches;
+        wfg::tree::MountTable mounts;
+        wfg::cue::Focus focus;
+
+        wfg::doc::registerDocumentCommands (engine.commands(), document);
+        wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::tree::registerTreeCommands (engine.commands(), touches);
+        wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
+
+        for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
+            std::cerr << "    " << problem << std::endl;
+
+        wfg::tree::ParameterTree parameters { document, engine.commands(), mounts };
+
+        wfg::tree::EngineState state;
+        state.version = WFG_VERSION;
+        state.documentPath = target.getFullPathName().toStdString();
+        state.documentName = target.getFileNameWithoutExtension().toStdString();
+
+        //  --- the log ------------------------------------------------------
+        const auto logPath = args.containsOption ("--log")
+                               ? args.getValueForOption ("--log").toStdString()
+                               : std::string();
+
+        if (! logPath.empty())
+        {
+            if (! engine.log().open (logPath, wfg::doc::Bundle::logHeaderLines (target)))
+            {
+                std::cerr << "wfg serve: cannot write the log at " << logPath << std::endl;
+                return 2;
+            }
+        }
+        else
+        {
+            engine.log().openInMemory (wfg::doc::Bundle::logHeaderLines (target));
+        }
+
+        //  --- the transports ------------------------------------------------
+        const auto requestedOsc = args.containsOption ("--osc-port")
+                                    ? args.getValueForOption ("--osc-port").getIntValue()
+                                    : 8010;
+
+        /*  Constructed, then wired, then started, in that order. The namespace
+            is built between the endpoint's construction and its start, which is
+            what lets the handler hold it and the namespace hold the endpoint
+            without either waiting on the other. */
+        wfg::osc::UdpEndpoint udp;
+
+        wfg::oscquery::EngineNamespace nameSpace { engine, parameters, touches, udp };
+
+        if (! udp.start (requestedOsc,
+                         [&engine, &nameSpace] (wfg::osc::Datagram datagram)
+                         {
+                             const auto decoded = wfg::osc::decode (datagram.bytes.data(),
+                                                                    datagram.bytes.size());
+
+                             /*  A packet that never became a command is an `X`
+                                 record carrying who sent it, which guard refused
+                                 it and the bytes themselves. Dropping it silently
+                                 would leave an operator with a surface that does
+                                 nothing and no way to find out why. */
+                             if (! decoded.ok)
+                             {
+                                 wfg::Drop drop;
+                                 drop.origin = datagram.origin();
+                                 drop.reason = decoded.reason;
+                                 drop.payload = std::move (datagram.bytes);
+                                 engine.submit (std::move (drop));
+                                 return;
+                             }
+
+                             /*  Not applied here. This is a socket thread; the
+                                 tick thread owns the model, and this hands it an
+                                 event like every other producer - through the
+                                 same seam the WebSocket writes go through, so
+                                 one address means one thing on both transports. */
+                             nameSpace.write (datagram.origin(), decoded.packet);
+                         }))
+        {
+            std::cerr << "wfg serve: cannot bind the OSC port " << requestedOsc << std::endl;
+            return 2;
+        }
+
+        const auto requestedHttp = args.containsOption ("--http-port")
+                                     ? args.getValueForOption ("--http-port").getIntValue()
+                                     : 5010;
+
+        wfg::oscquery::OscQueryServer server;
+
+        if (! server.start (requestedHttp, nameSpace))
+        {
+            std::cerr << "wfg serve: cannot bind the HTTP port " << requestedHttp << std::endl;
+            return 2;
+        }
+
+        /*  The two lines a driver parses. Flushed, because a harness reading
+            them is blocked until they arrive and a buffered stdout would hang
+            it until the process exits. */
+        std::cout << "wfg: http " << server.boundPort() << std::endl;
+        std::cout << "wfg: osc " << udp.boundPort() << std::endl;
+
+        //  --- the clock ------------------------------------------------------
+        const auto schedule = wfg::TickClock::create (sampleRate);
+
+        if (! schedule.has_value())
+        {
+            std::cerr << "wfg serve: " << sampleRate
+                      << " Hz does not divide into 50 ticks a second, so a tick"
+                         " would not sit on an exact sample."
+                      << std::endl;
+            return 2;
+        }
+
+        wfg::DummyAudioClock audio { sampleRate, blockSize };
+        wfg::TickThread ticks { engine, audio.clock(), *schedule };
+
+        /*  The three clock numbers a client reads at `/godot/engine`, filled in
+            before anything is served. PRD 6.2 wants "no clock" and "no
+            interface" to be two failures an operator can tell apart at a
+            glance, and they cannot be told apart from two zeroes. */
+        state.sampleRate = sampleRate;
+        state.blockSize = blockSize;
+        state.samplesPerTick = schedule->samplesPerTick();
+
+        /*  Published once before the server starts, so a client connecting in
+            the first millisecond gets a tree rather than a 503. */
+        auto previous = parameters.publish (0, state);
+
+        /*  Publish then flush, on the tick thread, once per tick, in that
+            order. The snapshot has to be the finished answer to the tick that
+            just ran; a push carrying a value from a tick still in progress is a
+            push of something nobody decided. */
+        ticks.setAfterTick ([&] (const wfg::Engine::TickResult& outcome)
+                            {
+                                /*  The runtime half of the state, refreshed
+                                    before the publish that carries it. Left
+                                    out, `/godot/engine/tick` reads 0 for the
+                                    life of the process - which is what the
+                                    first hand-run of this verb did, and it
+                                    looks exactly like a stopped clock. */
+                                state.tick = outcome.tick;
+                                state.lateness = ticks.lateness();
+                                state.latenessMax = ticks.latenessMax();
+                                state.errorCount = engine.errorCount();
+
+                                auto current = parameters.publish (outcome.tick, state);
+
+                                if (previous != nullptr && current != nullptr)
+                                    server.publishChanges (wfg::tree::diff (*previous, *current),
+                                                           *current, outcome.soleOrigin);
+
+                                previous = std::move (current);
+                            });
+
+        audio.start();
+        ticks.start();
+
+        /*  The main thread from here on is JUCE's, and only JUCE's. Phase 2
+            needs a message thread for plugin scanning and device callbacks, so
+            it is stood up now rather than retrofitted around a loop of our own. */
+        runMessageLoopUntilInterrupted();
+
+        ticks.stop();
+        audio.stop();
+        server.stop();
+        udp.stop();
+        engine.log().close();
+
+        return 0;
+    }
+
 //==============================================================================
 int wfg::runConsole (int argc, char** argv)
 {
@@ -715,6 +1048,16 @@ int wfg::runConsole (int argc, char** argv)
                       [] (const juce::ArgumentList& args)
                       {
                           if (const auto code = runSchema (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
+    app.addCommand ({ "serve",
+                      "serve <bundle> --sample-rate=N --buffer=N [--http-port=N] [--osc-port=N] [--log=<file>]",
+                      "Serves a bundle over OSCQuery and OSC until interrupted",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runServe (args); code != 0)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 

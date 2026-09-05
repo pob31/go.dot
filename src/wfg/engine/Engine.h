@@ -86,6 +86,25 @@ namespace wfg
             std::size_t rejected = 0;
             std::size_t dropped = 0;
 
+            /*  The origin of every event applied this tick, WHEN THERE WAS
+                EXACTLY ONE. Empty when nothing was applied, and empty when two
+                or more origins wrote.
+
+                It exists for echo suppression, and the emptiness in the
+                multiple case is the careful part. A push is withheld from the
+                client that caused it, because its fader is already there. With
+                two writers in one tick there is no single cause, and blaming
+                either one would withhold a change it did NOT make - a surface
+                left showing a stale value with nothing to correct it, which is
+                worse than the extra message suppression was saving.
+
+                So: suppress when the cause is unambiguous, and send to
+                everybody when it is not. The cost of being wrong that way is
+                one redundant push. Per-address attribution is what would remove
+                even that, and it belongs with Phase 6's real surfaces rather
+                than here. */
+            std::string soleOrigin;
+
             std::size_t total() const noexcept { return applied + rejected + dropped; }
         };
 
