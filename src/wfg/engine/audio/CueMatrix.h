@@ -100,7 +100,13 @@ namespace wfg::audio
             be summed twice.
 
             Extra channels beyond what prepare() was told about are cleared
-            rather than left, because a stale buffer is worse than silence. */
+            rather than left, because a stale buffer is worse than silence.
+
+            `numSamples` must not exceed the `maxBlockSize` prepare() was given.
+            A caller that asks for more is asking for a block this object was
+            never sized for, which is a wiring mistake rather than a runtime
+            condition - so it is a debug assertion, and in release the excess is
+            left silent rather than read from memory nobody allocated. */
         void process (const float* const* input, int numInputChannels,
                       float* const* output, int numOutputChannels,
                       int numSamples) noexcept;

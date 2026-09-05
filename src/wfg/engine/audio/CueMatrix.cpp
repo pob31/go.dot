@@ -108,6 +108,11 @@ namespace wfg::audio
         if (output == nullptr || numOutputChannels <= 0 || numSamples <= 0)
             return;
 
+        /*  A block larger than we were prepared for is a wiring mistake. Caught
+            in debug; in release the excess stays silent rather than reading past
+            the level ramp. */
+        jassert (numSamples <= blockLimit);
+
         const auto frames = std::min (numSamples, blockLimit);
 
         /*  Channels this matrix was never sized for are cleared rather than
