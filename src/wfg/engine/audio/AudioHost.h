@@ -68,6 +68,22 @@ namespace wfg::audio
         int channelsPerTrack = 2;
     };
 
+    /*  Somewhere for a block to go once the graph has produced it.
+
+        The audio thread calls this, once per block, after the graph has run and
+        before the sample counter moves. Two uses: a test asserting that a cue
+        reached the outputs it named, and PR 2.8's WAV render, which is how CI
+        hears anything at all. In a show there is no sink and the blocks go
+        straight to the device. */
+    struct BlockSink
+    {
+        virtual ~BlockSink() = default;
+
+        /** The audio thread. Allocating here would break §4.2 for everyone. */
+        virtual void blockProduced (const float* const* channels,
+                                    int numChannels, int numSamples) noexcept = 0;
+    };
+
     //==============================================================================
     class AudioHost
     {
@@ -107,6 +123,12 @@ namespace wfg::audio
 
         /** Blocks processed since the last start. Any thread. */
         std::int64_t blocksProcessed() const noexcept;
+
+        /*  Where each block goes after the graph has produced it. Null for none,
+            which is what a show uses. Set it with the audio stopped: it is read
+            on the audio thread without synchronisation, because a pointer that
+            changed mid-block is a question nobody should have to ask. */
+        void setBlockSink (BlockSink* sink) noexcept;
 
         /*  The sample counter, for TickThread. It only ever moves forward: the
             type is an AudioClockSource and not a ManualClock precisely so that
@@ -168,6 +190,44 @@ namespace wfg::audio
         /** Builds the graph offline and counts what is in it. */
         NodeIdReport inspectNodeIds() const;
 
+        /*  Points a track's resident clip at a media file. This is the seed of
+            what PR 2.3 will call arming a cue: the clip stays, its source
+            changes. Message thread, and it costs one graph rebuild - `source`
+            is on Tracktion's restart list, which the plan budgets for.
+
+            False if the index or the file is no good. */
+        bool setTrackSource (int trackIndex, const std::string& mediaFile);
+
+        /*  Starts a track's clip. The launch instant is derived from the
+            playback context's sync point, so the transport must be rolling and
+            at least one block must have gone through - a launch handle asked to
+            play at no particular beat dereferences an empty optional.
+
+            PR 2.3 replaces this with GO, which places the launch on a tick
+            boundary. This is the minimum needed to get audio out of the graph
+            and measure where it goes. */
+        /*  Waits until the track's source is mapped into the audio file cache,
+            pumping blocks while it waits. False if it never became ready.
+
+            A wave clip is silent until the cache holds a mapped Reader for its
+            file, and the cache only maps a file while something holds one - so
+            this is not a sleep, it is a sleep with the graph running. Firing a
+            cue before this returns plays silence for as long as the disk takes,
+            with the run reporting itself as playing throughout. PR 2.3's arm
+            calls it from standby.
+
+            Message thread: it sleeps, so it is never on the GO path. */
+        bool waitForTrackSourceReady (int trackIndex, int timeoutMilliseconds);
+
+        bool launchTrack (int trackIndex);
+
+        /*  Whether a track's clip is playing, and how long its source is. PR 2.3
+            needs the first to notice a cue has finished; both are here now
+            because a silent output has several possible causes and guessing
+            between them is not a diagnosis. */
+        bool isTrackPlaying (int trackIndex) const;
+        double trackSourceLengthSeconds (int trackIndex) const;
+
         /*  How many tracks hold a resident clip in their slot. Should equal the
             track count: a slot with no clip means that track's launcher node -
             and with it the track's whole output stage - is absent from the
@@ -178,6 +238,19 @@ namespace wfg::audio
             what a media cue writes when it is armed, and what a fade writes at
             50 Hz. Null for an index no track answers to. */
         CueMatrix* trackMatrix (int trackIndex) noexcept;
+
+        /*  The loudest sample the track's output plugin saw arriving and
+            leaving, since the last reset.
+
+            These exist because a silent output has several possible causes -
+            the clip never started, the clip stopped early, the matrix is wrong,
+            the graph never reaches the device - and a test that can only see the
+            far end cannot tell them apart. They are how M1 established that a
+            cue was routed correctly and still went quiet halfway through.
+            Written on the audio thread as relaxed stores; read from anywhere. */
+        float trackInputPeak (int trackIndex) const;
+        float trackOutputPeak (int trackIndex) const;
+        void resetTrackPeaks (int trackIndex);
 
     private:
         struct Impl;

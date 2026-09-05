@@ -115,6 +115,12 @@ namespace wfg::audio
     {
     }
 
+    void CueOutputPlugin::resetPeaks() noexcept
+    {
+        lastInputPeak.store (0.0f, std::memory_order_relaxed);
+        lastOutputPeak.store (0.0f, std::memory_order_relaxed);
+    }
+
     //==============================================================================
     void CueOutputPlugin::applyToBuffer (const te::PluginRenderContext& context)
     {
@@ -158,8 +164,26 @@ namespace wfg::audio
                 outputPointers[static_cast<std::size_t> (channel)]
                     = destination.getWritePointer (channel, start);
 
+            {
+                auto peak = lastInputPeak.load (std::memory_order_relaxed);
+
+                for (int channel = 0; channel < copied; ++channel)
+                    peak = std::max (peak, scratch.getMagnitude (channel, 0, frames));
+
+                lastInputPeak.store (peak, std::memory_order_relaxed);
+            }
+
             cueMatrix.process (scratch.getArrayOfReadPointers(), copied,
                                outputPointers.data(), channels, frames);
+
+            {
+                auto peak = lastOutputPeak.load (std::memory_order_relaxed);
+
+                for (int channel = 0; channel < channels; ++channel)
+                    peak = std::max (peak, destination.getMagnitude (channel, start, frames));
+
+                lastOutputPeak.store (peak, std::memory_order_relaxed);
+            }
 
             remaining -= frames;
             offset += frames;

@@ -247,6 +247,7 @@ namespace wfg::audio
 
             edit.reset();
             matrices.clear();
+            plugins.clear();
 
             /*  createEmptyEdit touches no disk. Edit::createEdit is the only
                 non-test, non-preview factory; the Edit ctor and
@@ -324,10 +325,11 @@ namespace wfg::audio
                     const auto slots = track->getClipSlotList().getClipSlots();
 
                     if (! slots.isEmpty() && slots[0] != nullptr)
-                        te::insertWaveClip (*slots[0], "resident", placeholder,
-                                            { { tracktion::TimePosition(),
-                                                tracktion::TimeDuration::fromSeconds (1.0) } },
-                                            te::DeleteExistingClips::yes);
+                        if (auto clip = te::insertWaveClip (*slots[0], "resident", placeholder,
+                                                            { { tracktion::TimePosition(),
+                                                                tracktion::TimeDuration::fromSeconds (1.0) } },
+                                                            te::DeleteExistingClips::yes))
+                            makeClipPlayAtItsOwnRate (*clip);
                 }
 
                 auto plugin = track->pluginList.insertPlugin (
@@ -344,6 +346,7 @@ namespace wfg::audio
                 }
 
                 matrices.push_back (&output->matrix());
+                plugins.push_back (output);
 
                 /*  Routed once, to the one wide device. This is the structural
                     edit that never happens again. */
@@ -395,6 +398,7 @@ namespace wfg::audio
         {
             edit.reset();
             matrices.clear();
+            plugins.clear();
 
             if (engine != nullptr)
             {
@@ -426,6 +430,10 @@ namespace wfg::audio
             midi.clear();
 
             engine->getDeviceManager().getHostedAudioDeviceInterface().processBlock (scratch, midi);
+
+            if (sink != nullptr)
+                sink->blockProduced (scratch.getArrayOfReadPointers(),
+                                     scratch.getNumChannels(), current.blockSize);
 
             /*  After the graph has run, not before. A reader that saw the new
                 sample count would otherwise be told the block had happened
@@ -479,6 +487,188 @@ namespace wfg::audio
             writer->writeFromAudioSampleBuffer (silence, 0, rate);
 
             return file;
+        }
+
+        te::WaveAudioClip* clipOn (int trackIndex) const
+        {
+            if (edit == nullptr)
+                return nullptr;
+
+            const auto tracks = te::getAudioTracks (*edit);
+
+            if (trackIndex < 0 || trackIndex >= tracks.size())
+                return nullptr;
+
+            auto* track = tracks[trackIndex];
+
+            if (track == nullptr)
+                return nullptr;
+
+            const auto slots = track->getClipSlotList().getClipSlots();
+
+            if (slots.isEmpty() || slots[0] == nullptr)
+                return nullptr;
+
+            return dynamic_cast<te::WaveAudioClip*> (slots[0]->getClip());
+        }
+
+        /*  GO.DOT OWNS TIME, AND THIS IS WHERE THAT STOPS BEING A SLOGAN.
+
+            A launcher clip is a musical object. It is played through auto-tempo:
+            Tracktion stretches it so that its length in BEATS - taken from the
+            loop info the file was scanned with - fits the Edit's tempo map, and
+            the launch handle schedules it in beats. Turning auto-tempo off does
+            not make it play at its own rate, it makes it play NOTHING: with no
+            beat length there is nothing for the launcher to schedule. Measured,
+            twice, in both directions.
+
+            So the rate is made honest from the other end. The Edit runs at 60
+            bpm (buildEdit, and the reason is here): one beat is one second, so a
+            clip whose beat count equals its length in seconds is stretched by
+            exactly 1:1 and plays as recorded.
+
+            THE BUG THIS FIXES, because it fails as silence rather than as an
+            error: the resident clip is created against a ONE-SECOND placeholder,
+            so its loop info says one beat. Pointing it at a two-second cue later
+            changes the source but not the beat count - so the file is squeezed
+            into one second, and at one second the cue goes quiet while the
+            launch handle still cheerfully reports that it is playing. M1 lost
+            exactly the second half of its tone. */
+        static void makeClipPlayAtItsOwnRate (te::WaveAudioClip& clip)
+        {
+            const auto seconds = clip.getSourceLength().inSeconds();
+
+            if (seconds <= 0.0)
+                return;
+
+            auto info = clip.getLoopInfo();
+            info.setNumBeats (seconds);          // 60 bpm: one beat, one second
+            clip.setLoopInfo (info);
+
+            clip.setAutoPitch (false);
+            clip.setSpeedRatio (1.0);
+        }
+
+        bool setTrackSource (int trackIndex, const std::string& mediaFile)
+        {
+            auto* clip = clipOn (trackIndex);
+            const juce::File file { juce::String (mediaFile) };
+
+            if (clip == nullptr || ! file.existsAsFile())
+                return false;
+
+            clip->getSourceFileReference().setToFile (file, te::SourceFileReference::PathStyle::alwaysAbsolute, false);
+
+            /*  The new file's own loop info, not the placeholder's. Everything
+                below reads a length off the clip, and until this runs those
+                lengths still describe the file that was there before. */
+            makeClipPlayAtItsOwnRate (*clip);
+
+            /*  Looping is off before anything else touches position: turning it
+                off rewrites the clip's offset, so doing it afterwards would
+                silently discard whatever was set. */
+            clip->disableLooping();
+            clip->setLength (tracktion::TimeDuration::fromSeconds (
+                                 clip->getSourceLength().inSeconds()), false);
+
+            edit->dispatchPendingUpdatesSynchronously();
+
+            return true;
+        }
+
+        /*  Waits until the track's source is mapped into the audio file cache,
+            pumping blocks meanwhile because the cache only maps a file while
+            something holds a Reader for it - and nothing does until the graph
+            has run. The clip is not launched yet, so those blocks cost the
+            transport nothing: a launcher clip that has not been told to play
+            does not advance.
+
+            WHY THIS IS ON THE HOST AND NOT IN A TEST. A cue that is fired
+            before its file is mapped plays silence for as long as the disk
+            takes, and reports itself as playing throughout - which is the worst
+            failure a show can have, because nothing looks wrong. PR 2.3's arm
+            calls this from standby, so the wait happens while the operator is
+            reading the next line rather than after they press GO.
+
+            Message thread, and it sleeps: never the audio thread, never the
+            tick thread on the GO path. */
+        bool waitForTrackSourceReady (int trackIndex, int timeoutMilliseconds)
+        {
+            auto* clip = clipOn (trackIndex);
+
+            if (clip == nullptr || engine == nullptr)
+                return false;
+
+            const te::AudioFile file { *engine, clip->getSourceFileReference().getFile() };
+
+            if (! file.isValid())
+                return false;
+
+            const auto deadline = juce::Time::getMillisecondCounter()
+                                    + static_cast<juce::uint32> (std::max (0, timeoutMilliseconds));
+
+            for (;;)
+            {
+                if (engine->getAudioFileManager().cache.hasMappedReader (file, 0))
+                    return true;
+
+                if (juce::Time::getMillisecondCounter() > deadline)
+                    return false;
+
+                for (int i = 0; i < 8; ++i)
+                    processBlock();
+
+                juce::Thread::sleep (5);
+            }
+        }
+
+        bool launchTrack (int trackIndex)
+        {
+            auto* clip = clipOn (trackIndex);
+
+            if (clip == nullptr || edit == nullptr)
+                return false;
+
+            auto handle = clip->getLaunchHandle();
+            auto* context = edit->getTransport().getCurrentPlaybackContext();
+
+            if (handle == nullptr || context == nullptr)
+                return false;
+
+            const auto syncPoint = context->getSyncPoint();
+
+            if (! syncPoint.has_value())
+                return false;
+
+            /*  Just ahead of now. A beat already past launches BACK-DATED - the
+                file is skipped forward by the lateness rather than delayed -
+                which is the trap PR 2.3's launch-tick rule exists to avoid. At
+                60 bpm a twentieth of a beat is 50 ms. */
+            const tracktion::engine::MonotonicBeat at {
+                tracktion::BeatPosition::fromBeats (syncPoint->monotonicBeat.v.inBeats() + 0.05) };
+
+            handle->play (at);
+            return true;
+        }
+
+        bool isTrackPlaying (int trackIndex) const
+        {
+            auto* clip = clipOn (trackIndex);
+
+            if (clip == nullptr)
+                return false;
+
+            auto handle = clip->getLaunchHandle();
+
+            return handle != nullptr
+                     && handle->getPlayingStatus() == te::LaunchHandle::PlayState::playing;
+        }
+
+        double trackSourceLengthSeconds (int trackIndex) const
+        {
+            auto* clip = clipOn (trackIndex);
+
+            return clip != nullptr ? clip->getSourceLength().inSeconds() : 0.0;
         }
 
         int residentClipCount() const
@@ -593,6 +783,7 @@ namespace wfg::audio
         std::unique_ptr<te::Engine> engine;
         std::unique_ptr<te::Edit> edit;
         std::vector<CueMatrix*> matrices;
+        std::vector<CueOutputPlugin*> plugins;
         juce::AudioBuffer<float> scratch;
         juce::MidiBuffer midi;
 
@@ -600,6 +791,7 @@ namespace wfg::audio
         std::atomic<std::int64_t> blocks { 0 };
 
         HostSettings current;
+        BlockSink* sink = nullptr;
         bool running = false;
         std::string error;
     };
@@ -620,6 +812,8 @@ namespace wfg::audio
     bool AudioHost::isRunning() const noexcept             { return impl->running; }
     const std::string& AudioHost::lastError() const noexcept { return impl->error; }
     void AudioHost::processBlock()                         { impl->processBlock(); }
+
+    void AudioHost::setBlockSink (BlockSink* sink) noexcept { impl->sink = sink; }
 
     std::int64_t AudioHost::blocksProcessed() const noexcept
     {
@@ -646,6 +840,50 @@ namespace wfg::audio
 
     AudioHost::NodeIdReport AudioHost::inspectNodeIds() const  { return impl->inspectNodeIds(); }
     int AudioHost::residentClipCount() const { return impl->residentClipCount(); }
+
+    bool AudioHost::setTrackSource (int trackIndex, const std::string& mediaFile)
+    {
+        return impl->setTrackSource (trackIndex, mediaFile);
+    }
+
+    bool AudioHost::waitForTrackSourceReady (int trackIndex, int timeoutMilliseconds)
+    {
+        return impl->waitForTrackSourceReady (trackIndex, timeoutMilliseconds);
+    }
+
+    bool AudioHost::launchTrack (int trackIndex)  { return impl->launchTrack (trackIndex); }
+
+    bool AudioHost::isTrackPlaying (int trackIndex) const
+    {
+        return impl->isTrackPlaying (trackIndex);
+    }
+
+    double AudioHost::trackSourceLengthSeconds (int trackIndex) const
+    {
+        return impl->trackSourceLengthSeconds (trackIndex);
+    }
+
+    float AudioHost::trackInputPeak (int trackIndex) const
+    {
+        if (trackIndex < 0 || trackIndex >= static_cast<int> (impl->plugins.size()))
+            return 0.0f;
+
+        return impl->plugins[static_cast<std::size_t> (trackIndex)]->inputPeak();
+    }
+
+    float AudioHost::trackOutputPeak (int trackIndex) const
+    {
+        if (trackIndex < 0 || trackIndex >= static_cast<int> (impl->plugins.size()))
+            return 0.0f;
+
+        return impl->plugins[static_cast<std::size_t> (trackIndex)]->outputPeak();
+    }
+
+    void AudioHost::resetTrackPeaks (int trackIndex)
+    {
+        if (trackIndex >= 0 && trackIndex < static_cast<int> (impl->plugins.size()))
+            impl->plugins[static_cast<std::size_t> (trackIndex)]->resetPeaks();
+    }
 
     int AudioHost::waveOutputDeviceCount() const noexcept
     {

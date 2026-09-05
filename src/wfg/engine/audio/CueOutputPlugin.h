@@ -28,6 +28,7 @@
 #include <juce_events/juce_events.h>
 #include <tracktion_engine/tracktion_engine.h>
 
+#include <atomic>
 #include <vector>
 
 /*  A track's output stage, as a Tracktion plugin: the cue's level and its
@@ -75,6 +76,15 @@ namespace wfg::audio
             store. This is what a cue, a fade and a stop all write. */
         CueMatrix& matrix() noexcept              { return cueMatrix; }
         const CueMatrix& matrix() const noexcept  { return cueMatrix; }
+
+        /*  The loudest sample seen arriving and leaving, since the last reset.
+            Diagnostic: a silent output has several possible causes and these
+            separate "nothing reached the plugin" from "the plugin dropped it",
+            which is otherwise a guess. Written on the audio thread with relaxed
+            stores; read from anywhere. */
+        float inputPeak() const noexcept   { return lastInputPeak.load (std::memory_order_relaxed); }
+        float outputPeak() const noexcept  { return lastOutputPeak.load (std::memory_order_relaxed); }
+        void resetPeaks() noexcept;
 
         int numOutputChannels() const noexcept    { return outputs; }
         int numInputChannels() const noexcept     { return inputs; }
@@ -132,6 +142,9 @@ namespace wfg::audio
             them. Sized in initialise() and never after. */
         juce::AudioBuffer<float> scratch;
         std::vector<float*> outputPointers;
+
+        std::atomic<float> lastInputPeak { 0.0f };
+        std::atomic<float> lastOutputPeak { 0.0f };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CueOutputPlugin)
     };
