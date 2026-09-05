@@ -19,7 +19,7 @@ document,dirty,T,r,false,,,state,5,no,park,none,Whether there are unsaved change
 list,name,s,rw,,,,state,50,no,park,show,The cue list's name.
 list,order,s,r,,,,state,50,no,park,none,"The identifiers of the list's top-level children, in order, space-separated."
 list,standby,s,rw,,,,state,50,no,park,state,"The cue GO will act on. One per list, and always one of that list's own top-level children or empty; moved only by a standby command, a write to this node, or the repair when the cue it names is deleted or moved away. Never by selection or scrolling."
-cue,kind,s,r,memo,memo|group,,state,50,no,park,none,"What kind of cue this is, derived from the element rather than stored: a Group is a group. Phase 1 has memo (a cue with no output) and group."
+cue,kind,s,r,memo,memo|group|media,,state,50,no,park,none,"What kind of cue this is, derived from the element rather than stored: a Group is a group and a Media is media. Deriving it is what stops a client turning one kind into another by writing a word, and what lets the grammar refuse a file attribute on a cue that plays nothing."
 cue,number,s,rw,,,,state,50,no,park,show,"The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity."
 cue,name,s,rw,,,,state,50,no,park,show,"The cue's name, as the operator reads it."
 cue,notes,s,rw,,,,state,50,no,park,show,Free text for the designer.
@@ -29,6 +29,11 @@ cue,preWait,d,rw,0,0..,s,state,50,no,park,show,"How long after entry before this
 cue,postWait,d,rw,0,0..,s,state,50,no,park,show,"How long after completion before this cue reports done to its parent. A group is complete once every member is, its members' own post-waits included; the group's post-wait then runs on top of that."
 cue,parent,s,r,,,,state,50,no,park,none,The identifier of the containing list or group.
 cue,index,i,r,0,,,state,50,no,park,none,"Position among siblings, zero-based."
+media,file,s,rw,,,,state,50,no,park,show,"The media to play, as a path relative to the bundle's media/ folder. Relative because a show travels between machines and an absolute path is a fact about the machine it was authored on. A file that is missing is reported when the show loads and fails the cue when it is armed - it never fails the load, because a show with one missing sound is still a show somebody has to run tonight."
+media,level,d,rw,0,-120..12,dB,state,50,no,park,show,"The level the cue plays at, as decided. Not what it is doing: a fade writes run/<id>/level and leaves this alone, so the document keeps saying what somebody chose while the run says what is happening. -120 dB is silence rather than a very small number."
+media,startOffset,d,rw,0,0..,s,state,50,no,park,show,"How far into the file playback begins. A cue that starts at the downbeat rather than at the top of the recording."
+route,bus,s,rw,,,,state,50,no,park,show,"The identifier of the bus this destination feeds. A destination names a bus and never a hardware channel: the bus is where the author said a channel exists, and a show moved to a different rig re-points buses rather than every cue."
+route,gains,d*,rw,,,,state,50,no,park,show,"The coefficients from the cue's channels to the bus's, row by row: input 0 to every bus channel, then input 1, and so on. Its length is the cue's channel count times the bus width, and a length that does not match is refused when the show loads rather than discovered mid-cue. A coefficient is a plain multiplier and carries no dB - level is the cue's, and this is where it goes."
 group,order,s,r,,,,state,50,no,park,none,"The identifiers of the group's children, in order, space-separated."
 group,mode,s,rw,sequence,timeline|sequence,,state,50,no,park,show,Whether members are scheduled at entry or run one after another.
 group,advance,s,rw,manual,auto|manual,,state,50,no,park,show,Whether a member starts when the previous completes or on GO.

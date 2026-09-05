@@ -320,11 +320,36 @@ namespace wfg::tree
             `parentId` and `index` are passed down rather than looked up because
             they are exactly the two derived values the table declares and the
             document refuses to store: the structure already says them. */
+        /*  One destination of one media cue, at an address of its own.
+
+            It carries no `parent` or `index` row: a route belongs to exactly
+            one cue, which the document says by containment, and it has no
+            position anybody can act on. What it needs is a bus and a run of
+            coefficients. */
+        void collectRoute (const juce::ValueTree& node, std::vector<Node>& out)
+        {
+            const auto id = node[idProperty].toString().toStdString();
+
+            if (id.empty())
+                return;
+
+            const auto base = std::string (godot) + "/route/" + id;
+
+            for (const auto* row : doc::Schema::rowsForOwner ("route"))
+            {
+                const doc::Attribute attribute { "Route", row };
+
+                out.push_back (makeLeaf (base + "/" + std::string (row->name),
+                                         *row, storedText (attribute, node)));
+            }
+        }
+
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
                          std::vector<Node>& out)
         {
             const auto element = node.getType().toString().toStdString();
             const auto isGroup = element == "Group";
+            const auto isMedia = element == "Media";
             const auto id = node[idProperty].toString().toStdString();
 
             if (id.empty())
@@ -332,10 +357,19 @@ namespace wfg::tree
 
             const auto base = std::string (godot) + "/cue/" + id;
 
+            /*  EVERY KIND IS A CUE FIRST. A media cue has a number, a name and
+                a pre-wait like any other and is addressed at /godot/cue/<id>,
+                so a client holding an identifier never has to know which kind
+                it got. The kind's own rows are appended, which is the same
+                thing a Group does with the `group` owner. */
             auto rows = doc::Schema::rowsForOwner ("cue");
 
             if (isGroup)
                 for (auto* row : doc::Schema::rowsForOwner ("group"))
+                    rows.push_back (row);
+
+            if (isMedia)
+                for (auto* row : doc::Schema::rowsForOwner ("media"))
                     rows.push_back (row);
 
             for (const auto* row : rows)
@@ -345,7 +379,9 @@ namespace wfg::tree
 
                 std::string text;
 
-                if (name == "kind")        text = isGroup ? "group" : "memo";
+                /*  Derived from the element, never stored - which is what makes
+                    it read-only in a way a client cannot argue with. */
+                if (name == "kind")        text = isGroup ? "group" : isMedia ? "media" : "memo";
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
                 else if (name == "order")  text = orderOf (node);
@@ -357,8 +393,23 @@ namespace wfg::tree
             int childIndex = 0;
 
             for (const auto& child : node)
-                if (child.hasProperty (idProperty))
-                    collectCue (child, id, childIndex++, out);
+            {
+                if (! child.hasProperty (idProperty))
+                    continue;
+
+                /*  A ROUTE IS NOT A NESTED CUE, and the recursion below would
+                    have made it one - it takes any identified child. A
+                    destination has its own top-level address so that changing
+                    one gain is a write to one node rather than a rewrite of the
+                    cue's whole routing (author, 2026-09-05). */
+                if (child.getType().toString() == "Route")
+                {
+                    collectRoute (child, out);
+                    continue;
+                }
+
+                collectCue (child, id, childIndex++, out);
+            }
         }
     }
 

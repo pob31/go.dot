@@ -56,7 +56,8 @@ OUT_PATH = REPO_ROOT / "src" / "wfg" / "engine" / "document" / "SchemaTable.gene
 # carries it, whether a Group inherits a Cue's rows - is Schema.cpp's business,
 # not this script's: a generator that decides things is a generator people have
 # to read before they can trust its output. This one transcribes.
-KNOWN_OWNERS = ("engine", "document", "list", "cue", "group", "mount", "audio", "bus")
+KNOWN_OWNERS = ("engine", "document", "list", "cue", "group", "mount",
+                "audio", "bus", "media", "route")
 
 VALUE_TYPES = {
     "s": "string",

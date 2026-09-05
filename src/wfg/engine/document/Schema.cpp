@@ -19,6 +19,7 @@
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cstring>
 
@@ -117,9 +118,32 @@ namespace wfg::doc
             static const std::vector<Containment> table {
                 { "Show",   false, { "Lists", "Mounts", "Audio" }, { "document" } },
                 { "Lists",  false, { "List" },             {} },
-                { "List",   true,  { "Cue", "Group" },     { "list" } },
+                { "List",   true,  { "Cue", "Group", "Media" }, { "list" } },
                 { "Cue",    true,  {},                     { "cue" } },
-                { "Group",  true,  { "Cue", "Group" },     { "cue", "group" } },
+                { "Group",  true,  { "Cue", "Group", "Media" }, { "cue", "group" } },
+
+                /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
+                    pattern a Group already set. `kind` stays derived from the
+                    element and read-only, so a client cannot turn a memo into a
+                    media cue by writing a word - and the grammar can refuse a
+                    `file` attribute on a cue that plays nothing, which it could
+                    not do if every cue were a <Cue> with a stored kind.
+
+                    Media carries the `cue` rows as well as its own, exactly as
+                    Group does: a media cue has a number, a name and a pre-wait
+                    like any other, and it is addressed at /godot/cue/<id> so a
+                    client holding an identifier never has to know which kind it
+                    got. */
+                { "Media",  true,  { "Route" },            { "cue", "media" } },
+
+                /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
+                    says a cue's destinations are a list rather than a choice,
+                    so Route repeats - and it is identified rather than
+                    positional because a client changing one destination's gains
+                    must not have to rewrite the others, and because an index is
+                    a position: deleting the first route would silently
+                    re-point a client holding the second. */
+                { "Route",  true,  {},                     { "route" } },
                 { "Mounts", false, { "Mount" },            {} },
                 { "Mount",  true,  {},                     { "mount" } },
                 { "Audio",  false, { "Bus" },              { "audio" } },
@@ -281,6 +305,67 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    Schema::Parsed Schema::parseList (const Attribute& attribute, std::string_view text,
+                                      std::string& canonical)
+    {
+        Parsed result;
+        canonical.clear();
+
+        std::size_t i = 0;
+        int position = 0;
+
+        while (i < text.size())
+        {
+            while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) != 0)
+                ++i;
+
+            const auto start = i;
+
+            while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) == 0)
+                ++i;
+
+            if (i == start)
+                break;
+
+            const auto token = text.substr (start, i - start);
+
+            Value value;
+            const auto parsed = parseValue (attribute, token, value);
+
+            if (! parsed.ok)
+            {
+                result.ok = false;
+                result.error = "element " + std::to_string (position) + ": " + parsed.error;
+                return result;
+            }
+
+            if (! canonical.empty())
+                canonical += ' ';
+
+            /*  Through the same formatter a scalar goes through, which is what
+                makes `1.50` and `1.5` the same document rather than two. */
+            switch (value.type())
+            {
+                case ValueType::string:    canonical += value.getString(); break;
+                case ValueType::integer:
+                case ValueType::integer64: canonical += std::to_string (value.getInteger()); break;
+                case ValueType::number:    canonical += osc::formatDouble (value.getNumber()); break;
+
+                case ValueType::boolean:
+                case ValueType::blob:
+                    /*  The generator refuses `T*` and `b*`, so neither reaches
+                        here. Named because the strict preset compiles with
+                        -Wswitch-enum. */
+                    break;
+            }
+
+            ++position;
+        }
+
+        result.ok = true;
+        return result;
+    }
+
     Schema::Parsed Schema::parseValue (const Attribute& attribute, std::string_view text,
                                        Value& out)
     {

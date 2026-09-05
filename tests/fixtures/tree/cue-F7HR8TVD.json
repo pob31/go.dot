@@ -29,11 +29,11 @@
     },
     "kind": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/kind",
-      "DESCRIPTION": "What kind of cue this is, derived from the element rather than stored: a Group is a group. Phase 1 has memo (a cue with no output) and group.",
+      "DESCRIPTION": "What kind of cue this is, derived from the element rather than stored: a Group is a group and a Media is media. Deriving it is what stops a client turning one kind into another by writing a word, and what lets the grammar refuse a file attribute on a cue that plays nothing.",
       "TYPE": "s",
       "ACCESS": 1,
       "VALUE": ["memo"],
-      "RANGE": [{"VALS": ["memo", "group"]}],
+      "RANGE": [{"VALS": ["memo", "group", "media"]}],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     },
     "name": {

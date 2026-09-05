@@ -153,6 +153,7 @@ namespace wfg::doc
     {
         if (kind == "memo")  return "Cue";
         if (kind == "group") return "Group";
+        if (kind == "media") return "Media";
         return {};
     }
 
@@ -161,7 +162,8 @@ namespace wfg::doc
         /*  A Group is a Cue (PRD §3.6), so both are addressed as `cue` — a
             client that has an identifier does not have to know which it got,
             and a cue that becomes a group keeps its address. */
-        if (element == "Cue" || element == "Group") return "cue";
+        if (element == "Cue" || element == "Group" || element == "Media") return "cue";
+        if (element == "Route")                     return "route";
         if (element == "List")                      return "list";
         if (element == "Mount")                     return "mount";
         if (element == "Bus")                       return "bus";
@@ -471,6 +473,25 @@ namespace wfg::doc
             is a Group, and a client cannot turn one into the other by writing
             to it. */
         return insertObject (parent, index, elementName, id, { { "name", name } });
+    }
+
+    EditResult ShowDocument::createRoute (const std::string& cueId,
+                                          const std::string& busId,
+                                          const std::string& id)
+    {
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        /*  Only a media cue has anywhere for a sound to go. Refusing here
+            rather than in the grammar means the client is told which of its two
+            identifiers was wrong, and told it at the moment it asked. */
+        if (cue.getType().toString() != "Media")
+            return EditResult::failed (reason::typeMismatch);
+
+        return insertObject (cue, cue.getNumChildren(), "Route", id,
+                             { { "bus", busId } });
     }
 
     EditResult ShowDocument::createMount (const std::string& prefix,

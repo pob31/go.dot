@@ -126,6 +126,17 @@ namespace wfg::doc
                               const std::string& kind, const std::string& name,
                               const std::string& id = {});
 
+        /*  Adds a destination to a media cue: which bus it feeds, and nothing
+            else. The coefficients are written afterwards through the ordinary
+            node path, because that is how every other value is written and a
+            second way in would be a second thing to keep correct.
+
+            Fails when the identifier names no cue, or names a cue that plays
+            nothing - a memo cue with a destination is a statement about a sound
+            that does not exist. */
+        EditResult createRoute (const std::string& cueId, const std::string& busId,
+                                const std::string& id = {});
+
         EditResult createMount (const std::string& prefix, const std::string& namespaceFile,
                                 const std::string& id = {});
 

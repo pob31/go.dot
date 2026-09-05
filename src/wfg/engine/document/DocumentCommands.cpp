@@ -118,6 +118,24 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        registry.add ({ "route.create",
+                        "Adds a destination to a media cue: the bus it feeds. The coefficients"
+                        " are written afterwards, like any other value.",
+                        { { "cue", 's', false }, { "bus", 's', false },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.createRoute (args[0].getString(),
+                                                                    args[1].getString(),
+                                                                    id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "mount.create",
                         "Declares a foreign namespace to be mounted at a prefix.",
                         { { "prefix", 's', false }, { "namespace", 's', false },

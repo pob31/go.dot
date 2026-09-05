@@ -159,6 +159,25 @@ namespace wfg::doc
             std::string error;          ///< empty when ok
         };
 
+        /*  A LIST ATTRIBUTE, validated element by element, and rewritten in the
+            spelling the document uses.
+
+            One function because both directions need the same answer and there
+            must not be two of it: the reader validates what a file says, and
+            the writer canonicalises what the model holds, and if those ever
+            disagreed a document would stop round-tripping.
+
+            `canonical` is the whole run, single-spaced, each element through
+            the same formatter a scalar goes through - so `1.50  0` becomes
+            `1.5 0` and a file written twice is the same bytes. Empty text is a
+            valid empty list: a cue routed nowhere yet is a show being written,
+            not a broken one.
+
+            A SINGLE BAD ELEMENT FAILS THE WHOLE LIST. Three of four gains is
+            not a smaller routing matrix, it is a different one. */
+        static Parsed parseList (const Attribute& attribute, std::string_view text,
+                                 std::string& canonical);
+
         /** Parses `text` against the attribute's declared type and range.
             `out` is only written when the result is ok. */
         static Parsed parseValue (const Attribute& attribute, std::string_view text,

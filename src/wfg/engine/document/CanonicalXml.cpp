@@ -84,6 +84,26 @@ namespace wfg::doc
 
             std::string text;
 
+            /*  A LIST IS HELD AS ITS TEXT, and canonicalised on the way out. A
+                juce::var cannot hold a run of doubles, and inventing a place to
+                put one would have meant a second representation of a value that
+                already has a perfectly good one: the space-separated spelling
+                the file uses and XSD calls a list. So the model carries that
+                string and the writer re-formats each element, which is what
+                makes `1.50  0` and `1.5 0` the same document. */
+            if (attribute.isList())
+            {
+                std::string canonical;
+
+                if (! Schema::parseList (attribute, raw.toString().toStdString(), canonical).ok)
+                    return std::nullopt;
+
+                if (canonical == attribute.defaultText())
+                    return std::nullopt;
+
+                return canonical;
+            }
+
             switch (attribute.type())
             {
                 case ValueType::string:
@@ -303,6 +323,26 @@ namespace wfg::doc
 
                     Value value;
                     const auto text = xml.getAttributeValue (i).toStdString();
+
+                    /*  Validated element by element and stored canonicalised,
+                        so that what the model holds is already what the file
+                        will say. See Schema::parseList. */
+                    if (attribute->isList())
+                    {
+                        std::string canonical;
+                        const auto list = Schema::parseList (*attribute, text, canonical);
+
+                        if (! list.ok)
+                        {
+                            problems.push_back (here + ": \"" + name + "\" " + list.error);
+                            continue;
+                        }
+
+                        node.setProperty (juce::Identifier (juce::String (name)),
+                                          juce::var (juce::String (canonical)), nullptr);
+                        continue;
+                    }
+
                     const auto parsed = Schema::parseValue (*attribute, text, value);
 
                     if (! parsed.ok)
