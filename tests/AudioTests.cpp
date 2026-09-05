@@ -28,6 +28,8 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
@@ -38,6 +40,7 @@
 
 #include "TestSupport.h"
 
+#include <limits>
 #include <memory>
 #include <string>
 #include <vector>
@@ -250,4 +253,188 @@ TEST_CASE ("audio: a write to the track count is refused as read-only, not as un
 
     CHECK_FALSE (missing.ok);
     CHECK (missing.reason == reason::badAddress);
+}
+
+//==============================================================================
+/*  Tracktion Engine, hosted with no audio hardware.
+
+    THE QUESTION THESE ANSWER is the one that had never been asked in this
+    repository: does a tracktion::engine::Engine come up inside our build
+    without touching the machine it runs on? Every spike built one, but a spike
+    links wfg::thirdparty and never wfg::engine, so none of them proved it for
+    the library the product is made of.
+
+    They are slow by the standards of the rest of this suite - constructing the
+    engine builds fifteen subsystems - so there are few of them and each earns
+    its second.
+*/
+namespace
+{
+    /** A folder of our own per case, so two runs cannot share Tracktion's
+        preferences and a failed run leaves nothing behind. */
+    struct ScopedStorage
+    {
+        ScopedStorage()
+            : folder (juce::File::getSpecialLocation (juce::File::tempDirectory)
+                        .getChildFile ("wfg-audio-test-"
+                                         + juce::Uuid().toDashedString()))
+        {
+        }
+
+        ~ScopedStorage() { folder.deleteRecursively(); }
+
+        std::string path() const { return folder.getFullPathName().toStdString(); }
+
+        juce::File folder;
+    };
+
+    /*  Tracktion reaches MessageManager::getInstance() while it builds. This
+        opens no display on Linux, which is why the CI job needs no xvfb - the
+        same reasoning `wfg selftest` records. */
+    struct HostRig
+    {
+        ScopedStorage storage;
+        juce::ScopedJuceInitialiser_GUI juceInitialiser;
+        audio::AudioHost host { storage.path() };
+    };
+}
+
+TEST_CASE ("audio host: the engine comes up with no device and pumps a block")
+{
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    INFO ("start error: " << rig.host.lastError());
+    REQUIRE (rig.host.start (settings));
+    CHECK (rig.host.isRunning());
+    CHECK (rig.host.lastError().empty());
+
+    CHECK (rig.host.clock().samplesElapsed() == 0);
+    CHECK (rig.host.blocksProcessed() == 0);
+
+    rig.host.processBlock();
+
+    CHECK (rig.host.blocksProcessed() == 1);
+    CHECK (rig.host.clock().samplesElapsed() == 128);
+}
+
+TEST_CASE ("audio host: the sample counter follows the blocks exactly")
+{
+    /*  Exactly, not approximately. The tick clock converts this number into
+        tick indices by division, so a block that advanced it by anything other
+        than its own size would put every later tick on the wrong sample -
+        silently, and further out the longer the show ran. */
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 44100;
+    settings.blockSize = 512;
+    settings.outputChannels = 4;
+
+    REQUIRE (rig.host.start (settings));
+
+    for (int i = 1; i <= 50; ++i)
+    {
+        rig.host.processBlock();
+
+        REQUIRE (rig.host.clock().samplesElapsed()
+                   == static_cast<std::int64_t> (i) * settings.blockSize);
+    }
+
+    CHECK (rig.host.blocksProcessed() == 50);
+}
+
+TEST_CASE ("audio host: unusable settings are refused, and say so")
+{
+    HostRig rig;
+
+    for (const auto& settings : { audio::HostSettings { 0, 128, 2 },
+                                  audio::HostSettings { 48000, 0, 2 },
+                                  audio::HostSettings { 48000, 128, 0 } })
+    {
+        INFO ("rate " << settings.sampleRate << " block " << settings.blockSize
+                       << " outputs " << settings.outputChannels);
+
+        CHECK_FALSE (rig.host.start (settings));
+        CHECK_FALSE (rig.host.isRunning());
+        CHECK_FALSE (rig.host.lastError().empty());
+    }
+}
+
+TEST_CASE ("audio host: a stopped host does nothing rather than crashing")
+{
+    /*  Phase 10's immediate stop and any device that disappears mid-show both
+        arrive here. Pumping a stopped host has to be inert, because the thread
+        that pumps cannot be asked to check first - by the time it looked, the
+        answer could have changed. */
+    HostRig rig;
+
+    rig.host.processBlock();
+    CHECK (rig.host.blocksProcessed() == 0);
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+    rig.host.processBlock();
+    REQUIRE (rig.host.clock().samplesElapsed() == 64);
+
+    rig.host.stop();
+    CHECK_FALSE (rig.host.isRunning());
+
+    rig.host.processBlock();
+    CHECK (rig.host.clock().samplesElapsed() == 64);
+}
+
+TEST_CASE ("audio host: hosting Tracktion does not change how this thread does arithmetic")
+{
+    /*  THE REGRESSION THIS PINS was found by the suite rather than by reading:
+        three number cases that pass on their own started failing once an audio
+        case ran before them in the same process. Standing a Tracktion engine up
+        sets flush-to-zero and leaves it set, which is right for audio and wrong
+        for a document - under it, a subnormal in a show file reads back as
+        zero, and PRD §3.20 asks a number to survive a save and a load.
+
+        Written here rather than in OscValueTests because the hazard belongs to
+        the host: this is the file whose changes could reintroduce it, and a
+        guard beside the thing it guards is one somebody will still understand
+        when it fires. */
+    const auto smallest = std::numeric_limits<float>::denorm_min();
+
+    REQUIRE (smallest > 0.0f);
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+    rig.host.processBlock();
+
+    /*  The arithmetic, after the engine has been up and a block has run
+        through it. Under flush-to-zero both of these become zero. */
+    volatile float tiny = smallest;
+
+    CHECK (tiny > 0.0f);
+    CHECK (tiny * 0.5f >= 0.0f);
+
+    const auto text = osc::formatFloat (smallest);
+    const auto recovered = osc::parseDouble (text);
+
+    INFO ("smallest float formatted as: " << text);
+    REQUIRE (recovered.has_value());
+    CHECK (static_cast<float> (*recovered) == smallest);
+
+    rig.host.stop();
+
+    volatile float stillTiny = smallest;
+    CHECK (stillTiny > 0.0f);
 }
