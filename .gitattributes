@@ -49,6 +49,22 @@ CMakeLists.txt text eol=lf
 # mean two different things on two machines.
 *.xml    text eol=lf
 
+# The generated grammar and the bundle manifest, and both are the same
+# correctness matter as the .xml rule above rather than a tidiness one.
+#
+# `wfg schema --check` compares the committed .rng with what the parameter table
+# generates, as BYTES - it reads the file with loadFileAsData precisely so that
+# no reader can normalise a line ending out of existence and report a match
+# between a CRLF file and an LF one. Without this rule a Windows checkout would
+# hand it CRLF and the gate would fail on the machine that had just written the
+# file correctly. The manifest is compared the same way, by the bundle
+# round-trip test.
+#
+# Caught by the warning Git prints on `git add`, which is worth reading rather
+# than scrolling past: it says exactly which files have no rule.
+*.rng    text eol=lf
+*.wfg    text eol=lf
+
 # The parameter table, for the same reason and one more: it is generated FROM
 # and read BY the build, and a spreadsheet round trip on Windows would otherwise
 # rewrite every line of the diff to say nothing.
