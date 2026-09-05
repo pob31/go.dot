@@ -32,6 +32,10 @@
 
 #include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/rt/RtCheck.h>
+#include <wfg/engine/audio/HostPlayer.h>
+#include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/audio/AudioHost.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -1889,4 +1893,194 @@ TEST_CASE ("launch: a stop that lands is confirmed, not assumed")
         rig.host.processBlock();
 
     CHECK_FALSE (rig.host.trackPlayState (0).playing);
+}
+
+//==============================================================================
+/*  THE PHASE'S DONE-WHEN CLAUSE, in one process: GO makes a sound.
+
+    Everything below the command is real - a generated Edit, a Tracktion
+    playback graph, a launcher clip, Go.dot's own output plugin and its routing
+    matrix, and a WAV written from what came out. What is faked is nothing.
+
+    It is here rather than in the black-box driver because a failure here says
+    WHICH layer broke, and because the black-box driver is a separate program
+    that cannot be stepped through. PR 2.8 does the same thing from outside, on
+    the shipped binary, over a socket; this is the version that fails usefully.
+*/
+TEST_CASE ("first sound: GO reaches the outputs the cue names, at the level it names")
+{
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 8;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 2;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSteadyTone (rig.storage.folder, 1, rate);
+    REQUIRE (tone.existsAsFile());
+
+    //  --- a show: one media cue, routed to a bus at channels 4 and 5 ---------
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (3);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    engine.log().openInMemory ({});
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    const auto listId = document.createList ("Sound").id;
+    const auto cueId = document.createCue (listId, 0, "media", "Thunder").id;
+
+    document.setAttribute ("/godot/cue/" + cueId + "/file",
+                           tone.getFileName().toStdString());
+
+    auto audioNode = document.root().getChildWithName ("Audio");
+    audioNode.setProperty (juce::Identifier ("tracks"), 2, nullptr);
+
+    juce::ValueTree bus { "Bus" };
+    bus.setProperty (juce::Identifier ("id"), "J3MT5XYA", nullptr);
+    bus.setProperty (juce::Identifier ("name"), "Foldback", nullptr);
+    bus.setProperty (juce::Identifier ("firstChannel"), 4, nullptr);
+    bus.setProperty (juce::Identifier ("width"), 2, nullptr);
+    audioNode.appendChild (bus, nullptr);
+
+    auto cue = document.findById (cueId);
+    juce::ValueTree route { "Route" };
+    route.setProperty (juce::Identifier ("id"), "Z04EH7PH", nullptr);
+    route.setProperty (juce::Identifier ("bus"), "J3MT5XYA", nullptr);
+
+    /*  One channel into two, at different gains, so a mistake in the row-major
+        order or in the bus offset shows up as the wrong number in the wrong
+        place rather than as silence. */
+    route.setProperty (juce::Identifier ("gains"), "1 0.5", nullptr);
+    cue.appendChild (route, nullptr);
+
+    document.setAttribute (cue::standbyAddressOf (listId), cueId);
+
+    //  --- the audio side ------------------------------------------------------
+    audio::HostPlayer player { rig.host, engine };
+    runner.setPlayer (&player);
+    runner.setSamplesPerTick (rate / 50);
+    runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
+
+    PeakSink sink;
+    sink.reset (settings.outputChannels);
+    rig.host.setBlockSink (&sink);
+
+    std::int64_t tick = 0;
+
+    /*  One tick of the real loop: the Runner observes, the engine applies, the
+        graph runs its share of blocks. The message loop is pumped too, because
+        arming is posted to it - in a show that is the main thread, and here it
+        is this one. */
+    const auto oneTick = [&]
+    {
+        runner.beforeTick (engine, tick);
+        engine.processTick (tick++);
+
+        /*  The message thread's share, driven rather than waited for. In a
+            show a timer does this; here the test does, which is the same
+            function on the same thread. */
+        player.serviceArms();
+
+        for (int i = 0; i < (rate / 50) / blockSize; ++i)
+            rig.host.processBlock();
+    };
+
+    for (int i = 0; i < 4; ++i)
+        oneTick();
+
+    REQUIRE (engine.submit ("udp:127.0.0.1:9000", "go", {}));
+
+    /*  Long enough for the arm to be queued, the message thread's share to run,
+        the disk to answer, the launch to be placed and the sound to reach the
+        sink - and short enough that the cue is still sounding when it is
+        measured. The tone is two seconds; this is well under one. */
+    for (int i = 0; i < 45; ++i)
+        oneTick();
+
+    rig.host.setBlockSink (nullptr);
+
+    REQUIRE (runs.all().size() == 1u);
+    const auto& run = runs.all().front();
+
+    INFO ("run " << run.id << " state " << run.state
+           << " track " << run.track << " error " << run.error);
+
+    CHECK (run.state == cue::runState::playing);
+    CHECK (run.track == 0);
+
+    INFO ("what reached the output stage: " << rig.host.trackInputPeak (0));
+    INFO ("peaks: " << sink[0] << " " << sink[1] << " " << sink[2] << " " << sink[3]
+           << " " << sink[4] << " " << sink[5] << " " << sink[6] << " " << sink[7]);
+
+    /*  THE CUE IS AUDIBLE, at the gains it was written with, on the channels the
+        bus put it on. The tone is 0.5 in the file, so channel 4 carries 0.5 and
+        channel 5 carries a quarter. */
+    CHECK (sink[4] == doctest::Approx (0.5f).epsilon (0.02));
+    CHECK (sink[5] == doctest::Approx (0.25f).epsilon (0.02));
+
+    /*  And nowhere else. A cue that leaked into the main pair would still pass
+        the two checks above. */
+    for (const int silent : { 0, 1, 2, 3, 6, 7 })
+    {
+        INFO ("output channel " << silent << " should be silent");
+        CHECK (sink[silent] < 0.001f);
+    }
+
+    /*  Standby was asked to move and had nowhere to go: one cue in the list, so
+        it stays put rather than wrapping or clearing. That is the end-of-list
+        rule, and GO applied either way. */
+    CHECK (document.findById (listId)[juce::Identifier ("standby")].toString()
+             == juce::String (cueId));
+
+    const auto parsed = LogFile::parse (engine.log().contents());
+    const auto go = std::find_if (parsed.records.begin(), parsed.records.end(),
+                                  [] (const auto& r) { return r.command == "go"; });
+
+    REQUIRE (go != parsed.records.end());
+    REQUIRE_FALSE (go->args.empty());
+    CHECK (go->args[0].getString() == run.id);
+
+    //  --- and it ends, and stays ended ---------------------------------------
+    /*  WRITTEN BECAUSE OF SOMETHING I SAW ONCE AND COULD NOT REPRODUCE. An
+        earlier version of this case measured after the tone had finished and
+        read TWICE the file's amplitude. The live render shows a clean level
+        throughout and nothing here reproduces it, so rather than leave an
+        unexplained observation lying about, this pins the property that would
+        have caught it: when a cue ends it goes silent, it stays silent, and it
+        does not come back at any level at all.
+
+        A cue that replayed itself at the end - or summed with itself - would be
+        the worst kind of show fault, because it happens after the moment
+        anybody is watching. */
+    sink.reset (settings.outputChannels);
+
+    for (int i = 0; i < 90; ++i)
+        oneTick();
+
+    REQUIRE (runs.all().front().isFinished());
+
+    INFO ("after the cue finished: " << sink[4] << " " << sink[5]);
+
+    for (int channel = 0; channel < settings.outputChannels; ++channel)
+    {
+        INFO ("channel " << channel << " after the end");
+        CHECK (sink[channel] < 0.001f);
+    }
 }

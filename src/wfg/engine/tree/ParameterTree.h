@@ -103,6 +103,12 @@ namespace wfg::tree
             not write. Both read zero in a build with the checks compiled out -
             which is why `wfg_tests` asks whether anybody was looking before it
             believes a zero. */
+        /*  How many ticks pass between a GO being applied and the sound
+            starting. Not a preference: the smallest delay that guarantees a
+            launch is never placed in the past, which would make the cue late
+            AND put a hole in it. */
+        int launchLatencyTicks = 0;
+
         std::uint64_t rtViolations = 0;
         std::uint64_t rtForeignAllocations = 0;
 

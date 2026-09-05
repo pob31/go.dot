@@ -79,13 +79,21 @@ namespace
             return playing.count (track) > 0;
         }
 
+        bool isArmReady (int track) const override
+        {
+            return ready.count (track) > 0;
+        }
+
         /** The disk answers: every outstanding arm is reported as ready. */
         void completeArms (Engine& engine)
         {
             for (const auto& arm : arms)
+            {
                 engine.submit (origin::engine, "audio.armed",
                                { osc::Value::string (arm.runId),
                                  osc::Value::int32 (arm.track) });
+                ready.insert (arm.track);
+            }
 
             arms.clear();
         }
@@ -98,6 +106,7 @@ namespace
         std::vector<cue::ArmRequest> arms;
         std::vector<std::pair<int, std::int64_t>> launches;
         std::set<int> playing;
+        std::set<int> ready;
     };
 
     //==========================================================================

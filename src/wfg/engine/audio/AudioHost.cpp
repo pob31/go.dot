@@ -432,6 +432,7 @@ namespace wfg::audio
 
             /*  RESOLVED HERE, ON THE MESSAGE THREAD, so the GO path never has to.
                 See the note on `handles`. */
+            editChannels = std::max (1, spec.channelsPerTrack);
             context = edit->getCurrentPlaybackContext();
             handles.clear();
 
@@ -695,6 +696,56 @@ namespace wfg::audio
 
             Message thread, and it sleeps: never the audio thread, never the
             tick thread on the GO path. */
+        bool isTrackSourceReady (int trackIndex) const
+        {
+            auto* clip = clipOn (trackIndex);
+
+            if (clip == nullptr || engine == nullptr)
+                return false;
+
+            const te::AudioFile file { *engine, clip->getSourceFileReference().getFile() };
+
+            if (! file.isValid())
+                return false;
+
+            return engine->getAudioFileManager().cache.hasMappedReader (file, 0);
+        }
+
+        void setTrackRouting (int trackIndex, double levelDb,
+                              const std::vector<std::array<double, 3>>& coefficients)
+        {
+            if (trackIndex < 0 || trackIndex >= static_cast<int> (matrices.size()))
+                return;
+
+            auto* matrix = matrices[static_cast<std::size_t> (trackIndex)];
+
+            if (matrix == nullptr)
+                return;
+
+            /*  Cleared first, because a track is reused. Whatever the last cue
+                on this voice was routed to would otherwise still be there, and
+                a cue would play out of a speaker belonging to the one before
+                it - which is the kind of fault nobody finds in rehearsal
+                because it only happens on the second GO. */
+            for (int input = 0; input < matrix->numInputs(); ++input)
+                for (int output = 0; output < matrix->numOutputs(); ++output)
+                    matrix->setGain (input, output, 0.0f);
+
+            for (const auto& coefficient : coefficients)
+                matrix->setGain (static_cast<int> (coefficient[0]),
+                                 static_cast<int> (coefficient[1]),
+                                 static_cast<float> (coefficient[2]));
+
+            matrix->setLevelDb (static_cast<float> (levelDb));
+
+            /*  SNAPPED, NOT SLEWED. This is an arm, which happens while the
+                voice is silent; sliding the coefficients up from whatever the
+                previous cue left would be a fade nobody asked for, and at the
+                wrong moment. A fade is Phase 3's, and it writes the same
+                atomics while the sound is running. */
+            matrix->snapToTargets();
+        }
+
         bool waitForTrackSourceReady (int trackIndex, int timeoutMilliseconds)
         {
             auto* clip = clipOn (trackIndex);
@@ -970,6 +1021,9 @@ namespace wfg::audio
             pointer is good for the life of the show. */
         std::vector<std::shared_ptr<te::LaunchHandle>> handles;
 
+        /** The width each track was built with, for a cue's routing. */
+        int editChannels = 2;
+
         /*  The playback context, cached for the same reason. Message thread
             writes it, the audio thread reads it; both only while the graph is
             not being rebuilt, which is never after load (PRD §3.25). */
@@ -1066,6 +1120,17 @@ namespace wfg::audio
         return impl->setTrackSource (trackIndex, mediaFile);
     }
 
+    bool AudioHost::isTrackSourceReady (int trackIndex) const
+    {
+        return impl->isTrackSourceReady (trackIndex);
+    }
+
+    void AudioHost::setTrackRouting (int trackIndex, double levelDb,
+                                     const std::vector<std::array<double, 3>>& coefficients)
+    {
+        impl->setTrackRouting (trackIndex, levelDb, coefficients);
+    }
+
     bool AudioHost::waitForTrackSourceReady (int trackIndex, int timeoutMilliseconds)
     {
         return impl->waitForTrackSourceReady (trackIndex, timeoutMilliseconds);
@@ -1139,6 +1204,8 @@ namespace wfg::audio
         if (trackIndex >= 0 && trackIndex < static_cast<int> (impl->plugins.size()))
             impl->plugins[static_cast<std::size_t> (trackIndex)]->resetPeaks();
     }
+
+    int AudioHost::editChannelsPerTrack() const noexcept  { return impl->editChannels; }
 
     int AudioHost::waveOutputDeviceCount() const noexcept
     {

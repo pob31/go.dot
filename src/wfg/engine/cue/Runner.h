@@ -158,6 +158,16 @@ namespace wfg::cue
         /** Whether that track's cue is sounding. Tick thread. */
         virtual bool isPlaying (int track) const = 0;
 
+        /*  Whether the media for that track is actually ready to sound.
+
+            SEPARATE FROM THE ARM BEING ACCEPTED, and the separation is the
+            point. Assigning a voice and rebuilding the graph is quick; getting
+            the file mapped into the audio cache is a disk, and firing a cue
+            before that plays silence for as long as the disk takes with the run
+            reporting itself as playing throughout. Asked once a tick rather
+            than waited on, so nothing blocks. */
+        virtual bool isArmReady (int track) const = 0;
+
         /** Go.dot's sample counter, now. Tick thread. */
         virtual std::int64_t samplesElapsed() const = 0;
 
@@ -186,6 +196,15 @@ namespace wfg::cue
 
         /** How many samples make a tick. Set once, from the tick schedule. */
         void setSamplesPerTick (int samples) noexcept { samplesPerTick = samples; }
+
+        /*  Where the show's media lives: the bundle's `media/` folder.
+
+            A cue names its file RELATIVE to that, because a show travels
+            between machines and an absolute path is a fact about the one it was
+            authored on. Resolving it here rather than in the audio side keeps
+            the Player free of any idea what a bundle is - it is handed a path
+            that exists, or the run fails before it gets there. */
+        void setMediaFolder (std::string folder) { mediaFolder = std::move (folder); }
 
         /** The published `/godot/engine/launchLatencyTicks`, or 0 with no audio. */
         int latencyTicks() const noexcept;
@@ -239,6 +258,7 @@ namespace wfg::cue
 
         Player* audio = nullptr;
         int samplesPerTick = 0;
+        std::string mediaFolder;
     };
 
     //==============================================================================

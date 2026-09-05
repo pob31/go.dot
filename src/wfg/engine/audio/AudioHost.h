@@ -18,8 +18,10 @@
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/clock/SampleClock.h>
 
+#include <array>
 #include <memory>
 #include <string>
+#include <vector>
 
 /*  Tracktion Engine, stood up with no audio hardware, and the sample counter it
     advances.
@@ -158,6 +160,9 @@ namespace wfg::audio
         /** How many tracks the generated Edit has. Zero before one is built. */
         int trackCount() const noexcept;
 
+        /** How many channels each of those tracks carries - a cue's input width. */
+        int editChannelsPerTrack() const noexcept;
+
         /*  Builds the playback graph a second time, offline, and asks whether
             every node in it has a unique identifier.
 
@@ -210,6 +215,32 @@ namespace wfg::audio
 
             Message thread: it sleeps, so it is never on the GO path. */
         bool waitForTrackSourceReady (int trackIndex, int timeoutMilliseconds);
+
+        /*  Whether the cache holds a mapped reader for the track's source - the
+            same question waitForTrackSourceReady waits on, ASKED rather than
+            waited on.
+
+            It exists because the waiting version pumps blocks itself, which is
+            right when nothing else is pumping and a data race when something
+            is. A show has a pump thread, so the arm asks once a tick and gets
+            on with the tick. Any thread. */
+        bool isTrackSourceReady (int trackIndex) const;
+
+        /*  Points a track's output stage at a set of destinations: absolute
+            hardware channels and their gains, plus the cue's level in dB.
+
+            Clears the whole matrix first, because a voice is reused - whatever
+            the previous cue on it was routed to would otherwise still be there,
+            and a cue would play out of a speaker belonging to the one before
+            it. Snapped rather than slewed: an arm happens while the voice is
+            silent, and sliding up from the last cue's coefficients would be a
+            fade nobody asked for at the wrong moment.
+
+            The triples are {input, output, gain}. A plain array rather than a
+            named struct because this header names no type from the cue layer
+            and the cue layer names none from here. */
+        void setTrackRouting (int trackIndex, double levelDb,
+                              const std::vector<std::array<double, 3>>& coefficients);
 
         /*  Starts a track's clip as soon as the next block, unquantised.
 

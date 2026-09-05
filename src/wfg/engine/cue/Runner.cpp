@@ -169,9 +169,22 @@ namespace wfg::cue
         if (audio == nullptr)
             return id;
 
-        const auto file = mediaFileOf (cue);
+        const auto named = mediaFileOf (cue);
 
-        if (file.empty())
+        /*  RESOLVED AGAINST THE BUNDLE, and checked here rather than three
+            layers down. A cue naming a file the bundle does not have fails its
+            RUN and never the load - a show with one missing sound is still a
+            show somebody has to run tonight - and finding out at the arm rather
+            than at the launch means the failure is reported while the operator
+            is still reading the next line. */
+        const auto file = named.empty() || mediaFolder.empty()
+                            ? named
+                            : juce::File (juce::String (mediaFolder))
+                                  .getChildFile (juce::String (named))
+                                  .getFullPathName().toStdString();
+
+        if (named.empty()
+              || (! mediaFolder.empty() && ! juce::File (juce::String (file)).existsAsFile()))
         {
             engine.submit (origin::engine, "run.failed",
                            { osc::Value::string (id),
@@ -340,6 +353,13 @@ namespace wfg::cue
                 the disk takes, with the run reporting itself as playing
                 throughout - the worst shape a failure can have. */
             if (! run->armConfirmed || run->track < 0)
+                continue;
+
+            /*  And not until the disk has answered either. The voice can be
+                assigned long before the file is mapped, and a launch in that
+                window is the worst kind of failure - silence, with the run
+                cheerfully reporting itself as playing. */
+            if (! audio->isArmReady (run->track))
                 continue;
 
             /*  THE LAUNCH INSTANT. Placed a whole number of ticks ahead of the

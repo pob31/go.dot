@@ -30,6 +30,7 @@
 
 #include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/rt/RtCheck.h>
+#include <wfg/engine/audio/HostPlayer.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
@@ -1230,6 +1231,7 @@ namespace
             device mode rather than a simulation of it. */
         std::unique_ptr<wfg::DummyAudioClock> dummy;
         std::unique_ptr<wfg::audio::HostedAudioDriver> driver;
+        std::unique_ptr<wfg::audio::HostPlayer> player;
         const wfg::SampleClock* blockSource = nullptr;
 
         if (hosted)
@@ -1310,6 +1312,20 @@ namespace
             std::cout << "wfg: audio hosted " << shape.tracks << " tracks "
                       << shape.outputs << " outputs " << ids.nodes << " nodes" << std::endl;
 
+            /*  THE CUE LAYER MEETS THE AUDIO SIDE, here and nowhere else.
+                Everything above this line is a graph; everything below it is a
+                show. The Runner holds a Player and has never heard of
+                Tracktion. */
+            player = std::make_unique<wfg::audio::HostPlayer> (driver->host(), engine);
+            runner.setPlayer (player.get());
+            runner.setSamplesPerTick (schedule->samplesPerTick());
+            runner.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
+
+            state.launchLatencyTicks = runner.latencyTicks();
+
+            std::cout << "wfg: audio launch latency " << state.launchLatencyTicks
+                      << " ticks" << std::endl;
+
             blockSource = &driver->clock();
         }
         else
@@ -1324,6 +1340,14 @@ namespace
             order. The snapshot has to be the finished answer to the tick that
             just ran; a push carrying a value from a tick still in progress is a
             push of something nobody decided. */
+        /*  BEFORE the tick's commands are drained, so a cue that started or
+            ended is applied on the tick it was observed rather than the one
+            after. See TickThread::setBeforeTick. */
+        ticks.setBeforeTick ([&] (std::int64_t tickIndex)
+                             {
+                                 runner.beforeTick (engine, tickIndex);
+                             });
+
         ticks.setAfterTick ([&] (const wfg::Engine::TickResult& outcome)
                             {
                                 /*  The runtime half of the state, refreshed
