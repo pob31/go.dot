@@ -9,6 +9,37 @@ Read §2 and §3 before touching anything.
 
 ---
 
+## 0. READ THIS FIRST — macOS went green, and it is not fixed
+
+Added after the document was written, and it is the most useful single fact in it.
+
+Run `33981165119`, on commit `e861ca1`, **passed on macOS**. That commit changed exactly one
+file — this document — and no source, no CMake, no tests. With ccache warm the compiled test
+binary is byte-identical to the one that failed on `25e1d8a`.
+
+**The same binary passed that had just failed.** macOS since the audio tests landed:
+
+| run | commit | macOS |
+|---|---|---|
+| `33975698265` | `29b1688` M1 | fail |
+| `33977352065` | `2fb60dc` docs | fail |
+| `33978838559` | `25e1d8a` CI fixes | fail |
+| `33981165119` | `e861ca1` this document | **pass** |
+
+Three consequences, and the third is the trap:
+
+1. It is a **race**, confirmed by controlled observation rather than by argument. §2's
+   mechanism is a race; §3's two refuted hypotheses were both deterministic-ish. This is
+   direct support for §2.
+2. Anything deterministic is **ruled out** — a compile-time difference, a configuration
+   difference, a code path that always misbehaves. Do not go looking for one.
+3. **A green run proves nothing.** Roughly one run in four passes. If you reproduce locally,
+   fix, and see green once, you have learned nothing: at a 75% failure rate a single green run
+   happens by luck a quarter of the time. §5 Step 2 says twenty runs under load and it means
+   it. The same applies to CI — do not call this closed on one green build.
+
+---
+
 ## 1. What you are picking up
 
 `main` is green on Linux (including the strict GCC `-Werror` build), Windows, the spikes job
