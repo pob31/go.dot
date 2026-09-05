@@ -239,7 +239,89 @@ namespace
             return 2;
         }
 
+        /*  THE ENGINE NEEDS THE SAME COMMANDS THE SESSION HAD, or every record
+            replays as `unknown-command` and the comparison is meaningless.
+
+            A bare Engine knows `noop` and nothing else. Replaying a real
+            session against one produced a tidy, confident report that six
+            applied records had become rejections - which is exactly what it
+            would look like if the engine had genuinely stopped being
+            deterministic, and it was instead the replay tool holding no show.
+            The black-box driver is what surfaced it.
+
+            So `--bundle=` is how a session log is replayed: load the show, wire
+            the same command set `serve` wires, and re-execute against that. The
+            single-argument form still works and is still worth having - the
+            committed skeleton fixture is a log of `noop`s, and it tests the
+            log format rather than the document.
+
+            The bundle is opened READ-ONLY as far as the disk is concerned:
+            document.save is registered against a folder the caller names with
+            --out, or refused. A replay that silently overwrote the show it was
+            handed would destroy the evidence it was asked to check. */
         wfg::Engine engine;
+
+        wfg::doc::ShowDocument document;
+        wfg::tree::TouchTable touches;
+        wfg::tree::MountTable mounts;
+        wfg::cue::Focus focus;
+
+        const auto bundlePath = args.containsOption ("--bundle")
+                                  ? args.getValueForOption ("--bundle")
+                                  : juce::String();
+
+        if (bundlePath.isNotEmpty())
+        {
+            const juce::File bundle {
+                juce::File::getCurrentWorkingDirectory().getChildFile (bundlePath) };
+
+            if (! bundle.isDirectory())
+            {
+                std::cerr << "wfg replay: not a bundle folder: "
+                          << bundle.getFullPathName() << std::endl;
+                return 2;
+            }
+
+            const auto opened = wfg::doc::Bundle::open (bundle, document);
+
+            if (! opened.ok)
+            {
+                std::cerr << "wfg replay: cannot load " << bundle.getFullPathName()
+                          << std::endl;
+
+                for (const auto& problem : opened.problems)
+                    std::cerr << "    " << problem << std::endl;
+
+                return 2;
+            }
+
+            wfg::doc::registerDocumentCommands (engine.commands(), document);
+            wfg::cue::registerCueCommands (engine.commands(), document, focus);
+            wfg::tree::registerTreeCommands (engine.commands(), touches);
+            wfg::tree::registerMountCommands (engine.commands(), document, mounts, bundle);
+
+            /*  Saving goes to --out, never to the bundle that was handed in.
+                Absent, document.save is not registered at all and replays as a
+                rejection - which is loud, and better than a replay that wrote
+                over the show it was checking. */
+            const auto outPath = args.containsOption ("--out")
+                                   ? args.getValueForOption ("--out")
+                                   : juce::String();
+
+            if (outPath.isNotEmpty())
+            {
+                const juce::File out {
+                    juce::File::getCurrentWorkingDirectory().getChildFile (outPath) };
+
+                out.createDirectory();
+                wfg::doc::registerBundleCommands (engine.commands(), document, out);
+            }
+
+            for (const auto& problem :
+                   wfg::tree::loadAllMountsFromBundle (document, mounts, bundle))
+                std::cerr << "    " << problem << std::endl;
+        }
+
         const auto result = wfg::replay (engine, *logFile);
 
         if (! result.ok)
@@ -812,6 +894,7 @@ namespace
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
+        wfg::doc::registerBundleCommands (engine.commands(), document, target);
 
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
             std::cerr << "    " << problem << std::endl;
@@ -822,6 +905,36 @@ namespace
         state.version = WFG_VERSION;
         state.documentPath = target.getFullPathName().toStdString();
         state.documentName = target.getFileNameWithoutExtension().toStdString();
+
+        /*  THE CLOCK IS CHECKED AND THE TREE PUBLISHED BEFORE ANY SOCKET OPENS,
+            and the order is load-bearing rather than tidy.
+
+            Published after the server had started, there was a window - short,
+            but a black-box driver hit it on its first request - in which
+            `GET /` returned 404 from a process that had already printed its
+            port. An empty tree is indistinguishable from a wrong address, so a
+            client's honest reaction is to conclude the node does not exist.
+
+            The rate is validated here for the same reason: refusing 44101 Hz
+            before anything binds means the failure is a message on stderr and
+            an exit code, rather than a server that answers for a while and then
+            stops. */
+        const auto schedule = wfg::TickClock::create (sampleRate);
+
+        if (! schedule.has_value())
+        {
+            std::cerr << "wfg serve: " << sampleRate
+                      << " Hz does not divide into 50 ticks a second, so a tick"
+                         " would not sit on an exact sample."
+                      << std::endl;
+            return 2;
+        }
+
+        state.sampleRate = sampleRate;
+        state.blockSize = blockSize;
+        state.samplesPerTick = schedule->samplesPerTick();
+
+        auto previous = parameters.publish (0, state);
 
         //  --- the log ------------------------------------------------------
         const auto logPath = args.containsOption ("--log")
@@ -906,31 +1019,8 @@ namespace
         std::cout << "wfg: osc " << udp.boundPort() << std::endl;
 
         //  --- the clock ------------------------------------------------------
-        const auto schedule = wfg::TickClock::create (sampleRate);
-
-        if (! schedule.has_value())
-        {
-            std::cerr << "wfg serve: " << sampleRate
-                      << " Hz does not divide into 50 ticks a second, so a tick"
-                         " would not sit on an exact sample."
-                      << std::endl;
-            return 2;
-        }
-
         wfg::DummyAudioClock audio { sampleRate, blockSize };
         wfg::TickThread ticks { engine, audio.clock(), *schedule };
-
-        /*  The three clock numbers a client reads at `/godot/engine`, filled in
-            before anything is served. PRD 6.2 wants "no clock" and "no
-            interface" to be two failures an operator can tell apart at a
-            glance, and they cannot be told apart from two zeroes. */
-        state.sampleRate = sampleRate;
-        state.blockSize = blockSize;
-        state.samplesPerTick = schedule->samplesPerTick();
-
-        /*  Published once before the server starts, so a client connecting in
-            the first millisecond gets a tree rather than a 503. */
-        auto previous = parameters.publish (0, state);
 
         /*  Publish then flush, on the tick thread, once per tick, in that
             order. The snapshot has to be the finished answer to the tick that
@@ -948,6 +1038,34 @@ namespace
                                 state.lateness = ticks.lateness();
                                 state.latenessMax = ticks.latenessMax();
                                 state.errorCount = engine.errorCount();
+
+                                /*  ANYTHING APPLIED MEANS THE DOCUMENT MAY HAVE
+                                    MOVED, so the projection is rebuilt.
+
+                                    Without this the whole serve loop is a
+                                    read-only window: ParameterTree caches its
+                                    document part and reuses it until told
+                                    otherwise, so a write landed in the model,
+                                    was logged as applied, was saved to disk -
+                                    and was invisible to every client, for ever,
+                                    with no error anywhere. The black-box driver
+                                    is what found it; nothing in the unit suite
+                                    could, because each of those tests publishes
+                                    once.
+
+                                    COARSER THAN THE PLAN'S LISTENER, which
+                                    would rebuild only the affected subtree.
+                                    This rebuilds on any applied command,
+                                    including ones that touch no document node
+                                    at all - a node.touch costs a full rebuild.
+                                    It is correct and it is cheap where it
+                                    matters: a tick with nothing in its queue
+                                    does no work, and that is almost every tick.
+                                    The listener is the Phase 2 refinement, when
+                                    a show is large enough for the difference to
+                                    be measurable. */
+                                if (outcome.applied > 0)
+                                    parameters.markStale();
 
                                 auto current = parameters.publish (outcome.tick, state);
 
@@ -1062,7 +1180,7 @@ int wfg::runConsole (int argc, char** argv)
                       } });
 
     app.addCommand ({ "replay",
-                      "replay <log>",
+                      "replay <log> [--bundle=<dir>] [--out=<dir>]",
                       "Replays an event log into a fresh engine and checks it reproduces it exactly",
                       {},
                       [] (const juce::ArgumentList& args)

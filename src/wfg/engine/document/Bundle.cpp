@@ -281,4 +281,32 @@ namespace wfg::doc
         result.ok = true;
         return result;
     }
+
+    //==============================================================================
+    void registerBundleCommands (CommandRegistry& registry,
+                                 ShowDocument& document,
+                                 const juce::File& folder)
+    {
+        registry.add ({ "document.save",
+                        "Writes the show back to the bundle it was loaded from.",
+                        {},
+                        true,
+                        [&document, folder] (CommandContext&,
+                                             const std::vector<osc::Value>& args)
+                        {
+                            const auto written = Bundle::save (folder, document);
+
+                            /*  A failed write is REJECTED and not merely
+                                reported. The log's `A` means "this happened",
+                                and a save that did not reach the disk did not
+                                happen - a replay reproducing it as applied
+                                would be reproducing a lie, and an operator
+                                reading a green log would believe their show was
+                                on disk when it was not. */
+                            if (! written.ok)
+                                return Outcome::rejected (reason::badAddress);
+
+                            return Outcome::ok (args);
+                        } });
+    }
 }

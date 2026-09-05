@@ -259,3 +259,38 @@ add_test(NAME deps.no-openssl
 # seconds and runs everywhere, which is the whole argument for it.
 add_test(NAME source.comments
          COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/check-comments.py")
+
+# -----------------------------------------------------------------------------
+# THE PHASE 1 DONE-WHEN CLAUSE, driven from outside the process.
+#
+# The devplan's criterion word for word: an external OSCQuery client can load a
+# document, read and write nodes, move standby, and the event log replays the
+# session bit-for-bit. tests/blackbox/phase1_session.py is that sentence as a
+# program — it launches the SHIPPED BINARY on a throwaway copy of a bundle,
+# talks to it over HTTP, WebSocket and UDP, saves, and then makes the engine
+# reproduce its own log.
+#
+# It found two bugs nothing else could, and both were invisible from inside:
+# `serve` published its first tree AFTER opening the socket, so a fast client
+# got a 404 from a server that had already printed its port; and nothing marked
+# the parameter tree stale, so every write landed in the model, was logged as
+# applied, was saved to disk, and was invisible to every client for ever.
+#
+# WFG_BINARY is how the driver finds what to run. $<TARGET_FILE:wfg> is the only
+# spelling that works on both the single-config Ninja jobs and the multi-config
+# Windows one, where the binary is under Debug/.
+#
+# Registered under both locales like every other serialisation surface: the
+# session writes numbers into show.xml and reads them back over HTTP, and a
+# formatter that consulted the locale would put a comma in one of them.
+add_test(NAME blackbox.phase1.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase1_session.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.phase1.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+add_test(NAME blackbox.phase1.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase1_session.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase1.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)

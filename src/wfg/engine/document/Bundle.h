@@ -46,6 +46,7 @@
 */
 
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/ShowDocument.h>
 
 #include <juce_core/juce_core.h>
@@ -107,4 +108,28 @@ namespace wfg::doc
         /** The `# ` header lines an event log should carry for this bundle. */
         std::vector<std::string> logHeaderLines (const juce::File& folder);
     }
+
+    //==============================================================================
+    /*  `document.save` - writing the show back out, as a named command.
+
+        SEPARATE FROM registerDocumentCommands because it is the only command
+        that needs to know where the bundle IS. The document holds what someone
+        decided; it does not hold which folder that came from, and giving it a
+        path so one command could use it would put a filesystem inside the model.
+
+        IT IS A COMMAND AND NOT A METHOD, because PRD 4.11 admits no exceptions:
+        every gesture-reachable action exists as a named command. Saving is a
+        gesture. It is also the one an OSCQuery client has no other way to ask
+        for - there is no node whose value is "saved" - so without this a remote
+        session could change a show and never commit it.
+
+        Applied on the tick thread like everything else, which is what makes it
+        safe to write the model out at all: nothing else is touching it. The cost
+        is a file write inside a tick, and that is why this is Phase 1's answer
+        rather than Phase 5's - crash-safe autosave (PRD 4.3) is a background
+        writer working from a snapshot, and it is a different piece of work.
+    */
+    void registerBundleCommands (CommandRegistry& registry,
+                                 ShowDocument& document,
+                                 const juce::File& folder);
 }
