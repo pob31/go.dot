@@ -949,6 +949,50 @@ TEST_CASE ("fade: a target that is not running is a no-op, applied rather than r
     CHECK (rig.audio.levels.empty());
 }
 
+TEST_CASE ("stop: a fade over the top of a fade-and-stop calls the stop off, and says so")
+{
+    /*  An operator fires a slow stop and then changes their mind - the scene ran
+        long, the actor is still talking - and fades the cue back up instead.
+        What must not happen is a cue that keeps playing while the model says it
+        is stopping, because `stopping` is a state the rest of the engine acts
+        on: it is how a group knows a member is on its way out.
+
+        That a fade CAN call off a stop is decided by the takeover rule rather
+        than by anybody: the new fade drops the old job, and a dropped job stops
+        nothing. This case pins the consequence so the two cannot drift apart -
+        if the takeover is ever made to leave a stop alone, this is what fails
+        and says which decision was changed. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "2");
+    rig.fire (rig.stopId);
+
+    CHECK (rig.runs.find (mediaRun)->state == cue::runState::stopping);
+
+    for (int i = 0; i < 25; ++i)
+        rig.tickOnce();
+
+    /*  Halfway down, and the mind is changed. */
+    REQUIRE (rig.runs.find (mediaRun)->level < -1.0);
+
+    rig.fire (rig.fadeId);
+
+    CHECK (rig.runs.find (mediaRun)->state == cue::runState::playing);
+
+    /*  And it is still there long after the stop would have arrived. */
+    for (int i = 0; i < 100; ++i)
+        rig.tickOnce();
+
+    INFO ("the media run: " << rig.runs.find (mediaRun)->state
+           << " at " << rig.runs.find (mediaRun)->level << " dB");
+
+    CHECK_FALSE (rig.runs.find (mediaRun)->isFinished());
+    CHECK (rig.runs.find (mediaRun)->state == cue::runState::playing);
+}
+
 TEST_CASE ("fade: a fade takes over from where the level has got to")
 {
     /*  Starting a second fade must not jump. It begins from where the level IS,
@@ -959,6 +1003,17 @@ TEST_CASE ("fade: a fade takes over from where the level has got to")
     const auto mediaRun = rig.startMedia();
 
     rig.fire (rig.fadeId);
+
+    /*  The fade's OWN run, which is a cue running like any other and which the
+        rest of this case is about as much as the level is. */
+    const auto firstFade = rig.runs.all().back().id;
+    REQUIRE (rig.runs.find (firstFade)->cue == rig.fadeId);
+
+    /*  PLAYING, not armed. A fade has nothing to arm - no voice to reserve, no
+        file to make ready - so the state a run is born in is one a fade is
+        never in, and a client watching this address while the level audibly
+        moved would otherwise have read `armed` for the whole of it. */
+    CHECK (rig.runs.find (firstFade)->state == cue::runState::playing);
 
     for (int i = 0; i < 25; ++i)
         rig.tickOnce();
@@ -994,6 +1049,28 @@ TEST_CASE ("fade: a fade takes over from where the level has got to")
     CHECK (takeover.fromDb < -1.0);
     CHECK (takeover.fromDb == doctest::Approx (rig.runs.find (mediaRun)->level).epsilon (0.01));
     CHECK (takeover.toDb == doctest::Approx (0.0));
+
+    /*  AND THE FADE THAT WAS TAKEN OVER IS OVER, which is a separate claim from
+        the level and a more consequential one. Its work is finished - somebody
+        else is doing it now - so the run that reported that work has to end.
+
+        A fade whose run never finished would be a cue that is still going for
+        the rest of the show: a group waiting on it (Section 3.6) would wait for
+        ever, a client watching /godot/run would show a fade that stopped moving
+        an hour ago, and the table would grow one entry per fade nobody let
+        finish. The rule is already written elsewhere in the Runner - a fade
+        whose target has gone ends the same way - and this is the same
+        situation.
+
+        ONE TICK LATER, and that is the engine's shape rather than a delay: a
+        tick drains a snapshot of its queue, so an event submitted from inside a
+        command handler is applied on the tick after it. The same is true of
+        every engine-origin report a command produces. */
+    INFO ("straight after the takeover: " << rig.runs.find (firstFade)->state);
+    rig.tickOnce();
+
+    INFO ("a tick later: " << rig.runs.find (firstFade)->state);
+    CHECK (rig.runs.find (firstFade)->isFinished());
 
     /*  And it climbs from there. */
     const auto before = rig.runs.find (mediaRun)->level;

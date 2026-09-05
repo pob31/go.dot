@@ -96,6 +96,26 @@ whether or not anybody ever puts one there.
 The bundle is also a real two-cue show with two buses at different channel offsets, so it is
 the one to reach for when something needs a document with audio in it.
 
+## `bundles/fade-stop/` and `logs/fade-stop.wfglog`
+
+What a log of a fade looks like, which is the question the other fixtures do not raise. A fade
+produces fifty values a second and none of them is written down — §3.15 keeps continuous
+readouts out of the log — so what is here is the GO that started it and the tick its run
+finished on, and everything between the two is recomputed on replay from this log and the
+bundle beside it. That is also why a fade reproduces with no audio side at all.
+
+The show is one media cue and three cues that act on it: a two-second sCurve fade, a
+three-second fade-and-stop, and a fade fired at a cue that has already finished — the no-op
+that §3.8 says is applied rather than refused. Between them they cover every path `beginFade`
+has.
+
+It paid for itself before it was committed. It failed, and what it had found was a fade
+takeover reporting from inside a command handler: `wfg replay` re-injects the log AND re-runs
+every handler, so the record arrived twice and a perfectly deterministic session did not
+reproduce. The rule that came out of it — only the tick hook reports, and a hook is not run by
+a replay — is now written into `Runner::advanceFades`, and the signatures of `fireFade`,
+`fireStop` and `beginFade` no longer take an `Engine` so it cannot quietly stop being true.
+
 ## `tree/cue-F7HR8TVD.json`
 
 The OSCQuery reply for one cue, written by hand rather than generated, so it can disagree

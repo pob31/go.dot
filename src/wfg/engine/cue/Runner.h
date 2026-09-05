@@ -269,18 +269,22 @@ namespace wfg::cue
         /*  A fade or a stop cue firing. Both act on a run that already exists,
             which is what makes them different from a media cue: they create a
             run of their own to report what they did, and they change one that
-            somebody else started. */
-        std::string fireFade (Engine& engine, const juce::ValueTree& cue,
-                              const std::string& runId);
-        std::string fireStop (Engine& engine, const juce::ValueTree& cue,
-                              const std::string& runId);
+            somebody else started.
+
+            NO ENGINE, and that is the signature carrying a rule rather than an
+            omission. These three run inside a command handler, and a handler
+            that reported would produce a record twice on replay - once from the
+            log and once from itself. Not being able to reach the engine is how
+            that stays true when somebody adds the next case. */
+        std::string fireFade (const juce::ValueTree& cue, const std::string& runId);
+        std::string fireStop (const juce::ValueTree& cue, const std::string& runId);
 
         /*  `selfCueId` is the fade or stop cue being fired; `targetCueId` is
             the cue it acts on. They are two arguments and not one because the
             run being created belongs to the FIRST - a run says which cue it
             instantiates - while the level being moved belongs to the second.
             Conflating them made liveRunOf answer with the fade's own run. */
-        std::string beginFade (Engine& engine, const std::string& selfCueId,
+        std::string beginFade (const std::string& selfCueId,
                                const std::string& targetCueId,
                                const std::string& selfRunId, const std::string& kind,
                                double toDb, double seconds, FadeCurve, bool stopWhenDone);
@@ -300,6 +304,11 @@ namespace wfg::cue
         std::string mediaFolder;
 
         std::vector<FadeJob> running;
+
+        /*  Fades taken over by another fade since the last tick, whose runs
+            have still to be ended. A queue rather than a submission at the
+            takeover, because only the tick hook reports - see advanceFades. */
+        std::vector<std::string> supersededRuns;
     };
 
     //==============================================================================

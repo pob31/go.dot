@@ -1,0 +1,16 @@
+<Show>
+  <Lists>
+    <List id="7K2QM9X4" name="Sound">
+      <Media id="B3N8R5TW" file="thunder.wav" name="Thunder" number="1">
+        <Route id="Z04EH7PH" bus="J3MT5XYA" gains="1 0 0 1"/>
+      </Media>
+      <Fade id="E4GP6QSC" curve="sCurve" duration="2" level="-12" name="Under" number="2" target="B3N8R5TW"/>
+      <Stop id="M5TQ7XVA" duration="3" name="Out" number="3" target="B3N8R5TW" verb="fade"/>
+      <Fade id="P9XKC2WR" duration="1" level="-6" name="Too late" number="4" target="B3N8R5TW"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="4">
+    <Bus id="J3MT5XYA" name="Main L/R" width="2"/>
+  </Audio>
+</Show>

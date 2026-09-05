@@ -1,0 +1,71 @@
+# wfg-log 1
+# fixture fade-stop — a cue faded, stopped, and faded again too late.
+#
+# The fifth replay fixture, and the one that answers a question the others do
+# not raise: what does a log of a FADE look like, given that a fade produces
+# fifty values a second and none of them may be written down?
+#
+# §3.15 is the answer. State transitions are events; continuous readouts are
+# not. The GO that started the fade is here, and the tick its run finished on is
+# here, and everything between the two is derived — recomputed on replay from
+# this log and the document beside it, never read back. A log that carried the
+# levels would be a log of the clock, and it would be fifty times longer for
+# nothing.
+#
+# Which is also why a fade needs no audio side at all to reproduce. Hand-written
+# and hand-checked like the others; `wfg replay --bundle` re-applies every line
+# of it with no Tracktion, no device and no sound.
+#
+# The graph came up. Four voices, two outputs, thirty-six nodes.
+A 0 0 engine audio.editBuilt s:"hosted" i:4 i:2 i:36
+#
+# The operator armed the standby cue ahead of time, and the audio side found it
+# a voice.
+A 40 1 udp:10.0.0.5:9000 audio.arm s:"B3N8R5TW" s:"G7W9EF36"
+A 42 2 engine audio.armed s:"G7W9EF36" i:0
+#
+# GO, and the sound started two ticks later. Standby advances to the Fade cue.
+A 100 3 udp:10.0.0.5:9000 go s:"G7W9EF36"
+A 102 4 engine run.started s:"G7W9EF36"
+#
+# GO ON THE FADE, which is a cue like any other: pressing GO on it is a thing
+# that happened, so it gets a run of its own with an identifier of its own. That
+# run is what a group will one day wait on (§3.6), and it is the only reason a
+# fade appears in a log at all.
+#
+# Two seconds, sCurve, down to −12 dB. None of which is written here, because
+# all of it is in the document — this record says WHO pressed GO on WHAT, and
+# the fade is recomputed from the cue.
+A 200 5 udp:10.0.0.5:9000 go s:"H2K4M6NP"
+#
+# A hundred ticks later, which is the two seconds, and the fade's run is done.
+# The media run is still playing, now at −12 dB — a fade is not a stop.
+A 300 6 engine run.ended s:"H2K4M6NP"
+#
+# GO ON THE STOP, whose verb is `fade`: three seconds down to silence and then
+# the clip stops. The media run reads `stopping` from this tick, because a cue on
+# its way out says so from the moment it is asked rather than when the sound
+# goes.
+A 400 7 udp:10.0.0.5:9000 go s:"Q6RS8TW2"
+#
+# Somebody fired a cue that is not in the show. Refused, with the reason, and the
+# stop in flight is untouched by it.
+R 500 8 cli unknown-id cue.fire s:"NOSUCHID"
+#
+# A hundred and fifty ticks after the GO: silence reached, the clip stopped, and
+# the stop cue's own run finished. TWO RECORDS AND NOT ONE, and the order is the
+# point — the fade arrives and reports, and the sound stopping is a separate
+# thing observed separately, two ticks later, when the launch handle said so.
+A 550 9 engine run.ended s:"Q6RS8TW2"
+A 552 10 engine run.ended s:"G7W9EF36"
+#
+# AND A FADE AT SOMETHING THAT IS NO LONGER THERE. The operator reaches for a
+# cue that ended while they were reading the next line. It is applied, not
+# refused (§3.8) — fading a cue that finished earlier than expected is what an
+# operator does, and there is simply nothing to fade.
+#
+# Its run is created and finished at once, one tick apart because that is the
+# engine's shape: a tick drains a snapshot of its queue, so what a command
+# submits is applied on the tick after it.
+A 600 11 udp:10.0.0.5:9000 go s:"V3XY5Z7B"
+A 601 12 engine run.ended s:"V3XY5Z7B"

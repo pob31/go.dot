@@ -138,10 +138,10 @@ namespace wfg::cue
             their own path - and they only make sense fired, never armed: there
             is nothing to make ready. */
         if (kind == "fade")
-            return fireAtOnce ? fireFade (engine, cue, runId) : std::string {};
+            return fireAtOnce ? fireFade (cue, runId) : std::string {};
 
         if (kind == "stop")
-            return fireAtOnce ? fireStop (engine, cue, runId) : std::string {};
+            return fireAtOnce ? fireStop (cue, runId) : std::string {};
 
         /*  A memo is a line in the book and a group has no runner until Phase 3.
             Both are legal things to press GO on; neither makes a run. */
@@ -338,11 +338,9 @@ namespace wfg::cue
     }
 
     //==============================================================================
-    std::string Runner::fireFade (Engine& engine, const juce::ValueTree& cue,
-                                  const std::string& runId)
+    std::string Runner::fireFade (const juce::ValueTree& cue, const std::string& runId)
     {
-        return beginFade (engine,
-                          cue[idProperty].toString().toStdString(),
+        return beginFade (cue[idProperty].toString().toStdString(),
                           cue[juce::Identifier ("target")].toString().toStdString(),
                           runId, "fade",
                           static_cast<double> (cue[juce::Identifier ("level")]),
@@ -351,8 +349,7 @@ namespace wfg::cue
                           false);
     }
 
-    std::string Runner::fireStop (Engine& engine, const juce::ValueTree& cue,
-                                  const std::string& runId)
+    std::string Runner::fireStop (const juce::ValueTree& cue, const std::string& runId)
     {
         const auto verb = cue[juce::Identifier ("verb")].toString();
 
@@ -364,8 +361,7 @@ namespace wfg::cue
                                ? static_cast<double> (cue[juce::Identifier ("duration")])
                                : 0.0;
 
-        return beginFade (engine,
-                          cue[idProperty].toString().toStdString(),
+        return beginFade (cue[idProperty].toString().toStdString(),
                           cue[juce::Identifier ("target")].toString().toStdString(),
                           runId, "stop",
                           silenceDb, seconds,
@@ -373,7 +369,7 @@ namespace wfg::cue
                           true);
     }
 
-    std::string Runner::beginFade (Engine& engine, const std::string& selfCueId,
+    std::string Runner::beginFade (const std::string& selfCueId,
                                    const std::string& targetCueId,
                                    const std::string& selfRunId, const std::string& kind,
                                    double toDb, double seconds, FadeCurve curve,
@@ -393,8 +389,17 @@ namespace wfg::cue
             it was supposed to be moving - so the fade faded itself. */
         runs.create (self, selfCueId, kind);
 
-        if (runs.find (self) == nullptr)
+        auto* selfRun = runs.find (self);
+
+        if (selfRun == nullptr)
             return self;
+
+        /*  RUNNING FROM THE TICK IT STARTS, because a fade has no arming phase:
+            no voice to reserve and no file to make ready, so the `armed` a run
+            is born in is a state a fade is never in. Left alone, a client
+            watching /godot/run while a fade audibly moved a level would have
+            read `armed` for the whole of it. */
+        selfRun->state = runState::playing;
 
         /*  A TARGET THAT IS NOT RUNNING IS A SILENT NO-OP, applied rather than
             refused (§3.8). Fading something that already finished is what an
@@ -405,7 +410,14 @@ namespace wfg::cue
 
         if (target == nullptr)
         {
-            engine.submit (origin::engine, "run.ended", one (self));
+            /*  A JOB WITH NOTHING TO FADE, rather than a report from here. The
+                tick hook already knows what to do with a fade whose target has
+                gone - it ends the fade's run - so this hands it the same
+                situation instead of writing the answer twice. It also keeps the
+                rule the hook exists for: only the tick hook reports. */
+            FadeJob orphan;
+            orphan.self = self;
+            running.push_back (orphan);
             return self;
         }
 
@@ -415,6 +427,49 @@ namespace wfg::cue
         /*  A FADE TAKES OVER FROM A FADE, from where the level HAS GOT TO and
             not from where the first one started. Anything else is a jump, and a
             jump on a PA is a click nobody can account for afterwards. */
+        for (const auto& superseded : running)
+        {
+            if (superseded.target != targetId)
+                continue;
+
+            /*  A JOB A REPLAY LEFT BEHIND. `advanceFades` runs from the tick
+                hook and a replay has none, so a fade that finished during the
+                session is still sitting in this list while the session is being
+                replayed. Its run ended when the log said it did, and ending it
+                again would be an answer to a question nobody asked. */
+            const auto* supersededRun = runs.find (superseded.self);
+
+            if (supersededRun == nullptr || supersededRun->isFinished())
+                continue;
+
+            /*  AND THE FADE IT TOOK OVER FROM IS OVER. Its work belongs to
+                somebody else now, so the run that reported that work ends -
+                which is the rule the Runner already applies to a fade whose
+                target has gone, arrived at from the other direction. A run left
+                running would be waited on for ever by the group that owns it
+                (§3.6), and would sit in /godot/run not moving for the rest of
+                the show.
+
+                QUEUED RATHER THAN SUBMITTED, because only the tick hook
+                reports. See advanceFades. */
+            supersededRuns.push_back (superseded.self);
+
+            /*  AND IF WHAT IT TOOK OVER FROM WAS A STOP, THE STOP IS NOT
+                HAPPENING. Dropping the job decides that a few lines below; this
+                only stops the run SAYING otherwise, because a cue reading
+                `stopping` that nothing is going to stop is a lie the rest of
+                the engine would go on to act on.
+
+                Whether a fade should be able to cancel a stop at all is the
+                author's to settle - it is currently decided by a `remove_if`
+                written for the level, which is no way to decide it. What is not
+                open either way is that the state and the behaviour agree. */
+            if (superseded.stopWhenDone && ! stopWhenDone)
+                if (auto* reprieved = runs.find (targetId);
+                    reprieved != nullptr && reprieved->state == runState::stopping)
+                    reprieved->state = runState::playing;
+        }
+
         running.erase (std::remove_if (running.begin(), running.end(),
                                        [&targetId] (const FadeJob& job)
                                        {
@@ -444,6 +499,30 @@ namespace wfg::cue
 
     void Runner::advanceFades (Engine& engine)
     {
+        /*  ONLY THE TICK HOOK REPORTS, and this is where that rule is kept.
+
+            `wfg replay` re-injects every record the session logged AND runs
+            every command handler again. So an engine-origin report submitted
+            from inside a handler arrives twice on replay - once from the log
+            and once from the handler - and a session that was perfectly
+            deterministic fails to reproduce itself. The hooks are not run by a
+            replay at all: it applies the ticks the log HAS and skips the
+            thousands between them, which would advance a fade at some rate
+            that is not fifty a second. That is what makes a hook the safe place
+            to report from, and a handler the wrong one.
+
+            The rest of the Runner already obeyed this by accident - the media
+            path returns before it reports when there is no audio side - and
+            fades broke it, because fades run with no audio side by design.
+            Fixture #5 is what found it, one commit after the takeover was
+            written.
+
+            So: fades taken over since the last tick end their runs here. */
+        for (const auto& id : supersededRuns)
+            engine.submit (origin::engine, "run.ended", one (id));
+
+        supersededRuns.clear();
+
         for (auto& job : running)
         {
             ++job.ticksDone;

@@ -716,7 +716,12 @@ namespace
         them is near the silence floor. */
     constexpr float sourceAmplitude (int channel)  { return 0.5f - 0.0625f * static_cast<float> (channel); }
 
-    juce::File writeSteadyTone (const juce::File& folder, int channels, int rate)
+    /*  `seconds` is an argument because the fade cases play for longer than
+        anything before them: a one-second fade measured from a steady level and
+        followed to its destination outlasts the two seconds every earlier case
+        needed. */
+    juce::File writeSteadyTone (const juce::File& folder, int channels, int rate,
+                                int seconds = 2)
     {
         const auto file = folder.getChildFile ("tone.wav");
         folder.createDirectory();
@@ -736,7 +741,7 @@ namespace
         if (writer == nullptr)
             return {};
 
-        juce::AudioBuffer<float> buffer { channels, rate * 2 };
+        juce::AudioBuffer<float> buffer { channels, rate * std::max (1, seconds) };
 
         for (int channel = 0; channel < channels; ++channel)
             juce::FloatVectorOperations::fill (buffer.getWritePointer (channel),
@@ -2411,4 +2416,661 @@ TEST_CASE ("M4: arming a second cue does not disturb the one already playing")
         the two are the same numbers - and if they are merely CLOSE, something
         happened and got smoothed over. */
     CHECK (worst == 0.0);
+}
+
+//==============================================================================
+/*  M6 - WHERE THE SOUND ACTUALLY ENDS.
+
+    M5's twin, and a separate measurement because it exercises different
+    Tracktion code - code that, unlike the launch path, has no field history
+    behind it at all. Every launcher-based project starts clips; placing a STOP
+    at an instant of its own choosing is what a show does and what a loop pedal
+    never needs, so `LaunchHandle::stop (beat)` arrives here untested by
+    anybody else's use.
+
+    IT MATTERS FROM THE OTHER END, for the same reason M5 does. A stop that
+    lands late leaves a cue running past the moment the show says it ends - a
+    tail over the top of the next scene, which is the fault operators describe
+    as "it didn't stop". A stop that lands early truncates the cue. And because
+    a fade ARRIVES at a stop, a stop that does not land where it was placed
+    makes the fade before it a fade to somewhere else.
+
+    WHAT IS MEASURED. The source is DC, so the output is a constant and the
+    first sample that is not at full level IS the moment the cue stopped - no
+    attack, no decay, nothing to threshold. Tracktion adds a ten-sample decaying
+    tail from the stop point (`SampleFader`, triggered in
+    `ArrangerLauncherSwitchingNode` - its click suppression, which a hard stop
+    is allowed to take), which is why the case looks for the DEPARTURE from full
+    level rather than the arrival at zero.
+*/
+namespace
+{
+    /** The first frame whose magnitude falls below a level, or -1. */
+    int firstBelow (const RecordingSink& sink, int channel, float level)
+    {
+        const auto* samples = sink.buffer.getReadPointer (channel);
+
+        for (int n = 0; n < sink.written; ++n)
+            if (std::abs (samples[n]) < level)
+                return n;
+
+        return -1;
+    }
+
+    /*  Plays a cue, places one stop at a sample of Go.dot's own choosing, and
+        reports where the sound actually ended. */
+    LandingResult measureStopLanding (int rate, int blockSize)
+    {
+        LandingResult result;
+
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = rate;
+        settings.blockSize = blockSize;
+        settings.outputChannels = 2;
+
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = 1;
+        spec.channelsPerTrack = 1;
+        REQUIRE (rig.host.buildEdit (spec));
+
+        const auto tone = writeSteadyTone (rig.storage.folder, 1, rate);
+        REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+        REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+        auto* matrix = rig.host.trackMatrix (0);
+        REQUIRE (matrix != nullptr);
+        matrix->setLevelDb (0.0f);
+        matrix->setGain (0, 0, 1.0f);
+        matrix->snapToTargets();
+
+        for (int i = 0; i < 8; ++i)
+            rig.host.processBlock();
+
+        const auto samplesPerTick = rate / 50;
+        const auto ticksAhead = cue::launchLatencyTicks (blockSize, samplesPerTick);
+
+        REQUIRE (rig.host.launchTrackAt (0, rig.host.beatsAtSample (
+                   rig.host.clock().samplesElapsed()
+                     + static_cast<std::int64_t> (ticksAhead) * samplesPerTick)));
+
+        /*  Until it is really sounding rather than for a count, because how
+            long the disk takes is wall-clock and this loop is samples. */
+        for (int i = 0; i < 2000 && ! rig.host.trackPlayState (0).playing; ++i)
+            rig.host.processBlock();
+
+        REQUIRE (rig.host.trackPlayState (0).playing);
+
+        RecordingSink sink;
+        sink.prepare (settings.outputChannels, rate / 2);
+        rig.host.setBlockSink (&sink);
+
+        const auto recordingBegan = rig.host.clock().samplesElapsed();
+
+        /*  A few blocks at full level first, so the recording has something to
+            depart FROM and the case can read the level rather than assume it. */
+        for (int i = 0; i < 4; ++i)
+            rig.host.processBlock();
+
+        /*  THE STOP INSTANT, placed the way the Runner places one: the same
+            rule as a launch, because the queue, the try-lock and the block in
+            flight are the same on the way out as on the way in. */
+        result.expected = rig.host.clock().samplesElapsed()
+                            + static_cast<std::int64_t> (ticksAhead) * samplesPerTick;
+
+        REQUIRE (rig.host.stopTrackAt (0, rig.host.beatsAtSample (result.expected)));
+
+        const auto blocks = (rate / 4) / blockSize;
+
+        for (int i = 0; i < blocks; ++i)
+            rig.host.processBlock();
+
+        rig.host.setBlockSink (nullptr);
+
+        const auto full = std::abs (sink.buffer.getSample (0, 8));
+        REQUIRE (full > 0.4f);
+
+        const auto found = firstBelow (sink, 0, full * 0.99f);
+        REQUIRE (found >= 0);
+
+        result.actual = recordingBegan + found;
+
+        /*  It really stopped rather than dipped: the end of the recording is
+            digitally silent, and the handle agrees. */
+        CHECK_FALSE (rig.host.trackPlayState (0).playing);
+
+        for (int n = sink.written - 64; n < sink.written; ++n)
+            REQUIRE (sink.buffer.getSample (0, n) == 0.0f);
+
+        return result;
+    }
+}
+
+TEST_CASE ("M6: a stop lands on the sample it was placed at")
+{
+    /*  THE SAME TOLERANCE AS M5 AND FOR THE SAME REASON, plus Tracktion's
+        tail. The launch queue and the stop queue are one spin-locked state that
+        the audio thread reads through a try-lock, so a stop may be seen one
+        block later than it was placed and can never be seen early. The extra
+        ten samples are the click suppressor's ramp, whose first frame is at
+        full level by construction - so the departure can be a sample or two
+        beyond the instant even when the split was exact. */
+    for (const int rate : { 44100, 48000, 96000 })
+    {
+        for (const int blockSize : { 64, 256, 1024 })
+        {
+            INFO ("at " << rate << " Hz with " << blockSize << "-sample blocks");
+
+            const auto landing = measureStopLanding (rate, blockSize);
+
+            INFO ("placed at " << landing.expected << ", ended at " << landing.actual
+                   << ", error " << landing.error() << " samples ("
+                   << (1000.0 * static_cast<double> (landing.error()) / rate) << " ms)");
+
+            /*  Never early. A cue that stopped before it was asked to would be
+                a truncated cue, and the arithmetic would be against the wrong
+                clock. */
+            CHECK (landing.error() >= 0);
+
+            /*  And never more than one block plus the suppressor's tail late. */
+            CHECK (landing.error() <= blockSize + 10);
+        }
+    }
+}
+
+//==============================================================================
+/*  M7 - THE FADE, AS IT COMES OUT OF THE GRAPH.
+
+    The arithmetic of the curve is checked on its own in GoTests, and the run's
+    level is checked there too. Neither can tell you that what a designer drew
+    is what a room hears. Between the two sits everything this case exists for:
+    fifty values a second written by the tick thread, a smoother on the audio
+    thread interpolating between them, and a block size that has nothing to do
+    with either.
+
+    THE MEASUREMENT IS EXACT RATHER THAN APPROXIMATE, which is worth saying
+    because a rendered envelope sounds like the sort of thing you can only check
+    loosely. The source is DC, so the output sample IS the gain. The smoother
+    ramps over exactly one tick of samples and JUCE lands its last step ON the
+    target rather than accumulating into it. So the last sample of every tick is
+    the level the Runner wrote one tick earlier, to the bit - and the case can
+    compare a rendered envelope against the curve that produced it, tick by
+    tick, and demand a fiftieth of a decibel.
+
+    WHAT WOULD BREAK IT, and each is a real bug rather than a hypothetical. A
+    smoother longer than a tick would lag and round the corners off the curve -
+    the reason `levelSlewSeconds` is what it is. A smoother shorter than a tick
+    would arrive early and hold, turning a fade into fifty steps. Interpolating
+    the dB rather than the gain would put the curve somewhere else entirely. And
+    a fade-and-stop that stopped before it was silent would leave a step in the
+    audio, which is a click, which is the thing the ordering exists to prevent.
+*/
+namespace
+{
+    struct FadeScenario
+    {
+        /*  The document's own spelling, because these go through setAttribute
+            and the suite runs under fr_FR: a number formatted here rather than
+            written here would be the test formatting it, not Go.dot. */
+        const char* level = "-20";
+        const char* duration = "1";
+        const char* curve = "linear";
+
+        /** Null for a Fade cue; `hard` or `fade` for a Stop cue. */
+        const char* verb = nullptr;
+
+        double toDb = -20.0;
+        double seconds = 1.0;
+    };
+
+    struct FadeRender
+    {
+        /*  The first sample of the fade's own audio: the tick that applied the
+            GO has been rendered, and the level has not moved yet. */
+        int fadeBegan = 0;
+
+        /** The level the cue was sounding at before the fade, as rendered. */
+        float steady = 0.0f;
+
+        int samplesPerTick = 0;
+        int fadeTicks = 0;
+
+        bool targetPlaying = false;
+        bool targetFinished = false;
+        double targetLevelDb = 0.0;
+    };
+
+    /*  Stands the whole stack up - a document, a Runner, a real Tracktion
+        graph, Go.dot's output stage - plays a DC tone, fires one fade or stop
+        cue at it, and records every sample that came out.
+    */
+    FadeRender renderFade (RecordingSink& sink, const FadeScenario& scenario)
+    {
+        FadeRender result;
+
+        constexpr int rate = 48000;
+
+        /*  A BLOCK THAT DIVIDES A TICK EXACTLY, and it is not tidiness. The
+            level smoother ramps over one tick of SAMPLES; a rig that pumped a
+            whole number of blocks adding up to less than a tick would cut every
+            ramp short, and the shortfall would compound down the whole fade
+            into a rendered curve that is not the one asked for. At 48 kHz a
+            tick is 960 samples and fifteen 64-sample blocks are exactly that.
+            What is being measured is Go.dot, not the test's arithmetic. */
+        constexpr int blockSize = 64;
+
+        result.samplesPerTick = rate / 50;
+        const auto blocksPerTick = result.samplesPerTick / blockSize;
+
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = rate;
+        settings.blockSize = blockSize;
+        settings.outputChannels = 2;
+
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = 1;
+        spec.channelsPerTrack = 1;
+        REQUIRE (rig.host.buildEdit (spec));
+
+        const auto tone = writeSteadyTone (rig.storage.folder, 1, rate, 4);
+        REQUIRE (tone.existsAsFile());
+
+        //  --- a show: one media cue, and one cue that acts on it -------------
+        Engine engine;
+        doc::ShowDocument document;
+        cue::RunTable runs;
+        cue::Focus focus;
+        auto runIds = doc::IdRegistry::withSeed (11);
+        cue::Runner runner { document, runs, runIds, focus };
+
+        engine.log().openInMemory ({});
+        doc::registerDocumentCommands (engine.commands(), document);
+        cue::registerCueCommands (engine.commands(), document, focus);
+        cue::registerRunCommands (engine.commands(), runs);
+        cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+        const auto listId = document.createList ("Sound").id;
+        const auto mediaId = document.createCue (listId, 0, "media", "Rain").id;
+
+        document.setAttribute ("/godot/cue/" + mediaId + "/file",
+                               tone.getFileName().toStdString());
+
+        auto audioNode = document.root().getChildWithName ("Audio");
+        audioNode.setProperty (juce::Identifier ("tracks"), 1, nullptr);
+
+        juce::ValueTree bus { "Bus" };
+        bus.setProperty (juce::Identifier ("id"), "J3MT5XYA", nullptr);
+        bus.setProperty (juce::Identifier ("name"), "Main", nullptr);
+        bus.setProperty (juce::Identifier ("firstChannel"), 0, nullptr);
+        bus.setProperty (juce::Identifier ("width"), 1, nullptr);
+        audioNode.appendChild (bus, nullptr);
+
+        auto media = document.findById (mediaId);
+        juce::ValueTree route { "Route" };
+        route.setProperty (juce::Identifier ("id"), "Z04EH7PH", nullptr);
+        route.setProperty (juce::Identifier ("bus"), "J3MT5XYA", nullptr);
+        route.setProperty (juce::Identifier ("gains"), "1", nullptr);
+        media.appendChild (route, nullptr);
+
+        const auto moverId = document.createCue (listId, 1,
+                                                 scenario.verb == nullptr ? "fade" : "stop",
+                                                 "Out").id;
+
+        const auto attribute = [&] (const char* name, const std::string& value)
+        {
+            document.setAttribute ("/godot/cue/" + moverId + "/" + name, value);
+        };
+
+        attribute ("target", mediaId);
+        attribute ("duration", scenario.duration);
+        attribute ("curve", scenario.curve);
+
+        if (scenario.verb != nullptr)
+            attribute ("verb", scenario.verb);
+        else
+            attribute ("level", scenario.level);
+
+        document.setAttribute (cue::standbyAddressOf (listId), mediaId);
+
+        //  --- the audio side --------------------------------------------------
+        audio::HostPlayer player { rig.host, engine };
+        runner.setPlayer (&player);
+        runner.setSamplesPerTick (result.samplesPerTick);
+        runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
+
+        std::int64_t tick = 0;
+
+        const auto oneTick = [&]
+        {
+            runner.beforeTick (engine, tick);
+            engine.processTick (tick++);
+            player.serviceArms();
+
+            for (int i = 0; i < blocksPerTick; ++i)
+                rig.host.processBlock();
+        };
+
+        for (int i = 0; i < 4; ++i)
+            oneTick();
+
+        REQUIRE (engine.submit ("udp:127.0.0.1:9000", "go", {}));
+
+        for (int i = 0; i < 600 && ! rig.host.trackPlayState (0).playing; ++i)
+            oneTick();
+
+        REQUIRE (rig.host.trackPlayState (0).playing);
+        REQUIRE (runs.all().size() == 1u);
+
+        const auto mediaRun = runs.all().front().id;
+
+        /*  Steady before anything moves, so the departure is measurable and the
+            level it left is a reading rather than an assumption. */
+        for (int i = 0; i < 3; ++i)
+            oneTick();
+
+        sink.prepare (settings.outputChannels, rate * 3);
+        rig.host.setBlockSink (&sink);
+
+        for (int i = 0; i < 3; ++i)
+            oneTick();
+
+        REQUIRE (engine.submit ("udp:127.0.0.1:9000", "cue.fire",
+                                { osc::Value::string (moverId) }));
+
+        /*  The tick that APPLIES the fade renders at the old level - the job
+            exists but has advanced no ticks - so the fade's own audio begins
+            after it. */
+        oneTick();
+
+        result.fadeBegan = sink.written;
+        result.steady = sink.buffer.getSample (0, result.fadeBegan - 1);
+        result.fadeTicks = static_cast<int> (std::lround (scenario.seconds * 50.0));
+
+        for (int i = 0; i < result.fadeTicks + 12; ++i)
+            oneTick();
+
+        rig.host.setBlockSink (nullptr);
+
+        result.targetPlaying = rig.host.trackPlayState (0).playing;
+
+        if (const auto* run = runs.find (mediaRun))
+        {
+            result.targetFinished = run->isFinished();
+            result.targetLevelDb = run->level;
+        }
+
+        return result;
+    }
+
+    /** The rendered level at a sample, in dB below where the cue was sitting. */
+    double renderedDb (const RecordingSink& sink, int at, float steady)
+    {
+        const auto ratio = std::abs (static_cast<double> (sink.buffer.getSample (0, at)))
+                             / static_cast<double> (steady);
+
+        return ratio <= 0.0 ? -1000.0 : 20.0 * std::log10 (ratio);
+    }
+
+    /** The largest jump between two consecutive rendered samples. */
+    double largestStep (const RecordingSink& sink, int from, int to)
+    {
+        double worst = 0.0;
+
+        for (int n = from + 1; n < to; ++n)
+            worst = std::max (worst,
+                              std::abs (static_cast<double> (sink.buffer.getSample (0, n))
+                                          - sink.buffer.getSample (0, n - 1)));
+
+        return worst;
+    }
+
+    /*  WHAT FLOAT ARITHMETIC ITSELF PUTS INTO A RAMP, in output units.
+
+        JUCE accumulates a linear ramp by repeated addition and then SNAPS the
+        last step onto the target rather than letting it arrive - so the whole
+        of the rounding drift accumulated across a tick is spent in ONE sample
+        at the end of it. That is a real step in the audio, it is measured here
+        at around -96 dBFS, and any bound on the rendered steps has to allow for
+        it.
+
+        The number is derived rather than fitted: each addition rounds by at
+        most half an ulp of a value near unity, so a ramp of `samplesPerTick`
+        additions cannot drift by more than that many halves of an epsilon. It
+        is four orders of magnitude below the steps this case exists to catch -
+        a fade arriving as fifty jumps, or a stop taken at full level - so
+        allowing it costs the measurement nothing. */
+    double rampRoundingNoise (float steady, int samplesPerTick)
+    {
+        return static_cast<double> (steady) * std::numeric_limits<float>::epsilon()
+                 * samplesPerTick * 0.5;
+    }
+
+    /*  The largest per-sample step the design ALLOWS, derived from the same
+        curve the fade is running: the biggest gain change between two of the
+        fifty values a second, spread over the tick the smoother has to cross it
+        in. A rendered step larger than this is a discontinuity - something
+        arriving in one sample that should have taken a tick. */
+    double allowedStepPerSample (double toDb, int ticks, cue::FadeCurve curve,
+                                 int samplesPerTick)
+    {
+        const auto gainAt = [] (double db)
+        {
+            return static_cast<double> (juce::Decibels::decibelsToGain (
+                     static_cast<float> (db), audio::CueMatrix::silenceDb));
+        };
+
+        double worst = 0.0;
+        auto previous = gainAt (0.0);
+
+        for (int k = 1; k <= ticks; ++k)
+        {
+            const auto now = gainAt (cue::fadeLevelDb (0.0, toDb,
+                                                       static_cast<double> (k) / ticks,
+                                                       curve));
+            worst = std::max (worst, std::abs (now - previous));
+            previous = now;
+        }
+
+        return worst / samplesPerTick;
+    }
+}
+
+TEST_CASE ("M7: a rendered fade is the curve it was given, tick by tick")
+{
+    for (const char* shape : { "linear", "sCurve" })
+    {
+        INFO ("curve " << std::string (shape));
+
+        FadeScenario scenario;
+        scenario.curve = shape;
+
+        RecordingSink sink;
+        const auto render = renderFade (sink, scenario);
+        const auto curve = cue::fadeCurveFrom (shape);
+
+        REQUIRE (render.steady > 0.4f);
+        REQUIRE (render.fadeTicks == 50);
+        REQUIRE (sink.written >= render.fadeBegan + render.fadeTicks * render.samplesPerTick);
+
+        /*  BOTH ENDPOINTS. The level it left is the level it was sounding at,
+            and the level it arrives at is the one the cue names - not near it,
+            because a fade that stopped a decibel short would leave every cue in
+            a show a decibel loud.
+
+            Compared as a difference rather than through doctest::Approx, whose
+            tolerance is RELATIVE: a relative tolerance around zero decibels can
+            never be met, and around minus twenty it would be twenty times
+            looser than around one. A fade is measured in decibels, so the
+            tolerance is stated in decibels. */
+        CHECK (std::abs (renderedDb (sink, render.fadeBegan - 1, render.steady)) < 0.001);
+
+        const auto arrival = render.fadeBegan + render.fadeTicks * render.samplesPerTick - 1;
+
+        INFO ("arrived at " << renderedDb (sink, arrival, render.steady) << " dB");
+        CHECK (std::abs (renderedDb (sink, arrival, render.steady) - scenario.toDb) < 0.01);
+
+        /*  AND EVERY VALUE IN BETWEEN. The last sample of each tick is the
+            level the Runner wrote one tick before, so this compares fifty
+            rendered numbers against the curve that produced them. */
+        double worstDeviation = 0.0;
+        int worstAt = 0;
+
+        for (int k = 1; k <= render.fadeTicks; ++k)
+        {
+            const auto at = render.fadeBegan + k * render.samplesPerTick - 1;
+            const auto ideal = cue::fadeLevelDb (0.0, scenario.toDb,
+                                                 static_cast<double> (k) / render.fadeTicks,
+                                                 curve);
+            const auto deviation = std::abs (renderedDb (sink, at, render.steady) - ideal);
+
+            if (deviation > worstDeviation)
+            {
+                worstDeviation = deviation;
+                worstAt = k;
+            }
+        }
+
+        INFO ("worst deviation " << worstDeviation << " dB, at tick " << worstAt
+               << " of " << render.fadeTicks);
+
+        CHECK (worstDeviation < 0.02);
+
+        /*  MONOTONIC IN THE AUDIO, not only in the arithmetic. A curve that is
+            monotonic and an interpolation that overshot between its points
+            would still put a level nobody asked for into the room.
+
+            Above the rounding noise rather than above zero, because the snap at
+            the end of each tick corrects a drift that can go either way - and
+            an sCurve, whose first tick barely moves, spends more of its step on
+            that correction than on the fade. An overshoot worth the name is
+            orders of magnitude larger. */
+        const auto* samples = sink.buffer.getReadPointer (0);
+        const auto noise = rampRoundingNoise (render.steady, render.samplesPerTick);
+        int roseAt = -1;
+
+        for (int n = render.fadeBegan + 1; n <= arrival && roseAt < 0; ++n)
+            if (static_cast<double> (samples[n]) - samples[n - 1] > noise)
+                roseAt = n;
+
+        INFO ("first sample that rose: " << roseAt);
+        CHECK (roseAt < 0);
+
+        /*  NO STEP BEYOND WHAT THE SLEW ALLOWS. Fifty values a second reaching
+            the audio as fifty steps would be a fade that ticks, and the bound
+            is derived from the same curve rather than chosen. */
+        const auto step = largestStep (sink, render.fadeBegan, arrival);
+        const auto allowed = static_cast<double> (render.steady)
+                               * allowedStepPerSample (scenario.toDb, render.fadeTicks,
+                                                       curve, render.samplesPerTick)
+                               + noise;
+
+        INFO ("largest step " << step << ", allowed " << allowed);
+        CHECK (step <= allowed);
+
+        /*  The fade moved the run's level and left it where the cue said. */
+        CHECK (std::abs (render.targetLevelDb - scenario.toDb) < 1.0e-9);
+
+        /*  A fade is not a stop: the cue is still sounding, quietly. */
+        CHECK (render.targetPlaying);
+        CHECK_FALSE (render.targetFinished);
+    }
+}
+
+TEST_CASE ("M7: a fade to silence renders digital silence, not a very small number")
+{
+    /*  -120 dB IS ZERO, and the difference is not academic. A cue left at some
+        tiny gain is a cue still summing into every output for the rest of the
+        show: it costs what a loud one costs, it denormalises, and on a rig with
+        sixty-four of them it is noise. decibelsToGain is given the floor so the
+        arithmetic reaches exactly zero rather than approaching it. */
+    FadeScenario scenario;
+    scenario.level = "-120";
+    scenario.duration = "0.5";
+    scenario.toDb = -120.0;
+    scenario.seconds = 0.5;
+
+    RecordingSink sink;
+    const auto render = renderFade (sink, scenario);
+
+    REQUIRE (render.steady > 0.4f);
+
+    const auto arrival = render.fadeBegan + render.fadeTicks * render.samplesPerTick - 1;
+    REQUIRE (sink.written > arrival + render.samplesPerTick);
+
+    /*  Halfway down it is still audible, so what follows is a fade that
+        happened rather than a cue that was never there. */
+    const auto halfway = render.fadeBegan + (render.fadeTicks / 2) * render.samplesPerTick - 1;
+
+    INFO ("halfway: " << renderedDb (sink, halfway, render.steady) << " dB");
+    CHECK (renderedDb (sink, halfway, render.steady) < -40.0);
+    CHECK (renderedDb (sink, halfway, render.steady) > -80.0);
+
+    /*  And at the bottom, exactly nothing - every sample of it. */
+    for (int n = arrival; n < sink.written; ++n)
+    {
+        INFO ("sample " << n << " of " << sink.written);
+        REQUIRE (sink.buffer.getSample (0, n) == 0.0f);
+    }
+
+    /*  Still running, at silence. A fade to -120 is not a stop, and the
+        difference matters to whatever is waiting on the run. */
+    CHECK (render.targetPlaying);
+}
+
+TEST_CASE ("M7: a stop that fades is silent before it stops, so there is nothing to click")
+{
+    /*  THE ORDER IS THE WHOLE POINT OF THE VERB. Tracktion ramps ten samples
+        out of a clip it stops, from whatever level the clip was at - which for
+        a stop at full level is a tenth of the signal gone in one sample, and
+        that is a click. The `fade` verb exists so that by the time the clip
+        stops there is nothing left for that ramp to ramp, and the way to assert
+        it is to go looking for the click: no step anywhere in the render bigger
+        than the fade's own slew allows, right through the stop. */
+    FadeScenario scenario;
+    scenario.duration = "0.5";
+    scenario.curve = "linear";
+    scenario.verb = "fade";
+    scenario.toDb = -120.0;
+    scenario.seconds = 0.5;
+
+    RecordingSink sink;
+    const auto render = renderFade (sink, scenario);
+
+    REQUIRE (render.steady > 0.4f);
+
+    const auto arrival = render.fadeBegan + render.fadeTicks * render.samplesPerTick - 1;
+    REQUIRE (sink.written > arrival + render.samplesPerTick);
+
+    /*  It faded rather than jumped: audible at the top, gone at the bottom. */
+    CHECK (renderedDb (sink, render.fadeBegan, render.steady) > -1.0);
+
+    for (int n = arrival; n < sink.written; ++n)
+    {
+        INFO ("sample " << n << " of " << sink.written << ", after the fade arrived");
+        REQUIRE (sink.buffer.getSample (0, n) == 0.0f);
+    }
+
+    /*  NO CLICK, ANYWHERE - and the stop is inside this range, so this is the
+        assertion the ordering exists for. */
+    const auto step = largestStep (sink, render.fadeBegan, sink.written);
+    const auto allowed = static_cast<double> (render.steady)
+                           * allowedStepPerSample (scenario.toDb, render.fadeTicks,
+                                                   cue::FadeCurve::linear,
+                                                   render.samplesPerTick)
+                           + rampRoundingNoise (render.steady, render.samplesPerTick);
+
+    INFO ("largest step " << step << ", allowed " << allowed);
+    CHECK (step <= allowed);
+
+    /*  And it stopped. A fade to silence that left the clip running would pass
+        every check above and hold a voice for the rest of the show. */
+    CHECK_FALSE (render.targetPlaying);
+    CHECK (render.targetFinished);
 }

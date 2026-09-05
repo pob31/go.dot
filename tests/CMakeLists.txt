@@ -180,6 +180,25 @@ add_test(NAME wfg.replay.go.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/first-sound
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The fourth replay fixture, and the one that says what a log of a FADE is. A
+# fade produces fifty values a second and not one of them is written down
+# (section 3.15: transitions are events, continuous readouts are not), so what
+# has to reproduce is the GO that started it and the tick its run finished on -
+# everything between the two is recomputed from this log and the bundle beside
+# it. Which is also why it needs no audio side at all.
+#
+# It earned its place before it was committed: it failed on a takeover reporting
+# from inside a command handler, which a replay re-runs, so the record arrived
+# twice. Nothing else in the suite would have found that.
+add_test(NAME wfg.replay.fade.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/fade-stop.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fade-stop
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.fade.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/fade-stop.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fade-stop
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a
