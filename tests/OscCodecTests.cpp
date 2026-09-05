@@ -447,6 +447,61 @@ TEST_CASE ("osc codec: an unknown type tag takes the message with it")
              "four undefined type tags");
 }
 
+TEST_CASE ("osc codec: WFS-DIY's fuzz corpus, every raw packet in it")
+{
+    /*  RAW_PACKETS from D:/dev/WFS_DIY_v1/tools/fuzz/corpus.py, transcribed
+        whole rather than sampled. They are the best kind of fixture available
+        here: written by the author for a different program, against a different
+        decoder, before this one existed - so they cannot have been shaped to
+        the thing they are testing. Every one is annotated `expect="ignored"`
+        there, and "ignored" is what a refusal is.
+
+        Their notes are kept as the case names so the two files can be diffed by
+        eye if the corpus grows. */
+    const auto address = str ("/wfs/input/positionX");   // 20 chars: already a multiple of four
+
+    refuses ({}, refusal::notOsc,
+             "empty datagram");
+
+    refuses (Bytes { 'n','o','t',' ','a','n',' ','o','s','c',' ','p','a','c','k','e','t' },
+             refusal::notOsc,
+             "no leading slash, no nulls");
+
+    refuses (Bytes { '/','w','f','s','/','i','n','p','u','t','/',
+                     'p','o','s','i','t','i','o','n','X' },
+             refusal::badAddress,
+             "address only, no type-tag terminator");
+
+    refuses (address, refusal::noTypeTags,
+             "address ok, no tag string");
+
+    refuses (address + str (",fff"), refusal::truncated,
+             "claims 3 floats but no payload");
+
+    refuses (Bytes (1024u, std::uint8_t { 0x00 }), refusal::badAddress,
+             "all zero bytes");
+
+    refuses (Bytes (1024u, std::uint8_t { 0xff }), refusal::badAddress,
+             "all 0xff bytes");
+
+    refuses (u32 (0xffffffffu) + str ("#bundle"), refusal::badAddress,
+             "garbage bundle header");
+
+    /*  And the raw payloads the corpus attaches to a real address. Its third
+        such case is an empty payload, which is the "no tag string" case already
+        above. The one below is the one that matters most: spatcore delivers it
+        as a parameter change of 0.0, which on positionX is a source jumping to
+        the origin. */
+    refuses (address + Bytes { ',', 'f', 0, 0, 0 }, refusal::notOsc,
+             "says 'f' but only 1 byte of payload");
+
+    /*  The corpus sends this one unaligned; padded here to four so that it
+        reaches the type-tag check rather than stopping at the alignment gate,
+        which is already covered above. */
+    refuses (address + str (",zzzz") + u64 (0), refusal::unknownTypeTag,
+             "undefined tag chars");
+}
+
 TEST_CASE ("osc codec: a blob cannot declare a length the datagram does not have")
 {
     refuses (str ("/b") + str (",b") + u32 (0xffffffffu), refusal::badBlob,
