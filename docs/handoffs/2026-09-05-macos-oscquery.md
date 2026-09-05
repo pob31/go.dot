@@ -9,6 +9,46 @@ Read §2 and §3 before touching anything.
 
 ---
 
+## RESOLVED — 2026-09-05, on the Mac, in `f936593`
+
+§2 was right. The suspect is the cause, and it is now fixed in
+`OscQueryServer::start`: the wait requires a non-zero port as well as
+`isConnected`. Nothing in the submodule changed.
+
+**Confirmed by measurement, not by argument.** The failing run was caught with the port in
+hand:
+
+```
+WFG-DIAG rig port=0 isRunning=true status=0 body=[]
+```
+
+`start()` had returned true, `isRunning()` was true, and the port was 0 — exactly the sequence
+§2 describes. Under twenty spinning `yes` processes on an M4 Pro, 120 runs of the oscquery
+cases:
+
+| | pass | fail |
+|---|---|---|
+| before | 99 | 21 |
+| after | **120** | **0** |
+
+Every failing run that carried the diagnostic reported `port=0` — 22 of 22. Full suite green
+afterwards: 271 cases, 52838 assertions, ctest 24/24 in both locales.
+
+**One correction to §2, and it matters for whoever reads the CI logs next.** §2 reasons from
+`REQUIRE(rig.started)` never failing. True, but the assertion that *does* fail is
+`REQUIRE(rig.port() > 0)` at `OscQueryTests.cpp:358` — and under load it is the single most
+common signature, 13 of the 21 baseline failures. CI had simply never sampled enough runs to
+show it. The diagnostic §5 proposes adding was already in the tree.
+
+**One false lead, recorded so nobody pays for it.** Reproducing locally also produced failures
+with a *valid* port and statuses of 404 and 401, the 401 carrying an Anthropic API
+authentication error as its body. That is not Go.dot: VS Code's helper process holds
+`127.0.0.1:50559` on that machine, and the test's client reached it. It is also why CI shows
+status 0 exclusively and never 404 or 401. A busy loopback on a dev box can manufacture
+failures that look like this bug and are not.
+
+---
+
 ## 0. READ THIS FIRST — macOS went green, and it is not fixed
 
 Added after the document was written, and it is the most useful single fact in it.
