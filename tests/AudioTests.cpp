@@ -1645,3 +1645,248 @@ TEST_CASE ("rt: a cue playing through the matrix still allocates nothing of ours
 
     CHECK (rt::violations() == 0);
 }
+
+//==============================================================================
+/*  THE ANCHOR: where Go.dot's sample counter meets Tracktion's beat axis.
+
+    Every launch instant is computed through this, so these are the numbers that
+    would rot silently. A wrong anchor does not crash, it makes every cue play
+    slightly early or late, every night, on a machine nobody can reproduce it on.
+
+    The anchor is MEASURED rather than derived, once per block, in the callback
+    where both numbers describe the same instant. That it currently comes out at
+    exactly zero is a coincidence of two facts that cancel - Tracktion seeds its
+    reference range one block ahead, and its sync point reports the END of the
+    block - and it is not hard-coded anywhere. These cases pin the behaviour, not
+    the coincidence.
+*/
+TEST_CASE ("anchor: the beat axis and the sample counter agree, and keep agreeing")
+{
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    /*  Nothing has been pumped, so there is no anchor yet - and the host says
+        so rather than answering with a confident zero. */
+    CHECK (rig.host.anchoredAtSample() == 0);
+
+    for (int i = 0; i < 500; ++i)
+        rig.host.processBlock();
+
+    const auto anchoredAt = rig.host.anchoredAtSample();
+    INFO ("anchored at sample " << anchoredAt);
+
+    /*  Taken at the end of the last block, which is what makes it pair with
+        Go.dot's counter rather than with the block in flight. */
+    CHECK (anchoredAt == 500 * settings.blockSize);
+
+    /*  ONE BEAT IS ONE SECOND, so the beat at sample N is N / sampleRate. That
+        is the whole arithmetic, and the Edit's tempo is asserted at buildEdit
+        precisely so it stays true. */
+    const auto beatsAtOneSecond = rig.host.beatsAtSample (settings.sampleRate);
+    INFO ("beats at one second: " << beatsAtOneSecond);
+    CHECK (beatsAtOneSecond == doctest::Approx (1.0).epsilon (1.0e-9));
+
+    const auto beatsAtTen = rig.host.beatsAtSample (10 * settings.sampleRate);
+    CHECK (beatsAtTen == doctest::Approx (10.0).epsilon (1.0e-9));
+
+    /*  And it does not drift. The offset is republished every block, so a
+        thousand blocks later the same future sample must answer the same beat -
+        an anchor that accumulated error would show up here as a difference in
+        the last digits rather than as anything anybody would notice live. */
+    const auto before = rig.host.beatsAtSample (1000 * settings.sampleRate);
+
+    for (int i = 0; i < 1000; ++i)
+        rig.host.processBlock();
+
+    const auto after = rig.host.beatsAtSample (1000 * settings.sampleRate);
+
+    INFO ("before " << before << ", after " << after);
+    CHECK (before == doctest::Approx (after).epsilon (1.0e-12));
+}
+
+TEST_CASE ("anchor: Tracktion's own counter runs exactly one block ahead, and says so")
+{
+    /*  REPORTED, NOT ASSERTED AS A CONSTANT. The skew is one block in a healthy
+        run because Tracktion publishes its sync range before the graph runs
+        while Go.dot advances its counter after. What matters is that it does
+        not CHANGE: a change means Tracktion skipped blocks - a suspended
+        device, the CPU-overload mute, a resync - and that is the number to look
+        at when a show has drifted and nobody knows why. */
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 256;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    for (int i = 0; i < 100; ++i)
+        rig.host.processBlock();
+
+    const auto skew = rig.host.referenceSkewSamples();
+    INFO ("reference skew: " << skew << " samples, block size " << settings.blockSize);
+
+    CHECK (skew == settings.blockSize);
+
+    for (int i = 0; i < 400; ++i)
+        rig.host.processBlock();
+
+    /*  Unchanged over four hundred more blocks. If this ever fails, the launch
+        arithmetic is still correct - the anchor measures around it - but
+        something upstream dropped audio, and that is worth finding out about. */
+    CHECK (rig.host.referenceSkewSamples() == skew);
+}
+
+TEST_CASE ("anchor: the beat is asked for in samples, so the rate is the only conversion")
+{
+    /*  Two rates, one arithmetic. If beatsAtSample ever started depending on
+        something other than the rate - a block size, a tick length - this is
+        where it would show. */
+    for (const int rate : { 44100, 96000 })
+    {
+        INFO ("at " << rate << " Hz");
+
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = rate;
+        settings.blockSize = 512;
+        settings.outputChannels = 2;
+
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = 1;
+        REQUIRE (rig.host.buildEdit (spec));
+
+        for (int i = 0; i < 200; ++i)
+            rig.host.processBlock();
+
+        CHECK (rig.host.beatsAtSample (rate) == doctest::Approx (1.0).epsilon (1.0e-9));
+        CHECK (rig.host.beatsAtSample (rate / 2) == doctest::Approx (0.5).epsilon (1.0e-9));
+    }
+}
+
+TEST_CASE ("launch: the tick-safe path reaches the same handle the diagnostic one does")
+{
+    /*  launchTrackAt is what GO uses, and it must not be a second mechanism
+        that could disagree with the first. Both end at the clip's one
+        LaunchHandle; this asserts they do.
+
+        It also covers the reason launchTrackAt exists: it reaches a handle
+        cached at buildEdit rather than walking to the clip, which costs two
+        heap allocations every time and would be four hundred of them a second
+        at 50 Hz over four tracks. */
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 2;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSteadyTone (rig.storage.folder, 1, settings.sampleRate);
+    REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+    CHECK (rig.host.trackPlayState (0).valid);
+    CHECK_FALSE (rig.host.trackPlayState (0).playing);
+
+    /*  An index no track answers to is answered rather than crashed on: this is
+        reachable from a cue naming a track that a smaller rig does not have. */
+    CHECK_FALSE (rig.host.trackPlayState (99).valid);
+    CHECK_FALSE (rig.host.launchTrackAt (99, 1.0));
+    CHECK_FALSE (rig.host.stopTrack (99));
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    /*  Placed a quarter of a second ahead, in Go.dot's own samples, converted
+        through the anchor. */
+    const auto target = rig.host.clock().samplesElapsed() + settings.sampleRate / 4;
+    REQUIRE (rig.host.launchTrackAt (0, rig.host.beatsAtSample (target)));
+
+    /*  Not yet: the instant is ahead of the blocks pumped so far. */
+    for (int i = 0; i < 10; ++i)
+        rig.host.processBlock();
+
+    CHECK_FALSE (rig.host.trackPlayState (0).playing);
+
+    /*  And now it is, having crossed the instant. */
+    for (int i = 0; i < 200; ++i)
+        rig.host.processBlock();
+
+    const auto playing = rig.host.trackPlayState (0);
+    INFO ("played beats: " << playing.playedBeats);
+
+    CHECK (playing.playing);
+    CHECK (playing.playedBeats > 0.0);
+
+    /*  The other track was never launched and must not have started on its own -
+        the handles are per track, and an index mistake would show up here. */
+    CHECK_FALSE (rig.host.trackPlayState (1).playing);
+}
+
+TEST_CASE ("launch: a stop that lands is confirmed, not assumed")
+{
+    /*  Cancelling a queued launch is best effort in Tracktion - the queue is
+        read through a try-lock that answers "nothing queued" when the audio
+        thread holds it - so Go.dot confirms on a later tick rather than
+        believing the call. This asserts the confirm, which is the part Go.dot
+        controls. */
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSteadyTone (rig.storage.folder, 1, settings.sampleRate);
+    REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    REQUIRE (rig.host.launchTrackAt (0, rig.host.beatsAtSample (rig.host.clock().samplesElapsed() + 1024)));
+
+    for (int i = 0; i < 100; ++i)
+        rig.host.processBlock();
+
+    REQUIRE (rig.host.trackPlayState (0).playing);
+
+    REQUIRE (rig.host.stopTrack (0));
+
+    for (int i = 0; i < 20; ++i)
+        rig.host.processBlock();
+
+    CHECK_FALSE (rig.host.trackPlayState (0).playing);
+}

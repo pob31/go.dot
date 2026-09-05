@@ -227,6 +227,7 @@ namespace wfg::audio
             midi.ensureSize (256);
 
             current = requested;
+            sampleRate = static_cast<double> (requested.sampleRate);
             blocks.store (0, std::memory_order_relaxed);
             running = true;
 
@@ -250,6 +251,8 @@ namespace wfg::audio
             edit.reset();
             matrices.clear();
             plugins.clear();
+            handles.clear();
+            context = nullptr;
 
             /*  createEmptyEdit touches no disk. Edit::createEdit is the only
                 non-test, non-preview factory; the Edit ctor and
@@ -396,6 +399,56 @@ namespace wfg::audio
             transport.ensureContextAllocated();
             transport.play (false);
 
+            /*  ONE BEAT IS ONE SECOND, ASSERTED RATHER THAN ASSUMED.
+
+                A launch is placed at a beat, and every time Go.dot computes one
+                it divides a sample count by the sample rate and calls the answer
+                beats. That is only true while a beat lasts a second, and 60 bpm
+                is not on its own enough to make it so: Tracktion's default
+                behaviour makes a beat's length depend on the time signature
+                DENOMINATOR, so seconds-per-beat is 240 / (bpm * denominator).
+                At 60 bpm in 6/8 a beat is half a second and every cue would
+                launch at twice its intended distance into the future.
+
+                Nothing in Go.dot writes a time signature today, so this holds -
+                which is exactly why it is worth a check rather than a comment.
+                The failure it guards against is silent and rhythmic. */
+            {
+                const auto& tempoSequence = edit->tempoSequence;
+                const auto bpm = tempoSequence.getTempo (0)->getBpm();
+                const auto denominator = tempoSequence.getTimeSig (0)->denominator.get();
+                const auto beatsPerSecond = bpm * static_cast<double> (denominator) / 240.0;
+
+                if (std::abs (beatsPerSecond - 1.0) > 1.0e-9)
+                {
+                    error = "the Edit's tempo does not make one beat one second, so every"
+                            " launch would be placed at the wrong distance";
+                    edit.reset();
+                    matrices.clear();
+                    plugins.clear();
+                    return false;
+                }
+            }
+
+            /*  RESOLVED HERE, ON THE MESSAGE THREAD, so the GO path never has to.
+                See the note on `handles`. */
+            context = edit->getCurrentPlaybackContext();
+            handles.clear();
+
+            for (int track = 0; track < static_cast<int> (matrices.size()); ++track)
+            {
+                std::shared_ptr<te::LaunchHandle> handle;
+
+                if (auto* clip = clipOn (track))
+                    handle = clip->getLaunchHandle();
+
+                handles.push_back (std::move (handle));
+            }
+
+            beatOffset.store (0.0, std::memory_order_relaxed);
+            anchorSample.store (0, std::memory_order_relaxed);
+            referenceSkew.store (0, std::memory_order_relaxed);
+
             error.clear();
             return true;
         }
@@ -405,6 +458,8 @@ namespace wfg::audio
             edit.reset();
             matrices.clear();
             plugins.clear();
+            handles.clear();
+            context = nullptr;
 
             if (engine != nullptr)
             {
@@ -459,6 +514,31 @@ namespace wfg::audio
                 while it was still happening. */
             samples.advance (current.blockSize);
             blocks.fetch_add (1, std::memory_order_relaxed);
+
+            /*  THE ANCHOR, published here and nowhere else, because here is the
+                only place the two numbers describe the same instant. Read from
+                the tick thread anywhere is not the same thing: the sync range
+                is published BEFORE the graph runs and Go.dot's counter advances
+                AFTER it returns, so a reader that catches the gap gets a
+                different answer from one that does not.
+
+                Allocation-free, lock-free and syscall-free (PRD §4.2): the
+                seqlock behind getSyncPoint is being read on the same thread that
+                wrote it, so it cannot spin, and the three stores are relaxed. */
+            if (context != nullptr)
+            {
+                if (const auto syncPoint = context->getSyncPoint())
+                {
+                    const auto elapsed = samples.samplesElapsed();
+                    const auto beats = syncPoint->monotonicBeat.v.inBeats();
+
+                    beatOffset.store (beats - static_cast<double> (elapsed) / sampleRate,
+                                      std::memory_order_relaxed);
+                    anchorSample.store (elapsed, std::memory_order_relaxed);
+                    referenceSkew.store (syncPoint->referenceSamplePosition - elapsed,
+                                         std::memory_order_relaxed);
+                }
+            }
         }
 
         juce::File storageFolder;
@@ -645,6 +725,71 @@ namespace wfg::audio
             }
         }
 
+        double beatsAtSample (std::int64_t sample) const noexcept
+        {
+            if (sampleRate <= 0.0)
+                return 0.0;
+
+            return beatOffset.load (std::memory_order_relaxed)
+                     + static_cast<double> (sample) / sampleRate;
+        }
+
+        bool launchTrackAt (int trackIndex, double monotonicBeat) noexcept
+        {
+            if (trackIndex < 0 || trackIndex >= static_cast<int> (handles.size()))
+                return false;
+
+            auto& handle = handles[static_cast<std::size_t> (trackIndex)];
+
+            if (handle == nullptr)
+                return false;
+
+            /*  Two stores under a spin mutex the audio thread only ever
+                try_locks, which is the whole of what GO does to Tracktion. */
+            handle->play (te::MonotonicBeat { tracktion::BeatPosition::fromBeats (monotonicBeat) });
+            return true;
+        }
+
+        bool stopTrackAt (int trackIndex, std::optional<double> monotonicBeat) noexcept
+        {
+            if (trackIndex < 0 || trackIndex >= static_cast<int> (handles.size()))
+                return false;
+
+            auto& handle = handles[static_cast<std::size_t> (trackIndex)];
+
+            if (handle == nullptr)
+                return false;
+
+            if (monotonicBeat.has_value())
+                handle->stop (te::MonotonicBeat { tracktion::BeatPosition::fromBeats (*monotonicBeat) });
+            else
+                handle->stop ({});
+
+            return true;
+        }
+
+        AudioHost::TrackPlayState trackPlayState (int trackIndex) const noexcept
+        {
+            AudioHost::TrackPlayState out;
+
+            if (trackIndex < 0 || trackIndex >= static_cast<int> (handles.size()))
+                return out;
+
+            const auto& handle = handles[static_cast<std::size_t> (trackIndex)];
+
+            if (handle == nullptr)
+                return out;
+
+            out.valid = true;
+            out.playing = handle->getPlayingStatus() == te::LaunchHandle::PlayState::playing;
+
+            if (out.playing)
+                if (const auto played = handle->getPlayedRange())
+                    out.playedBeats = played->getLength().inBeats();
+
+            return out;
+        }
+
         bool launchTrack (int trackIndex)
         {
             auto* clip = clipOn (trackIndex);
@@ -653,12 +798,12 @@ namespace wfg::audio
                 return false;
 
             auto handle = clip->getLaunchHandle();
-            auto* context = edit->getTransport().getCurrentPlaybackContext();
+            auto* playbackContext = edit->getTransport().getCurrentPlaybackContext();
 
-            if (handle == nullptr || context == nullptr)
+            if (handle == nullptr || playbackContext == nullptr)
                 return false;
 
-            const auto syncPoint = context->getSyncPoint();
+            const auto syncPoint = playbackContext->getSyncPoint();
 
             if (! syncPoint.has_value())
                 return false;
@@ -721,9 +866,12 @@ namespace wfg::audio
             if (edit == nullptr || engine == nullptr)
                 return report;
 
-            auto* context = edit->getCurrentPlaybackContext();
+            /*  The one buildEdit cached, rather than a second lookup that
+                could disagree with it. Named for what it is so it does not
+                shadow the member. */
+            auto* playbackContext = context;
 
-            if (context == nullptr)
+            if (playbackContext == nullptr)
                 return report;
 
             /*  A throwaway graph, built the way the playback context builds one,
@@ -751,7 +899,7 @@ namespace wfg::audio
 
                 This overload is what EditPlaybackContext itself calls. */
             std::atomic<double> audibleTime { 0.0 };
-            auto node = te::createNodeForEdit (*context, audibleTime, params);
+            auto node = te::createNodeForEdit (*playbackContext, audibleTime, params);
 
             if (node == nullptr)
                 return report;
@@ -807,6 +955,55 @@ namespace wfg::audio
         std::unique_ptr<te::Edit> edit;
         std::vector<CueMatrix*> matrices;
         std::vector<CueOutputPlugin*> plugins;
+
+        /*  RESOLVED ONCE, AT BUILD, because reaching them is not free. Every
+            path to a clip goes through getAudioTracks(), which unconditionally
+            does ensureStorageAllocated(32), and getClipSlots(), which returns a
+            juce::Array by value - two heap allocations per call. That is
+            tolerable in a diagnostic and not on the GO path, and at 50 Hz over
+            four tracks it would be four hundred allocations a second on the
+            thread that owns the model.
+
+            getLaunchHandle() also make_shared's on first call and is not
+            synchronised, so it is called here on the message thread and never
+            again. The member it fills is assigned once and never reset, so the
+            pointer is good for the life of the show. */
+        std::vector<std::shared_ptr<te::LaunchHandle>> handles;
+
+        /*  The playback context, cached for the same reason. Message thread
+            writes it, the audio thread reads it; both only while the graph is
+            not being rebuilt, which is never after load (PRD §3.25). */
+        te::EditPlaybackContext* context = nullptr;
+
+        /*  THE ANCHOR, and it is the whole of the launch arithmetic.
+
+            A launch is placed at a MonotonicBeat, and Go.dot has to turn one of
+            its own future sample positions into one. The two numbers are
+            related by a constant, and the honest way to find a constant is to
+            measure it rather than to derive it - so once per block, from the
+            callback, where Go.dot's counter and Tracktion's monotonic beat
+            describe the SAME instant, this records the difference:
+
+                beatOffset = monotonicBeat - samplesElapsed / sampleRate
+
+            Read from the tick thread as one relaxed load. It is 0.0 in a
+            healthy run today, and it is NOT hard-coded as zero: that zero is a
+            coincidence of two facts that happen to cancel, and four paths in
+            Tracktion break it without announcing themselves - a suspended
+            device, the CPU-overload mute, a cleared node graph and a transport
+            re-prepare. Measuring it every block is what makes it self-heal. */
+        std::atomic<double> beatOffset { 0.0 };
+
+        /*  Diagnostics for the same measurement. `anchorSample` says how stale
+            the offset is; `referenceSkew` is Tracktion's own sample counter
+            minus Go.dot's, which is one block in a healthy run and CHANGES when
+            Tracktion has skipped blocks. A change there is the thing to look at
+            when a show drifts. */
+        std::atomic<std::int64_t> anchorSample { 0 };
+        std::atomic<std::int64_t> referenceSkew { 0 };
+
+        /** The rate as a double, so the anchor does not convert one per block. */
+        double sampleRate = 0.0;
         juce::AudioBuffer<float> scratch;
         juce::MidiBuffer midi;
 
@@ -876,6 +1073,41 @@ namespace wfg::audio
 
     bool AudioHost::launchTrack (int trackIndex)  { return impl->launchTrack (trackIndex); }
 
+    double AudioHost::beatsAtSample (std::int64_t sample) const noexcept
+    {
+        return impl->beatsAtSample (sample);
+    }
+
+    std::int64_t AudioHost::anchoredAtSample() const noexcept
+    {
+        return impl->anchorSample.load (std::memory_order_relaxed);
+    }
+
+    std::int64_t AudioHost::referenceSkewSamples() const noexcept
+    {
+        return impl->referenceSkew.load (std::memory_order_relaxed);
+    }
+
+    bool AudioHost::launchTrackAt (int trackIndex, double monotonicBeat) noexcept
+    {
+        return impl->launchTrackAt (trackIndex, monotonicBeat);
+    }
+
+    bool AudioHost::stopTrackAt (int trackIndex, double monotonicBeat) noexcept
+    {
+        return impl->stopTrackAt (trackIndex, monotonicBeat);
+    }
+
+    bool AudioHost::stopTrack (int trackIndex) noexcept
+    {
+        return impl->stopTrackAt (trackIndex, std::nullopt);
+    }
+
+    AudioHost::TrackPlayState AudioHost::trackPlayState (int trackIndex) const noexcept
+    {
+        return impl->trackPlayState (trackIndex);
+    }
+
     bool AudioHost::isTrackPlaying (int trackIndex) const
     {
         return impl->isTrackPlaying (trackIndex);
@@ -928,6 +1160,6 @@ namespace wfg::audio
 
         auto* device = manager.getWaveOutDevice (0);
 
-        return device != nullptr ? device->getChannels().size() : 0;
+        return device != nullptr ? static_cast<int> (device->getChannels().size()) : 0;
     }
 }

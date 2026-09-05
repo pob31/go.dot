@@ -198,14 +198,6 @@ namespace wfg::audio
             False if the index or the file is no good. */
         bool setTrackSource (int trackIndex, const std::string& mediaFile);
 
-        /*  Starts a track's clip. The launch instant is derived from the
-            playback context's sync point, so the transport must be rolling and
-            at least one block must have gone through - a launch handle asked to
-            play at no particular beat dereferences an empty optional.
-
-            PR 2.3 replaces this with GO, which places the launch on a tick
-            boundary. This is the minimum needed to get audio out of the graph
-            and measure where it goes. */
         /*  Waits until the track's source is mapped into the audio file cache,
             pumping blocks while it waits. False if it never became ready.
 
@@ -219,7 +211,90 @@ namespace wfg::audio
             Message thread: it sleeps, so it is never on the GO path. */
         bool waitForTrackSourceReady (int trackIndex, int timeoutMilliseconds);
 
+        /*  Starts a track's clip as soon as the next block, unquantised.
+
+            A DIAGNOSTIC, not the GO path. It reaches the clip - which costs two
+            heap allocations - and it places no instant, so where the sound
+            starts depends on which block happened to be next. M1 uses it
+            because M1 asks where a cue goes and not when.
+
+            Message thread. GO uses launchTrackAt. */
         bool launchTrack (int trackIndex);
+
+        //======================================================================
+        /*  THE GO PATH. Everything below is callable from the tick thread while
+            a show is running: it allocates nothing, takes no lock the audio
+            thread can block on, and touches no Tracktion ValueTree.
+
+            What makes that possible is that buildEdit resolved the launch
+            handles once, on the message thread, and cached them. Reaching a
+            clip costs two heap allocations every time - getAudioTracks does an
+            unconditional ensureStorageAllocated, and getClipSlots returns an
+            array by value - which is fine in a diagnostic and not fine at
+            50 Hz on the thread that owns the model. */
+
+        /*  Turns one of Go.dot's own future sample positions into the beat to
+            launch at.
+
+            NOT A CONVERSION GO.DOT DERIVED. The offset between Go.dot's sample
+            counter and Tracktion's beat axis is MEASURED once per block, in the
+            callback, where the two numbers describe the same instant - see the
+            note on the anchor in AudioHost.cpp. Any thread; meaningless before
+            the first block has gone through, and anchoredAtSample says so. */
+        double beatsAtSample (std::int64_t sample) const noexcept;
+
+        /** The sample the anchor was last taken at. Zero before the first block. */
+        std::int64_t anchoredAtSample() const noexcept;
+
+        /*  Tracktion's own sample counter minus Go.dot's - one block in a
+            healthy run. Published rather than asserted because a CHANGE in it
+            means Tracktion skipped blocks (a suspended device, a CPU-overload
+            mute, a resync), and that is the number to look at when a show has
+            drifted and nobody knows why. */
+        std::int64_t referenceSkewSamples() const noexcept;
+
+        /*  Queues a track's clip to start at a beat. Tick thread.
+
+            A BEAT THAT HAS ALREADY PASSED DOES NOT SIMPLY START LATE. Tracktion
+            plays one block from the head of the file and only then jumps
+            forward by the lateness, so the cue is late AND has a hole in it -
+            verified in tracktion_LaunchHandle.cpp, where the block being
+            rendered takes the block's own start while the state stored for the
+            blocks after it is back-dated. That is why the launch instant is
+            placed well ahead rather than as soon as possible, and why lateness
+            is counted rather than tolerated.
+
+            False when there is no such track or no graph. */
+        bool launchTrackAt (int trackIndex, double monotonicBeat) noexcept;
+
+        /*  Stops a track's clip at a beat, or at the next block when none is
+            given. Tick thread.
+
+            BEST EFFORT WHEN THE CLIP HAS NOT STARTED YET, and a caller has to
+            know it: cancelling a queued launch reads Tracktion's queue through
+            a try-lock that answers "nothing queued" when the audio thread
+            happens to hold it, which is indistinguishable from there really
+            being nothing. So a cancel can silently not happen. Go.dot keeps its
+            own record of what it launched and confirms on the next tick rather
+            than trusting the answer. */
+        bool stopTrackAt (int trackIndex, double monotonicBeat) noexcept;
+        bool stopTrack (int trackIndex) noexcept;
+
+        /*  What a track's launch handle says right now, as a plain value.
+
+            Tick thread, and safe: an atomic acquire load plus a seqlock read,
+            both wait-free absent a concurrent write. It names no Tracktion type,
+            so the vendor-free surface stays vendor-free. */
+        struct TrackPlayState
+        {
+            bool valid = false;      ///< false when there is no such track
+            bool playing = false;
+
+            /** Beats played since it started. Zero when it is not playing. */
+            double playedBeats = 0.0;
+        };
+
+        TrackPlayState trackPlayState (int trackIndex) const noexcept;
 
         /*  Whether a track's clip is playing, and how long its source is. PR 2.3
             needs the first to notice a cue has finished; both are here now
