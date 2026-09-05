@@ -37,7 +37,9 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/log/EventLog.h>
@@ -58,7 +60,15 @@ namespace
             engine.log().openInMemory ({});
 
             doc::registerDocumentCommands (engine.commands(), document);
-            cue::registerRunCommands (engine.commands(), document, runs, runIds);
+            cue::registerRunCommands (engine.commands(), runs);
+
+            /*  The Runner with NO PLAYER, which is a complete configuration and
+                not a degraded one: `audio.arm` creates the run and stops there,
+                because there is no audio side to reserve a voice on. That is
+                exactly the shape a replay runs in, and it is why every case in
+                this file is about the model rather than about a sound. */
+            cue::registerGoCommands (engine.commands(), engine, runner,
+                                     document, focus, runIds);
 
             listId = document.createList ("Sound").id;
             mediaId = document.createCue (listId, 0, "media", "Thunder").id;
@@ -96,7 +106,9 @@ namespace
         Engine engine;
         doc::ShowDocument document;
         cue::RunTable runs;
+        cue::Focus focus;
         doc::IdRegistry runIds { doc::IdRegistry::withSeed (7) };
+        cue::Runner runner { document, runs, runIds, focus };
 
         std::string listId, mediaId, memoId;
         std::int64_t tick = 0;

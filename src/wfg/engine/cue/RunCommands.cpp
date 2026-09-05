@@ -20,86 +20,9 @@
 
 namespace wfg::cue
 {
-    namespace
-    {
-        /*  The generated identifier, written back into the arguments so the log
-            record carries what was actually applied. The same arrangement every
-            create command uses, and the reason a replay does not have to draw
-            from the same random sequence to arrive at the same show. */
-        std::vector<osc::Value> withId (std::vector<osc::Value> args,
-                                        std::size_t idIndex,
-                                        const std::string& id)
-        {
-            if (args.size() > idIndex)
-                args[idIndex] = osc::Value::string (id);
-            else
-                args.push_back (osc::Value::string (id));
-
-            return args;
-        }
-
-        /** The kind a cue's element declares, or empty when it is not a cue. */
-        std::string kindOfCue (const juce::ValueTree& cue)
-        {
-            const auto element = cue.getType().toString();
-
-            if (element == "Cue")   return "memo";
-            if (element == "Group") return "group";
-            if (element == "Media") return "media";
-
-            return {};
-        }
-    }
-
     //==============================================================================
-    void registerRunCommands (CommandRegistry& registry,
-                              const doc::ShowDocument& document,
-                              RunTable& runs,
-                              doc::IdRegistry& ids)
+    void registerRunCommands (CommandRegistry& registry, RunTable& runs)
     {
-        //----------------------------------------------------------------------
-        registry.add ({ "audio.arm",
-                        "Makes a cue ready to play: reserves nothing yet, and creates the run that"
-                        " will carry what happens to it.",
-                        { { "cue", 's', false }, { "run", 's', true } },
-                        true,
-                        [&document, &runs, &ids] (CommandContext&, const std::vector<osc::Value>& args)
-                        {
-                            const auto cueId = args[0].getString();
-                            const auto cue = document.findById (cueId);
-
-                            if (! cue.isValid())
-                                return Outcome::rejected (reason::unknownId);
-
-                            const auto kind = kindOfCue (cue);
-
-                            /*  Only a cue that plays something can be armed.
-                                Arming a memo would create a run that could
-                                never leave `armed`, which is a worse answer
-                                than a refusal because it looks like progress. */
-                            if (kind != "media")
-                                return Outcome::rejected (reason::typeMismatch);
-
-                            /*  DECISION B of 2026-09-05, and it is applied
-                                rather than rejected. A cue already running is
-                                not a malformed request - it is a legal request
-                                the show has already honoured - so the operator
-                                who pressed GO twice gets an applied record and
-                                the run that is playing carries on untouched. */
-                            if (const auto* live = runs.liveRunOf (cueId))
-                                return Outcome::ok (withId (args, 1, live->id));
-
-                            auto id = args.size() > 1 ? args[1].getString() : std::string {};
-
-                            if (id.empty())
-                                id = ids.generate();
-                            else if (! ids.reserve (id))
-                                return Outcome::rejected (reason::retiredId);
-
-                            runs.create (id, cueId, kind);
-                            return Outcome::ok (withId (args, 1, id));
-                        } });
-
         //----------------------------------------------------------------------
         registry.add ({ "audio.armed",
                         "The audio side reports which track a run got. Sent by the engine once the"
@@ -127,6 +50,10 @@ namespace wfg::cue
                                 return Outcome::ok (args);
 
                             run->track = track;
+
+                            /*  The voice is real and the media is ready, which
+                                is what a queued GO was waiting for. */
+                            run->armConfirmed = true;
                             return Outcome::ok (args);
                         } });
 

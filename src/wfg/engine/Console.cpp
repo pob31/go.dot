@@ -21,6 +21,7 @@
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/tree/OscQueryJson.h>
@@ -215,14 +216,21 @@ namespace
             the argument the caller left out, so a replay re-supplies it
             rather than having to draw the same number again. */
         auto runIds = wfg::doc::IdRegistry::withSystemEntropy();
+
         wfg::cue::Focus focus;
+        /*  The Runner with no Player until something gives it one. That is a
+            complete configuration, not a degraded one: `wfg replay` and
+            `wfg tree` have no audio side at all and must still create runs,
+            advance standby and produce the same log. */
+        wfg::cue::Runner runner { document, runs, runIds, focus };
         wfg::audio::AudioState audioState;
 
         const auto nowhere = juce::File::getCurrentWorkingDirectory();
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
-        wfg::cue::registerRunCommands (engine.commands(), document, runs, runIds);
+        wfg::cue::registerRunCommands (engine.commands(), runs);
+        wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
         wfg::doc::registerBundleCommands (engine.commands(), document, nowhere);
@@ -318,7 +326,13 @@ namespace
             the argument the caller left out, so a replay re-supplies it
             rather than having to draw the same number again. */
         auto runIds = wfg::doc::IdRegistry::withSystemEntropy();
+
         wfg::cue::Focus focus;
+        /*  The Runner with no Player until something gives it one. That is a
+            complete configuration, not a degraded one: `wfg replay` and
+            `wfg tree` have no audio side at all and must still create runs,
+            advance standby and produce the same log. */
+        wfg::cue::Runner runner { document, runs, runIds, focus };
         wfg::audio::AudioState audioState;
 
         /*  REGISTERED WHETHER OR NOT A BUNDLE WAS GIVEN, unlike everything
@@ -333,7 +347,8 @@ namespace
             empty one - which is the right answer. Everything else is the
             machine reporting what happened to a run, and a log of a performance
             has to replay on a laptop with no show open. */
-        wfg::cue::registerRunCommands (engine.commands(), document, runs, runIds);
+        wfg::cue::registerRunCommands (engine.commands(), runs);
+        wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
         const auto bundlePath = args.containsOption ("--bundle")
                                   ? args.getValueForOption ("--bundle")
@@ -698,12 +713,19 @@ namespace
             the argument the caller left out, so a replay re-supplies it
             rather than having to draw the same number again. */
         auto runIds = wfg::doc::IdRegistry::withSystemEntropy();
+
         wfg::cue::Focus focus;
+        /*  The Runner with no Player until something gives it one. That is a
+            complete configuration, not a degraded one: `wfg replay` and
+            `wfg tree` have no audio side at all and must still create runs,
+            advance standby and produce the same log. */
+        wfg::cue::Runner runner { document, runs, runIds, focus };
         wfg::audio::AudioState audioState;
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
-        wfg::cue::registerRunCommands (engine.commands(), document, runs, runIds);
+        wfg::cue::registerRunCommands (engine.commands(), runs);
+        wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
@@ -1055,12 +1077,19 @@ namespace
             the argument the caller left out, so a replay re-supplies it
             rather than having to draw the same number again. */
         auto runIds = wfg::doc::IdRegistry::withSystemEntropy();
+
         wfg::cue::Focus focus;
+        /*  The Runner with no Player until something gives it one. That is a
+            complete configuration, not a degraded one: `wfg replay` and
+            `wfg tree` have no audio side at all and must still create runs,
+            advance standby and produce the same log. */
+        wfg::cue::Runner runner { document, runs, runIds, focus };
         wfg::audio::AudioState audioState;
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
-        wfg::cue::registerRunCommands (engine.commands(), document, runs, runIds);
+        wfg::cue::registerRunCommands (engine.commands(), runs);
+        wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::doc::registerBundleCommands (engine.commands(), document, target);

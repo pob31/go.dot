@@ -139,6 +139,9 @@ namespace wfg
                 if (action.lateness > maxLateness.load (std::memory_order_relaxed))
                     maxLateness.store (action.lateness, std::memory_order_relaxed);
 
+                if (beforeTick != nullptr)
+                    beforeTick (action.tick);
+
                 const auto outcome = engine.processTick (action.tick);
 
                 /*  Before `processed` is advanced, so that a reader which sees

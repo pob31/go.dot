@@ -80,6 +80,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/Run.cpp
     wfg/engine/cue/RunCommands.h
     wfg/engine/cue/RunCommands.cpp
+    wfg/engine/cue/Runner.h
+    wfg/engine/cue/Runner.cpp
     wfg/engine/cue/CueList.h
     wfg/engine/audio/AudioCommands.h
     wfg/engine/audio/AudioCommands.cpp

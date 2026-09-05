@@ -54,17 +54,17 @@
 
 namespace wfg::cue
 {
-    /*  Registers the run lifecycle against `runs`.
+    /*  Registers what the machine REPORTS about a run: armed, started, ended,
+        failed, late, and the kill that asks for a stop.
 
-        `document` is read to find the cue an arm names and to learn its kind;
-        `ids` draws a run's identifier, and the drawn value is written back into
-        the log as the argument the caller left out, so a replay re-supplies it
-        rather than drawing again.
+        Not `audio.arm`. Arming is an ACTION - it reserves a voice and asks the
+        audio side for media - and actions live with the Runner, which is the
+        only thing that knows there is an audio side at all. Splitting them that
+        way is what keeps this file free of any opinion about audio: everything
+        here is a report about a run, applicable on a machine with no sound
+        card, which is exactly what a replay is.
 
-        None of the three references may outlive the registry.
+        `runs` may not outlive the registry.
     */
-    void registerRunCommands (CommandRegistry& registry,
-                              const doc::ShowDocument& document,
-                              RunTable& runs,
-                              doc::IdRegistry& ids);
+    void registerRunCommands (CommandRegistry& registry, RunTable& runs);
 }

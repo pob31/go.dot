@@ -149,6 +149,20 @@ namespace wfg
             The clock knows nothing about what the hook does. It does not
             include a tree header, and `serve` is the only caller that sets
             one. */
+        /*  Run on the tick thread immediately BEFORE each processTick, so
+            anything it submits is drained by that same tick.
+
+            The distinction is not fussiness. What the Runner submits here is
+            what it observed of the audio side - a cue started, a cue ended -
+            and submitting it from the AFTER hook would put it in the queue that
+            the NEXT tick drains, so the log would say it happened one tick
+            after it did. A replay would then reproduce a session twenty
+            milliseconds out of step with the one that was recorded, faithfully,
+            for ever. */
+        using BeforeTick = std::function<void (std::int64_t tick)>;
+
+        void setBeforeTick (BeforeTick hook) { beforeTick = std::move (hook); }
+
         using AfterTick = std::function<void (const Engine::TickResult&)>;
 
         void setAfterTick (AfterTick hook) { afterTick = std::move (hook); }
@@ -201,6 +215,7 @@ namespace wfg
         }
 
     private:
+        BeforeTick beforeTick;
         AfterTick afterTick;
 
         void run();

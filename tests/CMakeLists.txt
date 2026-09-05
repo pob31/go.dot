@@ -79,6 +79,7 @@ add_executable(wfg_tests
     CueListTests.cpp
     MediaCueTests.cpp
     RunTests.cpp
+    GoTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp

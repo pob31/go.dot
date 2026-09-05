@@ -47,6 +47,7 @@
     several runs make "which one" a real question.
 */
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -127,6 +128,30 @@ namespace wfg::cue
 
         /** From `runError`, when `state` is failed. Empty otherwise. */
         std::string error;
+
+        //======================================================================
+        /*  ENGINE STATE, PUBLISHED NOWHERE. These three are how the Runner
+            remembers what it is in the middle of; a client has no use for them
+            and no business writing them, so they carry no parameter row.
+
+            They are here rather than in a table beside the Runner because they
+            are facts about this run, and two places to look for a run's state
+            is one place too many. */
+
+        /** A GO has happened and the launch has not been placed yet. */
+        bool launchRequested = false;
+
+        /** The audio side has confirmed a voice and made the media ready. */
+        bool armConfirmed = false;
+
+        /** The sample the launch was placed at. Zero before it is placed. */
+        std::int64_t launchedAtSample = 0;
+
+        /*  Whether the last poll saw it sounding. The edge from true to false
+            is what ends a run - a launcher clip stops itself at the end of its
+            length, so this is the ordinary finish as well as how a stop is
+            noticed. */
+        bool sawPlaying = false;
 
         bool isFinished() const noexcept
         {
