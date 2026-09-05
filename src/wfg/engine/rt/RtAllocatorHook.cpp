@@ -42,6 +42,15 @@
 #include <cstdlib>
 #include <new>
 
+#if ! defined (_WIN32)
+ /*  posix_memalign is POSIX rather than standard C, so it is declared in
+     <stdlib.h> and is not guaranteed to reach the global namespace through
+     <cstdlib> on every implementation. Included by its own name so that a
+     toolchain which is strict about that compiles rather than failing on a
+     platform nobody here can test. */
+ #include <stdlib.h>
+#endif
+
 namespace
 {
     /*  Zero bytes still allocates: `operator new (0)` must return a distinct,
