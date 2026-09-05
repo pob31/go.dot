@@ -9,8 +9,8 @@
     </List>
   </Lists>
   <Mounts>
-    <Mount id="G1JS4VWE" namespace="namespaces/wfs-diy.json" prefix="/wfs"/>
-    <Mount id="H2KP7RTV" namespace="namespaces/console.json" prefix="/ext/console"/>
+    <Mount id="G1JS4VWE" namespace="namespaces/wfs-diy.json" port="8000" prefix="/wfs"/>
+    <Mount id="H2KP7RTV" namespace="namespaces/console.json" port="9000" prefix="/ext/console"/>
   </Mounts>
   <Audio tracks="8">
     <Bus id="J3MT5XYA" name="Main L/R" width="2"/>

@@ -82,6 +82,22 @@ namespace wfg::tree
         declaration.anticipatable =
             document.getAttribute (base + "anticipatable").value_or (std::string ("false")) == "true";
 
+        /*  WHERE IT SENDS. `transport` was declared in Phase 1 and read by
+            nobody; from Phase 2 it decides whether anything can be sent at all,
+            and a mount naming a transport Go.dot cannot speak is refused when
+            the show loads (loadMountFromBundle) rather than going quiet during
+            it.
+
+            `port` has no default, so an absent one stays 0 and is refused the
+            same way. That is the whole of what makes a mistyped destination a
+            load-time problem instead of a show-time mystery. */
+        declaration.host = document.getAttribute (base + "host").value_or (std::string ("127.0.0.1"));
+        declaration.transport = document.getAttribute (base + "transport").value_or (std::string ("udp"));
+
+        if (const auto port = document.getAttribute (base + "port"))
+            if (const auto parsed = osc::parseDouble (*port))
+                declaration.port = static_cast<int> (*parsed);
+
         return declaration;
     }
 
@@ -96,6 +112,26 @@ namespace wfg::tree
 
         if (declaration->namespaceFile.empty())
             return MountResult::failed (mountId + " declares no namespace file");
+
+        /*  WHERE IT SENDS, CHECKED WHEN THE SHOW OPENS, and refusing the whole
+            mount rather than letting it load and fail one cue at a time.
+
+            The reasoning is about which morning somebody finds out. A mount
+            with no port loads perfectly well and then every network cue aimed
+            at it does nothing, silently, because UDP has no way of telling
+            anybody that nobody was listening. Refusing here puts the problem in
+            front of whoever opened the file, alongside every other thing wrong
+            with the bundle, which is the moment it costs least. */
+        if (declaration->transport != "udp")
+            return MountResult::failed (mountId + ": transport \"" + declaration->transport
+                                        + "\" is declared but not implemented -"
+                                          " Go.dot speaks udp to a mount today");
+
+        if (declaration->port <= 0 || declaration->port > 65535)
+            return MountResult::failed (mountId + ": no usable port. A mount has to say"
+                                                  " which port its target listens on;"
+                                                  " nothing can be inferred and UDP will"
+                                                  " never tell you it was wrong");
 
         /*  Bundle-relative, and it has to STAY inside the bundle. A namespace
             path of "../../etc/passwd" is not a threat model Phase 1 has, but a

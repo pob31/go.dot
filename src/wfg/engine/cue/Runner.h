@@ -50,6 +50,7 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/FadeJob.h>
+#include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -61,6 +62,12 @@
 namespace wfg
 {
     class Engine;
+}
+
+namespace wfg::tree
+{
+    class MountSender;
+    class MountTable;
 }
 
 namespace wfg::cue
@@ -262,6 +269,24 @@ namespace wfg::cue
         /** Every fade in flight. Diagnostics and tests; the Runner drives them. */
         const std::vector<FadeJob>& fades() const noexcept { return running; }
 
+        /*  The mounted namespaces and the socket that serves them, which is
+            what a network cue needs and nothing else does.
+
+            BOTH NULL IS A COMPLETE CONFIGURATION, exactly as a null Player is:
+            `wfg replay` has no socket and must still create the run, advance
+            standby and write the same log - only the datagram is missing. They
+            are two pointers and not one because a table with no sender is also
+            real (a tree dump reads mounts and sends nothing), while a sender
+            with no table has nothing to address. */
+        void setMounts (tree::MountTable* table, tree::MountSender* sender) noexcept
+        {
+            mounts = table;
+            sender_ = sender;
+        }
+
+        /** Every network cue in flight. Diagnostics and tests. */
+        const std::vector<OscJob>& sends() const noexcept { return sending; }
+
     private:
         std::string armInternal (Engine& engine, const std::string& cueId,
                                  const std::string& runId, bool fireAtOnce);
@@ -279,6 +304,10 @@ namespace wfg::cue
         std::string fireFade (const juce::ValueTree& cue, const std::string& runId);
         std::string fireStop (const juce::ValueTree& cue, const std::string& runId);
 
+        /*  A network cue firing: one write to a mounted node, queued for the
+            end of this tick. No Engine here either, and for the same reason. */
+        std::string fireOsc (const juce::ValueTree& cue, const std::string& runId);
+
         /*  `selfCueId` is the fade or stop cue being fired; `targetCueId` is
             the cue it acts on. They are two arguments and not one because the
             run being created belongs to the FIRST - a run says which cue it
@@ -289,7 +318,8 @@ namespace wfg::cue
                                const std::string& selfRunId, const std::string& kind,
                                double toDb, double seconds, FadeCurve, bool stopWhenDone);
 
-        void advanceFades (Engine& engine);
+        void advanceFades (Engine& engine, std::int64_t tick);
+        void advanceSends (Engine& engine);
 
         void launchIfDue (Engine& engine, std::int64_t tick);
         void observeEdges (Engine& engine);
@@ -304,6 +334,15 @@ namespace wfg::cue
         std::string mediaFolder;
 
         std::vector<FadeJob> running;
+
+        /*  The tick being processed, so a stop fired inside a command
+            handler can be scheduled against the same clock the tick hook
+            reads. Set by beforeTick, which runs before the handlers do. */
+        std::int64_t currentTick = 0;
+        std::vector<OscJob> sending;
+
+        tree::MountTable* mounts = nullptr;
+        tree::MountSender* sender_ = nullptr;
 
         /*  Fades taken over by another fade since the last tick, whose runs
             have still to be ended. A queue rather than a submission at the

@@ -42,10 +42,16 @@
     nesting, and the root's own `FULL_PATH` is used only to check that the
     file's paths agree with its shape.
 
-    WHAT PHASE 1 DOES WITH A MOUNT: reads it, publishes it, accepts writes to
-    it, logs them, and sends nothing. There is no transport yet. That makes it a
-    stub, and the rules below are what keep the stub HONEST rather than merely
-    quiet - a mount that lied about what it knew would be worse than no mount.
+    WHAT A MOUNT DOES: reads a description, publishes it as nodes, accepts
+    writes to those nodes, logs them, and - from Phase 2 - sends them to the
+    box the description belongs to.
+
+    WHERE IT SENDS THEM is `host` and `port` on the declaration, and `port` is
+    required with no default. That is the same shape as `audio/tracks` and it is
+    required for a harder reason: UDP never reports that nobody was listening,
+    so a mount that guessed a port would send into the dark and report success
+    for the whole of a show. A number that cannot be checked at run time has to
+    be checked in the document.
 
       * CAPTURED VALUES ARE IGNORED. A captured description carries whatever
         the target happened to be doing when somebody pointed a browser at it,
@@ -65,8 +71,10 @@
         guessing yes is the guess that breaks a show.
 
       * A WRITE TO A READ-ONLY NODE IS REFUSED, like anywhere else, and an
-        accepted one lands in the tree and in the log. Phase 2 replaces the sink
-        with a transport; nothing above this has to change when it does.
+        accepted one lands in the tree, in the log, and on the wire. This table
+        does the first two and hands the third to a MountSender, which is what
+        keeps a socket out of a class that is otherwise pure arithmetic over a
+        JSON document.
 */
 
 #include <wfg/engine/tree/Node.h>
@@ -86,6 +94,17 @@ namespace wfg::tree
         std::string id;
         std::string prefix;           ///< where it lands: "/wfs"
         std::string namespaceFile;    ///< bundle-relative: "namespaces/wfs-diy.json"
+
+        /*  Where the box is, and how to reach it.
+
+            `host` is a literal address rather than a name on purpose: a socket
+            re-resolves whenever the destination differs from the last one it
+            saw, and a blocking name lookup on the tick thread is a frame
+            nobody gets back. `port` has no sensible default and is required in
+            the document. */
+        std::string host = "127.0.0.1";
+        int port = 0;
+        std::string transport = "udp";
 
         double rateCap = 50.0;
         bool anticipatable = false;
@@ -154,12 +173,25 @@ namespace wfg::tree
         {
             bool ok = false;
             std::string reason;
+
+            /*  Which mount took it, and the value AS COERCED - both so the
+                caller can put the same thing on the wire that went into the
+                tree. A sender that re-read the node would be reading a value
+                somebody else might already have overwritten in the same tick. */
+            std::string mountId;
+            osc::Value value;
         };
 
         WriteResult write (const std::string& address, const osc::Value& value);
 
         /** The current value of a mounted node, if it has been written. */
         const osc::Value* valueOf (const std::string& address) const;
+
+        /** What a mount declared, or nullptr if it is not loaded. */
+        const MountDeclaration* declarationOf (const std::string& mountId) const;
+
+        /** The mount whose prefix covers an address, or an empty string. */
+        std::string mountOf (const std::string& address) const;
 
     private:
         struct Entry

@@ -41,6 +41,7 @@
     show is a mistake nobody can explain afterwards.
 */
 
+#include <cstdint>
 #include <string>
 
 namespace wfg::cue
@@ -99,6 +100,29 @@ namespace wfg::cue
             click suppression has nothing left to suppress. */
         bool stopWhenDone = false;
 
+        /*  WHEN THE STOP LANDS, as an absolute tick rather than as a countdown.
+
+            The two differ only when a fade takes over from a stop, and that is
+            exactly the case this exists for. A STOP IS NOT A FADE AND IT STILL
+            HAPPENS (author, 2026-09-06): riding the level back up over a stop
+            that is already running does not withdraw the stop, it just decides
+            what the cue sounds like on the way out. An operator who fired a
+            three-second stop and then touched a fader has not changed their
+            mind about the cue going away - and a cue that could be kept alive
+            by accident is a cue nobody can get rid of.
+
+            Absolute, so that no arithmetic between the takeover and the arrival
+            can move it. The inheriting job copies this number and nothing else
+            about the stop. */
+        std::int64_t stopsAtTick = 0;
+
+        /*  Finished and waiting to be forgotten. A separate flag from
+            isFinished() because a job whose LEVEL has arrived may still be
+            holding a stop that has not - a short fade over the top of a long
+            fade-and-stop is exactly that shape. */
+        bool retired = false;
+
+        /** Whether the level has reached its destination. */
         bool isFinished() const noexcept { return ticksDone >= ticksTotal; }
 
         /** The level now. */

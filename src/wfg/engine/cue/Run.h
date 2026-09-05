@@ -92,6 +92,16 @@ namespace wfg::cue
 
         /** The cue names a bus, or a width, the rig cannot honour. */
         inline constexpr const char* badRoute = "bad-route";
+
+        /*  A message could not be put on the wire.
+
+            Distinct from every refusal above it because it is the only one that
+            is not about the show: the cue was right, the node was right, and
+            the socket would not take the bytes. It is also the only failure a
+            `sent` wait can produce that a `none` wait cannot - which is the
+            entire practical difference between the two, and the reason `sent`
+            is worth having. */
+        inline constexpr const char* sendFailed = "send-failed";
     }
 
     //==============================================================================

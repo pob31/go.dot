@@ -118,9 +118,9 @@ namespace wfg::doc
             static const std::vector<Containment> table {
                 { "Show",   false, { "Lists", "Mounts", "Audio" }, { "document" } },
                 { "Lists",  false, { "List" },             {} },
-                { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop" }, { "list" } },
+                { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, { "list" } },
                 { "Cue",    true,  {},                     { "cue" } },
-                { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop" }, { "cue", "group" } },
+                { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, { "cue", "group" } },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
                     pattern a Group already set. `kind` stays derived from the
@@ -153,6 +153,12 @@ namespace wfg::doc
                     them and a media cue. */
                 { "Fade",   true,  {},                     { "cue", "fade" } },
                 { "Stop",   true,  {},                     { "cue", "stop" } },
+
+                /*  And a network cue is one too, for the same reason. It
+                    carries no Route either: what it writes is somebody
+                    else's node, named by address, and the mount it belongs
+                    to already says where that is. */
+                { "Osc",    true,  {},                     { "cue", "osc" } },
                 { "Mounts", false, { "Mount" },            {} },
                 { "Mount",  true,  {},                     { "mount" } },
                 { "Audio",  false, { "Bus" },              { "audio" } },

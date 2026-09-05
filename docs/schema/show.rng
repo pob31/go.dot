@@ -69,6 +69,7 @@
           <ref name="Media"/>
           <ref name="Fade"/>
           <ref name="Stop"/>
+          <ref name="Osc"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -210,6 +211,7 @@
           <ref name="Media"/>
           <ref name="Fade"/>
           <ref name="Stop"/>
+          <ref name="Osc"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -500,6 +502,84 @@
     </element>
   </define>
 
+  <define name="Osc">
+    <element name="Osc">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="address">
+          <a:documentation>The node this cue writes, which is an address in a mounted namespace rather than a message somebody composed. Naming the NODE is what lets the tree check it: a cue pointing at something the target does not have is findable before the show rather than during it, and the node already says what type it takes.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="value">
+          <a:documentation>What to write, spelled the way the log spells an argument - f:0.5 for a float, i:3 for an integer, T for true. One atom, because a mounted node holds one value; the type is in the text so that a cue meaning the float and a cue meaning the integer are different cues rather than the same cue read twice by two machines.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="wait">
+          <a:documentation>How long the cue takes to be done. None finishes as soon as it is fired; sent finishes when the datagram has left the socket. A third, verified - the target is asked and has to answer with the value that was written - is what PRD 3.11 calls the default for Go.dot own processors, and it is deliberately absent from this list until it works: a grammar that accepted a word the engine ignores would be a show that looked like it was checking and was not.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>sent</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
   <define name="Mounts">
     <element name="Mounts">
       <zeroOrMore>
@@ -523,6 +603,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="host">
+          <a:documentation>Where the target is. A literal address rather than a name, because a socket resolves a hostname on every send whose destination differs from the last one, and a blocking lookup on the tick thread is a frame nobody gets back. It defaults to this machine because the ordinary rig is Go.dot and its processors on one box; anything else says so.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="namespace">
           <a:documentation>The bundle-relative OSCQuery namespace file describing the target.</a:documentation>
           <data type="string"/>
@@ -535,6 +621,15 @@
             <value>park</value>
             <value>snap</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="port">
+          <a:documentation>The port the target listens on. Required, and deliberately without a default for the same reason audio/tracks is: no number could be right for every device, and a mount that guessed would send into the dark and report success. UDP never tells you nobody was listening, so this one has to be right in the document or it is never right at all.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">65535</param>
+          </data>
         </attribute>
       </optional>
       <optional>
@@ -553,7 +648,7 @@
       </optional>
       <optional>
         <attribute name="transport">
-          <a:documentation>How the mounted target is reached. Declared now; used from Phase 2.</a:documentation>
+          <a:documentation>How the mounted target is reached. Only udp carries messages today; tcp and ws are declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring either is refused when the show loads rather than going quiet during it.</a:documentation>
           <choice>
             <value>udp</value>
             <value>tcp</value>

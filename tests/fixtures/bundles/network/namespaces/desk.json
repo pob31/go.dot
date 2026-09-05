@@ -1,0 +1,26 @@
+{
+  "FULL_PATH": "/desk",
+  "DESCRIPTION": "A lighting desk that takes messages and says nothing back. Hand-written, because most devices are: OSCQuery was never standardised and a captured description is the exception rather than the rule.",
+  "CONTENTS": {
+    "fader": {
+      "FULL_PATH": "/desk/fader",
+      "DESCRIPTION": "Grand master, 0 to 1.",
+      "TYPE": "f",
+      "ACCESS": 3,
+      "RANGE": [{"MIN": 0.0, "MAX": 1.0}]
+    },
+    "scene": {
+      "FULL_PATH": "/desk/scene",
+      "DESCRIPTION": "The scene to recall.",
+      "TYPE": "i",
+      "ACCESS": 3,
+      "RANGE": [{"MIN": 1, "MAX": 999}]
+    },
+    "meter": {
+      "FULL_PATH": "/desk/meter",
+      "DESCRIPTION": "What the desk reports. Read-only, which is what a meter is.",
+      "TYPE": "f",
+      "ACCESS": 1
+    }
+  }
+}

@@ -10,7 +10,7 @@
     </List>
   </Lists>
   <Mounts>
-    <Mount id="G1JS4VWE" prefix="/wfs" namespace="namespaces/wfs-diy.json" rateCap="50.0"/>
+    <Mount id="G1JS4VWE" prefix="/wfs" port="8000" namespace="namespaces/wfs-diy.json" rateCap="50.0"/>
   </Mounts>
       <Audio    tracks="4"/>
 </Show>

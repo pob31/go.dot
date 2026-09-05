@@ -352,6 +352,7 @@ namespace wfg::tree
             const auto isMedia = element == "Media";
             const auto isFade = element == "Fade";
             const auto isStop = element == "Stop";
+            const auto isOsc = element == "Osc";
             const auto id = node[idProperty].toString().toStdString();
 
             if (id.empty())
@@ -382,6 +383,10 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("stop"))
                     rows.push_back (row);
 
+            if (isOsc)
+                for (auto* row : doc::Schema::rowsForOwner ("osc"))
+                    rows.push_back (row);
+
             for (const auto* row : rows)
             {
                 const doc::Attribute attribute { element, row };
@@ -395,6 +400,7 @@ namespace wfg::tree
                                                   : isMedia ? "media"
                                                   : isFade  ? "fade"
                                                   : isStop  ? "stop"
+                                                  : isOsc   ? "osc"
                                                             : "memo";
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
@@ -521,6 +527,8 @@ namespace wfg::tree
                             text = mounts.isLoaded (id) ? "true" : "false";
                         else if (name == "nodeCount")
                             text = std::to_string (mounts.nodeCount (id));
+                        else if (name == "sent")
+                            text = std::to_string (sender != nullptr ? sender->sentFor (id) : 0u);
                         else
                             text = storedText (attribute, mount);
 

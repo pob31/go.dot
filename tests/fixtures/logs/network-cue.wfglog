@@ -1,0 +1,57 @@
+# wfg-log 1
+# fixture network-cue — messages sent to somebody else's box, and what the show
+# was told about them.
+#
+# The sixth replay fixture, and the first that is not about Go.dot's own state
+# at all: every record below is about a lighting desk that is not here. Which is
+# exactly why it is worth committing. A replay of this log re-applies every one
+# of them against a mount table built from the bundle beside it, reaches the
+# same tree, produces the same records — and PUTS NOTHING ON ANY WIRE.
+#
+# That last part is the point rather than a limitation. `wfg replay` is what
+# somebody runs at three in the morning to find out why a cue misfired, on a
+# laptop that may well still be plugged into the show network. A replay that
+# also sent would move the rig while they were reading about it.
+#
+# GO on a network cue whose wait is `sent`. The run is created by the GO and
+# reports done on the next tick, because that is when the flush that carried it
+# has happened — the datagram left at the end of the tick that fired the cue.
+A 40 0 udp:10.0.0.5:9000 go s:"H2K4M6NP"
+A 41 1 engine run.ended s:"H2K4M6NP"
+#
+# GO on the next cue, which names a node the desk does not have. Somebody
+# mistyped it, months ago, and nothing until now had any way of noticing.
+#
+# APPLIED AND THEN FAILED, which are two different things and both are true. The
+# request was legal — a cue may name any address, and the desk's namespace is
+# not Go.dot's to police at edit time — and the show could not honour it. A show
+# with one wrong address in it is still a show somebody has to run tonight.
+A 100 2 udp:10.0.0.5:9000 go s:"Q6RS8TW2"
+A 101 3 engine run.failed s:"Q6RS8TW2" s:"bad-address"
+#
+# `cue.fire` on the third, which does not touch standby (§3.5: only GO moves
+# it). The value is an integer and the node is an integer, so nothing is
+# coerced; the fader above was a float written to a float.
+A 200 4 cli cue.fire s:"M5TQ7XVA" s:"V3XY5Z7B"
+A 201 5 engine run.ended s:"V3XY5Z7B"
+#
+# AND THE SAME NODE, WRITTEN BY A CLIENT RATHER THAN BY A CUE. One value-write
+# command reaches the show's own nodes and somebody else's alike (§4.11), so
+# this record is the same shape as any other node.set and is refused in the same
+# words when it is wrong.
+#
+# The value is logged AS APPLIED: an integer 1 sent to a float node is `f:1`
+# here, because that is what landed in the tree and what went out on the wire.
+# A replay puts the identical bytes on the identical node.
+A 250 6 udp:10.0.0.5:9000 node.set s:"/desk/fader" f:1
+#
+# A write the desk will not take. A meter is something a console tells you, not
+# something you tell it, and mounted access defaults to read for exactly the
+# reason this record exists: assuming a write is allowed is the assumption that
+# breaks a show, and refusing a legal one costs a single message.
+R 260 7 udp:10.0.0.5:9000 read-only node.set s:"/desk/meter" f:0.5
+#
+# And a node no mount holds, refused as an address rather than as a permission.
+# The distinction is what tells somebody at half past seven whether to go and
+# look at the cue or at the device.
+R 270 8 cli bad-address node.set s:"/nowhere/at/all" f:0.5

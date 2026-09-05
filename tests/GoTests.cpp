@@ -949,19 +949,27 @@ TEST_CASE ("fade: a target that is not running is a no-op, applied rather than r
     CHECK (rig.audio.levels.empty());
 }
 
-TEST_CASE ("stop: a fade over the top of a fade-and-stop calls the stop off, and says so")
+TEST_CASE ("stop: a fade over the top of a fade-and-stop does not call the stop off")
 {
-    /*  An operator fires a slow stop and then changes their mind - the scene ran
-        long, the actor is still talking - and fades the cue back up instead.
-        What must not happen is a cue that keeps playing while the model says it
-        is stopping, because `stopping` is a state the rest of the engine acts
-        on: it is how a group knows a member is on its way out.
+    /*  AUTHOR, 2026-09-06: THE STOP HAPPENS WHEN IT SHOULD.
 
-        That a fade CAN call off a stop is decided by the takeover rule rather
-        than by anybody: the new fade drops the old job, and a dropped job stops
-        nothing. This case pins the consequence so the two cannot drift apart -
-        if the takeover is ever made to leave a stop alone, this is what fails
-        and says which decision was changed. */
+        An operator fires a slow stop and then changes their mind about the
+        LEVEL - the scene ran long, the actor is still talking - and rides the
+        cue back up. What they have not done is withdraw the stop. A cue that
+        could be kept alive by touching a fader is a cue nobody can get rid of,
+        and the operator who wanted it gone would have to find out during the
+        show that it was not.
+
+        I had this the other way round for one commit, on the reasoning that
+        dropping the superseded job dropped its stop with it - which is a
+        `remove_if` written for the level deciding a question about lifetime.
+
+        WHAT THE LEVEL DOES IN BETWEEN IS STILL OPEN, and the author has named
+        the case that will settle it: a fade on a GROUP over fades on its
+        members, and relative fades composing on top of each other. Neither
+        exists yet - `fade/@level` is a destination in dB and never an offset -
+        so the new fade owns the level here, and this case does not pin that
+        half. It pins the schedule, which is not the part that is open. */
     FadeRig rig;
 
     const auto mediaRun = rig.startMedia();
@@ -975,22 +983,81 @@ TEST_CASE ("stop: a fade over the top of a fade-and-stop calls the stop off, and
     for (int i = 0; i < 25; ++i)
         rig.tickOnce();
 
-    /*  Halfway down, and the mind is changed. */
+    /*  Halfway down, and the mind is changed about the level. */
     REQUIRE (rig.runs.find (mediaRun)->level < -1.0);
 
     rig.fire (rig.fadeId);
 
-    CHECK (rig.runs.find (mediaRun)->state == cue::runState::playing);
+    /*  STILL STOPPING. The run says so because it is: what was taken over was
+        the ramp, not the appointment. */
+    CHECK (rig.runs.find (mediaRun)->state == cue::runState::stopping);
 
-    /*  And it is still there long after the stop would have arrived. */
-    for (int i = 0; i < 100; ++i)
+    /*  The level follows the new fade - up, towards -20 dB from wherever the
+        stop had got to, rather than on down to silence. */
+    const auto atTakeover = rig.runs.find (mediaRun)->level;
+
+    for (int i = 0; i < 10; ++i)
         rig.tickOnce();
 
-    INFO ("the media run: " << rig.runs.find (mediaRun)->state
-           << " at " << rig.runs.find (mediaRun)->level << " dB");
+    INFO ("took over at " << atTakeover << " dB, now "
+           << rig.runs.find (mediaRun)->level << " dB");
+    CHECK (rig.runs.find (mediaRun)->level > atTakeover);
 
+    /*  AND IT STILL STOPS, on the tick the stop was always going to land on:
+        two seconds is a hundred ticks from the stop cue, and twenty-six of them
+        had gone when the fade took over. Checked from both sides, because "it
+        stopped eventually" is not the claim - the claim is that the appointment
+        did not move. */
+    for (int i = 0; i < 60; ++i)
+        rig.tickOnce();
+
+    INFO ("just before: " << rig.runs.find (mediaRun)->state);
     CHECK_FALSE (rig.runs.find (mediaRun)->isFinished());
-    CHECK (rig.runs.find (mediaRun)->state == cue::runState::playing);
+
+    for (int i = 0; i < 10; ++i)
+        rig.tickOnce();
+
+    INFO ("just after: " << rig.runs.find (mediaRun)->state);
+    CHECK (rig.runs.find (mediaRun)->isFinished());
+}
+
+TEST_CASE ("stop: a fade shorter than the stop it took over waits for the stop")
+{
+    /*  The other order, and the one that would have hung. The new fade arrives
+        at its level long before the stop is due, so a job that retired when its
+        LEVEL finished would take the stop with it and the cue would play on for
+        ever. That is why a fade job now has two ways of being over and only one
+        of them is a counter running out. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "4");
+    rig.fire (rig.stopId);
+
+    for (int i = 0; i < 10; ++i)
+        rig.tickOnce();
+
+    /*  A one-second fade over the top of a four-second stop. */
+    rig.fire (rig.fadeId);
+
+    for (int i = 0; i < 60; ++i)
+        rig.tickOnce();
+
+    /*  The fade has long since arrived and the cue is still playing, still on
+        its way out. */
+    INFO ("at " << rig.runs.find (mediaRun)->level << " dB, "
+           << rig.runs.find (mediaRun)->state);
+    CHECK (rig.runs.find (mediaRun)->state == cue::runState::stopping);
+    CHECK (rig.runs.find (mediaRun)->level == doctest::Approx (-20.0).epsilon (0.01));
+    REQUIRE (rig.runner.fades().size() == 1u);
+
+    for (int i = 0; i < 160; ++i)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (mediaRun)->isFinished());
+    CHECK (rig.runner.fades().empty());
 }
 
 TEST_CASE ("fade: a fade takes over from where the level has got to")

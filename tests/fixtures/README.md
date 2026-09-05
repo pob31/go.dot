@@ -116,6 +116,23 @@ reproduce. The rule that came out of it — only the tick hook reports, and a ho
 a replay — is now written into `Runner::advanceFades`, and the signatures of `fireFade`,
 `fireStop` and `beginFade` no longer take an `Engine` so it cannot quietly stop being true.
 
+## `bundles/network/` and `logs/network-cue.wfglog`
+
+The moment a mount stops being a stub, as a fixture. The show is three network cues and one
+mounted lighting desk — a hand-written namespace, because most devices are: OSCQuery was never
+standardised and a captured description is the exception. One cue's address is a typo somebody
+made months ago, which is the only way anybody was ever going to find it.
+
+The log covers both halves of §4.11's claim that a client reaches the model through named
+commands and nothing else: a cue writing a mounted node and a client writing the same node
+take the same path, produce the same record and are refused in the same words.
+
+**A replay puts nothing on any wire, and that is the feature.** `wfg replay` is what somebody
+runs at three in the morning to find out why a cue misfired, on a laptop that may still be
+plugged into the show network — so the replay wiring installs the mount write and deliberately
+no sender. The write has to happen (the tree must reach the state it reached live); the
+datagram must not.
+
 ## `tree/cue-F7HR8TVD.json`
 
 The OSCQuery reply for one cue, written by hand rather than generated, so it can disagree

@@ -53,6 +53,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <cstdint>
@@ -142,6 +143,12 @@ namespace wfg::tree
             stale, then publishes an immutable snapshot and returns it. */
         std::shared_ptr<const TreeSnapshot> publish (std::int64_t tick, const EngineState& state);
 
+        /*  The sender whose counts `mount/<id>/sent` publishes, if there is
+            one. Absent - `wfg tree`, a replay, any test - every mount reads
+            zero, which is the truth: nothing was sent because there was
+            nowhere to send it. */
+        void setSender (const MountSender* senderToRead) noexcept { sender = senderToRead; }
+
         /** The show changed; rebuild before the next publish. */
         void markStale() noexcept { stale = true; }
 
@@ -156,6 +163,7 @@ namespace wfg::tree
         const doc::ShowDocument& document;
         const CommandRegistry& commands;
         const MountTable& mounts;
+        const MountSender* sender = nullptr;
         const cue::RunTable& runs;
 
         std::shared_ptr<const std::vector<Node>> documentPart;

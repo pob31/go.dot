@@ -393,6 +393,31 @@ namespace wfg::tree
     }
 
     //==============================================================================
+    const MountDeclaration* MountTable::declarationOf (const std::string& mountId) const
+    {
+        const auto found = mounts.find (mountId);
+        return found == mounts.end() ? nullptr : &found->second.declaration;
+    }
+
+    std::string MountTable::mountOf (const std::string& address) const
+    {
+        /*  By PREFIX rather than by searching the nodes, so an address that is
+            under a mount but names a node it does not have still says which box
+            it was aimed at. That is what lets a cue pointing at a mistyped node
+            be reported against the mount somebody meant. */
+        for (const auto& [id, entry] : mounts)
+        {
+            const auto& prefix = entry.declaration.prefix;
+
+            if (address.size() > prefix.size()
+                  && address.compare (0, prefix.size(), prefix) == 0
+                  && address[prefix.size()] == '/')
+                return id;
+        }
+
+        return {};
+    }
+
     Node* MountTable::findNode (const std::string& address)
     {
         for (auto& entry : mounts)
@@ -417,25 +442,31 @@ namespace wfg::tree
         auto* node = findNode (address);
 
         if (node == nullptr)
-            return { false, reason::badAddress };
+            return { false, reason::badAddress, {}, {} };
 
         if (node->access != Access::write && node->access != Access::readWrite)
-            return { false, reason::readOnly };
+            return { false, reason::readOnly, {}, {} };
 
         if (node->typeTags.empty())
-            return { false, reason::typeMismatch };
+            return { false, reason::typeMismatch, {}, {} };
 
         const auto coerced = CommandRegistry::coerceToTag (node->typeTags.front(), value);
 
         if (! coerced.has_value())
-            return { false, reason::typeMismatch };
+            return { false, reason::typeMismatch, {}, {} };
 
         /*  It lands here and goes no further. There is no transport in Phase 1,
             and that is the whole extent of what a stub does NOT do - the value
             is in the tree, the event is in the log, and a replay reproduces
             both. Phase 2 puts a socket after this line. */
         node->values = { *coerced };
-        return { true, {} };
+
+        /*  IT LANDS HERE AND STOPS HERE, still. What goes on the wire is a
+            MountSender's business and the caller's to arrange - this class
+            names no socket, which is what lets every rule above be tested
+            against a string literal. The mount id and the coerced value are
+            handed back so the caller has both without looking anything up. */
+        return { true, {}, mountOf (address), *coerced };
     }
 
     const osc::Value* MountTable::valueOf (const std::string& address) const

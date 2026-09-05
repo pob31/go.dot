@@ -33,11 +33,12 @@
 namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
-    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "stop" };
+    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "stop", "osc" };
     inline constexpr std::string_view enum_fade_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_stop_verb[] = { "hard", "fade" };
     inline constexpr std::string_view enum_stop_curve[] = { "linear", "sCurve" };
-    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media" };
+    inline constexpr std::string_view enum_osc_wait[] = { "none", "sent" };
+    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc" };
     inline constexpr std::string_view enum_run_state[] = { "armed", "playing", "stopping", "done", "failed" };
     inline constexpr std::string_view enum_group_mode[] = { "timeline", "sequence" };
     inline constexpr std::string_view enum_group_advance[] = { "auto", "manual" };
@@ -198,7 +199,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           true, "memo",
           false, 0.0, false, 0.0,
-          enum_cue_kind, 5,
+          enum_cue_kind, 6,
           "", 50.0, false, "park",
           "What kind of cue this is, derived from the element rather than stored: a Group is a group and a Media is media. Deriving it is what stops a client turning one kind into another by writing a word, and what lets the grammar refuse a file attribute on a cue that plays nothing." },
         { "cue", "number",
@@ -355,6 +356,27 @@ namespace wfg::doc::generated
           enum_stop_curve, 2,
           "", 50.0, false, "park",
           "The shape of that fade. Ignored by a hard stop." },
+        { "osc", "address",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "The node this cue writes, which is an address in a mounted namespace rather than a message somebody composed. Naming the NODE is what lets the tree check it: a cue pointing at something the target does not have is findable before the show rather than during it, and the node already says what type it takes." },
+        { "osc", "value",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "What to write, spelled the way the log spells an argument - f:0.5 for a float, i:3 for an integer, T for true. One atom, because a mounted node holds one value; the type is in the text so that a cue meaning the float and a cue meaning the integer are different cues rather than the same cue read twice by two machines." },
+        { "osc", "wait",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          true, "none",
+          false, 0.0, false, 0.0,
+          enum_osc_wait, 2,
+          "", 50.0, false, "park",
+          "How long the cue takes to be done. None finishes as soon as it is fired; sent finishes when the datagram has left the socket. A third, verified - the target is asked and has to answer with the value that was written - is what PRD 3.11 calls the default for Go.dot own processors, and it is deliberately absent from this list until it works: a grammar that accepted a word the engine ignores would be a show that looked like it was checking and was not." },
         { "run", "cue",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
@@ -366,7 +388,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
           false, 0.0, false, 0.0,
-          enum_run_kind, 3,
+          enum_run_kind, 6,
           "", 50.0, false, "park",
           "The kind of the cue this run instantiates, copied at launch so a client reading a run does not have to go and look the cue up - and so the answer survives the cue being edited underneath it." },
         { "run", "state",
@@ -410,7 +432,7 @@ namespace wfg::doc::generated
           false, 0.0, false, 0.0,
           nullptr, 0,
           "", 50.0, false, "park",
-          "Why it failed, when it did: no-track when every voice was busy, media-missing when the file is not in the bundle, bad-route when the destination cannot be honoured. Empty otherwise. A failed run was still an APPLIED command - the request was legal and the show could not honour it, which is a different thing from a request that was malformed." },
+          "Why it failed, when it did: no-track when every voice was busy, media-missing when the file is not in the bundle, bad-route when the destination cannot be honoured, send-failed when a message could not be put on the wire, and the write refusals - bad-address, read-only, type-mismatch - when a network cue names a node the target does not have or will not take. Empty otherwise. A failed run was still an APPLIED command - the request was legal and the show could not honour it, which is a different thing from a request that was malformed." },
         { "group", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
@@ -445,7 +467,21 @@ namespace wfg::doc::generated
           false, 0.0, false, 0.0,
           enum_mount_transport, 3,
           "", 1.0, false, "park",
-          "How the mounted target is reached. Declared now; used from Phase 2." },
+          "How the mounted target is reached. Only udp carries messages today; tcp and ws are declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring either is refused when the show loads rather than going quiet during it." },
+        { "mount", "host",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::show,
+          true, "127.0.0.1",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "Where the target is. A literal address rather than a name, because a socket resolves a hostname on every send whose destination differs from the last one, and a blocking lookup on the tick thread is a frame nobody gets back. It defaults to this machine because the ordinary rig is Go.dot and its processors on one box; anything else says so." },
+        { "mount", "port",
+          ValueType::integer, 'i', false, Access::read, Kind::state, Persist::show,
+          false, "",
+          true, 1.0, true, 65535.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "The port the target listens on. Required, and deliberately without a default for the same reason audio/tracks is: no number could be right for every device, and a mount that guessed would send into the dark and report success. UDP never tells you nobody was listening, so this one has to be right in the document or it is never right at all." },
         { "mount", "namespace",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::show,
           false, "",
@@ -488,6 +524,13 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 1.0, false, "park",
           "How many nodes the mount contributed." },
+        { "mount", "sent",
+          ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
+          true, "0",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "How many messages have left for this target since the show opened. A readout for a tech rehearsal, and the first thing to establish when a device is not moving and nobody knows whose end is wrong: UDP cannot report delivery, so what Go.dot can honestly say is how many times it sent." },
         { "audio", "tracks",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::show,
           false, "",

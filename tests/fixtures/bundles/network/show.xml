@@ -1,0 +1,13 @@
+<Show>
+  <Lists>
+    <List id="7K2QM9X4" name="Cues">
+      <Osc id="B3N8R5TW" address="/desk/fader" name="House to full" number="1" value="f:0.75" wait="sent"/>
+      <Osc id="E4GP6QSC" address="/desk/nosuch" name="A typo somebody made" number="2" value="f:0.5"/>
+      <Osc id="M5TQ7XVA" address="/desk/scene" name="Scene 4" number="3" value="i:4" wait="sent"/>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="K3PV7WRB" namespace="namespaces/desk.json" port="9000" prefix="/desk"/>
+  </Mounts>
+  <Audio tracks="0"/>
+</Show>

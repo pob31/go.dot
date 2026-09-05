@@ -75,6 +75,7 @@ add_executable(wfg_tests
     AudioTests.cpp
     CueMatrixTests.cpp
     MountTests.cpp
+    NetworkCueTests.cpp
     JsonTests.cpp
     CueListTests.cpp
     MediaCueTests.cpp
@@ -197,6 +198,24 @@ add_test(NAME wfg.replay.fade.C
 add_test(NAME wfg.replay.fade.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/fade-stop.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fade-stop
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# The fifth replay fixture, and the first that is not about Go.dot's own state
+# at all: every record in it is about a lighting desk that is not here. A replay
+# re-applies all of them against a mount table built from the bundle, reaches
+# the same tree, produces the same records - and puts NOTHING on any wire.
+#
+# That last part is the point rather than a limitation. `wfg replay` is what
+# somebody runs at three in the morning to find out why a cue misfired, on a
+# laptop that may still be plugged into the show network. A replay that also
+# sent would move the rig while they were reading about it.
+add_test(NAME wfg.replay.osc.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/network-cue.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/network
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.osc.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/network-cue.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/network
                  --wfg-locale=${WFG_LOCALE_FR})
 
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is

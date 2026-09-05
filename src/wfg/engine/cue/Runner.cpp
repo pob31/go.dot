@@ -16,6 +16,9 @@
 
 #include <wfg/engine/cue/Runner.h>
 
+#include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/MountSender.h>
+
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -44,6 +47,7 @@ namespace wfg::cue
             if (element == "Media") return "media";
             if (element == "Fade")  return "fade";
             if (element == "Stop")  return "stop";
+            if (element == "Osc")   return "osc";
 
             return {};
         }
@@ -142,6 +146,12 @@ namespace wfg::cue
 
         if (kind == "stop")
             return fireAtOnce ? fireStop (cue, runId) : std::string {};
+
+        /*  And a network cue, which is the same shape: it acts on something
+            that is not a track, so there is no voice to reserve and nothing to
+            make ready. */
+        if (kind == "osc")
+            return fireAtOnce ? fireOsc (cue, runId) : std::string {};
 
         /*  A memo is a line in the book and a group has no runner until Phase 3.
             Both are legal things to press GO on; neither makes a run. */
@@ -427,6 +437,9 @@ namespace wfg::cue
         /*  A FADE TAKES OVER FROM A FADE, from where the level HAS GOT TO and
             not from where the first one started. Anything else is a jump, and a
             jump on a PA is a click nobody can account for afterwards. */
+        auto keepStopping = false;
+        std::int64_t inheritedStopTick = 0;
+
         for (const auto& superseded : running)
         {
             if (superseded.target != targetId)
@@ -454,20 +467,27 @@ namespace wfg::cue
                 reports. See advanceFades. */
             supersededRuns.push_back (superseded.self);
 
-            /*  AND IF WHAT IT TOOK OVER FROM WAS A STOP, THE STOP IS NOT
-                HAPPENING. Dropping the job decides that a few lines below; this
-                only stops the run SAYING otherwise, because a cue reading
-                `stopping` that nothing is going to stop is a lie the rest of
-                the engine would go on to act on.
+            /*  BUT A STOP IS NOT A FADE, AND IT STILL HAPPENS (author,
+                2026-09-06). A fade takes over the LEVEL; it does not call off
+                the stop that was already coming.
 
-                Whether a fade should be able to cancel a stop at all is the
-                author's to settle - it is currently decided by a `remove_if`
-                written for the level, which is no way to decide it. What is not
-                open either way is that the state and the behaviour agree. */
-            if (superseded.stopWhenDone && ! stopWhenDone)
-                if (auto* reprieved = runs.find (targetId);
-                    reprieved != nullptr && reprieved->state == runState::stopping)
-                    reprieved->state = runState::playing;
+                I had it the other way round for one commit, on the reasoning
+                that dropping the job dropped the stop with it - which is a
+                `remove_if` written for the level deciding a question about
+                lifetime, and no way to decide anything. The author's answer is
+                the one that survives contact with a show: the operator who
+                fired a three-second stop and then rode the level back up did
+                not withdraw the stop, and a cue that kept playing because
+                somebody touched a fader would be a cue nobody could get rid of.
+
+                So the scheduled arrival survives the takeover, at the tick it
+                was always going to land on, and the run goes on reading
+                `stopping` because it is. */
+            if (superseded.stopWhenDone)
+            {
+                keepStopping = true;
+                inheritedStopTick = superseded.stopsAtTick;
+            }
         }
 
         running.erase (std::remove_if (running.begin(), running.end(),
@@ -486,6 +506,33 @@ namespace wfg::cue
         job.curve = curve;
         job.stopWhenDone = stopWhenDone;
 
+        /*  THE STOP THIS FADE INHERITED, if it took over from one.
+
+            `stopsAtTick` is what the superseded job would have arrived at, kept
+            as an absolute tick rather than as a remaining count so that it
+            cannot drift: the stop lands when it was always going to land, and
+            no arithmetic between here and there can move it.
+
+            WHAT THE LEVEL DOES IN BETWEEN IS STILL OPEN. The new fade owns it,
+            which is the simplest thing that honours the takeover; the author
+            has raised the case where the two ramps should COMPOSE instead -
+            a group fade over a member's, and relative fades summed on top of
+            each other - and neither exists yet (`fade/@level` is a destination
+            in dB, never an offset). When relative fades arrive this is the line
+            that changes, and the stop's schedule is not what changes with it. */
+        if (keepStopping)
+        {
+            job.stopWhenDone = true;
+            job.stopsAtTick = inheritedStopTick;
+        }
+        else if (stopWhenDone)
+        {
+            /*  A stop of its own, landing when its own fade arrives. The two
+                are the same number here and diverge only when somebody fades
+                over the top of it. */
+            job.stopsAtTick = currentTick + job.ticksTotal;
+        }
+
         /*  A cue on its way out says so from the moment it is asked, not when
             the sound goes. `done` here would publish a silence that has not
             happened yet. */
@@ -497,7 +544,129 @@ namespace wfg::cue
         return self;
     }
 
-    void Runner::advanceFades (Engine& engine)
+    std::string Runner::fireOsc (const juce::ValueTree& cue, const std::string& runId)
+    {
+        auto self = runId;
+
+        if (self.empty())
+            self = ids.generate();
+
+        runs.create (self, cue[idProperty].toString().toStdString(), "osc");
+
+        auto* selfRun = runs.find (self);
+
+        if (selfRun == nullptr)
+            return self;
+
+        /*  Running from the tick it fires, like a fade: there is nothing to
+            arm, so `armed` would be a state it is never in. */
+        selfRun->state = runState::playing;
+
+        OscJob job;
+        job.self = self;
+        job.wait = oscWaitFrom (cue[juce::Identifier ("wait")].toString().toStdString());
+
+        const auto address = cue[juce::Identifier ("address")].toString().toStdString();
+        const auto atom = cue[juce::Identifier ("value")].toString().toStdString();
+
+        /*  THE VALUE IS SPELLED THE WAY THE LOG SPELLS ONE, and reusing that
+            grammar is worth more than the four lines it saves. A document, a
+            log record and a value on the wire then say the same thing the same
+            way - so a cue can be written by copying the atom out of a log of
+            the night somebody got it right by hand. */
+        const auto value = osc::Value::fromAtom (atom);
+
+        if (! value.has_value())
+        {
+            job.failure = reason::typeMismatch;
+            sending.push_back (job);
+            return self;
+        }
+
+        /*  NO MOUNT TABLE IS A COMPLETE CONFIGURATION. A replay has none and
+            must still create the run and finish it on the tick the log says;
+            what it cannot do is write somebody else's node, and there is
+            nothing there to write. */
+        if (mounts == nullptr)
+        {
+            sending.push_back (job);
+            return self;
+        }
+
+        const auto written = mounts->write (address, *value);
+
+        if (! written.ok)
+        {
+            job.failure = written.reason;
+            sending.push_back (job);
+            return self;
+        }
+
+        /*  IT REACHED THE TREE; NOW IT REACHES THE WIRE. The two are separate
+            on purpose: the tree is what a client reads back and what a replay
+            reproduces, and the socket is what the other box hears. A cue that
+            updated one and not the other would be a lie in whichever direction
+            somebody happened to look. */
+        if (sender_ != nullptr)
+            if (const auto* declaration = mounts->declarationOf (written.mountId))
+                job.ticket = sender_->queue (written.mountId,
+                                             { declaration->host, declaration->port },
+                                             address, written.value);
+
+        sending.push_back (job);
+        return self;
+    }
+
+    void Runner::advanceSends (Engine& engine)
+    {
+        for (auto& job : sending)
+        {
+            if (! job.failure.empty())
+            {
+                engine.submit (origin::engine, "run.failed",
+                               { osc::Value::string (job.self),
+                                 osc::Value::string (job.failure) });
+                job.finished = true;
+                continue;
+            }
+
+            /*  `none` FINISHES WITHOUT ASKING ANYTHING, which is what makes it
+                the right wait for a target that will never answer - a lighting
+                desk, a projector, anything that takes a message and says
+                nothing. It still finishes on the tick AFTER the cue fired,
+                because that is when a report is allowed to leave, not because
+                it waited for anything. */
+            if (job.wait == OscWait::none || sender_ == nullptr || job.ticket == 0)
+            {
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                job.finished = true;
+                continue;
+            }
+
+            /*  `sent` ASKS THE SENDER WHAT HAPPENED. The flush ran at the end of
+                the tick that queued this, so the answer is here by now; still
+                pending means the flush never ran, which is a wiring fault and
+                not something to keep waiting on. Either way the cue reports
+                what happened rather than what was asked for, which is the whole
+                difference between this wait and the one above. */
+            const auto outcome = sender_->outcomeOf (job.ticket);
+
+            if (outcome == tree::MountSender::Outcome::sent)
+                engine.submit (origin::engine, "run.ended", one (job.self));
+            else
+                engine.submit (origin::engine, "run.failed",
+                               { osc::Value::string (job.self),
+                                 osc::Value::string (runError::sendFailed) });
+
+            job.finished = true;
+        }
+
+        sending.erase (std::remove_if (sending.begin(), sending.end(),
+                                       [] (const OscJob& job) { return job.finished; }),
+                       sending.end());
+    }
+
+    void Runner::advanceFades (Engine& engine, std::int64_t tick)
     {
         /*  ONLY THE TICK HOOK REPORTS, and this is where that rule is kept.
 
@@ -525,7 +694,12 @@ namespace wfg::cue
 
         for (auto& job : running)
         {
-            ++job.ticksDone;
+            /*  The LEVEL stops advancing when it arrives; the JOB may not be
+                over, because it can still be holding a stop that is due later.
+                Before the author settled that, the two were the same thing and
+                one counter did for both. */
+            if (! job.isFinished())
+                ++job.ticksDone;
 
             auto* target = runs.find (job.target);
 
@@ -535,7 +709,7 @@ namespace wfg::cue
                 cue. */
             if (target == nullptr || (target->isFinished() && ! job.stopWhenDone))
             {
-                job.ticksDone = job.ticksTotal;
+                job.retired = true;
                 engine.submit (origin::engine, "run.ended", one (job.self));
                 continue;
             }
@@ -552,7 +726,12 @@ namespace wfg::cue
             if (audio != nullptr && target->track >= 0)
                 audio->setLevelDb (target->track, level);
 
-            if (! job.isFinished())
+            /*  WHAT THIS JOB IS WAITING FOR. A plain fade is done when its
+                level arrives. A job carrying a stop is done when the STOP is
+                due, which for a stop cue fired on its own is the same tick and
+                for one a later fade took over from is the tick the original
+                stop was always going to land on. */
+            if (job.stopWhenDone ? tick < job.stopsAtTick : ! job.isFinished())
                 continue;
 
             if (job.stopWhenDone)
@@ -572,10 +751,11 @@ namespace wfg::cue
             }
 
             engine.submit (origin::engine, "run.ended", one (job.self));
+            job.retired = true;
         }
 
         running.erase (std::remove_if (running.begin(), running.end(),
-                                       [] (const FadeJob& job) { return job.isFinished(); }),
+                                       [] (const FadeJob& job) { return job.retired; }),
                        running.end());
     }
 
@@ -585,7 +765,10 @@ namespace wfg::cue
         /*  Fades run whether or not there is an audio side. A replay has none
             and must still move the run's level and finish the fade's run on the
             same ticks, or it would not reproduce the session it is replaying. */
-        advanceFades (engine);
+        currentTick = tick;
+
+        advanceFades (engine, tick);
+        advanceSends (engine);
 
         if (audio == nullptr)
             return;

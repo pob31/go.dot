@@ -351,6 +351,11 @@ namespace
         wfg::cue::registerRunCommands (engine.commands(), runs);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
+        /*  The mounts, and deliberately no sender. A network cue replayed
+            reaches the same tree it reached live and puts nothing on any wire -
+            see the note in the bundle branch below. */
+        runner.setMounts (&mounts, nullptr);
+
         const auto bundlePath = args.containsOption ("--bundle")
                                   ? args.getValueForOption ("--bundle")
                                   : juce::String();
@@ -380,7 +385,30 @@ namespace
                 return 2;
             }
 
-            wfg::doc::registerDocumentCommands (engine.commands(), document);
+            /*  A WRITE TO A MOUNTED NODE, REPLAYED, AND ON NO ACCOUNT SENT.
+
+                The write has to happen: a session where somebody moved a
+                console fader must reach the same tree it reached live, and
+                without this the record replays as `bad-address` and a perfectly
+                good log looks like a divergence.
+
+                The datagram must NOT happen, and that is the more important
+                half. `wfg replay` is what somebody runs at three in the morning
+                to find out why a cue misfired, on a laptop that may well be on
+                the show network. A replay that also sent would move the rig. So
+                there is no sender here, and the absence is the feature. */
+            wfg::doc::registerDocumentCommands (
+                engine.commands(), document,
+                [&mounts] (const std::string& address, const wfg::osc::Value& value)
+                {
+                    const auto written = mounts.write (address, value);
+
+                    return written.ok
+                             ? wfg::Outcome::ok ({ wfg::osc::Value::string (address),
+                                                   written.value })
+                             : wfg::Outcome::rejected (written.reason);
+                });
+
             wfg::cue::registerCueCommands (engine.commands(), document, focus);
             wfg::tree::registerTreeCommands (engine.commands(), touches);
             wfg::tree::registerMountCommands (engine.commands(), document, mounts, bundle);
@@ -1087,7 +1115,46 @@ namespace
         wfg::cue::Runner runner { document, runs, runIds, focus };
         wfg::audio::AudioState audioState;
 
-        wfg::doc::registerDocumentCommands (engine.commands(), document);
+        /*  THE OUTBOUND SIDE OF A MOUNT, which is what stops it being a stub.
+
+            It is declared here, before the socket exists, because the command
+            handler below has to capture it and `wfg serve` cannot open its port
+            until the OSCQuery namespace is built - and the namespace needs the
+            engine, which needs the commands. setSocket closes that loop further
+            down; until it is called this sender queues, coalesces and reports
+            exactly as it will afterwards, and sends nothing. */
+        wfg::tree::MountSender sender;
+
+        wfg::doc::registerDocumentCommands (
+            engine.commands(), document,
+            [&mounts, &sender] (const std::string& address, const wfg::osc::Value& value)
+            {
+                /*  A WRITE TO SOMEBODY ELSE'S NODE, arriving through the same
+                    command as a write to one of ours (PRD 4.11) - one named
+                    action, one log record, one refusal vocabulary, whether the
+                    address turns out to be a cue's level or a console's fader.
+
+                    Two things happen and they are separate on purpose: the
+                    value lands in the mount table, which is what a client reads
+                    back and what a replay reproduces; and it is queued for the
+                    end of this tick, which is what the other box hears. */
+                const auto written = mounts.write (address, value);
+
+                if (! written.ok)
+                    return wfg::Outcome::rejected (written.reason);
+
+                if (const auto* declaration = mounts.declarationOf (written.mountId))
+                    sender.queue (written.mountId,
+                                  { declaration->host, declaration->port },
+                                  address, written.value);
+
+                /*  Logged AS APPLIED, so the record carries the value that
+                    actually landed rather than the one that was offered - an
+                    integer 1 written to a float node is `f:1` in the log, and a
+                    replay puts the same bytes on the wire. */
+                return wfg::Outcome::ok ({ wfg::osc::Value::string (address), written.value });
+            });
+
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::cue::registerRunCommands (engine.commands(), runs);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
@@ -1095,6 +1162,8 @@ namespace
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::doc::registerBundleCommands (engine.commands(), document, target);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
+
+        runner.setMounts (&mounts, &sender);
 
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
             std::cerr << "    " << problem << std::endl;
@@ -1166,6 +1235,11 @@ namespace
         wfg::osc::UdpEndpoint udp;
 
         wfg::oscquery::EngineNamespace nameSpace { engine, parameters, touches, udp };
+
+        /*  The loop closed. From here a mounted write reaches a socket; before
+            it, the same write reached the tree and the log and stopped. */
+        sender.setSocket (udp);
+        parameters.setSender (&sender);
 
         if (! udp.start (requestedOsc,
                          [&engine, &nameSpace] (wfg::osc::Datagram datagram)
@@ -1350,6 +1424,18 @@ namespace
 
         ticks.setAfterTick ([&] (const wfg::Engine::TickResult& outcome)
                             {
+                                /*  THE SHOW'S OWN TRAFFIC FIRST, ahead of the
+                                    diagnostics and the client push below it.
+
+                                    Everything this tick wrote to a mounted node
+                                    leaves here, together, which is what makes
+                                    the twelve messages of one GO one gesture
+                                    rather than a dribble (PRD 3.4). It goes
+                                    first because what follows is a full tree
+                                    rebuild and a diff, and a console should not
+                                    wait behind a client's screen refresh. */
+                                sender.flush();
+
                                 /*  The runtime half of the state, refreshed
                                     before the publish that carries it. Left
                                     out, `/godot/engine/tick` reads 0 for the

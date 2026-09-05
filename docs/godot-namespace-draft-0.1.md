@@ -213,6 +213,19 @@ nothing in a parallel parent, because nothing is waiting to be told.
 | `/godot/mount/<id>/panic` | `s` | ro | mount-level default (question F) |
 | `/godot/mount/<id>/loaded` | `T`/`F` | ro | |
 | `/godot/mount/<id>/nodeCount` | `i` | ro | |
+| `/godot/mount/<id>/host` | `s` | ro | where the target is; default `127.0.0.1` (PR 2.5) |
+| `/godot/mount/<id>/port` | `i` | ro | **required, no default** — where it sends (PR 2.5) |
+| `/godot/mount/<id>/sent` | `i` | ro | messages that have left for this target (PR 2.5) |
+
+**Added in PR 2.5, and the reason `port` is required.** Phase 1's table had no destination in
+it at all, which was correct while nothing was sent and a gap the moment something was. `port`
+follows `audio/@tracks` — required, no default — for a harder reason than "no number is right
+for every rig": UDP never reports that nobody was listening, so a mount that guessed would send
+into the dark and report success for a whole show. There is no later moment at which the engine
+could find out, so it is found out when the file is read. `host` defaults because the ordinary
+rig is Go.dot and its processors on one box, and it is a literal address rather than a name
+because a socket re-resolves whenever the destination changes and a blocking lookup on the tick
+thread is a frame nobody gets back.
 
 The mounted namespace itself appears at the prefix (`/wfs/…`), not under `/godot/mount`.
 
@@ -784,6 +797,12 @@ under `/godot/cue/<id>/`, `rw`, `persist = show`:
 | `fade` | `target` cue id; `level` double dB; `duration` double s; `curve` enum `linear \| sCurve` |
 | `stop` | `target` cue id; `verb` enum `hard \| fade`; `duration`; `curve` |
 | `osc` | `address` string, a mounted node; `value` string, one typed atom as the log writes it (`f:0.5`, `s:"…"`, `T`); `wait` enum `none \| sent \| verified`; `timeout` double s |
+
+**As PR 2.5 built it, `wait` is `none \| sent` and there is no `timeout` row.** `verified` and
+the timeout it needs land with the OSCQuery client in PR 2.6, and the enum grows then. The
+difference is deliberate rather than an omission: a grammar that accepted a word the engine
+ignored would be a show that looked like it was checking and was not, and `wait: verified`
+refused at load is the whole point of question K.
 
 A media cue's `level` is what was decided. The level a running instance is actually at is
 `/godot/run/<id>/level` (§11.3), which is what a fade writes. The two never merge (§4.10).

@@ -78,6 +78,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/CueList.cpp
     wfg/engine/cue/FadeJob.h
     wfg/engine/cue/FadeJob.cpp
+    wfg/engine/cue/OscJob.h
+    wfg/engine/cue/OscJob.cpp
     wfg/engine/cue/Run.h
     wfg/engine/cue/Run.cpp
     wfg/engine/cue/RunCommands.h
@@ -156,6 +158,8 @@ add_library(wfg_engine STATIC
     wfg/engine/oscquery/Subscriptions.cpp
     wfg/engine/oscquery/Subscriptions.h
     wfg/engine/tree/Mount.cpp
+    wfg/engine/tree/MountSender.h
+    wfg/engine/tree/MountSender.cpp
     wfg/engine/tree/Mount.h
     wfg/engine/tree/Node.h
     wfg/engine/tree/OscQueryJson.cpp

@@ -81,7 +81,8 @@ namespace wfg::doc
         }
     }
 
-    void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document)
+    void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document,
+                                   ForeignWrite foreign)
     {
         //----------------------------------------------------------------------
         registry.add ({ "list.create",
@@ -204,15 +205,25 @@ namespace wfg::doc
                         "Sets one value, by its address in the parameter tree.",
                         { { "address", 's', false }, { "value", '*', false } },
                         true,
-                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&document, foreign = std::move (foreign)]
+                        (CommandContext&, const std::vector<osc::Value>& args)
                         {
+                            const auto address = args[0].getString();
+
+                            /*  THE DOCUMENT FIRST, ALWAYS. `/godot` is Go.dot's
+                                and a mount prefix may not be `/`, so the two
+                                can never both claim an address - but asking the
+                                show first means a mount could never shadow it
+                                even if that rule were ever relaxed. */
+                            if (foreign && address.rfind ("/godot", 0) != 0)
+                                return foreign (address, args[1]);
+
                             const auto text = canonicalText (args[1]);
 
                             if (! text.has_value())
                                 return Outcome::rejected (reason::typeMismatch);
 
-                            return fromEdit (document.setAttribute (args[0].getString(), *text),
-                                             args);
+                            return fromEdit (document.setAttribute (address, *text), args);
                         } });
     }
 }
