@@ -37,8 +37,9 @@
 #
 # Phase 1 subsystems, in the order they depend on each other:
 #
-#   osc/      the value type of the whole control plane (OSC 1.1), and the one
-#             number formatter every text surface writes through
+#   osc/      the value type of the whole control plane (OSC 1.1), the one
+#             number formatter every text surface writes through, the codec that
+#             puts both on a wire, and the UDP socket that says who sent what
 #   document/ the show document: the schema generated from the parameter table,
 #             stable identifiers, canonical XML, and the commands that are the
 #             only way any of it changes; then the bundle it lives in - what
@@ -116,8 +117,14 @@ add_library(wfg_engine STATIC
     wfg/engine/log/EventLog.h
     wfg/engine/log/Replay.cpp
     wfg/engine/log/Replay.h
+    wfg/engine/osc/OscAddress.cpp
+    wfg/engine/osc/OscAddress.h
+    wfg/engine/osc/OscCodec.cpp
+    wfg/engine/osc/OscCodec.h
     wfg/engine/osc/OscValue.cpp
     wfg/engine/osc/OscValue.h
+    wfg/engine/osc/UdpEndpoint.cpp
+    wfg/engine/osc/UdpEndpoint.h
     wfg/engine/tree/Mount.cpp
     wfg/engine/tree/Mount.h
     wfg/engine/tree/Node.h

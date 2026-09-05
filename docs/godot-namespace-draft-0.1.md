@@ -495,7 +495,7 @@ A 0 0 cli document.load s:"D:/shows/MyShow"
 A 12 1 ws:192.168.1.20:51234 node.set s:"/godot/cue/B3N8R5TW/name" s:"House to half"
 A 12 2 ws:192.168.1.20:51234 cue.create s:"7K2QM9X4" i:3 s:"memo" s:"Blackout" s:"H5KT9WXF"
 R 13 3 udp:192.168.1.7:9000 read-only node.set s:"/godot/cue/B3N8R5TW/kind" s:"group"
-X 13 4 udp:192.168.1.7:9000 malformed-packet b:LyIvAAAsZgAA
+X 13 4 udp:192.168.1.7:9000 truncated b:LyIvAAAsZgAA
 A 40 5 cli standby.next
 ```
 
@@ -508,6 +508,34 @@ A 40 5 cli standby.next
   `create` that produced it, so replay never needs randomness.
 - Replay re-executes every `A` and `R` at its tick on a manual clock, checks that each `R`
   is rejected again, and must reproduce the saved bundle byte for byte.
+
+**The `X` reason is one of ten atoms, not the single `malformed-packet` this draft first
+showed** (built in PR 1.8). A datagram that never became a command is dropped with a
+kebab-case token naming *which guard refused it*:
+
+| Atom | What arrived |
+|---|---|
+| `not-osc` | empty, or not a multiple of four bytes — everything OSC contains is padded to four, so this is a datagram that lost its tail |
+| `bad-address` | the address is unterminated, not absolute, has an empty part, or uses one of the nine reserved characters |
+| `address-is-pattern` | a well-formed address *pattern* — `/godot/cue/*/name`. Phase 1 resolves an address to exactly one node, and a client that sends a pattern has asked for something Go.dot does not do. Told apart from `bad-address` deliberately: the two need different answers |
+| `no-type-tags` | the type-tag string is absent, or does not begin with `,`. OSC 1.0 let it be omitted and 1.1 does not — treating an absent one as "no arguments" turns a corrupted first byte into a plausible empty message |
+| `unknown-type-tag` | a tag outside `i h f d s b T F N I t`. Refused, never skipped: the payload size is a property of the tag, so a reader that stepped over one would desync and every later argument would be fiction |
+| `truncated` | a message promised an argument the packet does not contain |
+| `bad-blob` | a blob's declared length is negative, so no packet length could satisfy it |
+| `bad-bundle` | the `#bundle` marker, the time tag, or an element size that does not fit the bundle declaring it |
+| `too-deep` | nesting past 32 levels. A bundle costs about twenty bytes a level, so a 64 KB datagram would otherwise buy several thousand stack frames |
+| `trailing-bytes` | bytes after the last argument the type tags accounted for |
+
+The **prose** that goes with each — "a float32 argument runs past the end" — is kept beside
+the atom and shown to the operator, but it is not what the log records. A log column that
+is a sentence is one nobody can group or count, and one that silently stops matching the
+day the wording improves. The atom is a closed set and the sentence is free to be reworded.
+For the same reason the offending tag is named in the sentence and not in the atom: an atom
+that varied with the input would be an unbounded column whose cardinality an attacker
+chooses.
+
+The payload rides along as a `b:` atom. It is the only copy — the datagram is gone, and a
+post-mortem with no packet in it is a guess.
 
 ## 8. Ports (decided, overrule early)
 
