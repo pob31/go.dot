@@ -310,7 +310,16 @@ jobs:
       - name: Install lxml
         # See the macOS job for why this is a hard requirement rather than a
         # nicety. The image ships Python; it does not ship lxml.
-        run: python -m pip install lxml
+        #
+        # BOTH names, because on this runner they are different interpreters:
+        # `python` is 3.12 and `python3` is a 3.14.7 in the tool cache. CMake is
+        # now told to use the one on PATH, but which of the two names PATH
+        # resolves first is the image's business and it has already changed
+        # once. When they are the same the second command prints "already
+        # satisfied" and costs a second.
+        run: |
+          python -m pip install lxml
+          python3 -m pip install lxml
 
       - name: Configure (ci-windows)
         # The ci-windows preset inherits `vs`, which names no generator, so CMake

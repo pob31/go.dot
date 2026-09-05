@@ -227,6 +227,15 @@ if(WFG_BUILD_TESTS)
     # the first match, which is the same interpreter the shell would run.
     set(Python3_FIND_STRATEGY LOCATION)
 
+    # STRATEGY alone was not enough, measured on the same runner: CMake still
+    # chose the 3.14.7 while `python` was 3.12. Python3_FIND_REGISTRY defaults
+    # to FIRST on Windows and Python3_FIND_FRAMEWORK to FIRST on macOS, and both
+    # are consulted BEFORE the strategy gets to look at PATH. All three knobs are
+    # needed to say the one thing meant here: use the interpreter the shell
+    # would run.
+    set(Python3_FIND_REGISTRY LAST)     # Windows
+    set(Python3_FIND_FRAMEWORK LAST)    # macOS
+
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
     set(WFG_PYTHON "${Python3_EXECUTABLE}")
     message(STATUS "Go.dot: Python for the test gates: ${WFG_PYTHON}")
