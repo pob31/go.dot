@@ -431,7 +431,7 @@ TEST_CASE ("audio host: hosting Tracktion does not change how this thread does a
 
     INFO ("smallest float formatted as: " << text);
     REQUIRE (recovered.has_value());
-    CHECK (static_cast<float> (*recovered) == smallest);
+    CHECK (juce::exactlyEqual (static_cast<float> (*recovered), smallest));
 
     rig.host.stop();
 

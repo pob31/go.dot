@@ -172,7 +172,7 @@ namespace wfg::audio
                     /*  A coefficient of zero is most of a real matrix - a cue
                         feeds two destinations out of sixty-four - so skipping
                         it is not a micro-optimisation, it is the common case. */
-                    if (steady != 0.0f)
+                    if (! juce::exactlyEqual (steady, 0.0f))
                         juce::FloatVectorOperations::addWithMultiply (destination, source,
                                                                       steady, frames);
                 }
@@ -180,7 +180,7 @@ namespace wfg::audio
 
             if (levelIsMoving)
                 juce::FloatVectorOperations::multiply (destination, levelRamp.data(), frames);
-            else if (steadyLevel != 1.0f)
+            else if (! juce::exactlyEqual (steadyLevel, 1.0f))
                 juce::FloatVectorOperations::multiply (destination, steadyLevel, frames);
         }
     }

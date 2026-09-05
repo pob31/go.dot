@@ -163,7 +163,7 @@ TEST_CASE ("cue matrix: the level is in decibels, and its floor is real silence"
         run (matrix, buffers, 1);
 
         for (int n = 0; n < block; ++n)
-            REQUIRE (buffers.output.getSample (0, n) == 0.0f);
+            REQUIRE (juce::exactlyEqual (buffers.output.getSample (0, n), 0.0f));
     }
 }
 
@@ -265,9 +265,9 @@ TEST_CASE ("cue matrix: an out-of-range coefficient is ignored rather than fatal
     matrix.setGain (0, 99, 1.0f);
     matrix.setGain (99, 99, 1.0f);
 
-    CHECK (matrix.gain (-1, 0) == 0.0f);
-    CHECK (matrix.gain (0, 99) == 0.0f);
-    CHECK (matrix.gain (0, 0) == 0.0f);
+    CHECK (juce::exactlyEqual (matrix.gain (-1, 0), 0.0f));
+    CHECK (juce::exactlyEqual (matrix.gain (0, 99), 0.0f));
+    CHECK (juce::exactlyEqual (matrix.gain (0, 0), 0.0f));
 }
 
 TEST_CASE ("cue matrix: the level is clamped to the range the table declares")
