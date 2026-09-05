@@ -471,3 +471,83 @@ jobs:
         # Spikes not yet written are skipped by spikes/CMakeLists.txt with a
         # STATUS message, so this stays green as the seven land one at a time.
         run: cmake --build --preset spikes-debug
+
+  # ---------------------------------------------------------------------------
+  # The second net under PRD 4.2, and the only job in this file that asserts
+  # anything about real-time safety.
+  #
+  # The unit suite's counting allocator answers one question: did anything call
+  # operator new on the audio thread. Clang's real-time sanitizer answers the
+  # whole of 4.2 - locks, syscalls, anything that can block - and it does half
+  # of it at compile time, because `nonblocking` propagates to everything a
+  # marked function calls.
+  #
+  # WHY IT IS A JOB OF ITS OWN AND NOT A FLAG ON THE LINUX ONE. It needs Clang
+  # 20 or newer, which no runner image ships and which install-linux-deps.sh
+  # deliberately does not install: that script is what a contributor runs to
+  # build the PRODUCT, and a 500 MB toolchain nobody's build needs does not
+  # belong in it. So the LLVM repository is added here, in the one job that
+  # wants it, and the reasoning stays next to the apt line.
+  #
+  # WHAT ITS FIRST RUN MEANS. Nothing in this project has ever been compiled by
+  # Clang 20, let alone under -fsanitize=realtime with the audio thread's entry
+  # points marked nonblocking. If this job is red on landing, that is the
+  # measurement rather than a regression - the preset's own description
+  # anticipates exactly this - and what it reports belongs in the PR, not in a
+  # suppression. Nothing of Go.dot's may ever be added to the suppression list.
+  rtsan:
+    name: real-time safety (Linux, Clang 20)
+    needs: pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true          # NON-recursive — see the job `pins` comment
+
+      - name: Populate juce_simpleweb's nested asio
+        # The one scoped recursion, for the reason the other jobs give.
+        run: git submodule update --init --recursive ThirdParty/juce_simpleweb
+
+      - name: Install build deps
+        run: bash scripts/install-linux-deps.sh
+
+      - name: Install Clang 20
+        # apt.llvm.org's own installer, because -fsanitize=realtime does not
+        # exist before Clang 20 and Ubuntu's archive is several releases behind.
+        # Pinned to 20 rather than "latest": a sanitizer that changes what it
+        # reports between runs is a gate nobody can act on.
+        run: |
+          set -euo pipefail
+          wget -qO llvm.sh https://apt.llvm.org/llvm.sh
+          chmod +x llvm.sh
+          sudo ./llvm.sh 20
+          clang-20 --version
+
+      - name: Install the French locale
+        # The unit suite runs twice, and the second run needs this. TestMain.cpp
+        # exits 2 rather than skipping when setlocale fails, deliberately.
+        run: |
+          sudo locale-gen fr_FR.UTF-8
+          sudo update-locale
+
+      - name: Configure (rtsan)
+        # The compilers are named explicitly rather than left to the preset's
+        # bare `clang`: llvm.sh installs `clang-20` and does not necessarily
+        # leave an unversioned symlink behind, and a preset that silently found
+        # the system Clang 18 would configure, build, and check nothing.
+        run: >
+          cmake --preset rtsan
+          -DCMAKE_C_COMPILER=clang-20
+          -DCMAKE_CXX_COMPILER=clang++-20
+
+      - name: Build (Debug)
+        run: cmake --build --preset rtsan-debug
+
+      - name: Test under the sanitizer
+        # The suppression list is a RUN-time argument; putting it in the
+        # preset's flags would do nothing at all. halt_on_error=0 so that one
+        # violation does not hide the next - the point of the first run is the
+        # whole list, not the first line of it.
+        env:
+          RTSAN_OPTIONS: suppressions=${{ github.workspace }}/tools/rtsan-suppressions.txt:halt_on_error=0
+        run: ctest --test-dir build/rtsan -C Debug --output-on-failure

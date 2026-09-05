@@ -17,6 +17,8 @@
 
 #include <juce_audio_basics/juce_audio_basics.h>
 
+#include <wfg/engine/rt/RtCheck.h>
+
 #include <atomic>
 #include <memory>
 
@@ -128,7 +130,7 @@ namespace wfg::audio
             left silent rather than read from memory nobody allocated. */
         void process (const float* const* input, int numInputChannels,
                       float* const* output, int numOutputChannels,
-                      int numSamples) noexcept;
+                      int numSamples) noexcept WFG_AUDIO_THREAD;
 
     private:
         int index (int input, int output) const noexcept { return input * outputs + output; }

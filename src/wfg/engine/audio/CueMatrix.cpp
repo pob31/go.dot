@@ -103,7 +103,7 @@ namespace wfg::audio
     //==============================================================================
     void CueMatrix::process (const float* const* input, int numInputChannels,
                              float* const* output, int numOutputChannels,
-                             int numSamples) noexcept
+                             int numSamples) noexcept WFG_AUDIO_THREAD
     {
         if (output == nullptr || numOutputChannels <= 0 || numSamples <= 0)
             return;

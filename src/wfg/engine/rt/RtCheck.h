@@ -96,6 +96,45 @@ namespace wfg::rt
     void resetCounts() noexcept;
 
     //==============================================================================
+    /*  WFG_AUDIO_THREAD - "nothing in here may block", checked by the compiler
+        and by the sanitizer rather than by a reviewer.
+
+        This is the second net under PRD §4.2 and it catches what the counting
+        allocator above cannot. The counter answers one question: did anything
+        call operator new. Clang's real-time sanitizer answers the whole of
+        §4.2 - locks, syscalls, anything that can block - and it does half of it
+        at COMPILE time, because `nonblocking` propagates: a function marked
+        with it may only call functions that are also nonblocking, so the
+        warning arrives when somebody writes the call rather than on the night
+        it first contends.
+
+        GUARDED TWICE, and the second guard is the point. `__has_cpp_attribute`
+        keeps it off every compiler that is not Clang 20 or newer, which is all
+        three of the platforms this project ships from. `WFG_RTSAN` keeps it off
+        even on Clang unless the rtsan preset asked for it.
+
+        That is deliberately conservative. The attribute changes what compiles:
+        marking a function nonblocking makes the compiler object to a great deal
+        of code it was previously happy with, including code inside JUCE and
+        Tracktion that Go.dot does not own and cannot annotate. Confining that
+        to one CI job means the answer arrives as a report from a machine built
+        to produce it, and never as a broken build on somebody's laptop.
+
+        WHERE IT GOES: the audio callback's own entry points and nothing else.
+        Not on a helper that happens to be called from one - the attribute is a
+        promise about a thread, and a function that is called from both threads
+        cannot make it. */
+    #if defined (WFG_RTSAN) && defined (__clang__)
+     #if __has_cpp_attribute (clang::nonblocking)
+      #define WFG_AUDIO_THREAD [[clang::nonblocking]]
+     #else
+      #define WFG_AUDIO_THREAD
+     #endif
+    #else
+     #define WFG_AUDIO_THREAD
+    #endif
+
+    //==============================================================================
     /*  Marks a region of the audio thread. Nothing here allocates, locks or
         makes a syscall - it is two thread-local writes - so the instrument does
         not break the rule it measures.
