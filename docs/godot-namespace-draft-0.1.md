@@ -224,6 +224,33 @@ id, bad address, read-only node, type mismatch other than `i`↔`f`, `standby.se
 the focused list, a retired id offered to `create` → the event is rejected, logged as `R`
 with a reason code, and surfaced at `/godot/engine/lastError`.
 
+**Three things PR 1.5 settled while building this** (built and tested; say so here if any
+should be otherwise):
+
+- **`node.set`'s value argument is declared `*`** — "whatever the target says". Its
+  signature is the target node's, which is why it has no `/cmd` node, and the registry
+  cannot know the type until the address is resolved. Nothing is loosened: every value
+  becomes canonical text and the schema parses it against the row the address resolves to,
+  so a client sending the string `"3"` to an integer node and one sending the integer `3`
+  produce the identical document, and neither can put a word into a number. The check moved
+  one layer in, to where the type is known.
+- **Writing to a derived node is `read-only`, not `bad-address`.** `kind`, `parent`, `index`
+  and `order` are `persist=none`: the document does not hold them, so an address resolver
+  that only knew about stored attributes called them bad addresses. But the tree publishes
+  them, so a client that reads the namespace will write to one — and the address is not what
+  is wrong with the request. The schema now keeps its derived rows beside its stored ones so
+  the refusal can name the real reason.
+- **Only a `state` node carries the full `GODOT` key.** `RATE_CAP`, `ANTICIPATABLE` and
+  `PANIC` are statements about a *value*: a container has none, and an event has none at any
+  given time. `"PANIC": "park"` on `cue.create` would be filling in a form rather than
+  saying something, and a client reading it would be entitled to believe it. Containers and
+  events declare `KIND` and stop.
+
+**Not built yet, and noted so it is not mistaken for an oversight:** `/godot/list/order` and
+`/godot/list/focus` in §2.3 have no rows in the parameter table, and a table row is what
+makes a node exist. Both belong with the cue list in PR 1.7, which is also where `focus`
+acquires a meaning.
+
 ## 3. Node metadata — the `GODOT` key
 
 ```json

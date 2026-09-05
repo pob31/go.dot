@@ -54,6 +54,15 @@ namespace wfg::doc
         return it == attributes.end() ? nullptr : &*it;
     }
 
+    const Attribute* Element::derivedAttribute (std::string_view attributeName) const
+    {
+        const auto it = std::find_if (derivedAttributes.begin(), derivedAttributes.end(),
+                                      [attributeName] (const Attribute& a)
+                                      { return a.name() == attributeName; });
+
+        return it == derivedAttributes.end() ? nullptr : &*it;
+    }
+
     bool Element::mayContain (std::string_view childName) const
     {
         return std::find (childElements.begin(), childElements.end(), childName)
@@ -133,8 +142,15 @@ namespace wfg::doc
                 which is the order they read best in. */
             for (const auto& owner : c.attributeOwners)
                 for (const auto& row : generated::attributes)
-                    if (row.owner == owner && row.persist != Persist::none)
+                {
+                    if (row.owner != owner)
+                        continue;
+
+                    if (row.persist == Persist::none)
+                        element.derivedAttributes.push_back (Attribute { c.element, &row });
+                    else
                         element.attributes.push_back (Attribute { c.element, &row });
+                }
 
             elementList.push_back (std::move (element));
         }
@@ -147,6 +163,17 @@ namespace wfg::doc
             constructed. */
         static const Schema schema;
         return schema;
+    }
+
+    std::vector<const AttributeRow*> Schema::rowsForOwner (std::string_view owner)
+    {
+        std::vector<const AttributeRow*> rows;
+
+        for (const auto& row : generated::attributes)
+            if (row.owner == owner)
+                rows.push_back (&row);
+
+        return rows;
     }
 
     int Schema::formatVersion()

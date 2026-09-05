@@ -85,11 +85,26 @@ documents come first, and they are the thing to read before the code:
   `juce::Timer`: spike 05 measured that instrument's own idle floor at 0.76 ms median and
   2.60 ms at the 99th percentile, before doing any work. A paced stand-in for the audio
   device drives it until Phase 2 brings a real one.
+- **The `/godot` parameter tree**, published once per tick as an immutable snapshot. It is a
+  projection and owns no value: a node under `/godot/cue` reads an attribute of `show.xml`,
+  one under `/godot/engine` reads a counter the tick thread keeps, and a write to either is
+  the `node.set` command going through the document's single write path. Objects are
+  addressed by identity, so a client's subscription survives a reorder. Values the document
+  refuses to store because the structure already says them — a cue's index, a container's
+  order — are computed here rather than kept in a second place that would eventually
+  disagree. Server threads read a published snapshot and never wait on the model, which is
+  what keeps a web request out of the way of the GO path.
+- **Touch state** (PRD §3.16): while a surface is holding a node it stops being told what
+  that node's value is, so a fader under someone's finger is not fought by the engine
+  echoing it back. Holding and releasing are commands like everything else, because a replay
+  that did not re-apply them would send a different set of messages from the session it
+  claims to reproduce.
 - `wfg`, a console binary: `--version` prints the JUCE and TE versions it actually linked,
   `selftest` stands the JUCE message thread up headless, `commands` lists the registered
   command set, `canon` rewrites a show document in canonical form, `validate` checks a bundle
-  and reports every problem, `schema` writes or checks the grammar, and `replay` re-executes
-  a log and reports whether it reproduced itself.
+  and reports every problem, `schema` writes or checks the grammar, `tree` prints the
+  parameter tree as OSCQuery JSON with no server in the way, and `replay` re-executes a log
+  and reports whether it reproduced itself.
 - `wfg_tests`, a doctest suite — the toolchain facts a green compile does not prove (the
   JUCE pin at *runtime*, the module configuration actually reaching our targets), plus the
   skeleton's own guarantees, every case run twice, under `C` and under `fr_FR`.
@@ -99,12 +114,12 @@ documents come first, and they are the thing to read before the code:
   They are throwaway by construction: they may link `wfg::thirdparty` and never
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
-**What does not exist yet.** Most of the engine. There is no parameter tree, so the clock's
-own numbers are not published anywhere a client could read them; no mounted namespaces (a
-bundle can declare one, and nothing reads it yet); no cue list traversal or standby movement
-— the standby is stored and restored, but only a command that does not exist yet can move
-it; no OSC codec on the wire, no OSCQuery server, and therefore no `serve`: what exists is
-exercised by tests and by the console verbs, not by a client. Phase 1 adds those in
+**What does not exist yet.** There are no mounted namespaces (a bundle can declare one, and
+nothing reads it yet); no cue list traversal or standby movement — the standby is stored,
+restored and published, but only a command that does not exist yet can move it; no OSC codec
+on the wire, no OSCQuery server, and therefore no `serve`: the tree can be printed but not
+subscribed to, and what exists is exercised by tests and by the console verbs rather than by
+a client. Phase 1 adds those in
 that order, and two further submodules arrive with them — `ThirdParty/juce_simpleweb` for
 the HTTP+WebSocket transport and `ThirdParty/spatcore`, consumed at source level for its
 real-time helpers. No audio, no UI, no plugin hosting, no video: audio is Phase 2, which is

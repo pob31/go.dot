@@ -88,7 +88,19 @@ namespace wfg::doc
         /** Objects carry an `id`; containers and the root do not. */
         bool hasIdentity = false;
 
+        /*  The rows this element's owners declare that the DOCUMENT does not
+            store: `persist=none`, computed from the structure - a cue's index
+            among its siblings, a container's order, a cue's kind.
+
+            Kept beside the real attributes rather than dropped entirely so
+            that resolve() can find them. A client writing to one is writing to
+            a node the parameter tree really does publish, so the honest
+            refusal is "read-only" and not "no such address": the address is
+            not the thing that is wrong. */
+        std::vector<Attribute> derivedAttributes;
+
         const Attribute* attribute (std::string_view attributeName) const;
+        const Attribute* derivedAttribute (std::string_view attributeName) const;
         bool mayContain (std::string_view childName) const;
     };
 
@@ -98,6 +110,17 @@ namespace wfg::doc
         /** The one instance. Built once, on first use, from the generated
             table; there is nothing to configure and nothing to vary. */
         static const Schema& instance();
+
+        /*  Every row the table declares for an owner word - `engine`,
+            `document`, `list`, `cue`, `group`, `mount` - INCLUDING the
+            `persist=none` ones.
+
+            The document drops those: a cue's index among its siblings is
+            computed from the tree, so storing it would be a second copy that
+            eventually disagrees. The PARAMETER TREE publishes them, which is
+            the reason they are in the table at all, so it needs a way to ask
+            for the rows themselves rather than for an element's attributes. */
+        static std::vector<const AttributeRow*> rowsForOwner (std::string_view owner);
 
         const Element* element (std::string_view name) const;
         const std::vector<Element>& elements() const noexcept { return elementList; }

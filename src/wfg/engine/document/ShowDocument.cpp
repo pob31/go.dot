@@ -219,6 +219,18 @@ namespace wfg::doc
         const auto element = node.getType().toString().toStdString();
         out.attribute = Schema::instance().attribute (element, attributeName);
 
+        if (out.attribute == nullptr)
+        {
+            /*  Not an attribute of the document - but it may still be a node
+                the parameter tree publishes, computed from the structure. Say
+                which, so a refusal can name the real reason. */
+            if (const auto* schemaElement = Schema::instance().element (element))
+            {
+                out.attribute = schemaElement->derivedAttribute (attributeName);
+                out.isDerived = out.attribute != nullptr;
+            }
+        }
+
         if (out.attribute != nullptr)
             out.node = node;
 
@@ -233,7 +245,10 @@ namespace wfg::doc
         if (! target.isValid())
             return EditResult::failed (reason::badAddress);
 
-        if (target.attribute->access() == Access::read)
+        /*  A derived value is read-only by construction, whatever its row
+            says: it is computed from the structure, so there is nowhere to put
+            a written one and the structure is what would have to change. */
+        if (target.isDerived || target.attribute->access() == Access::read)
             return EditResult::failed (reason::readOnly);
 
         Value value;
@@ -255,6 +270,12 @@ namespace wfg::doc
         const auto target = resolve (address);
 
         if (! target.isValid())
+            return std::nullopt;
+
+        /*  The document does not hold a derived value - that is what derived
+            means - so it says so rather than handing back a default that would
+            look like an answer. The parameter tree computes these. */
+        if (target.isDerived)
             return std::nullopt;
 
         const juce::Identifier property { juce::String (std::string (target.attribute->name())) };

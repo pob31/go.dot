@@ -1,0 +1,92 @@
+{
+  "FULL_PATH": "/godot/cue/F7HR8TVD",
+  "ACCESS": 0,
+  "GODOT": {"KIND": "container"},
+  "CONTENTS": {
+    "colour": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/colour",
+      "DESCRIPTION": "A #RRGGBB decoration. Never the sole carrier of information.",
+      "TYPE": "s",
+      "ACCESS": 3,
+      "VALUE": [""],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "enabled": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/enabled",
+      "DESCRIPTION": "Whether the cue runs at all. A disabled cue is skipped, not deleted.",
+      "TYPE": "T",
+      "ACCESS": 3,
+      "VALUE": [true],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "index": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/index",
+      "DESCRIPTION": "Position among siblings, zero-based.",
+      "TYPE": "i",
+      "ACCESS": 1,
+      "VALUE": [1],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "kind": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/kind",
+      "DESCRIPTION": "What kind of cue this is, derived from the element rather than stored: a Group is a group. Phase 1 has memo (a cue with no output) and group.",
+      "TYPE": "s",
+      "ACCESS": 1,
+      "VALUE": ["memo"],
+      "RANGE": [{"VALS": ["memo", "group"]}],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "name": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/name",
+      "DESCRIPTION": "The cue's name, as the operator reads it.",
+      "TYPE": "s",
+      "ACCESS": 3,
+      "VALUE": ["Announce"],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "notes": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/notes",
+      "DESCRIPTION": "Free text for the designer.",
+      "TYPE": "s",
+      "ACCESS": 3,
+      "VALUE": [""],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "number": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/number",
+      "DESCRIPTION": "The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.",
+      "TYPE": "s",
+      "ACCESS": 3,
+      "VALUE": ["2.2"],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "parent": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/parent",
+      "DESCRIPTION": "The identifier of the containing list or group.",
+      "TYPE": "s",
+      "ACCESS": 1,
+      "VALUE": ["D9FH2JKA"],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "postWait": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/postWait",
+      "DESCRIPTION": "How long after completion before this cue reports done to its parent. A group is complete once every member is, its members' own post-waits included; the group's post-wait then runs on top of that.",
+      "TYPE": "d",
+      "ACCESS": 3,
+      "VALUE": [1.5],
+      "RANGE": [{"MIN": 0}],
+      "UNIT": ["s"],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "preWait": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/preWait",
+      "DESCRIPTION": "How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.",
+      "TYPE": "d",
+      "ACCESS": 3,
+      "VALUE": [0],
+      "RANGE": [{"MIN": 0}],
+      "UNIT": ["s"],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    }
+  }
+}

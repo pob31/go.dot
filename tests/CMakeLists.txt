@@ -70,7 +70,8 @@ add_executable(wfg_tests
     EngineTests.cpp
     DocumentTests.cpp
     BundleTests.cpp
-    ClockTests.cpp)
+    ClockTests.cpp
+    TreeTests.cpp)
 
 # Where the hand-authored fixtures live. Passed as a definition rather than
 # copied next to the binary: the fixtures are inputs to read, not artefacts to
@@ -188,6 +189,20 @@ add_test(NAME wfg.validate.C
                  --wfg-locale=C)
 add_test(NAME wfg.validate.fr_FR
          COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/minimal"
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# The parameter tree, printed by the product binary. Registered under both
+# locales for the same reason as `wfg schema`: this is a serialisation surface,
+# every number in it goes through the project's formatter, and a formatter that
+# consulted the locale would put a comma into a published OSCQuery reply. The
+# unit suite checks the bytes against a hand-written golden; what this adds is
+# that the BINARY can do it under either locale, which a library test cannot
+# show.
+add_test(NAME wfg.tree.C
+         COMMAND wfg tree "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/minimal"
+                 --wfg-locale=C)
+add_test(NAME wfg.tree.fr_FR
+         COMMAND wfg tree "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/minimal"
                  --wfg-locale=${WFG_LOCALE_FR})
 
 # THE OUTSIDE OPINION, and the reason the grammar is generated at all. Every

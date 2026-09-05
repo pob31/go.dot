@@ -94,6 +94,14 @@ namespace wfg::doc
         juce::ValueTree node;
         const Attribute* attribute = nullptr;
 
+        /*  The address names a real node that the document does not hold: a
+            derived value, computed from the structure and published read-only
+            by the parameter tree. Writing to one is refused as read-only,
+            because the address is not what is wrong with the request; reading
+            one from the document gives nothing, because the document genuinely
+            does not have it. */
+        bool isDerived = false;
+
         bool isValid() const noexcept { return node.isValid() && attribute != nullptr; }
     };
 

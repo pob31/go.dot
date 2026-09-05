@@ -40,7 +40,10 @@ namespace wfg
     struct CommandParam
     {
         std::string name;
-        char typeTag = 's';       // one OSC type tag: i h f d s b T (a bool accepts T or F)
+        /*  One OSC type tag: i h f d s b T (a bool accepts T or F), or '*'
+            for "whatever the target declares" - see the note in
+            CommandRegistry.cpp, and node.set, which is the only user. */
+        char typeTag = 's';
         bool optional = false;    // optional params come last and may be omitted
     };
 

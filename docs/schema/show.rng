@@ -110,7 +110,7 @@
       </optional>
       <optional>
         <attribute name="postWait">
-          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members own post-waits included; the groups post-wait then runs on top of that.</a:documentation>
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
@@ -185,7 +185,7 @@
       </optional>
       <optional>
         <attribute name="postWait">
-          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members own post-waits included; the groups post-wait then runs on top of that.</a:documentation>
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
           <data type="double">
             <param name="minInclusive">0</param>
           </data>

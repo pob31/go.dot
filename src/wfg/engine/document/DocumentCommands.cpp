@@ -18,6 +18,9 @@
 
 #include <wfg/engine/document/CanonicalXml.h>
 
+#include <optional>
+#include <string>
+
 namespace wfg::doc
 {
     namespace
@@ -52,6 +55,32 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    namespace
+    {
+        /*  An OSC value as the canonical text the schema parses.
+
+            Numbers go through the project's own formatter rather than
+            std::to_string or a stream, for the reason recorded at length in
+            osc/OscValue.cpp: everything else here writes the shortest text that
+            reads back as the identical value, and a write path that did not
+            would let a client set a number the document could not store.
+
+            Nothing for a blob, a nil, an impulse or a time tag. No row in the
+            table is any of those, so a value of one of those types is a type
+            mismatch rather than something to be coerced into a string. */
+        std::optional<std::string> canonicalText (const osc::Value& value)
+        {
+            if (value.isString())  return value.getString();
+            if (value.isBool())    return std::string (value.getBool() ? "true" : "false");
+            if (value.isInt32())   return std::to_string (value.getInt32());
+            if (value.isInt64())   return std::to_string (value.getInt64());
+            if (value.isFloat32()) return osc::formatFloat (value.getFloat32());
+            if (value.isFloat64()) return osc::formatDouble (value.getFloat64());
+
+            return std::nullopt;
+        }
+    }
+
     void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document)
     {
         //----------------------------------------------------------------------
@@ -138,21 +167,33 @@ namespace wfg::doc
             the parameter tree publishes, so a client that can read the namespace
             can write to it without a second vocabulary.
 
-            The value arrives as text rather than typed. That looks like a step
-            backwards and is not: the schema decides the type, so a client that
-            sends the string "3" for an integer attribute and one that sends the
-            integer 3 produce the identical document — and neither can smuggle a
-            string into a numeric attribute, which is exactly the failure a typed
-            argument would let through. Phase 1.5 adds the typed form on top of
-            this one for the wire. */
+            THE VALUE IS DECLARED '*', which is the registry's "whatever the
+            target says". A write to a `d` node carries a double and a write to
+            an `s` node carries a string, and there is no way to know which
+            until the address has been resolved - which is the draft's point
+            that node.set has no /cmd node because its signature IS the
+            target's.
+
+            Nothing is loosened by that. Every value takes the same road it
+            always did: it becomes canonical text, and the schema parses that
+            text against the row the address resolves to. So a client sending
+            the string "3" to an integer node and one sending the integer 3
+            produce the identical document, and neither can put a word into a
+            number - the check simply happens one layer in, where the type is
+            actually known, rather than at a parameter list that cannot know
+            it. */
         registry.add ({ "node.set",
                         "Sets one value, by its address in the parameter tree.",
-                        { { "address", 's', false }, { "value", 's', false } },
+                        { { "address", 's', false }, { "value", '*', false } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
-                            return fromEdit (document.setAttribute (args[0].getString(),
-                                                                    args[1].getString()),
+                            const auto text = canonicalText (args[1]);
+
+                            if (! text.has_value())
+                                return Outcome::rejected (reason::typeMismatch);
+
+                            return fromEdit (document.setAttribute (args[0].getString(), *text),
                                              args);
                         } });
     }

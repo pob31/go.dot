@@ -222,7 +222,7 @@ namespace wfg::doc::generated
           true, 0.0, false, 0.0,
           nullptr, 0,
           "s", 50.0, false, "park",
-          "How long after completion before this cue reports done to its parent. A group is complete once every member is, its members own post-waits included; the groups post-wait then runs on top of that." },
+          "How long after completion before this cue reports done to its parent. A group is complete once every member is, its members' own post-waits included; the group's post-wait then runs on top of that." },
         { "cue", "parent",
           ValueType::string, 's', Access::read, Kind::state, Persist::none,
           false, "",

@@ -51,6 +51,9 @@
 #   clock/    the sample counter every other clock derives from (PRD §3.4), the
 #             50 Hz tick derived from it, and the thread that turns one into the
 #             other - plus a paced stand-in for the audio device Phase 2 brings
+#   tree/     the /godot namespace: a projection of the document and the
+#             engine's own counters, published once per tick as an immutable
+#             snapshot the server threads read without ever waiting on the model
 #   Engine    the facade that ties them together; Console the command line
 #
 # Header-only files are listed as sources on purpose: without them an IDE's
@@ -101,7 +104,18 @@ add_library(wfg_engine STATIC
     wfg/engine/log/Replay.cpp
     wfg/engine/log/Replay.h
     wfg/engine/osc/OscValue.cpp
-    wfg/engine/osc/OscValue.h)
+    wfg/engine/osc/OscValue.h
+    wfg/engine/tree/Node.h
+    wfg/engine/tree/OscQueryJson.cpp
+    wfg/engine/tree/OscQueryJson.h
+    wfg/engine/tree/ParameterTree.cpp
+    wfg/engine/tree/ParameterTree.h
+    wfg/engine/tree/Touches.cpp
+    wfg/engine/tree/Touches.h
+    wfg/engine/tree/TreeCommands.cpp
+    wfg/engine/tree/TreeCommands.h
+    wfg/engine/tree/TreeSnapshot.cpp
+    wfg/engine/tree/TreeSnapshot.h)
 add_library(wfg::engine ALIAS wfg_engine)
 
 # PUBLIC, and pointed at src/ rather than at src/wfg/ — consumers therefore

@@ -88,6 +88,17 @@ namespace wfg
                     if (v.isInt32()) return osc::Value::boolean (v.getInt32() != 0);
                     return std::nullopt;
 
+                case '*':
+                    /*  Whatever the caller sent. One command uses it and one
+                        only: node.set, whose signature IS the target node's -
+                        a write to a `d` node carries a double and a write to
+                        an `s` node carries a string, and the registry cannot
+                        know which until it has read the address. The type
+                        check still happens, one layer in, against the schema
+                        row the address resolves to; refusing here would mean
+                        refusing every write except to string nodes. */
+                    return v;
+
                 default:
                     return std::nullopt;
             }

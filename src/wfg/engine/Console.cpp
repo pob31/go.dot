@@ -19,7 +19,11 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/RelaxNg.h>
+#include <wfg/engine/tree/OscQueryJson.h>
+#include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/tree/TreeCommands.h>
 #include <wfg/engine/log/Replay.h>
 
 /*  juce_core and juce_events are named directly even though tracktion_engine.h
@@ -469,6 +473,89 @@ namespace
         return 1;
     }
 
+    /*  `wfg tree <bundle-or-file> [--address=<addr>]`
+
+        The parameter tree as OSCQuery JSON, without a server in the way.
+
+        The same reasoning as `wfg canon` and `wfg schema`: the thing the engine
+        will put on a socket in PR 1.9 is worth being able to look at now, from
+        a shell, with no client to install and no port to guess. It is also what
+        makes the namespace reviewable - a diff of this output between two
+        commits says exactly what a client would see change.
+
+        --address narrows it to a subtree, which is the difference between
+        reading one cue and reading four thousand lines.
+    */
+    int runTree (const juce::ArgumentList& args)
+    {
+        const auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
+
+        if (path.isEmpty())
+        {
+            std::cerr << "wfg tree: give me a bundle folder or a show document" << std::endl;
+            return 2;
+        }
+
+        const juce::File target { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
+
+        wfg::doc::ShowDocument document;
+        wfg::doc::ReadResult result;
+
+        if (target.isDirectory())
+            result = wfg::doc::Bundle::open (target, document);
+        else if (target.existsAsFile())
+            result = wfg::doc::CanonicalXml::read (target.loadFileAsString().toStdString(), document);
+        else
+        {
+            std::cerr << "wfg tree: cannot read " << target.getFullPathName().toStdString()
+                      << std::endl;
+            return 2;
+        }
+
+        if (! result.ok)
+        {
+            std::cerr << "wfg tree: " << target.getFileName().toStdString()
+                      << " could not be loaded:" << std::endl;
+
+            for (const auto& problem : result.problems)
+                std::cerr << "    " << problem << std::endl;
+
+            return 1;
+        }
+
+        /*  Wired exactly as `serve` will wire it, so what this prints is what a
+            client would get rather than an approximation of it. */
+        wfg::Engine engine;
+        wfg::tree::TouchTable touches;
+
+        wfg::doc::registerDocumentCommands (engine.commands(), document);
+        wfg::tree::registerTreeCommands (engine.commands(), touches);
+
+        wfg::tree::ParameterTree parameters { document, engine.commands() };
+
+        wfg::tree::EngineState state;
+        state.version = WFG_VERSION;
+        state.documentPath = target.getFullPathName().toStdString();
+        state.documentName = target.getFileNameWithoutExtension().toStdString();
+
+        const auto snapshot = parameters.publish (0, state);
+
+        const auto address = args.containsOption ("--address")
+                               ? args.getValueForOption ("--address").toStdString()
+                               : std::string ("/");
+
+        const auto json = wfg::tree::OscQueryJson::describe (*snapshot, address);
+
+        if (json.empty())
+        {
+            std::cerr << "wfg tree: no node at " << address << std::endl;
+            return 1;
+        }
+
+        std::cout << json << std::flush;
+        return 0;
+    }
+
     /*  `wfg validate <bundle-or-file>`
 
         Takes a bundle folder or a bare show document, because both are things
@@ -593,6 +680,16 @@ int wfg::runConsole (int argc, char** argv)
                       [] (const juce::ArgumentList& args)
                       {
                           if (const auto code = runValidate (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
+    app.addCommand ({ "tree",
+                      "tree <bundle-or-file> [--address=<addr>]",
+                      "Prints the parameter tree as OSCQuery JSON, with no server in the way",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runTree (args); code != 0)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 
