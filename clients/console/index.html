@@ -577,7 +577,8 @@ function renderLists() {
       ' data-focused="' + (id === focus ? "yes" : "no") + '">' +
       (id === focus ? '<span class="mark">▸ </span>' : "") +
       esc(tree.get("/godot/list/" + id + "/name", id)) +
-    "</div>").join("");
+    "</div>").join("") +
+    '<div class="list-tab" data-newlist="yes" title="a second list runs beside this one">+</div>';
 
   const pane = el("cues");
 
@@ -782,7 +783,26 @@ function renderInspector() {
              esc(field.name) + "</label>" + controlFor(field) + "</div>";
     }
 
+    /*  UP AND DOWN, which is `object.move` at one index either way. Dragging
+        is what a desktop UI will do and is not what a first pass should try
+        over a poll: a row that moves under the pointer while the tree is being
+        re-fetched is a fight nobody wins. Two buttons say the same thing and
+        cannot half-happen.
+
+        The parent goes with the index because `object.move` takes both, and
+        passing the one it already has is what makes this a REORDER rather than
+        a reparent - the same command, aimed at the place it is. */
+    const siblings = tree.ids((tree.node("/godot/list/" + parent + "/order")
+                                 ? "/godot/list/" : "/godot/cue/") + parent + "/order");
+    const at = siblings.indexOf(picked);
+
     out += '<div class="group-head">structure</div><div class="actions">';
+
+    out += '<button data-move="' + (at - 1) + '" data-parent="' + esc(parent) + '"' +
+           (at > 0 ? "" : " disabled") + ' title="one earlier">▲</button>';
+    out += '<button data-move="' + (at + 1) + '" data-parent="' + esc(parent) + '"' +
+           (at >= 0 && at < siblings.length - 1 ? "" : " disabled") +
+           ' title="one later">▼</button>';
 
     /*  A NEW CUE GOES AFTER THIS ONE, in this one's parent, which is where a
         designer writing a list wants it and is the only guess that needs no
@@ -929,6 +949,17 @@ document.addEventListener("click", (event) => {
 
   if (data && data.role && picked) {
     command("group.role", [str(picked), str(data.role)]);
+    return;
+  }
+
+  if (data && data.newlist) {
+    const name = window.prompt("Name for the new list?", "");
+    if (name) command("list.create", [str(name)]);
+    return;
+  }
+
+  if (data && data.move && picked) {
+    command("object.move", [str(picked), str(data.parent), int(data.move)]);
     return;
   }
 

@@ -210,6 +210,19 @@ def edits(locale: "str | None") -> int:
                 report.equal(value_at(port, f"/godot/cue/{fresh}/kind"), "osc",
                              "of the kind it was asked for")
 
+                """AND IT MOVES, which is the inspector's two arrows: the same
+                `object.move`, given the parent it already has, so the command
+                that reparents is the command that reorders."""
+                link.send_osc("/godot/cmd/object/move", [fresh, "7K2QM9X4", 0])
+                report.check(settles(port, "/godot/list/7K2QM9X4/order",
+                                     " ".join([fresh] + order)),
+                             "object.move takes a cue one place earlier")
+
+                link.send_osc("/godot/cmd/object/move", [fresh, "7K2QM9X4", 1])
+                report.check(settles(port, "/godot/list/7K2QM9X4/order",
+                                     " ".join([order[0], fresh] + order[1:])),
+                             "and back again")
+
                 """THE POINTER, which the page moves from a row's gutter and
                 from the transport bar - and never from selecting a row, which
                 §3.5 is explicit about."""
