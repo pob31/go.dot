@@ -329,8 +329,9 @@ namespace wfg::cue
             header and this must not fire it as well. */
         auto createdGroup = false;
 
-        for (const auto& group : ancestors)
+        for (std::size_t level = 0; level < ancestors.size(); ++level)
         {
+            const auto& group = ancestors[level];
             const auto groupId = group[idProperty].toString().toStdString();
 
             /*  ALREADY RUNNING IS THE ORDINARY CASE: the operator pressed GO on
@@ -350,16 +351,34 @@ namespace wfg::cue
             {
                 run->preWaitTicks = ticksFor (numberOf (group, "preWait"));
                 run->postWaitTicks = ticksFor (numberOf (group, "postWait"));
+
+                /*  WHERE THIS LEVEL ENTERS: the member of THIS group that the
+                    pointer is inside of, which is the next group down the path,
+                    or the cue itself at the bottom. The pointer's own
+                    identifier is a member of the innermost group and of nothing
+                    above it, so handing it to every level gave each of those a
+                    member it could not find and a fall back to member one - a
+                    scene starting somewhere nobody asked for. */
+                run->enterAt = level + 1 < ancestors.size()
+                                 ? ancestors[level + 1][idProperty].toString().toStdString()
+                                 : cueId;
             }
 
-            /*  Its header runs, then the member the operator asked for. The job
-                is what does that, because the header comes first and the header
-                takes ticks - so the member is remembered rather than fired
-                here, and `beginPhase` starts the members at it. */
-            fireKind (engine, tick, group, "group", id);
+            /*  ONLY THE OUTERMOST IS FIRED HERE, and the rest are left standing.
 
-            if (! scheduled.empty() && scheduled.back().run == id)
-                scheduled.back().enterAt = cueId;
+                All of them are CREATED now, because the record has to carry
+                every identifier this press produced and a replay never draws
+                one of its own. Firing them too would start a scene from the
+                inside out: the innermost group would spawn its member on the
+                next tick while its parent was still running the header that is
+                supposed to come first, and the parent's job - finding a child
+                it had not started - would start a second one beside it.
+
+                So each of them waits to be launched by its parent's job, at the
+                moment §3.6 puts it; only the one with no group above it has
+                nobody to do that. */
+            if (parentRun.empty())
+                fireKind (engine, tick, group, "group", id);
 
             parentRun = id;
             createdGroup = true;
@@ -474,11 +493,34 @@ namespace wfg::cue
                 header running, or a member playing, or a footer to come, is
                 doing something - and there is no other word for it that a
                 client watching /godot/run would read correctly. */
-            if (auto* run = runs.find (runId))
-                run->state = runState::playing;
+            auto* run = runs.find (runId);
+
+            if (run == nullptr)
+                return;
+
+            run->state = runState::playing;
+
+            /*  ONE JOB PER RUN, and the guard is not defensive tidiness.
+
+                A group run reaches here by two roads - `fireStandby`, for the
+                one the pointer entered, and `run.launch` from its parent's job -
+                and a run that took both would be scheduled twice: two jobs
+                spawning the same members, launching them twice and ending them
+                twice, all under one identifier. That is what a GO into a nested
+                manual group produced, and it is cheap enough to make impossible
+                rather than merely unlikely. */
+            const auto already = std::any_of (scheduled.begin(), scheduled.end(),
+                                              [&runId] (const GroupJob& other)
+                                              {
+                                                  return other.run == runId && ! other.retired;
+                                              });
+
+            if (already)
+                return;
 
             GroupJob job;
             job.run = runId;
+            job.enterAt = run->enterAt;
             scheduled.push_back (job);
             return;
         }
@@ -1557,7 +1599,30 @@ namespace wfg::cue
             const auto timeline = job.phase == groupPhase::members
                                     && textOf (group, "mode") == "timeline";
 
-            const auto children = runs.childrenOf (job.run);
+            /*  THE CHILDREN OF THIS PHASE, and not every child of the run.
+
+                A group run collects its header's runs, its members' and its
+                footer's under one parent, which is what makes killing it take
+                the whole scene - and it means "the children" is the wrong set
+                for any single phase to reason about. A header phase that
+                launched the first armed child would launch the member a
+                descending GO had already created, in place of the header cue it
+                was there to run; a timeline phase counting children against its
+                own member list would think it had spawned them all one short.
+
+                So each phase asks about the runs of its own cues. The rest are
+                still the run's children, and still die with it. */
+            const auto inPhase = [&job] (const std::string& cueId)
+            {
+                return std::find (job.phaseCues.begin(), job.phaseCues.end(), cueId)
+                         != job.phaseCues.end();
+            };
+
+            std::vector<const Run*> children;
+
+            for (const auto* child : runs.childrenOf (job.run))
+                if (inPhase (child->cue))
+                    children.push_back (child);
 
             /*  A TIMELINE SCHEDULES EVERYTHING AT ENTRY and each member's
                 pre-wait is its OFFSET from that moment (§3.6) - which is why
@@ -1703,15 +1768,32 @@ namespace wfg::cue
             member the pointer has reached. */
         auto first = std::size_t { 0 };
 
+        /*  KEPT UNTIL THE MEMBERS BEGIN. A header is the group's own
+            preparation and runs before the members whatever the pointer was on,
+            so what the operator asked for has to still be here when its turn
+            comes - which it was not, because entering the header cleared it. */
         if (phase == groupPhase::members && ! job.enterAt.empty())
         {
             const auto at = std::find (cues.begin(), cues.end(), job.enterAt);
 
             if (at != cues.end())
                 first = static_cast<std::size_t> (at - cues.begin());
+
+            job.enterAt.clear();
         }
 
-        job.enterAt.clear();
+        /*  ALREADY THERE, which happens for one member and only when a GO
+            descended into this group: the run for the member the pointer is
+            inside of was created by that press, so the record could carry its
+            identifier. Spawning a second would leave two runs of one cue under
+            one parent - a scene playing twice, out of step with itself. It is
+            adopted instead: not spawned, and started by the launch above like
+            any other member. */
+        if (runs.hasChildFor (job.run, cues[first]))
+        {
+            job.nextMember = first + 1;
+            return true;
+        }
 
         engine.submit (origin::engine, "run.spawn",
                        { osc::Value::string (job.run), osc::Value::string (cues[first]) });
@@ -2068,7 +2150,13 @@ namespace wfg::cue
         //----------------------------------------------------------------------
         registry.add ({ "go",
                         "Fires the focused list's standby cue and moves standby to the next one.",
-                        { { "run", 's', true } },
+                        /*  AS MANY IDENTIFIERS AS THE PRESS CREATED. A member
+                            three manual groups deep needs each of those groups
+                            live before it can be their child, so one GO makes
+                            four runs - and the record carries all of them, in
+                            the order they were made, because a replay never
+                            draws one of its own. */
+                        { { "run", 's', true, true } },
                         true,
                         [&engine, &runner, &document, &focus, withRun]
                         (CommandContext& context, const std::vector<osc::Value>& args)

@@ -210,6 +210,24 @@ namespace wfg::cue
             are facts about this run, and two places to look for a run's state
             is one place too many. */
 
+        /*  WHERE A GROUP RUN IS TO START, when the pointer was not on its
+            first member. A cue identifier, and always one of this group's own
+            members - so descending three levels sets it on three runs, each
+            naming the member that the level below is inside of.
+
+            ON THE RUN RATHER THAN ON THE JOB, which is the point. GO creates a
+            run for every manual group between the pointer and the list, because
+            the record has to carry all of them and a replay never draws an
+            identifier of its own - but it FIRES only the outermost, and each of
+            the others is started by its parent's job at the moment §3.6 puts
+            it, which is after that parent's header. A job that does not exist
+            yet cannot be told where to enter; the run it will belong to can.
+
+            Empty means the first member, which is the ordinary case: the
+            pointer descends to member one and GO there is what created the
+            group. */
+        std::string enterAt;
+
         /** A GO has happened and the launch has not been placed yet. */
         bool launchRequested = false;
 

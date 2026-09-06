@@ -2550,6 +2550,116 @@ TEST_CASE ("manual group: a GO record carries every run it created")
 
     for (const auto& arg : go->args)
         CHECK (rig.runs.find (arg.getString()) != nullptr);
+
+    /*  AND THE SIGNATURE ACCEPTS WHAT THE HANDLER ANSWERED WITH, which is the
+        half that makes the other half worth anything.
+
+        `wfg replay` re-submits every record exactly as it was written, and the
+        arity check is the first thing it meets. A command that answers with
+        more identifiers than its signature accepts writes a record of its own
+        that it would then refuse - so the session cannot reproduce itself, and
+        the failure arrives as `arity` on a log nobody thought to replay.
+
+        Asked of the registry rather than by submitting the record again,
+        because submitting it would also RUN it: what is being checked is the
+        signature, and the signature is where the rule lives. */
+    const auto* command = rig.engine.commands().find ("go");
+    REQUIRE (command != nullptr);
+
+    const auto check = CommandRegistry::checkArgs (*command, go->args);
+    CHECK (check.ok);
+    CHECK (check.reason == "");
+}
+
+TEST_CASE ("manual group: a GO several levels down makes one run per group, and one member")
+{
+    /*  ONE PRESS, ONE RUN EACH, and this is the case that was wrong.
+
+        A member inside a group inside a group needs both of those groups live
+        before it can be their child, so the press creates both - and it used to
+        create one of them TWICE: once on the way down, and once again when the
+        outer group's job spawned its own first member, which is that same inner
+        group. Two runs of one group, each with a job of its own, each spawning
+        the member: the scene played twice, out of step with itself, under one
+        GO the operator pressed once.
+
+        Three separate mistakes made it: the entry point handed to every level
+        was the pointer's own cue, which is a member of the innermost group and
+        of nothing above it; every group on the path was fired immediately
+        rather than left for its parent to start; and a phase looked at every
+        child of the run rather than at the children of its own cues. */
+    ManualRig rig;
+
+    const auto inner = rig.document.createCue (rig.groupId, 0, "group", "Inner").id;
+    const auto deepOne = rig.document.createCue (inner, 0, "memo", "Deep one").id;
+    const auto deepTwo = rig.document.createCue (inner, 1, "memo", "Deep two").id;
+
+    rig.setStandby (deepOne);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (deepOne).empty(); }));
+
+    const auto runsFor = [&rig] (const std::string& cueId)
+    {
+        return std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                              [&cueId] (const cue::Run& run) { return run.cue == cueId; });
+    };
+
+    CHECK (runsFor (rig.groupId) == 1);
+    CHECK (runsFor (inner) == 1);
+    CHECK (runsFor (deepOne) == 1);
+
+    /*  And the run tree is the document's shape: the member under the inner
+        group, the inner group under the outer one. That is what makes killing
+        the outer group take the whole scene. */
+    const auto outerRun = rig.runOf (rig.groupId);
+    const auto innerRun = rig.runOf (inner);
+
+    REQUIRE (! outerRun.empty());
+    REQUIRE (! innerRun.empty());
+
+    CHECK (rig.runs.find (innerRun)->parent == outerRun);
+    CHECK (rig.runs.find (rig.runOf (deepOne))->parent == innerRun);
+
+    //  The pointer moved on inside the inner group, as it does on any GO.
+    CHECK (rig.standby() == deepTwo);
+
+    //  Nothing else runs on its own: the operator is still the parent.
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (deepTwo) == "");
+    CHECK_FALSE (rig.runs.find (outerRun)->isFinished());
+}
+
+TEST_CASE ("manual group: a descending GO still runs the outer header first")
+{
+    /*  §3.6 puts a group's header before its members whatever the pointer was
+        on, and a GO that descends past that group is the case where it is
+        easiest to lose: the member is several levels below and its group is
+        created by the same press. Firing those groups on the way down did lose
+        it - the innermost spawned its member on the next tick while the header
+        above was still running, which is the scene starting before its own
+        preparation. */
+    ManualRig rig;
+
+    const auto inner = rig.document.createCue (rig.groupId, 0, "group", "Inner").id;
+    const auto deep = rig.document.createCue (inner, 0, "memo", "Deep").id;
+
+    const auto header = rig.roleOf (rig.groupId, "header");
+    const auto opening = rig.document.createCue (header.c_str(), 0, "memo", "Pre-arm").id;
+    rig.setCue (opening, "postWait", "0.2");        // long enough to be caught in the act
+
+    rig.setStandby (deep);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    //  The outer header runs, and nothing inside the inner group has started.
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (opening).empty(); }));
+    CHECK (rig.runOf (deep) == "");
+
+    //  Then the member, once the header is done - one GO, nothing skipped.
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (deep).empty(); }));
+    CHECK (rig.runs.find (rig.runOf (opening))->isFinished());
 }
 
 TEST_CASE ("manual group: firing one by name is refused, because nobody would advance it")
