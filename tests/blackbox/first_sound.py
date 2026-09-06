@@ -67,6 +67,13 @@ MOCK = Path(__file__).resolve().parent / "mock_target.py"
 RATE = 48000
 BLOCK = 64
 
+# The fixture's two media cues, named here because the driver now asks for a
+# run BY CUE: standby arms ahead, so a run exists before the GO that starts it
+# and "the run that just appeared" no longer identifies anything.
+THUNDER = "B3N8R5TW"
+RAIN = "P9XKC2WR"
+DESK = "M5TQ7XVA"
+
 # The one number every sound assertion is derived from. 0.5 rather than 1.0 so
 # that a bug which doubled a level shows up as a value out of range rather than
 # as a clip nobody notices.
@@ -288,6 +295,27 @@ def runs_in(server: Server) -> "list[str]":
     return sorted(text.split())
 
 
+def run_for_cue(server: Server, cue: str, timeout: float = 20.0) -> str:
+    """The run instantiating a cue, or "" if there is none.
+
+    ASKED BY CUE RATHER THAN BY "WHAT IS NEW", which is what standby arming
+    made necessary. Before PR 3.3 nothing existed until GO, so "the run that
+    appeared" was the same question as "the run of the cue I just fired". Now
+    the pointer reaching a media cue arms it, so its run exists BEFORE the GO
+    and looking for a new one finds nothing.
+    """
+    deadline = time.monotonic() + timeout
+
+    while time.monotonic() < deadline:
+        for run in runs_in(server):
+            if value_of(server, f"/godot/run/{run}/cue") == cue:
+                return run
+
+        time.sleep(0.02)
+
+    return ""
+
+
 def go(server: Server) -> None:
     common.send_udp(server.osc_port, common.osc_encode("/godot/cmd/go"))
 
@@ -306,21 +334,6 @@ def wait_for_run_state(server: Server, run: str, expected: str,
         time.sleep(0.02)
 
     return actual
-
-
-def new_run(server: Server, before: "list[str]", timeout: float = 20.0) -> str:
-    """The run that appeared since `before`, or "" if none did."""
-    deadline = time.monotonic() + timeout
-
-    while time.monotonic() < deadline:
-        fresh = [r for r in runs_in(server) if r not in before]
-
-        if fresh:
-            return fresh[0]
-
-        time.sleep(0.02)
-
-    return ""
 
 
 # =============================================================================
@@ -358,22 +371,33 @@ def run(locale: "str | None") -> int:
                 # at state waits for it for the same reason.
                 report.equal(wait_for(server, "/godot/audio/status", "running"), "running",
                              "the audio side comes up running, without being asked")
-                report.equal(runs_in(server), [],
-                             "nothing is running before the first GO")
 
-                before = runs_in(server)
+                # --- Armed, and silent --------------------------------------
+                # THE STANDBY CUE ARMS ITSELF, which is what PR 3.3 added and
+                # what the whole prepare-ahead design exists for: the voice is
+                # reserved and the file is mapped while the operator reads the
+                # next line, so GO is two atomic stores and nothing else. The
+                # measured cost of NOT doing it is a disk - about 0.4 s for a
+                # local file - paid after the hand comes down.
+                #
+                # So "nothing is running" is no longer the right question. The
+                # right one is that nothing is SOUNDING: a run exists, it is
+                # armed, and the render is silent until GO.
+                media = run_for_cue(server, THUNDER)
+
+                if not report.check(bool(media), "the standby cue armed itself before any GO"):
+                    return report.finish()
+
+                report.equal(value_of(server, f"/godot/run/{media}/state"), "armed",
+                             "and it is armed rather than playing")
+                report.equal(value_of(server, f"/godot/run/{media}/kind"), "media",
+                             "and it is the media cue's run")
 
                 # --- GO: sound ----------------------------------------------
                 go(server)
-                media = new_run(server, before)
-
-                if not report.check(bool(media), "GO created a run"):
-                    return report.finish()
 
                 report.equal(wait_for_run_state(server, media, "playing"), "playing",
                              "the first cue is playing")
-                report.equal(value_of(server, f"/godot/run/{media}/kind"), "media",
-                             "and it is the media cue's run")
 
                 # Long enough to be unmistakably sounding before the fade.
                 time.sleep(0.6)
@@ -394,9 +418,8 @@ def run(locale: "str | None") -> int:
                 # PRD 3.11 end to end: a message out over UDP, a value read back
                 # over HTTP from another program, and a cue that reports done
                 # only because the device confirmed it.
-                before = runs_in(server)
                 go(server)
-                network = new_run(server, before)
+                network = run_for_cue(server, DESK)
 
                 if report.check(bool(network), "GO created a run for the network cue"):
                     report.equal(wait_for_run_state(server, network, "done", 15.0), "done",
@@ -408,9 +431,8 @@ def run(locale: "str | None") -> int:
                              "one message left for the desk")
 
                 # --- GO: the second media cue -------------------------------
-                before = runs_in(server)
                 go(server)
-                second = new_run(server, before)
+                second = run_for_cue(server, RAIN)
 
                 if report.check(bool(second), "GO created a run for the second cue"):
                     report.equal(wait_for_run_state(server, second, "playing"), "playing",
@@ -611,11 +633,10 @@ def a_device_that_disagrees(report: Report) -> None:
                 wait_for(server, "/godot/audio/status", "running")
 
                 # Straight to the network cue: no sound needed to establish this.
-                before = runs_in(server)
                 common.send_udp(server.osc_port,
-                                common.osc_encode("/godot/cmd/cue/fire", ["M5TQ7XVA"]))
+                                common.osc_encode("/godot/cmd/cue/fire", [DESK]))
 
-                network = new_run(server, before)
+                network = run_for_cue(server, DESK)
 
                 if not report.check(bool(network), "the cue against a disagreeing device ran"):
                     return

@@ -419,6 +419,7 @@ namespace wfg::cue
         void advanceFades (Engine& engine, std::int64_t tick);
         void advanceSends (Engine& engine);
         void advanceWaits (Engine& engine, std::int64_t tick);
+        void armStandby (Engine& engine);
         void advanceGroups (Engine& engine);
 
         /*  Starts a group's header, members or footer, and answers whether
@@ -462,6 +463,14 @@ namespace wfg::cue
         /*  One per group run in flight. A vector like every other job list
             here, and drained by the same `remove_if` on a retired flag. */
         std::vector<GroupJob> scheduled;
+
+        /*  The cue the standby was last seen on, so that arming it is asked for
+            ONCE rather than on every tick it sits there.
+
+            Engine state and not a model input: a replay never sets it, because
+            a replay runs no hooks - and it does not need to, because the arm it
+            would have asked for is a record in the log. */
+        std::string armedStandby;
 
         /*  The tick being processed, so a stop fired inside a command
             handler can be scheduled against the same clock the tick hook

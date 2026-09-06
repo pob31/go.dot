@@ -190,9 +190,17 @@ namespace
                        .toString().toStdString();
         }
 
+        /*  Parks the standby and LETS THE ARM SETTLE, which is what a show
+            does: the pointer reaches a cue while the operator reads the next
+            line, and the voice and the file are made ready in that time. Since
+            PR 3.3 the Runner asks for that arm from its hook, so a test that
+            parked and pressed GO in the same tick would be measuring a race no
+            operator can produce - and would see two commands applied on the GO
+            tick rather than one. */
         void setStandby (const std::string& cueId)
         {
             document.setAttribute (cue::standbyAddressOf (listId), cueId);
+            tickOnce();
         }
 
         Engine engine;
@@ -405,16 +413,14 @@ TEST_CASE ("go: every voice busy fails the run rather than stealing one")
     rig.audio.completeArms (rig.engine);
     rig.tickOnce();
 
+    /*  The pointer reaching the second cue is what asks for the voice now, so
+        the refusal arrives at standby rather than at GO - which is the whole
+        argument for arming ahead: an operator finds out that the rig is full
+        while there is still time to do something about it. */
     rig.setStandby (second);
-    const auto outcome = rig.submitAndTick ("go");
-
-    CHECK (outcome.applied >= 1);
-    REQUIRE (rig.runs.all().size() == 2u);
-
-    /*  The failure is SUBMITTED from inside the GO, so it is applied on the
-        next tick like anything else the engine reports about itself. One path
-        into the model, even for the engine's own bad news. */
     rig.tickOnce();
+
+    REQUIRE (rig.runs.all().size() == 2u);
 
     const auto& failed = rig.runs.all().back();
     CHECK (failed.state == cue::runState::failed);
@@ -423,12 +429,16 @@ TEST_CASE ("go: every voice busy fails the run rather than stealing one")
 
 TEST_CASE ("go: a cue with no file fails the run and says which failure it was")
 {
+    /*  AND IT SAYS SO AT STANDBY, which is what arming ahead is worth. Since
+        PR 3.3 the pointer reaching a media cue asks for it to be armed, so a
+        missing file is reported while the operator is reading the next line
+        rather than at the moment their hand comes down. The CSV row has said
+        this was the intention since PR 2.3 - "reported when the show loads and
+        fails the cue when it is armed" - and nothing armed until now. */
     Rig rig;
 
     const auto silent = rig.document.createCue (rig.listId, 2, "media", "Nothing").id;
     rig.setStandby (silent);
-
-    rig.submitAndTick ("go");
     rig.tickOnce();                 // the failure is applied like any report
 
     REQUIRE (rig.runs.all().size() == 1u);
@@ -780,12 +790,12 @@ TEST_CASE ("go: a cue that cannot be routed fails its run, never the load")
     RoutedRig rig;
 
     rig.addRoute (rig.mediaId, "NOSUCHID", "1 0 0 1");
-    rig.setStandby (rig.mediaId);
 
-    const auto outcome = rig.submitAndTick ("go");
+    /*  Reported at standby, like the other two ways an arm can fail: parking on
+        it is what asks for the routing to be resolved. */
+    rig.setStandby (rig.mediaId);
     rig.tickOnce();
 
-    CHECK (outcome.applied == 1);
     REQUIRE (rig.runs.all().size() == 1u);
     CHECK (rig.runs.all().front().state == cue::runState::failed);
     CHECK (rig.runs.all().front().error == cue::runError::badRoute);
@@ -1503,8 +1513,15 @@ TEST_CASE ("pre-wait: a media cue arms during its wait, so the disk is paid for 
         and it is why the wait sits between the arm and the launch rather than
         in front of both. */
     Rig rig;
-    rig.setStandby (rig.mediaId);
+
+    /*  THE WAIT IS WRITTEN BEFORE THE POINTER ARRIVES, and the order matters
+        now in a way it did not before PR 3.3: a run copies its waits when it is
+        CREATED (§4.10), and standby arming is what creates this one. Setting
+        the attribute afterwards would change the next run and not this one -
+        which is the rule working, and would have made this test measure a cue
+        with no pre-wait at all. */
     rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/preWait", "0.2");   // 10 ticks
+    rig.setStandby (rig.mediaId);
 
     CHECK (rig.submitAndTick ("go").applied == 1);
 

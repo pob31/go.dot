@@ -204,8 +204,27 @@ namespace wfg::cue
                 if (fireAtOnce && live->state == runState::armed)
                     if (auto* armed = runs.find (live->id))
                     {
-                        armed->launchRequested = true;
-                        armed->launchRequestedAtTick = tick;
+                        /*  AND IT STILL WAITS. A cue armed at standby has had
+                            its voice and its file made ready; what it has not
+                            had is its pre-wait, which starts when the cue is
+                            FIRED and not when it was got ready. Firing it
+                            straight away here would have made a pre-wait
+                            something that only applied to cues nobody had
+                            prepared - which is every cue, until the standby
+                            started arming them, and then none of them.
+
+                            Found by the arming: the moment standby armed a cue
+                            ahead, the pre-wait test stopped seeing a wait. */
+                        if (armed->preWaitTicks > 0)
+                        {
+                            armed->state = runState::waiting;
+                            armed->dueTick = tick + armed->preWaitTicks;
+                        }
+                        else
+                        {
+                            armed->launchRequested = true;
+                            armed->launchRequestedAtTick = tick;
+                        }
                     }
 
                 return live->id;
@@ -1514,6 +1533,66 @@ namespace wfg::cue
         job.retired = true;
     }
 
+    void Runner::armStandby (Engine& engine)
+    {
+        /*  THE STANDBY ARMS WHAT IT LANDS ON, and until now nothing did.
+
+            §11.4 of the namespace draft said "standby arms implicitly" and no
+            code ever did it: `audio.arm` has been a command with no submitter
+            anywhere in the engine since PR 2.3, so a GO on a cue nobody had
+            armed by hand did the arming AND the launching in one, and paid the
+            disk while the operator's hand was already down. §11.8 measured that
+            disk at about 0.4 s for a local file.
+
+            Which is the whole point of arming ahead: the work happens while the
+            operator reads the next line, not after they press GO.
+
+            IT IS A COMMAND AND NOT SOMETHING THIS HOOK DOES, for the reason
+            every decision here is: a hook does not run during a replay, and a
+            run created outside the log is a run the replay would not have. So
+            the hook notices and submits, and `audio.arm` carries the run
+            identifier it drew - which is what a replay re-supplies.
+
+            ASKED ONCE PER CUE. `armedStandby` is what stops this being a
+            submission every tick for as long as the pointer sits there; a cue
+            that failed to arm is not retried, because a voice that was busy a
+            tick ago is busy now and fifty rejections a second is not a report,
+            it is a fault of its own. */
+        if (audio == nullptr)
+            return;
+
+        const auto list = focus.list (document);
+        const auto standby = list.isValid()
+                               ? list[juce::Identifier ("standby")].toString().toStdString()
+                               : std::string {};
+
+        if (standby == armedStandby)
+            return;
+
+        armedStandby = standby;
+
+        if (standby.empty())
+            return;
+
+        const auto cue = document.findById (standby);
+
+        /*  ONLY A MEDIA CUE HAS ANYTHING TO MAKE READY. Asking to arm a memo
+            would be a rejection every time the pointer passed over one, which
+            would fill the log with a refusal about something nobody did wrong.
+            (A group at standby arms what it would launch first - PR 3.4, with
+            the cursor that knows how to look inside one.) */
+        if (! cue.isValid() || cue.getType().toString() != "Media")
+            return;
+
+        /*  Already running or already armed: nothing to do. `audio.arm` would
+            answer with the live run and change nothing, but not asking is
+            cheaper and keeps the log about things that happened. */
+        if (runs.liveRunOf (standby) != nullptr)
+            return;
+
+        engine.submit (origin::engine, "audio.arm", one (standby));
+    }
+
     //==============================================================================
     void Runner::beforeTick (Engine& engine, std::int64_t tick)
     {
@@ -1531,6 +1610,7 @@ namespace wfg::cue
             theatre. */
         advanceWaits (engine, tick);
         advanceGroups (engine);
+        armStandby (engine);
         advanceFades (engine, tick);
         advanceSends (engine);
 
