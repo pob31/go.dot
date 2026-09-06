@@ -144,6 +144,10 @@ safety.
 
 - **Prepare/commit** (PRD §3.12): anticipatable annotations honoured; headers
   pre-arm whole blocks; rollback on standby move is silent by construction.
+- **Presets derived into the header** — a member's parameter marked *preset* puts
+  a line in its group's header rather than making somebody author one. The
+  author's idea, 2026-09-06; the four things to settle first are in
+  `docs/godot-open-questions-0.1.md` §5.
 - **State solver + waypoints** (PRD §3.13): backward walk over last-writers and
   cue lifetimes, run-pointer reconstruction, diff-and-send against read-back,
   event-kind exclusion, group boundaries as structural waypoints. Load-to-time
@@ -178,6 +182,9 @@ designed.
 - **Running pane**: run pointers, kill/advance/prune, round pills, range name
   and iteration on the strip.
 - **Group bulk-edit view** with type filter (PRD §3.5).
+- **Header pane**: written lines upright, lines derived from a member's preset
+  mark in italics, double-click on a derived line opening the member's inspector
+  (open questions §5). Needs Phase 4's mechanism, not just the display.
 - **Curve editor** with breakpoint list and numeric entry.
 - **Dark UI mandatory** (PRD §2). Layout presets design/tech/show; show mode
   locks the layout and disables editing.

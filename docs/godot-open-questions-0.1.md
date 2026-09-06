@@ -197,6 +197,53 @@ third, it belongs there or here depending on whether it changes the namespace.
 
 ---
 
+## 5. The header as a preset sheet
+
+*Raised by the author on 2026-09-06, looking at the first web client: "since this is something
+that preloads and prepares OSC parameters ahead of time, the parameters of the groups could have
+a preload/preset tickbox to add them in the header, and we could add cues manually too. The
+preloaded or preset lines would appear in italics showing they are set from a cue from the group.
+Double clicking on them would lead to the edit panel."*
+
+**What it proposes.** A group's header is where preparation lives — Phase 3 runs it as an
+ordinary cue list at entry, and Phase 4 turns it into the prepare horizon proper (PRD §3.12). The
+idea is to let a member cue put a line there without anybody authoring one: a parameter carries a
+*preset* mark, and ticking it means "send this ahead of the GO rather than on it". The header
+then reads as two kinds of line — the ones somebody wrote, upright, and the ones a member asked
+for, in italics — and a header nobody wrote is still a header worth looking at, because it shows
+what the scene will have done to the desk before the operator's hand comes down.
+
+**Why it is the right shape.** §4.12 forbids inheritance *downward*: a container may not push
+values into its content. This pushes nothing. It derives a header line *upward* from a decision
+taken on the member, which is the direction §3.6 already works in and the direction the run tree
+already reports in. And it answers a real question about §3.3's `anticipatable` — that flag says a
+parameter *may* be sent early; this says *which* ones the designer wants sent early, on the cue
+where they were typed rather than in a second place.
+
+**What has to be decided before it is built.**
+
+- **Where the preset lives.** A mark on the member's parameter, with the header line derived at
+  read time, or a real header cue written into the show? §4.10 says the document holds what
+  somebody decided, so the mark is a decision and the derived line is not: writing both would put
+  the same fact in two places and let them disagree. The italics are then the visible form of
+  "this line is not in the file".
+- **What editing a derived line does.** Refusing the edit and sending the operator to the member —
+  the double-click the author describes — is consistent and is probably right. The alternative is
+  that editing detaches it into a real header cue, which is a second concept the file has to carry.
+- **Their order among the written ones.** A header is a sequence (Phase 3 makes it one whatever
+  the group's mode says). Derived lines before the written ones is the guess; §3.12's allocator
+  may have an opinion once claims exist.
+- **What happens when the member goes.** Disabled, deleted, or moved out of the group — the
+  derived line goes with it, which is exactly what a repair rule has to be written for, and is
+  the same class of problem as the standby pointer inside a deleted subtree.
+
+**Where it lands.** The mechanism is Phase 4's, beside prepare/commit and the allocator; the
+italics and the double-click are Phase 5's. Nothing in Phase 3 forecloses it: `Header` is already
+an identified element holding ordinary cues, `role` is already a derived node, and the cursor and
+the scheduler already refuse to treat a header cue as a member.
+
+---
+
 ## Where these go when they are answered
 
 Anything that changes the parameter table or the tree goes into
