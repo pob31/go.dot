@@ -628,34 +628,79 @@ TEST_CASE ("edit: every node in the generated graph has an identity of its own")
         release. Go.dot asks the question about its OWN generated Edit instead
         of trusting either the hash or the report - and asks it at every track
         count a show might plausibly use, because the failure is a resonance
-        between id strides and appears at some counts and not others. */
+        between id strides and appears at some counts and not others.
+
+        M10, AND WHY THE SAME QUESTION IS NOW ASKED TWICE OVER. Phase 3 gives
+        every track S slots, one per range of the widest media cue in the show
+        (§3.24), and a slot is where the collision lives: SlotControlNode takes
+        the slot's own EditItemID for its id, and the switching node above it
+        hash-combines its internal children's. So slots multiply exactly the
+        surface the upstream bug is on, and the ids they mint fall on a lattice
+        of their own - a stride within a track, laid over the stride between
+        tracks. A count that is unique at one slot says nothing about eight.
+
+        The plan gates the whole slot design on this answer (plan, M10): if the
+        ids collide at 1..64 tracks x 1..8 slots then S slots is not the shape,
+        and the A/B fallback - two slots, alternated - is what replaces it. */
     HostRig rig;
     REQUIRE (rig.host.start (hostFor (8)));
 
     for (const int tracks : { 1, 2, 3, 4, 5, 6, 7, 8, 12, 16, 24, 31, 32, 48, 63, 64 })
     {
-        INFO ("tracks: " << tracks);
+        int atOneSlot = 0;
 
-        audio::EditSpec spec;
-        spec.tracks = tracks;
+        for (const int slots : { 1, 2, 3, 4, 5, 6, 7, 8 })
+        {
+            INFO ("tracks: " << tracks << ", slots: " << slots);
 
-        REQUIRE (rig.host.buildEdit (spec));
+            audio::EditSpec spec;
+            spec.tracks = tracks;
+            spec.slots = slots;
 
-        const auto report = rig.host.inspectNodeIds();
+            REQUIRE (rig.host.buildEdit (spec));
 
-        /*  Reported, not just asserted. A graph whose ids were mostly zero
-            would pass a duplicate check while telling us nothing, so the shape
-            of what was inspected is printed with the verdict. */
-        INFO ("nodes " << report.nodes << ", zero ids " << report.zeroIds
-                        << ", duplicates " << report.duplicates);
+            const auto report = rig.host.inspectNodeIds();
 
-        CHECK (report.duplicates == 0);
+            /*  Reported, not just asserted. A graph whose ids were mostly zero
+                would pass a duplicate check while telling us nothing, so the
+                shape of what was inspected is printed with the verdict. */
+            INFO ("nodes " << report.nodes << " (" << report.outerNodes
+                            << " outer), zero ids " << report.zeroIds
+                            << ", duplicates " << report.duplicates
+                            << " (" << report.typedDuplicates << " same-type)");
 
-        /*  The check must actually be looking at something. If Tracktion ever
-            stopped giving these nodes identities, `duplicates == 0` would go on
-            passing for the wrong reason. */
-        CHECK (report.nodes > tracks);
-        CHECK (report.nodes - report.zeroIds > tracks);
+            CHECK (report.duplicates == 0);
+            CHECK (report.typedDuplicates == 0);
+
+            /*  The check must actually be looking at something. If Tracktion
+                ever stopped giving these nodes identities, `duplicates == 0`
+                would go on passing for the wrong reason. */
+            CHECK (report.nodes > tracks);
+            CHECK (report.nodes - report.zeroIds > tracks);
+
+            /*  AND AT THE SLOTS, which is the quiet way this could flatter
+                itself. The outer graph does not grow with the slot count at
+                all - a launcher slot is an internal node - so a check that
+                inspected only what the processor walks would ask the same
+                question eight times over and report eight passes.
+
+                What says the slots are being seen is that the collection grew
+                when they were asked for. */
+            if (slots == 1)
+                atOneSlot = report.nodes;
+            else
+                CHECK (report.nodes > atOneSlot);
+
+            /*  M10's numbers, at the polyphony ceiling, printed so the PR
+                carries them and so the shape can be read: what the slot count
+                multiplies and what it leaves alone. */
+            if (tracks == 64)
+                MESSAGE ("M10 at 64 tracks x " << slots << " slots: "
+                          << report.nodes << " nodes reachable by id ("
+                          << report.outerNodes << " in the outer graph), "
+                          << report.zeroIds << " with no id, "
+                          << report.duplicates << " duplicates");
+        }
     }
 }
 
@@ -958,6 +1003,7 @@ namespace
         double microsecondsPerBlock = 0.0;
         double budgetMicroseconds = 0.0;
         int tracksPlaying = 0;
+        int slotsPerTrack = 1;
 
         double percentOfBudget() const { return 100.0 * microsecondsPerBlock / budgetMicroseconds; }
     };
@@ -968,7 +1014,18 @@ namespace
         void blockProduced (const float* const*, int, int) noexcept override {}
     };
 
-    BlockCost measureBlockCost (int tracks, int outputs, int rate, int blockSize)
+    /*  ONE SOUNDING SLOT PER TRACK, WHATEVER THE SLOT COUNT, and that is the
+        shape a show runs rather than an easier one. A media cue's ranges are a
+        playlist over one file: one range sounds at a time, two only at the
+        instant of a boundary. Eight slots all playing is a rig no show ever
+        asks for, and measuring it would answer a question nobody has.
+
+        What the extra slots cost is not nothing, though, which is why they are
+        here at all: each one is a clip, a SlotControlNode and a branch of the
+        switching node above it, built into the graph at every track and
+        processed every block whether or not it is sounding. That is the cost
+        the slot design has to be affordable at. */
+    BlockCost measureBlockCost (int tracks, int outputs, int rate, int blockSize, int slots = 1)
     {
         HostRig rig;
 
@@ -982,6 +1039,7 @@ namespace
         audio::EditSpec spec;
         spec.tracks = tracks;
         spec.channelsPerTrack = 2;
+        spec.slots = slots;
         REQUIRE (rig.host.buildEdit (spec));
 
         const auto tone = writeSteadyTone (rig.storage.folder, 2, rate);
@@ -1055,7 +1113,8 @@ namespace
 
         return { micros / timedBlocks,
                  1.0e6 * blockSize / rate,
-                 playing };
+                 playing,
+                 slots };
     }
 
     juce::String report (const juce::String& name, const BlockCost& cost)
@@ -1063,7 +1122,8 @@ namespace
         return name + ": " + juce::String (cost.microsecondsPerBlock, 1) + " us/block of "
              + juce::String (cost.budgetMicroseconds, 1) + " us ("
              + juce::String (cost.percentOfBudget(), 1) + "% of real time), "
-             + juce::String (cost.tracksPlaying) + " tracks playing";
+             + juce::String (cost.tracksPlaying) + " tracks playing, "
+             + juce::String (cost.slotsPerTrack) + " slots each";
     }
 }
 
@@ -1091,6 +1151,89 @@ TEST_CASE ("M3: thirty-two cues into sixty-four outputs, at ninety-six kilohertz
         be asserted honestly. The cost itself is reported above and carried into
         the PR rather than pinned to a number this machine happened to produce. */
     CHECK (wide.microsecondsPerBlock > 0.0);
+}
+
+//==============================================================================
+/*  M11 - WHAT EIGHT SLOTS A TRACK COST, measured against M3's own number.
+
+    THE DECISION THIS IS FOR. §3.24 gives a media cue a list of ranges of one
+    file and Go.dot places the boundary between them, which means each range
+    wants a clip of its own, armed and waiting, in a slot of its own. The
+    chosen shape is S slots on every track, S being the widest range count in
+    the show, fixed when the graph is built (§3.25). The alternative, written
+    down in the plan and not built, is two slots alternated A/B - re-arming the
+    idle one while the other plays, a graph rebuild per boundary.
+
+    S slots is the better mechanism by some distance: no rebuild at a boundary,
+    every range ready before it is needed, and a boundary that can be placed as
+    far ahead as the launch latency allows. What it costs is a graph eight
+    times wider at the launcher, on every track, sounding or not. So the
+    question is arithmetic and this is where it gets answered: if eight slots
+    at the polyphony ceiling do not fit in a 96 kHz block, S is not affordable
+    and A/B is what gets built.
+
+    M3 measured the same rig at one slot. Reading the two together is the
+    point - the slot term is the difference, and it is printed at 1, 2, 4 and 8
+    so it can be read off rather than extrapolated from a single pair.
+
+    THIS REPORTS, IT DOES NOT GATE, for M3's reasons exactly: a wall-clock
+    threshold asserted on a shared CI runner is a flaky test, and Debug is not
+    the number a show runs at. The numbers go in the PR.
+*/
+TEST_CASE ("M11: thirty-two cues, eight slots each, into sixty-four outputs at ninety-six kilohertz")
+{
+    constexpr int rate = 96000;
+    constexpr int blockSize = 64;
+
+    /*  MEASURED IN ALTERNATION, ONE SLOT AND EIGHT, FOUR TIMES OVER - and that
+        is not decoration, it is the only way this number can be read.
+
+        Each of these rigs is a Tracktion engine built and torn down inside one
+        process, and the cost of a block drifts upwards with how many have been
+        built before it. It is a large drift: the same configuration measures
+        near 205 us early in a run and near 330 us eight rigs later, and after
+        M10 has built a hundred and twenty-eight Edits ahead of it, near 360.
+
+        A sweep from one slot to eight cannot tell a slot term from that, since
+        both rise together. Sweeping back down showed how bad it is - measured
+        descending, EIGHT slots came out 47 us cheaper than one, which is not a
+        fact about slots. So the two configurations that matter are interleaved
+        instead: 1, 8, 1, 8, 1, 8, 1, 8. Drift is then one step wide inside each
+        pair rather than seven, it falls on both members of the next pair
+        equally, and what is left is the difference the slots make. */
+    std::vector<BlockCost> one, eight;
+
+    for (int pass = 0; pass < 4; ++pass)
+    {
+        one.push_back (measureBlockCost (32, 64, rate, blockSize, 1));
+        eight.push_back (measureBlockCost (32, 64, rate, blockSize, 8));
+    }
+
+    double paired = 0.0;
+
+    for (int pass = 0; pass < 4; ++pass)
+    {
+        MESSAGE (report ("32 x 64 x 1 slot ", one[static_cast<std::size_t> (pass)]));
+        MESSAGE (report ("32 x 64 x 8 slots", eight[static_cast<std::size_t> (pass)]));
+
+        paired += eight[static_cast<std::size_t> (pass)].microsecondsPerBlock
+                    - one[static_cast<std::size_t> (pass)].microsecondsPerBlock;
+    }
+
+    /*  The whole difference between one slot and eight, undivided. Dividing by
+        seven would read as a per-slot figure this rig cannot resolve. */
+    MESSAGE ("eight slots less one slot, averaged over four interleaved pairs: "
+              << juce::String (paired / 4.0, 1) << " us/block, against a budget of "
+              << juce::String (one.front().budgetMicroseconds, 1) << " us");
+
+    /*  Every track really was sounding, at both slot counts - and one slot
+        each, which is the shape a show runs. A rig where the extra slots had
+        quietly kept the tracks silent would be cheap and would be measuring
+        nothing. */
+    for (const auto& cost : one)    CHECK (cost.tracksPlaying == 32);
+    for (const auto& cost : eight)  CHECK (cost.tracksPlaying == 32);
+
+    CHECK (eight.front().microsecondsPerBlock > 0.0);
 }
 
 //==============================================================================

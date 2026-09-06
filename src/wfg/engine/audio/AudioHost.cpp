@@ -29,7 +29,11 @@
     tracktion_engine_playback.cpp:124-153 #undefs and redefines VERSION
     mid-translation-unit. Nothing below is called VERSION.
 */
+#include <algorithm>
 #include <cstdint>
+#include <cstring>
+#include <typeinfo>
+#include <utility>
 #include <vector>
 
 #include <juce_core/juce_core.h>
@@ -321,24 +325,46 @@ namespace wfg::audio
                 if (auto* meter = track->getLevelMeterPlugin())
                     meter->removeFromParent();
 
-                /*  One slot per track in Phase 2: one cue per track at a time,
-                    which is what the polyphony ceiling means. */
-                track->getClipSlotList().ensureNumberOfSlots (1);
+                /*  ONE SLOT PER RANGE, and the count is the show's.
 
-                /*  The resident clip. It stays for the life of the show; arming
-                    a cue later points it at real media. Without one the slot is
-                    empty, the launcher node is not built, and the track's output
-                    stage is not in the graph at all. */
+                    Phase 2 had one: one cue per track at a time, which is what
+                    the polyphony ceiling means. §3.24 gives a media cue a list
+                    of ranges of one file, each a clip in a slot of its own, and
+                    Go.dot places the boundary between them - so the track needs
+                    as many slots as the widest cue in the show has ranges.
+
+                    Every new slot mints an EditItemID, and that id becomes a
+                    node id verbatim. Which is why the identity check is asked
+                    again at every slot count a show might use, and not only at
+                    every track count. */
+                track->getClipSlotList().ensureNumberOfSlots (std::max (1, spec.slots));
+
+                /*  A RESIDENT CLIP IN EVERY ONE OF THEM. It stays for the life
+                    of the show; arming a cue later points it at real media.
+                    Without one the slot is empty, the launcher node is not
+                    built, and - because a track's output stage hangs off its
+                    launcher nodes - the track is not in the graph at all.
+
+                    All of them rather than the first, so that the graph the
+                    identity check inspects and the callback cost measures is
+                    the graph a show with ranges actually plays. A slot filled
+                    only when a range is armed would make both of those answer
+                    about a shape that never runs. */
                 if (placeholder.existsAsFile())
                 {
                     const auto slots = track->getClipSlotList().getClipSlots();
 
-                    if (! slots.isEmpty() && slots[0] != nullptr)
-                        if (auto clip = te::insertWaveClip (*slots[0], "resident", placeholder,
+                    for (auto* slot : slots)
+                    {
+                        if (slot == nullptr)
+                            continue;
+
+                        if (auto clip = te::insertWaveClip (*slot, "resident", placeholder,
                                                             { { tracktion::TimePosition(),
                                                                 tracktion::TimeDuration::fromSeconds (1.0) } },
                                                             te::DeleteExistingClips::yes))
                             makeClipPlayAtItsOwnRate (*clip);
+                    }
                 }
 
                 auto plugin = track->pluginList.insertPlugin (
@@ -975,29 +1001,62 @@ namespace wfg::audio
             if (graph == nullptr)
                 return report;
 
-            std::vector<std::size_t> ids;
+            /*  sortedNodes, NOT orderedNodes, and at eight slots a track that
+                is the whole difference between a check and a gesture.
 
-            for (auto* n : graph->orderedNodes)
-                if (n != nullptr)
-                    ids.push_back (n->getNodeProperties().nodeID);
+                orderedNodes is the outer graph: what the processor walks, and
+                what Tracktion's own debug assertion looks at. A launcher slot
+                is not in it. SlotControlNode is an INTERNAL child of the
+                switching node above it (ArrangerLauncherSwitchingNode.cpp:70-
+                79), so a graph with eight slots on every track has exactly as
+                many ordered nodes as one with a single slot - measured, and it
+                is why the anti-vacuity bound here is not a count of slots.
+
+                But sortedNodes is built by createNodeMap, which recurses
+                through getInternalNodes (tracktion_Node.h:773-779), and it is
+                sortedNodes that findNodeWithID searches (tracktion_Utility.h:
+                82-97) - the lookup by which a rebuilt node adopts its
+                predecessor's state. SlotControlNode::prepareToPlay does
+                exactly that with the raw slot id (SlotControlNode.cpp:87-89).
+
+                So sortedNodes is the collection where a collision does harm,
+                the slots are in it and only in it, and it is what gets asked. */
+            std::vector<std::pair<std::size_t, const char*>> ids;
+
+            for (const auto& entry : graph->sortedNodes)
+                if (entry.node != nullptr)
+                    ids.emplace_back (entry.id, typeid (*entry.node).name());
 
             report.nodes = static_cast<int> (ids.size());
+            report.outerNodes = static_cast<int> (graph->orderedNodes.size());
 
-            std::vector<std::size_t> nonZero;
+            std::vector<std::pair<std::size_t, const char*>> nonZero;
 
-            for (const auto id : ids)
+            for (const auto& entry : ids)
             {
-                if (id == 0)
+                if (entry.first == 0)
                     ++report.zeroIds;
                 else
-                    nonZero.push_back (id);
+                    nonZero.push_back (entry);
             }
 
-            std::sort (nonZero.begin(), nonZero.end());
+            std::sort (nonZero.begin(), nonZero.end(),
+                       [] (const auto& a, const auto& b) { return a.first < b.first; });
 
             for (std::size_t i = 1; i < nonZero.size(); ++i)
-                if (nonZero[i] == nonZero[i - 1])
-                    ++report.duplicates;
+            {
+                if (nonZero[i].first != nonZero[i - 1].first)
+                    continue;
+
+                ++report.duplicates;
+
+                /*  std::type_info::name is not guaranteed unique across
+                    translation units, but the pointers here all come from one
+                    graph in one process, and a string compare is what makes
+                    the answer readable rather than pointer-identical. */
+                if (std::strcmp (nonZero[i].second, nonZero[i - 1].second) == 0)
+                    ++report.typedDuplicates;
+            }
 
             return report;
         }

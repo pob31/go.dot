@@ -68,6 +68,21 @@ namespace wfg::audio
 
         /** Channels per track, and so the width of a cue's source. */
         int channelsPerTrack = 2;
+
+        /*  SLOTS PER TRACK, which is how many RANGES of one file a media cue
+            can hold (§3.24): every range is a clip in a slot of its own, armed
+            looping, and Go.dot places the boundary between them.
+
+            A property of the SHOW, like the track count, fixed when the graph
+            is built and never after (§3.25) - because the graph's shape is what
+            the node identities are derived from, and changing it under a
+            running show is the rebuild nobody can afford. A range added beyond
+            this during a show has no slot and is refused until the show is
+            reloaded.
+
+            One is the Phase 2 shape and stays the default: a cue with no ranges
+            plays as it always has. */
+        int slots = 1;
     };
 
     /*  Somewhere for a block to go once the graph has produced it.
@@ -178,7 +193,16 @@ namespace wfg::audio
             thrown away. */
         struct NodeIdReport
         {
+            /** Every node an id lookup can reach: the outer graph and, inside
+                it, every internal node - which is where a launcher slot's node
+                lives and nowhere else. */
             int nodes = 0;
+
+            /*  The outer graph alone - what Tracktion's own assertion sees.
+                Reported beside `nodes` because the difference between them IS
+                the launcher, and a slot count that did not move it would mean
+                the extra slots never reached the graph. */
+            int outerNodes = 0;
 
             /*  Nodes carrying id 0 - built from no EditItem, so with no identity
                 to collide with. Tracktion's own assertion ignores them, and so
@@ -188,6 +212,13 @@ namespace wfg::audio
 
             /** Non-zero ids that appear more than once. Any is a defect. */
             int duplicates = 0;
+
+            /*  Duplicates whose two nodes are also of the same runtime type -
+                the ones that would actually adopt each other's state, since
+                the lookup that carries state across a rebuild filters by type
+                as well as by id. A duplicate that is not one of these is a
+                near miss; one of these is the bug itself. */
+            int typedDuplicates = 0;
 
             bool ok() const noexcept { return duplicates == 0; }
         };
