@@ -123,12 +123,24 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 
 #transport .hint { color: var(--ink-faint); font-size: 10px; margin-left: auto; }
 
+/*  SAID AT THE MOMENT OF CONFUSION. A list with no standby is a list where GO
+    and both arrows do nothing, on purpose: only an explicit park arms one,
+    because "next from nowhere" would have to invent a starting cue. Which is
+    right, and is indistinguishable from a broken transport unless somebody
+    says so. */
+#transport .clear-note { color: var(--standby); font-size: 11px; }
+
 /*  THE LAST REFUSAL, said out loud. OSC has no reply channel, so a write the
     engine would not take comes back only as a reading at
     /godot/engine/lastError - and a client that does not show it is a client
     where editing appears to do nothing at all. */
 #refusal { display: none; padding: 5px 12px; background: #2a1615;
            border-bottom: 1px solid var(--failed); color: var(--ink); font-size: 11px; }
+#refusal.stranded { background: #2a2116; border-bottom-color: var(--standby); padding: 10px 12px;
+                    font-size: 12px; line-height: 1.6; }
+#refusal.stranded b { color: var(--standby); font-weight: 600; }
+#refusal.stranded code { color: var(--ink); background: var(--panel-high);
+                         padding: 1px 5px; border-radius: 3px; }
 #refusal.show { display: block; }
 #refusal code { color: var(--ink-dim); }
 
@@ -174,8 +186,15 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 .row[data-enabled="no"] .name,
 .row[data-enabled="no"] .number { color: var(--ink-faint); text-decoration: line-through; }
 
+/*  THE PARKING TARGET, and it has to be findable. The wedge appears here on
+    hover, the whole cell is clickable, and the row lights its own left edge as
+    the pointer crosses it - because an eighteen-pixel column with a faint glyph
+    in it is a thing somebody can use a show without ever noticing. The author
+    did not, which is how this comment came to be written. */
 .gutter { text-align: center; color: var(--ink-faint); font-size: 11px; cursor: pointer; }
-.gutter:hover::before { content: "\25B8"; color: var(--ink-faint); }
+.gutter:hover::before { content: "\25B8"; color: var(--standby); }
+.row:hover { border-left-color: var(--rule); }
+.row:hover[data-standby="yes"] { border-left-color: var(--standby); }
 
 .number { color: var(--ink-dim); text-align: right; font-size: 12px; }
 
@@ -307,7 +326,8 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     <button data-cmd="standby.previous">▲ standby</button>
     <button data-cmd="standby.next">▼ standby</button>
     <button data-cmd="standby.clear">clear</button>
-    <span class="hint">space GO · ↑ ↓ standby · a row to inspect · its gutter to park</span>
+    <span class="clear-note" id="clear-note" hidden></span>
+    <span class="hint">space GO · ↑ ↓ standby · a row to inspect · its LEFT EDGE to park</span>
   </div>
 
   <div id="refusal"></div>
@@ -478,10 +498,37 @@ function oscEncode(address, args) {
 let socket = null;
 let socketUp = false;
 
+/*  SERVED BY THE ENGINE, OR NOT AT ALL.
+
+    This page is a client for something, and the file is sitting in the
+    repository where double-clicking it is the obvious thing to try. Opened that
+    way it has nothing to talk to - and, worse than nothing, it used to stop
+    dead: `location.host` is empty for a `file:` URL, `new WebSocket("ws:///")`
+    throws a TypeError before the socket is even attempted, and that throw came
+    out of `openSocket()`, which is called at the bottom of this script BEFORE
+    the poll is started. So the page did not fall back to reading. It sat there
+    with "connecting" in the corner and three empty panes and said nothing about
+    why, which is a quarter of an hour of somebody's evening.
+
+    Now it says so, in the one place a person is looking. */
+const servedByEngine = location.protocol === "http:" || location.protocol === "https:";
+
 function openSocket() {
+  if (!servedByEngine) return;
+
   const scheme = location.protocol === "https:" ? "wss://" : "ws://";
 
-  socket = new WebSocket(scheme + location.host + "/");
+  /*  GUARDED, because a constructor that throws here takes the whole page with
+      it - and "the address is not one a WebSocket can be opened at" is a thing
+      to recover from rather than to die of. */
+  try {
+    socket = new WebSocket(scheme + location.host + "/");
+  } catch (problem) {
+    socketUp = false;
+    setTimeout(openSocket, 2000);
+    return;
+  }
+
   socket.binaryType = "arraybuffer";
   socket.onopen = () => { socketUp = true; };
 
@@ -923,6 +970,14 @@ function renderInspector() {
 
     out += '<div class="group-head">structure</div><div class="actions">';
 
+    /*  PARK, FIRST AND BY ITSELF. The gutter does this too and is quicker once
+        somebody knows it is there; this is where they find out. A cue the
+        pointer may not stand on - inside an automatic group, in a header - is
+        refused by the engine and the refusal says which, which is a better
+        answer than a button that is not offered. */
+    out += '<button data-park="' + esc(picked) + '" title="GO will act on this cue">' +
+           "\u25B8 standby here</button>";
+
     out += '<button data-move="' + (at - 1) + '" data-parent="' + esc(parent) + '"' +
            (at > 0 ? "" : " disabled") + ' title="one earlier">▲</button>';
     out += '<button data-move="' + (at + 1) + '" data-parent="' + esc(parent) + '"' +
@@ -1003,6 +1058,14 @@ function renderStrip() {
   el("s-rt").textContent = Number.isFinite(rt) ? String(rt) : "—";
   el("s-rt-wrap").className = rt > 0 ? "stat warn" : "stat";
 
+  /*  A LIST WITH NO POINTER, said where the buttons that do nothing are. */
+  const focused = tree.get("/godot/list/focus", "") || tree.ids("/godot/list/order")[0] || "";
+  const parked = focused ? tree.get("/godot/list/" + focused + "/standby", "") : "";
+  const note = el("clear-note");
+
+  note.hidden = !focused || !!parked;
+  note.textContent = note.hidden ? "" : "standby is clear — click a row's left edge to park it";
+
   const refusal = tree.get("/godot/engine/lastError", "");
   const banner = el("refusal");
   banner.className = refusal ? "show" : "";
@@ -1054,8 +1117,39 @@ async function poll() {
         stopped moving. §3.17 asks for exactly this of the tablet, and the
         reason is the same here: a view that quietly freezes is worse than one
         that has gone, because somebody will act on it. */
-    if (failures > 2) link("down", "not connected (" + problem.message + ")");
+    /*  STALE IS SAID OUT LOUD rather than left to be inferred from numbers that
+        stopped moving, and the two reasons it can be stale are told apart. A
+        404 means something answered and it was not Go.dot - a static server
+        somebody pointed at this folder - and that is a different mistake from
+        an engine that has gone. */
+    if (failures > 2) {
+      link("down", /404/.test(problem.message)
+                     ? "no engine here (something else is serving this page)"
+                     : "not connected (" + problem.message + ")");
+    }
   }
+}
+
+/*  WHAT TO DO ABOUT IT, in the one place a person is looking. */
+function stranded() {
+  link("down", "opened as a file");
+
+  const banner = el("refusal");
+  banner.className = "show stranded";
+  banner.innerHTML =
+    "<b>This page has to be served by the engine.</b> It is open as a file on disk, so there " +
+    "is nothing behind it: no cue list, no runs, and GO does nothing.<br>Start the engine with " +
+    "<code>wfg serve &lt;bundle&gt; --sample-rate=48000 --buffer=128 --ui=clients/console</code>" +
+    " and open the address it prints, which ends in <code>/ui</code>.";
+
+  const nothing = (line, under) =>
+    '<div class="empty"><div class="line">' + line + '</div>' +
+    '<div class="under">' + under + "</div></div>";
+
+  el("cues").innerHTML = nothing("Nothing to be done.",
+                                 "This page is not talking to an engine.");
+  el("runs").innerHTML = nothing("They do not move.", "Nor will they, from here.");
+  el("inspect").innerHTML = nothing("Nothing to declare.", "");
 }
 
 /* ------------------------------------------------------------- gestures */
@@ -1174,9 +1268,13 @@ for (const button of document.querySelectorAll("#transport [data-cmd]")) {
   button.addEventListener("click", () => command(button.dataset.cmd));
 }
 
-openSocket();
-poll();
-setInterval(poll, POLL_MS);
+if (servedByEngine) {
+  openSocket();
+  poll();
+  setInterval(poll, POLL_MS);
+} else {
+  stranded();
+}
 </script>
 </body>
 </html>
