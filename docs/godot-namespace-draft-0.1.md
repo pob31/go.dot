@@ -1535,6 +1535,40 @@ not re-sort somebody else's namespace forty times a minute. Measured before and 
 | **M14** | duration exactness at rate 0.5 and 2.0 in both modes; pitch preserved under stretch, shifted under varispeed | rate at arm is what is claimed |
 | **M15** | an auto chain's member-to-member gap is exactly `2 + launchLatencyTicks` ticks, from the render | §12.1's arithmetic |
 
+#### What M10, M11 and M12 answered *(PR 3.8, 2026-09-07)*
+
+The three that gate the shape of ranges are all answered, and all three answered in the
+design's favour. Numbers on the Windows box, MSVC Release for M11, Debug for M10 and M12;
+`docs/spikes/spike03b-loop-joins.md` carries M12 in full.
+
+| | verdict | the numbers |
+|---|---|---|
+| **M10** | **no collisions anywhere** | 1..64 tracks × 1..8 slots, all 128 combinations: 0 duplicate ids, 0 nodes without one. At 64 tracks the collection an id lookup can reach grows by exactly 128 per slot added — two nodes per (track, slot) — to 1480 at eight slots, all distinct. |
+| **M11** | **S slots is affordable** | 32 tracks × 64 outputs @ 96 kHz, 64-frame blocks: ~216 µs a block at one slot, ~223 µs at eight — 32% and 33% of a 667 µs budget, against M3's 221 µs. Eight slots less one, averaged over four interleaved pairs, on three runs: +6.7, +15.1, +10.2 µs. |
+| **M12** | **the clip's own wrap wins** | 0 join error at every block size and both rates. The wrap: 0 damaged samples at 96 kHz at every block size, worst deviation 0.0065–0.014 of an amplitude of 0.5. A placed cross-slot boundary: 25–217 damaged samples and a worst deviation of 0.49, always about one block *before* the instant. `setLooping` on a clip armed not-looping never comes back. |
+
+**M10 had to be asked of a different collection before it meant anything.** The node-id check
+had looked at `orderedNodes` since Phase 2, which is the outer graph — and a launcher slot is
+not in it: `SlotControlNode` is an *internal* child of the switching node above it, so a graph
+with eight slots on every track has exactly as many ordered nodes as one with a single slot,
+456 at 64 tracks, measured. What decides state adoption across a rebuild is `sortedNodes`,
+which `createNodeMap` builds by recursing through `getInternalNodes` and which
+`findNodeWithID` searches. That is the collection the check now walks.
+
+**M11 had to be interleaved before it meant anything either.** Each rig is a Tracktion engine
+built and torn down inside one process, and the cost of a block drifts upward with how many
+have been built before it — the same configuration measures near 205 µs early in a run and
+near 330 µs eight rigs later. Measured as a descending sweep, eight slots came out 47 µs
+*cheaper* than one, which is not a fact about slots. The two configurations are therefore
+interleaved, 1 8 1 8 1 8 1 8.
+
+**M12 leaves one thing for PR 3.9 to try first.** A placed boundary is sample-accurate in
+position and lossy in content: the outgoing range stops at the start of the block containing
+its instant, up to a block early, and the incoming range starts on its sample — so a
+same-instant stop-and-play pair leaves a hole. Placing the stop one block *after* the play
+would replace the hole with an overlap of two regions, which spike 03 established does not
+comb-filter. M13 decides it from the render.
+
 ### 12.14 The direction this phase does not build — PRD §3.26
 
 Every trigger above is a processor or a console telling Go.dot to **fire** something. The author

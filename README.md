@@ -96,14 +96,28 @@ as runs in a tree, timeline and sequence, automatic and manual, with headers and
 blocking footers; a standby pointer that descends into a manual group and climbs
 out of it; rounds — shuffle, `loops`, `play N of M`, a seed that makes a shuffled
 scene rehearsable, and pruning a member for tonight without editing the show;
-parallel lists with a published focus; and triggers from OSC, MIDI and the wall
-clock. Every scheduler decision is a logged command, and five replay fixtures say
-so: an automatic chain, a descent through nested manual groups, a shuffled bed
-pruned and left at a boundary, three inputs that are not present on the machine
+parallel lists with a published focus; triggers from OSC, MIDI and the wall
+clock; and the ranges seam — a launcher slot for every region a media cue names,
+as many on every track as the show's widest cue has, each clip armed *looping*
+so its slot builds no stop for it and Go.dot places every boundary itself. Every
+scheduler decision is a logged command, and five replay fixtures say so: an
+automatic chain, a descent through nested manual groups, a shuffled bed pruned
+and left at a boundary, three inputs that are not present on the machine
 replaying them, and the waits fixture Phase 3 opened with.
 
-What is left of the phase is the audio line — ranges and in-cue loops, rate at
-arm — MIDI cues, and group-targeted fades as trims.
+Three measurements decided the shape of ranges and all three came out for it.
+The node identities are unique at every one of 1..64 tracks × 1..8 slots — asked
+of the collection the slots are actually in, which is not the one the check had
+been looking at. Eight slots on thirty-two tracks at 96 kHz cost about seven
+microseconds of a six-hundred-and-sixty-seven-microsecond block more than one
+slot does, which is inside the noise. And of three ways to carry a loop from one
+pass to the next, the clip's own wrap is the cleanest by a factor of twenty —
+zero damaged samples at 96 kHz at every block size — so a looping range is left
+alone (`docs/spikes/spike03b-loop-joins.md`).
+
+What is left of the phase is the rest of the audio line — in-cue loop counts, the
+boundary between two ranges, `advance`, rate at arm — MIDI cues, and
+group-targeted fades as trims.
 
 **There is now something to look at, and to work in.** `wfg serve <bundle>
 --ui=clients/console` serves a client from `/ui` on the OSCQuery port; open that
