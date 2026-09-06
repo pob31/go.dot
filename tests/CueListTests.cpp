@@ -220,6 +220,48 @@ TEST_CASE ("standby.set: the cue must exist, be a cue, and be at the list's top 
     CHECK (rig.standbyOf (mainList) == houseToHalf);
 }
 
+TEST_CASE ("standby.set: every kind of cue can be parked on, not only a memo and a group")
+{
+    /*  THE BUG THIS IS NAMED FOR. The handler asked whether the element was
+        literally `Cue` or `Group`, which was the whole list of cue elements when
+        it was written and stopped being it the moment Phase 2 added Media, Fade,
+        Stop and Osc. Every one of those was refused as `unknown-id` - of a cue
+        the engine had just found by that identifier - while `node.set` on the
+        same node accepted it, because the document's door asks a different and
+        correct question.
+
+        No fixture caught it: the shows that play restore their standby from
+        state.xml, which does not take this path, and the shows that exercise
+        this path have nothing in them but memos and a group. So the first
+        symptom would have been a UI that could not park on a sound cue.
+
+        Every media cue in the bundle, then, and the general question rather than
+        one example - a list of element names is what went stale the first time. */
+    Rig rig { false };
+
+    const juce::File soundBundle { juce::String (std::string (WFG_TEST_FIXTURES_DIR))
+                                     + "/bundles/first-sound" };
+    REQUIRE (doc::Bundle::open (soundBundle, rig.document).ok);
+
+    const std::string soundList = "7K2QM9X4";
+    const std::string thunder = "B3N8R5TW";              // a Media cue
+    const std::string rain = "E4GP6QSC";                 // and another
+
+    REQUIRE (rig.document.findById (thunder).getType().toString() == "Media");
+
+    CHECK (rig.run (1, "standby.set", { osc::Value::string (rain) }).applied == 1);
+    CHECK (rig.standbyOf (soundList) == rain);
+
+    CHECK (rig.run (2, "standby.set", { osc::Value::string (thunder) }).applied == 1);
+    CHECK (rig.standbyOf (soundList) == thunder);
+
+    /*  And the two doors agree, which is the property that was broken: a write
+        the command refuses must be one the node refuses too. */
+    CHECK (rig.run (3, "node.set", { osc::Value::string ("/godot/list/" + soundList + "/standby"),
+                                     osc::Value::string (rain) }).applied == 1);
+    CHECK (rig.standbyOf (soundList) == rain);
+}
+
 TEST_CASE ("standby.clear: an empty standby is a resting state, not a failure")
 {
     Rig rig;

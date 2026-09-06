@@ -73,9 +73,31 @@ namespace wfg::cue
                             if (! cue.isValid())
                                 return Outcome::rejected (reason::unknownId);
 
-                            const auto element = cue.getType().toString();
+                            /*  IS IT A CUE. Asked of the parameter table's
+                                owner word rather than of a list of element
+                                names, because that list has grown twice already
+                                and both times this line was not updated with
+                                it: Phase 2 added Media, Fade, Stop and Osc, and
+                                every one of them was refused here - as
+                                `unknown-id`, of a cue the engine had just found
+                                - while the SAME write through node.set was
+                                accepted, because the document's own door asks
+                                only whether the identifier names a child.
 
-                            if (element != "Cue" && element != "Group")
+                                Nothing caught it because no fixture parks
+                                standby on anything but a memo or a group: a
+                                show that plays restores its standby from
+                                state.xml, which does not take this path. It
+                                would have been found by the first person to
+                                click a media cue in a UI.
+
+                                `ownerForElement` is the question actually being
+                                asked - a Group is a Cue (§3.6) and so is a
+                                Media - and it is the same answer the address
+                                resolver gives, so a cue that can be addressed
+                                at /godot/cue/<id> can be parked on. */
+                            if (doc::ShowDocument::ownerForElement (
+                                    cue.getType().toString().toStdString()) != "cue")
                                 return Outcome::rejected (reason::unknownId);
 
                             if (! isTopLevelChild (list, cueId))
