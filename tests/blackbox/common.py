@@ -389,10 +389,21 @@ class Server:
 
     def __init__(self, bundle: Path, log: "Path | None" = None,
                  locale: "str | None" = None,
-                 sample_rate: int = 48000, buffer_size: int = 128):
+                 sample_rate: int = 48000, buffer_size: int = 128,
+                 hosted: bool = False, render: "Path | None" = None):
         argv = [str(find_binary()), "serve", str(bundle),
                 f"--sample-rate={sample_rate}", f"--buffer={buffer_size}",
                 "--http-port=0", "--osc-port=0"]
+
+        # --hosted puts a real Tracktion graph under the clock instead of a
+        # dummy one, and --render writes what comes out of it to a WAV. That
+        # pair is how "GO makes a sound" is asserted on a runner with no audio
+        # interface: the same code path a device would drive, minus the device,
+        # with the samples on disk afterwards for anybody to look at.
+        if hosted:
+            argv.append("--hosted")
+        if render is not None:
+            argv.append(f"--render={render}")
 
         if log is not None:
             argv.append(f"--log={log}")

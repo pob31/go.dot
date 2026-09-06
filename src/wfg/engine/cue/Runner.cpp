@@ -336,8 +336,17 @@ namespace wfg::cue
                     /*  Zero coefficients are dropped rather than written. The
                         matrix starts silent, so a zero says nothing new - and a
                         destination list of a hundred mostly-zero numbers would
-                        otherwise cost a hundred atomic stores per arm. */
-                    if (gain == 0.0)
+                        otherwise cost a hundred atomic stores per arm.
+
+                        `exactlyEqual` rather than `==`, and it is not a
+                        formality: the strict preset compiles our code with
+                        -Wfloat-equal, and MSVC does not have that warning at
+                        all - so this line built cleanly on the machine it was
+                        written on and reddened the Linux job for four commits
+                        before anybody read the log. The comparison IS exact and
+                        is meant to be; saying so is what makes that reviewable
+                        rather than suspicious. */
+                    if (juce::exactlyEqual (gain, 0.0))
                         continue;
 
                     out.push_back ({ input, firstChannel + channel,
@@ -824,7 +833,16 @@ namespace wfg::cue
                     already at silence, so Tracktion's own click suppression has
                     nothing left to suppress. */
                 if (audio != nullptr && target->track >= 0)
+                {
+                    /*  MARKED BEFORE IT IS ISSUED, so that enforceStops does
+                        not come along on the next tick and issue a second one.
+                        Two paths can stop a voice - a stop cue arriving here,
+                        and a `run.kill` that nothing else is going to act on -
+                        and the flag is what makes them one stop rather than
+                        two. */
+                    target->stopIssued = true;
                     audio->stop (target->track);
+                }
 
                 /*  With no audio side the sound cannot report its own end, so
                     the stop says it. A replay has to reach the same state as
@@ -857,6 +875,7 @@ namespace wfg::cue
             return;
 
         launchIfDue (engine, tick);
+        enforceStops();
         observeEdges (engine);
     }
 
@@ -912,6 +931,62 @@ namespace wfg::cue
 
                 engine.submit (origin::engine, "run.started", one (run->id));
             }
+        }
+    }
+
+    void Runner::enforceStops()
+    {
+        /*  A RUN THAT WAS ASKED TO STOP AND THAT NOBODY IS STOPPING.
+
+            `run.kill` marks a run `stopping` and goes no further, deliberately:
+            it is a command on the model, registered with the run table and
+            nothing else, and it must stay callable from `wfg replay` where
+            there is no audio side at all. Its own comment says the sound stops
+            and the audio side reports it - which was true of every path except
+            the one nobody had written. Nothing told the audio side.
+
+            So a killed cue read `stopping` and went on playing until its file
+            ran out. The black-box driver found it, and only because it asserted
+            on the SAMPLES: the run reached `done` inside the timeout, because
+            the file happened to end first, and every check about the model
+            passed while four seconds of audio nobody wanted went to the
+            outputs.
+
+            THE STOP GOES HERE rather than in the command, for the reason every
+            report does: this is the tick thread, which owns the Player, and a
+            command handler is re-run by a replay. It is idempotent - Tracktion
+            takes a second stop on a stopped voice quietly - and `observeEdges`
+            below is what turns the silence into `run.ended`.
+
+            A FADE-AND-STOP IS NOT THIS. That also marks its target `stopping`,
+            and it has a job counting down to a stop of its own; stopping it
+            here would land it at the moment the operator asked instead of at
+            the end of the fade, which is the whole difference between the two
+            verbs. So a run that some fade job is holding is left alone. */
+        if (audio == nullptr)
+            return;
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.state != runState::stopping
+                  || snapshot.track < 0
+                  || snapshot.stopIssued)
+                continue;
+
+            const auto held = std::any_of (running.begin(), running.end(),
+                                           [&snapshot] (const FadeJob& job)
+                                           {
+                                               return job.stopWhenDone
+                                                        && job.target == snapshot.id;
+                                           });
+
+            if (held)
+                continue;
+
+            if (auto* run = runs.find (snapshot.id))
+                run->stopIssued = true;
+
+            audio->stop (snapshot.track);
         }
     }
 

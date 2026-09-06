@@ -323,6 +323,7 @@ namespace wfg::cue
 
         void advanceFades (Engine& engine, std::int64_t tick);
         void advanceSends (Engine& engine);
+        void enforceStops();
 
         void launchIfDue (Engine& engine, std::int64_t tick);
         void observeEdges (Engine& engine);

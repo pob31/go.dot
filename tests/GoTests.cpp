@@ -949,6 +949,82 @@ TEST_CASE ("fade: a target that is not running is a no-op, applied rather than r
     CHECK (rig.audio.levels.empty());
 }
 
+TEST_CASE ("run.kill: the sound stops, and not only the run's mind about itself")
+{
+    /*  FOUND BY THE BLACK-BOX DRIVER, and findable by nothing else that
+        existed: `run.kill` marked a run `stopping` and went no further.
+
+        Its own comment was right about why - it is a command on the model,
+        registered with the run table alone so that it stays callable from
+        `wfg replay` where there is no audio side - and it said "the audio side
+        reports run.ended when it actually has", which was true of every path
+        except the one nobody had written. Nothing told the audio side.
+
+        So a killed cue read `stopping` and played on until its file ran out.
+        Every model-level assertion passed, because the run DID reach done: the
+        file ended first. Only an assertion on the samples could see the four
+        seconds of audio in between, which is the argument for having a driver
+        that listens to the render.
+
+        The stop is issued from the tick hook rather than from the command, for
+        the reason every report is: that is the thread which owns the Player,
+        and a command handler is re-run by a replay. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+    const auto track = rig.runs.find (mediaRun)->track;
+
+    REQUIRE (track >= 0);
+    REQUIRE (rig.audio.playing.count (track) == 1u);
+
+    rig.submitAndTick ("run.kill", { osc::Value::string (mediaRun) });
+
+    CHECK (rig.runs.find (mediaRun)->state == cue::runState::stopping);
+
+    rig.tickOnce();
+
+    /*  THE VOICE IS ACTUALLY SILENT, which is the half that was missing. */
+    CHECK (rig.audio.playing.count (track) == 0u);
+
+    rig.tickOnce();
+
+    /*  And the model catches up on its own, through the same edge that notices
+        a cue reaching the end of its file. */
+    CHECK (rig.runs.find (mediaRun)->isFinished());
+}
+
+TEST_CASE ("run.kill: a cue already on its way out by a fade is left to its fade")
+{
+    /*  THE ONE CASE THE FIX HAD TO BE CAREFUL OF. A stop cue with the `fade`
+        verb also marks its target `stopping`, and it has a job counting down to
+        a stop of its own. Stopping it the moment the state changed would land
+        the cue at the instant the operator asked instead of at the end of the
+        fade - which is the entire difference between the two verbs, and would
+        have turned every fade-and-stop into a hard stop with extra steps. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+    const auto track = rig.runs.find (mediaRun)->track;
+
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "1");
+    rig.fire (rig.stopId);
+
+    REQUIRE (rig.runs.find (mediaRun)->state == cue::runState::stopping);
+
+    for (int i = 0; i < 25; ++i)
+        rig.tickOnce();
+
+    /*  Halfway down and still sounding, which is what a fade-and-stop is. */
+    CHECK (rig.audio.playing.count (track) == 1u);
+    CHECK (rig.runs.find (mediaRun)->level < -1.0);
+
+    for (int i = 0; i < 40; ++i)
+        rig.tickOnce();
+
+    CHECK (rig.audio.playing.count (track) == 0u);
+}
+
 TEST_CASE ("stop: a fade over the top of a fade-and-stop does not call the stop off")
 {
     /*  AUTHOR, 2026-09-06: THE STOP HAPPENS WHEN IT SHOULD.

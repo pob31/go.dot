@@ -2012,11 +2012,27 @@ TEST_CASE ("first sound: GO reaches the outputs the cue names, at the level it n
 
     REQUIRE (engine.submit ("udp:127.0.0.1:9000", "go", {}));
 
-    /*  Long enough for the arm to be queued, the message thread's share to run,
-        the disk to answer, the launch to be placed and the sound to reach the
-        sink - and short enough that the cue is still sounding when it is
-        measured. The tone is two seconds; this is well under one. */
-    for (int i = 0; i < 45; ++i)
+    /*  PUMPED UNTIL IT IS SOUNDING, not for a count, and this is the second
+        time that distinction has cost a red build in this one test case.
+
+        Between the GO and the first sample there is an arm queued to the
+        message thread, a ValueTree write, a graph rebuild, and a disk read that
+        Tracktion's cache does on a thread of its own. Every one of those is
+        WALL-CLOCK, and the loop below is samples: how many ticks they add up to
+        is the machine's answer, not this file's. Forty-five was enough on the
+        Windows box and was not enough on a loaded macOS runner, where it failed
+        as "the cue is not playing and the outputs are silent" - which reads
+        exactly like a routing bug and is not one.
+
+        The cue then needs to be still sounding when it is measured, so this
+        stops as soon as it starts rather than running on. The tone is two
+        seconds and the wait is bounded well inside it. */
+    for (int i = 0; i < 400 && ! rig.host.trackPlayState (0).playing; ++i)
+        oneTick();
+
+    /*  And a few more, so what the sink holds is the cue's steady level rather
+        than the first partial block of it. */
+    for (int i = 0; i < 5; ++i)
         oneTick();
 
     rig.host.setBlockSink (nullptr);
@@ -2415,7 +2431,7 @@ TEST_CASE ("M4: arming a second cue does not disturb the one already playing")
         interpolation to round. If the rebuild has not touched the playing cue,
         the two are the same numbers - and if they are merely CLOSE, something
         happened and got smoothed over. */
-    CHECK (worst == 0.0);
+    CHECK (juce::exactlyEqual (worst, 0.0));
 }
 
 //==============================================================================
@@ -2543,7 +2559,7 @@ namespace
         CHECK_FALSE (rig.host.trackPlayState (0).playing);
 
         for (int n = sink.written - 64; n < sink.written; ++n)
-            REQUIRE (sink.buffer.getSample (0, n) == 0.0f);
+            REQUIRE (juce::exactlyEqual (sink.buffer.getSample (0, n), 0.0f));
 
         return result;
     }
@@ -3016,7 +3032,7 @@ TEST_CASE ("M7: a fade to silence renders digital silence, not a very small numb
     for (int n = arrival; n < sink.written; ++n)
     {
         INFO ("sample " << n << " of " << sink.written);
-        REQUIRE (sink.buffer.getSample (0, n) == 0.0f);
+        REQUIRE (juce::exactlyEqual (sink.buffer.getSample (0, n), 0.0f));
     }
 
     /*  Still running, at silence. A fade to -120 is not a stop, and the
@@ -3054,7 +3070,7 @@ TEST_CASE ("M7: a stop that fades is silent before it stops, so there is nothing
     for (int n = arrival; n < sink.written; ++n)
     {
         INFO ("sample " << n << " of " << sink.written << ", after the fade arrived");
-        REQUIRE (sink.buffer.getSample (0, n) == 0.0f);
+        REQUIRE (juce::exactlyEqual (sink.buffer.getSample (0, n), 0.0f));
     }
 
     /*  NO CLICK, ANYWHERE - and the stop is inside this range, so this is the

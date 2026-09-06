@@ -1,0 +1,21 @@
+<Show>
+  <Lists>
+    <List id="7K2QM9X4" name="Show">
+      <Media id="B3N8R5TW" file="tone.wav" name="Thunder" number="1">
+        <Route id="Z04EH7PH" bus="J3MT5XYA" gains="1 0.5"/>
+      </Media>
+      <Fade id="E4GP6QSC" duration="0.4" level="-20" name="Under" number="2" target="B3N8R5TW"/>
+      <Osc id="M5TQ7XVA" address="/desk/fader" name="Desk confirmed" number="3" timeout="4" value="f:0.75" wait="verified"/>
+      <Media id="P9XKC2WR" file="tone.wav" level="-6" name="Rain" number="4">
+        <Route id="V3XY5Z7B" bus="J3MT5XYA" gains="0 1"/>
+      </Media>
+      <Stop id="Q6RS8TW2" duration="0.2" name="Out" number="5" target="B3N8R5TW" verb="fade"/>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="K3PV7WRB" namespace="namespaces/desk.json" port="9000" prefix="/desk" queryPort="5005" readback="oscquery"/>
+  </Mounts>
+  <Audio tracks="2">
+    <Bus id="J3MT5XYA" name="Main L/R" width="2"/>
+  </Audio>
+</Show>

@@ -163,6 +163,17 @@ namespace wfg::cue
             noticed. */
         bool sawPlaying = false;
 
+        /*  Whether the tick thread has already told the audio side to stop this
+            run's voice.
+
+            ONCE, not every tick it reads `stopping`. Tracktion takes a repeated
+            stop on a stopped voice quietly, so the repetition would be harmless
+            in the show - but a stop is an OBSERVABLE, and a Player that counted
+            two of them is a Player whose tests cannot say whether the second
+            one was meant. Issuing it once is also the only version that can be
+            described in one sentence. */
+        bool stopIssued = false;
+
         bool isFinished() const noexcept
         {
             return state == runState::done || state == runState::failed;
