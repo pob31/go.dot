@@ -190,6 +190,16 @@ namespace
                        .toString().toStdString();
         }
 
+        /** The first run of a cue, or empty. */
+        std::string runOf (const std::string& cueId) const
+        {
+            for (const auto& run : runs.all())
+                if (run.cue == cueId)
+                    return run.id;
+
+            return {};
+        }
+
         /*  Parks the standby and LETS THE ARM SETTLE, which is what a show
             does: the pointer reaches a cue while the operator reads the next
             line, and the voice and the file are made ready in that time. Since
@@ -3179,4 +3189,74 @@ TEST_CASE ("rounds: a manual group ignores shuffle, because the operator is choo
                 round.push_back (record.args[i].getString());
 
     CHECK (round == std::vector<std::string> { rig.first, rig.second, rig.third });
+}
+
+
+//==============================================================================
+TEST_CASE ("parallel lists: GO acts on the focused list, and leaves the other alone")
+{
+    /*  §3.5 has several lists live at once, each with a standby of its own, so
+        that a chain started by timecode or by a trigger can never move the
+        operator's position. What decides whose standby GO means is the focus,
+        and it is one value rather than a flag per list - so nothing has to be
+        un-focused and nothing can end up with two.
+
+        The half worth asserting is the OTHER list: that it sits there with its
+        own pointer, untouched, while the focused one is being played. */
+    Rig rig;
+
+    const auto second = rig.document.createList ("Background").id;
+    const auto foyer = rig.document.createCue (second, 0, "memo", "Foyer loop").id;
+    const auto later = rig.document.createCue (second, 1, "memo", "Foyer out").id;
+
+    rig.setStandby (rig.memoId);
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (second), foyer).ok);
+
+    //  Focused on the first list, which is where a show opens.
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.memoId).empty(); }));
+
+    CHECK (rig.runOf (foyer) == "");
+    CHECK (rig.document.getAttribute ("/godot/list/" + second + "/standby") == foyer);
+
+    const auto whereTheFirstListIs = rig.standby();
+
+    //  And now the other one.
+    CHECK (rig.submitAndTick ("list.focus", { osc::Value::string (second) }).applied >= 1);
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (foyer).empty(); }));
+
+    CHECK (rig.document.getAttribute ("/godot/list/" + second + "/standby") == later);
+
+    /*  And the first list is exactly where its own GO left it. A press meant
+        for one list that moved another's pointer would be the failure §3.5 is
+        written to prevent, arriving from the inside. */
+    CHECK (rig.standby() == whereTheFirstListIs);
+}
+
+TEST_CASE ("parallel lists: firing a cue by name moves neither focus nor any standby")
+{
+    /*  `cue.fire` is what a button on a surface does, and from PR 3.7 it is
+        what a trigger does. §3.5 and §3.7 are both explicit: only GO moves the
+        standby. A cue fired from outside plays and changes nothing about where
+        the operator is - which is the whole reason a background list can be
+        driven by something other than a person without the person losing their
+        place. */
+    Rig rig;
+
+    const auto second = rig.document.createList ("Background").id;
+    const auto foyer = rig.document.createCue (second, 0, "memo", "Foyer loop").id;
+    rig.document.createCue (second, 1, "memo", "Foyer out");
+
+    rig.setStandby (rig.memoId);
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (second), foyer).ok);
+
+    const auto focusBefore = rig.document.getAttribute ("/godot/list/focus");
+
+    CHECK (rig.submitAndTick ("cue.fire", { osc::Value::string (foyer) }).applied >= 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (foyer).empty(); }));
+
+    CHECK (rig.document.getAttribute ("/godot/list/focus") == focusBefore);
+    CHECK (rig.document.getAttribute ("/godot/list/" + second + "/standby") == foyer);
+    CHECK (rig.standby() == rig.memoId);
 }

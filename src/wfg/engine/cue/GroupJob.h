@@ -36,8 +36,8 @@
     nothing, and everything it decides it decides by submitting.
 */
 
-#include <cstdint>
 #include <algorithm>
+#include <cstdint>
 #include <string>
 #include <vector>
 
