@@ -1,10 +1,12 @@
 # Go.dot — Reuse map
 
-**Draft 0.2**, 2026-09-05 (0.1 was 2026-09-04). What the author's other projects already
-provide, per Go.dot phase, and what stops each piece being used as-is. Written so the next
-phases start from it instead of rediscovering it. Draft 0.2 re-verified the Phase 2 rows
-against the checkouts, added what each one is *for* in Phase 2, and corrected one claim of
-draft 0.1 in writing rather than by deletion (§ *A correction to draft 0.1*). Paths are relative to the sibling checkouts on the
+**Draft 0.3**, 2026-09-06 (0.2 was 2026-09-05, 0.1 2026-09-04). What the author's other
+projects already provide, per Go.dot phase, and what stops each piece being used as-is. Written
+so the next phases start from it instead of rediscovering it. Draft 0.2 re-verified the Phase 2
+rows against the checkouts, added what each one is *for* in Phase 2, and corrected one claim of
+draft 0.1 in writing rather than by deletion (§ *A correction to draft 0.1*). Draft 0.3 rewrites
+the Phase 3 row now that Phase 3 is planned: it turned out there *is* something to reuse — WFS-DIY
+has a MIDI trigger — and one thing the Phase 2 plan said was reusable is corrected. Paths are relative to the sibling checkouts on the
 development machine (`D:\dev\WFS_DIY_v1`, its `spatcore` submodule, `D:\dev\juce_simpleweb`)
 and to the repositories `github.com/pob31/{WFS-DIY,spatcore,juce_simpleweb}`.
 
@@ -460,19 +462,35 @@ template, not an outlier.
 | Mock target | — | **none exists.** `tools/validation/control-replay/remote_tablet_mock.py` is a mock *client*, and nothing in `tools/` fakes a server or a device. Go.dot writes `tests/blackbox/mock_target.py` (stdlib HTTP + UDP) plus an in-process scripted target behind its own namespace-provider seam |
 | Golden drivers | `tools/validation/control-replay/common.py`: exit codes 0 pass / 1 mismatch / 2 usage / 3 app-start, an `App` launcher that polls for readiness, `OSCSender`, `oscquery_get`, `compare_or_update` | **adopted** (already Phase 1's convention) |
 
-### Phase 3 — groups, triggers, ranges
+### Phase 3 — groups, triggers, ranges (planned 2026-09-06)
 
-Nothing to reuse: no sibling project has a cue model, which is the whole reason Go.dot
-exists. What Phase 3 does have waiting for it is a decision already recorded rather than
-one to rediscover — **group waits compose with member waits rather than replacing them**
-(author, 2026-09-05). A group's pre-wait runs before its members begin theirs, so raising
-one number defers a whole scene without disturbing relative timing; a group's post-wait
-runs after every member is complete, members' own post-waits included. The full statement,
-including how it stacks through nested groups, is in
-[`godot-namespace-draft-0.1.md`](godot-namespace-draft-0.1.md) §2.4, *Waits compose*.
+**The cue model itself has nothing to reuse**: no sibling project has one, which is the whole
+reason Go.dot exists. What Phase 3 has waiting for it is a decision already recorded rather than
+one to rediscover — **group waits compose with member waits rather than replacing them** (author,
+2026-09-05; namespace draft §2.4, *Waits compose*) — and the schema already carries `preWait` and
+`postWait` on every cue, groups included, from Phase 1.2. The shape Phase 3 gives the tree is
+namespace draft §12.
 
-The schema already carries it: `preWait` and `postWait` are `cue` rows, and a Group
-inherits every Cue row, so a group has its own from Phase 1.2 onward.
+**Read the MIDI rows below in the right light (author, 2026-09-06).** WFS-DIY has a MIDI trigger
+and Go.dot is copying its *mechanism*, but that is not an endorsement of MIDI as the way in.
+`MidiSnapshotTrigger` exists because **one user wanted to drive his show from a Behringer console**
+and that console speaks MIDI CC and nothing else — an accommodation, not the favoured mode. **OSC
+is preferred**, and between Go.dot and the author's own processors it is the only sensible answer:
+they have a network, a namespace and a description of themselves, and MIDI has seven bits. So
+Go.dot implements MIDI triggers because PRD §3.7 lists them and consoles exist, and it expects the
+traffic that matters to arrive as OSC. PRD §3.26, added the same day, is that relationship in the
+other direction.
+
+Around the cue model, then, three things are reusable and one claim of the Phase 2 plan is not:
+
+| Need | Reuse | Status |
+|---|---|---|
+| A MIDI **trigger** *(the mechanism, not the preference — see above)* | `WFS_DIY_v1/Source/MidiSnapshotTrigger.h`: owns ONE `juce::MidiInput` itself rather than routing it through `AudioDeviceManager` (whose MIDI selection persists into the audio-device blob and is replayed only on the XML fast path, and whose `addMidiInputDeviceCallback` silently no-ops on a device that is not already enabled); matches on the **MIDI thread** with atomics only — no allocation, lock, log, ValueTree or Component; parks the hit in one atomic the message thread polls, latest-wins; hot-plug through `juce::MidiDeviceListConnection`, closing a port JUCE does not null when its device vanishes; reopens by identifier then by name, because `MidiDeviceInfo::identifier` is not stable across reboots; a 250 ms same-key retrigger lockout; and the note that **on Windows a MIDI port cannot be opened twice**, so a Lightpad's own port must not be chosen | **pattern adopted, code not lifted.** Go.dot's matcher is a pure function over an index the tick thread republishes, and the hit is not parked in an atomic — it is `engine.submit (trigger.fire …)`, so it lands in the log and replays with no port. The lockout becomes Phase 10's debounce *preference* (§3.7) rather than a constant; the velocity threshold is the trigger's `data` match |
+| MIDI **device selection persisted per machine** | `AppSettings::getMidiSnapshotInputId/Name` — identifier and name both stored, name as the fallback | **shape adopted**: `wfg serve --midi-in=<device>` and `--midi-out=<port>=<device>` are machine config on the command line for Phase 3; the document names only logical ports (§4.10). A saved machine profile is a later phase |
+| A MIDI **binding table** in the show | `WFSFileManager` `MidiBinding {channel 1..16, note}` per snapshot, scanned from disk with first-wins duplicate resolution reported through a callback | **conceptually the same object** as a Go.dot `Trigger` element (`channel`, `type`, `number`, `data`); Go.dot's is a child of the cue it fires, identified, and a duplicate binding fires both cues rather than one — there is no ambiguity to resolve when the trigger belongs to the cue |
+| A MIDI **cue** (output) | — | **nothing in WFS-DIY or spatcore sends MIDI.** It is in Phase 3 because PRD §3.10 requires every event type from the start and because the devices that need a Program Change do not speak anything else — not because the family does. `juce_audio_devices` is already linked in Go.dot, so `juce::MidiOutput` costs no build change; the send happens on a thread of its own because JUCE's Windows SysEx path busy-waits (`juce_Midi_windows.cpp`) |
+| Ranges and in-cue loops "on TE follow actions" (PRD §3.25, devplan) | — | **not the mechanism after all.** Read at the pin: every follow-action knob is on the graph's restart list, and the slot node stops a non-looping clip at its length before any loop lever can wrap it. Range clips are armed *looping* and Go.dot places every boundary as a queued stop/play pair (namespace draft §12.9). A PRD amendment is proposed at Phase 3's close-out |
+| A **wall-clock** trigger | — | nothing in the author's repos reads calendar time for control; Go.dot reads it in the `serve` wiring only, never in the model, and the firing is a record |
 
 ### Phase 5 — desktop UI and undo
 

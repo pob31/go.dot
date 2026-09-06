@@ -5,7 +5,9 @@ to go and measure, decisions that have surfaced early and have nowhere else to l
 one thing the author knows they have forgotten.*
 
 Two of these already have answers and are recorded here so the answer does not get lost between
-the commit that implements it and the phase that reconciles the documents.
+the commit that implements it and the phase that reconciles the documents. *Updated 2026-09-06
+with the Phase 3 plan: the group-fade question and the second-GO question now have answers
+(decisions O and N, namespace draft §9); the relative-fade half of §2 does not.*
 
 ---
 
@@ -44,6 +46,12 @@ applied as a **multiplier on top** — a master fader over a channel fader — o
 > because "a group fade is a master fader" and "a group fade is another fade" produce different
 > data structures, not just different behaviour.
 
+*(**Settled 2026-09-06, with the Phase 3 plan — decision O**: a group fade is a **trim**, a master
+fader over a channel fader. A run's level becomes `base + Σ trims`, a group run's `level` is a
+trim over its members, and PR 3.12 builds it. This is what PRD §3.6 already said — "trim, not
+write; nested trims compose" — and it is the structure §2 and §3 below need. The QLab check is
+still worth doing for the *relative-fade* half, which is not settled.)*
+
 ### 1b. Cheap to check while you are there
 
 - **A fade whose target ends on its own, mid-fade.** Does the fade cue report done, error, or
@@ -53,8 +61,11 @@ applied as a **multiplier on top** — a master fader over a channel fader — o
   expected is what an operator does, not a mistake they made.)*
 - **When a fade cue reports done to its group** — at the end of its duration, or when the level
   arrives? The two differ whenever the audio side lags the control side.
-- **A second GO on a cue that is already running.** The author chose *ignore* (decision B,
-  2026-09-05); worth confirming what the field convention actually is.
+- **A second GO on a cue that is already running.** The author chose *ignore* for media
+  (decision B, 2026-09-05) and, with the Phase 3 plan (decision N, 2026-09-06), **per kind**:
+  ignore for media and groups, *restart* for a fade or stop (it takes over from the current
+  level), a *second instance* for osc, midi and memo. Still worth confirming against the field
+  convention, since the answer is now three answers.
 - **A fade-and-stop with a duration of zero.** Instant, or refused?
 
 ### 1c. The network cue question
@@ -122,10 +133,13 @@ run into the gap twice — the fade-over-stop case above, and the group-fade cas
   got wrong, and it is the reason a desk keeps the accumulated offset separately from the
   applied one.
 
-**Go.dot's shape for it, provisionally:** a run's level becomes `base + Σ offsets` rather than a
-single number, where an absolute fade moves `base` and a relative fade moves an entry in
-`offsets`. That is the structure `run/<id>/level` would have to publish, and it is also exactly
-what a DCA is (below) — which is a strong hint that the two are one feature.
+**Go.dot's shape for it, now decided rather than provisional:** a run's level becomes
+`base + Σ trims` rather than a single number — Phase 3's PR 3.12 builds it for group fades
+(decision O) — where an absolute fade moves `base` and a relative fade would move an entry in
+`trims`. That is the structure `run/<id>/level` publishes, and it is also exactly what a DCA is
+(below) — which is why building the group fade first costs nothing later. What a *relative fade
+cue* is — which parameters admit one, how the ends clamp — is still the author's, and a PRD
+amendment.
 
 ---
 

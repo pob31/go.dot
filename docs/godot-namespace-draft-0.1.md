@@ -1,12 +1,13 @@
 # Go.dot — Parameter-tree namespace and document schema
 
-**Draft 0.4** — the PRD §9.3 "parameter-tree namespace and node metadata schema". It also
+**Draft 0.5** — the PRD §9.3 "parameter-tree namespace and node metadata schema". It also
 fixes the show-document schema, because the document is the other half of the same
 namespace: every node under `/godot/cue` is a projection of an attribute in `show.xml`.
 Draft 0.3 added §11, the shape Phase 2 gives the tree, written ahead of its code so that the
-Phase 2 pull requests have something to be reviewed against. **Draft 0.4 adds §11.8**, which
-is the other direction: what PR 2.1 measured once that code existed, including the two things
-it made the design change its mind about.
+Phase 2 pull requests have something to be reviewed against; draft 0.4 added §11.8, what PR 2.1
+measured once that code existed. **Draft 0.5 adds §12**, the shape Phase 3 gives the tree —
+groups, the run tree, triggers, ranges, MIDI — again written before its code, and records the
+four decisions the author took with the Phase 3 plan on 2026-09-06 (L–O in §9).
 
 **This is a living document, and deliberately so.** Go.dot is not a port of something that
 already works, the way WFS-DIY was a port of a Max patch — there is no finished parameter
@@ -735,6 +736,31 @@ back on if nobody feels strongly by then.
   is WASAPI/DirectSound only) and `JUCE_JACK=1` on Linux with `libjack-jackd2-dev` in the
   package list. CoreAudio needs nothing.
 
+- **L — The §3.24 proposals touching Phase 3** (settled 2026-09-06, with the Phase 3 plan):
+  ranges **may be discontiguous and in any file order** — a media cue is then a playlist over one
+  file — and **an edit to a running cue's ranges takes effect at the next iteration**. Crossfaded
+  joins and tag targeting for stop cues (§3.8) are **not built**; both stay *(proposed)*.
+
+- **M — GO on a manual sequence group fires its first member** (settled 2026-09-06): the pointer
+  lands on the second member — QLab's "start first child and enter" — and leaves the group to its
+  next sibling the moment the last member of the last round fires, so no GO is ever spent on
+  leaving. The literal reading of §3.6's "GO past the final iteration completes the group", in
+  which the pointer wraps and one more GO exits, was offered and declined; that sentence goes to
+  the author as an amendment. An infinite manual loop is left by `afterIteration`, `advance` or
+  `run.stop`.
+
+- **N — A refire is decided per kind** (settled 2026-09-06, PRD §6.6): **ignored** for media (H)
+  and for groups; a **restart** for a fade or a stop, which takes over from the level its target
+  is at; a **second instance** for an osc, midi or memo cue. "Ignore for every kind" was the
+  recommendation and was declined. A stop or fade aimed at a cue with several live runs acts on
+  the newest.
+
+- **O — A fade aimed at a group is a trim** (settled 2026-09-06): a run's level becomes
+  `base + Σ trims` and a group run's `level` is a trim over its members, which is what §3.6
+  already says ("trim, not write… nested trims compose"). Built in PR 3.12. Relative fade *cues*
+  — a delta rather than a destination — remain a PRD amendment for the author; the structure that
+  will carry them is this one.
+
 ### Open, with the subphase that forces each
 
 | # | Question | Forced by | Fallback if undecided |
@@ -770,7 +796,9 @@ Media, fades, triggers, bindings, run pointers, prepare/commit, headers and foot
 solver, timecode, surfaces, video, plugins. The tree above is the skeleton those hang on:
 a cue's outputs and parameters (Phase 2+) become further nodes under `/godot/cue/<id>`,
 run pointers become `/godot/run/<id>` (a minimal form in Phase 2, plural per group in
-Phase 3), and mounts stop being stubs in Phase 2. §11 draws the Phase 2 part.
+Phase 3), and mounts stop being stubs in Phase 2. §11 draws the Phase 2 part and §12 the
+Phase 3 one — each written before its code, so its pull requests have a text to be reviewed
+against rather than a memory.
 
 ## 11. Phase 2 — first sound: what the tree, the commands and the log gain
 
@@ -1011,3 +1039,410 @@ exists to keep the tick thread from holding a raw pointer into a playback contex
 exercise a generation swap before it, so it lands there, with the code that makes it necessary.
 `ItemIds` was the jittered identifier lattice, and M2 is the reason it is not here: it was a
 workaround for a collision that does not occur.
+
+## 12. Phase 3 — groups, triggers, ranges: what the tree, the commands and the log gain
+
+Written on 2026-09-06, before any of it exists, as §11 was for Phase 2: the approved Phase 3 plan
+drawn as a text the pull requests 3.1–3.13 can be reviewed against rather than against memory.
+Rows reach `parameters/godot-parameters.csv` with the PR that implements each of them, never
+before. Where this section and the code come to disagree, §12.15 at close-out says which won.
+
+Four decisions the author took with the plan shape it — **L** (the §3.24 proposals), **M** (GO on
+a manual group), **N** (refire per kind) and **O** (a group fade is a trim), all in §9 — and so
+does one rule Phase 2 found load-bearing and Phase 3 leans on harder than anything else did:
+
+### 12.1 The hook decides, the handler applies — and the arithmetic that forces
+
+Phase 2's rule was that *state transitions are events and continuous readouts are not*, and that
+*only the tick hook reports*. Phase 3 has a scheduler, and a scheduler is nothing but decisions,
+so the rule becomes: **every decision the scheduler takes is a logged engine-origin command** —
+spawn a member, launch it, fire it when its wait elapses, materialise a round, enter a range,
+report a group done. The hook submits; the handler applies; **a handler never submits**, because
+`wfg replay` re-injects every record *and* re-runs every handler, and a handler that reported would
+report twice. Two consequences the code forced:
+
+- A due tick computed inside a handler comes from the command's own tick
+  (`CommandContext::tick`), never from `Runner::currentTick`, which no hook sets during a replay.
+- The new hooks sit **above** `beforeTick`'s "no Player, return" line, because `wfg serve` without
+  `--hosted` has no Player and must still sequence a group of memo, osc and fade cues.
+
+**The gap at a sequence boundary is 2 + `launchLatencyTicks` ticks.** The hook at tick *n* sees a
+member's voice stop and submits `run.ended`; *n*'s drain applies it; the hook at *n+1* sees `done`
+and submits `run.launch`; *n+1*'s drain applies it; the hook at *n+2* places the launch
+`launchLatencyTicks` ahead. Same-tick reaction would need a hook to mutate the model directly,
+which replay forbids. The number is published — `/godot/engine/sequenceGapTicks` — for the reason
+`launchLatencyTicks` is: a designer timing a chain against light needs it. §3.6's sequence group
+is discrete children relaunched; the sample-accurate join is §3.24's range (§12.9), a different
+owner by design.
+
+### 12.2 `/godot/run` — a tree, and every kind gets one
+
+Every cue kind now gets a run, memo included (done on the tick *after* it fires, as an osc cue
+with `wait = none` already is), so "done" has one home: **a run is complete when its `state` is
+`done`**, every kind's loop ends its run with `run.ended`, and the group scheduler reads states from
+the table and nothing else. A run copies `preWait` and `postWait` (in ticks) from its cue at
+creation, as it copies `kind`, so an edit under a running group changes the next run and never the
+current one; a group's `mode`, `advance` and `selection` are **not** copied — §3.6 says a mid-run
+toggle takes effect at the next member boundary, so the job reads them from the document there.
+
+| Node | Type | Meaning |
+|---|---|---|
+| `/godot/run/order` | `s` | live run IDs in creation order — the first container-level node (§12.12) |
+| `/godot/run/<id>/state` | `s` | grows `waiting` (its pre-wait is running) and `postWait` (its own activity ended; the post-wait before it reports done to its parent) beside `armed \| playing \| stopping \| done \| failed` |
+| `/godot/run/<id>/parent` | `s` | the group run that spawned it, or empty at the top level |
+| `/godot/run/<id>/children` | `s` | its child run IDs in order (groups) |
+| `/godot/run/<id>/phase` | `s` | groups: `header \| members \| footer` |
+| `/godot/run/<id>/member` | `s` | groups: the cue ID of the member in progress |
+| `/godot/run/<id>/iteration`, `iterations` | `i` | groups: the round in progress and the count (0 = infinite) — the strip's `3/8` |
+| `/godot/run/<id>/round` | `s` | groups: the materialised round, cue IDs in the order they will play |
+| `/godot/run/<id>/pruned` | `s` | groups: cue IDs pruned from this run — run-local, evaporates with the run (§3.6) |
+| `/godot/run/<id>/seed` | `h` | groups: the seed the round was drawn with |
+| `/godot/run/<id>/range`, `rangeIteration` | `s`, `i` | ranged media: the range in progress and its pass — the pass is a readout computed from the sample counter, like `position` |
+| `/godot/run/<id>/rate` | `d` | media: the rate it was armed at (§12.10); read-only |
+| `/godot/run/<id>/error` | `s` | grows `no-port` (a MIDI cue's port is unbound on this machine), `bad-target` (a target the document no longer has), `no-slot` (a range beyond the slots the show was loaded with) |
+
+All `persist = none`, as every run row is.
+
+**Refire, per kind — decision N.** A GO or fire on a cue that already has a live run is *ignored*
+for `media` and `group` (applied, logged, nothing created); *restarts* a `fade` or `stop` (the
+existing takeover path, from the level the target is at now — the superseded fade's own run ends
+and a fresh one starts); creates a *second instance* of an `osc`, `midi` or `memo` cue. A stop or
+fade aimed at a cue with several live runs acts on the **newest** — `liveRunOf`'s existing answer.
+
+**Retention.** A finished run keeps its address for 250 ticks after it ended (a constant of the
+Runner, derived from the `run.ended` tick, so it is the same on replay) and is then removed with
+`PATH_REMOVED`. Gogo is present tense (§7 of the PRD); a client polling at 20 ms still sees the
+`done` it was waiting for; a four-hour show does not publish four hours of runs every tick.
+
+### 12.3 What the engine reports to itself — the scheduler's records
+
+Registered commands, replay-idempotent handlers, origin `engine`, as §11.4's are:
+
+| Command | Args | When |
+|---|---|---|
+| `run.spawn` | `s` parentRun, `s` cue, `[s run]` | the scheduler created a child run — armed if media, idle otherwise. The generated ID is the record's last argument, as every generated ID is |
+| `run.launch` | `s` run | the scheduler started a run: its pre-wait begins; the due tick is the record's tick plus the wait |
+| `run.fire` | `s` run | a pre-wait elapsed: the kind's fire path runs — media requests its launch, a fade, osc or memo fires at once. Its own record, because a replay runs no hook and skips no handler |
+| `run.done` | `s` run | a post-wait elapsed; the run reports done to its parent. Written only when there *was* a post-wait — `run.ended` sets `done` directly when the run copied none |
+| `run.round` | `s` run, `h` seed, `s` ids… | a shuffle group materialised a round. The round is the data; a replay never consults the RNG |
+| `run.range` | `s` run, `i` index | a ranged media run entered a range — at launch, at a placed boundary, or on an advance — reported when the boundary is *placed*, the `run.started` rule |
+| `run.late` | `s` run, `i` blocks | §11.4 declared it and nothing ever produced it. From Phase 3 the intended launch tick is kept on the run and the hook reports the shortfall — a GO before its arm, a range boundary its re-arm missed |
+
+### 12.4 Operator commands
+
+| Command | Node | Params | Notes |
+|---|---|---|---|
+| `run.stop` | `/godot/cmd/run/stop` | `s` run, `s` verb, `[d duration, s curve]` | the targeting object of §3.8 aimed at a *run* rather than a cue — "may target a specific run pointer". Verbs as `stop/@verb`: `hard \| fade \| afterIteration \| afterMember \| advance` |
+| `run.advance` | `/godot/cmd/run/advance` | `s` run | leave the current range at the end of its current pass (§12.9) |
+| `run.prune`, `run.unprune` | `/godot/cmd/run/prune`, `…/unprune` | `s` run, `s` cue, `s` scope | scope `round` (this round only) or `group` (every round of this run). Run-local; clicking again reinstates if not already passed (§3.6) |
+| `run.kill` | unchanged | `s` run | **now kills a run with no track** — a fade, an osc wait, a group and every descendant — immediately, and runs no footer |
+| `trigger.fire` | `/godot/cmd/trigger/fire` | `s` trigger, `[s run]` | what a matched trigger submits (§12.8); fires the trigger's cue as `cue.fire` does and never moves standby or focus |
+| `go`, `cue.fire`, `audio.arm` | unchanged | | `audio.arm` stays the explicit form and still accepts only media |
+
+**Graceful and immediate, drawn now for §4.4 later.** A **stop cue** (any verb) aimed at a group
+stops its live members per the verb, **then runs the footer**, then the group reports done — the
+same path as normal completion, entered early. **`run.kill`** on a group run kills every
+descendant and runs no footer. Esc and double-Esc in Phase 10 are these two paths bound to keys.
+
+### 12.5 Groups — `/godot/cue/<id>` grows, and two children appear
+
+| Node | Type | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/cue/<id>/selection` | `s` | rw | show | groups: `sequential \| shuffle` (§3.6) |
+| `/godot/cue/<id>/loops` | `i` | rw | show | groups: rounds to play; 1; **0 = infinite** |
+| `/godot/cue/<id>/play` | `i` | rw | show | groups: "play N of M"; 0 = all |
+| `/godot/cue/<id>/seed` | `i` | rw | show | groups: 0 = a fresh seed per run, drawn by the run and logged in `run.round`; anything else is the fixed-seed option for "random that is the same every night" |
+| `/godot/cue/<id>/headerOrder`, `footerOrder` | `s` | ro | none | groups: the cue IDs of the header and footer, in order |
+| `/godot/cue/<id>/role` | `s` | ro | none | any cue: `member \| header \| footer` — where in its group it sits |
+
+**Header and footer** are two optional child elements of `Group`, `Header` and `Footer`, each
+holding ordinary cues. They are **identified** (the `Route` precedent, and because `cue.create`
+and `object.move` address a parent by id) and carry no attributes of their own; at most one of
+each per group is a `validate()` rule. Header cues run as an auto sequence at entry and members
+wait for them; footer cues run as an auto sequence at exit and **block** completion (§3.6: "the
+group is not done until its footer's cues report done"). `order` lists members only; the cursor
+and `childrenOf` never enter a header or footer; `standby.set` refuses their cues. Phase 4 turns
+the header into the prepare horizon; nothing here forecloses that.
+
+**How a group run proceeds.** After its own pre-wait, then its header:
+
+| mode / advance | at entry | on a member's `done` | complete when |
+|---|---|---|---|
+| **timeline** | every member spawned and launched at once; each member's pre-wait is its offset from entry (§3.6). Tracks are claimed at entry, so a member that finds none fails *at entry*, visibly, not at its offset | nothing — post-wait is inert in a parallel parent | every member `done` |
+| **sequence · auto** | the first member spawned and launched; the next spawned (armed) | the armed next member launched; the one after spawned | the last member of the last round `done` |
+| **sequence · manual** | created by GO (§12.6); the header runs; members fire on GO | nothing — GO is the parent | as auto, and the pointer has already left |
+
+Then the footer, then the group's post-wait, then `run.done` to its parent. **Waits compose, they
+do not replace** — exactly as §2.4 recorded before any of this existed.
+
+**Rounds.** A round is materialised as a list when it begins (`run.round`); a shuffle re-draws
+until the first of the new round differs from the last of the previous (two members: fully
+determined, and correct). **Iterations count rounds, not playbacks.** A pruned member is removed
+from the current round or from every round of this run; an emptied round completes the group
+rather than spinning; `afterIteration` and `afterMember` are honoured at the next boundary.
+
+**Disabled cues are skipped** — by the scheduler (not spawned, not run in a header or footer) and
+by the cursor. A GO whose standby is disabled, which only a cue disabled while the pointer sat on
+it can produce, is applied, fires nothing and advances: the one GO that does nothing, logged as
+such. Phase 1's "a disabled cue is not skipped" (§2.6) is therefore superseded here.
+
+**Arming, which nothing does implicitly today.** §11.4 said "standby arms implicitly" and no code
+ever did — `audio.arm` is an operator command with no submitter in the engine, and a GO on an
+unarmed cue arms and launches in one, paying the disk. Phase 3 builds it: when a list's standby
+lands on a media cue (by any of the ways it moves) the Runner arms it; when it lands on a group,
+the Runner arms what that group would launch first. Inside a running sequence group the next
+member is armed; a timeline group arms every member at entry. Phase 4's allocator replaces this
+lookahead with claims.
+
+### 12.6 The standby cursor — decision M, and four places that move
+
+`nextOf`/`previousOf` were one level of one list. They become a cursor that **descends into an
+enabled manual sequence group** to its first enabled member, steps over timeline and auto groups
+as opaque siblings — positionally past the whole chain, the instant GO is pressed (§3.5) — skips
+disabled cues and header/footer elements, and **climbs out** to the group's next sibling when the
+members are exhausted. **Decision M**: GO at a manual group's row fires its first member (after
+the header) and lands the pointer on the second; the pointer leaves the group the moment the last
+member of the last round is fired, not a GO later. In a manual loop the cursor wraps to the next
+round's first member while rounds remain — the one fact it reads from the run table.
+
+The invariant on `list/@standby` widens from *a top-level child* to *a cue of this list whose every
+ancestor group is a manual sequence group*, in **all four places it lives**: the legality check,
+the document's write door, the repair when the standby cue is deleted (advance to the next
+remaining sibling *inside the group*, or climb out), and the clear when it is moved away.
+`standby.set` on a member of an auto or timeline group is refused with a new atom,
+**`not-manual-path`** — the pointer cannot be the parent of something the machine parents.
+`not-in-list` keeps its meanings. `standby.set` also stops refusing media, fade, stop and osc cues,
+which it has done since Phase 2 by accepting only elements named `Cue` or `Group` — a bug no
+fixture exercised, because every one parks on a memo or restores standby from `state.xml`.
+
+GO on a member whose manual group has **no live run** — the pointer was placed inside by
+`standby.set` or restored from `state.xml` — creates the group run, runs the header, and the member
+follows the header: one GO, nothing skipped. **A manual sequence group is reachable only through
+GO from standby**: `cue.fire` or a trigger aimed at one is rejected, **`needs-go`**, because
+there is nobody to be its parent, and `wfg validate` warns about a manual group nested under a
+timeline or auto group for the same reason.
+
+What descent changes that already exists, so PR 3.4 replaces rather than discovers it: decision
+C's two tests, the recorded session in `CueListTests` that asserts `standby.set` on a nested cue
+is *refused*, and every fixture that carries a `<Group>` — all manual sequence groups by default.
+
+### 12.7 `/godot/list` — the container §2.3 said Phase 3 publishes
+
+| Node | Type | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/list/order` | `s` | ro | none | list IDs in order |
+| `/godot/list/focus` | `s` | rw | **state** | the focused list; write = `list.focus`. Persisted like `standby`, so a show reopens on the list the operator was on |
+
+`go` acts on the focused list's standby; `cue.fire`, `trigger.fire` and the scheduler act on any
+list and never move focus or standby. A list with no standby and only triggers is then §3.5's
+background process, with nothing built for it.
+
+### 12.8 `/godot/trigger` — GO is one trigger among several
+
+A `Trigger` element, identified, is a child of any cue kind including `Group`; published flat by
+ID with a derived `cue`.
+
+| Node | Type, default | Meaning |
+|---|---|---|
+| `/godot/trigger/<id>/kind` | `s` — `osc \| midi \| clock` | |
+| `/godot/trigger/<id>/enabled` | `T`, true | |
+| `/godot/trigger/<id>/address` | `s` | **osc**: an address arriving on Go.dot's own OSC port **over UDP**. Refused at load under `/godot` or under any mount prefix — those are nodes, and a node write is `node.set` |
+| `/godot/trigger/<id>/value` | `s`, empty | **osc**: an atom the first argument must match (`f:1`, `T`); empty = any, including no argument |
+| `/godot/trigger/<id>/port` | `s`, empty | **midi**: a declared `Port` name (§12.11); empty = any input |
+| `/godot/trigger/<id>/channel` | `i`, 0 (0..16) | **midi**: 0 = any |
+| `/godot/trigger/<id>/type` | `s` — `noteOn \| programChange \| controlChange` | **midi** |
+| `/godot/trigger/<id>/number` | `i`, 0..127 | **midi**: note or controller |
+| `/godot/trigger/<id>/data` | `i`, −1 (−1..127) | **midi**: velocity or value to match; −1 = any |
+| `/godot/trigger/<id>/at` | `s` | **clock**: `HH:MM:SS`, local time of day; fires once each day it is crossed while the show is open |
+| `/godot/trigger/<id>/cue` | `s`, ro | derived: the cue it fires |
+
+**`trigger.fire <trigger>` is the command** (§4.11). *What* fired is the command's argument,
+never the origin — nothing enforces an origin and §11.9 says so. Origins still say where it came
+from: `udp:<ip>:<port>`, `midi:<device>`, `clock`. The handler fires the trigger's cue exactly as
+`cue.fire` does and never moves standby or focus (§3.5, §3.7); it rejects a manual sequence group
+(`needs-go`).
+
+**The matchers are pure functions over an immutable index** the tick thread republishes with the
+tree snapshot whenever the document changes, so they are tested with no socket, port or clock, and
+they run where the mount probe runs — in the `serve` wiring, outside `Engine` and `Runner`, which
+still read no clock and own no socket:
+
+- **OSC**: the namespace's write path runs the match *before* it treats an address as `node.set`
+  and *before* its argument-less early return, and only for a `udp:` origin — a WebSocket client
+  has the command set and `cue.fire`; a trigger is a device-facing input. A malformed datagram is
+  still an `X`.
+- **MIDI**: `wfg serve --midi-in=<device>` (repeatable) opens inputs; the callback matches on its
+  own thread against the index and submits. `wfg midi` lists inputs and outputs and exits 0 with
+  none. WFS-DIY's `MidiSnapshotTrigger` is the precedent for the *mechanism* and the reuse map says
+  what is taken from it: own the port rather than route it through the device manager, match on the
+  MIDI thread with nothing that allocates or locks, reopen by identifier then by name on hot-plug.
+  **It is not a statement that MIDI is the way in** (author, 2026-09-06): that trigger exists in
+  WFS-DIY because one user drives his show from a Behringer console, and **OSC is the preferred
+  carrier** — certainly between Go.dot and the author's own processors, which have a namespace and
+  a description of themselves. MIDI is here because §3.7 lists it and consoles exist.
+- **Clock**: once per tick, in the serve loop's before-tick step, the wall clock is read and
+  compared with the previous reading; a crossing submits on that tick. "Last day fired" is
+  serve-side machine state, never the document. A replay re-injects the record and consults
+  nothing — which is the whole point of the firing being a record.
+
+Debounce is a user preference (§3.7) and arrives with Phase 10's other preferences.
+
+### 12.9 `/godot/range` — ranges, in-cue loops, and what the pin actually allows (decision L)
+
+**What Tracktion at the pin does, read rather than assumed**, because it changed the design:
+
+- Every knob a follow action uses is on the graph's restart list, and the slot node captures its
+  stop duration and follow function at graph build. Nothing about a range's shape can change while
+  the graph runs, and there is no `advance` (§3.25 already says so).
+- **A clip whose `isLooping()` is false gets a finite stop duration — its length — and the slot
+  node queues that stop every block *before* it advances the launch handle.** So
+  `LaunchHandle::setLooping`, the one rebuild-free loop lever, cannot loop a clip Go.dot armed with
+  `disableLooping()`: the queued stop pre-empts the wrap at the end of the first pass. A clip armed
+  **looping** gets *no* stop duration and its wave node loops the section for ever, with no click
+  suppressor at the wrap, and nothing but a queued stop ends it.
+
+**So the mechanism is this, and it uses no follow action:**
+
+- **Every range is a clip in its own slot, armed looping** — its source, then its loop range
+  `[in, out)` — inside the one `ReallocationInhibitor` that arming already uses. One rebuild per
+  arm, exactly as today; none while it plays.
+- **Go.dot places every boundary.** The boundary of pass *k* of a range launched at sample *s* with
+  length *L* is `s + k × L`, known the moment the launch is placed. The natural end of a range
+  after *N* passes and an `advance` at the end of the current pass are the same operation: a
+  queued `stop (boundary)` on the live slot and `play (boundary)` on the next range's slot — or
+  the stop alone, after the last range — placed `launchLatencyTicks` ahead, which M5 and M6
+  measured landing on their sample. An infinite range is never stopped on its own. If the audio
+  thread's try-lock misses the block a wrap and a stop share, the stop lands at the next block
+  start: one block of restarted audio, the class of artefact spike 03 measured.
+- **Passes are readouts, transitions are events.** `rangeIteration` is computed from the sample
+  counter like `position`; entering a range is `run.range`.
+
+| Node | Type, default | Meaning |
+|---|---|---|
+| `/godot/range/<id>/name` | `s` | what the strip shows (§3.24) |
+| `/godot/range/<id>/in`, `out` | `d`, seconds | the region of the file; `out` ≤ file length is checked at arm, when the file is read, not at load |
+| `/godot/range/<id>/loops` | `i`, 1 (0 = infinite) | passes before playback continues into the next range |
+| `/godot/range/<id>/cue`, `index` | `s`, `i`, ro | derived |
+
+A media cue with no ranges plays as today. With ranges, the list is what plays and `startOffset`
+is refused beside it. **Ranges may be discontiguous and in any file order** (decision L) — a media
+cue is then a playlist over one file. **Edits take effect at the next iteration** (decision L): a
+running ranged cue does *not* copy its ranges at launch; at every boundary the job re-reads them —
+a changed `loops` is honoured then; a changed `in`/`out` re-arms that range's slot on the message
+thread (a rebuild on playing audio, which M4 measured bit-identical) and the *next* pass uses the
+new length; a range removed while playing finishes its pass and is not entered again. A boundary
+whose re-arm has not confirmed is placed late and `run.late` says so.
+
+**Slots.** Every track gets **S slots**, S = the largest range count of any media cue in the show
+(at least 1) — a property of the show, like `tracks`, fixed at load so the graph's shape never
+changes after it (§3.25). A range added beyond S during a show has no slot: refused, `no-slot`,
+until the show is reloaded, and `lastError` says so. Fallback, recorded not chosen: two slots per
+track, A/B alternated, re-arming the idle one while the other plays — if M10 or M11 find S slots
+too costly.
+
+`stop/@verb` grows **`afterIteration | afterMember | advance`**; `advance` means *the end of the
+current pass*. §3.24 also lists *advance at range end* without saying what it adds; it is not
+built until the author says.
+
+### 12.10 Rate — at arm, not live, and the PRD has to be told
+
+`media/rate` (`d`, 1, 0.25..4) and `media/rateMode` (`varispeed | stretch`) are applied **at arm**:
+the clip's beat count and its length are scaled together (scaling one alone leaves a clip that
+ends early or runs into silence); varispeed is the resampler Tracktion already uses when no
+stretcher is compiled in, stretch is Signalsmith (vendored, MIT, behind
+`TRACKTION_ENABLE_TIMESTRETCH_SIGNALSMITH`, off today). `run/<id>/rate` is a readout.
+
+**§3.24's "rate is a node, so it is automatable, fader-bindable and can carry a lane" cannot be
+honoured at this pin.** `setSpeedRatio` is a no-op on an auto-tempo clip, which every slot clip
+is; the launcher path never receives a ratio; the 1:1 rate Go.dot gets today comes entirely from
+the clip's beat count, which is on the restart list. Live rate needs a per-clip speed threaded
+into Tracktion's wave node — upstream or forked — and that is a PRD amendment for the author, put
+at close-out beside Phase 2's three.
+
+### 12.11 MIDI — cues, ports, and the thread that sends
+
+**Ports are a declaration, devices are machine config.** `Show` gains a `Midi` section holding
+`Port` elements (identified; `name`), published at `/godot/port/<id>/name`. The document says
+*"Lights"* (§4.10); `wfg serve --midi-out=<port name>=<device>` binds it to a physical output — a
+fact about this machine, like `--device=`. An unbound port is reported at start and its cues fail,
+`no-port`, never the load.
+
+| `midi` cue node | Type, default | Meaning |
+|---|---|---|
+| `/godot/cue/<id>/port` | `s` | a declared `Port` |
+| `/godot/cue/<id>/type` | `s` — `noteOn \| noteOff \| programChange \| controlChange \| pitchBend \| aftertouch \| channelPressure \| sysex` | every event type §3.10 names |
+| `/godot/cue/<id>/channel` | `i`, 1 (1..16) | |
+| `/godot/cue/<id>/number` | `i`, 0 (0..127) | note, controller or program |
+| `/godot/cue/<id>/data` | `i`, 0 (0..16383) | velocity, value, or the 14-bit bend |
+| `/godot/cue/<id>/sysex` | `s` | hex bytes, `F0 … F7` |
+| `/godot/cue/<id>/wait` | `s` — `none \| sent` | as osc, minus `verified`: MIDI has no read-back, and `verified` on a MIDI cue is refused at load |
+
+`kind` and `run/kind` grow `midi`.
+
+**The tick flush hands a batch to a sender thread.** At the end of the launch tick the tick thread
+enqueues the tick's MIDI beside its OSC datagrams — every message belonging to one GO leaves in
+the same frame (§3.4) — and a sender thread of its own puts them on the ports. Not the tick thread
+itself: on Windows a SysEx send busy-waits for the port, about 32 ms for a hundred bytes, and the
+flush also publishes the tree. Resolution is the tick plus `lateness`, as for a network cue. The
+alternative is recorded for the sequenced-MIDI-clip cue §3.10 puts in v1: a Tracktion `MidiClip`
+in a launcher slot takes the identical launch path as audio and is sample-accurate, and the host's
+block already receives the graph's MIDI output and throws it away — but it needs a lock-free
+queue off the audio thread, one hosted MIDI output demultiplexed by port, and more slots in the
+fixed graph. Right for a MIDI *clip*; more than one event needs. A replay installs no sender.
+
+### 12.12 The document layer — three pieces of plumbing, done once each
+
+- **Child elements by role.** The tree walk skipped every id-less child and special-cased `Route`;
+  it becomes a lookup — `Route`, `Range`, `Trigger`, `Header`, `Footer` — so a non-cue child is
+  published where it belongs and never as a cue that mis-indexes its siblings.
+- **Container-level nodes.** `/godot/list/order`, `/godot/list/focus`, `/godot/run/order` need
+  what §2.3 said they need: an owner token for the container itself, a container case in address
+  resolution, and a root-attribute case in the state writer and the RELAX NG generator (and
+  `<optional>` for a single non-repeating child).
+- **A `refers` column** in the parameter table names what an id-valued attribute must point at —
+  `cue`, `list`, `bus`, `port` — and replaces the hand-written standby check, covering
+  `fade/@target`, `stop/@target`, `route/@bus` and `midi/@port` in one place: the generalisation
+  the code said "Phase 3's second case" would pay for. **A dangling reference is a `wfg validate`
+  warning and a run-time `failed bad-target`, never a load refusal**: deleting a cue repairs no
+  reference today and §3.8 makes a target that is not there a silent no-op during tech, so
+  yesterday's saved show must open. Load refusals stay the explicit cases: a trigger address under
+  `/godot` or a mount prefix, `verified` on a MIDI cue, `startOffset` beside ranges.
+
+**The tree rebuild is split before triggers land.** The document half re-materialises every
+mounted node on any applied mutation — 2 480 of them with the WFS-DIY capture. The mounted subtree
+becomes its own half, rebuilt only on `mount.load`, so a trigger firing forty times a minute does
+not re-sort somebody else's namespace forty times a minute. Measured before and after (M9).
+
+### 12.13 What Phase 3 has to measure, and in which order
+
+| | what | why it gates |
+|---|---|---|
+| **M9** | wall-clock of one `node.set` with the 2 480-node capture, before and after the tree split | triggers add mutation rate |
+| **M10** | node IDs unique at 1..64 tracks × 1..8 slots, on the graph that plays | the ID check fails hard and the slot count multiplies its surface |
+| **M11** | callback cost at 32 tracks × 8 slots × 64 outputs at 96 kHz, against M3's 221 µs | S slots is the chosen shape; A/B is the fallback |
+| **M12** (spike 03b) | three joins on spike 03's chirp rig at five block sizes: the looping clip's own wrap, a `setLooping` re-trigger on a lengthened clip, the cross-slot placed boundary | the wrap is the primary; if it measures worse than a placed boundary, loops become placed same-slot `play`s |
+| **M13** | a natural and an advanced boundary land on their sample; damaged span ≤ block + 40 samples | what §3.24 promises, from the render |
+| **M14** | duration exactness at rate 0.5 and 2.0 in both modes; pitch preserved under stretch, shifted under varispeed | rate at arm is what is claimed |
+| **M15** | an auto chain's member-to-member gap is exactly `2 + launchLatencyTicks` ticks, from the render | §12.1's arithmetic |
+
+### 12.14 The direction this phase does not build — PRD §3.26
+
+Every trigger above is a processor or a console telling Go.dot to **fire** something. The author
+added PRD §3.26 on 2026-09-06 for the other thing a processor will eventually want: to **write**
+to the show — a capture verb, so that the position, send and LFO rate a designer has just found at
+WFS-DIY become a cue, or update the cue being rehearsed, the way QLab's OSC API can author and not
+only fire.
+
+Nothing in Phase 3 builds it, and it needs no new transport when it comes: §4.11 already makes
+every gesture a named command and §3.2 makes every client equal, so `cue.create` and `node.set`
+are reachable by any process that can address the engine. What §3.26 says is missing is a capture
+verb, an explicit statement of where the result lands (§3.10's *update cue*, never a silent
+write-back), and a cue-list view for the processor no wider than §3.23's. It waits for the state
+solver, because a capture is a solved state written down.
+
+Recorded here so that Phase 3's trigger table is not later mistaken for the whole of the
+relationship between Go.dot and the processors it commands.
+
+### 12.15 What Phase 3 built, against what §12 drew
+
+*Written at close-out.*

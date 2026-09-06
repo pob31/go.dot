@@ -29,7 +29,7 @@ The specification lives in `docs/`, and it is the spec — not background readin
 
 ---
 
-## Status: Phase 2 complete but for the hardware pass
+## Status: Phase 3 begun; Phase 2 complete but for the hardware pass
 
 Phase 0 — *"a repo that builds on three platforms"* — is complete, and the seven
 Tracktion Engine validation spikes have been run (`docs/spikes/`; all pass).
@@ -76,6 +76,20 @@ a device that opens at a rate nobody asked for currently **refuses**, which is t
 *refuse / warn / resample* that cannot be wrong quietly.
 [`docs/godot-open-questions-0.1.md`](docs/godot-open-questions-0.1.md) carries those, and what
 to check in QLab about fades that compound.
+
+**Phase 3 — groups, triggers, ranges — has begun**, with its documentation first, as Phase 2's
+did. Its criterion is *a complex background auto-sequence with a looping ambience runs while
+manual foreground cues fire on top; an advance cue exits the loop cleanly; the replay log
+reproduces all of it*. What it builds: groups as runs in a tree with a scheduler whose every
+decision is a logged command, headers and blocking footers, shuffle with materialised rounds, a
+standby pointer that descends into a manual group, parallel lists with a published focus, triggers
+from OSC, MIDI and the wall clock, ranges and in-cue loops as looping clips with every boundary
+placed by Go.dot, and MIDI cues. §12 of the namespace draft is that shape written before the
+code, and §9 records the four decisions the author took with the plan on 2026-09-06 — among them
+that a fade aimed at a group is a *trim*, which is the structure relative fades and DCAs will
+share. Two things the plan found by reading the engine rather than the documents: nothing arms a
+cue at standby yet, and Tracktion's slot node stops a non-looping clip before any rebuild-free
+loop lever can wrap it — so range clips are armed looping and the boundaries are Go.dot's.
 
 The documents come first, and they are the thing to read before the code:
 
@@ -202,12 +216,14 @@ The documents come first, and they are the thing to read before the code:
   They are throwaway by construction: they may link `wfg::thirdparty` and never
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
-**What does not exist yet.** Nothing is *sent* to a mounted target: writes land in the tree
-the log AND the wire: everything a tick writes to a mounted node leaves together at the end of it,
-so the twelve messages of one GO are one gesture rather than a dribble (§3.4).
-Nothing *fires* a cue, so the standby is a pointer with nothing at the end of it yet. A
-group is an opaque sibling to that pointer, and descending into one is Phase 3, along with
-parallel lists and the published focus node.
+**What does not exist yet.** A group has no runtime: it is an opaque sibling to the standby
+pointer, and descending into one, running its members, its header and its footer is Phase 3 —
+along with parallel lists and the published focus node, triggers other than GO, ranges and in-cue
+loops, and MIDI in either direction. Nothing arms a cue when it becomes standby; a GO on an
+unarmed cue arms and launches in one and pays the disk. A cue's pre-wait and post-wait are stored
+and read by nothing. Finished runs keep their addresses for ever. Everything a tick writes to a
+mounted node leaves together at the end of it, so the twelve messages of one GO are one gesture
+rather than a dribble (§3.4) — that part is Phase 2's and does exist.
 
 The OSCQuery server does not advertise itself over mDNS — clients are pointed at a host and
 a port, and `juce::NetworkServiceDiscovery` is not mDNS. It speaks no TLS, and
@@ -217,8 +233,8 @@ than told the node does not exist. Bundle time tags are carried and preserved bu
 scheduled — Phase 4's state solver is where a time tag starts meaning something, and
 honouring one now would tell a client its timing had been respected when it had not.
 
-No UI, no third-party plugin hosting, no video. There is an audio graph, and it is exact
-and measured, but nothing fires a cue into it yet: GO is PR 2.3.
+No UI, no third-party plugin hosting, no video. There is an audio graph, exact and measured,
+and GO fires a cue into it.
 
 **Open questions, deliberately unanswered anywhere in this tree**
 

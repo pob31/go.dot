@@ -129,7 +129,11 @@ while manual foreground cues fire on top; an advance cue exits the loop cleanly;
 the replay log reproduces all of it.
 
 **Needs from the author:** restart-vs-second-instance policy (PRD §6.6);
-confirmation or rejection of the *(proposed)* items in §3.24.
+confirmation or rejection of the *(proposed)* items in §3.24. **Both answered
+2026-09-06** — decisions L and N in `godot-namespace-draft-0.1.md` §9, along with
+M (GO on a manual group) and O (a group fade is a trim). The phase's own shape is
+§12 of that draft; ranges turned out **not** to map onto TE follow actions and the
+line above saying they do is superseded there.
 
 ---
 
@@ -305,6 +309,12 @@ discontinuity, and each stop level does exactly its guarantee and nothing more.
   tags; pane contract; BLE sidecar in Rust with `btleplug`, speaking Choufleur's
   opcode table; Go.dot relays the buzz. Embedded vs docked decided here.
 - **OSC device templates** as OSCQuery namespace descriptions; ADM-OSC built in.
+- **Authoring from a processor** (PRD §3.26, added 2026-09-06): the capture verb
+  that lets WFS-DIY write a cue rather than only be commanded by one — QLab's
+  authoring API in Go.dot's own protocol. It needs no new transport (§4.11 already
+  makes every gesture a command); what it needs is the verb, an explicit landing
+  place, and a cue-list view for the processor. Here because a capture is a solved
+  state written down, so it wants §3.13 finished.
 - **Stream Deck** profile (bitmap renderable, triggering role); **SpaceMouse**
   as a rate endpoint; further surface profiles.
 

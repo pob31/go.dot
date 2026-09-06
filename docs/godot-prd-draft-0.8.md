@@ -1437,6 +1437,64 @@ still on JUCE 8 at the time of writing. Linux native multitouch is a JUCE 9
 feature (`JUCE_USE_XINPUT`, XInput2 touch events), so **that surface is gated on
 Tracktion adopting JUCE 9** and cannot be unlocked from Go.dot's side.
 
+### 3.26 Authoring from a processor — Go.dot's own programming protocol
+
+*Added in 0.8, at the author's direction (2026-09-06).*
+
+Every section above describes Go.dot **commanding** a processor: a cue asserts a
+value, §3.11 reads it back, §3.22 says how the processor described itself. The
+other direction is missing, and it is the one a designer is in all afternoon —
+sitting at WFS-DIY, having just found the position, the reverb send and the LFO
+rate that work, wanting *that* to become a cue, or to update the cue currently in
+rehearsal.
+
+QLab has an answer to this and it is one of the reasons people script against it:
+its OSC API can **create and edit** cues, not only fire them, so a remote client
+can author a show. Go.dot should have the same capability, **in its own
+protocol**, spoken first by WFS-DIY and then by the rest of the family.
+
+**Most of the machinery already exists, and nothing new belongs at the transport
+layer.** §4.11 makes every gesture a named command and §3.2 makes every client
+equal, so `cue.create`, `node.set` and the rest are already reachable over OSC and
+OSCQuery from any process that can address the engine. A processor writing a cue
+is a client exactly as the tablet is a client.
+
+Three things are missing, and they are what the protocol has to specify:
+
+1. **A capture verb.** "Make a cue of what I am doing now" is one request, not a
+   sequence of writes the processor composes. Go.dot answers it by asking the
+   processor for the state it declares — §3.11's read-back, running in the
+   direction it already runs — and writing a cue that asserts what came back. That
+   keeps the knowledge of *what is worth capturing* where it belongs: in the
+   processor, which knows which of its parameters are a scene and which are a
+   preference.
+2. **Where it lands, said explicitly.** A new cue after the standby, a new cue at
+   the end of a named list, or an update to an existing cue by ID. The last is
+   §3.10's "capture into a cue is an explicit *update cue* action, never a silent
+   write-back", seen from the other end, and the rule survives the change of
+   direction: **a processor may never silently rewrite a cue somebody is
+   rehearsing.**
+3. **What the processor may know about the show.** §3.23 already exposes a
+   cue-list namespace to Choufleur — number, name, ID, tags. A processor authoring
+   cues needs that same view and no more: enough to say "update cue 12.5", never
+   enough to become a second cue list.
+
+**Triggers are the same relationship seen from the other side, and OSC is the
+carrier for both.** A processor that can author a cue can also fire one, and it
+does so as §3.7 says — a trigger that never moves standby. MIDI stays in the
+trigger vocabulary for the consoles that only speak it; it is **not** the route
+between Go.dot and the author's own processors, which have a network and a
+namespace and should use them.
+
+**The licence direction is §3.23's, and here it costs nothing**: both ends are
+GPL-3 and both are the author's, so the protocol can be documented and free
+without either end constraining the other.
+
+**Not scheduled**, and deliberately so. It belongs after the state solver (§3.13)
+has settled what a cue's content *is* for a mounted namespace, because a capture
+is exactly a solved state written down. Phase 11's integrations is the earliest
+honest home for it.
+
 ---
 
 ## 4. Constraints as law
