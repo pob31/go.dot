@@ -2,47 +2,47 @@
 
 ## Verdict
 
-**The clip's own loop wrap is the cleanest of the three, and a looping range is left alone.**
-That is M12 answered, and it answers it in Go.dot's favour: PR 3.8 already arms every range
-clip looping, and nothing more has to be built to carry a range from one pass to the next.
+**The clip's own loop wrap is the cleanest of the three, at every configuration, and a
+looping range is left alone.** That is M12 answered, and it answers in the design's favour:
+PR 3.8 already arms every range clip looping, and nothing more has to be built to carry a
+range from one pass to the next.
 
-Three findings, in the order they matter.
+Three findings.
 
-**1. The wrap is free, and at 96 kHz it is perfect.** `join_error_samples = 0` at every block
-size at both rates — the second pass lands on exactly the sample that continues the first,
-with nothing dropped and nothing repeated. At 96 kHz the damaged span is **zero samples at
-every block size from 64 to 1024**: the reference and the render agree to within 16-bit
-quantisation noise right through the wrap. At 48 kHz the span is zero at 64 and 128 frames and
-grows to 381 samples at 512 and 1024, with a worst deviation of 0.027 against an amplitude of
-0.5 — **5% of full scale, 4 ms of very slightly wrong audio at a block size no show runs.**
+**1. The wrap wins everywhere, by between five and twenty thousand times.** `join_error_samples
+= 0` at every block size at both rates — the second pass lands on exactly the sample that
+continues the first, nothing dropped and nothing repeated. The damage around the join, measured
+as the summed squared deviation from the reference, is smaller than a placed boundary's at
+**every one of the ten configurations**, by a factor between 5.5 (48 kHz, 1024 frames) and
+23 000 (96 kHz, 128 frames). At 96 kHz up to 256 frames there is no damaged sample at all: the
+render and the reference agree to within 16-bit quantisation noise straight through the wrap.
 
-**2. `LaunchHandle::setLooping` on a clip armed not-looping does nothing, at every block size
-and both rates.** The clip stops at the end of its first pass and does not come back. This is
+**2. `LaunchHandle::setLooping` on a clip armed not-looping does nothing**, at every block size
+and both rates. The clip stops at the end of its first pass and does not come back. This is
 what the sources said would happen and it is now measured: `SlotControlNode` captures a stop
 duration when the graph is *built* — the clip's length in beats when `isLooping()` is false —
 and queues that stop every block, ahead of the wrap. `setLooping` is a rebuild-free seqlock
 store and cannot remove a duration that was already captured.
 
 **This is why "every range clip is armed looping" is a mechanism and not a setting.** A range
-clip that were armed the other way could never be made to loop, and the failure would be
-silence at the end of the first pass rather than an error.
+clip armed the other way could never be made to loop, and the failure would be silence at the
+end of the first pass rather than an error.
 
-**3. A placed cross-slot boundary costs up to one block of GAP, and that is new.** The
-alignment is perfect — `join_error_samples = 0` everywhere, so the incoming range starts on
-exactly the right sample — but the damage is **up to half of full scale**, and its worst point
-is always at a *negative* offset: −32, −96, −192, −608 samples, always about one block before
-the boundary. The outgoing range stops at the start of the block containing the boundary
-rather than at the boundary sample, and what is left is a hole.
+**3. A placed cross-slot boundary costs a fixed ~25–33 samples of loud damage, and it is
+Tracktion's own stop fade.** The position is perfect — `join_error_samples = 0`, so the
+incoming range starts on exactly the right sample — but the outgoing range is taken down with
+a one-sided decay: 25 samples at 96 kHz and 26–33 at 48 kHz, **independent of block size**, one
+of which is actually silent, with a worst deviation of 0.49 against an amplitude of 0.5. That
+is `SlotControlNode::processStop`'s `lastSampleFadeLength = std::min (numFrames, 40u)`, which
+spike 03 identified and quoted. It is a fade where the reference expects material, not a hole.
 
-That is a design finding for PR 3.9 rather than a defect here: **a boundary between two ranges
-should not queue its stop and its play at the same instant.** Letting the outgoing range run a
-block past the boundary trades a gap for a brief overlap, and spike 03 already established
-that two overlapping copies of one file are sample-aligned. M13 is where that gets decided
-from the render.
+Small — 0.26 ms at 96 kHz — and it is the price of every boundary *between* ranges, which is
+unavoidable and is M13's to bound. It is not a price a *looping* range has to pay, which is the
+whole of what M12 was asked.
 
 ## Criterion
 
-Not one of PRD §6.1's seven. This is **M12 of the Phase 3 plan**, which the plan states as:
+Not one of PRD §6.1's seven. This is **M12 of the Phase 3 plan**:
 
 > **M12 (spike 03b)** | on spike 03's chirp rig, three joins side by side at 5 block sizes:
 > the looping clip's own wrap, a `LaunchHandle::setLooping` re-trigger on a lengthened clip,
@@ -65,10 +65,22 @@ ambiguous modulo one period and every join would measure as perfect. What is rep
 **difference of two alignments**, one before the join and one after, because TE's launch
 instant is not reproducible (spike 04) and the jitter is common to both.
 
-Added on top of spike 03: the **damaged span**, being how many consecutive samples around the
-join differ from the reference by more than 0.02, and the worst deviation with the offset it
-occurred at. A join can land on its sample and still have a click, and that is exactly what
-the placed boundary turns out to do.
+Added on top of spike 03, and each one earned:
+
+- the **longest unbroken run** of damaged samples, rather than first-to-last: a span counted
+  from the first damaged sample to the last is inflated by isolated quantisation stragglers,
+  and comparing two inflated numbers compares two amounts of inflation;
+- how many of the damaged samples were **silent** while the reference was not, which is what
+  tells a gap from a fade from wrong material;
+- the **energy** — summed squared deviation over the window — which is what the verdict
+  compares.
+
+**Energy, and not length, and this rig showed why.** At 48 kHz with 512-frame blocks the wrap's
+longest damaged run is 55 samples and a placed boundary's is 33, so by length the placed
+boundary wins — while the wrap's worst deviation is 0.027 and the placed boundary's is 0.49,
+eighteen times louder. A longer, quieter blemish is not worse than a shorter, louder one, and
+length alone cannot say so. Both are still reported, because a single number nobody can
+decompose is a number nobody can argue with.
 
 ## How it was run
 
@@ -88,54 +100,51 @@ hand would compare five different launch jitters.
 `join_error_samples` is **0** in every cell that measured, at both rates and every block size.
 What varies is the damage.
 
-### 48 kHz — damaged span in samples (worst deviation, against amplitude 0.5)
+### Damage energy — summed squared deviation over ±4096 samples of the join
 
-| block | wrap | setLooping | placed |
-|---|---|---|---|
-| 64   | **0** (0.013) | did not come back | 58 (0.498) |
-| 128  | **0** (0.013) | did not come back | 122 (0.496) |
-| 256  | 130 (0.026) | did not come back | 129 (0.496) |
-| 512  | 381 (0.027) | did not come back | 129 (0.496) |
-| 1024 | 381 (0.027) | did not come back | 641 (0.311) |
+| block | 48 kHz wrap | 48 kHz placed | 96 kHz wrap | 96 kHz placed |
+|---|---|---|---|---|
+| 64   | **0.00017** | 1.067 | **0.000043** | 0.071 |
+| 128  | **0.00017** | 1.061 | **0.000043** | 0.998 |
+| 256  | **0.049**   | 1.088 | **0.000043** | 0.950 |
+| 512  | **0.144**   | 1.088 | **0.024**    | 0.950 |
+| 1024 | **0.144**   | 0.795 | **0.072**    | 0.950 |
 
-### 96 kHz — damaged span in samples (worst deviation)
+### Longest unbroken damaged run, in samples (worst deviation, against amplitude 0.5)
 
-| block | wrap | setLooping | placed |
-|---|---|---|---|
-| 64   | **0** (0.0065) | did not come back | 25 (0.101) |
-| 128  | **0** (0.0065) | did not come back | 89 (0.500) |
-| 256  | **0** (0.0065) | did not come back | 217 (0.487) |
-| 512  | **0** (0.013) | did not come back | 217 (0.487) |
-| 1024 | **0** (0.014) | did not come back | 217 (0.487) |
+| block | 48 kHz wrap | 48 kHz placed | 96 kHz wrap | 96 kHz placed |
+|---|---|---|---|---|
+| 64   | **0** (0.013) | 26 (0.498) | **0** (0.0065) | 25 (0.101) |
+| 128  | **0** (0.013) | 26 (0.496) | **0** (0.0065) | 25 (0.500) |
+| 256  | 38 (0.026) | 33 (0.496) | **0** (0.0065) | 25 (0.487) |
+| 512  | 55 (0.027) | 33 (0.496) | **0** (0.013)  | 25 (0.487) |
+| 1024 | 55 (0.027) | 33 (0.311) | **0** (0.014)  | 25 (0.487) |
 
-**Read the deviations, not only the spans.** A wrap's worst deviation is 0.0065 to 0.027 —
-between 1.3% and 5.4% of the material, which is the residue of a 16-bit file read back through
-a float graph. A placed boundary's is 0.49, which is the material being *absent*. The two
-columns are not measuring the same kind of wrongness.
+`setLooping` reports *it stopped at the end of the first pass and did not come back* in all ten
+cells.
+
+Silent samples inside the damage: **1** for every placed boundary, at every configuration; 0, 2
+or 6 for a wrap. Neither join is a hole.
 
 ## What was learned
 
-**The wrap is not merely acceptable, it is the best join available in this engine.** At 96 kHz
-it is indistinguishable from the reference. That settles the plan's fallback — "loops become
-placed same-slot `play` per pass" — as unnecessary, and it means an ambience bed looping for
-four hours costs Go.dot nothing per pass: no command, no placed instant, no run record.
+**The wrap is not merely acceptable, it is the best join available in this engine**, and at
+96 kHz up to 256 frames it is not a join at all — the render is the reference. That settles the
+plan's fallback, "loops become placed same-slot `play` per pass", as unnecessary, and it means
+an ambience bed looping for four hours costs Go.dot nothing per pass: no command, no placed
+instant, no run record, and no artefact.
 
-**A placed boundary is sample-accurate in position and lossy in content**, and those are
-different properties that spike 03 did not have to separate because a follow action never gets
-to choose. Go.dot does choose, and PR 3.9 should choose to overlap rather than to butt:
+**The damage that does exist at 48 kHz with large blocks is quiet and worth a listen.** 55
+samples at 5% of full scale is 1.1 ms of very slightly wrong audio at 512 and 1024 frames —
+inaudible on a bed, possibly not on a transient. The hardware checklist already carries "a loop
+boundary *listened to* at 128 and 256 frames"; this adds 512 at 48 kHz to it, and says the
+other cells need no ear.
 
-- the stop lands at the start of the block containing its instant, up to a block early;
-- the play lands on its sample;
-- so a same-instant pair leaves a hole of up to one block.
-
-Placing the stop one block *after* the play would replace the hole with an overlap of two
-different regions. Whether that is better is M13's question, measured from the render, and it
-is the first thing PR 3.9 should try.
-
-**The 48 kHz wrap at 512 and 1024 frames is worth one more look before Phase 3 closes.** 381
-samples at 0.027 is 8 ms of audio that is 5% wrong — inaudible on a bed, possibly not on a
-transient. The hardware checklist already carries "a loop boundary *listened to* at 128 and
-256 frames"; this adds 512 to it.
+**A placed boundary's cost is a constant, which is good news for PR 3.9.** It does not grow
+with the block size, because it is not a scheduling error: it is Tracktion's fixed 40-sample
+stop decay, capped at the block length. So a range playlist's boundaries cost 25–33 samples
+each however the rig is set up, and M13's bound — *damaged span ≤ block + 40 samples* — is met
+with room to spare before PR 3.9 has written a line.
 
 ## Status
 

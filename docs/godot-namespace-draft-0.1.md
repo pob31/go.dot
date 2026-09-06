@@ -1545,7 +1545,7 @@ design's favour. Numbers on the Windows box, MSVC Release for M11, Debug for M10
 |---|---|---|
 | **M10** | **no collisions anywhere** | 1..64 tracks × 1..8 slots, all 128 combinations: 0 duplicate ids, 0 nodes without one. At 64 tracks the collection an id lookup can reach grows by exactly 128 per slot added — two nodes per (track, slot) — to 1480 at eight slots, all distinct. |
 | **M11** | **S slots is affordable** | 32 tracks × 64 outputs @ 96 kHz, 64-frame blocks: ~216 µs a block at one slot, ~223 µs at eight — 32% and 33% of a 667 µs budget, against M3's 221 µs. Eight slots less one, averaged over four interleaved pairs, on three runs: +6.7, +15.1, +10.2 µs. |
-| **M12** | **the clip's own wrap wins** | 0 join error at every block size and both rates. The wrap: 0 damaged samples at 96 kHz at every block size, worst deviation 0.0065–0.014 of an amplitude of 0.5. A placed cross-slot boundary: 25–217 damaged samples and a worst deviation of 0.49, always about one block *before* the instant. `setLooping` on a clip armed not-looping never comes back. |
+| **M12** | **the clip's own wrap wins, at every configuration** | 0 join error at every block size and both rates. Damage energy - summed squared deviation around the join - is smaller for the wrap than for a placed boundary in all ten cells, by 5.5× to 23 000×; at 96 kHz up to 256 frames the wrap has no damaged sample at all. A placed boundary costs a fixed 25–33 samples at 0.49 of an amplitude of 0.5, block-size independent, which is `SlotControlNode`'s own 40-sample stop decay. `setLooping` on a clip armed not-looping never comes back. |
 
 **M10 had to be asked of a different collection before it meant anything.** The node-id check
 had looked at `orderedNodes` since Phase 2, which is the outer graph — and a launcher slot is
@@ -1562,12 +1562,12 @@ near 330 µs eight rigs later. Measured as a descending sweep, eight slots came 
 *cheaper* than one, which is not a fact about slots. The two configurations are therefore
 interleaved, 1 8 1 8 1 8 1 8.
 
-**M12 leaves one thing for PR 3.9 to try first.** A placed boundary is sample-accurate in
-position and lossy in content: the outgoing range stops at the start of the block containing
-its instant, up to a block early, and the incoming range starts on its sample — so a
-same-instant stop-and-play pair leaves a hole. Placing the stop one block *after* the play
-would replace the hole with an overlap of two regions, which spike 03 established does not
-comb-filter. M13 decides it from the render.
+**M12 also priced the boundary PR 3.9 has to place.** A placed cross-slot boundary is
+sample-accurate in position and costs a fixed 25–33 samples of one-sided decay on the outgoing
+range — `SlotControlNode`'s `lastSampleFadeLength = std::min (numFrames, 40u)`, which spike 03
+identified. It does not grow with the block size, because it is not a scheduling error. So
+M13's bound, *damaged span ≤ block + 40 samples*, is met before PR 3.9 has written a line, and
+the boundary between two ranges needs no cleverness to meet it.
 
 ### 12.14 The direction this phase does not build — PRD §3.26
 

@@ -225,6 +225,37 @@ namespace
         long long count = 0;       ///< how many were damaged inside that span
         double worst = 0.0;
         long long worstAt = 0;
+
+        /*  THE LONGEST UNBROKEN RUN of damaged samples, which is a different
+            number from `span` and is the one an ear responds to. `span` counts
+            from the first damaged sample to the last, so two isolated
+            quantisation stragglers a thousand apart report a span of a thousand
+            and describe nothing. */
+        long long longestRun = 0;
+
+        /*  How many of the damaged samples were SILENT while the reference was
+            not - which is what tells a gap from a fade from wrong material. A
+            hole reads as silence; Tracktion's own 40-sample stop decay reads as
+            damage that is not silence; a boundary landing on the wrong material
+            reads as neither. */
+        long long silent = 0;
+
+        /*  THE SUM OF SQUARED DEVIATIONS over the whole inspected window, and
+            it is what the verdict compares.
+
+            Comparing on the longest damaged RUN alone gets the answer wrong,
+            and this rig demonstrated it: at 48 kHz with 512-frame blocks the
+            wrap's run is 55 samples and a placed boundary's is 33, so by run
+            length the placed boundary wins - while the wrap's worst deviation
+            is 0.027 and the placed boundary's is 0.49, eighteen times louder.
+            A longer, quieter blemish is not worse than a shorter, louder one,
+            and length alone cannot say so.
+
+            Energy integrates both, which is roughly what an ear does over a
+            millisecond. Reported beside the length and the depth rather than
+            instead of them, because a single number nobody can decompose is a
+            number nobody can argue with. */
+        double energy = 0.0;
     };
 
     template <typename ReferenceAt>
@@ -237,6 +268,7 @@ namespace
 
         long long first = -1;
         long long last = -1;
+        long long run = 0;
 
         for (long long n = joinAt - damageRadius; n <= joinAt + damageRadius; ++n)
         {
@@ -253,6 +285,8 @@ namespace
 
             const auto difference = std::abs (actual - *expected);
 
+            damage.energy += difference * difference;
+
             if (difference > damage.worst)
             {
                 damage.worst = difference;
@@ -266,6 +300,16 @@ namespace
 
                 last = n;
                 ++damage.count;
+
+                ++run;
+                damage.longestRun = std::max (damage.longestRun, run);
+
+                if (std::abs (actual) < damageFloor && std::abs (*expected) >= damageFloor)
+                    ++damage.silent;
+            }
+            else
+            {
+                run = 0;
             }
         }
 
@@ -842,6 +886,9 @@ namespace
         report.value (key ("confident"), join.confident ? 1 : 0);
         report.value (key ("damaged_span_samples"), join.damage.span);
         report.value (key ("damaged_samples"), join.damage.count);
+        report.value (key ("longest_damaged_run"), join.damage.longestRun);
+        report.value (key ("silent_samples"), join.damage.silent);
+        report.value (key ("damage_energy"), join.damage.energy);
         report.value (key ("worst_deviation"), join.damage.worst);
         report.value (key ("worst_at_offset"), join.damage.worstAt);
     }
@@ -874,8 +921,10 @@ int main (int argc, char** argv)
         laptop running a rehearsal is set to. */
     bool anyWrap = false;
     bool anyPlaced = false;
-    long long worstWrapSpan = 0;
-    long long worstPlacedSpan = 0;
+    long long worstWrapRun = 0;
+    long long worstPlacedRun = 0;
+    double worstWrapEnergy = 0.0;
+    double worstPlacedEnergy = 0.0;
 
     for (const int blockSize : { 64, 128, 256, 512, 1024 })
     {
@@ -889,16 +938,22 @@ int main (int argc, char** argv)
         reportJoin (report, "setlooping", relooped, blockSize);
         reportJoin (report, "placed", placed, blockSize);
 
+        /*  The worst configuration of each, on both measures. Not the span -
+            first-to-last is inflated by isolated quantisation stragglers either
+            side, and comparing two inflated numbers compares two amounts of
+            inflation. */
         if (wrap.reached)
         {
             anyWrap = true;
-            worstWrapSpan = std::max (worstWrapSpan, wrap.damage.span);
+            worstWrapRun = std::max (worstWrapRun, wrap.damage.longestRun);
+            worstWrapEnergy = std::max (worstWrapEnergy, wrap.damage.energy);
         }
 
         if (placed.reached)
         {
             anyPlaced = true;
-            worstPlacedSpan = std::max (worstPlacedSpan, placed.damage.span);
+            worstPlacedRun = std::max (worstPlacedRun, placed.damage.longestRun);
+            worstPlacedEnergy = std::max (worstPlacedEnergy, placed.damage.energy);
         }
     }
 
@@ -914,14 +969,16 @@ int main (int argc, char** argv)
                                        : "the clip's own wrap could not be brought about, so"
                                          " there is nothing to compare");
 
-    report.value ("worst_wrap_damaged_span", worstWrapSpan);
-    report.value ("worst_placed_damaged_span", worstPlacedSpan);
+    report.value ("worst_wrap_damaged_run", worstWrapRun);
+    report.value ("worst_placed_damaged_run", worstPlacedRun);
+    report.value ("worst_wrap_energy", worstWrapEnergy);
+    report.value ("worst_placed_energy", worstPlacedEnergy);
 
     /*  THE VERDICT IS A COMPARISON, not a threshold. What Phase 3 has to decide
         is whether a looping range can be left to wrap on its own or has to have
         every pass placed - and that is answered by which of the two is worse,
         at every block size, not by either one clearing a number. */
-    const auto wrapIsFine = worstWrapSpan <= worstPlacedSpan;
+    const auto wrapIsFine = worstWrapEnergy <= worstPlacedEnergy;
 
     return report.verdict (wrapIsFine,
                            wrapIsFine

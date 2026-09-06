@@ -111,9 +111,10 @@ of the collection the slots are actually in, which is not the one the check had
 been looking at. Eight slots on thirty-two tracks at 96 kHz cost about seven
 microseconds of a six-hundred-and-sixty-seven-microsecond block more than one
 slot does, which is inside the noise. And of three ways to carry a loop from one
-pass to the next, the clip's own wrap is the cleanest by a factor of twenty —
-zero damaged samples at 96 kHz at every block size — so a looping range is left
-alone (`docs/spikes/spike03b-loop-joins.md`).
+pass to the next, the clip's own wrap is the cleanest at every block size and
+both sample rates — by between five and twenty thousand times, and at 96 kHz it
+is not a join at all, the render being the reference — so a looping range is
+left alone (`docs/spikes/spike03b-loop-joins.md`).
 
 What is left of the phase is the rest of the audio line — in-cue loop counts, the
 boundary between two ranges, `advance`, rate at arm — MIDI cues, and
