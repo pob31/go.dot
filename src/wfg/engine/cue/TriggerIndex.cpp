@@ -17,6 +17,7 @@
 #include <wfg/engine/cue/TriggerIndex.h>
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 
 namespace wfg::cue
