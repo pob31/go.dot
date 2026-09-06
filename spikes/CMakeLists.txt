@@ -51,6 +51,12 @@ set(WFG_SPIKES
     #    achievable without a custom clip?
     spike03_join_quality
 
+    # 3b. Phase 3's sequel to #3, and not a criterion of the author's: of the
+    #     clip's own loop wrap, a setLooping re-trigger and a placed cross-slot
+    #     boundary, which join is cleanest. M12 of the Phase 3 plan, whose
+    #     verdict fixes how a looping range is carried from pass to pass.
+    spike03b_loop_joins
+
     # 4. Graph stability under sustained launching with a fixed track set - no
     #    rebuild, no crossfade tax on already-playing material.  (1st priority)
     spike04_graph_stability

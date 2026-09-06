@@ -79,8 +79,25 @@ namespace wfg::audio
             /*  THE VALUETREE WRITE, on the thread Tracktion asserts. Pointing
                 the clip at the file rebuilds the playback graph, which is why
                 this is not on the GO path. */
-            if (! audioHost.setTrackSource (request.track, request.mediaFile))
+            /*  RANGES AND NO RANGES ARE THE SAME CALL, and the empty list is
+                the Phase 2 shape: the whole file into slot nought. With ranges
+                it is a clip per range, each armed LOOPING so the launcher
+                builds no stop duration for it - see setTrackRanges, where the
+                reason that is the mechanism rather than a setting is written
+                down. */
+            std::vector<audio::AudioHost::RangeSpec> ranges;
+            ranges.reserve (request.ranges.size());
+
+            for (const auto& range : request.ranges)
+                ranges.push_back ({ range.in, range.out, range.loops });
+
+            if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges))
             {
+                /*  MEDIA-MISSING COVERS BOTH, for now: a file that is not there
+                    and a range that is not inside it are both "this cue cannot
+                    be made ready", and `lastError` carries which. A `no-slot`
+                    of its own arrives with the run-level range reporting in
+                    PR 3.9, where there is something to report it against. */
                 engine.submit (origin::engine, "run.failed",
                                { osc::Value::string (request.runId),
                                  osc::Value::string (cue::runError::mediaMissing) });
@@ -113,18 +130,20 @@ namespace wfg::audio
     }
 
     //==============================================================================
-    bool HostPlayer::launchAtSample (int track, std::int64_t sample)
+    int HostPlayer::slotCount() const  { return audioHost.slotCount(); }
+
+    bool HostPlayer::launchAtSample (int track, int slot, std::int64_t sample)
     {
         /*  The tick thread, and the whole of what GO does to the audio side:
             one sample turned into a beat through the anchor, then two stores. */
-        return audioHost.launchTrackAt (track, audioHost.beatsAtSample (sample));
+        return audioHost.launchTrackAt (track, slot, audioHost.beatsAtSample (sample));
     }
 
     bool HostPlayer::stop (int track)           { return audioHost.stopTrack (track); }
 
-    bool HostPlayer::stopAtSample (int track, std::int64_t sample)
+    bool HostPlayer::stopAtSample (int track, int slot, std::int64_t sample)
     {
-        return audioHost.stopTrackAt (track, audioHost.beatsAtSample (sample));
+        return audioHost.stopTrackAt (track, slot, audioHost.beatsAtSample (sample));
     }
 
     void HostPlayer::setLevelDb (int track, double levelDb)

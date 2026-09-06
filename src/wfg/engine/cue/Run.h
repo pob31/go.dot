@@ -111,6 +111,16 @@ namespace wfg::cue
         /** The cue names a bus, or a width, the rig cannot honour. */
         inline constexpr const char* badRoute = "bad-route";
 
+        /*  The cue has more ranges than the graph has launcher slots.
+
+            The slot count is fixed when the graph is built, from the widest cue
+            in the show as it stood then (§3.25), so this is what a range ADDED
+            during the show gets: the cue cannot be armed until the show is
+            reloaded and the graph rebuilt around the new width. It is the run
+            that fails and never the edit - the range is a decision somebody
+            made, and the document keeps it. */
+        inline constexpr const char* noSlot = "no-slot";
+
         /*  A message could not be put on the wire.
 
             Distinct from every refusal above it because it is the only one that

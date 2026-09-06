@@ -27,6 +27,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cmath>
+#include <cstdlib>
 
 namespace wfg::cue
 {
@@ -137,6 +138,46 @@ namespace wfg::cue
     double Runner::numberOf (const juce::ValueTree& cue, const char* name) const
     {
         return osc::parseDouble (textOf (cue, name)).value_or (0.0);
+    }
+
+    std::vector<RangeSpec> Runner::rangesOf (const juce::ValueTree& cue) const
+    {
+        std::vector<RangeSpec> out;
+
+        for (const auto& child : cue)
+        {
+            if (child.getType().toString() != "Range")
+                continue;
+
+            const auto id = child[idProperty].toString().toStdString();
+
+            if (id.empty())
+                continue;
+
+            const auto value = [this, &id] (const char* name)
+            {
+                return document.getAttribute ("/godot/range/" + id + "/" + name)
+                         .value_or (std::string {});
+            };
+
+            RangeSpec range;
+            range.in = osc::parseDouble (value ("in")).value_or (0.0);
+            range.out = osc::parseDouble (value ("out")).value_or (0.0);
+
+            /*  One rather than nought when the row is absent, because the row's
+                default is one pass and nought means FOR EVER. Reading a missing
+                attribute as "loop this range for ever" would be the worst
+                possible way to be wrong about it. */
+            const auto loops = value ("loops");
+            range.loops = loops.empty() ? 1 : std::atoi (loops.c_str());
+
+            out.push_back (range);
+        }
+
+        /*  DOCUMENT ORDER IS PLAYLIST ORDER, which is why nothing sorts here:
+            `range/index` is derived from exactly this walk, so the strip's
+            numbering and the order the graph plays them in are one fact. */
+        return out;
     }
 
     //==============================================================================
@@ -661,6 +702,21 @@ namespace wfg::cue
         request.mediaFile = file;
         request.levelDb = numberOf (cue, "level");
         request.routing = routing;
+        request.ranges = rangesOf (cue);
+
+        /*  NO SLOT, and it is a refusal rather than a truncation. The graph is
+            built with as many launcher slots as the show's widest cue has
+            ranges, once, when the show loads (§3.25) - so a range added during
+            the show has nowhere to be armed. Arming the first S of them would
+            be a cue that plays most of what it says, which is worse than one
+            that says it cannot. */
+        if (static_cast<int> (request.ranges.size()) > audio->slotCount())
+        {
+            engine.submit (origin::engine, "run.failed",
+                           { osc::Value::string (runId),
+                             osc::Value::string (runError::noSlot) });
+            return;
+        }
 
         run->level = request.levelDb;
 
@@ -2252,7 +2308,12 @@ namespace wfg::cue
             if (target - now < 2 * blockSize)
                 continue;
 
-            if (audio->launchAtSample (run->track, target))
+            /*  SLOT NOUGHT UNTIL PR 3.9 KNOWS BETTER. A cue with no ranges
+                plays out of the first slot, which is what Phase 2 did without
+                having to say so; a ranged cue enters its first range, which is
+                the same slot. Which slot a LATER range sounds out of is the
+                range job's to say, and it does not exist yet. */
+            if (audio->launchAtSample (run->track, 0, target))
             {
                 run->launchRequested = false;
                 run->launchedAtSample = target;

@@ -226,13 +226,62 @@ namespace wfg::audio
         /** Builds the graph offline and counts what is in it. */
         NodeIdReport inspectNodeIds() const;
 
+        /*  One region of one file, which is what §3.24 calls a range and what
+            the graph calls a slot.
+
+            A VALUE WITH NO DOCUMENT IN IT, like ArmRequest and for the same
+            reason: it crosses from the tick thread to the message thread, and a
+            reference into a tree the tick thread may edit meanwhile is the bug
+            that gets found on a show night. */
+        struct RangeSpec
+        {
+            double in = 0.0;
+            double out = 0.0;
+
+            /** Passes before playback moves on. Zero is for ever. */
+            int loops = 1;
+        };
+
         /*  Points a track's resident clip at a media file. This is the seed of
             what PR 2.3 will call arming a cue: the clip stays, its source
             changes. Message thread, and it costs one graph rebuild - `source`
             is on Tracktion's restart list, which the plan budgets for.
 
+            The slot is which of the track's launcher slots to point, which is
+            which RANGE of the cue this is. Slot nought is the whole file, and
+            is what a cue with no ranges plays.
+
             False if the index or the file is no good. */
-        bool setTrackSource (int trackIndex, const std::string& mediaFile);
+        bool setTrackSource (int trackIndex, int slot, const std::string& mediaFile);
+
+        /*  Arms a whole cue: its file into as many slots as it has ranges, each
+            clip LOOPING its own region, and every slot past them put back on
+            the silent placeholder so the last cue's ranges cannot linger.
+
+            EVERY RANGE CLIP IS ARMED LOOPING, and that is the mechanism rather
+            than a setting. A launcher slot captures a stop duration when the
+            graph is built - the clip's length in beats for a clip that does not
+            loop, nothing at all for one that does - and it queues that stop
+            every block, ahead of the wrap. So a clip armed looping plays its
+            section for ever inside WaveNodeRealTime with no click suppressor at
+            the boundary, and a clip armed not-looping cannot be made to loop
+            afterwards, because the queued stop pre-empts the wrap.
+
+            Go.dot then places every boundary itself, as a stop on the live slot
+            and a play on the next, both at a sample it computed. Which is why
+            the clips loop for ever and Go.dot decides when they do not.
+
+            An empty range list is the Phase 2 shape: the whole file in slot
+            nought, not looping. More ranges than the graph has slots is a
+            refusal - `false`, with `lastError` saying so - because the slot
+            count is fixed when the graph is built (§3.25).
+
+            Message thread. One rebuild for the lot, rather than one per range. */
+        bool setTrackRanges (int trackIndex, const std::string& mediaFile,
+                             const std::vector<RangeSpec>& ranges);
+
+        /** How many slots every track was built with: the show's widest cue. */
+        int slotCount() const noexcept;
 
         /*  Waits until the track's source is mapped into the audio file cache,
             pumping blocks while it waits. False if it never became ready.
@@ -281,7 +330,7 @@ namespace wfg::audio
             because M1 asks where a cue goes and not when.
 
             Message thread. GO uses launchTrackAt. */
-        bool launchTrack (int trackIndex);
+        bool launchTrack (int trackIndex, int slot = 0);
 
         //======================================================================
         /*  THE GO PATH. Everything below is callable from the tick thread while
@@ -326,8 +375,8 @@ namespace wfg::audio
             placed well ahead rather than as soon as possible, and why lateness
             is counted rather than tolerated.
 
-            False when there is no such track or no graph. */
-        bool launchTrackAt (int trackIndex, double monotonicBeat) noexcept;
+            False when there is no such track, slot or graph. */
+        bool launchTrackAt (int trackIndex, int slot, double monotonicBeat) noexcept;
 
         /*  Stops a track's clip at a beat, or at the next block when none is
             given. Tick thread.
@@ -339,7 +388,11 @@ namespace wfg::audio
             being nothing. So a cancel can silently not happen. Go.dot keeps its
             own record of what it launched and confirms on the next tick rather
             than trusting the answer. */
-        bool stopTrackAt (int trackIndex, double monotonicBeat) noexcept;
+        bool stopTrackAt (int trackIndex, int slot, double monotonicBeat) noexcept;
+
+        /*  Stops EVERY slot of the track, at the next block. What a stop cue
+            means: the cue stops, and which of its ranges happened to be
+            sounding is not something the caller should have to know. */
         bool stopTrack (int trackIndex) noexcept;
 
         /*  What a track's launch handle says right now, as a plain value.
@@ -356,19 +409,23 @@ namespace wfg::audio
             double playedBeats = 0.0;
         };
 
-        TrackPlayState trackPlayState (int trackIndex) const noexcept;
+        TrackPlayState trackPlayState (int trackIndex, int slot = 0) const noexcept;
 
         /*  Whether a track's clip is playing, and how long its source is. PR 2.3
             needs the first to notice a cue has finished; both are here now
             because a silent output has several possible causes and guessing
             between them is not a diagnosis. */
+        /*  ANY SLOT, because the question is whether the CUE is sounding and
+            a ranged cue sounds out of whichever slot its current range is in.
+            The slot-wise question is trackPlayState, which the range job asks
+            because it is the one caller that knows which range it is on. */
         bool isTrackPlaying (int trackIndex) const;
-        double trackSourceLengthSeconds (int trackIndex) const;
+        double trackSourceLengthSeconds (int trackIndex, int slot = 0) const;
 
-        /*  How many tracks hold a resident clip in their slot. Should equal the
-            track count: a slot with no clip means that track's launcher node -
-            and with it the track's whole output stage - is absent from the
-            playback graph, silently. */
+        /*  How many slots hold a resident clip. Should equal the track count
+            times the slot count: a slot with no clip means no launcher node for
+            it, and an empty FIRST slot takes the track's whole output stage out
+            of the playback graph with it, silently. */
         int residentClipCount() const;
 
         /*  A track's output stage - its level and routing coefficients. This is

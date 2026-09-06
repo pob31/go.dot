@@ -459,17 +459,25 @@ namespace wfg::audio
             /*  RESOLVED HERE, ON THE MESSAGE THREAD, so the GO path never has to.
                 See the note on `handles`. */
             editChannels = std::max (1, spec.channelsPerTrack);
+            editSlots = std::max (1, spec.slots);
             context = edit->getCurrentPlaybackContext();
             handles.clear();
 
+            /*  ONE HANDLE PER SLOT, in a flat vector indexed track-major, so
+                that the GO path reaches any of them with one multiply and no
+                allocation. A vector of vectors would be two indirections and a
+                heap block per track for a thing whose shape never changes. */
             for (int track = 0; track < static_cast<int> (matrices.size()); ++track)
             {
-                std::shared_ptr<te::LaunchHandle> handle;
+                for (int slot = 0; slot < editSlots; ++slot)
+                {
+                    std::shared_ptr<te::LaunchHandle> handle;
 
-                if (auto* clip = clipOn (track))
-                    handle = clip->getLaunchHandle();
+                    if (auto* clip = clipOn (track, slot))
+                        handle = clip->getLaunchHandle();
 
-                handles.push_back (std::move (handle));
+                    handles.push_back (std::move (handle));
+                }
             }
 
             beatOffset.store (0.0, std::memory_order_relaxed);
@@ -619,9 +627,9 @@ namespace wfg::audio
             return file;
         }
 
-        te::WaveAudioClip* clipOn (int trackIndex) const
+        te::WaveAudioClip* clipOn (int trackIndex, int slotIndex = 0) const
         {
-            if (edit == nullptr)
+            if (edit == nullptr || slotIndex < 0)
                 return nullptr;
 
             const auto tracks = te::getAudioTracks (*edit);
@@ -636,10 +644,23 @@ namespace wfg::audio
 
             const auto slots = track->getClipSlotList().getClipSlots();
 
-            if (slots.isEmpty() || slots[0] == nullptr)
+            if (slotIndex >= slots.size() || slots[slotIndex] == nullptr)
                 return nullptr;
 
-            return dynamic_cast<te::WaveAudioClip*> (slots[0]->getClip());
+            return dynamic_cast<te::WaveAudioClip*> (slots[slotIndex]->getClip());
+        }
+
+        /*  Where a (track, slot) sits in the flat handle cache, or a size that
+            fails every bounds check when there is no such pair. Not an optional
+            because the GO path branches on it once, on a size comparison it was
+            going to make anyway. */
+        std::size_t handleIndex (int trackIndex, int slotIndex) const noexcept
+        {
+            if (trackIndex < 0 || slotIndex < 0 || slotIndex >= editSlots)
+                return handles.size();
+
+            return static_cast<std::size_t> (trackIndex) * static_cast<std::size_t> (editSlots)
+                     + static_cast<std::size_t> (slotIndex);
         }
 
         /*  GO.DOT OWNS TIME, AND THIS IS WHERE THAT STOPS BEING A SLOGAN.
@@ -679,10 +700,16 @@ namespace wfg::audio
             clip.setSpeedRatio (1.0);
         }
 
-        bool setTrackSource (int trackIndex, const std::string& mediaFile)
+        /*  Points one slot's clip at one file, whole - the Phase 2 arm, now
+            told which slot. Everything a RANGE needs on top of this is in
+            armRangeInto below; this stays the plain case because a cue with no
+            ranges is still most cues.
+
+            It does not dispatch: the caller does, once, so that arming eight
+            slots is one round of pending updates rather than eight. */
+        bool pointSlotAtFile (int trackIndex, int slotIndex, const juce::File& file)
         {
-            auto* clip = clipOn (trackIndex);
-            const juce::File file { juce::String (mediaFile) };
+            auto* clip = clipOn (trackIndex, slotIndex);
 
             if (clip == nullptr || ! file.existsAsFile())
                 return false;
@@ -701,9 +728,154 @@ namespace wfg::audio
             clip->setLength (tracktion::TimeDuration::fromSeconds (
                                  clip->getSourceLength().inSeconds()), false);
 
+            return true;
+        }
+
+        /*  One range into one slot: the file, and then the section of it, armed
+            LOOPING so that the launcher builds no stop duration for it.
+
+            WHY LOOPING IS THE MECHANISM AND NOT A SETTING. SlotControlNode
+            captures a stop duration when the graph is built - the clip's length
+            in beats when `isLooping()` is false, nothing at all when it is
+            (tracktion_EditNodeBuilder.cpp:1025-1026) - and every block, before
+            it advances, it queues a stop for the block containing that duration
+            (tracktion_SlotControlNode.cpp:134-153). So a clip armed NOT looping
+            can never be made to loop afterwards: LaunchHandle::setLooping is a
+            rebuild-free store, but the queued stop pre-empts the wrap.
+
+            Armed looping, the section repeats for ever inside WaveNodeRealTime
+            with no click suppressor at the boundary, and Go.dot ends it by
+            placing a stop at a sample it computed. Which is the arrangement
+            §3.24 describes: Go.dot places every boundary.
+
+            At 60 bpm one beat is one second, which is what makes the loop range
+            in beats the same number as the range in seconds. */
+        bool armRangeInto (int trackIndex, int slotIndex, const juce::File& file,
+                           const AudioHost::RangeSpec& range)
+        {
+            if (! pointSlotAtFile (trackIndex, slotIndex, file))
+                return false;
+
+            auto* clip = clipOn (trackIndex, slotIndex);
+
+            if (clip == nullptr)
+                return false;
+
+            const auto length = clip->getSourceLength().inSeconds();
+
+            /*  A RANGE PAST THE END OF THE FILE IS A FAILED ARM, and this is
+                where the file is finally open to be asked. The document could
+                not have known: a show is authored on one machine and its media
+                copied onto another, and refusing the load would have made a
+                sound that had not arrived yet into a show nobody could work on. */
+            if (! (range.out > range.in) || range.in < 0.0 || range.out > length + 1.0e-6)
+            {
+                /*  juce::String rather than the canonical formatter: this is
+                    a sentence for a person, and the audio layer names nothing
+                    from the osc layer. */
+                const auto seconds = [] (double value)
+                {
+                    return juce::String (value, 3).toStdString();
+                };
+
+                error = "a range of " + seconds (range.in) + " to " + seconds (range.out)
+                          + " seconds is not inside \"" + file.getFileName().toStdString()
+                          + "\", which is " + seconds (length) + " seconds long";
+                return false;
+            }
+
+            clip->setLoopRangeBeats ({ tracktion::BeatPosition::fromBeats (range.in),
+                                       tracktion::BeatPosition::fromBeats (range.out) });
+
+            return clip->isLooping();
+        }
+
+        bool setTrackSource (int trackIndex, int slotIndex, const std::string& mediaFile)
+        {
+            const juce::File file { juce::String (mediaFile) };
+
+            if (! pointSlotAtFile (trackIndex, slotIndex, file))
+                return false;
+
+            edit->dispatchPendingUpdatesSynchronously();
+            return true;
+        }
+
+        bool setTrackRanges (int trackIndex, const std::string& mediaFile,
+                             const std::vector<AudioHost::RangeSpec>& ranges)
+        {
+            const juce::File file { juce::String (mediaFile) };
+
+            if (edit == nullptr || ! file.existsAsFile())
+            {
+                error = "there is no graph, or \"" + mediaFile + "\" is not a file";
+                return false;
+            }
+
+            /*  NO SLOT, and it is a refusal rather than a truncation. The slot
+                count is fixed when the graph is built (§3.25), so a cue that
+                grew a ninth range during a show has nowhere to arm it - and
+                arming the first eight would be a cue that plays most of what it
+                says, which is worse than one that says it cannot. */
+            if (static_cast<int> (ranges.size()) > editSlots)
+            {
+                error = "no-slot: this cue has " + std::to_string (ranges.size())
+                          + " ranges and the graph was built with " + std::to_string (editSlots)
+                          + " slots a track, which is fixed until the show is reloaded";
+                return false;
+            }
+
+            const auto placeholder = ensureSilentPlaceholder (editChannels);
+
+            /*  ONE REBUILD FOR THE LOT, and it is the dispatch at the end that
+                does it rather than any scoped object.
+
+                Every write below is on Tracktion's restart list, and each one
+                calls Edit::restartPlayback - which sets a BOOL and starts a
+                timer. Eight writes therefore set one flag eight times, and the
+                single synchronous dispatch afterwards turns it into one graph
+                rebuild. Nothing has to be inhibited for that to be true.
+
+                THE THING THAT LOOKED RIGHT AND CRASHED: Edit::ScopedRenderStatus
+                is the obvious "batch these" object and it calls
+                freePlaybackContext() on construction (tracktion_Edit.cpp:793-
+                800). It destroys the running playback context - which AudioHost
+                caches, and which the audio thread reads every block - and builds
+                a different one when it goes out of scope. Arming a cue is not a
+                render, and taking a show's playback context away mid-block is a
+                segmentation fault, which is how this was found.
+
+                TransportControl::ReallocationInhibitor is the safe one of the
+                two, and it is not needed either: it defers the rebuild to the
+                transport's own JUCE timer, which is one more thing that has to
+                run before a cue can sound. */
+            bool armed = true;
+
+            for (int slot = 0; slot < editSlots; ++slot)
+            {
+                if (slot < static_cast<int> (ranges.size()))
+                {
+                    armed = armRangeInto (trackIndex, slot, file,
+                                          ranges[static_cast<std::size_t> (slot)]) && armed;
+                    continue;
+                }
+
+                /*  BACK ONTO THE PLACEHOLDER, because a voice is reused. A slot
+                    still holding the last cue's third range would sound if
+                    anything ever launched it, and the thing that eventually
+                    launches it is a bug in a later phase rather than never. */
+                if (ranges.empty() && slot == 0)
+                {
+                    armed = pointSlotAtFile (trackIndex, 0, file) && armed;
+                    continue;
+                }
+
+                pointSlotAtFile (trackIndex, slot, placeholder);
+            }
+
             edit->dispatchPendingUpdatesSynchronously();
 
-            return true;
+            return armed;
         }
 
         /*  Waits until the track's source is mapped into the audio file cache,
@@ -722,9 +894,9 @@ namespace wfg::audio
 
             Message thread, and it sleeps: never the audio thread, never the
             tick thread on the GO path. */
-        bool isTrackSourceReady (int trackIndex) const
+        bool isSlotSourceReady (int trackIndex, int slotIndex) const
         {
-            auto* clip = clipOn (trackIndex);
+            auto* clip = clipOn (trackIndex, slotIndex);
 
             if (clip == nullptr || engine == nullptr)
                 return false;
@@ -735,6 +907,23 @@ namespace wfg::audio
                 return false;
 
             return engine->getAudioFileManager().cache.hasMappedReader (file, 0);
+        }
+
+        /*  EVERY SLOT OF THE TRACK, because a ranged cue is not ready until
+            every range it might enter is. A cue that reported itself ready with
+            its second range unmapped would play its first range perfectly and
+            then go silent at the boundary - which is the failure this whole
+            wait exists to prevent, moved four seconds later.
+
+            The slots past the cue's ranges hold the silent placeholder, which
+            is a real file and maps once for the life of the show. */
+        bool isTrackSourceReady (int trackIndex) const
+        {
+            for (int slot = 0; slot < editSlots; ++slot)
+                if (! isSlotSourceReady (trackIndex, slot))
+                    return false;
+
+            return true;
         }
 
         void setTrackRouting (int trackIndex, double levelDb,
@@ -811,12 +1000,14 @@ namespace wfg::audio
                      + static_cast<double> (sample) / sampleRate;
         }
 
-        bool launchTrackAt (int trackIndex, double monotonicBeat) noexcept
+        bool launchTrackAt (int trackIndex, int slotIndex, double monotonicBeat) noexcept
         {
-            if (trackIndex < 0 || trackIndex >= static_cast<int> (handles.size()))
+            const auto at = handleIndex (trackIndex, slotIndex);
+
+            if (at >= handles.size())
                 return false;
 
-            auto& handle = handles[static_cast<std::size_t> (trackIndex)];
+            auto& handle = handles[at];
 
             if (handle == nullptr)
                 return false;
@@ -827,12 +1018,15 @@ namespace wfg::audio
             return true;
         }
 
-        bool stopTrackAt (int trackIndex, std::optional<double> monotonicBeat) noexcept
+        bool stopTrackAt (int trackIndex, int slotIndex,
+                          std::optional<double> monotonicBeat) noexcept
         {
-            if (trackIndex < 0 || trackIndex >= static_cast<int> (handles.size()))
+            const auto at = handleIndex (trackIndex, slotIndex);
+
+            if (at >= handles.size())
                 return false;
 
-            auto& handle = handles[static_cast<std::size_t> (trackIndex)];
+            auto& handle = handles[at];
 
             if (handle == nullptr)
                 return false;
@@ -845,14 +1039,29 @@ namespace wfg::audio
             return true;
         }
 
-        AudioHost::TrackPlayState trackPlayState (int trackIndex) const noexcept
+        /*  Every slot, at the next block. A stop cue stops the CUE, and which
+            of its ranges was sounding is not something the caller knows or
+            should have to. Answers true when at least one slot took it. */
+        bool stopEverySlot (int trackIndex) noexcept
+        {
+            bool stopped = false;
+
+            for (int slot = 0; slot < editSlots; ++slot)
+                stopped = stopTrackAt (trackIndex, slot, {}) || stopped;
+
+            return stopped;
+        }
+
+        AudioHost::TrackPlayState trackPlayState (int trackIndex, int slotIndex) const noexcept
         {
             AudioHost::TrackPlayState out;
 
-            if (trackIndex < 0 || trackIndex >= static_cast<int> (handles.size()))
+            const auto at = handleIndex (trackIndex, slotIndex);
+
+            if (at >= handles.size())
                 return out;
 
-            const auto& handle = handles[static_cast<std::size_t> (trackIndex)];
+            const auto& handle = handles[at];
 
             if (handle == nullptr)
                 return out;
@@ -867,9 +1076,9 @@ namespace wfg::audio
             return out;
         }
 
-        bool launchTrack (int trackIndex)
+        bool launchTrack (int trackIndex, int slotIndex)
         {
-            auto* clip = clipOn (trackIndex);
+            auto* clip = clipOn (trackIndex, slotIndex);
 
             if (clip == nullptr || edit == nullptr)
                 return false;
@@ -896,22 +1105,40 @@ namespace wfg::audio
             return true;
         }
 
+        /*  ANY SLOT, because the question is whether the CUE is sounding and a
+            ranged cue sounds out of whichever slot its current range is in.
+
+            This asked slot nought until PR 3.8, which was the same question
+            while there was only one slot and is a DIFFERENT one now: a cue on
+            its second range would have reported itself finished, its run would
+            have ended, and the sound would have gone on playing with nothing
+            holding the voice.
+
+            Through the cached handles rather than through clipOn, because the
+            Runner asks this once a tick for every live run and reaching a clip
+            costs two heap allocations. */
         bool isTrackPlaying (int trackIndex) const
         {
-            auto* clip = clipOn (trackIndex);
+            for (int slot = 0; slot < editSlots; ++slot)
+            {
+                const auto at = handleIndex (trackIndex, slot);
 
-            if (clip == nullptr)
-                return false;
+                if (at >= handles.size())
+                    continue;
 
-            auto handle = clip->getLaunchHandle();
+                const auto& handle = handles[at];
 
-            return handle != nullptr
-                     && handle->getPlayingStatus() == te::LaunchHandle::PlayState::playing;
+                if (handle != nullptr
+                      && handle->getPlayingStatus() == te::LaunchHandle::PlayState::playing)
+                    return true;
+            }
+
+            return false;
         }
 
-        double trackSourceLengthSeconds (int trackIndex) const
+        double trackSourceLengthSeconds (int trackIndex, int slotIndex) const
         {
-            auto* clip = clipOn (trackIndex);
+            auto* clip = clipOn (trackIndex, slotIndex);
 
             return clip != nullptr ? clip->getSourceLength().inSeconds() : 0.0;
         }
@@ -1083,6 +1310,11 @@ namespace wfg::audio
         /** The width each track was built with, for a cue's routing. */
         int editChannels = 2;
 
+        /*  How many launcher slots every track was built with: the widest range
+            count in the show, at least one. Fixed by buildEdit and never after,
+            which is what makes the flat handle cache indexable. */
+        int editSlots = 1;
+
         /*  The playback context, cached for the same reason. Message thread
             writes it, the audio thread reads it; both only while the graph is
             not being rebuilt, which is never after load (PRD §3.25). */
@@ -1174,10 +1406,18 @@ namespace wfg::audio
     AudioHost::NodeIdReport AudioHost::inspectNodeIds() const  { return impl->inspectNodeIds(); }
     int AudioHost::residentClipCount() const { return impl->residentClipCount(); }
 
-    bool AudioHost::setTrackSource (int trackIndex, const std::string& mediaFile)
+    bool AudioHost::setTrackSource (int trackIndex, int slot, const std::string& mediaFile)
     {
-        return impl->setTrackSource (trackIndex, mediaFile);
+        return impl->setTrackSource (trackIndex, slot, mediaFile);
     }
+
+    bool AudioHost::setTrackRanges (int trackIndex, const std::string& mediaFile,
+                                    const std::vector<RangeSpec>& ranges)
+    {
+        return impl->setTrackRanges (trackIndex, mediaFile, ranges);
+    }
+
+    int AudioHost::slotCount() const noexcept  { return impl->editSlots; }
 
     bool AudioHost::isTrackSourceReady (int trackIndex) const
     {
@@ -1195,7 +1435,10 @@ namespace wfg::audio
         return impl->waitForTrackSourceReady (trackIndex, timeoutMilliseconds);
     }
 
-    bool AudioHost::launchTrack (int trackIndex)  { return impl->launchTrack (trackIndex); }
+    bool AudioHost::launchTrack (int trackIndex, int slot)
+    {
+        return impl->launchTrack (trackIndex, slot);
+    }
 
     double AudioHost::beatsAtSample (std::int64_t sample) const noexcept
     {
@@ -1212,24 +1455,24 @@ namespace wfg::audio
         return impl->referenceSkew.load (std::memory_order_relaxed);
     }
 
-    bool AudioHost::launchTrackAt (int trackIndex, double monotonicBeat) noexcept
+    bool AudioHost::launchTrackAt (int trackIndex, int slot, double monotonicBeat) noexcept
     {
-        return impl->launchTrackAt (trackIndex, monotonicBeat);
+        return impl->launchTrackAt (trackIndex, slot, monotonicBeat);
     }
 
-    bool AudioHost::stopTrackAt (int trackIndex, double monotonicBeat) noexcept
+    bool AudioHost::stopTrackAt (int trackIndex, int slot, double monotonicBeat) noexcept
     {
-        return impl->stopTrackAt (trackIndex, monotonicBeat);
+        return impl->stopTrackAt (trackIndex, slot, monotonicBeat);
     }
 
     bool AudioHost::stopTrack (int trackIndex) noexcept
     {
-        return impl->stopTrackAt (trackIndex, std::nullopt);
+        return impl->stopEverySlot (trackIndex);
     }
 
-    AudioHost::TrackPlayState AudioHost::trackPlayState (int trackIndex) const noexcept
+    AudioHost::TrackPlayState AudioHost::trackPlayState (int trackIndex, int slot) const noexcept
     {
-        return impl->trackPlayState (trackIndex);
+        return impl->trackPlayState (trackIndex, slot);
     }
 
     bool AudioHost::isTrackPlaying (int trackIndex) const
@@ -1237,9 +1480,9 @@ namespace wfg::audio
         return impl->isTrackPlaying (trackIndex);
     }
 
-    double AudioHost::trackSourceLengthSeconds (int trackIndex) const
+    double AudioHost::trackSourceLengthSeconds (int trackIndex, int slot) const
     {
-        return impl->trackSourceLengthSeconds (trackIndex);
+        return impl->trackSourceLengthSeconds (trackIndex, slot);
     }
 
     float AudioHost::trackInputPeak (int trackIndex) const

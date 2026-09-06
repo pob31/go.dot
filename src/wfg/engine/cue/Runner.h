@@ -128,6 +128,18 @@ namespace wfg::cue
         float gain = 0.0f;
     };
 
+    /*  One region of the cue's file: §3.24's range, as the audio side needs
+        it. Seconds, because that is what the document says and what a file
+        length is; the graph converts. */
+    struct RangeSpec
+    {
+        double in = 0.0;
+        double out = 0.0;
+
+        /** Passes before playback moves on. Zero is for ever. */
+        int loops = 1;
+    };
+
     /*  Everything the audio side needs to make one cue ready.
 
         A VALUE, carrying no document reference, because it crosses a thread
@@ -146,6 +158,18 @@ namespace wfg::cue
 
         /** Where it goes. Empty is legal and means a cue routed nowhere yet. */
         std::vector<Coefficient> routing;
+
+        /*  The cue's ranges, in playlist order, EMPTY BEING THE ORDINARY CASE:
+            a cue with no ranges plays its whole file, which is most cues and is
+            all of Phase 2.
+
+            Copied into the request rather than read at the boundary, because
+            the arm crosses to the message thread and a reference into a
+            document the tick thread may edit meanwhile is the bug that gets
+            found on a show night. The RE-READING §3.24 asks for - a `loops`
+            edit taking effect at the next iteration - happens on the tick
+            thread at each boundary, and re-arms through a fresh request. */
+        std::vector<RangeSpec> ranges;
     };
 
     /*  The audio side, as the cue layer sees it.
@@ -171,11 +195,22 @@ namespace wfg::cue
             Called from the tick thread. It must not block there. */
         virtual void requestArm (const ArmRequest&) = 0;
 
-        /*  Places a launch at one of Go.dot's own sample positions. Tick
-            thread, and the whole of what GO does to the audio side. */
-        virtual bool launchAtSample (int track, std::int64_t sample) = 0;
+        /** How many ranges of one cue the graph can hold. One with no ranges. */
+        virtual int slotCount() const = 0;
 
-        /** Stops a track's cue now. Tick thread. */
+        /*  Places a launch at one of Go.dot's own sample positions. Tick
+            thread, and the whole of what GO does to the audio side.
+
+            The slot is which RANGE this is - nought for a cue with none, which
+            is what Phase 2 did without having to say so. */
+        virtual bool launchAtSample (int track, int slot, std::int64_t sample) = 0;
+
+        /*  Stops a track's cue now, whichever of its ranges is sounding. Tick
+            thread.
+
+            TRACK-WIDE ON PURPOSE. A stop cue stops the CUE; which range it had
+            reached is not something the caller knows, and making it ask would
+            put the range job's bookkeeping into every stop path. */
         virtual bool stop (int track) = 0;
 
         /*  Stops it at one of Go.dot's own sample positions, the way a launch
@@ -186,13 +221,15 @@ namespace wfg::cue
             already past stops for the whole block - so a stop is as placeable
             as a start, which is what lets a hard stop land where the show says
             rather than wherever the next block happened to begin. */
-        virtual bool stopAtSample (int track, std::int64_t sample) = 0;
+        virtual bool stopAtSample (int track, int slot, std::int64_t sample) = 0;
 
         /*  The level a track's cue is playing at, in dB. Tick thread, once per
             tick while a fade runs, and one relaxed atomic store. */
         virtual void setLevelDb (int track, double levelDb) = 0;
 
-        /** Whether that track's cue is sounding. Tick thread. */
+        /*  Whether that track's cue is sounding, out of any of its slots.
+            Tick thread. Track-wide for the reason `stop` is: the question is
+            about the cue. */
         virtual bool isPlaying (int track) const = 0;
 
         /*  Whether the media for that track is actually ready to sound.
@@ -397,6 +434,15 @@ namespace wfg::cue
             default, which is what having one door is for. */
         std::string textOf (const juce::ValueTree& cue, const char* name) const;
         double numberOf (const juce::ValueTree& cue, const char* name) const;
+
+        /*  A media cue's ranges, in playlist order, empty when it has none.
+
+            READ AT THE ARM, and copied into the request. §3.24 says an edit
+            takes effect at the next iteration, which is a re-read at the
+            boundary rather than a live reference - and a live reference into
+            the document would be the tick thread handing the message thread a
+            tree it may edit meanwhile. */
+        std::vector<RangeSpec> rangesOf (const juce::ValueTree& cue) const;
 
         /*  The kind's own fire path, once every wait is out of the way: a media
             cue asks for a voice, a fade or a stop takes over a level, a network

@@ -1086,8 +1086,43 @@ namespace
     {
         int tracks = 0;
         int outputs = 0;
+
+        /*  SLOTS PER TRACK: the widest range count of any media cue in the
+            show, at least one. A property of the SHOW, like the track count,
+            because §3.25 fixes the graph's shape when it is built and never
+            after - and a range added later has no slot until the show is
+            reloaded (`no-slot`). */
+        int slots = 1;
+
         std::string problem;
     };
+
+    /*  How many ranges the widest media cue in the show carries.
+
+        WALKED RATHER THAN STORED, and never written into the document: it is a
+        fact ABOUT the ranges, and a second copy of it in <Audio> would be one
+        more thing to keep in step with a list somebody edits. The walk happens
+        once, at load, on the thread that opens the show. */
+    int widestRangeCount (const juce::ValueTree& node)
+    {
+        int widest = 0;
+
+        if (node.getType().toString() == "Media")
+        {
+            int here = 0;
+
+            for (const auto& child : node)
+                if (child.getType().toString() == "Range")
+                    ++here;
+
+            widest = here;
+        }
+
+        for (const auto& child : node)
+            widest = std::max (widest, widestRangeCount (child));
+
+        return widest;
+    }
 
     AudioShape audioShapeOf (const wfg::doc::ShowDocument& document)
     {
@@ -1102,6 +1137,7 @@ namespace
         }
 
         shape.tracks = static_cast<int> (audio["tracks"]);
+        shape.slots = std::max (1, widestRangeCount (document.root()));
 
         for (const auto bus : audio)
         {
@@ -1621,6 +1657,7 @@ namespace
                                    : std::string {};
             request.blockSize = blockSize;
             request.edit.tracks = shape.tracks;
+            request.edit.slots = shape.slots;
 
             if (! deviceDriver->open (request))
             {
@@ -1732,6 +1769,7 @@ namespace
                 ran would be a structural edit racing the graph that reads it. */
             wfg::audio::EditSpec spec;
             spec.tracks = shape.tracks;
+            spec.slots = shape.slots;
 
             if (! driver->host().buildEdit (spec))
             {

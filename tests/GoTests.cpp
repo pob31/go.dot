@@ -64,9 +64,12 @@ namespace
             arms.push_back (request);
         }
 
-        bool launchAtSample (int track, std::int64_t sample) override
+        int slotCount() const override             { return slots; }
+
+        bool launchAtSample (int track, int slot, std::int64_t sample) override
         {
             launches.push_back ({ track, sample });
+            launchedSlots.push_back (slot);
             return true;
         }
 
@@ -77,9 +80,10 @@ namespace
             return true;
         }
 
-        bool stopAtSample (int track, std::int64_t sample) override
+        bool stopAtSample (int track, int slot, std::int64_t sample) override
         {
             stopsAt.push_back ({ track, sample });
+            stoppedSlots.push_back (slot);
             return true;
         }
 
@@ -115,10 +119,20 @@ namespace
         int tracks = 4;
         int block = 128;
         int channels = 2;
+
+        /*  One slot a track, which is a show whose widest media cue has one
+            range or none - every fixture there is, until a case says otherwise.
+            A test that wants to be refused for `no-slot` sets it. */
+        int slots = 1;
+
         std::int64_t samples = 0;
 
         std::vector<cue::ArmRequest> arms;
         std::vector<std::pair<int, std::int64_t>> launches;
+
+        /** Which slot each launch and each placed stop was aimed at. */
+        std::vector<int> launchedSlots;
+        std::vector<int> stoppedSlots;
         std::set<int> playing;
         std::set<int> ready;
         std::vector<int> stopped;

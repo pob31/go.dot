@@ -828,7 +828,7 @@ namespace
 
         const auto tone = writeSteadyTone (rig.storage.folder, sourceChannels, rate);
         REQUIRE (tone.existsAsFile());
-        REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+        REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
 
         auto* matrix = rig.host.trackMatrix (0);
         REQUIRE (matrix != nullptr);
@@ -1050,7 +1050,7 @@ namespace
             away. This is a full house: the polyphony ceiling, all of it in use. */
         for (int track = 0; track < tracks; ++track)
         {
-            REQUIRE (rig.host.setTrackSource (track, tone.getFullPathName().toStdString()));
+            REQUIRE (rig.host.setTrackSource (track, 0, tone.getFullPathName().toStdString()));
 
             if (auto* matrix = rig.host.trackMatrix (track))
             {
@@ -1761,7 +1761,7 @@ TEST_CASE ("rt: a cue playing through the matrix still allocates nothing of ours
 
     const auto tone = writeSteadyTone (rig.storage.folder, 1, settings.sampleRate);
     REQUIRE (tone.existsAsFile());
-    REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+    REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
 
     auto* matrix = rig.host.trackMatrix (0);
     REQUIRE (matrix != nullptr);
@@ -1959,7 +1959,7 @@ TEST_CASE ("launch: the tick-safe path reaches the same handle the diagnostic on
     REQUIRE (rig.host.buildEdit (spec));
 
     const auto tone = writeSteadyTone (rig.storage.folder, 1, settings.sampleRate);
-    REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+    REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
     REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
 
     CHECK (rig.host.trackPlayState (0).valid);
@@ -1968,7 +1968,7 @@ TEST_CASE ("launch: the tick-safe path reaches the same handle the diagnostic on
     /*  An index no track answers to is answered rather than crashed on: this is
         reachable from a cue naming a track that a smaller rig does not have. */
     CHECK_FALSE (rig.host.trackPlayState (99).valid);
-    CHECK_FALSE (rig.host.launchTrackAt (99, 1.0));
+    CHECK_FALSE (rig.host.launchTrackAt (99, 0, 1.0));
     CHECK_FALSE (rig.host.stopTrack (99));
 
     for (int i = 0; i < 8; ++i)
@@ -1977,7 +1977,7 @@ TEST_CASE ("launch: the tick-safe path reaches the same handle the diagnostic on
     /*  Placed a quarter of a second ahead, in Go.dot's own samples, converted
         through the anchor. */
     const auto target = rig.host.clock().samplesElapsed() + settings.sampleRate / 4;
-    REQUIRE (rig.host.launchTrackAt (0, rig.host.beatsAtSample (target)));
+    REQUIRE (rig.host.launchTrackAt (0, 0, rig.host.beatsAtSample (target)));
 
     /*  Not yet: the instant is ahead of the blocks pumped so far. */
     for (int i = 0; i < 10; ++i)
@@ -2022,13 +2022,13 @@ TEST_CASE ("launch: a stop that lands is confirmed, not assumed")
     REQUIRE (rig.host.buildEdit (spec));
 
     const auto tone = writeSteadyTone (rig.storage.folder, 1, settings.sampleRate);
-    REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+    REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
     REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
 
     for (int i = 0; i < 8; ++i)
         rig.host.processBlock();
 
-    REQUIRE (rig.host.launchTrackAt (0, rig.host.beatsAtSample (rig.host.clock().samplesElapsed() + 1024)));
+    REQUIRE (rig.host.launchTrackAt (0, 0, rig.host.beatsAtSample (rig.host.clock().samplesElapsed() + 1024)));
 
     for (int i = 0; i < 100; ++i)
         rig.host.processBlock();
@@ -2352,7 +2352,7 @@ namespace
         REQUIRE (rig.host.buildEdit (spec));
 
         const auto tone = writeSteadyTone (rig.storage.folder, 1, rate);
-        REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+        REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
         REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
 
         auto* matrix = rig.host.trackMatrix (0);
@@ -2382,7 +2382,7 @@ namespace
         result.expected = rig.host.clock().samplesElapsed()
                             + static_cast<std::int64_t> (ticksAhead) * samplesPerTick;
 
-        REQUIRE (rig.host.launchTrackAt (0, rig.host.beatsAtSample (result.expected)));
+        REQUIRE (rig.host.launchTrackAt (0, 0, rig.host.beatsAtSample (result.expected)));
 
         const auto blocks = (rate / 2) / blockSize;
 
@@ -2478,7 +2478,7 @@ namespace
         const auto tone = writeSteadyTone (rig.storage.folder, 1, rate);
         toneOut = tone;
 
-        REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+        REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
         REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
 
         auto* matrix = rig.host.trackMatrix (0);
@@ -2493,7 +2493,7 @@ namespace
         /*  Launched at a fixed distance from where the counter is, so both runs
             have the same shape however long the disk took to answer. */
         const auto target = rig.host.clock().samplesElapsed() + 4 * (rate / 50);
-        REQUIRE (rig.host.launchTrackAt (0, rig.host.beatsAtSample (target)));
+        REQUIRE (rig.host.launchTrackAt (0, 0, rig.host.beatsAtSample (target)));
 
         /*  Recording starts after the launch is placed and runs across it, so
             the comparison covers the start of the cue as well as its middle. */
@@ -2510,7 +2510,7 @@ namespace
                 /*  THE THING BEING MEASURED. A ValueTree write on a second
                     track, which rebuilds the graph the first one is playing
                     through. */
-                REQUIRE (rig.host.setTrackSource (1, tone.getFullPathName().toStdString()));
+                REQUIRE (rig.host.setTrackSource (1, 0, tone.getFullPathName().toStdString()));
             }
 
             rig.host.processBlock();
@@ -2637,7 +2637,7 @@ namespace
         REQUIRE (rig.host.buildEdit (spec));
 
         const auto tone = writeSteadyTone (rig.storage.folder, 1, rate);
-        REQUIRE (rig.host.setTrackSource (0, tone.getFullPathName().toStdString()));
+        REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
         REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
 
         auto* matrix = rig.host.trackMatrix (0);
@@ -2652,7 +2652,7 @@ namespace
         const auto samplesPerTick = rate / 50;
         const auto ticksAhead = cue::launchLatencyTicks (blockSize, samplesPerTick);
 
-        REQUIRE (rig.host.launchTrackAt (0, rig.host.beatsAtSample (
+        REQUIRE (rig.host.launchTrackAt (0, 0, rig.host.beatsAtSample (
                    rig.host.clock().samplesElapsed()
                      + static_cast<std::int64_t> (ticksAhead) * samplesPerTick)));
 
@@ -2680,7 +2680,7 @@ namespace
         result.expected = rig.host.clock().samplesElapsed()
                             + static_cast<std::int64_t> (ticksAhead) * samplesPerTick;
 
-        REQUIRE (rig.host.stopTrackAt (0, rig.host.beatsAtSample (result.expected)));
+        REQUIRE (rig.host.stopTrackAt (0, 0, rig.host.beatsAtSample (result.expected)));
 
         const auto blocks = (rate / 4) / blockSize;
 
@@ -3232,4 +3232,293 @@ TEST_CASE ("M7: a stop that fades is silent before it stops, so there is nothing
         every check above and hold a voice for the rest of the show. */
     CHECK_FALSE (render.targetPlaying);
     CHECK (render.targetFinished);
+}
+
+//==============================================================================
+/*  RANGES: A CUE THAT PLAYS PART OF ITS FILE.
+
+    §3.24 lets a media cue carry a list of regions of its file, and the graph
+    holds each one as a clip in a launcher slot of its own, armed and waiting.
+    What is checked here is the seam - that the slots exist, that arming puts
+    the right region in each of them, and that a range plays the part of the
+    file it names and keeps playing it.
+
+    THE METHOD IS PHASE 2'S, EXTENDED. A file whose three seconds are three
+    DIFFERENT CONSTANTS, so the value coming out of the rig says which second of
+    the recording is sounding, as arithmetic. No FFT, no thresholding, no
+    guessing: 0.25 is the first second, 0.5 the second, 0.75 the third.
+
+    What is NOT here is the boundary between two ranges - the placed stop-and-
+    play pair that carries a cue from its first range into its second. That is
+    PR 3.9, and M13 is what will measure it. This is the ground it stands on.
+*/
+namespace
+{
+    /** The constant that says which second of the segmented tone this is. */
+    constexpr float segmentLevel (int segment)
+    {
+        return 0.25f * static_cast<float> (segment + 1);
+    }
+
+    /*  Three seconds, three constants. Not `tone.wav`: writeSteadyTone uses
+        that name, and a test that got the wrong file would measure a flat one
+        and pass every check about the first segment. */
+    juce::File writeSegmentedTone (const juce::File& folder, int rate, int segments = 3)
+    {
+        const auto file = folder.getChildFile ("segments.wav");
+        folder.createDirectory();
+
+        juce::WavAudioFormat format;
+        std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
+
+        if (stream == nullptr)
+            return {};
+
+        auto writer = format.createWriterFor (stream,
+                                              juce::AudioFormatWriterOptions{}
+                                                .withSampleRate (static_cast<double> (rate))
+                                                .withNumChannels (1)
+                                                .withBitsPerSample (16));
+
+        if (writer == nullptr)
+            return {};
+
+        juce::AudioBuffer<float> buffer { 1, rate * segments };
+
+        for (int segment = 0; segment < segments; ++segment)
+            juce::FloatVectorOperations::fill (buffer.getWritePointer (0, segment * rate),
+                                               segmentLevel (segment), rate);
+
+        writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+        return file;
+    }
+
+    /** Which segment a rendered sample came from: 0, 1, 2 - or -1 for none. */
+    int segmentOf (float sample)
+    {
+        for (int segment = 0; segment < 3; ++segment)
+            if (std::abs (sample - segmentLevel (segment)) < 0.01f)
+                return segment;
+
+        return -1;
+    }
+}
+
+TEST_CASE ("ranges: every slot of every track holds a resident clip")
+{
+    /*  An empty slot means no SlotControlNode for it, and an empty FIRST slot
+        takes the whole track's output stage out of the graph with it. So the
+        count is tracks TIMES slots, and a slot count that quietly produced
+        fewer clips than it promised would be a cue whose fourth range was
+        silent for a reason nothing reported. */
+    HostRig rig;
+    REQUIRE (rig.host.start (hostFor (4)));
+
+    for (const int slots : { 1, 2, 5, 8 })
+    {
+        INFO ("slots: " << slots);
+
+        audio::EditSpec spec;
+        spec.tracks = 6;
+        spec.slots = slots;
+
+        REQUIRE (rig.host.buildEdit (spec));
+        CHECK (rig.host.slotCount() == slots);
+        CHECK (rig.host.residentClipCount() == 6 * slots);
+    }
+}
+
+TEST_CASE ("ranges: a cue with more of them than the graph has slots is refused, not truncated")
+{
+    /*  `no-slot`. The slot count is fixed when the graph is built (§3.25), so a
+        range added during a show has nowhere to be armed. Arming the first S of
+        them would be a cue that plays most of what it says - which is worse
+        than one that says it cannot, because nobody would notice until the part
+        that was dropped mattered. */
+    HostRig rig;
+    REQUIRE (rig.host.start (hostFor (2)));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 2;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSegmentedTone (rig.storage.folder, 48000);
+    REQUIRE (tone.existsAsFile());
+
+    const auto path = tone.getFullPathName().toStdString();
+
+    CHECK (rig.host.setTrackRanges (0, path, { { 0.0, 1.0, 1 } }));
+    CHECK (rig.host.setTrackRanges (0, path, { { 0.0, 1.0, 1 }, { 1.0, 2.0, 1 } }));
+
+    CHECK_FALSE (rig.host.setTrackRanges (0, path, { { 0.0, 1.0, 1 },
+                                                     { 1.0, 2.0, 1 },
+                                                     { 2.0, 3.0, 1 } }));
+
+    CHECK (rig.host.lastError().find ("no-slot") != std::string::npos);
+}
+
+TEST_CASE ("ranges: one that is not inside the file fails the arm, which is when the file is read")
+{
+    /*  The document could not have known. A show is authored on one machine and
+        its media copied onto another, so `out` against the file length is a
+        question for the arm rather than for the load - which is the same rule
+        that lets a show with a missing sound still open. */
+    HostRig rig;
+    REQUIRE (rig.host.start (hostFor (2)));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 2;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSegmentedTone (rig.storage.folder, 48000);
+    const auto path = tone.getFullPathName().toStdString();
+
+    CHECK (rig.host.setTrackRanges (0, path, { { 0.0, 3.0, 1 } }));        // the whole file
+    CHECK_FALSE (rig.host.setTrackRanges (0, path, { { 0.0, 4.0, 1 } }));  // a second too far
+    CHECK_FALSE (rig.host.setTrackRanges (0, path, { { 2.0, 1.0, 1 } }));  // backwards
+}
+
+TEST_CASE ("ranges: a range plays the part of the file it names, and goes on playing it")
+{
+    /*  THE TWO PROPERTIES THE WHOLE MECHANISM RESTS ON.
+
+        The first: the slot sounds the REGION, not the file. Arming the second
+        second of a three-second file and hearing the first would mean the loop
+        range never reached the clip, and every boundary PR 3.9 places would be
+        placed around the wrong material.
+
+        The second: it does not stop at the end of that region. A range clip is
+        armed LOOPING precisely so that its launcher builds no stop duration for
+        it - and if that has not worked, the cue goes silent at the end of its
+        first pass and every loop count in the document means nothing. A second
+        and a half of a one-second range is what says the wrap happened. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 3;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSegmentedTone (rig.storage.folder, rate);
+    REQUIRE (tone.existsAsFile());
+
+    /*  Three ranges, one per segment, each a single pass - the shape the plan
+        names for this PR. All three are armed; only the middle one is launched,
+        because which slot sounds when is PR 3.9's question and which slot holds
+        what is this one's. */
+    REQUIRE (rig.host.setTrackRanges (0, tone.getFullPathName().toStdString(),
+                                      { { 0.0, 1.0, 1 }, { 1.0, 2.0, 1 }, { 2.0, 3.0, 1 } }));
+
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+    auto* matrix = rig.host.trackMatrix (0);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->snapToTargets();
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    RecordingSink sink;
+    sink.prepare (settings.outputChannels, rate * 3);
+    rig.host.setBlockSink (&sink);
+
+    const auto target = rig.host.clock().samplesElapsed() + 4 * (rate / 50);
+    REQUIRE (rig.host.launchTrackAt (0, 1, rig.host.beatsAtSample (target)));
+
+    /*  Two seconds and a bit of a range that is one second long. */
+    for (int block = 0; block < 2 * rate / blockSize + 200; ++block)
+        rig.host.processBlock();
+
+    rig.host.setBlockSink (nullptr);
+
+    const auto first = sink.firstSoundAt (0);
+    REQUIRE (first >= 0);
+
+    /*  IT IS THE MIDDLE SEGMENT, which is the range that was armed into the
+        slot that was launched. */
+    CHECK (segmentOf (sink.buffer.getSample (0, first + 1000)) == 1);
+
+    /*  AND IT IS STILL THE MIDDLE SEGMENT A SECOND AND A HALF LATER, past the
+        end of the region, which is the wrap. Sampled rather than swept, because
+        the wrap INSTANT is M12's subject and not this test's. */
+    REQUIRE (sink.written > first + rate * 3 / 2);
+    CHECK (segmentOf (sink.buffer.getSample (0, first + rate * 3 / 2)) == 1);
+
+    /*  It never played anything else: no first segment leaking in from the head
+        of the file, no third from running past the end. */
+    int wrong = 0;
+
+    for (int n = first + 500; n < std::min (sink.written, first + 2 * rate) - 500; n += 97)
+        if (segmentOf (sink.buffer.getSample (0, n)) != 1)
+            ++wrong;
+
+    INFO ("samples belonging to another segment: " << wrong);
+    CHECK (wrong == 0);
+
+    CHECK (rig.host.trackPlayState (0, 1).playing);
+    CHECK_FALSE (rig.host.trackPlayState (0, 0).playing);
+    CHECK_FALSE (rig.host.trackPlayState (0, 2).playing);
+
+    /*  And the cue-wide question answers yes, because a ranged cue sounds out
+        of whichever slot its current range is in. */
+    CHECK (rig.host.isTrackPlaying (0));
+}
+
+TEST_CASE ("ranges: arming a cue with none of them puts the whole file back in the first slot")
+{
+    /*  A voice is reused. A slot still holding the last cue's third range would
+        sound if anything ever launched it, so arming a rangeless cue puts every
+        slot past the first back on the silent placeholder - and the first back
+        on the whole file, which is the Phase 2 shape and is what most cues are. */
+    constexpr int rate = 48000;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 3;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSegmentedTone (rig.storage.folder, rate);
+    const auto path = tone.getFullPathName().toStdString();
+
+    REQUIRE (rig.host.setTrackRanges (0, path, { { 0.0, 1.0, 1 }, { 1.0, 2.0, 1 } }));
+
+    /*  Every armed slot is three seconds long as a SOURCE - it is the same file
+        either way - so what says a slot was RELEASED is the placeholder's own
+        length coming back. */
+    CHECK (rig.host.trackSourceLengthSeconds (0, 0) > 2.5);
+    CHECK (rig.host.trackSourceLengthSeconds (0, 1) > 2.5);
+    CHECK (rig.host.trackSourceLengthSeconds (0, 2) < 1.5);   // still the placeholder
+
+    REQUIRE (rig.host.setTrackRanges (0, path, {}));
+
+    CHECK (rig.host.trackSourceLengthSeconds (0, 0) > 2.5);   // the whole file
+    CHECK (rig.host.trackSourceLengthSeconds (0, 1) < 1.5);   // back to the placeholder
+    CHECK (rig.host.trackSourceLengthSeconds (0, 2) < 1.5);
 }
