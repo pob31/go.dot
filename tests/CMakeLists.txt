@@ -71,6 +71,7 @@ add_executable(wfg_tests
     DocumentTests.cpp
     BundleTests.cpp
     ClockTests.cpp
+    DeviceTests.cpp
     TreeTests.cpp
     AudioTests.cpp
     CueMatrixTests.cpp

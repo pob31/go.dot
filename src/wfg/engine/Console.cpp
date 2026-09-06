@@ -32,6 +32,7 @@
 #include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/rt/RtCheck.h>
 #include <wfg/engine/audio/HostPlayer.h>
+#include <wfg/engine/audio/DeviceLayer.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
@@ -267,6 +268,72 @@ namespace
         "the log is unreadable" and "the engine is not deterministic" are
         different failures with different remedies.
     */
+    /*  `wfg devices` - what this machine can play through, and what to type.
+
+        EXITS 0 WITH NOTHING TO SAY on a machine with no sound card, which is
+        every CI runner, and that is why the verb is testable at all. A device
+        list is a fact about the machine; an empty one is a fact too, and making
+        it an error would mean the only assertion CI could make about this verb
+        is that it fails.
+
+        It is SLOW, deliberately. A device type will list a name without knowing
+        anything about its channels or its rates - only the device object knows,
+        and creating one means touching the driver. Printing a name and no
+        numbers would be printing the half that is easy, and the numbers are the
+        half somebody actually needs before they can write --buffer=.
+    */
+    void listDevices()
+    {
+        const auto devices = wfg::audio::availableDevices();
+
+        if (devices.empty())
+        {
+            std::cout << "wfg devices: this machine has no audio devices" << std::endl;
+            return;
+        }
+
+        std::string currentType;
+
+        for (const auto& device : devices)
+        {
+            if (device.type != currentType)
+            {
+                currentType = device.type;
+                std::cout << currentType
+                          << (device.isDefaultType ? "   (default)" : "") << std::endl;
+            }
+
+            std::cout << "    " << device.name << std::endl;
+            std::cout << "        " << device.outputChannels << " out, "
+                      << device.inputChannels << " in" << std::endl;
+
+            /*  Both lists are what the DEVICE claims, not what it will grant.
+                A driver may decline a rate it advertises, and the only way to
+                find out is to open it - which `serve` does, and then reports
+                what it actually got. */
+            if (! device.sampleRates.empty())
+            {
+                std::cout << "        rates";
+
+                for (const auto rate : device.sampleRates)
+                    std::cout << " " << static_cast<long long> (rate);
+
+                std::cout << std::endl;
+            }
+
+            if (! device.bufferSizes.empty())
+            {
+                std::cout << "        buffers";
+
+                for (const auto size : device.bufferSizes)
+                    std::cout << " " << size;
+
+                std::cout << std::endl;
+            }
+        }
+    }
+
+    //==============================================================================
     int runReplay (const juce::ArgumentList& args)
     {
         const auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
@@ -1323,10 +1390,118 @@ namespace
             device mode rather than a simulation of it. */
         std::unique_ptr<wfg::DummyAudioClock> dummy;
         std::unique_ptr<wfg::audio::HostedAudioDriver> driver;
+        std::unique_ptr<wfg::audio::DeviceAudioDriver> deviceDriver;
         std::unique_ptr<wfg::audio::HostPlayer> player;
         const wfg::SampleClock* blockSource = nullptr;
 
-        if (hosted)
+        const auto deviceName = args.containsOption ("--device")
+                                  ? args.getValueForOption ("--device").toStdString()
+                                  : std::string {};
+
+        const auto onDevice = args.containsOption ("--device");
+
+        if (onDevice && hosted)
+        {
+            std::cerr << "wfg serve: --device and --hosted are two different block"
+                         " sources; give one" << std::endl;
+            return 2;
+        }
+
+        if (onDevice)
+        {
+            /*  A SHOW OFF A SOUND CARD, which is the same program as the two
+                lines below it with a different thing deciding when a block
+                happens. TickThread takes a SampleClock and cannot tell which. */
+            const auto shape = audioShapeOf (document);
+
+            if (! shape.problem.empty())
+            {
+                std::cerr << "wfg serve: " << shape.problem << std::endl;
+                return 2;
+            }
+
+            deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
+                             engineCacheFolder().getFullPathName().toStdString());
+
+            wfg::audio::DeviceAudioDriver::Request request;
+            request.deviceName = deviceName;
+            request.deviceType = args.containsOption ("--device-type")
+                                   ? args.getValueForOption ("--device-type").toStdString()
+                                   : std::string {};
+            request.blockSize = blockSize;
+            request.edit.tracks = shape.tracks;
+
+            if (! deviceDriver->open (request))
+            {
+                std::cerr << "wfg serve --device: " << deviceDriver->lastError() << std::endl;
+                std::cerr << "    `wfg devices` lists what this machine has." << std::endl;
+                return 2;
+            }
+
+            if (const auto duplicates = deviceDriver->host().inspectNodeIds();
+                ! duplicates.ok())
+            {
+                std::cerr << "wfg serve --device: the playback graph has "
+                          << duplicates.duplicates << " duplicated node identities out of "
+                          << duplicates.nodes << std::endl;
+                return 2;
+            }
+
+            const auto ids = deviceDriver->host().inspectNodeIds();
+            const auto granted = deviceDriver->settings();
+
+            /*  A RATE THAT IS NOT THE ONE ASKED FOR STOPS THE SHOW HERE.
+
+                The tick schedule was built above from `--sample-rate`, and
+                everything downstream is arithmetic on it: samples per tick, the
+                launch-tick rule, the fade's fifty values a second. A card that
+                opened at 44100 while the schedule says 48000 would put every
+                one of those 8.8% out - every cue late, every fade the wrong
+                length - and nothing would look wrong.
+
+                REFUSING IS THE SAFE READING OF PRD §6.2, whose mismatch policy
+                (refuse, warn, or resample) is the author's to settle and is
+                deliberately still open. Refusing is the one of the three that
+                cannot be wrong quietly, and the message says the number to
+                pass, so the remedy is one flag rather than an investigation. */
+            if (granted.sampleRate != sampleRate)
+            {
+                std::cerr << "wfg serve --device: \"" << deviceDriver->deviceName()
+                          << "\" opened at " << granted.sampleRate
+                          << " Hz, not the " << sampleRate << " Hz this was asked for."
+                          << std::endl
+                          << "    The rate is the device's to choose (PRD 6.2), and every"
+                             " tick is computed from it," << std::endl
+                          << "    so re-run with --sample-rate=" << granted.sampleRate
+                          << " or set the device to " << sampleRate << " Hz." << std::endl;
+                return 2;
+            }
+
+            /*  REPORTED WITH THE DEVICE'S NAME, and the numbers it GRANTED
+                rather than the ones that were asked for. A driver is entitled
+                to open at a rate and a block size of its own choosing - this
+                machine answers a request for 256 frames with 480 - and PRD §6.2
+                is that the rate is observed, never set. Everything downstream
+                is computed from what came back. */
+            engine.submit ("engine", "audio.editBuilt",
+                           { wfg::osc::Value::string (deviceDriver->deviceName()),
+                             wfg::osc::Value::int32 (shape.tracks),
+                             wfg::osc::Value::int32 (granted.outputChannels),
+                             wfg::osc::Value::int32 (ids.nodes) });
+
+            std::cout << "wfg: audio device \"" << deviceDriver->deviceName() << "\" "
+                      << granted.sampleRate << " Hz " << granted.blockSize << " frames "
+                      << granted.outputChannels << " outputs " << ids.nodes << " nodes"
+                      << std::endl;
+
+            player = std::make_unique<wfg::audio::HostPlayer> (deviceDriver->host(), engine);
+            runner.setPlayer (player.get());
+            runner.setMediaFolder (target.getChildFile ("media")
+                                     .getFullPathName().toStdString());
+
+            blockSource = &deviceDriver->host().clock();
+        }
+        else if (hosted)
         {
             const auto shape = audioShapeOf (document);
 
@@ -1586,6 +1761,12 @@ int wfg::runConsole (int argc, char** argv)
                       "Lists every named command the engine exposes",
                       {},
                       [] (const juce::ArgumentList&) { listCommands(); } });
+
+    app.addCommand ({ "devices",
+                      "devices",
+                      "Lists the audio devices this machine can play through",
+                      {},
+                      [] (const juce::ArgumentList&) { listDevices(); } });
 
     app.addCommand ({ "canon",
                       "canon <file> [--in-place]",
