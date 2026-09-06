@@ -357,6 +357,37 @@ namespace wfg::tree
             }
         }
 
+        /*  A RANGE, at a top level address of its own.
+
+            The Route and Trigger precedent again, with one difference that
+            matters: a range HAS a position and the position is the playlist.
+            So `index` is published beside `cue`, and both are derived - the
+            containment says which cue, the sibling order says which pass. A
+            stored copy of either could come to disagree with the document, and
+            the strip's "3 of 8" would then be a number about nothing. */
+        void collectRange (const juce::ValueTree& node, const std::string& cueId,
+                           int index, std::vector<Node>& out)
+        {
+            const auto id = node[idProperty].toString().toStdString();
+
+            if (id.empty())
+                return;
+
+            const auto base = std::string (godot) + "/range/" + id;
+
+            for (const auto* row : doc::Schema::rowsForOwner ("range"))
+            {
+                const doc::Attribute attribute { "Range", row };
+                const auto name = std::string (row->name);
+
+                const auto text = name == "cue"   ? cueId
+                                : name == "index" ? std::to_string (index)
+                                                  : storedText (attribute, node);
+
+                out.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
+        }
+
         /*  A TRIGGER, at a top level address of its own.
 
             Flat rather than nested under the cue, which is the Route precedent
@@ -455,6 +486,7 @@ namespace wfg::tree
             }
 
             int childIndex = 0;
+            int rangeIndex = 0;
 
             for (const auto& child : node)
             {
@@ -487,6 +519,16 @@ namespace wfg::tree
                 if (childElement == "Route")
                 {
                     collectRoute (child, out);
+                    continue;
+                }
+
+                if (childElement == "Range")
+                {
+                    /*  Counted separately from the cue index, because a range
+                        is not a member of anything: its number is its place in
+                        this cue's playlist, and a Route or a Trigger sitting
+                        between two ranges must not move it. */
+                    collectRange (child, id, rangeIndex++, out);
                     continue;
                 }
 

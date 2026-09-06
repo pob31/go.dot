@@ -109,6 +109,21 @@ TEST_CASE ("schema: the table describes the elements a show is made of")
     CHECK (schema.element ("Group")->mayContain ("Cue"));
     CHECK_FALSE (schema.element ("Cue")->mayContain ("Cue"));
     CHECK_FALSE (schema.element ("List")->mayContain ("List"));
+
+    /*  A RANGE IS A MEDIA CUE'S, and a trigger is everybody's. §3.24 makes a
+        range a region of the cue's own file, so a cue that plays nothing has
+        nothing to cut up; §3.7 gives a trigger list to "a cue or a group",
+        which is every kind there is. */
+    REQUIRE (schema.element ("Range") != nullptr);
+    CHECK (schema.element ("Media")->mayContain ("Range"));
+    CHECK_FALSE (schema.element ("Cue")->mayContain ("Range"));
+    CHECK_FALSE (schema.element ("Group")->mayContain ("Range"));
+    CHECK (schema.element ("Media")->mayContain ("Trigger"));
+    CHECK (schema.element ("Cue")->mayContain ("Trigger"));
+
+    REQUIRE (schema.attribute ("Range", "in") != nullptr);
+    REQUIRE (schema.attribute ("Range", "loops") != nullptr);
+    CHECK (schema.attribute ("Range", "index") == nullptr);   // derived, so not stored
 }
 
 TEST_CASE ("schema: a derived value is not an attribute of anything")

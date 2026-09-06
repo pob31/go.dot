@@ -162,7 +162,7 @@ namespace wfg::doc
                     like any other, and it is addressed at /godot/cue/<id> so a
                     client holding an identifier never has to know which kind it
                     got. */
-                { "Media",  true,  { "Route", "Trigger" }, { "cue", "media" } },
+                { "Media",  true,  { "Route", "Range", "Trigger" }, { "cue", "media" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,
@@ -172,6 +172,27 @@ namespace wfg::doc
                     a position: deleting the first route would silently
                     re-point a client holding the second. */
                 { "Route",  true,  {},                     { "route" } },
+
+                /*  A RANGE IS AN OBJECT ON A MEDIA CUE, and on that kind only:
+                    §3.24 makes it a region of the cue's own file, so a cue that
+                    plays no file can hold none. That is the difference between
+                    it and a Trigger, which every kind carries.
+
+                    Identified and repeating, for the Route argument exactly: a
+                    cue's ranges are a list somebody edits one at a time, and an
+                    index would be a position - deleting the first range would
+                    silently re-point a client holding the second. The order IS
+                    the playlist, though, so `index` is published as a derived
+                    row and moving a range is `object.move` like any other
+                    ordered thing.
+
+                    ONE SLOT IN THE GRAPH PER RANGE, which is the part that
+                    reaches past the document: the show's widest range count
+                    fixes how many launcher slots every track is built with,
+                    once, when the graph is built (§3.25). A range added past
+                    that during a show has nowhere to be armed and is refused
+                    with `no-slot` until the show is reloaded. */
+                { "Range",  true,  {},                     { "range" } },
 
                 /*  A TRIGGER IS AN OBJECT ON A CUE, and on ANY cue: §3.7 says a
                     cue or a group carries a list of them, so it is a child of

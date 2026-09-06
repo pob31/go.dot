@@ -84,6 +84,7 @@ add_executable(wfg_tests
     RunTests.cpp
     GoTests.cpp
     TriggerTests.cpp
+    RangeTests.cpp
     MidiTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp

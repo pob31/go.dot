@@ -64,7 +64,7 @@ OUT_PATH = REPO_ROOT / "src" / "wfg" / "engine" / "document" / "SchemaTable.gene
 #   same container read two ways, and a client walking the tree should not have
 #   to know that one of them is spelled differently.
 KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
-                "audio", "bus", "media", "route", "run", "runs",
+                "audio", "bus", "media", "route", "range", "run", "runs",
                 "fade", "stop", "osc", "trigger")
 
 VALUE_TYPES = {

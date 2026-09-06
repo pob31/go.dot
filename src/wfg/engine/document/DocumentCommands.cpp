@@ -137,6 +137,25 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        registry.add ({ "range.create",
+                        "Adds a range to a media cue: a named region of its file, and one"
+                        " entry in the playlist the cue plays instead of the whole thing.",
+                        { { "cue", 's', false }, { "in", 'd', false }, { "out", 'd', false },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 3 ? args[3].getString() : std::string {};
+
+                            const auto edit = document.createRange (args[0].getString(),
+                                                                    args[1].getFloat64(),
+                                                                    args[2].getFloat64(),
+                                                                    id);
+
+                            return fromEdit (edit, withId (args, 3, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "trigger.create",
                         "Adds a trigger to a cue: what fires it when nobody presses GO.",
                         { { "cue", 's', false }, { "kind", 's', false },

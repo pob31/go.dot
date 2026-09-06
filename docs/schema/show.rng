@@ -372,6 +372,7 @@
       <zeroOrMore>
         <choice>
           <ref name="Route"/>
+          <ref name="Range"/>
           <ref name="Trigger"/>
         </choice>
       </zeroOrMore>
@@ -397,6 +398,44 @@
               <data type="double"/>
             </zeroOrMore>
           </list>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Range">
+    <element name="Range">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="in">
+          <a:documentation>Where in the file the range begins, in seconds. Ranges may be discontiguous and in any file order (author, 2026-09-06): a media cue with ranges is a playlist over one file, so the second range may start before the first ends, or before it begins.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="loops">
+          <a:documentation>How many passes of this range before playback continues into the next. Nought is for ever, which is what an ambience bed is: it plays until something advances it. The count is of passes rather than of repeats, so one is the range played once.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the strip shows (PRD 3.24). A range is a region of a file that somebody named - the verse, the approach, the last eight bars - and the name is the only part of it a designer says out loud.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="out">
+          <a:documentation>Where in the file it ends, in seconds. Checked against the file length when the cue is ARMED, which is when the file is read, and not when the show loads - a show whose media is not on this machine yet is still a show somebody has to open. An out that is not after its in fails the arm.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
         </attribute>
       </optional>
     </element>

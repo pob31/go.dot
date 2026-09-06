@@ -160,6 +160,16 @@ namespace wfg::doc
         EditResult createTrigger (const std::string& cueId, const std::string& kind,
                                   const std::string& id = {});
 
+        /*  Adds a range to a media cue - a region of the cue's own file, and
+            one more clip in a launcher slot when the cue is armed (§3.24).
+
+            `in` and `out` are given at creation rather than defaulted, because
+            a range whose bounds are both nought is not a shorter way of saying
+            anything: it is a range of no length, and every path that would then
+            have to tolerate one is a path that could have refused it here. */
+        EditResult createRange (const std::string& cueId, double in, double out,
+                                const std::string& id = {});
+
         EditResult createRole (const std::string& groupId, const std::string& role,
                                const std::string& id = {});
 

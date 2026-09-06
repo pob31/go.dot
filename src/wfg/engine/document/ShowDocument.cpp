@@ -217,6 +217,7 @@ namespace wfg::doc
             promising a `/godot/header/<id>/…` that has nothing in it. */
         if (element == "Header" || element == "Footer")   return {};
         if (element == "Route")                     return "route";
+        if (element == "Range")                     return "range";
         if (element == "Trigger")                   return "trigger";
         if (element == "List")                      return "list";
         if (element == "Mount")                     return "mount";
@@ -574,6 +575,35 @@ namespace wfg::doc
 
         return insertObject (cue, cue.getNumChildren(), "Route", id,
                              { { "bus", busId } });
+    }
+
+    EditResult ShowDocument::createRange (const std::string& cueId, double in, double out,
+                                          const std::string& id)
+    {
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        /*  ONLY A MEDIA CUE, because a range is a region of the cue's own file
+            (§3.24) and a cue that plays nothing has no file to cut up. The
+            element name is asked directly here rather than through the owner
+            word, unlike a trigger: `cue` is the answer for every kind, and this
+            is the one kind. */
+        if (cue.getType().toString() != "Media")
+            return EditResult::failed (reason::typeMismatch);
+
+        /*  A RANGE THAT ENDS BEFORE IT BEGINS is not a range, and this is the
+            one thing about one that can be judged without reading the file.
+            Whether `out` is past the end of the media is answered when the cue
+            is armed, which is when the file is opened - a show whose media has
+            not arrived yet still has to open. */
+        if (in < 0.0 || ! (out > in))
+            return EditResult::failed (reason::badValue);
+
+        return insertObject (cue, cue.getNumChildren(), "Range", id,
+                             { { "in", osc::formatDouble (in) },
+                               { "out", osc::formatDouble (out) } });
     }
 
     EditResult ShowDocument::createTrigger (const std::string& cueId, const std::string& kind,
@@ -1015,6 +1045,54 @@ namespace wfg::doc
         };
 
         Triggers { problems, prefixes }.visit (showNode);
+
+        /*  A START OFFSET AND A LIST OF RANGES ARE TWO ANSWERS TO ONE QUESTION.
+
+            `startOffset` says where in the file playback begins. A range says
+            the same thing and says where it ends and how many times, and a cue
+            with ranges plays the list rather than the file (§3.24). Honouring
+            both would mean choosing between them - offsetting the first range,
+            or ignoring the offset - and either choice is a rule nobody wrote
+            down that somebody would find out about during a show.
+
+            REFUSED WHEN THE SHOW IS READ, like the trigger address above and
+            for the same reason: there is no reading of the file under which the
+            cue does what both attributes say. Zero is the resting value and
+            says nothing, so it is only a non-zero offset that collides. */
+        struct Offsets
+        {
+            std::vector<std::string>& problems;
+
+            void visit (const juce::ValueTree& node)
+            {
+                if (node.getType().toString() == "Media")
+                {
+                    const auto offset = static_cast<double> (
+                        node[juce::Identifier ("startOffset")]);
+
+                    bool hasRange = false;
+
+                    for (const auto& child : node)
+                        if (child.getType().toString() == "Range")
+                            hasRange = true;
+
+                    /*  `> 0` rather than `!= 0`: the row's range is 0.. so a
+                        negative offset is the Walk pass's problem, and an
+                        equality on a double is a warning in the strict build. */
+                    if (hasRange && offset > 0.0)
+                        problems.push_back ("/Show/.../Media["
+                                             + node[juce::Identifier ("id")].toString().toStdString()
+                                             + "]: a cue with ranges plays its ranges, so it cannot"
+                                               " also have a startOffset - the offset belongs in the"
+                                               " first range's `in`");
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        Offsets { problems }.visit (showNode);
         return problems;
     }
 }
