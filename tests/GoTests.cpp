@@ -1658,7 +1658,11 @@ TEST_CASE ("run.kill: it reaches a fade, which holds a level rather than a voice
     for (int n = 0; n < 20; ++n)
         rig.tickOnce();
 
-    CHECK (rig.runs.find (media)->level == after);
+    /*  Approx rather than `==`, because the strict build treats a raw
+        floating-point comparison as an error (-Wfloat-equal) - and rightly:
+        what is being asserted is that the level did not MOVE, not that two
+        doubles are bit-identical. */
+    CHECK (rig.runs.find (media)->level == doctest::Approx (after));
     CHECK (rig.runs.find (media)->state == cue::runState::playing);
 }
 

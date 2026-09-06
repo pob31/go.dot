@@ -54,11 +54,6 @@ namespace wfg::cue
             return {};
         }
 
-        std::string mediaFileOf (const juce::ValueTree& cue)
-        {
-            return cue[juce::Identifier ("file")].toString().toStdString();
-        }
-
         std::vector<osc::Value> one (const std::string& text)
         {
             return { osc::Value::string (text) };

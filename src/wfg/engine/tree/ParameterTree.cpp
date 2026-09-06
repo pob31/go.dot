@@ -455,15 +455,15 @@ namespace wfg::tree
                     joining it - and because the failure mode of forgetting one
                     is silent: it becomes a cue at `/godot/cue/<id>`, with the
                     rows of a kind it is not. */
-                const auto element = child.getType().toString();
+                const auto childElement = child.getType().toString();
 
-                if (element == "Route")
+                if (childElement == "Route")
                 {
                     collectRoute (child, out);
                     continue;
                 }
 
-                if (element == "Header" || element == "Footer")
+                if (childElement == "Header" || childElement == "Footer")
                 {
                     int roleIndex = 0;
 
