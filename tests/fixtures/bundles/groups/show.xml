@@ -23,9 +23,19 @@
       </Group>
       <Cue id="M5TQ7XVA" name="Interval" number="4" postWait="2"/>
       <Cue id="Z9DSAB12" enabled="false" name="Cut in tech" number="5"/>
+      <Group id="BED5RND1" advance="auto" loops="0" name="Night bed" number="6" seed="7" selection="shuffle">
+        <Cue id="BED5RND2" name="Crickets" number="6.1"/>
+        <Cue id="BED5RND3" name="Distant road" number="6.2"/>
+        <Cue id="BED5RND4" name="Wind in the eaves" number="6.3"/>
+      </Group>
     </List>
     <List id="K2TRGX99" name="Background">
-      <Cue id="K3TRGX01" name="Foyer loop" number="B1"/>
+      <Cue id="K3TRGX01" name="Foyer loop" number="B1">
+        <Trigger id="TRGDEM01" address="/desk/foyer"/>
+      </Cue>
+      <Cue id="K4TRGX02" name="Half hour call" number="B2">
+        <Trigger id="TRGDEM02" at="19:30:00" kind="clock"/>
+      </Cue>
     </List>
   </Lists>
   <Mounts/>
