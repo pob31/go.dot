@@ -317,6 +317,13 @@ namespace wfg::cue
         /** Every group in flight. Diagnostics and tests; the Runner drives them. */
         const std::vector<GroupJob>& groups() const noexcept { return scheduled; }
 
+        /*  Whether this cue is a group whose members the OPERATOR advances -
+            a sequence, set to manual, which is what both attributes default to.
+
+            Asked by `cue.fire` and, from PR 3.7, by a trigger: firing one by
+            name would leave it waiting for a GO that is never coming. */
+        bool isManualGroup (const juce::ValueTree& cue) const;
+
         /** Whether the run table has this identifier. What `run.fire` asks
             before it acts, so that an unknown one is REJECTED rather than
             quietly doing nothing. */

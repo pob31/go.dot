@@ -272,6 +272,14 @@ namespace wfg::cue
         return id;
     }
 
+    bool Runner::isManualGroup (const juce::ValueTree& cue) const
+    {
+        return cue.isValid()
+                 && cue.getType().toString() == "Group"
+                 && textOf (cue, "mode") != "timeline"
+                 && textOf (cue, "advance") != "auto";
+    }
+
     std::vector<std::string> Runner::fireStandby (Engine& engine, std::int64_t tick,
                                                   const juce::ValueTree& list,
                                                   const std::string& cueId,
@@ -2126,9 +2134,27 @@ namespace wfg::cue
                         (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             const auto cueId = args[0].getString();
+                            const auto cue = document.findById (cueId);
 
-                            if (! document.findById (cueId).isValid())
+                            if (! cue.isValid())
                                 return Outcome::rejected (reason::unknownId);
+
+                            /*  A MANUAL SEQUENCE GROUP HAS NOBODY TO BE ITS
+                                PARENT when it is fired by name. §3.6 makes the
+                                operator the parent: its members start on GO, one
+                                press at a time, and the pointer is what says
+                                which. Fired from a surface it would run its
+                                header, start its first member and then wait for
+                                a GO that is never coming - a scene stuck halfway
+                                with its voices held.
+
+                                Refused rather than quietly run as an automatic
+                                one, because "run this group without me" is a
+                                reasonable thing to want and is a different group
+                                from the one somebody wrote. */
+                            if (cue.getType().toString() == "Group"
+                                  && runner.isManualGroup (cue))
+                                return Outcome::rejected (reason::needsGo);
 
                             const auto id = args.size() > 1 ? args[1].getString()
                                                             : std::string {};

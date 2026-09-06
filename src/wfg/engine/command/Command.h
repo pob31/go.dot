@@ -110,6 +110,20 @@ namespace wfg
             things moving one pointer). The remedy is to make the group manual,
             or to park on the group instead. */
         inline constexpr const char* notManualPath   = "not-manual-path";
+
+        /*  A manual sequence group was asked to run by something that is not
+            GO - `cue.fire`, or a trigger.
+
+            §3.6 makes the OPERATOR the parent of a manual group: its members
+            start on GO, one press at a time. Fired by name there is nobody to
+            press anything, so it would run its header, start its first member
+            and then wait for a GO that is never coming - a scene stuck halfway
+            with its voices held.
+
+            Refused rather than quietly promoted to automatic, because "run this
+            group without me" is a thing somebody may well want and is a
+            different group from the one they wrote. */
+        inline constexpr const char* needsGo          = "needs-go";
         inline constexpr const char* badAddress      = "bad-address";
         inline constexpr const char* readOnly        = "read-only";
         inline constexpr const char* notInList       = "not-in-list";

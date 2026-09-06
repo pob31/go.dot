@@ -2551,3 +2551,33 @@ TEST_CASE ("manual group: a GO record carries every run it created")
     for (const auto& arg : go->args)
         CHECK (rig.runs.find (arg.getString()) != nullptr);
 }
+
+TEST_CASE ("manual group: firing one by name is refused, because nobody would advance it")
+{
+    /*  §3.6 makes the OPERATOR the parent of a manual sequence group: its
+        members start on GO, one press at a time, and the standby pointer is
+        what says which. Fired from a surface there is nobody to press anything,
+        so it would run its header, start its first member and then wait for a
+        GO that is never coming - a scene stuck halfway with its voices held.
+
+        Refused rather than quietly run as an automatic one, because "run this
+        group without me" is a reasonable thing to want and is a different group
+        from the one somebody wrote. From PR 3.7 a trigger is refused the same
+        way and for the same reason. */
+    ManualRig rig;
+
+    const auto outcome = rig.submitAndTick ("cue.fire",
+                                            { osc::Value::string (rig.groupId) });
+
+    CHECK (outcome.rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::needsGo) != std::string::npos);
+    CHECK (rig.runs.all().empty());
+
+    /*  An AUTOMATIC group is a different thing entirely: it advances itself, so
+        firing it by name is exactly what a surface button should do. */
+    rig.setCue (rig.groupId, "advance", "auto");
+
+    CHECK (rig.submitAndTick ("cue.fire",
+                              { osc::Value::string (rig.groupId) }).applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+}
