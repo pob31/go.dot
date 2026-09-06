@@ -250,6 +250,12 @@ namespace
                 signature += p.name;
                 signature += ':';
                 signature += p.typeTag;
+
+                //  "as many more of these as you have", spelled the way a shell
+                //  usage line spells it.
+                if (p.variadic)
+                    signature += "...";
+
                 signature += p.optional ? ']' : '>';
             }
 

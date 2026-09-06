@@ -45,6 +45,21 @@ namespace wfg
             CommandRegistry.cpp, and node.set, which is the only user. */
         char typeTag = 's';
         bool optional = false;    // optional params come last and may be omitted
+
+        /*  AS MANY AS THERE ARE, of this type, and only on the LAST parameter.
+
+            A few commands answer with a number of identifiers that depends on
+            what they found rather than on their signature: one GO on a member
+            three manual groups deep creates a run for each group it entered,
+            and the record has to carry all of them because a replay never draws
+            an identifier of its own. A fixed arity cannot describe that, and a
+            command whose own record fails its own arity check is a session that
+            cannot reproduce itself - which is exactly what `go` did, silently,
+            for anybody whose show nested one manual group inside another.
+
+            `optional` still says whether the tail may be EMPTY. Variadic and
+            required together means one or more. */
+        bool variadic = false;
     };
 
     struct Outcome

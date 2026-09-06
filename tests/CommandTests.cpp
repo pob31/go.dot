@@ -105,6 +105,61 @@ TEST_CASE ("command signature: arity is checked before anything runs")
     CHECK (tooMany.reason == reason::arity);
 }
 
+TEST_CASE ("command signature: a variadic tail takes as many as there are")
+{
+    /*  WHY THERE IS ONE AT ALL. A few commands answer with a number of
+        identifiers that depends on what they found rather than on their
+        signature: one GO on a member three manual groups deep creates a run for
+        each group it entered, and the record has to carry all of them because a
+        replay never draws an identifier of its own.
+
+        Which makes this an arity rule with teeth. `wfg replay` re-submits every
+        record exactly as written, and the arity check is the first thing it
+        meets - so a command that answers with more than its signature accepts
+        writes a record it would itself refuse, and the session cannot reproduce
+        itself. That is what `go` did before this existed, for anybody whose
+        show nested one manual group inside another. */
+    const auto command = makeCommand ("takes.many",
+                                      { { "who", 's', false }, { "run", 's', true, true } });
+
+    CHECK (CommandRegistry::checkArgs (command, { osc::Value::string ("A") }).ok);
+    CHECK (CommandRegistry::checkArgs (command, { osc::Value::string ("A"),
+                                                  osc::Value::string ("B") }).ok);
+
+    const auto four = CommandRegistry::checkArgs (command, { osc::Value::string ("A"),
+                                                             osc::Value::string ("B"),
+                                                             osc::Value::string ("C"),
+                                                             osc::Value::string ("D") });
+    CHECK (four.ok);
+    CHECK (four.args.size() == 4u);
+
+    // The tail is still TYPED: it is "more of this parameter", not "anything".
+    const auto wrong = CommandRegistry::checkArgs (command, { osc::Value::string ("A"),
+                                                              osc::Value::string ("B"),
+                                                              osc::Value::int32 (3) });
+    CHECK_FALSE (wrong.ok);
+    CHECK (wrong.reason == reason::typeMismatch);
+
+    // And what comes BEFORE it is unchanged: a missing required one is arity.
+    CHECK (CommandRegistry::checkArgs (command, {}).reason == reason::arity);
+}
+
+TEST_CASE ("command signature: a required variadic tail wants at least one")
+{
+    /*  `optional` keeps its meaning beside `variadic`: it says whether the tail
+        may be EMPTY. Required and variadic together is one or more, which is
+        what a command that acts on a set of things wants - being handed none of
+        them is a caller mistake rather than a shorter list. */
+    const auto command = makeCommand ("needs.one", { { "id", 's', false, true } });
+
+    CHECK_FALSE (CommandRegistry::checkArgs (command, {}).ok);
+    CHECK (CommandRegistry::checkArgs (command, {}).reason == reason::arity);
+
+    CHECK (CommandRegistry::checkArgs (command, { osc::Value::string ("A") }).ok);
+    CHECK (CommandRegistry::checkArgs (command, { osc::Value::string ("A"),
+                                                  osc::Value::string ("B") }).ok);
+}
+
 TEST_CASE ("command signature: optional parameters may be left out")
 {
     const auto command = makeCommand ("one.optional",

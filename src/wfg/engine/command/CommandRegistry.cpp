@@ -16,6 +16,8 @@
 
 #include <wfg/engine/command/CommandRegistry.h>
 
+#include <algorithm>
+
 namespace wfg
 {
     void CommandRegistry::add (Command command)
@@ -121,7 +123,14 @@ namespace wfg
             if (! p.optional)
                 ++required;
 
-        if (args.size() < required || args.size() > command.params.size())
+        /*  THE TAIL, when the last parameter declares one: as many more of its
+            type as the caller has, and no upper bound. Only the last, because a
+            variadic in the middle would make "which parameter is this argument"
+            a guess - and every command that wants one wants it at the end, for
+            a list of identifiers a handler produced. */
+        const auto variadic = ! command.params.empty() && command.params.back().variadic;
+
+        if (args.size() < required || (! variadic && args.size() > command.params.size()))
         {
             result.reason = reason::arity;
             return result;
@@ -138,7 +147,9 @@ namespace wfg
                 return result;
             }
 
-            auto coerced = coerceImpl (command.params[i].typeTag, args[i]);
+            const auto& declared = command.params[std::min (i, command.params.size() - 1)];
+
+            auto coerced = coerceImpl (declared.typeTag, args[i]);
 
             if (! coerced)
             {

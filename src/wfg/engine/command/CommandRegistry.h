@@ -63,7 +63,10 @@ namespace wfg
             hand the handler, or a reason code.
 
             Two rules, and they are the whole of the type policy:
-              * arity - every required parameter present, no extras;
+              * arity - every required parameter present, and no extras unless
+                the last parameter is variadic, in which case the tail is as
+                long as it likes and every value in it takes that parameter's
+                type;
               * types - exact, except that the numeric tags coerce to each other,
                 because a client that types 1 where 1.0 is wanted is not making a
                 mistake anyone wants reported. Everything else is a type-mismatch,
