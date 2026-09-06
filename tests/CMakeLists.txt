@@ -84,6 +84,7 @@ add_executable(wfg_tests
     RunTests.cpp
     GoTests.cpp
     TriggerTests.cpp
+    MidiTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp
@@ -144,6 +145,12 @@ add_test(NAME wfg.selftest COMMAND wfg selftest)
 # says every gesture-reachable action exists as a named command, and a list
 # nobody ever runs is a promise nobody ever checks.
 # -----------------------------------------------------------------------------
+# `wfg midi` is registered for the reason `wfg devices` is: it exits 0 with
+# nothing to say on a machine with no MIDI interface, which is every CI runner,
+# and that is what makes the verb testable at all. A port list is a fact about
+# the machine; an empty one is a fact too.
+add_test(NAME wfg.midi COMMAND wfg midi)
+
 add_test(NAME wfg.commands.C     COMMAND wfg commands --wfg-locale=C)
 add_test(NAME wfg.commands.fr_FR COMMAND wfg commands --wfg-locale=${WFG_LOCALE_FR})
 

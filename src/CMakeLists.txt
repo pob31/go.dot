@@ -90,6 +90,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/CueList.h
     wfg/engine/cue/TriggerIndex.h
     wfg/engine/cue/TriggerIndex.cpp
+    wfg/engine/midi/MidiInputs.h
+    wfg/engine/midi/MidiInputs.cpp
     wfg/engine/audio/AudioCommands.h
     wfg/engine/audio/AudioCommands.cpp
     wfg/engine/audio/AudioHost.h

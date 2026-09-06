@@ -22,6 +22,7 @@
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/midi/MidiInputs.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/tree/MountProbe.h>
@@ -288,6 +289,40 @@ namespace
         numbers would be printing the half that is easy, and the numbers are the
         half somebody actually needs before they can write --buffer=.
     */
+    /*  `wfg midi` - what this machine can listen to and talk to.
+
+        EXITS 0 WITH NOTHING TO SAY on a machine with no MIDI interface, which
+        is every CI runner and is why the verb is testable at all. A port list
+        is a fact about the machine; an empty one is a fact too, and making it
+        an error would mean the only build that could run this test is one with
+        hardware plugged into it.
+
+        The names are the ones `--midi-in=` and `--midi-out=` take, so this is
+        also the answer to "what do I type". */
+    void listMidi()
+    {
+        const auto inputs = wfg::midi::availableInputs();
+        const auto outputs = wfg::midi::availableOutputs();
+
+        if (inputs.empty() && outputs.empty())
+        {
+            std::cout << "wfg midi: this machine has no MIDI ports" << std::endl;
+            return;
+        }
+
+        std::cout << "inputs" << (inputs.empty() ? "   (none)" : "") << std::endl;
+
+        for (const auto& name : inputs)
+            std::cout << "    " << name << std::endl;
+
+        std::cout << "outputs" << (outputs.empty() ? "   (none)" : "") << std::endl;
+
+        for (const auto& name : outputs)
+            std::cout << "    " << name << std::endl;
+
+        std::cout << std::flush;
+    }
+
     void listDevices()
     {
         const auto devices = wfg::audio::availableDevices();
@@ -1152,6 +1187,24 @@ namespace
         const auto blockSize = args.getValueForOption ("--buffer").getIntValue();
         const auto hosted = args.containsOption ("--hosted");
 
+        /*  `--midi-in=<device>`, repeatable, because a rig has a surface and a
+            foot switch and they are two devices.
+
+            THE PORTS ARE A FACT ABOUT THIS MACHINE and never a thing the
+            document says - the same rule the audio device follows (§4.9: the
+            controller arrives knowing nothing). A show that named its
+            interfaces would be a show that only ran in one building.
+
+            Read out of the raw arguments rather than through
+            `getValueForOption`, which answers with the first of a repeated
+            option and would silently open one device of the two. */
+        std::vector<std::string> midiInputNames;
+
+        for (const auto& argument : args.arguments)
+            if (argument.text.startsWith ("--midi-in="))
+                midiInputNames.push_back (argument.text.fromFirstOccurrenceOf ("=", false, false)
+                                            .toStdString());
+
         /*  `--ui=<directory>` serves a client from `/ui` on the OSCQuery port.
 
             A DIRECTORY RATHER THAN A COPY IN THE BINARY, while the layout is
@@ -1363,6 +1416,33 @@ namespace
         /*  The triggers, rebuilt on the tick thread whenever the document moves
             and held here so the clock read below has one too. */
         std::shared_ptr<const wfg::cue::TriggerIndex> triggerIndex;
+
+        /*  THE MIDI INPUTS, opened before the clock starts so that a mistyped
+            device name is a sentence on the terminal somebody is still looking
+            at rather than a trigger that never fires.
+
+            FATAL, like `--ui` pointed at nothing. A cue that can be fired from
+            a foot switch and silently cannot is the failure this whole feature
+            exists to avoid, and "the device is not there" is almost always a
+            name spelled differently - so the message lists what this machine
+            does have, and the remedy is to read it. */
+        wfg::midi::MidiInputs midiIn;
+        midiIn.sendTo (engine);
+
+        for (const auto& name : midiInputNames)
+            midiIn.open (name);
+
+        if (! midiIn.problems().empty())
+        {
+            for (const auto& problem : midiIn.problems())
+                std::cerr << "wfg serve: " << problem << std::endl;
+
+            return 2;
+        }
+
+        if (midiIn.count() > 0)
+            std::cout << "wfg: listening on " << midiIn.count()
+                      << " MIDI input(s)" << std::endl;
 
         /*  The loop closed. From here a mounted write reaches a socket; before
             it, the same write reached the tree and the log and stopped. */
@@ -1796,6 +1876,7 @@ namespace
                                     triggerIndex =
                                         wfg::cue::TriggerIndex::build (document);
                                     nameSpace.publishTriggers (triggerIndex);
+                                    midiIn.publishTriggers (triggerIndex);
                                 }
 
                                 auto current = parameters.publish (outcome.tick, state);
@@ -1884,6 +1965,12 @@ int wfg::runConsole (int argc, char** argv)
                       {},
                       [] (const juce::ArgumentList&) { listDevices(); } });
 
+    app.addCommand ({ "midi",
+                      "midi",
+                      "Lists the MIDI ports this machine has, by the names --midi-in takes",
+                      {},
+                      [] (const juce::ArgumentList&) { listMidi(); } });
+
     app.addCommand ({ "canon",
                       "canon <file> [--in-place]",
                       "Rewrites a show document in canonical form, or reports why it cannot",
@@ -1925,7 +2012,8 @@ int wfg::runConsole (int argc, char** argv)
                       } });
 
     app.addCommand ({ "serve",
-                      "serve <bundle> --sample-rate=N --buffer=N [--hosted [--render=<wav>]] [--ui=<dir>]"
+                      "serve <bundle> --sample-rate=N --buffer=N [--hosted [--render=<wav>]]"
+                      " [--ui=<dir>] [--midi-in=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
