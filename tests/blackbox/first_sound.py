@@ -516,7 +516,20 @@ def run(locale: "str | None") -> int:
         # Measured as "how long has it been silent for" rather than "is the last
         # 100 ms silent", because the second phrasing cannot tell a show that
         # ended properly from a file that was cut off mid-note.
-        span = RATE // 10
+        #
+        # ONE TICK IS THE BOUND, and it is set by what it has to DISCRIMINATE
+        # rather than by what looked comfortable on the machine it was written
+        # on. The source is DC, so a cue that was still playing has no zero
+        # crossings at all and would leave exactly zero silent frames;
+        # Tracktion's click suppression is ten samples. Anything past a block is
+        # already decisive, and a tick is fifteen of those.
+        #
+        # The generous version failed on a Windows runner that had flushed 59 ms
+        # of silence rather than 100 - which measured the writer's background
+        # thread against a stopwatch, not the show against its own ending. How
+        # much of the tail reaches disk before the process is killed is the
+        # writer's business; that there IS a tail is Go.dot's.
+        span = RATE // 50
         quiet = 0
 
         for n in range(len(samples[0]) - 1, -1, -1):
@@ -527,7 +540,8 @@ def run(locale: "str | None") -> int:
         report.check(quiet >= span,
                      "the render ends in digital silence, not something small",
                      f"only {quiet} of the last frames were zero "
-                     f"({quiet / RATE * 1000:.0f} ms; wanted at least 100)")
+                     f"({quiet / RATE * 1000:.1f} ms; wanted at least one tick, "
+                     f"{span} frames)")
 
         # --- and the log reproduces it -------------------------------------
         # NOT "did it crash". Replay re-executes every record against a fresh
