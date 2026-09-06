@@ -266,6 +266,26 @@ namespace wfg::cue
         std::string fire (Engine& engine, std::int64_t tick, const std::string& cueId,
                           const std::string& runId);
 
+        /*  What GO does, which is more than firing a cue once the pointer can
+            be inside a group.
+
+            A member of a manual sequence group is not a cue that plays on its
+            own: it plays AS PART OF the group, so the group's run has to exist
+            to be its parent, its header has to have run, and its footer will
+            run when the members are done. If the operator's pointer is three
+            levels down and none of those groups is live, GO creates the whole
+            chain - outermost first - and then the member.
+
+            THE IDENTIFIERS ARE SUPPLIED OR DRAWN, in that order, which is what
+            makes it replayable: a `go` record carries EVERY identifier it
+            created rather than only one, and a replay hands them back in the
+            same order. The record is variadic because the number is a property
+            of how deep the pointer was, not a constant. */
+        std::vector<std::string> fireStandby (Engine& engine, std::int64_t tick,
+                                              const juce::ValueTree& list,
+                                              const std::string& cueId,
+                                              const std::vector<std::string>& supplied);
+
         /*  Arms a cue without firing it: the standby path. Same return. */
         std::string arm (Engine& engine, std::int64_t tick, const std::string& cueId,
                          const std::string& runId);

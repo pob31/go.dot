@@ -87,6 +87,15 @@ namespace wfg::cue
         return nullptr;
     }
 
+    bool RunTable::hasChildFor (const std::string& parentRun, const std::string& cueId) const
+    {
+        return std::any_of (runs.begin(), runs.end(),
+                            [&parentRun, &cueId] (const Run& run)
+                            {
+                                return run.parent == parentRun && run.cue == cueId;
+                            });
+    }
+
     bool RunTable::isTrackBusy (int track) const
     {
         return std::any_of (runs.begin(), runs.end(),

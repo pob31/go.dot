@@ -272,6 +272,147 @@ namespace wfg::cue
         return id;
     }
 
+    std::vector<std::string> Runner::fireStandby (Engine& engine, std::int64_t tick,
+                                                  const juce::ValueTree& list,
+                                                  const std::string& cueId,
+                                                  const std::vector<std::string>& supplied)
+    {
+        std::vector<std::string> used;
+
+        /*  The identifiers, supplied by a replay or drawn fresh. Kept in one
+            place so that "the next one" means the same thing on both roads. */
+        std::size_t taken = 0;
+
+        const auto nextId = [&]
+        {
+            auto id = taken < supplied.size() ? supplied[taken] : std::string {};
+            ++taken;
+
+            if (id.empty())
+                id = ids.generate();
+
+            used.push_back (id);
+            return id;
+        };
+
+        /*  THE GROUPS BETWEEN THE CUE AND THE LIST, outermost first. A member of
+            a manual sequence plays as part of its group - §3.6 makes the group
+            the thing that organises its members' time, order and lifetime - so
+            every one of them has to be live before the member can be its child.
+
+            Walking up and then reversing, because the document knows parents
+            and not paths. */
+        std::vector<juce::ValueTree> ancestors;
+
+        for (auto node = document.findById (cueId).getParent();
+             node.isValid() && node != list;
+             node = node.getParent())
+        {
+            if (node.getType().toString() == "Group")
+                ancestors.push_back (node);
+        }
+
+        std::reverse (ancestors.begin(), ancestors.end());
+
+        std::string parentRun;
+
+        /*  Whether this GO ENTERED a group rather than joining one already
+            running. If it did, the group's job fires the member after the
+            header and this must not fire it as well. */
+        auto createdGroup = false;
+
+        for (const auto& group : ancestors)
+        {
+            const auto groupId = group[idProperty].toString().toStdString();
+
+            /*  ALREADY RUNNING IS THE ORDINARY CASE: the operator pressed GO on
+                member one a moment ago, and members two onwards join the run
+                that started then. */
+            if (const auto* live = runs.liveRunOf (groupId))
+            {
+                parentRun = live->id;
+                continue;
+            }
+
+            const auto id = nextId();
+
+            runs.create (id, groupId, "group", parentRun);
+
+            if (auto* run = runs.find (id))
+            {
+                run->preWaitTicks = ticksFor (numberOf (group, "preWait"));
+                run->postWaitTicks = ticksFor (numberOf (group, "postWait"));
+            }
+
+            /*  Its header runs, then the member the operator asked for. The job
+                is what does that, because the header comes first and the header
+                takes ticks - so the member is remembered rather than fired
+                here, and `beginPhase` starts the members at it. */
+            fireKind (engine, tick, group, "group", id);
+
+            if (! scheduled.empty() && scheduled.back().run == id)
+                scheduled.back().enterAt = cueId;
+
+            parentRun = id;
+            createdGroup = true;
+        }
+
+        /*  And the cue itself, as a child of the innermost group - or of
+            nothing, when the pointer was at the top level all along. */
+        const auto cue = document.findById (cueId);
+
+        if (! cue.isValid())
+            return used;
+
+        if (parentRun.empty())
+        {
+            const auto id = fire (engine, tick, cueId, nextId());
+
+            /*  THE RUN IT ACTED ON, which is not always the one it drew.
+
+                Standby arms ahead, so the ordinary GO launches a run that
+                already existed - and `fire` answers with THAT identifier while
+                the one drawn here goes unused. Recording the drawn one would
+                put a number in the log that names nothing; recording what
+                `fire` returned keeps the record's promise, which is that a
+                replay never has to draw a number of its own.
+
+                Empty means the cue makes no run at all, and then the record
+                carries nothing rather than an identifier for a run that does
+                not exist. */
+            if (id.empty())
+                used.pop_back();
+            else
+                used.back() = id;
+
+            return used;
+        }
+
+        /*  Entering the group is the whole of this GO: the header runs and the
+            job fires the member at the far end of it. */
+        if (createdGroup)
+            return used;
+
+        /*  Decision N, 2026-09-06: a media cue that is already sounding is
+            ignored - the GO is applied and logged, the pointer has advanced, and
+            the playing instance carries on. */
+        if (runs.liveRunOf (cueId) != nullptr && kindOfCue (cue) == "media")
+            return used;
+
+        /*  A member of a manual group is spawned INTO it, so the group waits for
+            it, its footer runs after it, and killing the group takes it with it. */
+        /*  SPAWNED AND NOT LAUNCHED. The group's job starts it on the next
+            tick, because one launcher is better than two: `run.launch` begins a
+            pre-wait, and a member started from both here and there would begin
+            its wait twice. */
+        const auto id = spawnChild (engine, parentRun, cueId, nextId());
+
+        if (id.empty())
+            used.pop_back();
+
+        return used;
+    }
+
     //==============================================================================
     void Runner::fireNow (Engine& engine, std::int64_t tick, const std::string& runId)
     {
@@ -1430,6 +1571,48 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  A MANUAL SEQUENCE DOES NOT ADVANCE ITSELF. §3.6: "manual - a
+                member starts on GO ... the operator is the parent." So once its
+                header is done the job spawns nothing and waits; each GO on the
+                member the pointer has reached creates that member's run as a
+                child, and the job simply notices when the last one is finished.
+
+                A header and a footer are always sequences and always automatic,
+                whatever the group says: they are the group's own preparation and
+                release, and an operator does not step through them. */
+            const auto manual = job.phase == groupPhase::members
+                                  && textOf (group, "advance") != "auto";
+
+            if (manual)
+            {
+                /*  THE JOB IS THE ONLY THING THAT LAUNCHES, whoever asked for
+                    the member. GO creates the child - so that the record
+                    carries its identifier and a replay re-supplies it - and the
+                    job starts it on the next tick, which is the same tick
+                    budget every other member boundary costs.
+
+                    One launcher rather than two because `run.launch` begins a
+                    pre-wait, and a member launched twice would begin its wait
+                    twice. */
+                for (auto i = job.launched; i < children.size(); ++i)
+                    engine.submit (origin::engine, "run.launch", one (children[i]->id));
+
+                job.launched = children.size();
+
+                /*  DONE WHEN THE LAST MEMBER HAS BEEN FIRED AND HAS FINISHED,
+                    and both halves are needed. A manual group between GOs looks
+                    exactly like one that is over - no child is running either
+                    way - so "nothing is running" cannot be the test. What tells
+                    them apart is whether the last member was ever started. */
+                const auto lastFired = ! job.phaseCues.empty()
+                                         && runs.hasChildFor (job.run, job.phaseCues.back());
+
+                if (lastFired && runs.allChildrenFinished (job.run))
+                    finishPhase (engine, job, group);
+
+                continue;
+            }
+
             /*  A sequence, which a header and a footer always are: launch what
                 was spawned, wait for it, then spawn the next. */
             if (job.awaiting.empty())
@@ -1502,9 +1685,29 @@ namespace wfg::cue
             return true;
         }
 
+        /*  A MANUAL SEQUENCE STARTS WHERE THE OPERATOR WAS, which is member one
+            in every ordinary case - the pointer descends to it and GO there is
+            what created the group - and is not member one when `standby.set`
+            put the pointer somewhere else. Firing member one then would start a
+            scene at a place nobody asked for.
+
+            After this the group spawns nothing on its own: each GO creates the
+            member the pointer has reached. */
+        auto first = std::size_t { 0 };
+
+        if (phase == groupPhase::members && ! job.enterAt.empty())
+        {
+            const auto at = std::find (cues.begin(), cues.end(), job.enterAt);
+
+            if (at != cues.end())
+                first = static_cast<std::size_t> (at - cues.begin());
+        }
+
+        job.enterAt.clear();
+
         engine.submit (origin::engine, "run.spawn",
-                       { osc::Value::string (job.run), osc::Value::string (cues.front()) });
-        job.nextMember = 1;
+                       { osc::Value::string (job.run), osc::Value::string (cues[first]) });
+        job.nextMember = first + 1;
         return true;
     }
 
@@ -1887,12 +2090,30 @@ namespace wfg::cue
                             const auto next = nextStandby (list, standby);
                             document.setAttribute (standbyAddressOf (listId), next);
 
-                            const auto id = args.empty() ? std::string {}
-                                                         : args[0].getString();
+                            /*  EVERY IDENTIFIER THIS GO CREATED, not just one.
 
-                            return Outcome::ok (withRun (args, 0,
-                                                         runner.fire (engine, context.tick,
-                                                                      standby, id)));
+                                A member three levels inside manual groups needs
+                                each of those groups live before it can be their
+                                child, so one GO can create four runs. The record
+                                carries all of them, in the order they were made,
+                                and a replay hands them back in that order - which
+                                is the same guarantee the single identifier gave,
+                                widened to a number that depends on where the
+                                pointer was. */
+                            std::vector<std::string> supplied;
+
+                            for (const auto& value : args)
+                                supplied.push_back (value.getString());
+
+                            const auto made = runner.fireStandby (engine, context.tick,
+                                                                  list, standby, supplied);
+
+                            std::vector<osc::Value> applied;
+
+                            for (const auto& id : made)
+                                applied.push_back (osc::Value::string (id));
+
+                            return Outcome::ok (applied);
                         } });
 
         //----------------------------------------------------------------------

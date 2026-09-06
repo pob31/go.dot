@@ -347,6 +347,14 @@ namespace wfg::cue
             is complete, which is the honest answer and not a special case. */
         bool allChildrenFinished (const std::string& parentRun) const;
 
+        /*  Whether this group run has ever spawned a run for that cue -
+            finished or not.
+
+            What tells a manual group that is WAITING for its next GO from one
+            that is OVER. The two look identical from the outside: no child is
+            running either way. */
+        bool hasChildFor (const std::string& parentRun, const std::string& cueId) const;
+
         Run* find (const std::string& id);
         const Run* find (const std::string& id) const;
 

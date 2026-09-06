@@ -120,6 +120,21 @@ namespace wfg::cue
             once instead of one at a time. */
         std::vector<std::string> phaseCues;
 
+        /*  The member the operator asked for when they entered the group, for
+            a manual sequence.
+
+            ENTERING FIRES THE MEMBER THE POINTER WAS ON, and it is usually the
+            first - the pointer descends to member one and GO there is what
+            creates the group. It is not always: `standby.set` can put the
+            pointer on member three of a group that is not running, and firing
+            member one instead would start a scene somewhere the operator did
+            not ask for.
+
+            It waits for the HEADER, which is why this is remembered rather than
+            fired at once: §3.6 runs the header before the members, and the GO
+            that entered the group is the same GO that fires the member. */
+        std::string enterAt;
+
         /** Finished and waiting to be forgotten. */
         bool retired = false;
     };

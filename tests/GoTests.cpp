@@ -1830,6 +1830,13 @@ namespace
         {
             groupId = document.createCue (listId, 2, "group", "Preshow").id;
 
+            /*  AUTOMATIC, because `advance` defaults to MANUAL - which is the
+                gentler default (a group somebody made and did not configure is
+                one the operator drives) and the wrong one for the cases below,
+                which are about the scheduler advancing a chain on its own.
+                Manual groups have a rig and cases of their own. */
+            document.setAttribute ("/godot/cue/" + groupId + "/advance", "auto");
+
             first = document.createCue (groupId, 0, "memo", "One").id;
             second = document.createCue (groupId, 1, "memo", "Two").id;
             third = document.createCue (groupId, 2, "memo", "Three").id;
@@ -2049,6 +2056,7 @@ TEST_CASE ("group: groups nest, and the inner one completes before the outer")
     GroupRig rig;
 
     const auto outer = rig.document.createCue (rig.listId, 3, "group", "Scene").id;
+    rig.setCue (outer, "advance", "auto");        // the default is manual
     rig.document.setAttribute ("/godot/cue/" + rig.groupId + "/enabled", "false");
 
     // Move the inner group inside the outer one, and give the outer a memo after it.
@@ -2322,4 +2330,224 @@ TEST_CASE ("group: a header's cues are published as cues, and are not members of
     /*  And asking for the same role twice answers with the one that exists,
         rather than making a second: a group has at most one of each. */
     CHECK (rig.roleOf (rig.groupId, "header") == header);
+}
+
+//==============================================================================
+/*  A MANUAL SEQUENCE GROUP: the operator is the parent.
+
+    §3.6: "manual - a member starts on GO. The standby pointer descends into the
+    group; the operator is the parent. Toggleable during tech; a mid-run change
+    takes effect at the next member boundary."
+
+    So the scheduler does almost nothing here. It runs the header, and after
+    that it spawns nothing: each GO on the member the pointer has reached
+    creates that member's run as a child of the group's. What the group still
+    owns is the things a group owns (§4.12) - lifetime, so killing it takes the
+    members; order, so its footer runs after the last of them; and completion,
+    so whatever is waiting on the group is told when it is over.
+
+    Both attributes DEFAULT to this - `mode` to `sequence` and `advance` to
+    `manual` - which is the gentler pair: a group somebody made and did not
+    configure is one the operator drives rather than one that runs away.
+*/
+namespace
+{
+    struct ManualRig : Rig
+    {
+        ManualRig()
+        {
+            groupId = document.createCue (listId, 2, "group", "Scene").id;
+
+            // Deliberately not configured: manual sequence is what both default to.
+            first = document.createCue (groupId, 0, "memo", "One").id;
+            second = document.createCue (groupId, 1, "memo", "Two").id;
+            third = document.createCue (groupId, 2, "memo", "Three").id;
+            /*  Somewhere for the pointer to go when it leaves the group. There
+                is no wrap at the end of a list (§3.5), so without this the
+                "it climbs out" case would be indistinguishable from "it is at
+                the end and stays put". */
+            after = document.createCue (listId, 3, "memo", "After").id;
+        }
+
+        void setCue (const std::string& id, const char* name, const std::string& value)
+        {
+            document.setAttribute ("/godot/cue/" + id + "/" + name, value);
+        }
+
+        std::string roleOf (const std::string& group, const char* role)
+        {
+            const auto edit = document.createRole (group, role);
+            REQUIRE (edit.ok);
+            return edit.id;
+        }
+
+        std::string runOf (const std::string& cueId) const
+        {
+            for (const auto& run : runs.all())
+                if (run.cue == cueId)
+                    return run.id;
+
+            return {};
+        }
+
+        std::string groupId, first, second, third, after;
+    };
+}
+
+TEST_CASE ("manual group: each GO fires one member, and the pointer walks through it")
+{
+    ManualRig rig;
+    rig.setStandby (rig.first);           // the pointer descends here on its own
+
+    /*  The FIRST GO enters the group: it creates the group's run - which is
+        what the members will be children of - and the group fires member one
+        after its header. */
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    const auto groupRun = rig.runOf (rig.groupId);
+    REQUIRE (! groupRun.empty());
+    CHECK (rig.runs.find (rig.runOf (rig.first))->parent == groupRun);
+
+    // And the pointer moved on, as it does on every GO, whatever the cue did.
+    CHECK (rig.standby() == rig.second);
+
+    /*  NOTHING ELSE HAPPENS ON ITS OWN. Twenty ticks after the first member has
+        finished, the second has still not been fired: the operator is the
+        parent, so the group is waiting for them. */
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto id = rig.runOf (rig.first);
+        return ! id.empty() && rig.runs.find (id)->isFinished();
+    }));
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (rig.second) == "");
+    CHECK_FALSE (rig.runs.find (groupRun)->isFinished());
+
+    // The second GO fires the second member, into the same group run.
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.second).empty(); }));
+
+    CHECK (rig.runs.find (rig.runOf (rig.second))->parent == groupRun);
+    CHECK (rig.standby() == rig.third);
+
+    /*  And the third takes the pointer OUT of the group, on the press that
+        fires the last member - decision M, 2026-09-06: no GO is ever spent on
+        leaving. (The count is not asserted: the same tick can apply a
+        `run.launch` the scheduler asked for, which is the machinery working.) */
+    CHECK (rig.submitAndTick ("go").rejected == 0);
+    CHECK (rig.standby() == rig.after);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (groupRun)->isFinished(); }));
+}
+
+TEST_CASE ("manual group: it is over when its last member is, not when it is idle")
+{
+    /*  A manual group between GOs looks exactly like one that is over: no child
+        is running either way. What tells them apart is whether the LAST member
+        was ever started - so an idle group in the middle is still playing, and
+        anything waiting on it keeps waiting. */
+    ManualRig rig;
+    rig.setStandby (rig.first);
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto groupRun = rig.runs.all().front().id;
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.allChildrenFinished (groupRun)
+                                           && ! rig.runOf (rig.first).empty(); }));
+
+    // Idle in the middle, and not done.
+    CHECK_FALSE (rig.runs.find (groupRun)->isFinished());
+}
+
+TEST_CASE ("manual group: entering it runs the header first, then the member")
+{
+    /*  §3.6 puts the header before the members whatever the group's mode is -
+        it is the group's own preparation, and the GO that enters the group is
+        the same GO that fires the member at the far end of it. */
+    ManualRig rig;
+
+    const auto header = rig.roleOf (rig.groupId, "header");
+    const auto opening = rig.document.createCue (header, 0, "memo", "Pre-arm").id;
+    rig.setCue (opening, "postWait", "0.2");         // long enough to be caught
+
+    rig.setStandby (rig.first);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    // The header cue runs, and the member has not.
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (opening).empty(); }));
+    CHECK (rig.runOf (rig.first) == "");
+
+    // Then the member, once the header is done.
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+    CHECK (rig.runs.find (rig.runOf (opening))->isFinished());
+}
+
+TEST_CASE ("manual group: the pointer put in the middle enters there, not at the top")
+{
+    /*  The ordinary path descends to member one and GO there creates the group,
+        so "enter at the first member" and "enter where the pointer is" are the
+        same thing almost always. `standby.set` is where they differ - and
+        starting a scene at a place nobody asked for is the wrong answer. */
+    ManualRig rig;
+    rig.setStandby (rig.second);
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.second).empty(); }));
+
+    CHECK (rig.runOf (rig.first) == "");             // never started
+}
+
+TEST_CASE ("manual group: killing it takes the members with it and skips the footer")
+{
+    ManualRig rig;
+
+    const auto footer = rig.roleOf (rig.groupId, "footer");
+    const auto closing = rig.document.createCue (footer, 0, "memo", "Release").id;
+
+    rig.setStandby (rig.first);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto groupRun = rig.runs.all().front().id;
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    rig.submitAndTick ("run.kill", { osc::Value::string (groupRun) });
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (groupRun)->isFinished(); }));
+
+    CHECK (rig.runOf (closing) == "");               // no footer: it was killed
+}
+
+TEST_CASE ("manual group: a GO record carries every run it created")
+{
+    /*  One GO can create several runs - the groups between the pointer and the
+        list, then the member - so the record is variadic. The guarantee is the
+        one a single identifier gave, widened: a replay never draws a number of
+        its own, so it needs to be handed all of them, in the order they were
+        made. */
+    ManualRig rig;
+
+    // A manual group inside the manual group: two levels to create at once.
+    const auto inner = rig.document.createCue (rig.groupId, 0, "group", "Inner").id;
+    const auto deep = rig.document.createCue (inner, 0, "memo", "Deep").id;
+
+    rig.setStandby (deep);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+
+    const auto go = std::find_if (parsed.records.begin(), parsed.records.end(),
+                                  [] (const auto& record) { return record.command == "go"; });
+
+    REQUIRE (go != parsed.records.end());
+
+    /*  Two: the outer group's run and the inner group's. The member's own is
+        spawned by the inner group's job after its header, so it carries its
+        identifier in a `run.spawn` record instead. */
+    CHECK (go->args.size() == 2u);
+
+    for (const auto& arg : go->args)
+        CHECK (rig.runs.find (arg.getString()) != nullptr);
 }
