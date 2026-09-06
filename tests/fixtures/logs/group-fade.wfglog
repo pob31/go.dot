@@ -1,0 +1,56 @@
+# wfg-log 1
+# fixture group-fade — a fade aimed at a group while the group is running.
+#
+# WHAT THIS FIXTURE IS FOR, and what it deliberately does not say.
+#
+# §3.6 makes a fade aimed at a group a TRIM over its members rather than a write
+# to any of them, and PR 3.12 built it: a run's level is its own plus every
+# ancestor's, so a member authored at -3 inside a group trimmed to -6 is heard
+# at -9 and its own level is still -3. That arithmetic is not in this file and
+# cannot be, because §3.15 keeps continuous readouts out of the log — a level
+# moving fifty times a second is exactly what a log must not carry, and a replay
+# recomputes it from the GO and the document instead.
+#
+# So what this asserts is the other half, and it is the half a fixture is for:
+# the SESSION reproduces. A group fired, its members spawned and run by the
+# scheduler, a fade cue fired over the top of them while they ran, and both the
+# fade's run and the group's ending where they did. The trim arithmetic is
+# checked where it can be — in the unit suite, sample by sample — and this says
+# the decisions around it are all written down.
+#
+# GO fires the group. Standby moves to the fade cue (§3.5).
+A 0 0 cli go s:"RN000001"
+#
+# The round: an automatic sequence with no shuffle draws its members in the
+# order they are written, and the seed is nought because nobody asked for one.
+A 1 1 engine run.round s:"RN000001" i:0 s:"TRM00003" s:"TRM00004"
+#
+# The first member is spawned and launched. A memo has nothing to make ready, so
+# the spawn and the launch are a tick apart and the run ends on the tick after.
+A 1 2 engine run.spawn s:"RN000001" s:"TRM00003" s:"RN000002"
+A 2 3 engine run.launch s:"RN000002"
+A 3 4 engine run.ended s:"RN000002"
+#
+# The second follows. Its pre-wait is two tenths, so ten ticks pass between the
+# launch and the fire — the wait is the cue's own and the scheduler is only
+# counting it.
+A 4 5 engine run.spawn s:"RN000001" s:"TRM00004" s:"RN000003"
+A 5 6 engine run.launch s:"RN000003"
+#
+# AND HERE IS THE FADE, fired while the group is still running its second
+# member. It is aimed at the GROUP, which has no voice of its own — what it
+# writes is the trim every member is heard through.
+A 7 7 cli cue.fire s:"TRM00005" s:"RN000004"
+#
+# The member's pre-wait elapses and it fires, with the trim already in force.
+A 10 8 engine run.fire s:"RN000003"
+A 11 9 engine run.ended s:"RN000003"
+#
+# The group has no more members and no footer, so it is done.
+A 12 10 engine run.ended s:"RN000001"
+#
+# The fade arrives two tenths after it was fired — ten ticks — and its own run
+# ends there. It outlives the group it was trimming, which is not a problem and
+# is worth having written down: a trim on a run that has finished reaches
+# nothing, and the fade says so by ending rather than by failing.
+A 17 11 engine run.ended s:"RN000004"

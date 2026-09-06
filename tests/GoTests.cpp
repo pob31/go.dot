@@ -3279,3 +3279,243 @@ TEST_CASE ("parallel lists: firing a cue by name moves neither focus nor any sta
     CHECK (rig.document.getAttribute ("/godot/list/" + second + "/standby") == foyer);
     CHECK (rig.standby() == rig.memoId);
 }
+
+//==============================================================================
+/*  GROUP FADES AS TRIMS — the author's decision 4, 2026-09-06.
+
+    §3.6: a fade aimed at a group is a TRIM over its members, not a write, and
+    nested trims compose. Which makes a run's level a sum rather than a value:
+
+        level = ownLevel + every ancestor run's ownLevel
+
+    That is a small change to say and a structural one to have. It is what
+    relative fade cues will be built on, and it is the shape Phase 6's DCAs
+    need: a fader that trims a group of cues is the same arithmetic reached from
+    a different direction. Built here, before either, so that neither has to
+    change it.
+
+    THE THING THAT MAKES IT COMPOSE RATHER THAN ACCUMULATE is which number a
+    fade takes over from. A fade on a member starts from the member's OWN level
+    and not from what it is heard at, so a trim in force while the fade runs is
+    not folded into the base and left behind when the group releases it.
+*/
+namespace
+{
+    /*  A group of media cues, so that a trim has something with a voice to
+        reach. The memo members of GroupRig have no track and no level. */
+    struct TrimRig : Rig
+    {
+        TrimRig()
+        {
+            groupId = document.createCue (listId, 2, "group", "Scene").id;
+            document.setAttribute ("/godot/cue/" + groupId + "/advance", "auto");
+            document.setAttribute ("/godot/cue/" + groupId + "/mode", "timeline");
+
+            member = document.createCue (groupId, 0, "media", "Rain").id;
+            document.setAttribute ("/godot/cue/" + member + "/file", "thunder.wav");
+            document.setAttribute ("/godot/cue/" + member + "/level", "-3");
+        }
+
+        /** A fade cue aimed at something, with a duration in seconds. */
+        std::string fadeAt (const std::string& target, const char* toDb, const char* seconds)
+        {
+            const auto id = document.createCue (listId, 3, "fade", "Under").id;
+
+            document.setAttribute ("/godot/cue/" + id + "/target", target);
+            document.setAttribute ("/godot/cue/" + id + "/level", toDb);
+            document.setAttribute ("/godot/cue/" + id + "/duration", seconds);
+            return id;
+        }
+
+        /** The run of a cue, or empty. */
+        std::string runOf (const std::string& cueId) const
+        {
+            for (const auto& run : runs.all())
+                if (run.cue == cueId)
+                    return run.id;
+
+            return {};
+        }
+
+        double levelOf (const std::string& cueId) const
+        {
+            const auto id = runOf (cueId);
+            const auto* run = id.empty() ? nullptr : runs.find (id);
+            return run != nullptr ? run->level : 0.0;
+        }
+
+        double ownLevelOf (const std::string& cueId) const
+        {
+            const auto id = runOf (cueId);
+            const auto* run = id.empty() ? nullptr : runs.find (id);
+            return run != nullptr ? run->ownLevel : 0.0;
+        }
+
+        /** Ticks until a fade has arrived, or the bound runs out. */
+        void settle (int howMany = 60)
+        {
+            for (int n = 0; n < howMany; ++n)
+                tickOnce();
+        }
+
+        std::string groupId, member;
+    };
+}
+
+TEST_CASE ("trim: a fade aimed at a group moves its members and touches none of their levels")
+{
+    /*  The whole of decision 4 in one case. The member is authored at -3 and is
+        heard at -3; the group is trimmed to -6 and the member is heard at -9;
+        and the member's OWN level is still -3 throughout, because nothing wrote
+        to it. */
+    TrimRig rig;
+    rig.setStandby (rig.groupId);
+
+    rig.submitAndTick ("go");
+    rig.audio.completeArms (rig.engine);
+    rig.settle (10);
+
+    REQUIRE_FALSE (rig.runOf (rig.member).empty());
+
+    CHECK (rig.ownLevelOf (rig.member) == doctest::Approx (-3.0));
+    CHECK (rig.levelOf (rig.member) == doctest::Approx (-3.0));
+
+    /*  A GROUP RUN HAS NO VOICE, so its trim starts at nothing. */
+    CHECK (rig.ownLevelOf (rig.groupId) == doctest::Approx (0.0));
+
+    const auto trim = rig.fadeAt (rig.groupId, "-6", "0.2");
+    rig.submitAndTick ("cue.fire", { osc::Value::string (trim) });
+    rig.settle (20);
+
+    /*  THE GROUP CARRIES THE TRIM. */
+    CHECK (rig.ownLevelOf (rig.groupId) == doctest::Approx (-6.0));
+    CHECK (rig.levelOf (rig.groupId) == doctest::Approx (-6.0));
+
+    /*  THE MEMBER IS HEARD SIX DECIBELS DOWN, and its own level never moved. */
+    CHECK (rig.levelOf (rig.member) == doctest::Approx (-9.0));
+    CHECK (rig.ownLevelOf (rig.member) == doctest::Approx (-3.0));
+
+    /*  AND THE VOICE WAS TOLD. What reaches the audio side is the effective
+        level, which is the number the trim exists to produce. */
+    REQUIRE_FALSE (rig.audio.levels.empty());
+    CHECK (rig.audio.levels.back().second == doctest::Approx (-9.0));
+}
+
+TEST_CASE ("trim: a member's own fade and its group's trim compose in dB, and each returns alone")
+{
+    /*  §3.6's "nested trims compose", seen from the member's side: two fades
+        running over one cue, one aimed at it and one at the group above it, and
+        the answer is their sum. Then each is released and the other is still
+        exactly where it was - which is the property a trim has and a write does
+        not. */
+    TrimRig rig;
+    rig.setStandby (rig.groupId);
+
+    rig.submitAndTick ("go");
+    rig.audio.completeArms (rig.engine);
+    rig.settle (10);
+
+    const auto trim = rig.fadeAt (rig.groupId, "-6", "0.2");
+    const auto own = rig.fadeAt (rig.member, "-10", "0.2");
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string (trim) });
+    rig.submitAndTick ("cue.fire", { osc::Value::string (own) });
+    rig.settle (25);
+
+    CHECK (rig.ownLevelOf (rig.member) == doctest::Approx (-10.0));
+    CHECK (rig.levelOf (rig.member) == doctest::Approx (-16.0));
+
+    /*  THE GROUP LETS GO, and the member is at what its own fade left it at -
+        not at -16, and not back at -3. */
+    const auto release = rig.fadeAt (rig.groupId, "0", "0.2");
+    rig.submitAndTick ("cue.fire", { osc::Value::string (release) });
+    rig.settle (25);
+
+    CHECK (rig.levelOf (rig.member) == doctest::Approx (-10.0));
+    CHECK (rig.ownLevelOf (rig.member) == doctest::Approx (-10.0));
+}
+
+TEST_CASE ("trim: a nested group's trim adds to its parent's")
+{
+    /*  Trims compose downwards through as many levels as the show has, which is
+        what makes this the structure a DCA can be built on: a fader trimming a
+        group that is itself inside a trimmed group is two numbers added, not a
+        special case. */
+    TrimRig rig;
+
+    const auto inner = rig.document.createCue (rig.groupId, 1, "group", "Inside").id;
+    rig.document.setAttribute ("/godot/cue/" + inner + "/advance", "auto");
+    rig.document.setAttribute ("/godot/cue/" + inner + "/mode", "timeline");
+
+    const auto deep = rig.document.createCue (inner, 0, "media", "Deep").id;
+    rig.document.setAttribute ("/godot/cue/" + deep + "/file", "thunder.wav");
+    rig.document.setAttribute ("/godot/cue/" + deep + "/level", "-2");
+
+    rig.setStandby (rig.groupId);
+
+    rig.submitAndTick ("go");
+    rig.audio.completeArms (rig.engine);
+    rig.settle (15);
+    rig.audio.completeArms (rig.engine);
+    rig.settle (15);
+
+    REQUIRE_FALSE (rig.runOf (deep).empty());
+    CHECK (rig.levelOf (deep) == doctest::Approx (-2.0));
+
+    const auto outerTrim = rig.fadeAt (rig.groupId, "-6", "0.2");
+    const auto innerTrim = rig.fadeAt (inner, "-4", "0.2");
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string (outerTrim) });
+    rig.submitAndTick ("cue.fire", { osc::Value::string (innerTrim) });
+    rig.settle (25);
+
+    /*  -2 authored, -4 from the group it is in, -6 from the group that is in. */
+    CHECK (rig.levelOf (deep) == doctest::Approx (-12.0));
+
+    /*  AND THE INNER GROUP'S OWN LEVEL IS THE TRIM IN FORCE ON ITS MEMBERS,
+        which is its own plus its parent's - one rule for both kinds of run, so
+        a client never has to ask which it is holding. */
+    CHECK (rig.ownLevelOf (inner) == doctest::Approx (-4.0));
+    CHECK (rig.levelOf (inner) == doctest::Approx (-10.0));
+}
+
+TEST_CASE ("trim: a fade on a trimmed member starts from where the member is, not from what it is heard at")
+{
+    /*  THE LINE THAT MAKES TRIMS COMPOSE. A fade takes over from the run's OWN
+        level. Taking over from the effective one would fold the trim into the
+        base: the member would be heard six decibels lower than it should while
+        the fade ran, and would keep the six when the group let go.
+
+        Measured as the first level the fade writes, which is where it started
+        from rather than where it is going. */
+    TrimRig rig;
+    rig.setStandby (rig.groupId);
+
+    rig.submitAndTick ("go");
+    rig.audio.completeArms (rig.engine);
+    rig.settle (10);
+
+    const auto trim = rig.fadeAt (rig.groupId, "-6", "0.1");
+    rig.submitAndTick ("cue.fire", { osc::Value::string (trim) });
+    rig.settle (15);
+
+    REQUIRE (rig.levelOf (rig.member) == doctest::Approx (-9.0));
+
+    /*  A long fade, so the first tick of it is far from its destination and the
+        starting point is unambiguous. */
+    const auto own = rig.fadeAt (rig.member, "-40", "2");
+    rig.submitAndTick ("cue.fire", { osc::Value::string (own) });
+    rig.tickOnce();
+
+    /*  ONE TICK IN, its own level has moved a fiftieth of the way from -3 to
+        -40, which is about -3.7. Had it taken over from -9 it would be near
+        -9.6, and would be heard at -15.6 rather than at -12.7. */
+    const auto ownLevel = rig.ownLevelOf (rig.member);
+
+    INFO ("one tick in, its own level is " << ownLevel);
+    CHECK (ownLevel < -3.0);
+    CHECK (ownLevel > -5.0);
+
+    /*  And what it is HEARD at is that plus the trim, still. */
+    CHECK (rig.levelOf (rig.member) == doctest::Approx (ownLevel - 6.0));
+}

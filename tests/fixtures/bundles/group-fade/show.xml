@@ -1,0 +1,14 @@
+<Show>
+  <Lists>
+    <List id="TRM00001" name="Act One">
+      <Group id="TRM00002" advance="auto" name="The scene" number="1">
+        <Cue id="TRM00003" name="Wind up" number="1.1"/>
+        <Cue id="TRM00004" name="Wind down" number="1.2" preWait="0.2"/>
+      </Group>
+      <Fade id="TRM00005" duration="0.2" level="-6" name="Under the dialogue" number="2" target="TRM00002"/>
+      <Cue id="TRM00006" name="Clear" number="3"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="0"/>
+</Show>

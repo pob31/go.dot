@@ -464,6 +464,17 @@ namespace wfg::cue
             a readout and §3.15 says readouts do not replay. */
         void advanceRanges (Engine& engine);
 
+        /*  Recomputes every live run's effective level from its own and its
+            ancestors', and hands the media ones to the audio side.
+
+            ONE PLACE, AFTER THE FADES, and that is the point of it existing at
+            all rather than each fade writing the voice itself. A fade knows what
+            IT changed; only something that walks the tree knows what that means
+            for a member three levels down whose own fade is not running. Written
+            as a pass, a group trim reaches every descendant on the tick it
+            moves, including the ones nothing else is touching. */
+        void applyLevels();
+
         /*  The kind's own fire path, once every wait is out of the way: a media
             cue asks for a voice, a fade or a stop takes over a level, a network
             cue writes a node, a memo has nothing to do and says so next tick. */

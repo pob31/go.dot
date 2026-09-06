@@ -153,10 +153,40 @@ namespace wfg::cue
             values are not. */
         double position = 0.0;
 
-        /*  The level it is playing at, in dB. This is what a fade writes, and
-            it is NOT the cue's authored `level` - that one stays where the
-            designer left it. */
+        /*  THE LEVEL IT IS PLAYING AT, in dB, and since PR 3.12 it is a SUM
+            rather than a value anybody wrote:
+
+                level = ownLevel + every ancestor run's ownLevel
+
+            §3.6: a fade aimed at a group is a TRIM over its members, not a
+            write, and nested trims compose. So a media cue sitting at -3 inside
+            a group trimmed to -6 plays at -9, and when the group's trim comes
+            back the cue is at -3 again without anything having remembered it.
+
+            It is the same rule for a group run, which has no sound of its own:
+            its `level` is the trim in force on its members, being its own plus
+            whatever its parents are trimming. One rule for both kinds, so a
+            client reading `/godot/run/<id>/level` never has to ask which it has.
+
+            Recomputed on the tick thread every tick and NEVER logged - §3.15
+            keeps continuous readouts out of the log, and a replay recomputes it
+            from the GO and the document. */
         double level = 0.0;
+
+        /*  WHAT THIS RUN'S OWN FADES HAVE WRITTEN, which is the only level
+            anybody actually sets.
+
+            For a media run it starts at the cue's authored `level` and is what
+            a fade aimed at that cue moves. For a group run it starts at nought
+            - a trim of nothing - and is what a fade aimed at the GROUP moves.
+
+            A FADE TAKES OVER FROM THIS AND NOT FROM `level`, which is the whole
+            of what makes trims compose rather than accumulate: a second fade on
+            a member inside a trimmed group starts from where the member was,
+            not from where the trim had put it, so the trim is not folded into
+            the base and counted twice. With no group above, the two are the
+            same number and every fade Phase 2 wrote behaves exactly as it did. */
+        double ownLevel = 0.0;
 
         /*  How many blocks the launch was late by, when GO arrived before the
             arm had finished. Zero is the ordinary case and the number is worth

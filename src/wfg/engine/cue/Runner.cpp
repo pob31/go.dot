@@ -739,6 +739,12 @@ namespace wfg::cue
             return;
         }
 
+        /*  THE CUE'S AUTHORED LEVEL IS THE RUN'S OWN, which is what a fade
+            aimed at this cue moves and what a trim from a group above it is
+            added TO. `level` itself is left for applyLevels to compute on the
+            next tick, so there is one place that decides what a run is heard
+            at rather than two that could disagree. */
+        run->ownLevel = request.levelDb;
         run->level = request.levelDb;
 
         audio->requestArm (request);
@@ -1066,7 +1072,13 @@ namespace wfg::cue
         }
 
         const auto targetId = target->id;
-        const auto fromDb = target->level;
+
+        /*  FROM ITS OWN LEVEL, not from its effective one. A member inside a
+            group trimmed to -6 dB is HEARD at -9 while its own level says -3,
+            and a fade that took over from -9 would fold the trim into the base:
+            the trim would then be counted twice while it lasted, and would be
+            left behind in the member when the group released it. */
+        const auto fromDb = target->ownLevel;
 
         /*  A FADE TAKES OVER FROM A FADE, from where the level HAS GOT TO and
             not from where the first one started. Anything else is a jump, and a
@@ -1437,15 +1449,19 @@ namespace wfg::cue
 
             const auto level = job.currentDb();
 
-            /*  THE MODEL AND THE SOUND, both every tick. The run's level is
-                what a client watches; the atomic is what the audio interpolates
-                between. NEITHER IS LOGGED - §3.15 keeps continuous readouts out
-                of the log, and a replay recomputes them from the GO that
-                started the fade and the document it read. */
-            target->level = level;
+            /*  THE RUN'S OWN LEVEL, and only that.
 
-            if (audio != nullptr && target->track >= 0)
-                audio->setLevelDb (target->track, level);
+                What reaches the voice is `applyLevels` below, because what this
+                fade wrote is not what the cue is heard at: a group above it may
+                be trimming, and a group run has no voice of its own at all.
+                Writing the atomic from here worked while a run's level was a
+                value rather than a sum, and would now write the base where the
+                effective level belongs.
+
+                NEITHER IS LOGGED - §3.15 keeps continuous readouts out of the
+                log, and a replay recomputes them from the GO that started the
+                fade and the document it read. */
+            target->ownLevel = level;
 
             /*  WHAT THIS JOB IS WAITING FOR. A plain fade is done when its
                 level arrives. A job carrying a stop is done when the STOP is
@@ -2311,6 +2327,7 @@ namespace wfg::cue
         advanceGroups (engine);
         armStandby (engine);
         advanceFades (engine, tick);
+        applyLevels();
         advanceSends (engine);
 
         if (audio == nullptr)
@@ -2610,6 +2627,58 @@ namespace wfg::cue
             engine.submit (origin::engine, "run.range",
                            { osc::Value::string (run->id),
                              osc::Value::int32 (static_cast<std::int32_t> (next)) });
+        }
+    }
+
+    void Runner::applyLevels()
+    {
+        /*  EFFECTIVE = OWN + EVERY ANCESTOR'S OWN, walked rather than cached.
+
+            The chain is at most as deep as the show's nesting and a show is a
+            handful of levels, so the walk is cheaper than any bookkeeping that
+            would have to be invalidated - and bookkeeping is where a trim gets
+            left behind after the group that owned it has gone. */
+        const auto effectiveOf = [this] (const Run& run)
+        {
+            auto total = run.ownLevel;
+            auto parent = run.parent;
+
+            /*  BOUNDED BY THE TABLE, not by the tree, because a `parent` that
+                pointed at itself would otherwise be a show that hangs on its
+                first tick. The table cannot be longer than it is. */
+            for (std::size_t guard = 0; guard <= runs.all().size() && ! parent.empty(); ++guard)
+            {
+                const auto* above = runs.find (parent);
+
+                if (above == nullptr)
+                    break;
+
+                total += above->ownLevel;
+                parent = above->parent;
+            }
+
+            return total;
+        };
+
+        for (const auto& snapshot : runs.all())
+        {
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr || run->isFinished())
+                continue;
+
+            const auto effective = effectiveOf (*run);
+
+            if (juce::approximatelyEqual (effective, run->level))
+                continue;
+
+            run->level = effective;
+
+            /*  A GROUP RUN HAS NO VOICE, which is what makes its level a trim
+                rather than a level: the number reaches the outputs through its
+                members, each of which has just had it added to its own. */
+            if (audio != nullptr && run->track >= 0)
+                audio->setLevelDb (run->track, effective);
         }
     }
 

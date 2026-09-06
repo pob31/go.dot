@@ -370,6 +370,21 @@ add_test(NAME wfg.replay.ambience.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/ambience
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The thirteenth, and the one whose subject is deliberately NOT in it. A fade
+# aimed at a group is a trim over its members (PRD 3.6), and the arithmetic of
+# that is a level moving fifty times a second - which 3.15 keeps out of the log
+# and a replay recomputes. So what this asserts is the session around it: a
+# group fired, its members spawned and run, a fade fired over the top of them
+# while they ran, and the fade outliving the group it was trimming.
+add_test(NAME wfg.replay.group-fade.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/group-fade.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/group-fade
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.group-fade.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/group-fade.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/group-fade
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a

@@ -118,6 +118,22 @@ is the rest of that pass, and it is what `advance` promises over a stop.
 The file is a day long and nobody has to have it: with no audio side there is nothing to arm,
 so `night.wav` is never looked for.
 
+## `bundles/group-fade/` and `logs/group-fade.wfglog`
+
+A fade aimed at a group while the group is running — and the thing it is named for is
+deliberately **not in the file**. §3.6 makes a group fade a trim over its members rather than a
+write to any of them, and a run's level is therefore its own plus every ancestor's; but a level
+moving fifty times a second is exactly what §3.15 keeps out of a log, and a replay recomputes
+it from the GO and the document.
+
+So what this asserts is the other half, which is the half a fixture is for: the **session**
+reproduces. A group fired, its members spawned and run by the scheduler, a fade fired over the
+top of them while they ran, and the fade's own run outliving the group it was trimming — which
+is worth having written down, because a trim on a run that has finished reaches nothing and
+the fade says so by ending rather than by failing.
+
+The arithmetic is checked where it can be, in the unit suite, decibel by decibel.
+
 ## `bundles/chain/` and `logs/auto-chain.wfglog`
 
 One press, and a whole scene runs itself: five cues, a nested timeline group and a footer. An
