@@ -194,6 +194,7 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 
 .tail { display: flex; gap: 10px; align-items: center; font-size: 10px;
         color: var(--ink-faint); }
+.tail .trig { color: var(--waiting); letter-spacing: 0; }
 .tail .flag { letter-spacing: .05em; text-transform: uppercase; }
 .tail .standby-word { color: var(--standby); }
 
@@ -262,6 +263,18 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 .field input:focus, .field select:focus { outline: none; border-color: var(--picked); }
 .field input[data-dirty="yes"] { border-color: var(--standby); }
 .field input[type=checkbox] { accent-color: var(--standby); width: 14px; height: 14px; }
+
+.trigger-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 2px 0;
+  font-size: 12px; cursor: pointer; color: var(--ink-dim);
+}
+.trigger-row:hover { color: var(--ink); }
+.trigger-row[data-picked="yes"] { color: #fff; }
+.trigger-row .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trigger-row .off { color: var(--ink-faint); text-decoration: line-through; }
+
+.back { font-size: 11px; color: var(--waiting); cursor: pointer; }
+.back:hover { text-decoration: underline; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .actions .danger { border-color: #5a2b28; color: #e0918b; }
@@ -392,6 +405,25 @@ const tree = {
     return typeof text === "string" && text.length ? text.trim().split(/\s+/) : [];
   },
   cue(id, name, fallback) { return this.get("/godot/cue/" + id + "/" + name, fallback); },
+  trigger(id, name, fallback) {
+    return this.get("/godot/trigger/" + id + "/" + name, fallback);
+  },
+
+  /*  A cue's triggers, found by asking every trigger which cue it belongs to.
+      There is no `triggerOrder` node to read: a trigger says where it sits and
+      the containment is not copied anywhere, so this is the only answer that
+      cannot go stale. */
+  triggersOf(cueId) {
+    const found = [];
+
+    for (const address of Object.keys(this.at)) {
+      const match = /^\/godot\/trigger\/([0-9A-Z]+)\/cue$/.exec(address);
+
+      if (match && this.get(address, "") === cueId) found.push(match[1]);
+    }
+
+    return found;
+  },
   run(id, name, fallback) { return this.get("/godot/run/" + id + "/" + name, fallback); },
 };
 
@@ -526,6 +558,11 @@ function cueRow(id, depth, role, standby, out) {
   if (post) flags.push("hold " + post);
   if (!enabled) flags.push("disabled");
 
+  /*  A cue somebody else can fire. Worth a mark on the row rather than only in
+      the inspector: an operator looking down a list needs to know which of
+      these can go off without them. */
+  const triggers = tree.triggersOf(id);
+
   const twist = isGroup
     ? '<span class="twist" data-fold="' + id + '">' + (open ? "▼" : "▶") + "</span>"
     : '<span class="twist"></span>';
@@ -544,6 +581,10 @@ function cueRow(id, depth, role, standby, out) {
       "</div>" +
       '<div class="tail">' +
         flags.map((f) => '<span class="flag">' + esc(f) + "</span>").join("") +
+        (triggers.length
+           ? '<span class="flag trig" title="' + triggers.length +
+             ' trigger(s)">\u26A1' + (triggers.length > 1 ? triggers.length : "") + "</span>"
+           : "") +
         (id === standby ? '<span class="flag standby-word">standby</span>' : "") +
       "</div>" +
     "</div>");
@@ -750,8 +791,57 @@ function controlFor(field) {
 
 const KINDS = ["memo", "media", "fade", "stop", "osc", "group"];
 
+/*  What a trigger says in one line, which is enough to tell two of them apart
+    without opening either. */
+function triggerSummary(id) {
+  const kind = tree.trigger(id, "kind", "osc");
+
+  if (kind === "osc") return tree.trigger(id, "address", "") || "no address";
+  if (kind === "clock") return tree.trigger(id, "at", "") || "no time";
+
+  const channel = Number(tree.trigger(id, "channel", 0));
+
+  return tree.trigger(id, "type", "noteOn") + " " + tree.trigger(id, "number", 0) +
+         (channel ? " ch " + channel : " any ch");
+}
+
 function renderInspector() {
   const pane = el("inspect");
+
+  /*  A TRIGGER IS INSPECTED LIKE ANYTHING ELSE, because it is addressed like
+      anything else: the fields come from `/godot/trigger/<id>/*` through the
+      same lookup that reads a cue's. What it needs of its own is a way back to
+      the cue it belongs to. */
+  if (picked && tree.node("/godot/trigger/" + picked + "/kind")) {
+    const owner = tree.trigger(picked, "cue", "");
+    const fields = fieldsFor(picked);
+    const signature = "trigger|" + picked + "|" + fields.map((f) => f.address).join(",");
+
+    if (pane.dataset.showing !== signature) {
+      pane.dataset.showing = signature;
+
+      let out =
+        '<div class="who"><span class="text">' + esc(triggerSummary(picked)) +
+        '</span><span class="kind">trigger</span>' +
+        '<span class="id num">' + esc(picked) + "</span></div>" +
+        '<div class="back" data-pick="' + esc(owner) + '">\u2190 ' +
+        esc(tree.cue(owner, "name", "") || owner) + "</div>";
+
+      for (const field of fields) {
+        out += '<div class="field"><label title="' + esc(field.node.DESCRIPTION || "") + '">' +
+               esc(field.name) + "</label>" + controlFor(field) + "</div>";
+      }
+
+      out += '<div class="group-head">structure</div><div class="actions">' +
+             '<button class="danger" data-delete="' + esc(picked) + '">delete</button></div>';
+
+      pane.innerHTML = out;
+      return;
+    }
+
+    refreshFields(pane);
+    return;
+  }
 
   if (!picked || !tree.node("/godot/cue/" + picked + "/kind")) {
     pane.innerHTML = '<div class="empty"><div class="line">Nothing to declare.</div>' +
@@ -795,6 +885,28 @@ function renderInspector() {
       out += '<div class="field"><label title="' + esc(field.node.DESCRIPTION || "") + '">' +
              esc(field.name) + "</label>" + controlFor(field) + "</div>";
     }
+
+    /*  THE CUE'S TRIGGERS, listed rather than folded into the fields above:
+        they are objects with identifiers of their own, a cue may have several,
+        and each is edited on its own page. §3.7 gives the list to any cue. */
+    out += '<div class="group-head">triggers</div>';
+
+    for (const trigger of tree.triggersOf(picked)) {
+      const off = tree.trigger(trigger, "enabled", true) === false;
+
+      out += '<div class="trigger-row" data-pick="' + trigger + '">' +
+             '<span class="kind">' + esc(tree.trigger(trigger, "kind", "osc")) + "</span>" +
+             '<span class="what' + (off ? " off" : "") + '">' +
+             esc(triggerSummary(trigger)) + "</span></div>";
+    }
+
+    out += '<div class="actions">';
+
+    for (const k of ["osc", "midi", "clock"]) {
+      out += '<button data-trigger="' + k + '">+ ' + k + "</button>";
+    }
+
+    out += "</div>";
 
     /*  UP AND DOWN, which is `object.move` at one index either way. Dragging
         is what a desktop UI will do and is not what a first pass should try
@@ -843,6 +955,12 @@ function renderInspector() {
     return;
   }
 
+  refreshFields(pane);
+}
+
+/*  Values only, and only where nobody is working: never into a field that has
+    the focus, and never over an edit that has not been committed. */
+function refreshFields(pane) {
   for (const input of pane.querySelectorAll("[data-set]")) {
     if (input === document.activeElement || input.dataset.dirty === "yes") continue;
 
@@ -959,6 +1077,11 @@ document.addEventListener("click", (event) => {
   if (data && data.park) { command("standby.set", [str(data.park)]); return; }
 
   if (data && data.kill) { command("run.kill", [str(data.kill)]); return; }
+
+  if (data && data.trigger && picked) {
+    command("trigger.create", [str(picked), str(data.trigger)]);
+    return;
+  }
 
   if (data && data.role && picked) {
     command("group.role", [str(picked), str(data.role)]);
