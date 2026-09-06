@@ -642,6 +642,25 @@ namespace wfg::tree
         stale = false;
     }
 
+    namespace
+    {
+        /** Identifiers as a container's `order` spells them: space-separated. */
+        std::string joinIds (const std::vector<std::string>& ids)
+        {
+            std::string out;
+
+            for (const auto& id : ids)
+            {
+                if (! out.empty())
+                    out += ' ';
+
+                out += id;
+            }
+
+            return out;
+        }
+    }
+
     //==============================================================================
     std::shared_ptr<const TreeSnapshot> ParameterTree::publish (std::int64_t tick,
                                                                 const EngineState& state)
@@ -681,6 +700,18 @@ namespace wfg::tree
             else if (name == "errorCount")     text = std::to_string (state.errorCount);
             else if (name == "launchLatencyTicks")
                                                text = std::to_string (state.launchLatencyTicks);
+            /*  TWO TICKS PLUS THE LAUNCH LATENCY, and the two are the price of
+                the scheduler deciding by SUBMITTING rather than by acting: a
+                member's `run.ended` is applied during one tick, the scheduler
+                sees it on the next and asks for the next member, and the launch
+                goes in on the one after. That is what lets a whole show replay,
+                and it is published rather than left for somebody to find with a
+                stopwatch. Zero when there is no audio side, because there is
+                then no launch to be late for. */
+            else if (name == "sequenceGapTicks")
+                                               text = std::to_string (state.launchLatencyTicks > 0
+                                                                        ? state.launchLatencyTicks + 2
+                                                                        : 0);
             else if (name == "rtViolations")   text = std::to_string (state.rtViolations);
             else if (name == "rtForeignAllocations")
                                                text = std::to_string (state.rtForeignAllocations);
@@ -797,6 +828,8 @@ namespace wfg::tree
                 else if (name == "position")  text = osc::formatDouble (run.position);
                 else if (name == "level")     text = osc::formatDouble (run.level);
                 else if (name == "late")      text = std::to_string (run.late);
+                else if (name == "parent")    text = run.parent;
+                else if (name == "children")  text = joinIds (run.children);
                 else if (name == "error")     text = run.error;
                 else                          text = std::string (row->defaultText);
 

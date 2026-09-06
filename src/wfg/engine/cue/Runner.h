@@ -50,6 +50,7 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/FadeJob.h>
+#include <wfg/engine/cue/GroupJob.h>
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/document/Ids.h>
@@ -278,6 +279,24 @@ namespace wfg::cue
             decided. */
         void fireNow (Engine& engine, std::int64_t tick, const std::string& runId);
 
+        /*  A group spawning one of its members: the child run is created,
+            armed if it is media, and left ready. What `run.spawn` calls.
+
+            SPAWNING IS NOT LAUNCHING, and the two are separate records because
+            they are separate moments. An auto sequence spawns the next member
+            while the current one is still playing - which is what pays the disk
+            before the chain reaches it - and launches it when the current one
+            reports done. Returns the child's run identifier. */
+        std::string spawnChild (Engine& engine, const std::string& parentRun,
+                                const std::string& cueId, const std::string& runId);
+
+        /*  A run that was spawned and is now to begin: its pre-wait starts, or
+            it fires at once when it has none. What `run.launch` calls. */
+        void launchRun (Engine& engine, std::int64_t tick, const std::string& runId);
+
+        /** Every group in flight. Diagnostics and tests; the Runner drives them. */
+        const std::vector<GroupJob>& groups() const noexcept { return scheduled; }
+
         /** Whether the run table has this identifier. What `run.fire` asks
             before it acts, so that an unknown one is REJECTED rather than
             quietly doing nothing. */
@@ -382,6 +401,10 @@ namespace wfg::cue
         void advanceFades (Engine& engine, std::int64_t tick);
         void advanceSends (Engine& engine);
         void advanceWaits (Engine& engine, std::int64_t tick);
+        void advanceGroups (Engine& engine);
+
+        /** The cues a group runs, in order: its enabled children. */
+        std::vector<std::string> membersOf (const juce::ValueTree& group) const;
         void enforceStops();
 
         void launchIfDue (Engine& engine, std::int64_t tick);
@@ -407,6 +430,10 @@ namespace wfg::cue
             network cue with `wait: none` does, because that is when a report is
             allowed to leave and not because anything was waited for. */
         std::vector<std::string> finishing;
+
+        /*  One per group run in flight. A vector like every other job list
+            here, and drained by the same `remove_if` on a retired flag. */
+        std::vector<GroupJob> scheduled;
 
         /*  The tick being processed, so a stop fired inside a command
             handler can be scheduled against the same clock the tick hook

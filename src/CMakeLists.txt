@@ -77,6 +77,7 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/CueCommands.h
     wfg/engine/cue/CueList.cpp
     wfg/engine/cue/FadeJob.h
+    wfg/engine/cue/GroupJob.h
     wfg/engine/cue/FadeJob.cpp
     wfg/engine/cue/OscJob.h
     wfg/engine/cue/OscJob.cpp

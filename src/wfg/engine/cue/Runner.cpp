@@ -153,9 +153,7 @@ namespace wfg::cue
 
         const auto kind = kindOfCue (cue);
 
-        /*  A group organises time, order and lifetime, and none of that exists
-            until PR 3.3. Pressing GO on one is legal and makes nothing. */
-        if (kind.empty() || kind == "group")
+        if (kind.empty())
             return {};
 
         /*  ARMING IS A MEDIA IDEA. A fade takes over a level, a network cue
@@ -284,6 +282,26 @@ namespace wfg::cue
         if (kind == "osc")
         {
             fireOsc (cue, runId);
+            return;
+        }
+
+        if (kind == "group")
+        {
+            /*  A GROUP RUN IS A SCHEDULER AND NOT A SOUND. It holds no voice
+                and no level (§4.12: containers describe behaviour, content
+                describes output), so what firing it creates is a job that will
+                spawn its members and wait for them.
+
+                `playing` from the moment it starts, because a group with a
+                header running, or a member playing, or a footer to come, is
+                doing something - and there is no other word for it that a
+                client watching /godot/run would read correctly. */
+            if (auto* run = runs.find (runId))
+                run->state = runState::playing;
+
+            GroupJob job;
+            job.run = runId;
+            scheduled.push_back (job);
             return;
         }
 
@@ -1128,7 +1146,15 @@ namespace wfg::cue
                 std::any_of (running.begin(), running.end(),
                              [&snapshot] (const FadeJob& job) { return job.self == snapshot.id; })
                 || std::any_of (sending.begin(), sending.end(),
-                                [&snapshot] (const OscJob& job) { return job.self == snapshot.id; });
+                                [&snapshot] (const OscJob& job) { return job.self == snapshot.id; })
+                /*  A GROUP OWNS ITS OWN ENDING, and forgetting that here would
+                    have been the sharp bug: a killed group holds no voice and no
+                    job of the other two kinds, so this sweep would have ended it
+                    on the spot - before `advanceGroups`, which runs after this
+                    one, had killed a single member. The group would have read
+                    `done` with its whole scene still playing underneath it. */
+                || std::any_of (scheduled.begin(), scheduled.end(),
+                                [&snapshot] (const GroupJob& job) { return job.run == snapshot.id; });
 
             if (! owned)
                 engine.submit (origin::engine, "run.ended", one (snapshot.id));
@@ -1153,6 +1179,278 @@ namespace wfg::cue
         finishing.clear();
     }
 
+    std::vector<std::string> Runner::membersOf (const juce::ValueTree& group) const
+    {
+        std::vector<std::string> out;
+
+        for (const auto& child : group)
+        {
+            if (! child.hasProperty (idProperty))
+                continue;
+
+            if (kindOfCue (child).empty())
+                continue;
+
+            /*  A DISABLED MEMBER IS SKIPPED, which Phase 1 deliberately did not
+                do and said so where it asserted the opposite: "skipping is a
+                running-behaviour decision that Phase 1 has no runner to
+                justify". Phase 3 has the runner. A disabled cue is still a row
+                in the list - it is not deleted, and the pointer can still be
+                parked on it - but a group does not spawn it, because a member
+                that plays nothing and is waited on for ever is the failure the
+                whole completion table exists to avoid. */
+            const auto id = child[idProperty].toString().toStdString();
+
+            /*  THROUGH THE DOCUMENT AND NOT OFF THE VALUETREE, because the
+                canonical writer OMITS an attribute holding its default and the
+                reader leaves it absent - so a cue that has never had `enabled`
+                written to it has no such property at all, and asking the tree
+                directly answers `false` for every cue in the show. Which it
+                did: the first version of this skipped every member of every
+                group and the groups all completed instantly.
+
+                `getAttribute` resolves the row and supplies the default, which
+                is the whole reason the document has one door. */
+            if (document.getAttribute ("/godot/cue/" + id + "/enabled").value_or ("true")
+                  == "false")
+                continue;
+
+            out.push_back (id);
+        }
+
+        return out;
+    }
+
+    std::string Runner::spawnChild (Engine& engine, const std::string& parentRun,
+                                    const std::string& cueId, const std::string& runId)
+    {
+        const auto cue = document.findById (cueId);
+
+        if (! cue.isValid())
+            return {};
+
+        const auto kind = kindOfCue (cue);
+
+        if (kind.empty())
+            return {};
+
+        auto id = runId;
+
+        if (id.empty())
+            id = ids.generate();
+
+        runs.create (id, cueId, kind, parentRun);
+
+        auto* run = runs.find (id);
+
+        if (run == nullptr)
+            return {};
+
+        run->preWaitTicks = ticksFor (static_cast<double> (cue[juce::Identifier ("preWait")]));
+        run->postWaitTicks = ticksFor (static_cast<double> (cue[juce::Identifier ("postWait")]));
+
+        /*  ARMED AND NOT LAUNCHED. A media member reserves its voice and asks
+            for its file here, which is the whole reason spawning is a separate
+            moment from launching: an auto sequence spawns the next member while
+            the current one is still playing, so the disk is paid for before the
+            chain arrives rather than after. Every other kind has nothing to make
+            ready and simply waits in the state it was born in. */
+        if (kind == "media")
+            armMedia (engine, cue, id);
+
+        return id;
+    }
+
+    void Runner::launchRun (Engine& engine, std::int64_t tick, const std::string& runId)
+    {
+        auto* run = runs.find (runId);
+
+        if (run == nullptr || run->isFinished())
+            return;
+
+        /*  The same fork the top-level path takes, and it has to be the same
+            one: a member with a pre-wait waits exactly as a cue fired from
+            standby does, and §2.4's rule that waits COMPOSE is what falls out
+            of the group having its own on top. */
+        if (run->preWaitTicks > 0)
+        {
+            run->state = runState::waiting;
+            run->dueTick = tick + run->preWaitTicks;
+            return;
+        }
+
+        fireNow (engine, tick, runId);
+    }
+
+    void Runner::advanceGroups (Engine& engine)
+    {
+        /*  THE HOOK DECIDES AND THE HANDLER APPLIES, which is why nothing here
+            changes a run: every decision leaves as a command. `wfg replay`
+            re-injects every record AND re-runs every handler, so a scheduler
+            that acted directly would act twice on replay - and one that acted
+            only in the hook would not act at all, because a replay runs no
+            hooks. Submitting is the only shape that is right in both.
+
+            It costs a tick at every boundary. A member's `run.ended` is applied
+            in tick n's drain, this sees it at n+1 and submits, and the launch
+            goes in at n+2 - which is `/godot/engine/sequenceGapTicks`, published
+            rather than left for somebody to discover with a stopwatch. §3.6's
+            sequence group is discrete children relaunched; the sample-accurate
+            join is §3.24's range, which is a different mechanism on purpose. */
+        for (auto& job : scheduled)
+        {
+            auto* run = runs.find (job.run);
+
+            if (run == nullptr || run->isFinished())
+            {
+                job.retired = true;
+                continue;
+            }
+
+            /*  Killed, or stopped by a stop cue. Its members go with it: a
+                group's lifetime is the thing a group owns (§4.12), so ending
+                one ends what it was organising. */
+            if (run->state == runState::stopping)
+            {
+                for (const auto* child : runs.childrenOf (job.run))
+                    if (! child->isFinished())
+                        engine.submit (origin::engine, "run.kill", one (child->id));
+
+                if (runs.allChildrenFinished (job.run))
+                {
+                    engine.submit (origin::engine, "run.ended", one (job.run));
+                    job.retired = true;
+                }
+
+                continue;
+            }
+
+            const auto group = document.findById (run->cue);
+
+            if (! group.isValid())
+            {
+                engine.submit (origin::engine, "run.ended", one (job.run));
+                job.retired = true;
+                continue;
+            }
+
+            /*  READ AT EVERY BOUNDARY rather than copied at entry, because
+                §3.6 says a mid-run change takes effect at the next member
+                boundary - so a designer flipping a group during a plotting
+                session sees it now, not tomorrow. */
+            const auto timeline = group[juce::Identifier ("mode")].toString() == "timeline";
+            const auto members = membersOf (group);
+
+            if (job.phase == groupPhase::entering)
+            {
+                job.phase = groupPhase::members;
+
+                if (members.empty())
+                {
+                    /*  A group with nothing in it is COMPLETE, not stuck. An
+                        empty round completes the group rather than spinning
+                        (§3.6), and this is the same answer one level up. */
+                    engine.submit (origin::engine, "run.ended", one (job.run));
+                    job.retired = true;
+                    continue;
+                }
+
+                if (timeline)
+                {
+                    /*  EVERY MEMBER AT ENTRY, and each member's pre-wait is its
+                        OFFSET from that moment (§3.6). Which is why the group's
+                        own pre-wait defers the whole scene without disturbing
+                        anything: raising one number moves the entry, and every
+                        offset is measured from it.
+
+                        Voices are claimed here too, so a member that finds none
+                        fails at entry - visibly, while there is still time to do
+                        something about it - rather than at its offset. */
+                    for (const auto& member : members)
+                        engine.submit (origin::engine, "run.spawn",
+                                       { osc::Value::string (job.run),
+                                         osc::Value::string (member) });
+
+                    job.nextMember = members.size();
+                    continue;
+                }
+
+                engine.submit (origin::engine, "run.spawn",
+                               { osc::Value::string (job.run),
+                                 osc::Value::string (members.front()) });
+                job.nextMember = 1;
+                continue;
+            }
+
+            if (job.phase != groupPhase::members)
+                continue;
+
+            const auto children = runs.childrenOf (job.run);
+
+            /*  A TIMELINE GROUP WAITS FOR ALL OF THEM and a sequence for the
+                one it is on. §3.6's completion table, read off the run states -
+                which is what giving every kind a run bought: there is one place
+                to ask, and it answers the same way for a memo, a fade and a
+                nested group. */
+            if (timeline)
+            {
+                /*  EVERYTHING SPAWNED AT ENTRY IS ALSO STARTED AT ENTRY, one
+                    tick later, because the identifiers do not exist until the
+                    spawns have been applied. From there each member's own
+                    pre-wait is its offset and the group waits for all of them. */
+                for (auto i = job.launched; i < children.size(); ++i)
+                    engine.submit (origin::engine, "run.launch", one (children[i]->id));
+
+                job.launched = children.size();
+
+                if (children.size() >= members.size() && runs.allChildrenFinished (job.run))
+                {
+                    engine.submit (origin::engine, "run.ended", one (job.run));
+                    job.retired = true;
+                }
+
+                continue;
+            }
+
+            /*  A sequence: launch what was spawned, then wait for it. */
+            if (job.awaiting.empty())
+            {
+                for (const auto* child : children)
+                    if (child->state == runState::armed && child->parent == job.run)
+                    {
+                        job.awaiting = child->id;
+                        engine.submit (origin::engine, "run.launch", one (child->id));
+                        break;
+                    }
+
+                continue;
+            }
+
+            const auto* awaited = runs.find (job.awaiting);
+
+            if (awaited == nullptr || ! awaited->isFinished())
+                continue;
+
+            job.awaiting.clear();
+
+            if (job.nextMember < members.size())
+            {
+                engine.submit (origin::engine, "run.spawn",
+                               { osc::Value::string (job.run),
+                                 osc::Value::string (members[job.nextMember]) });
+                ++job.nextMember;
+                continue;
+            }
+
+            engine.submit (origin::engine, "run.ended", one (job.run));
+            job.retired = true;
+        }
+
+        scheduled.erase (std::remove_if (scheduled.begin(), scheduled.end(),
+                                         [] (const GroupJob& job) { return job.retired; }),
+                         scheduled.end());
+    }
+
     //==============================================================================
     void Runner::beforeTick (Engine& engine, std::int64_t tick)
     {
@@ -1169,6 +1467,7 @@ namespace wfg::cue
             there was a sound card would be a cue list that only worked in a
             theatre. */
         advanceWaits (engine, tick);
+        advanceGroups (engine);
         advanceFades (engine, tick);
         advanceSends (engine);
 
@@ -1478,6 +1777,60 @@ namespace wfg::cue
                             return Outcome::ok (withRun (args, 1,
                                                          runner.fire (engine, context.tick,
                                                                       cueId, id)));
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  THE TWO A GROUP SENDS ITSELF, and they are two rather than one
+            because spawning and launching are separate moments. An auto
+            sequence spawns the next member while the current one is still
+            playing - so the disk is paid for before the chain reaches it - and
+            launches it when the current one reports done. A timeline group does
+            both at entry for every member at once.
+
+            Like every engine-origin command they may be sent by anyone: one
+            only the inside of the process could send would be one a replay
+            could not send. */
+        registry.add ({ "run.spawn",
+                        "A group created one of its members' runs: reserved, made ready, and not"
+                        " yet started.",
+                        { { "parent", 's', false }, { "cue", 's', false }, { "run", 's', true } },
+                        true,
+                        [&engine, &runner, &document, withRun]
+                        (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto parentRun = args[0].getString();
+                            const auto cueId = args[1].getString();
+
+                            if (! runner.knowsRun (parentRun))
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (! document.findById (cueId).isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            const auto id = args.size() > 2 ? args[2].getString()
+                                                            : std::string {};
+
+                            return Outcome::ok (withRun (args, 2,
+                                                         runner.spawnChild (engine, parentRun,
+                                                                            cueId, id)));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "run.launch",
+                        "A spawned run begins: its pre-wait starts, or it fires at once when it"
+                        " has none.",
+                        { { "run", 's', false } },
+                        true,
+                        [&engine, &runner] (CommandContext& context,
+                                            const std::vector<osc::Value>& args)
+                        {
+                            const auto runId = args[0].getString();
+
+                            if (! runner.knowsRun (runId))
+                                return Outcome::rejected (reason::unknownId);
+
+                            runner.launchRun (engine, context.tick, runId);
+                            return Outcome::ok (args);
                         } });
 
         //----------------------------------------------------------------------

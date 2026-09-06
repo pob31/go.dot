@@ -158,6 +158,22 @@ namespace wfg::cue
         std::string error;
 
         //======================================================================
+        /*  THE TREE. A group run is the live instance of a group, and its
+            members are runs of their own with it as their parent.
+
+            RUNS AND NOT CUES, because the same cue can be a member of a group
+            that is running twice - a shuffled loop plays it in round three and
+            again in round five - and "which one finished" has to have an
+            answer. §3.6's completion table is read off this: a sequence group
+            advances when its current child is `done`, and is itself done when
+            the last one is.
+
+            The parent is an identifier rather than a pointer for the reason
+            everything else here is: `RunTable` is a vector and a vector moves. */
+        std::string parent;
+        std::vector<std::string> children;
+
+        //======================================================================
         /*  THE WAITS, IN TICKS, COPIED FROM THE CUE WHEN THE RUN IS CREATED.
 
             Copied rather than looked up, so that editing a cue under a run that
@@ -241,6 +257,11 @@ namespace wfg::cue
             return state == runState::done || state == runState::failed;
         }
 
+        /** Whether this run is a group's, and so has children rather than a
+            voice. A group organises time, order and lifetime and owns no
+            output of its own (§4.12). */
+        bool isGroup() const noexcept { return kind == "group"; }
+
         /** Whether it is holding on a wait, either end. */
         bool isWaiting() const noexcept
         {
@@ -299,7 +320,18 @@ namespace wfg::cue
             test found by crashing, and that would have found the Runner later
             and less kindly. Every caller looks a run up by identifier, which is
             what the command handlers were all doing anyway. */
-        void create (std::string id, std::string cueId, std::string kind);
+        void create (std::string id, std::string cueId, std::string kind,
+                     std::string parentRun = {});
+
+        /*  Every unfinished child of a group run, in the order they were
+            spawned. Answered by scanning rather than by trusting the parent's
+            own list, because the two could disagree and only one of them is
+            what the runs actually say. */
+        std::vector<const Run*> childrenOf (const std::string& parentRun) const;
+
+        /** Whether every child of this group run has finished. An empty group
+            is complete, which is the honest answer and not a special case. */
+        bool allChildrenFinished (const std::string& parentRun) const;
 
         Run* find (const std::string& id);
         const Run* find (const std::string& id) const;

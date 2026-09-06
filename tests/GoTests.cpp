@@ -162,6 +162,28 @@ namespace
             return tickOnce();
         }
 
+        /*  Ticks until a predicate holds, and answers whether it ever did.
+
+            BOUNDED, and that is not caution. Every loop in these cases is
+            waiting for a scheduler to do something, and a scheduler that has
+            stopped is exactly what they are here to catch - so an unbounded
+            wait would turn the most interesting failure into a suite that hangs
+            and says nothing. */
+        template <typename Predicate>
+        bool tickUntil (Predicate ready, int bound = 400)
+        {
+            for (int n = 0; n < bound; ++n)
+            {
+                if (ready())
+                    return true;
+
+                tickOnce();
+            }
+
+            return ready();
+        }
+
+
         std::string standby() const
         {
             return document.findById (listId)[juce::Identifier ("standby")]
@@ -1503,8 +1525,8 @@ TEST_CASE ("pre-wait: a media cue arms during its wait, so the disk is paid for 
     CHECK (rig.runs.find (id)->state == cue::runState::waiting);
     CHECK (rig.audio.launches.empty());
 
-    while (rig.runs.find (id)->state == cue::runState::waiting)
-        rig.tickOnce();
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (id)->state
+                                           != cue::runState::waiting; }));
 
     /*  And once the wait is over the launch goes in on the next tick, because
         there is nothing left to make ready. That is the whole point. */
@@ -1718,8 +1740,7 @@ TEST_CASE ("run.late: a cue fired from cold reports the blocks the disk cost it"
 
     rig.audio.completeArms (rig.engine);
 
-    while (rig.audio.launches.empty())
-        rig.tickOnce();
+    REQUIRE (rig.tickUntil ([&] { return ! rig.audio.launches.empty(); }));
 
     const auto launchTick = rig.tick - 1;             // tickOnce post-increments
 
@@ -1754,8 +1775,305 @@ TEST_CASE ("run.late: a cue armed at standby is not late, which is what arming i
 
     CHECK (rig.submitAndTick ("go").applied == 1);
 
-    while (rig.audio.launches.empty())
-        rig.tickOnce();
+    REQUIRE (rig.tickUntil ([&] { return ! rig.audio.launches.empty(); }));
 
     CHECK (rig.runs.find (id)->late == 0);
+}
+
+//==============================================================================
+/*  GROUPS: time, order and lifetime, and nothing else.
+
+    §4.12: containers describe behaviour, content describes output. A group run
+    holds no voice and no level - what it holds is a position among its members
+    and the answer to "are they finished yet". Which is what giving every kind a
+    run bought in PR 3.1: there is ONE place to ask, and it answers the same way
+    for a memo, a fade and a nested group.
+
+    THE SCHEDULER REPORTS RATHER THAN ACTS, like every hook here. A member's
+    `run.ended` is applied in one tick's drain, the scheduler sees it on the
+    next and submits, and the launch goes in on the one after - two ticks plus
+    the launch latency, published as sequenceGapTicks rather than left for
+    somebody to find with a stopwatch. §3.6's sequence group is discrete
+    children relaunched; the sample-accurate join is §3.24's range, a different
+    mechanism on purpose.
+*/
+namespace
+{
+    /*  The rig, plus a group with three memo members. Memos because this is
+        about ORDER and LIFETIME: a memo's run finishes on the tick after it
+        fires, so a sequence of them advances as fast as the scheduler can, and
+        what is being measured is the scheduler. */
+    struct GroupRig : Rig
+    {
+        GroupRig()
+        {
+            groupId = document.createCue (listId, 2, "group", "Preshow").id;
+
+            first = document.createCue (groupId, 0, "memo", "One").id;
+            second = document.createCue (groupId, 1, "memo", "Two").id;
+            third = document.createCue (groupId, 2, "memo", "Three").id;
+        }
+
+        void setCue (const std::string& id, const char* name, const std::string& value)
+        {
+            document.setAttribute ("/godot/cue/" + id + "/" + name, value);
+        }
+
+        /** Ticks until the group run finishes, bounded so a stuck group fails
+            the test rather than hanging the suite. */
+        int runToCompletion (const std::string& groupRun, int bound = 400)
+        {
+            for (int n = 0; n < bound; ++n)
+            {
+                const auto* found = runs.find (groupRun);
+
+                if (found == nullptr || found->isFinished())
+                    return n;
+
+                tickOnce();
+            }
+
+            return bound;
+        }
+
+        /** The run of a cue, or empty. */
+        std::string runOf (const std::string& cueId) const
+        {
+            for (const auto& run : runs.all())
+                if (run.cue == cueId)
+                    return run.id;
+
+            return {};
+        }
+
+        std::string groupId, first, second, third;
+    };
+}
+
+TEST_CASE ("group: a sequence runs its members one after another, in order")
+{
+    GroupRig rig;
+    rig.setStandby (rig.groupId);
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    REQUIRE (rig.runs.all().size() == 1u);
+    const auto groupRun = rig.runs.all().front().id;
+
+    CHECK (rig.runs.find (groupRun)->kind == "group");
+    CHECK (rig.runs.find (groupRun)->state == cue::runState::playing);
+    CHECK (rig.runs.find (groupRun)->track == -1);       // a group owns no output
+
+    CHECK (rig.runToCompletion (groupRun) < 400);
+
+    /*  Every member ran, each with a run of its own, and the group is the
+        parent of all three. */
+    CHECK (rig.runs.all().size() == 4u);
+
+    for (const auto& cueId : { rig.first, rig.second, rig.third })
+    {
+        const auto id = rig.runOf (cueId);
+        REQUIRE_MESSAGE (! id.empty(), "no run for " << cueId);
+        CHECK (rig.runs.find (id)->parent == groupRun);
+        CHECK (rig.runs.find (id)->state == cue::runState::done);
+    }
+
+    CHECK (rig.runs.find (groupRun)->children.size() == 3u);
+
+    /*  IN ORDER, which for a sequence is the whole promise. Runs are created in
+        the order they were spawned, so the table's own order is the answer. */
+    std::vector<std::string> cuesInRunOrder;
+
+    for (const auto& run : rig.runs.all())
+        if (run.parent == groupRun)
+            cuesInRunOrder.push_back (run.cue);
+
+    CHECK (cuesInRunOrder == std::vector<std::string> { rig.first, rig.second, rig.third });
+}
+
+TEST_CASE ("group: a timeline schedules every member at entry, and each pre-wait is an offset")
+{
+    /*  §3.6: "Timeline group - all members scheduled at entry; pre-waits are
+        offsets." Which is why raising the GROUP's pre-wait defers a whole scene
+        without disturbing the relative timing somebody spent an afternoon
+        getting right: the entry moves and every offset is measured from it. */
+    GroupRig rig;
+    rig.setCue (rig.groupId, "mode", "timeline");
+    rig.setCue (rig.second, "preWait", "0.2");           // 10 ticks
+    rig.setCue (rig.third, "preWait", "0.4");            // 20 ticks
+
+    rig.setStandby (rig.groupId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto groupRun = rig.runs.all().front().id;
+
+    // One tick for the scheduler to see the group, one for the spawns to apply.
+    rig.tickOnce();
+    rig.tickOnce();
+
+    // All three exist at once, which a sequence would never do.
+    CHECK (rig.runs.all().size() == 4u);
+
+    const auto firstRun = rig.runOf (rig.first);
+    const auto secondRun = rig.runOf (rig.second);
+    const auto thirdRun = rig.runOf (rig.third);
+
+    REQUIRE (! secondRun.empty());
+    REQUIRE (! thirdRun.empty());
+
+    CHECK (rig.runs.find (secondRun)->state == cue::runState::waiting);
+    CHECK (rig.runs.find (thirdRun)->state == cue::runState::waiting);
+
+    // And their offsets differ by exactly the difference in their pre-waits.
+    CHECK (rig.runs.find (thirdRun)->dueTick - rig.runs.find (secondRun)->dueTick == 10);
+
+    CHECK (rig.runToCompletion (groupRun) < 400);
+    CHECK (rig.runs.find (firstRun)->state == cue::runState::done);
+    CHECK (rig.runs.find (thirdRun)->state == cue::runState::done);
+}
+
+TEST_CASE ("group: it is not done until its last member is, and its post-wait runs on top")
+{
+    /*  §3.6's completion rule and §2.4's composition rule, in one case. A group
+        is complete once every member is - each member's own post-wait included,
+        since that is what done MEANS for a cue - and the group's post-wait then
+        runs on top of that, before it reports done to whatever is waiting on
+        it. Nested groups stack outward, one layer per level. */
+    GroupRig rig;
+    rig.setCue (rig.third, "postWait", "0.2");           // 10 ticks
+    rig.setCue (rig.groupId, "postWait", "0.2");         // 10 more, on top
+
+    rig.setStandby (rig.groupId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto groupRun = rig.runs.all().front().id;
+
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.third).empty(); }));
+
+    const auto lastMember = rig.runOf (rig.third);
+
+    // The last member holds its own post-wait, and the group is still playing.
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (lastMember)->state
+                                           == cue::runState::postWait; }));
+
+    CHECK (rig.runs.find (groupRun)->state == cue::runState::playing);
+
+    // Then the group holds its own, and is still not done.
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (groupRun)->state
+                                           != cue::runState::playing; }));
+
+    CHECK (rig.runs.find (lastMember)->state == cue::runState::done);
+    CHECK (rig.runs.find (groupRun)->state == cue::runState::postWait);
+
+    CHECK (rig.runToCompletion (groupRun) < 400);
+}
+
+TEST_CASE ("group: a disabled member is not spawned, and Phase 1's choice is now the other one")
+{
+    /*  Phase 1 asserted that a disabled cue is NOT skipped, and named the test
+        for the choice rather than for a rule so that this moment would be
+        visible: "Phase 3 revisits it when a GO that does nothing becomes a real
+        failure rather than a hypothetical one."
+
+        It has. A disabled member that a group spawned would be a run that plays
+        nothing and is waited on for ever, which is the exact failure §3.6's
+        completion table exists to avoid. So the scheduler skips it. It is still
+        a row in the list, still addressable, still parkable - it is simply not
+        run. */
+    GroupRig rig;
+    rig.setCue (rig.second, "enabled", "false");
+
+    rig.setStandby (rig.groupId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto groupRun = rig.runs.all().front().id;
+    CHECK (rig.runToCompletion (groupRun) < 400);
+
+    CHECK (rig.runOf (rig.first) != "");
+    CHECK (rig.runOf (rig.second) == "");                // never spawned
+    CHECK (rig.runOf (rig.third) != "");
+}
+
+TEST_CASE ("group: an empty one completes rather than waiting for nothing")
+{
+    /*  §3.6 says an emptied round completes the group rather than spinning, and
+        the same answer holds one level up: a group with no members - authored
+        that way, or with every member disabled - is done. Anything else is a
+        show that stops on a container somebody forgot to fill. */
+    GroupRig rig;
+    const auto empty = rig.document.createCue (rig.listId, 3, "group", "Nothing").id;
+
+    rig.setStandby (empty);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto groupRun = rig.runs.all().front().id;
+    CHECK (rig.runToCompletion (groupRun) < 10);
+    CHECK (rig.runs.find (groupRun)->state == cue::runState::done);
+}
+
+TEST_CASE ("group: groups nest, and the inner one completes before the outer")
+{
+    /*  §3.6: for a nested sequential parent, the child's completion is still
+        "last member completes". Which means the tree of runs mirrors the tree
+        of cues while it is running, and a parent waits on a child that is
+        itself waiting on three of its own. */
+    GroupRig rig;
+
+    const auto outer = rig.document.createCue (rig.listId, 3, "group", "Scene").id;
+    rig.document.setAttribute ("/godot/cue/" + rig.groupId + "/enabled", "false");
+
+    // Move the inner group inside the outer one, and give the outer a memo after it.
+    REQUIRE (rig.document.move (rig.groupId, outer, 0).ok);
+    rig.document.setAttribute ("/godot/cue/" + rig.groupId + "/enabled", "true");
+    const auto after = rig.document.createCue (outer, 1, "memo", "After").id;
+
+    rig.setStandby (outer);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto outerRun = rig.runs.all().front().id;
+    CHECK (rig.runToCompletion (outerRun) < 400);
+
+    const auto innerRun = rig.runOf (rig.groupId);
+    REQUIRE (! innerRun.empty());
+
+    CHECK (rig.runs.find (innerRun)->parent == outerRun);
+    CHECK (rig.runs.find (rig.runOf (rig.first))->parent == innerRun);
+
+    // The memo after the inner group ran, which means the outer waited for it.
+    CHECK (rig.runOf (after) != "");
+    CHECK (rig.runs.find (rig.runOf (after))->state == cue::runState::done);
+}
+
+TEST_CASE ("group: killing it takes its members with it")
+{
+    /*  A group's lifetime is one of the three things a group owns (§4.12), so
+        ending one ends what it was organising. `run.kill` is the immediate
+        path - it runs no footers and asks nothing of the cue - and this is what
+        Phase 10's double-Esc will be built on. */
+    GroupRig rig;
+    rig.setCue (rig.second, "preWait", "10");            // long enough to be caught
+
+    rig.setStandby (rig.groupId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto groupRun = rig.runs.all().front().id;
+
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.second).empty(); }));
+
+    const auto member = rig.runOf (rig.second);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (member)->state
+                                           == cue::runState::waiting; }));
+
+    REQUIRE (rig.submitAndTick ("run.kill",
+                                { osc::Value::string (groupRun) }).applied == 1);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (member)->isFinished());
+    CHECK (rig.runs.find (groupRun)->isFinished());
+
+    // And the third member was never started.
+    CHECK (rig.runOf (rig.third) == "");
 }

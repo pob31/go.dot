@@ -20,14 +20,44 @@
 
 namespace wfg::cue
 {
-    void RunTable::create (std::string id, std::string cueId, std::string kind)
+    void RunTable::create (std::string id, std::string cueId, std::string kind,
+                           std::string parentRun)
     {
         Run run;
         run.id = std::move (id);
         run.cue = std::move (cueId);
         run.kind = std::move (kind);
+        run.parent = std::move (parentRun);
+
+        /*  The parent is told about the child, and the child about the parent.
+            Both directions, because both questions get asked: a scheduler walks
+            down to find what it is waiting for, and a report walks up to find
+            who is waiting. */
+        if (! run.parent.empty())
+            if (auto* parent = find (run.parent))
+                parent->children.push_back (run.id);
 
         runs.push_back (std::move (run));
+    }
+
+    std::vector<const Run*> RunTable::childrenOf (const std::string& parentRun) const
+    {
+        std::vector<const Run*> out;
+
+        for (const auto& run : runs)
+            if (run.parent == parentRun)
+                out.push_back (&run);
+
+        return out;
+    }
+
+    bool RunTable::allChildrenFinished (const std::string& parentRun) const
+    {
+        return std::all_of (runs.begin(), runs.end(),
+                            [&parentRun] (const Run& run)
+                            {
+                                return run.parent != parentRun || run.isFinished();
+                            });
     }
 
     Run* RunTable::find (const std::string& id)
