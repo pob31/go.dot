@@ -94,7 +94,12 @@ namespace wfg::cue
         that shadows a member - including a member FUNCTION. MSVC says nothing,
         so it would have been a Linux-only build failure. The same trap already
         cost this project two CI round trips. */
-    bool Focus::request (const doc::ShowDocument& document, const std::string& wanted)
+    std::string focusAddress()
+    {
+        return "/godot/list/focus";
+    }
+
+    bool Focus::request (doc::ShowDocument& document, const std::string& wanted)
     {
         const auto node = document.findById (wanted);
 
@@ -105,15 +110,28 @@ namespace wfg::cue
         if (! node.isValid() || node.getType().toString() != "List")
             return false;
 
-        requestedId = wanted;
-        return true;
+        /*  THROUGH THE DOCUMENT'S ONE WRITE DOOR, which is what changed in PR
+            3.2. Focus was a string on this object: engine state, unpublished,
+            forgotten on every close. Now it is `/godot/list/focus`, so a client
+            can read which list GO acts on, a surface can move it, and a show
+            reopens on the list the operator was working in - the same argument
+            that persisted the standby, applied to the pointer that says which
+            standby is being pointed at. */
+        return document.setAttribute (focusAddress(), wanted).ok;
+    }
+
+    void Focus::clear (doc::ShowDocument& document)
+    {
+        document.setAttribute (focusAddress(), {});
     }
 
     juce::ValueTree Focus::list (const doc::ShowDocument& document) const
     {
-        if (! requestedId.empty())
+        const auto requested = document.getAttribute (focusAddress()).value_or (std::string {});
+
+        if (! requested.empty())
         {
-            const auto node = document.findById (requestedId);
+            const auto node = document.findById (requested);
 
             if (node.isValid() && node.getType().toString() == "List")
                 return node;
@@ -131,6 +149,11 @@ namespace wfg::cue
                 return child;
 
         return {};
+    }
+
+    std::string Focus::requested (const doc::ShowDocument& document) const
+    {
+        return document.getAttribute (focusAddress()).value_or (std::string {});
     }
 
     std::string Focus::listId (const doc::ShowDocument& document) const

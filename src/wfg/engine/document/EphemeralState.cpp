@@ -69,7 +69,20 @@ namespace wfg::doc
             const auto elementName = node.getType().toString().toStdString();
             const auto* element = Schema::instance().element (elementName);
 
-            if (element != nullptr && node.hasProperty (idProperty))
+            /*  IDENTIFIED OBJECTS AND CONTAINERS BOTH, and the second is new.
+
+                A `<List>` is found by its identifier. `<Lists>` has none and
+                needs none: there is one of them, it is the collection, and the
+                fact it remembers - which list has the focus - belongs to the
+                collection rather than to any list in it. So an entry is written
+                for an identified element with something to say, and for a
+                container element with something to say, and the difference on
+                the page is exactly whether it carries an id. */
+            const auto identified = node.hasProperty (idProperty);
+            const auto isContainer =
+                ! ShowDocument::containerSegmentFor (elementName).empty();
+
+            if (element != nullptr && (identified || isContainer))
             {
                 std::map<std::string, std::string> sorted;
 
@@ -88,7 +101,9 @@ namespace wfg::doc
                 if (! sorted.empty())
                 {
                     out += "  <" + elementName;
-                    out += " id=\"" + escapeAttribute (node[idProperty].toString().toStdString()) + "\"";
+
+                    if (identified)
+                        out += " id=\"" + escapeAttribute (node[idProperty].toString().toStdString()) + "\"";
 
                     for (const auto& [name, value] : sorted)
                         out += " " + name + "=\"" + escapeAttribute (value) + "\"";
@@ -169,36 +184,54 @@ namespace wfg::doc
 
             const auto elementName = entry->getTagName().toStdString();
             const auto* element = schema.element (elementName);
+            const auto containerSegment = ShowDocument::containerSegmentFor (elementName);
 
-            if (element == nullptr || ! element->hasIdentity)
+            if (element == nullptr || (! element->hasIdentity && containerSegment.empty()))
             {
                 result.problems.push_back ("state.xml: <" + elementName
                                            + "> is not an identified show element");
                 continue;
             }
 
-            const auto id = entry->getStringAttribute ("id").toStdString();
+            /*  A CONTAINER IS ADDRESSED WITHOUT AN IDENTIFIER, so the lookup
+                below is skipped for one entirely: there is exactly one
+                `<Lists>`, and it cannot have gone away since the state was
+                written the way a cue can. */
+            std::string addressPrefix;
 
-            if (! Id::isValid (id))
+            if (! containerSegment.empty())
             {
-                result.problems.push_back ("state.xml: <" + elementName
-                                           + "> has no usable id");
-                continue;
+                addressPrefix = "/godot/" + std::string (containerSegment);
             }
-
-            /*  The object may simply be gone - deleted since the state was
-                written, or the state carried over from a different show. That
-                is a stale pointer, not a broken document: say so and move on. */
-            const auto node = document.findById (id);
-
-            if (! node.isValid())
+            else
             {
-                result.problems.push_back ("state.xml: no object " + id
-                                           + " in this show; entry skipped");
-                continue;
-            }
+                const auto id = entry->getStringAttribute ("id").toStdString();
 
-            const auto owner = ShowDocument::ownerForElement (node.getType().toString().toStdString());
+                if (! Id::isValid (id))
+                {
+                    result.problems.push_back ("state.xml: <" + elementName
+                                               + "> has no usable id");
+                    continue;
+                }
+
+                /*  The object may simply be gone - deleted since the state was
+                    written, or the state carried over from a different show.
+                    That is a stale pointer, not a broken document: say so and
+                    move on. */
+                const auto node = document.findById (id);
+
+                if (! node.isValid())
+                {
+                    result.problems.push_back ("state.xml: no object " + id
+                                               + " in this show; entry skipped");
+                    continue;
+                }
+
+                const auto owner =
+                    ShowDocument::ownerForElement (node.getType().toString().toStdString());
+
+                addressPrefix = "/godot/" + std::string (owner) + "/" + id;
+            }
 
             for (int i = 0; i < entry->getNumAttributes(); ++i)
             {
@@ -221,7 +254,7 @@ namespace wfg::doc
                     would be. A read-only ephemeral attribute would be refused
                     here, which is the right noise to make: nothing should be
                     able to save something no command can set. */
-                const auto address = "/godot/" + std::string (owner) + "/" + id + "/" + name;
+                const auto address = addressPrefix + "/" + name;
                 const auto edit = document.setAttribute (address,
                                                          entry->getAttributeValue (i).toStdString());
 

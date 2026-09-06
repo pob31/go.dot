@@ -46,15 +46,23 @@
     one sibling, and the test that asserts it is named for the choice rather
     than for a rule.
 
-    FOCUS IS RUNTIME AND RESOLVED, NOT STORED AND MAINTAINED (author, 2026-09-06).
-    The development plan puts the focus model in Phase 3 and the namespace draft
-    puts a published `/godot/list/focus` node in this one; the author settled it
-    at the smallest thing that makes `standby.next` unambiguous - engine state,
-    not a published node, not written to state.xml. Which means it needs no
-    maintenance: it is a request that falls back to the first list whenever the
-    request names nothing, so creating and deleting lists cannot leave it
-    pointing at a list that is gone. Phase 3 publishes it when parallel lists
-    give it something to be exclusive about.
+    FOCUS IS RESOLVED RATHER THAN MAINTAINED, and since PR 3.2 it is also
+    PUBLISHED. Phase 1 settled it at the smallest thing that made `standby.next`
+    unambiguous: a string on this object, not a node, not written to a file. That
+    was the right size for a phase with one list in it.
+
+    Phase 3 has parallel lists, which is what gives focus something to be
+    exclusive about, so it is now `/godot/list/focus` - a document attribute a
+    client can read, a surface can move, and `state.xml` remembers, on the same
+    argument that persisted the standby: a rehearsal reopened where it was left
+    is the kinder default, and losing that file costs only where somebody had
+    got to.
+
+    What did NOT change is the resolving. It is still a request that falls back
+    to the first list whenever it names nothing, so creating and deleting lists
+    cannot leave the engine pointed at a list that is gone, and "exactly one list
+    is focused whenever a list exists" stays true by construction rather than by
+    upkeep.
 */
 
 #include <wfg/engine/document/ShowDocument.h>
@@ -105,8 +113,16 @@ namespace wfg::cue
         /*  Asks for a list by identifier. False, and nothing changes, when the
             id names no list - including when it names a cue or a mount, since
             an identifier alone is unambiguous and the wrong kind of object is a
-            mistake rather than a coincidence. */
-        bool request (const doc::ShowDocument& document, const std::string& wanted);
+            mistake rather than a coincidence.
+
+            The document is not const because this WRITES: focus is an attribute
+            of the show's list collection, and it goes through the same single
+            door every other attribute does. */
+        bool request (doc::ShowDocument& document, const std::string& wanted);
+
+        /** Back to no request, and so to the first list. What deleting the
+            focused list leaves behind. */
+        void clear (doc::ShowDocument& document);
 
         /*  The focused list: the requested one if it is still there, otherwise
             the first list in the show, otherwise nothing.
@@ -123,11 +139,12 @@ namespace wfg::cue
 
         /** What was last asked for, whether or not it resolves. Tests and
             diagnostics; the engine reads list() instead. */
-        const std::string& requested() const noexcept { return requestedId; }
-
-    private:
-        std::string requestedId;
+        std::string requested (const doc::ShowDocument& document) const;
     };
+
+    /** Where the focus lives: `/godot/list/focus`, one attribute of the show's
+        collection of lists. Spelled once, because three files write it. */
+    std::string focusAddress();
 
     //==============================================================================
     /*  The address of a list's standby node, which is where every write to it

@@ -117,7 +117,12 @@ namespace wfg::doc
         {
             static const std::vector<Containment> table {
                 { "Show",   false, { "Lists", "Mounts", "Audio" }, { "document" } },
-                { "Lists",  false, { "List" },             {} },
+                /*  THE CONTAINER CARRIES A VALUE, which is why it is no
+                    longer an empty pair of brackets. `focus` is a fact about
+                    the collection of lists rather than about any list in it -
+                    exactly as `Audio` carries the track count, which is a fact
+                    about the whole show and not about any bus. */
+                { "Lists",  false, { "List" },             { "lists" } },
                 { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, { "list" } },
                 { "Cue",    true,  {},                     { "cue" } },
                 { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, { "cue", "group" } },

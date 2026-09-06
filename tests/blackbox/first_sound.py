@@ -262,16 +262,30 @@ def wait_for(server: Server, address: str, expected, timeout: float = 20.0):
 
 
 def runs_in(server: Server) -> "list[str]":
-    """Every run the engine currently has, by id."""
-    status, body = common.http_get(server.http_port, "/godot/run")
+    """Every run the engine currently has, by id.
+
+    READ FROM `/godot/run/order` RATHER THAN FROM THE CONTAINER'S CHILDREN, and
+    the difference is not cosmetic. This used to list the keys under
+    `/godot/run` and take every one of them for a run - which was true while
+    runs were the only thing there, and stopped being true the moment the
+    container gained a roster node of its own. The harness reported a run called
+    "order" before the first GO and failed the phase.
+
+    So it asks the node whose whole job is to answer this. `order` lists exactly
+    what is published, retention included: a run that has stopped being
+    published has stopped being in the order.
+    """
+    status, body = common.http_get(server.http_port, "/godot/run/order?VALUE")
 
     if status != 200:
         return []
 
     try:
-        return sorted(common.json.loads(body).get("CONTENTS", {}).keys())
-    except ValueError:
+        text = common.json.loads(body)["VALUE"][0]
+    except (ValueError, KeyError, IndexError):
         return []
+
+    return sorted(text.split())
 
 
 def go(server: Server) -> None:

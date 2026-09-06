@@ -160,6 +160,27 @@ namespace wfg::doc
         return {};
     }
 
+    std::string_view ShowDocument::containerSegmentFor (std::string_view element)
+    {
+        /*  THE ELEMENTS THAT ARE ADDRESSED WITHOUT AN IDENTIFIER, because there
+            is only one of each: `/godot/document/name`, `/godot/audio/tracks`,
+            `/godot/list/focus`. A container carries facts about the collection
+            rather than about any member of it, and a collection has no id to
+            look it up by.
+
+            THE SEGMENT STAYS SINGULAR for `Lists`, and that is deliberate
+            rather than an inconsistency: `/godot/list/<id>/standby` and
+            `/godot/list/focus` are one container read two ways, and a client
+            walking the tree should not have to learn that one of them is
+            spelled differently. The parameter table's owner token is `lists`
+            because a table row belongs to an element; the address is what a
+            person types. */
+        if (element == "Show")  return "document";
+        if (element == "Audio") return "audio";
+        if (element == "Lists") return "list";
+        return {};
+    }
+
     std::string_view ShowDocument::ownerForElement (std::string_view element)
     {
         /*  A Group is a Cue (PRD §3.6), so both are addressed as `cue` — a
@@ -168,6 +189,7 @@ namespace wfg::doc
         if (element == "Cue" || element == "Group" || element == "Media"
               || element == "Fade" || element == "Stop"
               || element == "Osc")                                  return "cue";
+        if (element == "Lists")                     return "lists";
         if (element == "Route")                     return "route";
         if (element == "List")                      return "list";
         if (element == "Mount")                     return "mount";
@@ -237,6 +259,14 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    juce::ValueTree ShowDocument::containerElementFor (std::string_view segment) const
+    {
+        if (segment == "document") return showNode;
+        if (segment == "audio")    return showNode.getChildWithName ("Audio");
+        if (segment == "list")     return showNode.getChildWithName ("Lists");
+        return {};
+    }
+
     Resolved ShowDocument::resolve (const std::string& address) const
     {
         Resolved out;
@@ -252,24 +282,30 @@ namespace wfg::doc
         juce::ValueTree node;
         std::string attributeName;
 
-        if (owner == "document" || owner == "audio")
+        /*  A CONTAINER ADDRESS HAS THREE PARTS, an object address has four, and
+            the count is what tells them apart rather than the word. `list` is
+            now BOTH - `/godot/list/focus` names the collection and
+            `/godot/list/<id>/standby` names one of its members - so a branch on
+            the owner word alone would have had to choose, and choosing would
+            have meant spelling the container differently for no reason a client
+            could see. */
+        const auto container = parts.size() == 3 ? containerElementFor (owner)
+                                                 : juce::ValueTree {};
+
+        if (container.isValid())
         {
-            if (parts.size() != 3)
-                return out;
-
-            /*  The two owners that name an element rather than an object.
-                `document` is the root itself; `audio` is the one container
-                that carries attributes, because the track count is a fact
-                about the whole show and not about any bus in it. Neither has
-                an identifier to look up, so neither takes the id path. */
-            node = owner == "document" ? showNode : showNode.getChildWithName ("Audio");
+            /*  The elements that carry facts about a COLLECTION rather than
+                about any member: the show itself, the audio rig's track count,
+                and which list has the focus. None has an identifier, because
+                there is only one of each. */
+            node = container;
             attributeName = parts[2];
-
-            if (! node.isValid())
-                return out;
         }
         else
         {
+            if (parts.size() == 3)
+                return out;
+
             if (parts.size() != 4)
                 return out;
 

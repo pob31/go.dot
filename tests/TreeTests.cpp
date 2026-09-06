@@ -227,6 +227,41 @@ TEST_CASE ("tree: the derived values come from the structure, not from the file"
     CHECK (valueAt (mainList + "/order") == osc::Value::string ("B3N8R5TW D9FH2JKA"));
 }
 
+TEST_CASE ("tree: a collection carries nodes of its own, beside its members")
+{
+    /*  `/godot/list/order` and `/godot/list/focus` sit at the CONTAINER address,
+        beside `/godot/list/<id>/standby`. Three segments rather than four is
+        what tells them apart, and the word stays `list` for both on purpose:
+        they are one container read two ways, and a client walking the tree
+        should not have to learn that the collection is spelled differently from
+        the things in it.
+
+        The same shape gives `/godot/run/order`, which is a roster rather than a
+        stored value - it lists exactly what is published, retention included. */
+    Rig rig;
+    const auto snapshot = rig.publish (0);
+
+    const auto valueAt = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    CHECK (valueAt ("/godot/list/order") == osc::Value::string ("7K2QM9X4"));
+    CHECK (valueAt ("/godot/list/focus") == osc::Value::string (""));
+    CHECK (valueAt ("/godot/run/order") == osc::Value::string (""));
+
+    /*  A COLLECTION IS BOTH A CONTAINER AND A NODE, which is legitimate and is
+        why `order` exists: a client cannot assume every child of `/godot/run` is
+        a run, so the roster is the node that answers the question. The
+        black-box driver found this the honest way - it listed the container's
+        children before the first GO and reported a run called "order". */
+    CHECK (snapshot->find ("/godot/list/7K2QM9X4/standby") != nullptr);
+    CHECK (snapshot->find ("/godot/list") != nullptr);
+}
+
 TEST_CASE ("tree: a cue keeps its address when it moves, and its index changes")
 {
     /*  Identity addressing, which is what makes a client's subscription and a

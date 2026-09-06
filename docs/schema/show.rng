@@ -738,8 +738,22 @@
         <data type="integer"/>
       </attribute>
       <zeroOrMore>
-        <ref name="State.List"/>
+        <choice>
+          <ref name="State.Lists"/>
+          <ref name="State.List"/>
+        </choice>
       </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="State.Lists">
+    <element name="Lists">
+      <optional>
+        <attribute name="focus">
+          <a:documentation>Which list GO acts on. Exactly one, and exclusive by construction rather than by upkeep - it is one value, so there is no flag anywhere to leave set. A list that has gone takes the focus with it and the first remaining list has it instead, which is why nothing has to remember to move this when a list is deleted. It is remembered across a save for the same reason the standby is: a rehearsal reopened where it was left is the kinder default, and losing state.xml costs only where somebody had got to.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
     </element>
   </define>
 

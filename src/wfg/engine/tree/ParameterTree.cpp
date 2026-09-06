@@ -473,6 +473,27 @@ namespace wfg::tree
 
             if (containerName == "Lists")
             {
+                /*  THE COLLECTION'S OWN NODES, which §2.3 of the namespace draft
+                    promised in Phase 1 and could not have then: they need a
+                    parameter-table owner for the container itself, and there was
+                    one list, so there was nothing for a focus to be exclusive
+                    about. Parallel lists give it something.
+
+                    `/godot/list/order` is the roster and `/godot/list/focus` is
+                    which of them GO acts on - both at the container address,
+                    beside `/godot/list/<id>/standby`, because they are one thing
+                    read two ways. */
+                for (const auto* row : doc::Schema::rowsForOwner ("lists"))
+                {
+                    const doc::Attribute attribute { "Lists", row };
+                    const auto name = std::string (row->name);
+                    const auto text = name == "order" ? orderOf (container)
+                                                      : storedText (attribute, container);
+
+                    nodes.push_back (makeLeaf (std::string (godot) + "/list/" + name,
+                                               *row, text));
+                }
+
                 for (const auto& list : container)
                 {
                     const auto id = list[idProperty].toString().toStdString();
@@ -730,6 +751,30 @@ namespace wfg::tree
             The clock it reads is the run's OWN ending tick, written by the
             handler that finished it, so what is published at tick N is the same
             set live and replayed. */
+        /*  THE ROSTER, so a client can ask what is running without walking the
+            tree and guessing which addresses appeared since last time. It lists
+            exactly what is published below, retention included - a run that has
+            stopped being published has stopped being in the order. */
+        std::string runOrder;
+
+        for (const auto& run : runs.all())
+        {
+            if (run.id.empty())
+                continue;
+
+            if (run.endedAtTick >= 0 && tick - run.endedAtTick > cue::retentionTicks)
+                continue;
+
+            if (! runOrder.empty())
+                runOrder += ' ';
+
+            runOrder += run.id;
+        }
+
+        for (const auto* row : doc::Schema::rowsForOwner ("runs"))
+            runtime.push_back (makeLeaf (std::string (godot) + "/run/" + std::string (row->name),
+                                         *row, runOrder));
+
         for (const auto& run : runs.all())
         {
             if (run.id.empty())

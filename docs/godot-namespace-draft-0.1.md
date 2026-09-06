@@ -123,8 +123,8 @@ downstream has to special-case it.
 
 | Node | Type | Access | Meaning |
 |---|---|---|---|
-| `/godot/list/order` | `s` | ro | list IDs in order, space-separated |
-| `/godot/list/focus` | `s` | rw | ID of the focused list; exactly one; write = `list.focus` |
+| `/godot/list/order` | `s` | ro | list IDs in order, space-separated (owner `lists`, derived) |
+| `/godot/list/focus` | `s` | rw | ID of the focused list; exactly one; write = `list.focus` (owner `lists`, `persist = state`) |
 | `/godot/list/<id>/name` | `s` | rw | |
 | `/godot/list/<id>/order` | `s` | ro | IDs of the list's top-level children in order |
 | `/godot/list/<id>/standby` | `s` | rw | cue ID, or empty; write = `standby.set` |
@@ -142,16 +142,30 @@ focused list's standby answers `standby.next`/`previous`.
 - **A direct write is accepted on *any* list**, focused or not. The load path depends on it:
   restoring a show writes every list's standby with no focus involved, and making the node
   writable on only one list would break opening a show with two.
-- **`/godot/list/order` and `/godot/list/focus` are NOT built.** They need a parameter-table
-  row for the `/godot/list` container itself, which needs a new owner token, a containment
-  entry, container-level address resolution and a root-attribute case in both the state
-  writer and the RELAX NG generator. The author settled focus as **runtime only** for Phase 1
-  (2026-09-06) — the smallest thing that makes `standby.next` unambiguous — because the
-  development plan puts the focus model in Phase 3, with parallel lists. Focus is therefore
-  engine state, resolved rather than stored: the requested list if it still exists, otherwise
-  the first list. Nothing has to maintain it, and "exactly one list is focused whenever a
-  list exists" is true by construction. **Phase 3 publishes both nodes**; until then a client
-  cannot read or write the focus, and the roster is only visible as the shape of the tree.
+- **`/godot/list/order` and `/godot/list/focus` are built, since PR 3.2.** They were not in
+  Phase 1, and the reason is worth keeping: they need a parameter-table row for the
+  `/godot/list` **container** rather than for a list, which meant a new owner token, a
+  containment entry, container-level address resolution, and a case in both the state writer and
+  the RELAX NG generator for an entry that carries no identifier. The author settled focus as
+  runtime-only for Phase 1 (2026-09-06) — the smallest thing that makes `standby.next`
+  unambiguous — because with one list there was nothing for a focus to be exclusive about.
+  Parallel lists are what made it worth the plumbing.
+- **What did not change is the resolving.** `focus` is still a request that falls back to the
+  first list whenever it names nothing, so creating and deleting lists cannot leave the engine
+  pointed at a list that is gone, and "exactly one list is focused whenever a list exists" stays
+  true by construction rather than by upkeep. What changed is that the request is now a document
+  attribute: a client can read which list GO acts on, a surface can move it, and `state.xml`
+  remembers it — the same argument that persisted the standby, applied to the pointer that says
+  which standby is being pointed at.
+- **The owner token is `lists` and the address segment is `list`**, deliberately.
+  `/godot/list/focus` and `/godot/list/<id>/standby` are one container read two ways, and a
+  client walking the tree should not have to learn that the collection is spelled differently
+  from the things in it. Three address segments rather than four is what tells the resolver
+  which was meant. `/godot/run/order` is the same shape and arrived in the same PR.
+- **A collection is both a container and a node, and that is why `order` exists.** A client
+  cannot assume every child of `/godot/run` is a run — one of them is the roster. The black-box
+  driver found this the honest way: it listed the container's children before the first GO and
+  reported a run called `order`.
 - **The standby moves when the show moves under it.** Deleting the cue it is parked on
   advances it to the next remaining top-level sibling, or empties it if there is none;
   moving that cue out of the list's top level clears it. Both happen *inside the applied
@@ -336,10 +350,11 @@ should be otherwise):
   saying something, and a client reading it would be entitled to believe it. Containers and
   events declare `KIND` and stop.
 
-**Not built yet, and noted so it is not mistaken for an oversight:** `/godot/list/order` and
-`/godot/list/focus` in §2.3 have no rows in the parameter table, and a table row is what
-makes a node exist. Both belong with the cue list in PR 1.7, which is also where `focus`
-acquires a meaning.
+**Built in PR 3.2, and the note is kept rather than deleted** because the reason they were
+absent is the useful part: `/godot/list/order` and `/godot/list/focus` had no rows in the
+parameter table, and a table row is what makes a node exist. The rows they needed belong to the
+`/godot/list` **container** rather than to a list, which is a different kind of owner from any
+that existed — see §2.3.
 
 ## 3. Node metadata — the `GODOT` key
 
@@ -1226,7 +1241,7 @@ What descent changes that already exists, so PR 3.4 replaces rather than discove
 C's two tests, the recorded session in `CueListTests` that asserts `standby.set` on a nested cue
 is *refused*, and every fixture that carries a `<Group>` — all manual sequence groups by default.
 
-### 12.7 `/godot/list` — the container §2.3 said Phase 3 publishes
+### 12.7 `/godot/list` — the container §2.3 said Phase 3 publishes *(built in PR 3.2)*
 
 | Node | Type | Access | Persist | Meaning |
 |---|---|---|---|---|

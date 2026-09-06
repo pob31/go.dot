@@ -202,6 +202,15 @@ namespace wfg::doc
             Cue and Group are both `cue`. */
         static std::string_view ownerForElement (std::string_view element);
 
+        /*  The address segment an element without an identifier is reached by,
+            or empty for one that is reached by id. `Show` is `document`,
+            `Audio` is `audio`, `Lists` is `list` - three collections, each with
+            facts of its own and nothing to look them up by. */
+        static std::string_view containerSegmentFor (std::string_view element);
+
+        /** The other direction: the element a container segment names. */
+        juce::ValueTree containerElementFor (std::string_view segment) const;
+
     private:
         EditResult insertObject (juce::ValueTree parent, int index,
                                  std::string_view elementName,

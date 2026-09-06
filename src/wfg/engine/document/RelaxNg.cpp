@@ -18,6 +18,7 @@
 
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/Schema.h>
+#include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <map>
@@ -298,7 +299,11 @@ namespace wfg::doc
             line (out, 1, "<define name=\"State." + name + "\">");
             line (out, 2, "<element name=\"" + name + "\">");
 
-            writeIdAttribute (out, 3);
+            /*  A container entry carries no identifier, because there is one of
+                it. `<Lists focus="...">` is the collection saying something
+                about itself; `<List id="..." standby="...">` is one member. */
+            if (element.hasIdentity)
+                writeIdAttribute (out, 3);
 
             for (const auto& entry : attributesOf (element, Persist::state))
                 writeAttribute (out, *entry.second, 3);
@@ -361,9 +366,22 @@ namespace wfg::doc
             every object that had nothing to say. */
         std::vector<const Element*> stateful;
 
+        /*  IDENTIFIED OBJECTS AND CONTAINERS BOTH. An entry is either a `<List
+            id=... standby=...>` - one object, found by identifier - or a
+            `<Lists focus=...>`, which is the collection saying something about
+            itself and has no identifier because there is only one of it.
+
+            The grammar tells them apart exactly as the file does: whether the
+            entry carries an id. */
         for (const auto& element : schema.elements())
-            if (element.hasIdentity && ! attributesOf (element, Persist::state).empty())
+        {
+            if (attributesOf (element, Persist::state).empty())
+                continue;
+
+            if (element.hasIdentity
+                  || ! ShowDocument::containerSegmentFor (element.name).empty())
                 stateful.push_back (&element);
+        }
 
         line (out, 1, "<define name=\"State\">");
         line (out, 2, "<element name=\"State\">");

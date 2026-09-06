@@ -56,8 +56,15 @@ OUT_PATH = REPO_ROOT / "src" / "wfg" / "engine" / "document" / "SchemaTable.gene
 # carries it, whether a Group inherits a Cue's rows - is Schema.cpp's business,
 # not this script's: a generator that decides things is a generator people have
 # to read before they can trust its output. This one transcribes.
-KNOWN_OWNERS = ("engine", "document", "list", "cue", "group", "mount",
-                "audio", "bus", "media", "route", "run",
+#   The plural tokens are CONTAINERS rather than objects: `lists` is the
+#   collection of cue lists and `runs` is the collection of runs, so their rows
+#   are addressed /godot/list/order and /godot/run/order - with no identifier in
+#   the middle, because there is only one of each. The address segment stays
+#   singular on purpose: /godot/list/<id>/standby and /godot/list/focus are the
+#   same container read two ways, and a client walking the tree should not have
+#   to know that one of them is spelled differently.
+KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
+                "audio", "bus", "media", "route", "run", "runs",
                 "fade", "stop", "osc")
 
 VALUE_TYPES = {

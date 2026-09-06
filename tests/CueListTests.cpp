@@ -485,7 +485,7 @@ TEST_CASE ("focus: it falls back to the first list rather than being maintained"
     Rig rig;
 
     // Never requested: the first list.
-    CHECK (rig.focus.requested().empty());
+    CHECK (rig.focus.requested (rig.document).empty());
     CHECK (rig.focus.listId (rig.document) == mainList);
 
     REQUIRE (rig.run (1, "list.create", { osc::Value::string ("Second") }).applied == 1);
@@ -539,7 +539,7 @@ TEST_CASE ("focus: it must name a list, not a cue and not nothing")
     CHECK (rig.focus.listId (rig.document) == secondList);
 
     // And the failures left nothing behind, not even an unresolvable request.
-    CHECK (rig.focus.requested() == secondList);
+    CHECK (rig.focus.requested (rig.document) == secondList);
 }
 
 TEST_CASE ("standby: the commands act on the focused list and on no other")
@@ -723,4 +723,109 @@ TEST_CASE ("replay: a standby session reproduces itself, its show and its state"
 
     CHECK (doc::CanonicalXml::write (freshDocument) == sessionShow);
     CHECK (doc::EphemeralState::write (freshDocument) == sessionState);
+}
+
+//==============================================================================
+/*  THE CONTAINER NODES: what a collection says about itself.
+
+    `/godot/list/order` and `/godot/list/focus` were drawn in §2.3 of the
+    namespace draft during Phase 1 and could not be built then. They need a
+    parameter-table owner for the CONTAINER rather than for its members, and
+    Phase 1 had one list — so there was nothing for a focus to be exclusive
+    about, and the author settled it at engine state, unpublished, for as long
+    as that was true.
+
+    Parallel lists are what makes it untrue.
+*/
+
+TEST_CASE ("container nodes: the collection of lists carries a roster and a focus")
+{
+    Rig rig;
+
+    /*  ADDRESSED WITHOUT AN IDENTIFIER, because there is one of it. Three parts
+        rather than four is what tells the resolver that `/godot/list/focus`
+        names the collection and `/godot/list/<id>/standby` names a member -
+        the word is the same on purpose, because they are one container read two
+        ways and a client walking the tree should not have to learn that one of
+        them is spelled differently.
+
+        (`order` is the collection's other node and is DERIVED, so it exists in
+        the tree and not in the document - TreeTests is where it is asserted,
+        beside every other computed value.) */
+    CHECK (rig.document.getAttribute ("/godot/list/focus").value_or ("?").empty());
+
+    REQUIRE (rig.run (1, "list.create", { osc::Value::string ("Second") }).applied == 1);
+
+    const auto secondList = rig.document.root().getChildWithName ("Lists").getChild (1)
+                              .getProperty ("id").toString().toStdString();
+
+    // And the focus is a node, so a client can write it as it writes any other.
+    REQUIRE (rig.run (2, "node.set", { osc::Value::string ("/godot/list/focus"),
+                                       osc::Value::string (secondList) }).applied == 1);
+    CHECK (rig.focus.listId (rig.document) == secondList);
+}
+
+TEST_CASE ("container nodes: focus is remembered across a save and a load")
+{
+    /*  The same argument that persisted the standby, applied to the pointer
+        that says which standby is being pointed at: a rehearsal reopened where
+        it was left is the kinder default. And the same limit - losing state.xml
+        costs only where somebody had got to, never the show. */
+    Rig rig;
+
+    REQUIRE (rig.run (1, "list.create", { osc::Value::string ("Second") }).applied == 1);
+
+    const auto secondList = rig.document.root().getChildWithName ("Lists").getChild (1)
+                              .getProperty ("id").toString().toStdString();
+
+    REQUIRE (rig.run (2, "list.focus", { osc::Value::string (secondList) }).applied == 1);
+
+    /*  IT IS IN state.xml AND NOT IN show.xml, which is the split the persist
+        column decides and the canonical writer enforces in both directions.
+        Which list somebody was working in is not a decision about the show. */
+    const auto state = doc::EphemeralState::write (rig.document);
+    const auto show = doc::CanonicalXml::write (rig.document);
+
+    INFO ("state.xml:\n" << state);
+    CHECK (state.find ("<Lists focus=\"" + secondList + "\"/>") != std::string::npos);
+    CHECK (show.find ("focus") == std::string::npos);
+
+    /*  AN ENTRY WITH NO IDENTIFIER, which is the shape this file could not
+        carry before. A `<List>` is found by its id; `<Lists>` has none and
+        needs none, because there is one of it and it is the collection. */
+    doc::ShowDocument reopened;
+    REQUIRE (doc::CanonicalXml::read (show, reopened).ok);
+
+    const auto restored = doc::EphemeralState::read (state, reopened);
+    INFO ("problems: " << (restored.problems.empty() ? std::string ("none")
+                                                     : restored.problems.front()));
+    CHECK (restored.ok);
+    CHECK (restored.problems.empty());
+
+    Focus reopenedFocus;
+    CHECK (reopenedFocus.listId (reopened) == secondList);
+}
+
+TEST_CASE ("container nodes: a focus naming a list the show no longer has resolves to the first")
+{
+    /*  Resolved rather than maintained, which is what PR 3.2 kept while moving
+        the value into the document. Nothing has to remember to move the focus
+        when a list is deleted, so "exactly one list is focused whenever a list
+        exists" stays true by construction rather than by upkeep - and a
+        state.xml written against a different show cannot leave the engine
+        pointed at nothing. */
+    Rig rig;
+
+    REQUIRE (rig.run (1, "list.create", { osc::Value::string ("Second") }).applied == 1);
+
+    const auto secondList = rig.document.root().getChildWithName ("Lists").getChild (1)
+                              .getProperty ("id").toString().toStdString();
+
+    REQUIRE (rig.run (2, "list.focus", { osc::Value::string (secondList) }).applied == 1);
+    CHECK (rig.focus.listId (rig.document) == secondList);
+
+    REQUIRE (rig.run (3, "object.delete", { osc::Value::string (secondList) }).applied == 1);
+
+    // The request is still on file and no longer resolves, so the first list has it.
+    CHECK (rig.focus.listId (rig.document) == mainList);
 }
