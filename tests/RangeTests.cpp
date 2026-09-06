@@ -33,7 +33,10 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/RunCommands.h>
+#include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
@@ -42,6 +45,7 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <set>
 #include <string>
 
 using namespace wfg;
@@ -323,4 +327,425 @@ TEST_CASE ("range.create: the command draws the identifier and the record carrie
     CHECK (doc::Id::isValid (id));
     CHECK (rig.stored (id, "in") == "1");
     CHECK (rig.stored (id, "out") == "5");
+}
+
+//==============================================================================
+/*  THE SCHEDULER'S HALF: passes counted, boundaries placed, edits honoured.
+
+    M13 in AudioTests puts a real graph under all of this and reads the answer
+    off a render, which is the only way to know a boundary LANDS. What a render
+    cannot show cheaply is the rules around it - what a loop count of two does,
+    what happens to a `loops` an operator changes while the range plays, what a
+    deleted range does - because each of those wants a run several seconds long
+    and a rendered second costs a second.
+
+    So they are asked here, with a Player that is a record of what it was told
+    and a sample counter the test advances. Nothing sounds; everything is
+    decided.
+*/
+namespace
+{
+    /*  The audio side as a notebook. Its sample counter moves when the rig
+        ticks, which is what lets a case put a boundary four seconds away and
+        reach it in four hundred ticks rather than in four seconds. */
+    struct NotePlayer final : cue::Player
+    {
+        int trackCount() const override              { return 2; }
+        int slotCount() const override               { return 8; }
+        int blockSize() const override               { return 128; }
+        int channelsPerTrack() const override        { return 1; }
+        int sampleRate() const override              { return 48000; }
+        std::int64_t samplesElapsed() const override { return samples; }
+
+        void requestArm (const cue::ArmRequest& request) override
+        {
+            arms.push_back (request);
+        }
+
+        bool launchAtSample (int track, int slot, std::int64_t sample) override
+        {
+            launches.push_back ({ track, slot, sample });
+            playing.insert (track);
+            return true;
+        }
+
+        bool stop (int track) override
+        {
+            playing.erase (track);
+            return true;
+        }
+
+        bool stopAtSample (int track, int slot, std::int64_t sample) override
+        {
+            stops.push_back ({ track, slot, sample });
+            return true;
+        }
+
+        void setLevelDb (int, double) override {}
+        bool isPlaying (int track) const override  { return playing.count (track) > 0; }
+        bool isArmReady (int) const override       { return armsReady; }
+
+        /** The disk answers: every outstanding arm is reported as ready. */
+        void completeArms (Engine& engine)
+        {
+            for (const auto& arm : arms)
+                engine.submit (origin::engine, "audio.armed",
+                               { osc::Value::string (arm.runId),
+                                 osc::Value::int32 (arm.track) });
+
+            arms.clear();
+            armsReady = true;
+        }
+
+        struct Placed
+        {
+            int track = 0;
+            int slot = 0;
+            std::int64_t sample = 0;
+        };
+
+        std::int64_t samples = 0;
+        bool armsReady = false;
+
+        std::vector<cue::ArmRequest> arms;
+        std::vector<Placed> launches;
+        std::vector<Placed> stops;
+        std::set<int> playing;
+    };
+
+    /*  A show with one media cue and however many ranges a case wants, plus the
+        loop that turns ticks into samples. */
+    struct SchedulerRig
+    {
+        SchedulerRig()
+        {
+            engine.log().openInMemory ({});
+
+            doc::registerDocumentCommands (engine.commands(), document);
+            cue::registerCueCommands (engine.commands(), document, focus);
+            cue::registerRunCommands (engine.commands(), runs);
+            cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+            runner.setPlayer (&audio);
+            runner.setSamplesPerTick (960);          // 48 kHz at 50 Hz
+
+            listId = document.createList ("Sound").id;
+            cueId = document.createCue (listId, 0, "media", "Bed").id;
+
+            document.setAttribute ("/godot/cue/" + cueId + "/file", "night.wav");
+            document.setAttribute (cue::standbyAddressOf (listId), cueId);
+        }
+
+        std::string addRange (double in, double out, int loops = 1)
+        {
+            const auto edit = document.createRange (cueId, in, out);
+            REQUIRE (edit.ok);
+
+            REQUIRE (document.setAttribute ("/godot/range/" + edit.id + "/loops",
+                                            std::to_string (loops)).ok);
+            return edit.id;
+        }
+
+        /** One tick, with the sample counter moving as an audio device would. */
+        Engine::TickResult tickOnce()
+        {
+            runner.beforeTick (engine, tick);
+            const auto result = engine.processTick (tick++);
+            audio.samples += 960;
+            return result;
+        }
+
+        Engine::TickResult submitAndTick (const std::string& name,
+                                          std::vector<osc::Value> args = {})
+        {
+            REQUIRE (engine.submit (origin::cli, name, std::move (args)));
+            return tickOnce();
+        }
+
+        /** GO, then the disk answers, then it is launched and in range nought. */
+        std::string goAndLaunch()
+        {
+            submitAndTick ("go");
+            audio.completeArms (engine);
+
+            for (int i = 0; i < 20; ++i)
+                tickOnce();
+
+            REQUIRE_FALSE (runs.all().empty());
+            return runs.all().front().id;
+        }
+
+        void ticks (int howMany)
+        {
+            for (int i = 0; i < howMany; ++i)
+                tickOnce();
+        }
+
+        const cue::Run* run (const std::string& id) const { return runs.find (id); }
+
+        Engine engine;
+        doc::ShowDocument document;
+        cue::RunTable runs;
+        cue::Focus focus;
+        doc::IdRegistry runIds = doc::IdRegistry::withSeed (23);
+        cue::Runner runner { document, runs, runIds, focus };
+        NotePlayer audio;
+        std::int64_t tick = 0;
+
+        std::string listId, cueId;
+    };
+
+    /** Everything the run's first range was told to do, as seconds. */
+    double secondsOf (std::int64_t samples)  { return static_cast<double> (samples) / 48000.0; }
+}
+
+TEST_CASE ("range scheduler: the launch enters range nought and says so")
+{
+    SchedulerRig rig;
+    rig.addRange (0.0, 1.0);
+    rig.addRange (1.0, 2.0);
+
+    const auto id = rig.goAndLaunch();
+
+    const auto* run = rig.run (id);
+    REQUIRE (run != nullptr);
+
+    CHECK (run->range == 0);
+    CHECK (run->rangeIteration >= 1);
+
+    /*  Out of slot nought, which is where range nought was armed. */
+    REQUIRE_FALSE (rig.audio.launches.empty());
+    CHECK (rig.audio.launches.front().slot == 0);
+
+    /*  And it holds a voice, which is what the arm that carried the ranges into
+        the slots did for it. */
+    CHECK (run->track >= 0);
+}
+
+TEST_CASE ("range scheduler: a loop count of two places the boundary after two passes")
+{
+    /*  §3.24's `loops`, and the thing that makes it more than a document row:
+        the boundary out of a range is placed at the end of the LAST pass, not
+        of the first. A count read as one would cut every looped range short,
+        and a count ignored would never leave one at all. */
+    SchedulerRig rig;
+    rig.addRange (0.0, 1.0, 2);            // two passes of one second
+    rig.addRange (1.0, 2.0, 1);
+
+    const auto id = rig.goAndLaunch();
+    const auto* run = rig.run (id);
+    REQUIRE (run != nullptr);
+
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    /*  Not yet at one second: the first pass has ended and the range has not. */
+    rig.ticks (60);
+    CHECK (rig.run (id)->range == 0);
+
+    rig.ticks (80);
+
+    /*  Two seconds in, the boundary has been placed and the second range
+        entered. The FIRST stop is the one this case is about - by now the
+        second range's own end may have been placed too, which is the playlist
+        doing its job and not this measurement. */
+    REQUIRE (rig.run (id)->range >= 1);
+    REQUIRE_FALSE (rig.audio.stops.empty());
+
+    const auto boundary = rig.audio.stops.front().sample;
+
+    INFO ("launched at " << launchedAt << ", boundary at " << boundary
+           << " (" << secondsOf (boundary - launchedAt) << " s)");
+
+    /*  TWO SECONDS AFTER THE LAUNCH, which is two passes of a one-second range.
+        Exactly, because the boundary is arithmetic on the launch instant rather
+        than on whichever tick noticed it. */
+    CHECK (boundary - launchedAt == 2 * 48000);
+
+    /*  The stop is on the slot that was playing and the play on the next, both
+        at the same instant. */
+    CHECK (rig.audio.stops.front().slot == 0);
+    REQUIRE (rig.audio.launches.size() >= 2u);
+    CHECK (rig.audio.launches[1].slot == 1);
+    CHECK (rig.audio.launches[1].sample == boundary);
+}
+
+TEST_CASE ("range scheduler: a loops changed while the range plays is honoured from the next boundary")
+{
+    /*  DECISION L, edit-at-next-iteration (author, 2026-09-06). A running
+        ranged cue does not copy its range list at launch: at every boundary it
+        re-reads it. So an operator who decides during the show that the bed
+        should turn after three passes rather than after ten gets three - and
+        gets it without the cue stopping.
+
+        What is NOT re-read is the pass length of the range playing now: that is
+        what the clip was armed with, and changing it needs the message thread. */
+    SchedulerRig rig;
+    const auto bed = rig.addRange (0.0, 1.0, 10);      // ten passes, to begin with
+    rig.addRange (1.0, 2.0, 1);
+
+    const auto id = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    rig.ticks (100);                                     // two seconds in
+    REQUIRE (rig.run (id)->range == 0);
+
+    /*  The operator shortens it while it plays. */
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/loops", "3").ok);
+
+    rig.ticks (100);
+
+    REQUIRE (rig.run (id)->range >= 1);
+    REQUIRE_FALSE (rig.audio.stops.empty());
+
+    /*  THREE PASSES, not ten. The count the range was launched with was never
+        copied anywhere, so the edit is what the boundary is computed from. */
+    CHECK (rig.audio.stops.front().sample - launchedAt == 3 * 48000);
+}
+
+TEST_CASE ("range scheduler: an advance leaves at the end of the pass it is on")
+{
+    /*  A range that loops for ever - which is what an ambience bed is - and the
+        only way out of one. The boundary is at the end of the pass PLAYING, not
+        at the moment of the asking, which is the whole difference between this
+        verb and a stop. */
+    SchedulerRig rig;
+    rig.addRange (0.0, 1.0, 0);            // for ever
+    rig.addRange (1.0, 2.0, 1);
+
+    const auto id = rig.goAndLaunch();
+    const auto launchedAt = rig.audio.launches.front().sample;
+
+    /*  Four seconds of a range that a loop count of one would have ended after
+        one. Nothing has been placed, because nothing has asked. */
+    rig.ticks (200);
+    CHECK (rig.run (id)->range == 0);
+    CHECK (rig.audio.stops.empty());
+    CHECK (rig.run (id)->rangeIteration >= 4);
+
+    /*  The advance, asked partway through a pass. */
+    rig.submitAndTick ("run.advance", { osc::Value::string (id) });
+    rig.ticks (60);
+
+    REQUIRE (rig.audio.stops.size() == 1u);
+
+    const auto boundary = rig.audio.stops.front().sample;
+    const auto after = boundary - launchedAt;
+
+    INFO ("the advance was asked at about four seconds; the boundary is at "
+           << secondsOf (after) << " s");
+
+    /*  A WHOLE NUMBER OF PASSES after the launch, and the next one after the
+        asking. Not four and a bit seconds, which is where a stop would have
+        landed. */
+    CHECK (after % 48000 == 0);
+    CHECK (after == 5 * 48000);
+
+    CHECK (rig.run (id)->range == 1);
+}
+
+TEST_CASE ("range scheduler: a stop cue whose verb is advance does the same thing")
+{
+    /*  §3.24's verb reached the way a show reaches it: a cue in the list, fired
+        by GO like any other, rather than a command a client sends. */
+    SchedulerRig rig;
+    rig.addRange (0.0, 1.0, 0);
+    rig.addRange (1.0, 2.0, 1);
+
+    const auto mover = rig.document.createCue (rig.listId, 1, "stop", "Move it on").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/target", rig.cueId).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/verb", "advance").ok);
+
+    const auto id = rig.goAndLaunch();
+
+    rig.ticks (150);
+    REQUIRE (rig.audio.stops.empty());
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string (mover) });
+    rig.ticks (60);
+
+    REQUIRE (rig.audio.stops.size() == 1u);
+    CHECK (rig.run (id)->range == 1);
+}
+
+TEST_CASE ("range scheduler: the last range's end is placed with nothing after it")
+{
+    /*  The end of a playlist is a stop and no play, and the run ends there
+        rather than at the boundary before it - which is what `rangesFinished`
+        is for. */
+    SchedulerRig rig;
+    rig.addRange (0.0, 1.0, 1);
+    rig.addRange (1.0, 2.0, 1);
+
+    const auto id = rig.goAndLaunch();
+
+    rig.ticks (120);
+    REQUIRE (rig.run (id)->range == 1);
+
+    /*  Its own second passes, and the last boundary is placed. */
+    rig.ticks (80);
+
+    REQUIRE (rig.audio.stops.size() == 2u);
+    CHECK (rig.audio.stops.back().slot == 1);
+
+    /*  TWO LAUNCHES AND TWO STOPS, not three launches: there is no third range
+        to enter. */
+    CHECK (rig.audio.launches.size() == 2u);
+
+    const auto* run = rig.run (id);
+    REQUIRE (run != nullptr);
+    CHECK (run->rangesFinished);
+}
+
+TEST_CASE ("range scheduler: a range deleted while it plays is not entered again")
+{
+    /*  Decision L's other half. The list is re-read at every boundary, so a
+        range removed during the show is simply not there when the boundary
+        looks - and the range playing when it happened finishes its passes,
+        because that one is a clip in a slot rather than a row in a list. */
+    SchedulerRig rig;
+    rig.addRange (0.0, 1.0, 1);
+    const auto second = rig.addRange (1.0, 2.0, 1);
+    rig.addRange (2.0, 3.0, 1);
+
+    const auto id = rig.goAndLaunch();
+
+    rig.ticks (30);
+
+    /*  Deleted before the first boundary, so the cue's list is two ranges long
+        when the scheduler next looks. */
+    REQUIRE (rig.document.remove (second).ok);
+
+    rig.ticks (100);
+
+    /*  It went into range one - which is now the THIRD region, because deleting
+        the second renumbered it. What matters is that the playlist is two long
+        and the run did not try to enter a range that is not there. */
+    const auto* run = rig.run (id);
+    REQUIRE (run != nullptr);
+    CHECK (run->range == 1);
+
+    rig.ticks (100);
+
+    CHECK (rig.run (id)->rangesFinished);
+    CHECK (rig.audio.launches.size() == 2u);
+}
+
+TEST_CASE ("range scheduler: a cue with no ranges is never in one")
+{
+    /*  Every cue Phase 2 knew about, and most cues still. `range` stays -1 and
+        the hook does nothing for it, which is what keeps the ordinary media cue
+        exactly as cheap as it was. */
+    SchedulerRig rig;
+
+    const auto id = rig.goAndLaunch();
+
+    rig.ticks (100);
+
+    const auto* run = rig.run (id);
+    REQUIRE (run != nullptr);
+
+    CHECK (run->range == -1);
+    CHECK (run->rangeIteration == 0);
+    CHECK (rig.audio.stops.empty());
+    CHECK (rig.audio.launches.size() == 1u);
 }
