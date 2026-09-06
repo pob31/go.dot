@@ -1683,7 +1683,31 @@ namespace
 
                                 state.lateness = ticks.lateness();
                                 state.latenessMax = ticks.latenessMax();
-                                state.errorCount = engine.errorCount();
+
+                                /*  THE REFUSAL ITSELF, and not only the count
+                                    of them.
+
+                                    OSC has no reply channel: a client that
+                                    writes a word to a number gets no answer at
+                                    all, and `/godot/engine/lastError` is the
+                                    whole of what it can read back instead. The
+                                    count was published here and the TEXT was
+                                    not - so every refusal in a running engine
+                                    arrived as an empty string, and a client
+                                    doing the right thing with it showed
+                                    nothing. The console client is what found
+                                    it, on its first edit.
+
+                                    READ ONLY WHEN THE COUNT HAS MOVED, which
+                                    is a mutex and a string copy avoided fifty
+                                    times a second for the whole of a show that
+                                    is going well. */
+                                const auto errorCount = engine.errorCount();
+
+                                if (errorCount != state.errorCount)
+                                    state.lastError = engine.lastError();
+
+                                state.errorCount = errorCount;
 
                                 /*  Published every tick, from the tick thread,
                                     like the lateness beside it. The audio

@@ -36,6 +36,7 @@
   --stopping:   #d98b4b;
   --failed:     #d9564b;
   --waiting:    #6f8ec9;
+  --picked:     #7f7ad6;
 
   --row: 26px;
 }
@@ -53,11 +54,15 @@ html, body {
        font-variant-numeric: tabular-nums; }
 
 /* ---------------------------------------------------------------- layout */
-#app { display: grid; grid-template-rows: auto 1fr; height: 100%; }
+#app { display: grid; grid-template-rows: auto auto auto 1fr; height: 100%; }
 
 #panes {
-  display: grid; grid-template-columns: minmax(0, 3fr) minmax(320px, 2fr);
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(210px, 0.85fr) minmax(300px, 1.05fr);
   min-height: 0;
+}
+@media (max-width: 1080px) {
+  #panes { grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr); }
 }
 
 .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0;
@@ -91,15 +96,50 @@ html, body {
 #link { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 #link .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
 #link.up   .dot { background: var(--live); }
+#link.half .dot { background: var(--stopping); }
 #link.down .dot { background: var(--failed); }
+
+/* ------------------------------------------------------------ transport */
+#transport {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 12px; border-bottom: 1px solid var(--rule); background: var(--ground);
+}
+
+button {
+  font: inherit; font-size: 11px; color: var(--ink);
+  background: var(--panel-high); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 4px 10px; cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--ink-faint); }
+button:disabled { color: var(--ink-faint); cursor: default; }
+
+/*  GO IS NOT A BUTTON LIKE THE OTHERS, and it is the one place on this page
+    where colour is allowed to shout - though it does not carry the meaning on
+    its own (§4.8): it is also the widest control here and the only one in
+    capitals. */
+#go { background: var(--standby); color: #1b1206; border-color: var(--standby);
+      font-weight: 700; letter-spacing: .12em; padding: 5px 26px; }
+#go:hover { filter: brightness(1.08); }
+
+#transport .hint { color: var(--ink-faint); font-size: 10px; margin-left: auto; }
+
+/*  THE LAST REFUSAL, said out loud. OSC has no reply channel, so a write the
+    engine would not take comes back only as a reading at
+    /godot/engine/lastError - and a client that does not show it is a client
+    where editing appears to do nothing at all. */
+#refusal { display: none; padding: 5px 12px; background: #2a1615;
+           border-bottom: 1px solid var(--failed); color: var(--ink); font-size: 11px; }
+#refusal.show { display: block; }
+#refusal code { color: var(--ink-dim); }
 
 /* ------------------------------------------------------------- cue rows */
 .list-tabs { display: flex; gap: 2px; padding: 0 8px; }
 .list-tab {
   padding: 4px 10px; font-size: 11px; border: 1px solid transparent;
   border-bottom: none; border-radius: 4px 4px 0 0;
-  color: var(--ink-dim); cursor: default;
+  color: var(--ink-dim); cursor: pointer;
 }
+.list-tab:hover { color: var(--ink); }
 .list-tab[data-focused="yes"] {
   background: var(--panel); border-color: var(--rule); color: var(--ink);
 }
@@ -123,10 +163,19 @@ html, body {
 }
 .row[data-standby="yes"] .gutter::before { content: "\25B8"; color: var(--standby); }
 
+/*  SELECTED IS NOT STANDBY, and the two are drawn so differently that neither
+    can be read for the other: standby is a wedge and a warm rule, a selection
+    is a cool outline and a name in full white. §3.5 is emphatic that picking a
+    row must not move the pointer, so the page has to make the difference plain
+    before anybody presses GO. */
+.row[data-picked="yes"] { outline: 1px solid var(--picked); outline-offset: -1px; }
+.row[data-picked="yes"] .name .text { color: #fff; }
+
 .row[data-enabled="no"] .name,
 .row[data-enabled="no"] .number { color: var(--ink-faint); text-decoration: line-through; }
 
-.gutter { text-align: center; color: var(--ink-faint); font-size: 11px; }
+.gutter { text-align: center; color: var(--ink-faint); font-size: 11px; cursor: pointer; }
+.gutter:hover::before { content: "\25B8"; color: var(--ink-faint); }
 
 .number { color: var(--ink-dim); text-align: right; font-size: 12px; }
 
@@ -160,7 +209,9 @@ html, body {
 }
 .run .who { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
 .run .who .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.run .meta { font-size: 10px; color: var(--ink-faint); display: flex; gap: 10px; }
+.run .meta { font-size: 10px; color: var(--ink-faint); display: flex; gap: 10px;
+             align-items: baseline; }
+.run .meta button { padding: 1px 6px; font-size: 10px; }
 
 .state {
   font-size: 9px; letter-spacing: .07em; text-transform: uppercase;
@@ -183,16 +234,45 @@ html, body {
 .run[data-s="failed"]   { border-left-color: var(--failed); }
 .run[data-s="done"]     { opacity: .45; }
 
+/* ------------------------------------------------------------- inspector */
+#inspect { padding: 10px 12px 30px; }
+
+#inspect .who { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+#inspect .who .text { font-size: 14px; }
+#inspect .who .id { font-size: 10px; color: var(--ink-faint); }
+
+.group-head {
+  font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-faint); margin: 14px 0 5px; padding-bottom: 3px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.field { display: grid; grid-template-columns: 96px 1fr; gap: 8px;
+         align-items: center; padding: 2px 0; }
+.field > label { font-size: 11px; color: var(--ink-dim); text-align: right;
+                 overflow: hidden; text-overflow: ellipsis; }
+.field .ro { font-size: 12px; color: var(--ink-faint); overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+
+.field input[type=text], .field input[type=number], .field select {
+  font: inherit; font-size: 12px; width: 100%;
+  color: var(--ink); background: var(--ground);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 2px 6px;
+}
+.field input:focus, .field select:focus { outline: none; border-color: var(--picked); }
+.field input[data-dirty="yes"] { border-color: var(--standby); }
+.field input[type=checkbox] { accent-color: var(--standby); width: 14px; height: 14px; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.actions .danger { border-color: #5a2b28; color: #e0918b; }
+.actions .danger:hover { border-color: var(--failed); }
+
 /* -------------------------------------------------------- empty states */
 /*  PRD §4.7: easter eggs live where idle eyes wander - a splash, an About, an
     EMPTY STATE. Never in the error path. */
 .empty { padding: 42px 20px; text-align: center; color: var(--ink-faint); }
 .empty .line { font-size: 15px; font-style: italic; color: var(--ink-dim); }
 .empty .under { font-size: 11px; margin-top: 8px; }
-
-.problem { margin: 16px 12px; padding: 10px 12px; border: 1px solid var(--failed);
-           border-radius: 4px; color: var(--ink); font-size: 12px; }
-.problem code { color: var(--ink-dim); }
 </style>
 </head>
 <body>
@@ -209,6 +289,16 @@ html, body {
     <span id="link"><span class="dot"></span><span id="link-text">connecting</span></span>
   </div>
 
+  <div id="transport">
+    <button id="go">GO</button>
+    <button data-cmd="standby.previous">▲ standby</button>
+    <button data-cmd="standby.next">▼ standby</button>
+    <button data-cmd="standby.clear">clear</button>
+    <span class="hint">space GO · ↑ ↓ standby · a row to inspect · its gutter to park</span>
+  </div>
+
+  <div id="refusal"></div>
+
   <div id="panes">
     <section class="pane">
       <header>
@@ -222,9 +312,17 @@ html, body {
     <section class="pane">
       <header>
         <h2>Gogo</h2>
-        <span class="sub">running — present tense, no history</span>
+        <span class="sub">running — present tense</span>
       </header>
       <div class="scroll" id="runs"></div>
+    </section>
+
+    <section class="pane">
+      <header>
+        <h2>Inspector</h2>
+        <span class="sub">what someone decided</span>
+      </header>
+      <div class="scroll" id="inspect"></div>
     </section>
   </div>
 </div>
@@ -232,22 +330,29 @@ html, body {
 <script>
 "use strict";
 
-/*  A READ-ONLY VIEW OF THE ENGINE, over the OSCQuery surface it already
-    publishes. It sends nothing and knows no command; every value on the screen
-    was fetched from `GET /godot` and nothing here can change the show.
+/*  A CLIENT FOR THE ENGINE, over the OSCQuery surface it already publishes: it
+    reads by polling `GET /godot` and writes by sending binary OSC on the
+    WebSocket that answers on the same port. Those are the two halves OSCQuery
+    has, used the way it means them.
 
-    IT IS SERVED BY THE ENGINE ITSELF, from `/ui` on the OSCQuery port, so this
-    is a same-origin page and there is no CORS anywhere. That also means the
-    address in the browser's bar is the address of the engine - which is what
-    makes it reachable from a tablet on the same network without anybody
-    configuring anything.
+    IT IS SERVED BY THE ENGINE ITSELF, from `/ui`, so this is a same-origin page
+    and there is no CORS anywhere. That also means the address in the browser's
+    bar is the address of the engine, which is what makes it reachable from a
+    tablet on the same network without anybody configuring anything.
 
-    POLLED RATHER THAN SUBSCRIBED, for now. The server does push coalesced
-    binary OSC over a WebSocket on this same port, and reading that is the right
-    answer for a surface somebody is operating from. It is not the right answer
-    for the FIRST version of a view whose job is to be read and argued with: a
-    poll of the whole tree is twenty lines, has no decode step to be wrong, and
-    at ten a second is imperceptible against a fifty-hertz engine. */
+    EVERY EDIT IS A NAMED COMMAND (§4.11). Nothing here reaches into the
+    document: a value becomes `node.set <address> <value>`, and a structural
+    change becomes `cue.create`, `object.delete`, `group.role` or `standby.set`.
+    They arrive at the engine exactly as they would from a hardware surface or a
+    script, they are logged, and a replay reproduces them - which is why there
+    is no second vocabulary for "the UI did it".
+
+    POLLED FOR READING, for now. The server does push coalesced OSC over this
+    same socket to whoever sends LISTEN, and that is the right answer for a
+    surface somebody is operating from. It is not the right answer for a view
+    whose job is still to be looked at and argued with: a poll of the whole tree
+    has no decode step to be wrong, and at ten a second it is imperceptible
+    against a fifty-hertz engine. */
 
 const POLL_MS = 100;
 
@@ -256,15 +361,15 @@ const el = (id) => document.getElementById(id);
 /* ------------------------------------------------------------------ model */
 
 /*  The OSCQuery reply is a tree of CONTENTS; everything below wants a flat map
-    of address to value, so it is flattened once on arrival. A node carries its
-    value as an ARRAY (a node can hold several arguments), and every node this
-    view reads holds one. */
+    of address to NODE - the whole node, not just its value, because the
+    inspector is built out of what each node says about itself: its TYPE, its
+    ACCESS, its RANGE and its DESCRIPTION. That is what keeps this page from
+    holding a second copy of the parameter table: a row added to the CSV shows
+    up here without a line being written. */
 function flatten(node, into) {
   if (!node || typeof node !== "object") return into;
 
-  if (typeof node.FULL_PATH === "string") {
-    into[node.FULL_PATH] = Array.isArray(node.VALUE) ? node.VALUE[0] : undefined;
-  }
+  if (typeof node.FULL_PATH === "string") into[node.FULL_PATH] = node;
 
   if (node.CONTENTS) {
     for (const key of Object.keys(node.CONTENTS)) flatten(node.CONTENTS[key], into);
@@ -275,8 +380,10 @@ function flatten(node, into) {
 
 const tree = {
   at: {},
+  node(address) { return this.at[address]; },
   get(address, fallback) {
-    const value = this.at[address];
+    const node = this.at[address];
+    const value = node && Array.isArray(node.VALUE) ? node.VALUE[0] : undefined;
     return value === undefined || value === null ? fallback : value;
   },
   /** A space-separated identifier list, as every `order` node spells one. */
@@ -284,14 +391,104 @@ const tree = {
     const text = this.get(address, "");
     return typeof text === "string" && text.length ? text.trim().split(/\s+/) : [];
   },
-  cue(id, name, fallback) { return this.get(`/godot/cue/${id}/${name}`, fallback); },
-  run(id, name, fallback) { return this.get(`/godot/run/${id}/${name}`, fallback); },
+  cue(id, name, fallback) { return this.get("/godot/cue/" + id + "/" + name, fallback); },
+  run(id, name, fallback) { return this.get("/godot/run/" + id + "/" + name, fallback); },
 };
+
+/* -------------------------------------------------------------------- OSC */
+
+/*  OSC 1.0 on the wire: four-byte aligned everywhere, big-endian everywhere.
+    Written out rather than pulled from a library because it is forty lines and
+    a dependency this page could not fetch anyway - the engine serves this file
+    and nothing else, and a client that needed a CDN would be useless in the one
+    room it exists for. */
+function oscString(text) {
+  const raw = new TextEncoder().encode(text);
+  const size = (raw.length + 4) & ~3;          // at least one NUL, then pad to four
+  const out = new Uint8Array(size);
+  out.set(raw);
+  return out;
+}
+
+function oscEncode(address, args) {
+  let tags = ",";
+  for (const arg of args) tags += arg.tag;
+
+  const parts = [oscString(address), oscString(tags)];
+
+  for (const arg of args) {
+    if (arg.tag === "T" || arg.tag === "F") continue;      // the tag IS the value
+
+    if (arg.tag === "s") { parts.push(oscString(String(arg.value))); continue; }
+
+    const buffer = new ArrayBuffer(4);
+    const view = new DataView(buffer);
+
+    if (arg.tag === "i") view.setInt32(0, Number(arg.value) | 0, false);
+    else view.setFloat32(0, Number(arg.value), false);
+
+    parts.push(new Uint8Array(buffer));
+  }
+
+  let total = 0;
+  for (const part of parts) total += part.length;
+
+  const packet = new Uint8Array(total);
+  let at = 0;
+
+  for (const part of parts) { packet.set(part, at); at += part.length; }
+
+  return packet;
+}
+
+/* ------------------------------------------------------------------- link */
+
+let socket = null;
+let socketUp = false;
+
+function openSocket() {
+  const scheme = location.protocol === "https:" ? "wss://" : "ws://";
+
+  socket = new WebSocket(scheme + location.host + "/");
+  socket.binaryType = "arraybuffer";
+  socket.onopen = () => { socketUp = true; };
+
+  /*  Reopened rather than mourned. The engine is the thing that restarts during
+      a rehearsal, and a page somebody has to remember to refresh is a page that
+      will be stale at the moment it matters. */
+  socket.onclose = () => { socketUp = false; setTimeout(openSocket, 700); };
+  socket.onerror = () => { try { socket.close(); } catch (problem) { socketUp = false; } };
+}
+
+function send(address, args) {
+  if (!socket || !socketUp) return false;
+
+  try { socket.send(oscEncode(address, args)); return true; }
+  catch (problem) { return false; }
+}
+
+const str = (value) => ({ tag: "s", value: String(value) });
+const int = (value) => ({ tag: "i", value: Number(value) });
+
+/** A named command (§4.11): `standby.set` is published at /godot/cmd/standby/set. */
+function command(name, args) {
+  return send("/godot/cmd/" + name.replace(/\./g, "/"), args || []);
+}
+
+/*  ONE VALUE, AS TEXT. `node.set` declares its value argument as '*' - whatever
+    the target says - and turns whatever arrives into canonical text before the
+    schema parses it against the row the address resolves to. So text is not a
+    shortcut: it is the road an integer takes anyway, one step earlier, and it
+    means this page never has to guess a type it could get wrong. */
+function setNode(address, text) {
+  return send(address, [str(text)]);
+}
 
 /* ------------------------------------------------------------- rendering */
 
 const folded = new Set();          // group ids the reader has closed
 let lastShow = null;
+let picked = null;                 // the inspected cue - NOT the standby (§3.5)
 
 function esc(text) {
   return String(text).replace(/[&<>"]/g, (c) =>
@@ -300,7 +497,7 @@ function esc(text) {
 
 function seconds(value) {
   const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? `${n}s` : "";
+  return Number.isFinite(n) && n > 0 ? n + "s" : "";
 }
 
 /*  ONE CUE ROW. `depth` is the indent, `role` is member / header / footer, and
@@ -318,49 +515,55 @@ function cueRow(id, depth, role, standby, out) {
   const post = seconds(tree.cue(id, "postWait", 0));
 
   const flags = [];
+
   if (isGroup) {
     const mode = tree.cue(id, "mode", "sequence");
     const advance = tree.cue(id, "advance", "manual");
     flags.push(mode === "timeline" ? "timeline" : advance === "auto" ? "auto" : "manual");
   }
-  if (pre) flags.push(`wait ${pre}`);
-  if (post) flags.push(`hold ${post}`);
+
+  if (pre) flags.push("wait " + pre);
+  if (post) flags.push("hold " + post);
   if (!enabled) flags.push("disabled");
 
   const twist = isGroup
-    ? `<span class="twist" data-fold="${id}">${open ? "▼" : "▶"}</span>`
-    : `<span class="twist"></span>`;
+    ? '<span class="twist" data-fold="' + id + '">' + (open ? "▼" : "▶") + "</span>"
+    : '<span class="twist"></span>';
 
   out.push(
-    `<div class="row" data-standby="${id === standby ? "yes" : "no"}" data-enabled="${enabled ? "yes" : "no"}">` +
-      `<div class="gutter"></div>` +
-      `<div class="number num">${number}</div>` +
-      `<div class="name" style="padding-left:${depth * 16}px">` +
+    '<div class="row" data-pick="' + id + '"' +
+      ' data-standby="' + (id === standby ? "yes" : "no") + '"' +
+      ' data-picked="' + (id === picked ? "yes" : "no") + '"' +
+      ' data-enabled="' + (enabled ? "yes" : "no") + '">' +
+      '<div class="gutter" data-park="' + id + '" title="park the standby here"></div>' +
+      '<div class="number num">' + number + "</div>" +
+      '<div class="name" style="padding-left:' + (depth * 16) + 'px">' +
         twist +
-        `<span class="kind">${esc(kind)}</span>` +
-        `<span class="text">${name}</span>` +
-      `</div>` +
-      `<div class="tail">` +
-        flags.map((f) => `<span class="flag">${esc(f)}</span>`).join("") +
-        (id === standby ? `<span class="flag standby-word">standby</span>` : "") +
-      `</div>` +
-    `</div>`);
+        '<span class="kind">' + esc(kind) + "</span>" +
+        '<span class="text">' + name + "</span>" +
+      "</div>" +
+      '<div class="tail">' +
+        flags.map((f) => '<span class="flag">' + esc(f) + "</span>").join("") +
+        (id === standby ? '<span class="flag standby-word">standby</span>' : "") +
+      "</div>" +
+    "</div>");
 
   if (!isGroup || !open) return;
 
-  const header = tree.ids(`/godot/cue/${id}/headerOrder`);
-  const footer = tree.ids(`/godot/cue/${id}/footerOrder`);
+  const header = tree.ids("/godot/cue/" + id + "/headerOrder");
+  const footer = tree.ids("/godot/cue/" + id + "/footerOrder");
+  const band = (depth + 1) * 16 + 92;
 
   if (header.length) {
-    out.push(`<div class="band" style="padding-left:${(depth + 1) * 16 + 92}px">header</div>`);
+    out.push('<div class="band" style="padding-left:' + band + 'px">header</div>');
     header.forEach((child) => cueRow(child, depth + 1, "header", standby, out));
   }
 
-  tree.ids(`/godot/cue/${id}/order`).forEach((child) =>
+  tree.ids("/godot/cue/" + id + "/order").forEach((child) =>
     cueRow(child, depth + 1, "member", standby, out));
 
   if (footer.length) {
-    out.push(`<div class="band" style="padding-left:${(depth + 1) * 16 + 92}px">footer</div>`);
+    out.push('<div class="band" style="padding-left:' + band + 'px">footer</div>');
     footer.forEach((child) => cueRow(child, depth + 1, "footer", standby, out));
   }
 }
@@ -370,25 +573,26 @@ function renderLists() {
   const focus = tree.get("/godot/list/focus", "") || lists[0] || "";
 
   el("tabs").innerHTML = lists.map((id) =>
-    `<div class="list-tab" data-focused="${id === focus ? "yes" : "no"}">` +
-      (id === focus ? `<span class="mark">▸ </span>` : "") +
-      esc(tree.get(`/godot/list/${id}/name`, id)) +
-    `</div>`).join("");
+    '<div class="list-tab" data-focus="' + id + '"' +
+      ' data-focused="' + (id === focus ? "yes" : "no") + '">' +
+      (id === focus ? '<span class="mark">▸ </span>' : "") +
+      esc(tree.get("/godot/list/" + id + "/name", id)) +
+    "</div>").join("");
 
   const pane = el("cues");
 
   if (!lists.length) {
-    pane.innerHTML = `<div class="empty"><div class="line">Rien à faire.</div>` +
-                     `<div class="under">This show has no cue list yet.</div></div>`;
+    pane.innerHTML = '<div class="empty"><div class="line">Rien à faire.</div>' +
+                     '<div class="under">This show has no cue list yet.</div></div>';
     return;
   }
 
-  const standby = tree.get(`/godot/list/${focus}/standby`, "");
-  const cues = tree.ids(`/godot/list/${focus}/order`);
+  const standby = tree.get("/godot/list/" + focus + "/standby", "");
+  const cues = tree.ids("/godot/list/" + focus + "/order");
 
   if (!cues.length) {
-    pane.innerHTML = `<div class="empty"><div class="line">Rien à faire.</div>` +
-                     `<div class="under">Nothing in this list.</div></div>`;
+    pane.innerHTML = '<div class="empty"><div class="line">Rien à faire.</div>' +
+                     '<div class="under">Nothing in this list.</div></div>';
     return;
   }
 
@@ -409,34 +613,41 @@ function runRow(id, depth, out) {
 
   const bits = [];
   const track = Number(tree.run(id, "track", -1));
-  if (Number.isFinite(track) && track >= 0) bits.push(`track ${track}`);
+  if (Number.isFinite(track) && track >= 0) bits.push("track " + track);
 
   const level = Number(tree.run(id, "level", 0));
-  if (kind === "media" && Number.isFinite(level)) bits.push(`${level.toFixed(1)} dB`);
+  if (kind === "media" && Number.isFinite(level)) bits.push(level.toFixed(1) + " dB");
 
   const position = Number(tree.run(id, "position", 0));
-  if (Number.isFinite(position) && position > 0) bits.push(`${position.toFixed(1)}s`);
+  if (Number.isFinite(position) && position > 0) bits.push(position.toFixed(1) + "s");
 
   const phase = tree.run(id, "phase", "");
   if (phase) bits.push(phase);
 
   const late = Number(tree.run(id, "late", 0));
-  if (Number.isFinite(late) && late > 0) bits.push(`late ${late}`);
+  if (Number.isFinite(late) && late > 0) bits.push("late " + late);
 
   const error = tree.run(id, "error", "");
   if (error) bits.push(error);
 
-  out.push(
-    `<div class="run" data-s="${esc(state)}" style="padding-left:${12 + depth * 14}px">` +
-      `<div class="who">` +
-        `<span class="state" data-s="${esc(state)}">${esc(state)}</span>` +
-        `<span class="text">${esc(name)}</span>` +
-        `<span class="kind">${esc(kind)}</span>` +
-      `</div>` +
-      `<div class="meta">${bits.map((b) => `<span>${esc(b)}</span>`).join("")}</div>` +
-    `</div>`);
+  const finished = state === "done" || state === "failed";
 
-  tree.ids(`/godot/run/${id}/children`).forEach((child) => runRow(child, depth + 1, out));
+  out.push(
+    '<div class="run" data-s="' + esc(state) + '"' +
+      ' style="padding-left:' + (12 + depth * 14) + 'px">' +
+      '<div class="who">' +
+        '<span class="state" data-s="' + esc(state) + '">' + esc(state) + "</span>" +
+        '<span class="text">' + esc(name) + "</span>" +
+        '<span class="kind">' + esc(kind) + "</span>" +
+      "</div>" +
+      '<div class="meta">' +
+        bits.map((b) => "<span>" + esc(b) + "</span>").join("") +
+        (finished ? ""
+                  : '<button data-kill="' + id + '" title="immediate: no footer">kill</button>') +
+      "</div>" +
+    "</div>");
+
+  tree.ids("/godot/run/" + id + "/children").forEach((child) => runRow(child, depth + 1, out));
 }
 
 function renderRuns() {
@@ -446,14 +657,170 @@ function renderRuns() {
   if (!all.length) {
     /*  §7's other phrase, for the state it names: the show is complete and all
         is silent. It is an empty state, which §4.7 says is where these belong. */
-    pane.innerHTML = `<div class="empty"><div class="line">They do not move.</div>` +
-                     `<div class="under">Nothing is running.</div></div>`;
+    pane.innerHTML = '<div class="empty"><div class="line">They do not move.</div>' +
+                     '<div class="under">Nothing is running.</div></div>';
     return;
   }
 
   const out = [];
   all.filter((id) => !tree.run(id, "parent", "")).forEach((id) => runRow(id, 0, out));
   pane.innerHTML = out.join("");
+}
+
+/* ------------------------------------------------------------- inspector */
+
+/*  Every address in the tree that belongs to this object, whatever owner word
+    publishes it. A media cue carries `/godot/cue/<id>/name` and
+    `/godot/media/<id>/file` at once, and the inspector shows both without ever
+    being told that media cues have files. */
+function fieldsFor(id) {
+  const found = [];
+  const pattern = new RegExp("^/godot/([a-z]+)/" + id + "/([A-Za-z]+)$");
+
+  for (const address of Object.keys(tree.at)) {
+    const match = pattern.exec(address);
+    if (!match) continue;
+
+    const node = tree.at[address];
+    if (!node || typeof node.TYPE !== "string") continue;      // a container, not a value
+
+    found.push({ address: address, owner: match[1], name: match[2], node: node });
+  }
+
+  /*  The common rows first and the kind's own after, alphabetical inside each,
+      which is the order the tree itself is in - so a reader who has seen the
+      namespace is not learning a second arrangement here. */
+  found.sort((a, b) =>
+    (a.owner === "cue" ? 0 : 1) - (b.owner === "cue" ? 0 : 1)
+      || a.owner.localeCompare(b.owner)
+      || a.name.localeCompare(b.name));
+
+  return found;
+}
+
+function controlFor(field) {
+  const node = field.node;
+  const writable = (Number(node.ACCESS) & 2) !== 0;
+  const value = Array.isArray(node.VALUE) && node.VALUE.length ? node.VALUE[0] : "";
+  const range = Array.isArray(node.RANGE) && node.RANGE.length ? node.RANGE[0] : null;
+  const set = ' data-set="' + esc(field.address) + '"';
+
+  /*  READ-ONLY IS SHOWN AND NOT HIDDEN. `kind`, `parent`, `index` and `role`
+      are derived rather than decided (§4.10), and they are exactly what
+      somebody looks at when a cue is not where they thought it was. */
+  if (!writable) return '<div class="ro">' + esc(value === "" ? "—" : value) + "</div>";
+
+  if (range && Array.isArray(range.VALS)) {
+    return "<select" + set + ">" +
+      range.VALS.map((v) =>
+        '<option value="' + esc(v) + '"' + (String(v) === String(value) ? " selected" : "") +
+        ">" + esc(v) + "</option>").join("") +
+      "</select>";
+  }
+
+  if (node.TYPE === "T" || node.TYPE === "F") {
+    return '<input type="checkbox"' + set + (value === true ? " checked" : "") + ">";
+  }
+
+  if ("ifdh".indexOf(node.TYPE) >= 0) {
+    const step = "ih".indexOf(node.TYPE) >= 0 ? "1" : "any";
+    const min = range && range.MIN !== undefined ? ' min="' + esc(range.MIN) + '"' : "";
+    const max = range && range.MAX !== undefined ? ' max="' + esc(range.MAX) + '"' : "";
+
+    return '<input type="number" step="' + step + '"' + min + max + set +
+           ' value="' + esc(value) + '">';
+  }
+
+  return '<input type="text"' + set + ' value="' + esc(value) + '">';
+}
+
+const KINDS = ["memo", "media", "fade", "stop", "osc", "group"];
+
+function renderInspector() {
+  const pane = el("inspect");
+
+  if (!picked || !tree.node("/godot/cue/" + picked + "/kind")) {
+    pane.innerHTML = '<div class="empty"><div class="line">Nothing to declare.</div>' +
+                     '<div class="under">Click a cue to see what it says.</div></div>';
+    pane.dataset.showing = "";
+    return;
+  }
+
+  const kind = tree.cue(picked, "kind", "memo");
+  const fields = fieldsFor(picked);
+  const signature = picked + "|" + fields.map((f) => f.address).join(",");
+
+  /*  REBUILT ONLY WHEN THE SHAPE CHANGES, and that is not an optimisation. The
+      poll arrives ten times a second, and rebuilding the panel on each one
+      would take the cursor out of the box somebody is typing in - which is the
+      ordinary way a live-updating editor becomes unusable. So the markup is
+      made once per selection, and the values below are refreshed in place:
+      never into a field that has the focus, and never over an edit that has not
+      been committed. */
+  if (pane.dataset.showing !== signature) {
+    pane.dataset.showing = signature;
+
+    const parent = tree.cue(picked, "parent", "");
+    const isGroup = kind === "group";
+    const hasHeader = tree.ids("/godot/cue/" + picked + "/headerOrder").length > 0;
+    const hasFooter = tree.ids("/godot/cue/" + picked + "/footerOrder").length > 0;
+
+    let out =
+      '<div class="who"><span class="text">' + esc(tree.cue(picked, "name", "") || "—") +
+      '</span><span class="kind">' + esc(kind) + "</span>" +
+      '<span class="id num">' + esc(picked) + "</span></div>";
+
+    let owner = null;
+
+    for (const field of fields) {
+      if (field.owner !== owner) {
+        owner = field.owner;
+        out += '<div class="group-head">' + esc(owner) + "</div>";
+      }
+
+      out += '<div class="field"><label title="' + esc(field.node.DESCRIPTION || "") + '">' +
+             esc(field.name) + "</label>" + controlFor(field) + "</div>";
+    }
+
+    out += '<div class="group-head">structure</div><div class="actions">';
+
+    /*  A NEW CUE GOES AFTER THIS ONE, in this one's parent, which is where a
+        designer writing a list wants it and is the only guess that needs no
+        second click. A group is offered the other reading as well: inside. */
+    for (const k of KINDS) {
+      out += '<button data-add="' + k + '" data-into="' + esc(parent) + '"' +
+             ' title="after this cue">+ ' + k + "</button>";
+    }
+
+    if (isGroup) {
+      out += '</div><div class="actions">';
+
+      for (const k of KINDS) {
+        out += '<button data-add="' + k + '" data-into="' + esc(picked) + '"' +
+               ' title="inside this group">+ ' + k + " inside</button>";
+      }
+
+      out += '</div><div class="actions">';
+      if (!hasHeader) out += '<button data-role="header">+ header</button>';
+      if (!hasFooter) out += '<button data-role="footer">+ footer</button>';
+    }
+
+    out += '<button class="danger" data-delete="' + esc(picked) + '">delete</button></div>';
+    pane.innerHTML = out;
+    return;
+  }
+
+  for (const input of pane.querySelectorAll("[data-set]")) {
+    if (input === document.activeElement || input.dataset.dirty === "yes") continue;
+
+    const node = tree.node(input.dataset.set);
+    if (!node || !Array.isArray(node.VALUE) || !node.VALUE.length) continue;
+
+    const value = node.VALUE[0];
+
+    if (input.type === "checkbox") input.checked = value === true;
+    else if (String(input.value) !== String(value)) input.value = value;
+  }
 }
 
 function renderStrip() {
@@ -465,17 +832,17 @@ function renderStrip() {
 
   const rate = tree.get("/godot/engine/sampleRate", 0);
   const block = tree.get("/godot/engine/blockSize", 0);
-  el("s-rate").textContent = rate ? `${rate} / ${block}` : "—";
+  el("s-rate").textContent = rate ? rate + " / " + block : "—";
 
   const late = Number(tree.get("/godot/engine/latenessMax", 0));
   el("s-late").textContent = Number.isFinite(late) && rate
-    ? `${(late / rate * 1000).toFixed(1)} ms`
+    ? (late / rate * 1000).toFixed(1) + " ms"
     : "—";
 
   const launch = Number(tree.get("/godot/engine/launchLatencyTicks", 0));
   const gap = Number(tree.get("/godot/engine/sequenceGapTicks", 0));
   el("s-latency").textContent = launch
-    ? `${(launch * 20)} ms${gap ? ` · chain ${gap * 20} ms` : ""}`
+    ? (launch * 20) + " ms" + (gap ? " · chain " + (gap * 20) + " ms" : "")
     : "—";
 
   /*  The one number on this strip that is a claim rather than a reading: PRD
@@ -484,18 +851,24 @@ function renderStrip() {
   const rt = Number(tree.get("/godot/engine/rtViolations", 0));
   el("s-rt").textContent = Number.isFinite(rt) ? String(rt) : "—";
   el("s-rt-wrap").className = rt > 0 ? "stat warn" : "stat";
+
+  const refusal = tree.get("/godot/engine/lastError", "");
+  const banner = el("refusal");
+  banner.className = refusal ? "show" : "";
+  banner.innerHTML = refusal ? "refused: <code>" + esc(refusal) + "</code>" : "";
 }
 
 function render() {
   const show = tree.get("/godot/document/path", "");
 
-  /*  Folding is the reader's, and it is kept across polls - but not across a
-      different show, where the identifiers mean nothing. */
-  if (show !== lastShow) { folded.clear(); lastShow = show; }
+  /*  Folding and the selection are the reader's, and they are kept across polls
+      - but not across a different show, where the identifiers mean nothing. */
+  if (show !== lastShow) { folded.clear(); picked = null; lastShow = show; }
 
   renderStrip();
   renderLists();
   renderRuns();
+  renderInspector();
 }
 
 /* ------------------------------------------------------------- the poll */
@@ -511,11 +884,17 @@ async function poll() {
   try {
     const reply = await fetch("/godot", { cache: "no-store" });
 
-    if (!reply.ok) throw new Error(`the engine answered ${reply.status}`);
+    if (!reply.ok) throw new Error("the engine answered " + reply.status);
 
     tree.at = flatten(await reply.json(), {});
     failures = 0;
-    link("up", "live");
+
+    /*  TWO STATES OF LIVE, because they are different capabilities and a page
+        that cannot write looks exactly like one that can until somebody tries.
+        The tree is read over HTTP and every edit goes out over the socket, so
+        a socket that is down is a page that reads perfectly and changes
+        nothing - which is worth saying before a note goes missing. */
+    link(socketUp ? "up" : "half", socketUp ? "live" : "reading only");
     render();
   } catch (problem) {
     failures += 1;
@@ -524,20 +903,111 @@ async function poll() {
         stopped moving. §3.17 asks for exactly this of the tablet, and the
         reason is the same here: a view that quietly freezes is worse than one
         that has gone, because somebody will act on it. */
-    if (failures > 2) {
-      link("down", `not connected (${esc(problem.message)})`);
-    }
+    if (failures > 2) link("down", "not connected (" + problem.message + ")");
   }
 }
 
-document.addEventListener("click", (event) => {
-  const id = event.target?.dataset?.fold;
-  if (!id) return;
+/* ------------------------------------------------------------- gestures */
 
-  if (folded.has(id)) folded.delete(id); else folded.add(id);
-  render();
+document.addEventListener("click", (event) => {
+  const data = event.target && event.target.dataset;
+
+  if (data && data.fold) {
+    if (folded.has(data.fold)) folded.delete(data.fold); else folded.add(data.fold);
+    render();
+    return;
+  }
+
+  if (data && data.focus) { command("list.focus", [str(data.focus)]); return; }
+
+  /*  PARKING IS NOT SELECTING. §3.5: "standby never moves on scroll or select",
+      so the pointer has a target of its own - the gutter, where the wedge that
+      marks it already lives. */
+  if (data && data.park) { command("standby.set", [str(data.park)]); return; }
+
+  if (data && data.kill) { command("run.kill", [str(data.kill)]); return; }
+
+  if (data && data.role && picked) {
+    command("group.role", [str(picked), str(data.role)]);
+    return;
+  }
+
+  if (data && data.add) {
+    const into = data.into;
+
+    /*  Where in the parent. A list publishes its children at
+        /godot/list/<id>/order and a group at /godot/cue/<id>/order, and which
+        of the two answers settles which this is. */
+    const asList = tree.node("/godot/list/" + into + "/order");
+    const siblings = tree.ids((asList ? "/godot/list/" : "/godot/cue/") + into + "/order");
+    const after = siblings.indexOf(picked);
+    const at = after >= 0 ? after + 1 : siblings.length;
+
+    command("cue.create", [str(into), int(at), str(data.add), str("")]);
+    return;
+  }
+
+  if (data && data.delete) {
+    /*  The one gesture here that pressing again does not undo. Undo is Phase
+        5's and does not exist yet, so the question gets asked rather than
+        pretended away. */
+    if (window.confirm("Delete this cue and everything inside it?")) {
+      command("object.delete", [str(data.delete)]);
+      picked = null;
+    }
+
+    return;
+  }
+
+  const row = event.target.closest && event.target.closest("[data-pick]");
+  if (row) { picked = row.dataset.pick; render(); }
 });
 
+/*  A FIELD COMMITS ON `change` - blur or Enter for a box, the moment of
+    choosing for a menu - and not on every keystroke. A cue named "Th" on the
+    way to "Thunder" would otherwise be a write, a log record and a document
+    mutation nobody asked for, five times over. */
+document.addEventListener("input", (event) => {
+  const target = event.target;
+
+  if (target && target.dataset && target.dataset.set && target.type !== "checkbox") {
+    target.dataset.dirty = "yes";
+  }
+});
+
+document.addEventListener("change", (event) => {
+  const target = event.target;
+  const address = target && target.dataset ? target.dataset.set : null;
+
+  if (!address) return;
+
+  setNode(address, target.type === "checkbox" ? (target.checked ? "true" : "false")
+                                              : target.value);
+  target.dataset.dirty = "";
+});
+
+/*  GO ON SPACE (§3.5, which calls it a sacred convention). Refused while a
+    field has the focus, because somebody typing a cue name has every right to
+    a space in it - and that is exactly the accident this guard is here to
+    stop. */
+document.addEventListener("keydown", (event) => {
+  const tag = document.activeElement ? document.activeElement.tagName : "";
+
+  if (/^(INPUT|SELECT|TEXTAREA)$/.test(tag)) return;
+  if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+  if (event.code === "Space") { event.preventDefault(); command("go"); }
+  else if (event.code === "ArrowDown") { event.preventDefault(); command("standby.next"); }
+  else if (event.code === "ArrowUp") { event.preventDefault(); command("standby.previous"); }
+});
+
+el("go").addEventListener("click", () => command("go"));
+
+for (const button of document.querySelectorAll("#transport [data-cmd]")) {
+  button.addEventListener("click", () => command(button.dataset.cmd));
+}
+
+openSocket();
 poll();
 setInterval(poll, POLL_MS);
 </script>
