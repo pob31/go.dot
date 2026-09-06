@@ -446,10 +446,10 @@ namespace
             return engine.processTick (tickCount++);
         }
 
-        std::string runOf (const std::string& cueId) const
+        std::string runOf (const std::string& wanted) const
         {
             for (const auto& run : runs.all())
-                if (run.cue == cueId)
+                if (run.cue == wanted)
                     return run.id;
 
             return {};
