@@ -362,6 +362,18 @@ namespace wfg::cue
             run being created belongs to the FIRST - a run says which cue it
             instantiates - while the level being moved belongs to the second.
             Conflating them made liveRunOf answer with the fade's own run. */
+        /*  What the fades already on a target meant, once they have been
+            resolved and removed. Two answers, deliberately: which runs are over
+            is a question about LIFETIME, and which stop is inherited is a
+            question about TIME. */
+        struct Takeover
+        {
+            bool keepStopping = false;
+            std::int64_t stopsAtTick = 0;
+        };
+
+        Takeover resolveTakeover (const std::string& targetId);
+
         void beginFade (const std::string& selfCueId,
                         const std::string& targetCueId,
                         const std::string& selfRunId, const std::string& kind,

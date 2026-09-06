@@ -542,6 +542,80 @@ namespace wfg::cue
                           true);
     }
 
+    Runner::Takeover Runner::resolveTakeover (const std::string& targetId)
+    {
+        /*  WHAT THE JOBS ALREADY ON THIS TARGET MEANT, and what of it survives.
+
+            Two separate things come out of this, and keeping them apart is why
+            it is a function: which RUNS are over (their work belongs to somebody
+            else now) and which SCHEDULE is inherited (a stop that was already
+            coming). The first is about lifetime; the second is about time. */
+        Takeover out;
+
+        for (const auto& superseded : running)
+        {
+            if (superseded.target != targetId)
+                continue;
+
+            /*  A JOB A REPLAY LEFT BEHIND. `advanceFades` runs from the tick
+                hook and a replay has none, so a fade that finished during the
+                session is still sitting in this list while the session is being
+                replayed. Its run ended when the log said it did, and ending it
+                again would be an answer to a question nobody asked. */
+            const auto* supersededRun = runs.find (superseded.self);
+
+            if (supersededRun == nullptr || supersededRun->isFinished())
+                continue;
+
+            /*  AND THE FADE IT TOOK OVER FROM IS OVER. Its work belongs to
+                somebody else now, so the run that reported that work ends -
+                which is the rule the Runner already applies to a fade whose
+                target has gone, arrived at from the other direction. A run left
+                running would be waited on for ever by the group that owns it
+                (§3.6), and would sit in /godot/run not moving for the rest of
+                the show.
+
+                QUEUED RATHER THAN SUBMITTED, because only the tick hook
+                reports. See advanceFades. */
+            supersededRuns.push_back (superseded.self);
+
+            /*  BUT A STOP IS NOT A FADE, AND IT STILL HAPPENS (author,
+                2026-09-06). A fade takes over the LEVEL; it does not call off
+                the stop that was already coming.
+
+                I had it the other way round for one commit, on the reasoning
+                that dropping the job dropped the stop with it - which is a
+                `remove_if` written for the level deciding a question about
+                lifetime, and no way to decide anything. The author's answer is
+                the one that survives contact with a show: the operator who
+                fired a three-second stop and then rode the level back up did
+                not withdraw the stop, and a cue that kept playing because
+                somebody touched a fader would be a cue nobody could get rid of.
+
+                So the scheduled arrival survives the takeover, at the tick it
+                was always going to land on, and the run goes on reading
+                `stopping` because it is.
+
+                A `run.kill` on the stop's own run is the other case entirely and
+                is handled in advanceFades: that one abandons the stop, because
+                kill asks nothing of the cue. */
+            if (superseded.stopWhenDone)
+            {
+                out.keepStopping = true;
+                out.stopsAtTick = superseded.stopsAtTick;
+            }
+        }
+
+        running.erase (std::remove_if (running.begin(), running.end(),
+                                       [&targetId] (const FadeJob& job)
+                                       {
+                                           return job.target == targetId;
+                                       }),
+                       running.end());
+
+        return out;
+    }
+
     void Runner::beginFade (const std::string& selfCueId,
                             const std::string& targetCueId,
                             const std::string& selfRunId, const std::string& kind,
@@ -598,66 +672,17 @@ namespace wfg::cue
 
         /*  A FADE TAKES OVER FROM A FADE, from where the level HAS GOT TO and
             not from where the first one started. Anything else is a jump, and a
-            jump on a PA is a click nobody can account for afterwards. */
-        auto keepStopping = false;
-        std::int64_t inheritedStopTick = 0;
+            jump on a PA is a click nobody can account for afterwards.
 
-        for (const auto& superseded : running)
-        {
-            if (superseded.target != targetId)
-                continue;
-
-            /*  A JOB A REPLAY LEFT BEHIND. `advanceFades` runs from the tick
-                hook and a replay has none, so a fade that finished during the
-                session is still sitting in this list while the session is being
-                replayed. Its run ended when the log said it did, and ending it
-                again would be an answer to a question nobody asked. */
-            const auto* supersededRun = runs.find (superseded.self);
-
-            if (supersededRun == nullptr || supersededRun->isFinished())
-                continue;
-
-            /*  AND THE FADE IT TOOK OVER FROM IS OVER. Its work belongs to
-                somebody else now, so the run that reported that work ends -
-                which is the rule the Runner already applies to a fade whose
-                target has gone, arrived at from the other direction. A run left
-                running would be waited on for ever by the group that owns it
-                (§3.6), and would sit in /godot/run not moving for the rest of
-                the show.
-
-                QUEUED RATHER THAN SUBMITTED, because only the tick hook
-                reports. See advanceFades. */
-            supersededRuns.push_back (superseded.self);
-
-            /*  BUT A STOP IS NOT A FADE, AND IT STILL HAPPENS (author,
-                2026-09-06). A fade takes over the LEVEL; it does not call off
-                the stop that was already coming.
-
-                I had it the other way round for one commit, on the reasoning
-                that dropping the job dropped the stop with it - which is a
-                `remove_if` written for the level deciding a question about
-                lifetime, and no way to decide anything. The author's answer is
-                the one that survives contact with a show: the operator who
-                fired a three-second stop and then rode the level back up did
-                not withdraw the stop, and a cue that kept playing because
-                somebody touched a fader would be a cue nobody could get rid of.
-
-                So the scheduled arrival survives the takeover, at the tick it
-                was always going to land on, and the run goes on reading
-                `stopping` because it is. */
-            if (superseded.stopWhenDone)
-            {
-                keepStopping = true;
-                inheritedStopTick = superseded.stopsAtTick;
-            }
-        }
-
-        running.erase (std::remove_if (running.begin(), running.end(),
-                                       [&targetId] (const FadeJob& job)
-                                       {
-                                           return job.target == targetId;
-                                       }),
-                       running.end());
+            RESOLVED BEFORE THE NEW JOB IS BUILT, in a step of its own, and the
+            separation is worth the function it costs. Deciding what the old
+            jobs meant and deciding what the new one is are two questions with
+            one thing in common - a level - and PR 3.12 changes the answer to
+            the second (a run's level becomes `base + Σ trims`, so a group fade
+            composes with a member's rather than replacing it) without touching
+            the first. Written as one block, that change would have had to be
+            made in the middle of a loop that is also deciding lifetimes. */
+        const auto takeover = resolveTakeover (targetId);
 
         FadeJob job;
         job.target = targetId;
@@ -682,10 +707,10 @@ namespace wfg::cue
             each other - and neither exists yet (`fade/@level` is a destination
             in dB, never an offset). When relative fades arrive this is the line
             that changes, and the stop's schedule is not what changes with it. */
-        if (keepStopping)
+        if (takeover.keepStopping)
         {
             job.stopWhenDone = true;
-            job.stopsAtTick = inheritedStopTick;
+            job.stopsAtTick = takeover.stopsAtTick;
         }
         else if (stopWhenDone)
         {
