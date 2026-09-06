@@ -287,22 +287,24 @@ namespace wfg::audio
             if (auto* type = impl->manager.getCurrentDeviceTypeObject())
                 type->scanForDevices();
 
-            /*  OUTPUT ONLY, AND THIS IS WHY spatcore's setDeviceAllChannels
-                IS NOT CALLED HERE.
+            /*  NAMED AS AN INPUT ONLY IF IT IS ONE, which is the rule
+                spatcore's setDeviceAllChannels does not have.
 
-                It sets the input device name and the output device name to the
-                same string, which is right for the interfaces it was written
-                for - a WFS rig's RME has both halves - and wrong for most
-                things a show plays through. This machine's speakers have six
-                outputs and NO inputs, so naming them as an input made JUCE look
-                the name up in an empty list and answer "No such device" for a
-                device the enumeration had just printed.
+                That function sets the input device name and the output device
+                name to the same string unconditionally. It is right for the
+                interfaces it was written for - a WFS rig's RME is one device
+                with both halves - and wrong for anything that only plays: this
+                machine's built-in output has no inputs at all, so naming it as
+                one made JUCE look the name up in an empty list and answer "No
+                such device" for a device the enumeration had just printed.
 
-                Phase 2 plays out and records nothing (PRD §3.25: Tracktion is a
-                commanded player), so asking for no inputs at all is not a
-                limitation being worked around - it is what a playback engine
-                wants, and it also stops Go.dot holding an input somebody else's
-                software needs exclusively.
+                The FIX IS NOT "never ask for inputs" (author, 2026-09-06). A
+                rack has them, and on Windows most users will be on ASIO, where
+                there is one device for both directions and no separate
+                selection to make - so refusing inputs there would be refusing
+                half of the only device on offer. The rule is that a device is
+                named as an input when it HAS inputs, which is true of an
+                interface and false of a pair of speakers, and needs no flag.
 
                 The POLICY is still spatcore's and is the part worth reusing:
                 explicit channel masks with both `useDefault…Channels` flags
@@ -310,14 +312,25 @@ namespace wfg::audio
                 the caller's mask away and substitutes a count frozen at the
                 last initialise. That is the half nobody discovers by reading
                 the API. */
+            auto hasInputs = false;
+
+            if (auto* type = impl->manager.getCurrentDeviceTypeObject())
+                hasInputs = type->getDeviceNames (true)
+                              .contains (juce::String (request.deviceName));
+
             auto setup = impl->manager.getAudioDeviceSetup();
 
-            setup.inputDeviceName = {};
+            setup.inputDeviceName = hasInputs ? juce::String (request.deviceName)
+                                              : juce::String {};
             setup.outputDeviceName = juce::String (request.deviceName);
             setup.useDefaultInputChannels = false;
             setup.useDefaultOutputChannels = false;
             setup.inputChannels.clear();
             setup.outputChannels.clear();
+
+            if (hasInputs)
+                setup.inputChannels.setRange (0, 512, true);
+
             setup.outputChannels.setRange (0, 512, true);
 
             /*  Zero means "the device's own", which is the only pair certain to
@@ -336,19 +349,32 @@ namespace wfg::audio
 
         /*  Trimmed to what the device really has, now that it exists to be
             asked. The mask above was provisional - 512 channels is not a claim,
-            it is "as many as there are" before anybody knows how many that is. */
+            it is "as many as there are" before anybody knows how many that is.
+
+            BOTH DIRECTIONS, because a device that has inputs was opened with
+            them: PRD §3.25 makes Tracktion a commanded player and Phase 2
+            records nothing, but the rack will have inputs and an ASIO device
+            hands you both halves whether or not today's show wants one. Holding
+            them open now is what makes that a show-document question later
+            rather than a device-layer one. */
         if (auto* opened = impl->manager.getCurrentAudioDevice())
         {
-            auto setup = impl->manager.getAudioDeviceSetup();
-            const auto width = opened->getOutputChannelNames().size();
+            const auto current = impl->manager.getAudioDeviceSetup();
+            auto setup = current;
 
             setup.useDefaultInputChannels = false;
             setup.useDefaultOutputChannels = false;
             setup.inputChannels.clear();
             setup.outputChannels.clear();
-            setup.outputChannels.setRange (0, width, true);
+            setup.inputChannels.setRange (0, opened->getInputChannelNames().size(), true);
+            setup.outputChannels.setRange (0, opened->getOutputChannelNames().size(), true);
 
-            if (setup.outputChannels != impl->manager.getAudioDeviceSetup().outputChannels)
+            /*  Compared against what was REQUESTED rather than against the
+                device's active masks: a device that declines to open everything
+                it was asked for would otherwise be reopened on every call, for
+                ever. spatcore's note, and its reasoning. */
+            if (setup.inputChannels != current.inputChannels
+                  || setup.outputChannels != current.outputChannels)
                 if (const auto trimmed = impl->manager.setAudioDeviceSetup (setup, true);
                     trimmed.isNotEmpty())
                 {
