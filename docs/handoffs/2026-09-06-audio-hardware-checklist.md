@@ -112,3 +112,27 @@ build has no ASIO and item 1 is the whole of the answer.
 - **Device hot-swap.** `TeSession` generations exist in the plan for this; nothing swaps yet.
 
 Each is a real gap rather than an oversight, and each needs the hardware in the room.
+
+## And one more, added by Phase 3's triggers (PR 3.7)
+
+**A real MIDI surface, on a real cable.** `wfg serve --midi-in=<device>` opens an input and
+turns matching events into `trigger.fire`; `wfg midi` lists what a machine has. Everything from
+the callback inwards is tested — the conversion from `juce::MidiMessage` to the engine's own
+event has cases of its own, and the matching is a pure function with a dozen more — but *opening
+a device and receiving from it* is not, and cannot be: no CI runner has a MIDI interface, and
+JUCE creates virtual ports on macOS and Linux only.
+
+What to check, on the Windows box and on the M4 Pro:
+
+1. `wfg midi` lists the surface, by a name that can be typed back into `--midi-in=`.
+2. A note fires the cue a trigger names, and **the standby does not move** — which is the
+   property the whole feature rests on and the one an operator would never forgive.
+3. A note-on of **velocity nought** is matched by a trigger asking for `data: 0` on a `noteOn`.
+   That is how a great many surfaces spell "released", JUCE reports it as a note-off by default,
+   and the engine deliberately classifies by the status byte instead. It is the one behaviour
+   here that a unit test asserts and only hardware can confirm somebody meant.
+4. MIDI clock from a device that sends it does not cost anything measurable: twenty-four
+   messages a beat arrive on the callback thread and are dropped before the matcher, and it is
+   worth watching the tick lateness while one is running.
+5. A cable pulled out mid-show. JUCE's input goes quiet; nothing should fall over, and the
+   question is whether anything says so.

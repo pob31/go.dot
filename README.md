@@ -91,12 +91,33 @@ share. Two things the plan found by reading the engine rather than the documents
 cue at standby yet, and Tracktion's slot node stops a non-looping clip before any rebuild-free
 loop lever can wrap it — so range clips are armed looping and the boundaries are Go.dot's.
 
-**There is now something to look at.** `wfg serve <bundle> --ui=clients/console`
-serves a read-only client from `/ui` on the OSCQuery port; open that address in a
-browser and the cue list, the groups nested inside it, the standby pointer and
-the running pane are on screen. It is a plain HTML page with no build step and no
-dependency, and it reads the tree the engine already publishes — it sends
-nothing and knows no command, so it cannot change a show.
+**What is built so far.** Runs for every cue kind with waits at both ends; groups
+as runs in a tree, timeline and sequence, automatic and manual, with headers and
+blocking footers; a standby pointer that descends into a manual group and climbs
+out of it; rounds — shuffle, `loops`, `play N of M`, a seed that makes a shuffled
+scene rehearsable, and pruning a member for tonight without editing the show;
+parallel lists with a published focus; and triggers from OSC, MIDI and the wall
+clock. Every scheduler decision is a logged command, and five replay fixtures say
+so: an automatic chain, a descent through nested manual groups, a shuffled bed
+pruned and left at a boundary, three inputs that are not present on the machine
+replaying them, and the waits fixture Phase 3 opened with.
+
+What is left of the phase is the audio line — ranges and in-cue loops, rate at
+arm — MIDI cues, and group-targeted fades as trims.
+
+**There is now something to look at, and to work in.** `wfg serve <bundle>
+--ui=clients/console` serves a client from `/ui` on the OSCQuery port; open that
+address in a browser and the cue list, the groups nested inside it, the standby
+pointer and the running pane are on screen. It is a plain HTML page with no build
+step and no dependency.
+
+It reads by polling the tree the engine already publishes and writes by sending
+binary OSC on the WebSocket that answers on the same port — so an edit in its
+inspector is `node.set`, a new cue is `cue.create`, and every one of them arrives
+exactly as it would from a hardware surface: logged, replayable, with no second
+vocabulary for "the UI did it". The inspector is built from the tree rather than
+from a copy of the parameter table, so a row added to the CSV appears in it
+without a line being written.
 
 It arrives ahead of its place in the plan (the desktop UI is Phase 5 and the
 tablet client Phase 7) for a reason the author gave: a headless engine is one
