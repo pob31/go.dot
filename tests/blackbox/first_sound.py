@@ -545,6 +545,69 @@ def run(locale: "str | None") -> int:
     return report.finish()
 
 
+# =============================================================================
+# The device that disagrees
+# =============================================================================
+
+def a_device_that_disagrees(report: Report) -> None:
+    """A second, short session against a target that reports something else.
+
+    WHY THIS IS HERE AT ALL. The unit suite already drives all four device
+    behaviours - agree, disagree, nothing to say, not there - against Go.dot's
+    OWN OSCQuery server, which is a strong test of the client and a weak one of
+    the agreement: same process, same code, same idea of what a bare `?VALUE`
+    means. And the session above only ever meets a device that cooperates.
+
+    So this is the one that matters for a show: the SHIPPED BINARY, talking to a
+    program written from the specification in another language, which takes the
+    message and then reports a different value. That is what a clipped range, a
+    mode that ignores the parameter, or a channel somebody re-patched at the
+    weekend looks like from Go.dot's side - and the cue has to say `disagreed`
+    rather than `timeout`, because one sends somebody to look at the device and
+    the other at the network.
+
+    It also means `mock_target.py`'s other behaviours are exercised rather than
+    merely available. A mock with three unused modes is three modes nobody knows
+    still work.
+    """
+    with tempfile.TemporaryDirectory(prefix="wfg-disagrees-") as scratch:
+        room = Path(scratch)
+        bundle = common.copy_bundle(FIXTURE, room / "phase2")
+        write_tone(bundle / "media" / "tone.wav", seconds=2.0)
+
+        # It takes the message and reports 0.1 whatever it was told.
+        with MockTarget("alter") as target:
+            point_mount_at(bundle, target)
+
+            with Server(bundle, sample_rate=RATE, buffer_size=BLOCK, hosted=True) as server:
+                wait_for(server, "/godot/audio/status", "running")
+
+                # Straight to the network cue: no sound needed to establish this.
+                before = runs_in(server)
+                common.send_udp(server.osc_port,
+                                common.osc_encode("/godot/cmd/cue/fire", ["M5TQ7XVA"]))
+
+                network = new_run(server, before)
+
+                if not report.check(bool(network), "the cue against a disagreeing device ran"):
+                    return
+
+                state = wait_for_run_state(server, network, "failed", 15.0)
+                error = value_of(server, f"/godot/run/{network}/error")
+
+                report.equal(state, "failed",
+                             "a device that reports something else fails the cue")
+                report.equal(error, "disagreed",
+                             "and says the device disagreed, not that it timed out",
+                             "one sends somebody to the device, the other to the network")
+
+                # THE MESSAGE STILL WENT. A verified cue that failed is not a
+                # cue that did nothing: the write left, the device took it, and
+                # what failed was the confirmation.
+                report.equal(value_of(server, "/godot/mount/K3PV7WRB/sent"), 1,
+                             "the message left even though the confirmation failed")
+
+
 def main() -> int:
     try:
         common.find_binary()
@@ -567,7 +630,12 @@ def main() -> int:
             locale = argument.split("=", 1)[1]
 
     try:
-        return run(locale)
+        code = run(locale)
+
+        report = Report(f"phase 2: a device that disagrees ({locale or 'C'})")
+        a_device_that_disagrees(report)
+
+        return max(code, report.finish())
     except HarnessError as problem:
         print(f"first_sound: {problem}", file=sys.stderr)
         return 2
