@@ -720,17 +720,49 @@ namespace
             return result;
         }
 
-        /*  ONE READING OF THE SYNC POINT, three instants derived from it. Two
+        /*  ONE READING OF THE SYNC POINT, both instants derived from it. Two
             readings would be two roundings, and the spacing between the launch
             and the boundary is the whole measurement. */
-        const auto now = syncPoint->monotonicBeat.v.inBeats();
-        const auto launchAt = now + 1.0;
+        /*  A QUARTER OF A BEAT AHEAD, not a whole one, and the two numbers have
+            to be read together: the play has to LAND before the boundary can be
+            queued behind it, and the boundary is `half` after the play. A whole
+            beat ahead leaves a quarter of a second for the wait, which is what
+            the first version of this spent reporting "the first range never
+            started". At 60 bpm a quarter beat is 250 ms, which is six times the
+            launch latency Go.dot itself budgets. */
+        const auto launchAt = syncPoint->monotonicBeat.v.inBeats() + 0.25;
         const auto boundaryAt = launchAt + half;
 
         firstHandle->play (MonotonicBeat { BeatPosition::fromBeats (launchAt) });
 
-        /*  THE PAIR. Both at the same instant, both placed well ahead, which is
-            what makes them land rather than arrive. */
+        /*  THE PLAY IS LET LAND BEFORE THE PAIR IS QUEUED, and finding that out
+            is what this variant cost. LaunchHandle keeps ONE queued state: a
+            stop queued while a play is still queued CANCELS the play rather
+            than following it (tracktion_LaunchHandle.cpp), so the first version
+            of this queued a boundary onto a clip that was never going to start
+            and then reported that it could not find the first half.
+
+            Go.dot places a boundary the same way for the same reason: the range
+            is sounding when its end is placed. */
+        const auto blocksToWait = static_cast<int> ((0.75 * half * rig.sampleRate)
+                                                     / rig.blockSize);
+
+        bool started = false;
+
+        for (int i = 0; i < blocksToWait && ! started; ++i)
+        {
+            rig.player->process (rig.blockSize);
+            started = firstHandle->getPlayingStatus() == LaunchHandle::PlayState::playing;
+        }
+
+        if (! started)
+        {
+            result.note = "the first range never started";
+            return result;
+        }
+
+        /*  THE PAIR. Both at the same instant, both placed ahead of it, which
+            is what makes them land rather than arrive. */
         firstHandle->stop (MonotonicBeat { BeatPosition::fromBeats (boundaryAt) });
         secondHandle->play (MonotonicBeat { BeatPosition::fromBeats (boundaryAt) });
 
@@ -744,9 +776,12 @@ namespace
         const auto halfSamples = static_cast<long long> (chirp.size()) / 2;
         const auto window = static_cast<size_t> (rig.sampleRate / 8.0);
 
+        /*  SEARCHED AS WIDELY AS THE FIRST VARIANT IS, because where the sound
+            starts is the launch jitter spike 04 measured and is not something
+            this rig gets to assume. */
         const auto pre = alignWindow (out, 0, chirp, 0, window,
                                       static_cast<long long> (rig.sampleRate),
-                                      static_cast<long long> (rig.sampleRate));
+                                      2 * static_cast<long long> (rig.sampleRate));
 
         if (! pre.confident)
         {
@@ -867,10 +902,17 @@ int main (int argc, char** argv)
         }
     }
 
-    if (! anyWrap && ! anyPlaced)
-        return report.cannotMeasure ("neither the wrap nor the placed boundary could be"
-                                     " brought about on this rig, so there is nothing to"
-                                     " compare");
+    /*  BOTH OR NOTHING. The question is which of two joins is cleaner, so one
+        of them missing is not a result with a caveat - it is no result. The
+        first version of this spike reported PASS with the placed boundary
+        unmeasured, which is exactly the shape of a measurement that flatters
+        whatever it did manage to run. */
+    if (! anyWrap || ! anyPlaced)
+        return report.cannotMeasure (anyWrap
+                                       ? "the placed cross-slot boundary could not be brought"
+                                         " about, so the wrap has nothing to be compared with"
+                                       : "the clip's own wrap could not be brought about, so"
+                                         " there is nothing to compare");
 
     report.value ("worst_wrap_damaged_span", worstWrapSpan);
     report.value ("worst_placed_damaged_span", worstPlacedSpan);
@@ -879,7 +921,7 @@ int main (int argc, char** argv)
         is whether a looping range can be left to wrap on its own or has to have
         every pass placed - and that is answered by which of the two is worse,
         at every block size, not by either one clearing a number. */
-    const auto wrapIsFine = anyWrap && (! anyPlaced || worstWrapSpan <= worstPlacedSpan);
+    const auto wrapIsFine = worstWrapSpan <= worstPlacedSpan;
 
     return report.verdict (wrapIsFine,
                            wrapIsFine

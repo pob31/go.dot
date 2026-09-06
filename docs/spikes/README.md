@@ -13,6 +13,7 @@ PRD §9.2 gives the decision rule for the whole set:
 | 2 | Launcher start at an arbitrary in-file offset | **PASS** — honoured to the nearest sample; §6.1's "one genuine gap" premise is false | [spike02-launch-offset.md](spike02-launch-offset.md) |
 | 1 | Launcher clip → multichannel bus routing | **PASS** — mono, stereo and mixed 64-ch rigs all exact; limit is throughput (~72 objects @48k, ~40 @96k) | [spike01-bus-routing.md](spike01-bus-routing.md) |
 | 3 | Follow-action join quality | **PASS** on sample-accuracy; **NO** crossfade without a custom clip; artefact is buffer-dependent; overlapping copies are sample-aligned (no comb filtering) | [spike03-join-quality.md](spike03-join-quality.md) |
+| 3b | *Phase 3, not §6.1*: loop joins — the wrap, `setLooping`, the placed boundary | **The wrap wins**: 0 join error everywhere, 0 damaged samples at 96 kHz; `setLooping` on a non-looping clip never comes back; a placed cross-slot boundary gaps by up to one block | [spike03b-loop-joins.md](spike03b-loop-joins.md) |
 | 5 | External parameter control at 50 Hz | **PASS** — 512 params = 13% of a 20 ms tick on Windows, 14.5% on an M4 Pro; ~4 µs per write, ~5.7 µs on macOS. Fails at buffers 32/64 on xruns, which is those buffers, not the writes | [spike05-param-50hz.md](spike05-param-50hz.md) |
 | 6 | Live-input latency through a Rack, PDC | **PASS** — PDC is global and ON by default, but `Edit::setLatencyCompensationEnabled(false)` removes it entirely | [spike06-rack-latency-pdc.md](spike06-rack-latency-pdc.md) |
 | 7 | Proxy-plugin sandbox as a custom TE plugin type | **PASS** — 0.9 µs round trip, survives the child being killed | [spike07-proxy-plugin.md](spike07-proxy-plugin.md) |
@@ -21,6 +22,11 @@ PRD §9.2 gives the decision rule for the whole set:
 
 Rows are in the devplan's priority order (devplan:42), which is **not** §6.1's
 numbering: #4 first because it is what the polyphony model rests on.
+
+**3b is not the author's.** It is M12 of the Phase 3 plan, written as a sequel to #3 because
+it asks #3's question again about the mechanism Phase 3 actually chose - a clip armed looping
+rather than a follow action. It sits beside #3 rather than after #7 so that the two are read
+together.
 
 ## Running them
 
