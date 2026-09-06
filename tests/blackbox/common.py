@@ -390,7 +390,8 @@ class Server:
     def __init__(self, bundle: Path, log: "Path | None" = None,
                  locale: "str | None" = None,
                  sample_rate: int = 48000, buffer_size: int = 128,
-                 hosted: bool = False, render: "Path | None" = None):
+                 hosted: bool = False, render: "Path | None" = None,
+                 ui: "Path | None" = None):
         argv = [str(find_binary()), "serve", str(bundle),
                 f"--sample-rate={sample_rate}", f"--buffer={buffer_size}",
                 "--http-port=0", "--osc-port=0"]
@@ -404,6 +405,12 @@ class Server:
             argv.append("--hosted")
         if render is not None:
             argv.append(f"--render={render}")
+
+        # --ui serves a client from /ui on this same HTTP port. Same origin as
+        # the tree it reads, so there is no CORS anywhere and a tablet reaches
+        # it by the address it already needs to know.
+        if ui is not None:
+            argv.append(f"--ui={ui}")
 
         if log is not None:
             argv.append(f"--log={log}")

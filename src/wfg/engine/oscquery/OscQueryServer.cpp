@@ -58,6 +58,34 @@ namespace wfg::oscquery
 
         constexpr const char* jsonMime = "application/json";
         constexpr const char* textMime = "text/plain";
+
+        /*  WHERE THE CLIENT LIVES, and it is reserved rather than merely used.
+
+            `/ui` is not an OSCQuery address on this server: a request for it is
+            answered with a file before anything looks in the tree. A mount that
+            declared this prefix would therefore be published and unreachable at
+            once - visible in a tree dump and answering HTML to anybody who
+            asked for it over HTTP - so the mount reader refuses it, the same
+            answer it already gives to a prefix of "/". */
+        constexpr const char* clientPrefix = "/ui";
+
+        /*  The content type for a file, by extension. Unknown is served as
+            bytes rather than guessed at: a browser told the wrong type does
+            something confidently wrong. */
+        std::string mimeFor (const juce::File& file)
+        {
+            const auto extension = file.getFileExtension().toLowerCase();
+
+            if (extension == ".html")  return "text/html; charset=utf-8";
+            if (extension == ".js")    return "text/javascript; charset=utf-8";
+            if (extension == ".css")   return "text/css; charset=utf-8";
+            if (extension == ".json")  return "application/json";
+            if (extension == ".svg")   return "image/svg+xml";
+            if (extension == ".png")   return "image/png";
+            if (extension == ".woff2") return "font/woff2";
+
+            return "application/octet-stream";
+        }
     }
 
     //==========================================================================
@@ -68,6 +96,11 @@ namespace wfg::oscquery
         Subscriptions subscriptions;
         Namespace* target = nullptr;
         OscQueryServer* owner = nullptr;
+
+        /*  Read on an HTTP thread and written before the server starts, which
+            is the only ordering this needs: `serveClientFrom` is called while
+            the engine is being wired and never again. */
+        juce::File clientDirectory;
 
         Impl() { server.addWebSocketListener (this); }
 
@@ -98,6 +131,15 @@ namespace wfg::oscquery
 
             const auto& path = request->path;
             const auto& query = request->query_string;
+
+            /*  THE CLIENT COMES FIRST, before anything consults the tree, so
+                that `/ui` is a file and not an address. It is answered here
+                rather than after a failed lookup because "no such node" is a
+                different and misleading thing to tell somebody who asked for a
+                page. */
+            if (path == clientPrefix
+                  || path.rfind (std::string (clientPrefix) + "/", 0) == 0)
+                return serveClient (response, path);
 
             //  ?HOST_INFO is a question about the SERVER, and takes no path.
             if (query == "HOST_INFO")
@@ -151,6 +193,57 @@ namespace wfg::oscquery
 
             response->write (SimpleWeb::StatusCode::success_ok, json,
                              { { "Content-Type", jsonMime } });
+            return true;
+        }
+
+        bool serveClient (std::shared_ptr<HttpServer::Response> response,
+                          const std::string& path)
+        {
+            if (clientDirectory == juce::File())
+            {
+                response->write (SimpleWeb::StatusCode::client_error_not_found,
+                                 "no client is being served here. Start the engine with "
+                                 "--ui=<directory> to serve one.\n",
+                                 { { "Content-Type", textMime } });
+                return true;
+            }
+
+            auto relative = path.substr (std::string (clientPrefix).size());
+
+            while (! relative.empty() && relative.front() == '/')
+                relative.erase (relative.begin());
+
+            if (relative.empty())
+                relative = "index.html";
+
+            /*  NO WAY OUT OF THE DIRECTORY, and the check is on the RESOLVED
+                file rather than on the text of the request. Refusing strings
+                that contain ".." is the version everybody writes and it is not
+                enough: a symbolic link inside the directory, or an encoding the
+                request parser has already unescaped, walks straight past it.
+                Asking whether the file actually found is a descendant of the
+                directory is the question that cannot be talked around.
+
+                This server binds an interface and answers anybody who can reach
+                it - that is what makes a tablet work - so "it is only ever
+                localhost" is not a thing to rely on. */
+            const auto file = clientDirectory.getChildFile (juce::String (relative));
+
+            if (! file.isAChildOf (clientDirectory) || ! file.existsAsFile())
+            {
+                response->write (SimpleWeb::StatusCode::client_error_not_found,
+                                 "no such file: " + relative + "\n",
+                                 { { "Content-Type", textMime } });
+                return true;
+            }
+
+            /*  NOT CACHED, because the page is being edited while the engine is
+                running and a stale copy after a refresh is a minute of somebody
+                wondering why their change did nothing. */
+            response->write (SimpleWeb::StatusCode::success_ok,
+                             file.loadFileAsString().toStdString(),
+                             { { "Content-Type", mimeFor (file) },
+                               { "Cache-Control", "no-store" } });
             return true;
         }
 
@@ -298,6 +391,11 @@ namespace wfg::oscquery
     }
 
     //==========================================================================
+    void OscQueryServer::serveClientFrom (const juce::File& directory)
+    {
+        impl->clientDirectory = directory;
+    }
+
     bool OscQueryServer::start (int portToBind, Namespace& nameSpace)
     {
         if (running.load (std::memory_order_relaxed))

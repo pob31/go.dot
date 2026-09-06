@@ -1146,6 +1146,40 @@ namespace
         const auto blockSize = args.getValueForOption ("--buffer").getIntValue();
         const auto hosted = args.containsOption ("--hosted");
 
+        /*  `--ui=<directory>` serves a client from `/ui` on the OSCQuery port.
+
+            A DIRECTORY RATHER THAN A COPY IN THE BINARY, while the layout is
+            being designed: the author edits the page and presses refresh. A
+            page compiled in would mean a rebuild per adjustment, which is the
+            wrong loop for the one part of this project that is decided by
+            looking at it.
+
+            It is checked here rather than at the first request, because a
+            mistyped path should be a sentence on the terminal the moment
+            somebody starts the engine and not a 404 twenty minutes later. */
+        juce::File clientDirectory;
+
+        if (args.containsOption ("--ui"))
+        {
+            const auto given = args.getValueForOption ("--ui");
+            clientDirectory = juce::File::getCurrentWorkingDirectory()
+                                .getChildFile (given);
+
+            if (! clientDirectory.isDirectory())
+            {
+                std::cerr << "wfg serve: --ui wants a directory, and "
+                          << clientDirectory.getFullPathName() << " is not one" << std::endl;
+                return 2;
+            }
+
+            if (! clientDirectory.getChildFile ("index.html").existsAsFile())
+            {
+                std::cerr << "wfg serve: no index.html in "
+                          << clientDirectory.getFullPathName() << std::endl;
+                return 2;
+            }
+        }
+
         const juce::File target { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
 
         if (! target.isDirectory())
@@ -1364,6 +1398,9 @@ namespace
                                      : 5010;
 
         wfg::oscquery::OscQueryServer server;
+
+        if (clientDirectory != juce::File())
+            server.serveClientFrom (clientDirectory);
 
         if (! server.start (requestedHttp, nameSpace))
         {
@@ -1809,7 +1846,7 @@ int wfg::runConsole (int argc, char** argv)
                       } });
 
     app.addCommand ({ "serve",
-                      "serve <bundle> --sample-rate=N --buffer=N [--hosted [--render=<wav>]]"
+                      "serve <bundle> --sample-rate=N --buffer=N [--hosted [--render=<wav>]] [--ui=<dir>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},

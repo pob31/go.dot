@@ -64,6 +64,19 @@ namespace wfg::tree
                 return false;
             }
 
+            /*  `/ui` is where the OSCQuery server answers with the client
+                rather than with the tree, so a mount there would be published
+                and unreachable at once - visible in a tree dump and answering
+                HTML to anybody who asked for it over HTTP. Refused at load, for
+                the same reason "/" is: the file says something the engine
+                cannot honour. */
+            if (prefix == "/ui" || prefix.rfind ("/ui/", 0) == 0)
+            {
+                why = "\"/ui\" is where the engine serves its client, so nothing "
+                      "can be mounted there";
+                return false;
+            }
+
             if (prefix == "/")
             {
                 why = "a mount prefix of \"/\" would mount over the whole tree";

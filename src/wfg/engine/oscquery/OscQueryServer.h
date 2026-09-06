@@ -62,6 +62,8 @@
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <juce_core/juce_core.h>
+
 #include <atomic>
 #include <cstdint>
 #include <memory>
@@ -148,6 +150,27 @@ namespace wfg::oscquery
             told, so a regression in the submodule surfaces here rather than in
             PR 1.10's harness. */
         bool start (int port, Namespace& nameSpace);
+
+        /*  Serves a client from `/ui` on this same port, out of a directory on
+            disk. Empty - the default - and `/ui` answers 404 saying how to turn
+            it on.
+
+            THE SAME PORT, which is the whole reason it is here rather than in a
+            second server. A page fetched from somewhere else would be a
+            different origin, and every request it made to the tree would need
+            the engine to send permissive CORS headers - which is a thing to get
+            wrong on a show network. Served from the port it talks to, there is
+            no cross-origin request at all, and a tablet on the same network
+            reaches it by the address it already needs to know.
+
+            FROM DISK RATHER THAN FROM THE BINARY, deliberately, and this is the
+            trade that matters while the layout is being designed: the author
+            edits the page and presses refresh. A copy compiled into the
+            executable would mean a rebuild per adjustment, which is the wrong
+            loop for the one part of this project that is decided by looking at
+            it. Embedding a default copy so a shipped binary needs no directory
+            is a later question. */
+        void serveClientFrom (const juce::File& directory);
 
         void stop();
 

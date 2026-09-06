@@ -91,6 +91,20 @@ share. Two things the plan found by reading the engine rather than the documents
 cue at standby yet, and Tracktion's slot node stops a non-looping clip before any rebuild-free
 loop lever can wrap it — so range clips are armed looping and the boundaries are Go.dot's.
 
+**There is now something to look at.** `wfg serve <bundle> --ui=clients/console`
+serves a read-only client from `/ui` on the OSCQuery port; open that address in a
+browser and the cue list, the groups nested inside it, the standby pointer and
+the running pane are on screen. It is a plain HTML page with no build step and no
+dependency, and it reads the tree the engine already publishes — it sends
+nothing and knows no command, so it cannot change a show.
+
+It arrives ahead of its place in the plan (the desktop UI is Phase 5 and the
+tablet client Phase 7) for a reason the author gave: a headless engine is one
+nobody can form an opinion about, and the layout is his to design. The order it
+displaces is worth stating plainly rather than quietly — PRD §3.2's law is
+intact, because every value on that page was already exposed over OSCQuery and
+already driven by a headless test before the page existed.
+
 The documents come first, and they are the thing to read before the code:
 
 - **[`docs/godot-namespace-draft-0.1.md`](docs/godot-namespace-draft-0.1.md)** — the
@@ -480,6 +494,8 @@ CMakePresets.json    every preset here is run by CI
 cmake/               guards, options, third-party wiring
 docs/                the PRD and the development plan — the spec
 scripts/             bootstrap, the Linux package list, the pin gate
+clients/console/     a read-only web client the engine serves at /ui; one HTML
+                     file, no build step, no dependency
 src/                 wfg_engine (the library) and wfg (the binary)
 tests/               the doctest suite and every add_test() in the project
 spikes/              throwaway PRD §6.1 validation programs
@@ -491,7 +507,11 @@ Two directories that do **not** exist here, and will not:
 
 - The Phase 7 tablet client goes in `clients/tablet/` with its own toolchain and
   is never an `add_subdirectory` of this build. It is a client over OSCQuery like
-  any other, and a web toolchain inside a CMake tree helps nobody.
+  any other, and a web toolchain inside a CMake tree helps nobody. The console
+  client in `clients/console/` already follows that rule the easy way: it is one
+  file with no toolchain at all, and the engine serves it from disk rather than
+  compiling it in — which is what lets the page be edited and refreshed while a
+  show is running, the only loop that suits work decided by looking at it.
 - The Phase 11 Rust BLE sidecar lives in the permissively licensed
   [Choufleur](https://github.com/pob31/choufleur_prompt) repo (MIT OR Apache-2.0)
   and is pulled in as a `ThirdParty/` submodule if it is needed at all. There is

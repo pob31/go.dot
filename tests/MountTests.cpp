@@ -394,7 +394,12 @@ TEST_CASE ("mount: a prefix that would swallow the tree, or is malformed, is ref
     const std::string description =
         R"({"FULL_PATH": "/", "CONTENTS": {"x": {"FULL_PATH": "/x", "TYPE": "f", "ACCESS": 3}}})";
 
-    for (const auto& prefix : { "", "/", "wfs", "/wfs/", "/a//b" })
+    /*  `/ui` and anything under it joins the list, because that is where the
+        OSCQuery server answers with the client rather than with the tree. A
+        mount there would be published and unreachable at once - visible in a
+        tree dump, and answering HTML to anybody who asked for it over HTTP - so
+        it is refused when the show is read rather than discovered during it. */
+    for (const auto& prefix : { "", "/", "wfs", "/wfs/", "/a//b", "/ui", "/ui/desk" })
     {
         INFO ("prefix: \"" << prefix << "\"");
 

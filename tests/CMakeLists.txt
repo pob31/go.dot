@@ -444,3 +444,26 @@ add_test(NAME blackbox.first-sound.fr_FR
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.first-sound.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 600)
+
+# The engine serving its own client, and serving nothing else. `--ui=<dir>`
+# answers /ui from disk on the same port the tree is on - same origin, so the
+# page needs no CORS, and a tablet reaches it by the address it already has to
+# know to reach the engine at all.
+#
+# That is a file server inside a process which binds an interface and answers
+# anybody who can reach it, so most of what this asserts is the REFUSALS: three
+# ways of climbing out of the directory, a file that is not there, and - the one
+# that would be easiest to lose - the OSCQuery tree still answering on the same
+# port, because a route put in front of the namespace is exactly the kind of
+# change that can shadow it.
+add_test(NAME blackbox.client.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/client_page.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.client.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+add_test(NAME blackbox.client.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/client_page.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.client.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
