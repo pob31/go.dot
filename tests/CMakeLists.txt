@@ -548,6 +548,21 @@ set_tests_properties(blackbox.first-sound.fr_FR PROPERTIES
 # that would be easiest to lose - the OSCQuery tree still answering on the same
 # port, because a route put in front of the namespace is exactly the kind of
 # change that can shadow it.
+# `serve --device=` end to end, which nothing covered: the device layer has unit
+# tests that open a card and the serve wiring around it had none. It used to
+# print its whole banner - both ports, the client URL, the granted settings -
+# and then die of an access violation before the first tick, because the clock
+# was chosen as a pair when there are three of them.
+#
+# SKIPS ITSELF on a machine with no audio device, which is every CI runner, and
+# that is honest rather than convenient: what it checks cannot be checked
+# without one. It runs where the configuration it covers is actually used.
+add_test(NAME blackbox.device.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/device_serve.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.device.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The wiring the unit suite cannot reach: a real datagram, on a real socket, on
 # a thread that may not read the document, reaching the right cue - and the
 # operator's pointer not moving when it does.

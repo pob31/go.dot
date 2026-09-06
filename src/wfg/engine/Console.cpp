@@ -1498,9 +1498,73 @@ namespace
             return 2;
         }
 
-        /*  The two lines a driver parses. Flushed, because a harness reading
-            them is blocked until they arrive and a buffered stdout would hang
-            it until the process exits. */
+        /*  AN ADDRESS, NOT A PORT NUMBER, when there is a page to open.
+
+            "wfg: http 5010" is a fact and it is not an instruction. The obvious
+            thing to do with a client that is sitting in the repository is to
+            double-click it, which opens it as a `file:` URL with no engine
+            behind it - and that is exactly what happened the first time
+            somebody tried (2026-09-06). So the terminal says what to open,
+            spelled the way it has to be typed, ending in `/ui`.
+
+            AND THE ADDRESSES OF THIS MACHINE ON ITS NETWORK, because the whole
+            reason the page is served from the engine's own port is that a
+            tablet can reach it without anybody configuring anything - and to do
+            that somebody has to know the number. Loopback is filtered out; it
+            is already on the line above.
+
+            BEFORE THE PORT NUMBERS, and not only because the thing to do
+            reads better above the details it is made of: the black-box harness
+            stops reading this stream the moment it has both ports, so a line
+            printed after them is a line no test can see.
+
+            The three-token shape `wfg: <word> <value>` is kept, because that
+            harness reads the ports by splitting on spaces and looking at the
+            second token. `client` is neither `http` nor `osc`, so it is passed
+            over. */
+        if (clientDirectory != juce::File())
+        {
+            std::cout << "wfg: client http://localhost:" << server.boundPort() << "/ui"
+                      << std::endl;
+
+            for (const auto& address : juce::IPAddress::getAllAddresses())
+            {
+                if (address.isNull() || address.isIPv6 || address == juce::IPAddress::local())
+                    continue;
+
+                /*  ONLY THE ONES SOMEBODY COULD TYPE INTO A TABLET. Windows
+                    hands back rather more than the machine's addresses:
+                    multicast groups (224.0.0.0 to 239.255.255.255, which is
+                    where mDNS and SSDP live) and link-local self-assignments
+                    (169.254.x.x, which is what an interface with no DHCP gives
+                    itself). Neither is an address anything can reach this
+                    machine at, and eleven lines of them buries the one that
+                    works. */
+                const auto first = address.address[0];
+                const auto second = address.address[1];
+
+                if (first >= 224 || (first == 169 && second == 254))
+                    continue;
+
+                std::cout << "wfg: client http://" << address.toString() << ":"
+                          << server.boundPort() << "/ui" << std::endl;
+            }
+        }
+
+        /*  AND THE TWO LINES A DRIVER PARSES. Flushed, because a harness
+            reading them is blocked until they arrive and a buffered stdout
+            would hang it until the process exits.
+
+            OUTSIDE THE BLOCK ABOVE, which is where they were before somebody
+            moved the address ahead of them and took the closing brace along by
+            mistake.
+
+            An engine started without `--ui` then printed no ports at all, and
+            every black-box driver that does not serve a page sat waiting for
+            two lines that were never coming, until its timeout. Four of them,
+            five and ten minutes each. The suite is what noticed; nothing about
+            the engine looked wrong, because from the terminal's point of view
+            it had started perfectly. */
         std::cout << "wfg: http " << server.boundPort() << std::endl;
         std::cout << "wfg: osc " << udp.boundPort() << std::endl;
 
@@ -1728,6 +1792,18 @@ namespace
             blockSource = &dummy->clock();
         }
 
+        /*  WHICH CLOCK IS ACTUALLY COUNTING, published rather than assumed.
+
+            The row has said `dummy|device` since Phase 1 and nothing ever wrote
+            to it, so it read `dummy` on a machine with a real interface open -
+            which is the one question a client asks this node, answered wrongly
+            for as long as there has been a device layer to answer it about.
+
+            Only `--device` is a device clock. `--hosted` builds a Tracktion
+            graph and drives it from a dummy clock of its own, which is what
+            makes a render reproducible and is exactly not a card. */
+        state.clock = deviceDriver != nullptr ? "device" : "dummy";
+
         wfg::TickThread ticks { engine, *blockSource, *schedule };
 
         /*  Publish then flush, on the tick thread, once per tick, in that
@@ -1888,7 +1964,30 @@ namespace
                                 previous = std::move (current);
                             });
 
-        if (driver != nullptr)
+        /*  THREE CLOCKS, AND ALL THREE ANSWERED FOR.
+
+            `--device` opens a real interface, `--hosted` builds a Tracktion
+            graph under a dummy clock, and neither means a plain dummy. This was
+            written as a pair - hosted, or else the dummy - and the device path
+            fell down the `else`, where `dummy` is a null unique_ptr and
+            `dummy->start()` is a segmentation fault.
+
+            It was invisible because of WHERE it lands: the whole banner has
+            already been printed by then, ports, client URL and the granted
+            device settings, so the terminal says the engine is up and the
+            engine is gone. A browser opening the address it was just handed
+            gets a refused connection, and the only clue is an exit code nobody
+            was looking at.
+
+            The device driver starts its own callback inside `open()` - which is
+            why there is nothing to start here - and that asymmetry is exactly
+            what made a two-branch decision look complete. */
+        if (deviceDriver != nullptr)
+        {
+            //  Already running: `open()` built the graph and started the
+            //  callback, and its failure was reported where it happened.
+        }
+        else if (driver != nullptr)
         {
             if (! driver->start())
             {
@@ -1910,7 +2009,9 @@ namespace
 
         ticks.stop();
 
-        if (driver != nullptr)
+        if (deviceDriver != nullptr)
+            deviceDriver->close();
+        else if (driver != nullptr)
             driver->stop();
         else
             dummy->stop();

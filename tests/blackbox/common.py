@@ -391,7 +391,7 @@ class Server:
                  locale: "str | None" = None,
                  sample_rate: int = 48000, buffer_size: int = 128,
                  hosted: bool = False, render: "Path | None" = None,
-                 ui: "Path | None" = None):
+                 ui: "Path | None" = None, device: "str | None" = None):
         argv = [str(find_binary()), "serve", str(bundle),
                 f"--sample-rate={sample_rate}", f"--buffer={buffer_size}",
                 "--http-port=0", "--osc-port=0"]
@@ -412,6 +412,13 @@ class Server:
         if ui is not None:
             argv.append(f"--ui={ui}")
 
+        # --device names a real interface, which is a fact about the machine
+        # rather than about the show. A driver that wants one asks `wfg devices`
+        # for the name first: the two verbs have to agree on the spelling or
+        # neither is any use.
+        if device is not None:
+            argv.append(f"--device={device}")
+
         if log is not None:
             argv.append(f"--log={log}")
         if locale is not None:
@@ -423,6 +430,11 @@ class Server:
 
         self.http_port = 0
         self.osc_port = 0
+
+        # Every `wfg: ...` line the engine printed while starting, in order.
+        # The ports are read out of two of them; the rest are things it wants
+        # somebody to know, and a driver may want to assert one.
+        self.notices: "list[str]" = []
         self._stderr: "list[str]" = []
 
         deadline = time.monotonic() + STARTUP_TIMEOUT
@@ -439,6 +451,9 @@ class Server:
                 continue
 
             parts = line.split()
+
+            if parts and parts[0] == "wfg:":
+                self.notices.append(line.strip())
 
             if len(parts) == 3 and parts[0] == "wfg:":
                 if parts[1] == "http":
