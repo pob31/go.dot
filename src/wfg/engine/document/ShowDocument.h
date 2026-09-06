@@ -152,6 +152,14 @@ namespace wfg::doc
             asking twice answers with the first rather than making a second: two
             headers is not a thing a group can have, and the friendliest moment
             to say so is before it exists. */
+        /*  Adds a trigger to a cue - any kind of cue, because §3.7 gives the
+            list to "a cue or a group". The kind is fixed at creation for the
+            same reason a cue's is: a trigger that could be turned from a note
+            into a time of day by writing a word would carry the fields of the
+            kind it used to be. */
+        EditResult createTrigger (const std::string& cueId, const std::string& kind,
+                                  const std::string& id = {});
+
         EditResult createRole (const std::string& groupId, const std::string& role,
                                const std::string& id = {});
 

@@ -129,6 +129,9 @@
           </data>
         </attribute>
       </optional>
+      <zeroOrMore>
+        <ref name="Trigger"/>
+      </zeroOrMore>
     </element>
   </define>
 
@@ -247,6 +250,7 @@
           <ref name="Osc"/>
           <ref name="Header"/>
           <ref name="Footer"/>
+          <ref name="Trigger"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -366,7 +370,10 @@
         </attribute>
       </optional>
       <zeroOrMore>
-        <ref name="Route"/>
+        <choice>
+          <ref name="Route"/>
+          <ref name="Trigger"/>
+        </choice>
       </zeroOrMore>
     </element>
   </define>
@@ -390,6 +397,95 @@
               <data type="double"/>
             </zeroOrMore>
           </list>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Trigger">
+    <element name="Trigger">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="address">
+          <a:documentation>osc: the address that fires this cue, arriving on Go.dot own OSC port over UDP. Refused at load if it falls under /godot or under a mount prefix, because those are NODES - a trigger there would be a message that both wrote a value and fired a cue, and nobody could tell which had been meant.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="at">
+          <a:documentation>clock: a local time of day, HH:MM:SS, fired once each day it is crossed while the show is open. The wall clock is the one input the model refuses to read - nothing inside the engine reads a clock, which is what makes a replay reproducible - so a crossing is noticed outside it and arrives as a logged command like any other.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="channel">
+          <a:documentation>midi: the channel, 1 to 16. Nought is any, and it is nought rather than -1 because MIDI channels are one-based everywhere a musician looks at them.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">16</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="data">
+          <a:documentation>midi: the velocity or value that must match, or -1 for any. A note-on with velocity nought is a note-off on a great many devices, so matching on it is a thing somebody will need to do deliberately.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">-1</param>
+            <param name="maxInclusive">127</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether it can fire. A trigger turned off during tech is still written down, which is the whole difference between disabling one and deleting it.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="kind">
+          <a:documentation>What kind of thing fires it. The three inputs Phase 3 builds: a message on Go.dot own OSC port, a MIDI event on an input it was told to open, and a time of day. Timecode is Phase 10, and GO is not in this list at all - GO is the operator, and the only trigger that moves the standby (PRD 3.5).</a:documentation>
+          <choice>
+            <value>osc</value>
+            <value>midi</value>
+            <value>clock</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>midi: the note, controller or program number.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">127</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="port">
+          <a:documentation>midi: the declared port the event must arrive on. Empty is any input, which is what a rig with one MIDI cable wants and is the honest default: naming a port that is not bound would be a trigger that silently never fires.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="type">
+          <a:documentation>midi: the event type. Four of them, which are the four a surface sends: the rest of the event types exist for MIDI CUES (PRD 3.10) rather than for listening.</a:documentation>
+          <choice>
+            <value>noteOn</value>
+            <value>noteOff</value>
+            <value>programChange</value>
+            <value>controlChange</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="value">
+          <a:documentation>osc: an argument the message must also carry, written the way the log writes one - f:1, i:3, T, s:go. Empty matches any arguments including none, which is what a bare address means to most of the things that will be sending one.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
     </element>
@@ -481,6 +577,9 @@
           <data type="string"/>
         </attribute>
       </optional>
+      <zeroOrMore>
+        <ref name="Trigger"/>
+      </zeroOrMore>
     </element>
   </define>
 
@@ -572,6 +671,9 @@
           </choice>
         </attribute>
       </optional>
+      <zeroOrMore>
+        <ref name="Trigger"/>
+      </zeroOrMore>
     </element>
   </define>
 
@@ -659,6 +761,9 @@
           </choice>
         </attribute>
       </optional>
+      <zeroOrMore>
+        <ref name="Trigger"/>
+      </zeroOrMore>
     </element>
   </define>
 

@@ -137,6 +137,23 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        registry.add ({ "trigger.create",
+                        "Adds a trigger to a cue: what fires it when nobody presses GO.",
+                        { { "cue", 's', false }, { "kind", 's', false },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.createTrigger (args[0].getString(),
+                                                                      args[1].getString(),
+                                                                      id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "group.role",
                         "Gives a group its header or its footer - the cue lists that run before"
                         " its members and at its exit. Asking twice answers with the one it has.",

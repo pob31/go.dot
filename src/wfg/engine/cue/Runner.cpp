@@ -2553,6 +2553,60 @@ namespace wfg::cue
                         } });
 
         //----------------------------------------------------------------------
+        /*  WHAT FIRED IS AN ARGUMENT, NOT AN ORIGIN.
+
+            §4.11 wants every gesture-reachable action to exist as a named
+            command, and a trigger firing is a gesture somebody made months ago
+            in a document. The origin says where the message came from -
+            `udp:10.0.0.5:9000`, `midi:BCF2000`, `clock` - and nothing anywhere
+            enforces an origin, by design (RunCommands.h): anyone may send an
+            engine-origin command, because one only the inside of the process
+            could send would be one a replay could not send. So the trigger's
+            identity travels as the argument, where it can be checked.
+
+            IT FIRES AND MOVES NOTHING. §3.5 and §3.7 are both explicit: only GO
+            moves the standby. That is the whole reason a background list can be
+            driven by something other than a person without the person losing
+            their place, and it is why this is not `go` with a different name. */
+        registry.add ({ "trigger.fire",
+                        "A trigger fired its cue. The standby does not move, whatever it was.",
+                        { { "trigger", 's', false }, { "run", 's', true } },
+                        true,
+                        [&engine, &runner, &document, withRun]
+                        (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto trigger = document.findById (args[0].getString());
+
+                            if (! trigger.isValid()
+                                  || trigger.getType().toString() != "Trigger")
+                                return Outcome::rejected (reason::unknownId);
+
+                            const auto cue = trigger.getParent();
+
+                            if (! cue.isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            const auto cueId = cue[idProperty].toString().toStdString();
+
+                            /*  A MANUAL SEQUENCE GROUP HAS NOBODY TO BE ITS
+                                PARENT, the same refusal `cue.fire` gives and for
+                                the same reason: its members start on GO, one
+                                press at a time, and fired from here it would run
+                                its header, start its first member and wait for a
+                                press that is never coming. */
+                            if (cue.getType().toString() == "Group"
+                                  && runner.isManualGroup (cue))
+                                return Outcome::rejected (reason::needsGo);
+
+                            const auto id = args.size() > 1 ? args[1].getString()
+                                                            : std::string {};
+
+                            return Outcome::ok (withRun (args, 1,
+                                                         runner.fire (engine, context.tick,
+                                                                      cueId, id)));
+                        } });
+
+        //----------------------------------------------------------------------
         /*  THE TWO A GROUP SENDS ITSELF, and they are two rather than one
             because spawning and launching are separate moments. An auto
             sequence spawns the next member while the current one is still

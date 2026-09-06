@@ -124,9 +124,9 @@ namespace wfg::doc
                     about the whole show and not about any bus. */
                 { "Lists",  false, { "List" },             { "lists" } },
                 { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, { "list" } },
-                { "Cue",    true,  {},                     { "cue" } },
+                { "Cue",    true,  { "Trigger" },                     { "cue" } },
                 { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
-                                     "Header", "Footer" },                { "cue", "group" } },
+                                     "Header", "Footer", "Trigger" },     { "cue", "group" } },
 
                 /*  A HEADER AND A FOOTER ARE ORDINARY CUE LISTS (§3.6), which
                     is why they are elements holding cues rather than a word on
@@ -162,7 +162,7 @@ namespace wfg::doc
                     like any other, and it is addressed at /godot/cue/<id> so a
                     client holding an identifier never has to know which kind it
                     got. */
-                { "Media",  true,  { "Route" },            { "cue", "media" } },
+                { "Media",  true,  { "Route", "Trigger" }, { "cue", "media" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,
@@ -173,20 +173,38 @@ namespace wfg::doc
                     re-point a client holding the second. */
                 { "Route",  true,  {},                     { "route" } },
 
+                /*  A TRIGGER IS AN OBJECT ON A CUE, and on ANY cue: §3.7 says a
+                    cue or a group carries a list of them, so it is a child of
+                    every kind rather than a row on one.
+
+                    Identified, and a list rather than a choice, for the reason
+                    a Route is: a cue fired by a note AND by a time of day is
+                    two triggers, and a client editing one must not have to
+                    rewrite the other. An index would be a position, and
+                    deleting the first would silently re-point a client holding
+                    the second.
+
+                    IT CARRIES EVERY KIND'S ROWS, because the grammar cannot
+                    refuse `channel` on an OSC trigger without an element per
+                    kind - and three elements for a thing that is one concept
+                    with three sources would be worse. `wfg validate` is where
+                    a MIDI field on a clock trigger gets mentioned. */
+                { "Trigger", true, {},                     { "trigger" } },
+
                 /*  A FADE AND A STOP ARE CUES, and elements of their own for
                     the reason a Media is: `kind` stays derived and read-only,
                     and the grammar can refuse a `duration` on a cue that has
                     nothing to fade. Neither carries a Route - they act on a run
                     that already has one, which is the whole difference between
                     them and a media cue. */
-                { "Fade",   true,  {},                     { "cue", "fade" } },
-                { "Stop",   true,  {},                     { "cue", "stop" } },
+                { "Fade",   true,  { "Trigger" },                     { "cue", "fade" } },
+                { "Stop",   true,  { "Trigger" },                     { "cue", "stop" } },
 
                 /*  And a network cue is one too, for the same reason. It
                     carries no Route either: what it writes is somebody
                     else's node, named by address, and the mount it belongs
                     to already says where that is. */
-                { "Osc",    true,  {},                     { "cue", "osc" } },
+                { "Osc",    true,  { "Trigger" },                     { "cue", "osc" } },
                 { "Mounts", false, { "Mount" },            {} },
                 { "Mount",  true,  {},                     { "mount" } },
                 { "Audio",  false, { "Bus" },              { "audio" } },

@@ -217,6 +217,7 @@ namespace wfg::doc
             promising a `/godot/header/<id>/…` that has nothing in it. */
         if (element == "Header" || element == "Footer")   return {};
         if (element == "Route")                     return "route";
+        if (element == "Trigger")                   return "trigger";
         if (element == "List")                      return "list";
         if (element == "Mount")                     return "mount";
         if (element == "Bus")                       return "bus";
@@ -575,6 +576,29 @@ namespace wfg::doc
                              { { "bus", busId } });
     }
 
+    EditResult ShowDocument::createTrigger (const std::string& cueId, const std::string& kind,
+                                            const std::string& id)
+    {
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        /*  ON ANY CUE, which is what §3.7 says: "a cue or a group carries a
+            trigger list". So the question asked is whether the parent IS a cue,
+            through the owner word the parameter table already answers it with -
+            not whether its element name is one of a list. That list has grown
+            twice since Phase 1 and both times something was forgotten. */
+        if (ownerForElement (cue.getType().toString().toStdString()) != "cue")
+            return EditResult::failed (reason::typeMismatch);
+
+        if (kind != "osc" && kind != "midi" && kind != "clock")
+            return EditResult::failed (reason::badValue);
+
+        return insertObject (cue, cue.getNumChildren(), "Trigger", id,
+                             { { "kind", kind } });
+    }
+
     EditResult ShowDocument::createRole (const std::string& groupId, const std::string& role,
                                          const std::string& id)
     {
@@ -917,6 +941,80 @@ namespace wfg::doc
         }
 
         Walk { schema, problems, seenIds }.visit (showNode, "");
+
+        /*  AN OSC TRIGGER MAY NOT LISTEN WHERE THE ENGINE ANSWERS.
+
+            §3.7's triggers arrive on Go.dot's own OSC port, which is the same
+            port `/godot/...` is written on and the same port a mounted
+            namespace is proxied through. An address under either is a message
+            that would both write a value and fire a cue, and nobody reading the
+            log afterwards could say which had been meant - nor which the sender
+            intended, because the sender wrote one message.
+
+            REFUSED WHEN THE SHOW IS READ rather than discovered during it,
+            which is the rule the whole document layer follows for things that
+            cannot be honoured at all. A dangling reference is a warning, and
+            this is not one: there is no reading of the file under which such a
+            trigger does what it says.
+
+            A SECOND PASS, because it needs the mounts and the walk above meets
+            them in document order - mounts are written after the lists. */
+        std::vector<std::string> prefixes;
+
+        for (const auto& mounts : showNode)
+        {
+            if (mounts.getType().toString() != "Mounts")
+                continue;
+
+            for (const auto& mount : mounts)
+                if (mount.hasProperty (juce::Identifier ("prefix")))
+                    prefixes.push_back (mount[juce::Identifier ("prefix")]
+                                          .toString().toStdString());
+        }
+
+        struct Triggers
+        {
+            std::vector<std::string>& problems;
+            const std::vector<std::string>& prefixes;
+
+            static bool under (const std::string& address, const std::string& prefix)
+            {
+                return address == prefix
+                         || address.rfind (prefix + "/", 0) == 0;
+            }
+
+            void visit (const juce::ValueTree& node)
+            {
+                if (node.getType().toString() == "Trigger")
+                {
+                    const auto kind = node[juce::Identifier ("kind")].toString().toStdString();
+                    const auto address = node[juce::Identifier ("address")]
+                                           .toString().toStdString();
+
+                    if ((kind.empty() || kind == "osc") && ! address.empty())
+                    {
+                        const auto here = "/Show/.../Trigger[" + node[juce::Identifier ("id")]
+                                            .toString().toStdString() + "]";
+
+                        if (under (address, "/godot"))
+                            problems.push_back (here + ": an OSC trigger may not listen at \""
+                                                + address + "\", which is inside the engine's own"
+                                                " namespace");
+
+                        for (const auto& prefix : prefixes)
+                            if (! prefix.empty() && under (address, prefix))
+                                problems.push_back (here + ": an OSC trigger may not listen at \""
+                                                    + address + "\", which is inside the mount"
+                                                    " prefix \"" + prefix + "\"");
+                    }
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        Triggers { problems, prefixes }.visit (showNode);
         return problems;
     }
 }
