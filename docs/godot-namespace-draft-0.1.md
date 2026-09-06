@@ -1354,6 +1354,49 @@ still read no clock and own no socket:
 
 Debounce is a user preference (§3.7) and arrives with Phase 10's other preferences.
 
+**Six things PR 3.7 settled while building that**, recorded here for the same reason §12.5's
+seven are: each is a choice somebody could reasonably have made differently.
+
+1. **One element for three kinds, and the matchers keep them apart.** The grammar cannot refuse
+   `channel` on an OSC trigger without an element per kind, and three elements for one concept
+   with three sources would be worse to read and worse to extend. So `Trigger` carries every
+   kind's rows, `kind` is fixed at creation the way a cue's is, and a MIDI trigger answering an
+   OSC address is a thing the matchers prevent rather than the grammar. `wfg validate` is where a
+   MIDI field on a clock trigger will get mentioned, when there is a warning channel for it.
+
+2. **A trigger with no address fires on nothing**, rather than on everything. A bare
+   `address != wanted` would have made a half-authored trigger — created and not yet filled in —
+   answer every message the show received, which is the worst possible failure of the feature.
+
+3. **An empty `value` matches any arguments including none**, and a value asked for is matched
+   against *any* argument rather than the first. A foot switch sends a bare address; a surface
+   sends `/go f:1` on press and `f:0` on release and may put the meaningful argument second.
+
+4. **`data` is -1 for "any velocity" and channel is 0 for "any channel"**, and the asymmetry is
+   deliberate. MIDI channels are one-based everywhere a musician looks at them, so nought cannot
+   be one; velocity nought *can* be a velocity, and matching it is how somebody catches the
+   release from the very many surfaces that spell it that way. Which is also why the conversion
+   from `juce::MidiMessage` classifies by the **status byte**: JUCE reports a note-on of velocity
+   nought as a note-off, and that is right for a synthesiser and wrong here.
+
+5. **A clock trigger is asked about an INTERVAL, half-open, `(previous, now]`.** A tick is 20 ms
+   and a second is fifty of them: "does the clock read 19:30:00" would fire fifty times, and
+   asking on a tick that happened to be late would miss it. Midnight falls out of the interval
+   wrapping rather than a special case. The first tick crosses nothing, so a show opened at
+   19:30:00 does not fire the 19:30:00 cue because it happened to be started then.
+
+6. **A `--midi-in` device that is not there is fatal at startup**, like a mistyped `--ui`, and
+   the message lists the ports the machine does have. A cue that can be fired from a foot switch
+   and silently cannot is the failure the whole feature exists to avoid, and the answer is almost
+   always one of those names spelled differently.
+
+**And the load refusal, which is the one thing here that stops a show from opening.** An OSC
+trigger may not listen under `/godot` or under a mount prefix. The engine already answers there
+on that same port, so such a trigger would be a message that both wrote a value and fired a cue —
+and nobody reading the log afterwards could say which had been meant, nor which the sender
+intended, because the sender wrote one message. Refused when the show is read, because there is
+no reading of the file under which it does what it says.
+
 ### 12.9 `/godot/range` — ranges, in-cue loops, and what the pin actually allows (decision L)
 
 **What Tracktion at the pin does, read rather than assumed**, because it changed the design:
