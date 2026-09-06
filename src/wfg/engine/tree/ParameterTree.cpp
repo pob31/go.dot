@@ -357,6 +357,33 @@ namespace wfg::tree
             }
         }
 
+        /*  A TRIGGER, at a top level address of its own.
+
+            Flat rather than nested under the cue, which is the Route precedent
+            and the same argument: a client watching one trigger is watching one
+            node, and a trigger belongs to exactly one cue - so `cue` is derived
+            from where it sits rather than stored, and the containment cannot
+            come to disagree with a copy of itself. */
+        void collectTrigger (const juce::ValueTree& node, const std::string& cueId,
+                             std::vector<Node>& out)
+        {
+            const auto id = node[idProperty].toString().toStdString();
+
+            if (id.empty())
+                return;
+
+            const auto base = std::string (godot) + "/trigger/" + id;
+
+            for (const auto* row : doc::Schema::rowsForOwner ("trigger"))
+            {
+                const doc::Attribute attribute { "Trigger", row };
+                const auto name = std::string (row->name);
+
+                const auto text = name == "cue" ? cueId : storedText (attribute, node);
+                out.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
+        }
+
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
                          std::vector<Node>& out)
         {
@@ -460,6 +487,12 @@ namespace wfg::tree
                 if (childElement == "Route")
                 {
                     collectRoute (child, out);
+                    continue;
+                }
+
+                if (childElement == "Trigger")
+                {
+                    collectTrigger (child, id, out);
                     continue;
                 }
 

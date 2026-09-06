@@ -326,6 +326,24 @@ add_test(NAME wfg.replay.rounds.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/rounds
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The eleventh, and the one that says an INPUT THAT IS NOT THERE reproduces. A
+# trigger fires a cue from a lighting desk's datagram, a MIDI note, or a time of
+# day - and a machine replaying a log has no socket, no MIDI interface, and it
+# is a different hour on a different day.
+#
+# Which is exactly why the matching happens outside the model and what reaches
+# the engine is a command. Three origins, one record shape, and the standby does
+# not move once anywhere in the file - which is the property the whole feature
+# rests on (PRD 3.5, 3.7).
+add_test(NAME wfg.replay.triggers.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/triggers.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/triggers
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.triggers.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/triggers.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/triggers
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a
@@ -523,6 +541,20 @@ set_tests_properties(blackbox.first-sound.fr_FR PROPERTIES
 # that would be easiest to lose - the OSCQuery tree still answering on the same
 # port, because a route put in front of the namespace is exactly the kind of
 # change that can shadow it.
+# The wiring the unit suite cannot reach: a real datagram, on a real socket, on
+# a thread that may not read the document, reaching the right cue - and the
+# operator's pointer not moving when it does.
+add_test(NAME blackbox.triggers.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/triggers.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.triggers.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.triggers.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/triggers.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.triggers.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 add_test(NAME blackbox.client.C
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/client_page.py"
                  --wfg-locale=C)

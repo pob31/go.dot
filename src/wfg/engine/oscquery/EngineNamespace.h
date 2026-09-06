@@ -47,11 +47,13 @@
 #include <wfg/engine/oscquery/OscQueryServer.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/cue/TriggerIndex.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/tree/Touches.h>
 
 #include <memory>
+#include <mutex>
 #include <string>
 
 namespace wfg::oscquery
@@ -93,10 +95,26 @@ namespace wfg::oscquery
             both is the only thing that keeps them honest. */
         static std::string commandNameFor (const std::string& address);
 
+        /*  WHAT FIRES A CUE FROM OUTSIDE, published here because this is where
+            the datagrams arrive.
+
+            Built on the tick thread whenever the document changes and swapped
+            whole, exactly as the tree snapshot is - and for the same reason:
+            `write` runs on a socket thread, which may not read a document. A
+            reader takes a copy of the pointer and is then reading something
+            nothing can change under it.
+
+            Empty until somebody publishes one, which is what every test that
+            does not care about triggers gets. */
+        void publishTriggers (std::shared_ptr<const cue::TriggerIndex> index);
+
     private:
         Engine& engine;
         tree::ParameterTree& parameters;
         tree::TouchTable& touches;
         const osc::UdpEndpoint& udp;
+
+        mutable std::mutex triggerMutex;
+        std::shared_ptr<const cue::TriggerIndex> triggers;
     };
 }

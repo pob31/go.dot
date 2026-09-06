@@ -1,0 +1,18 @@
+<Show>
+  <Lists>
+    <List id="TRG00001" name="Front of house">
+      <Cue id="TRG00002" name="House to half" number="1"/>
+      <Cue id="TRG00003" name="Doors" number="2"/>
+    </List>
+    <List id="TRG00010" name="Background">
+      <Cue id="TRG00011" name="Foyer chime" number="B1">
+        <Trigger id="TRG00012" address="/desk/chime" kind="osc"/>
+      </Cue>
+      <Cue id="TRG00013" name="Half hour call" number="B2">
+        <Trigger id="TRG00014" at="19:30:00" kind="clock"/>
+      </Cue>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="0"/>
+</Show>

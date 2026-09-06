@@ -84,6 +84,43 @@ namespace wfg::oscquery
             return;
         }
 
+        /*  A TRIGGER, and it is asked about BEFORE the argument-less return
+            below - because a foot switch that sends a bare address and nothing
+            else is the ordinary case, and that return would have swallowed it
+            silently as "a write of nothing".
+
+            OVER UDP ONLY. A WebSocket client is a client: it has the whole
+            command set and can send `cue.fire`, so a trigger fired from one
+            would be a second road to the same place with no advantage and one
+            more thing to reason about. §3.7's triggers are device-facing, and
+            the devices that send them send datagrams.
+
+            A MATCH ENDS IT. Anything that is not a trigger takes the road it
+            always took, which is the node write below - so an address that is
+            both a trigger and a node cannot exist, and the load refusal in
+            `validate()` is what makes sure of that rather than a rule here. */
+        if (origin.rfind ("udp:", 0) == 0)
+        {
+            std::shared_ptr<const cue::TriggerIndex> index;
+
+            {
+                const std::lock_guard<std::mutex> lock { triggerMutex };
+                index = triggers;
+            }
+
+            if (index != nullptr)
+            {
+                const auto fired = cue::matchOsc (*index, packet.address, packet.args);
+
+                for (const auto& id : fired)
+                    engine.submit (Event { origin, "trigger.fire",
+                                           { osc::Value::string (id) } });
+
+                if (! fired.empty())
+                    return;
+            }
+        }
+
         /*  Everything else is a value written to a node, by its address. The
             engine decides whether that address exists, whether the node is
             writable and whether the type fits; a rejection comes back as an `R`
@@ -102,6 +139,13 @@ namespace wfg::oscquery
         args.push_back (packet.args.front());
 
         engine.submit (Event { origin, "node.set", std::move (args) });
+    }
+
+    //==========================================================================
+    void EngineNamespace::publishTriggers (std::shared_ptr<const cue::TriggerIndex> index)
+    {
+        const std::lock_guard<std::mutex> lock { triggerMutex };
+        triggers = std::move (index);
     }
 
     //==========================================================================

@@ -1,0 +1,71 @@
+# wfg-log 1
+# fixture triggers — three cues fired by three things that are not a person,
+# hand-written and hand-checked.
+#
+# WHAT THIS FIXTURE IS FOR. §3.7 lets a cue be fired by a message on Go.dot's
+# own OSC port, by a MIDI event on an input it was told to open, or by a time of
+# day. None of those exists on a machine replaying a log: there is no socket, no
+# MIDI interface, and it is a different hour on a different day.
+#
+# Which is exactly why a trigger firing is a COMMAND. The matching happens
+# outside the model — on a socket thread, on a driver callback, in the serve
+# loop — and what reaches the engine is `trigger.fire <trigger>`, a record like
+# any other. So this file reproduces three inputs that are not present, on a
+# machine that has none of them.
+#
+# THE ORIGIN SAYS WHERE IT CAME FROM AND NOTHING ELSE. Nothing anywhere enforces
+# an origin, by design (RunCommands.h: a command only the inside of the process
+# could send would be one a replay could not send), so the trigger's identity
+# travels as the ARGUMENT — where it can be checked — and `udp:`, `midi:` and
+# `clock` are there for the person reading the log at two in the morning.
+#
+# AND THE STANDBY DOES NOT MOVE. Not once, anywhere below. §3.5 and §3.7 both
+# say it, and it is the reason a background list can be driven by something
+# other than a person without the person losing their place. The pointer is on
+# `TRG00002` when this log begins and it is on `TRG00002` when it ends; nothing
+# in the file says so, which is the point — no record moved it because no
+# command that moves it was sent.
+#
+# A LIGHTING DESK sends `/desk/chime`. The trigger's identifier is the argument;
+# the run identifier is the one the fire drew, recorded so a replay is handed it
+# rather than drawing one of its own.
+A 10 0 udp:10.0.0.5:9000 trigger.fire s:"TRG00012" s:"RN000001"
+#
+# A memo ends on the tick after it fires, as it does whoever fired it.
+A 11 1 engine run.ended s:"RN000001"
+#
+# THE SAME TRIGGER AGAIN, forty ticks later, because a desk that sends a message
+# once will send it again — and a second run is what §6.6 decision 3 asks for on
+# a memo: two instances, both live, rather than one ignored.
+A 50 2 udp:10.0.0.5:9000 trigger.fire s:"TRG00012" s:"RN000002"
+A 51 3 engine run.ended s:"RN000002"
+#
+# 19:30:00 ARRIVES. The engine did not notice this — nothing inside it reads a
+# wall clock, which is what makes a replay reproducible (Engine.h). The serve
+# loop read the clock, saw a second crossed, and submitted. On replay there is
+# no clock in the room and the record is all there is.
+A 90 4 clock trigger.fire s:"TRG00014" s:"RN000003"
+A 91 5 engine run.ended s:"RN000003"
+#
+# AND A MIDI EVENT, from an input this machine does not have. The record is
+# identical in shape to the two above it, which is the whole argument for
+# putting the matching outside the model: three quite different pieces of
+# hardware, one command, one thing to replay.
+#
+# The trigger it names is the OSC one, deliberately — `trigger.fire` fires the
+# cue a trigger sits on and asks nothing about how the news arrived, so a MIDI
+# origin firing an OSC trigger is legal and is what a `wfg replay` of a
+# hand-edited log would do. What it is not is a second road into the engine: the
+# matcher that produced this on the night matched a MIDI trigger.
+A 120 6 midi:BCF2000 trigger.fire s:"TRG00012" s:"RN000004"
+A 121 7 engine run.ended s:"RN000004"
+#
+# AND ONE THAT IS REFUSED. A trigger identifier that names nothing is not a
+# thing to guess at: a replay of a log whose show has since had a trigger
+# deleted must say so rather than firing whatever is nearest.
+R 150 8 udp:10.0.0.5:9000 unknown-id trigger.fire s:"NOSUCHID"
+#
+# And a cue's identifier is refused too, which is the same rule seen from the
+# other side: `trigger.fire` takes the TRIGGER, and firing a cue by name is
+# `cue.fire`. Two commands with two meanings rather than one that guesses.
+R 160 9 udp:10.0.0.5:9000 unknown-id trigger.fire s:"TRG00011"

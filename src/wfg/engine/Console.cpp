@@ -1360,6 +1360,10 @@ namespace
 
         wfg::oscquery::EngineNamespace nameSpace { engine, parameters, touches, udp };
 
+        /*  The triggers, rebuilt on the tick thread whenever the document moves
+            and held here so the clock read below has one too. */
+        std::shared_ptr<const wfg::cue::TriggerIndex> triggerIndex;
+
         /*  The loop closed. From here a mounted write reaches a socket; before
             it, the same write reached the tree and the log and stopped. */
         sender.setSocket (udp);
@@ -1653,9 +1657,39 @@ namespace
         /*  BEFORE the tick's commands are drained, so a cue that started or
             ended is applied on the tick it was observed rather than the one
             after. See TickThread::setBeforeTick. */
+        /*  THE WALL CLOCK, read here and nowhere inside the engine.
+
+            `Engine.h` states it as an invariant: "nothing in here reads a wall
+            clock, which is what makes a replay reproducible". A clock trigger
+            needs one, so it is read OUTSIDE - in the serve wiring, on the tick
+            thread, once per tick - and a crossing becomes a `trigger.fire`
+            record like any other input. A replay re-injects that record and
+            consults nothing: the same session reproduces on a machine where it
+            is a different time of day, in a different year.
+
+            "Which second it was last time" is machine state and lives here,
+            never in the document (§4.10). It starts at -1, which is what makes
+            the FIRST tick cross nothing: a show opened at 19:30:00 must not
+            fire the 19:30:00 cue because it happened to be started then. */
+        int previousSecond = -1;
+
         ticks.setBeforeTick ([&] (std::int64_t tickIndex)
                              {
                                  runner.beforeTick (engine, tickIndex);
+
+                                 const auto now = juce::Time::getCurrentTime();
+                                 const auto second = now.getHours() * 3600
+                                                       + now.getMinutes() * 60
+                                                       + now.getSeconds();
+
+                                 if (previousSecond >= 0 && second != previousSecond)
+                                     if (const auto index = triggerIndex)
+                                         for (const auto& id : wfg::cue::clockCrossings (
+                                                                 *index, previousSecond, second))
+                                             engine.submit ({ "clock", "trigger.fire",
+                                                              { wfg::osc::Value::string (id) } });
+
+                                 previousSecond = second;
                              });
 
         ticks.setAfterTick ([&] (const wfg::Engine::TickResult& outcome)
@@ -1748,6 +1782,21 @@ namespace
                                     be measurable. */
                                 if (outcome.applied > 0)
                                     parameters.markStale();
+
+                                /*  AND THE TRIGGERS, republished with the tree
+                                    and for the same reason: the matching
+                                    happens on whichever thread the input
+                                    arrived on - a socket thread for a datagram,
+                                    this one for the clock - and none of them
+                                    may read a document. So the tick thread
+                                    reads it once, here, and publishes something
+                                    immutable that anybody can hold. */
+                                if (outcome.applied > 0 || triggerIndex == nullptr)
+                                {
+                                    triggerIndex =
+                                        wfg::cue::TriggerIndex::build (document);
+                                    nameSpace.publishTriggers (triggerIndex);
+                                }
 
                                 auto current = parameters.publish (outcome.tick, state);
 

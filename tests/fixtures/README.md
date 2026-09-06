@@ -57,6 +57,26 @@ reloads and reparses the megabyte. That is the price of testing against somethin
 it is recorded here so that the next person to wonder where the three seconds went does not
 have to bisect for it.
 
+## `bundles/triggers/` and `logs/triggers.wfglog`
+
+Three cues fired by three things that are not a person: a lighting desk's datagram, a MIDI
+note, and a time of day. None of those exists on a machine replaying a log — there is no
+socket, no MIDI interface, and it is a different hour on a different day — which is exactly
+why a trigger firing is a **command**. The matching happens outside the model, on whichever
+thread the input arrived on, and what reaches the engine is `trigger.fire <trigger>`.
+
+The origin says where it came from and nothing else. Nothing anywhere enforces an origin, by
+design, so the trigger's identity travels as the argument where it can be checked; `udp:`,
+`midi:` and `clock` are there for the person reading the log at two in the morning.
+
+**And the standby does not move**, not once, anywhere in the file — which is the property the
+whole feature rests on. Nothing in the log says so, and that is the point: no record moved it,
+because no command that moves it was sent.
+
+Two refusals close it: a trigger identifier that names nothing, and a cue's identifier, which
+is the same rule seen from the other side — `trigger.fire` takes the trigger, and firing a cue
+by name is `cue.fire`.
+
 ## `bundles/rounds/` and `logs/rounds.wfglog`
 
 A shuffled ambience bed, pruned during the show and left at a boundary. The engine draws each
