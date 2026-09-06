@@ -97,6 +97,27 @@ costs one more round when the press lands in the same tick as the boundary.
 
 Captured from a live session and rewritten by hand, then replayed to confirm the rewrite.
 
+## `bundles/ambience/` and `logs/ambience.wfglog`
+
+A bed that loops for ever, advanced out of, and let run to the end of its playlist. §3.24 gives
+a media cue a list of ranges of one file, and **the mechanism that plays them is entirely
+outside the model**: a clip per range armed looping, and Go.dot placing a stop-and-play pair at
+every boundary from the sample counter. None of that exists in a replay — no graph, no counter,
+no sound — so the only thing that can carry which range a cue was in is a record.
+
+Which is the design in one line, and the fixture is what says it holds: entering a range is an
+**event** and is logged; which pass of it is playing is a **readout** and is not. Twenty passes
+of a twelve-second bed produce no records at all, because the clip wraps by itself — M12
+measured that wrap as the cleanest join this engine has — and a bed that logged its passes
+would write a thousand records for something nobody decided.
+
+The advance is the interesting one. It is asked for partway through the twenty-first pass and
+the range ends where it was always going to end; the gap between the asking and the transition
+is the rest of that pass, and it is what `advance` promises over a stop.
+
+The file is a day long and nobody has to have it: with no audio side there is nothing to arm,
+so `night.wav` is never looked for.
+
 ## `bundles/chain/` and `logs/auto-chain.wfglog`
 
 One press, and a whole scene runs itself: five cues, a nested timeline group and a footer. An

@@ -957,6 +957,9 @@ namespace wfg::tree
                 else if (name == "round")      text = joinIds (run.round);
                 else if (name == "pruned")     text = joinIds (run.pruned);
                 else if (name == "seed")       text = std::to_string (run.seed);
+                else if (name == "range")      text = std::to_string (run.range);
+                else if (name == "rangeIteration")
+                                               text = std::to_string (run.rangeIteration);
                 else                          text = std::string (row->defaultText);
 
                 runtime.push_back (makeLeaf (base + "/" + name, *row, text));

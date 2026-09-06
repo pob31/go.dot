@@ -1,0 +1,65 @@
+# wfg-log 1
+# fixture ambience — a bed that loops for ever, advanced out of, and let run to
+# the end of its playlist. Hand-written and hand-checked.
+#
+# WHAT THIS FIXTURE IS FOR. §3.24 gives a media cue a list of ranges of one
+# file, and the mechanism that plays them is entirely OUTSIDE the model: a clip
+# per range armed looping, and Go.dot placing a stop-and-play pair at every
+# boundary from the sample counter. None of that exists in a replay — there is
+# no graph, no counter and no sound — so the only way a replay can know which
+# range a cue was in at any tick is if the transitions were written down.
+#
+# They are, and that is the whole design in one line: entering a range is an
+# EVENT and is logged; which pass of it is playing is a READOUT and is not. A
+# bed looping for four hours writes three records; a bed that logged its passes
+# would write a thousand for something nobody decided.
+#
+# The file is a day long and nobody has to have it: with no audio side there is
+# nothing to arm, so `night.wav` is never looked for. What the replay checks is
+# that the decisions reproduce.
+#
+# The show is one media cue with three ranges — a bed that loops for ever, a
+# turn, an outro — and a stop cue whose verb is `advance`, which is the way out
+# of a range that never ends.
+#
+# GO on the bed. The pointer moves to the stop cue whatever happens next (§3.5).
+A 0 0 udp:10.0.0.5:9000 go s:"AM000001"
+#
+# The sound started, two ticks later, which is the launch latency at this block
+# size and rate; and the launch entered range nought. Two records rather than
+# one, because they are two different facts: a cue with no ranges produces the
+# first and never the second.
+A 2 1 engine run.started s:"AM000001"
+A 2 2 engine run.range s:"AM000001" i:0
+#
+# Nothing at all for four minutes. The bed is looping its twelve seconds, twenty
+# times over, and the clip does that by itself — M12 measured the wrap as the
+# cleanest join this engine has, so Go.dot places nothing inside a range. Every
+# one of those twenty wraps is invisible here, which is the point.
+#
+# The operator asks for the advance, by pressing GO on the stop cue standby is
+# parked on. The pointer moves to Dawn.
+A 12000 3 udp:10.0.0.5:9000 go s:"AM000002"
+#
+# The stop cue's own run is over on the next tick, as a memo's is: asking is all
+# it does, and the asking has been done.
+A 12001 4 engine run.ended s:"AM000002"
+#
+# AND THE BED LEFT AT A BOUNDARY, not when it was asked. The advance arrived
+# partway through the twenty-first pass; the range ends where it was always
+# going to end, and only then does the turn begin. The gap between the asking
+# and this record is the rest of that pass.
+A 12034 5 engine run.range s:"AM000001" i:1
+#
+# The turn is six seconds and plays once, so the outro follows it three hundred
+# ticks later. Nobody asked for this one: it is the playlist doing what the
+# document says.
+A 12334 6 engine run.range s:"AM000001" i:2
+#
+# The outro is six seconds and plays once, and there is no fourth range — so
+# the stop at the end of it is the cue finishing rather than a boundary.
+A 12634 7 engine run.ended s:"AM000001"
+#
+# GO on Dawn, which is a memo, so it is done on the tick after it fires.
+A 13000 8 udp:10.0.0.5:9000 go s:"AM000003"
+A 13001 9 engine run.ended s:"AM000003"

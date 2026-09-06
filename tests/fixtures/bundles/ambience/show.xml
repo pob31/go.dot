@@ -1,0 +1,18 @@
+<Show>
+  <Lists>
+    <List id="AMB00001" name="Ambience">
+      <Media id="AMB00002" file="night.wav" name="Night bed" number="1">
+        <Range id="AMB00010" in="0" loops="0" name="The bed" out="12"/>
+        <Range id="AMB00011" in="12" name="The turn" out="18"/>
+        <Range id="AMB00012" in="18" name="The outro" out="24"/>
+        <Route id="AMB00003" bus="AMB00020" gains="1 0 0 1"/>
+      </Media>
+      <Stop id="AMB00004" name="Move it on" number="2" target="AMB00002" verb="advance"/>
+      <Cue id="AMB00005" name="Dawn" number="3"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="AMB00020" name="Main L/R" width="2"/>
+  </Audio>
+</Show>

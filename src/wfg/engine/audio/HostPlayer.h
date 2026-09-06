@@ -77,6 +77,7 @@ namespace wfg::audio
         void requestArm (const cue::ArmRequest&) override;
 
         int slotCount() const override;
+        int sampleRate() const override;
         bool launchAtSample (int track, int slot, std::int64_t sample) override;
         bool stop (int track) override;
         bool stopAtSample (int track, int slot, std::int64_t sample) override;

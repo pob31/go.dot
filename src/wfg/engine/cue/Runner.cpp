@@ -140,6 +140,27 @@ namespace wfg::cue
         return osc::parseDouble (textOf (cue, name)).value_or (0.0);
     }
 
+    namespace
+    {
+        /*  How many samples one pass of a range is.
+
+            ROUNDED TO NEAREST rather than truncated, because the boundary is
+            the sum of these and a truncation would accumulate: eight passes of
+            a range whose length lands half a sample short would end four
+            samples early, which over an eight-hour bed is a drift nobody could
+            explain from the document. */
+        std::int64_t samplesForRange (const RangeSpec& range, std::int64_t rate) noexcept
+        {
+            const auto seconds = range.out - range.in;
+
+            if (! (seconds > 0.0) || rate <= 0)
+                return 0;
+
+            return static_cast<std::int64_t> (
+                std::llround (seconds * static_cast<double> (rate)));
+        }
+    }
+
     std::vector<RangeSpec> Runner::rangesOf (const juce::ValueTree& cue) const
     {
         std::vector<RangeSpec> out;
@@ -830,6 +851,43 @@ namespace wfg::cue
     void Runner::fireStop (const juce::ValueTree& cue, const std::string& runId)
     {
         const auto verb = textOf (cue, "verb");
+
+        /*  ADVANCE: THE THIRD GRACEFUL VERB, and the one that belongs to a
+            ranged media cue rather than to a group.
+
+            §3.24's range list may loop for ever, and `advance` is how it is got
+            out of: the range playing now finishes the pass it is on and then
+            leaves, into the next range or into silence. Which is the same shape
+            as `afterMember` on a group - reach a boundary the scene was going
+            to reach anyway - aimed at a different kind of boundary.
+
+            IT IS NOT A STOP. A cue with three ranges advanced out of its first
+            plays its second, and the run goes on. The stop cue's own run is
+            over either way, because asking is all it does. */
+        if (verb == "advance")
+        {
+            const auto* target = runs.liveRunOf (textOf (cue, "target"));
+
+            if (target != nullptr)
+                if (auto* run = runs.find (target->id))
+                {
+                    if (run->range >= 0)
+                    {
+                        run->advanceRequested = true;
+                        finishing.push_back (runId);
+                        return;
+                    }
+
+                    /*  Nothing to advance out of. A hard stop, for the reason
+                        `afterMember` is one against a cue that is not a group:
+                        there is no boundary to wait for, and a request quietly
+                        ignored is worse than one honoured plainly. */
+                    run->state = runState::stopping;
+                }
+
+            finishing.push_back (runId);
+            return;
+        }
 
         /*  TWO OF THE VERBS ASK FOR A BOUNDARY RATHER THAN FOR SILENCE.
 
@@ -2259,6 +2317,7 @@ namespace wfg::cue
             return;
 
         launchIfDue (engine, tick);
+        advanceRanges (engine);
         enforceStops();
         observeEdges (engine);
     }
@@ -2320,6 +2379,29 @@ namespace wfg::cue
 
                 engine.submit (origin::engine, "run.started", one (run->id));
 
+                /*  AND WHICH RANGE IT IS IN, when it has any. A cue with no
+                    ranges plays its file out of slot nought and never enters
+                    one, which is what `range = -1` says and is every cue Phase
+                    2 knew about.
+
+                    The bookkeeping is set here and the published value by the
+                    record, which is the same split `run.started` uses: a replay
+                    is told which range and cannot be told which SAMPLE, having
+                    no counter to have counted it. */
+                if (const auto ranges = rangesOf (document.findById (run->cue));
+                    ! ranges.empty())
+                {
+                    run->rangeStartedAtSample = target;
+                    run->passesWanted = ranges.front().loops;
+                    run->passSamples = samplesForRange (ranges.front(),
+                                                        audio->sampleRate());
+                    run->boundaryPlacedAt = -1;
+                    run->rangesFinished = false;
+
+                    engine.submit (origin::engine, "run.range",
+                                   { osc::Value::string (run->id), osc::Value::int32 (0) });
+                }
+
                 /*  AND HOW LATE IT WAS, which until now nothing measured.
 
                     `run.late` has been registered, documented and tested since
@@ -2362,6 +2444,172 @@ namespace wfg::cue
                                          osc::Value::int32 (static_cast<std::int32_t> (blocks)) });
                 }
             }
+        }
+    }
+
+    void Runner::advanceRanges (Engine& engine)
+    {
+        /*  WHAT A LOOPING RANGE COSTS PER PASS: nothing. M12 measured three
+            ways of carrying a loop from one pass to the next and the clip's own
+            wrap won every one of ten configurations, by between five and
+            twenty-three thousand times in damage energy - so Go.dot places
+            nothing INSIDE a range and only at the boundary OUT of it.
+
+            Which makes this loop's job small: count the pass for the strip to
+            read, and place one stop-and-play pair when the range is ending. */
+        const auto rate = static_cast<std::int64_t> (audio->sampleRate());
+        const auto ticksAhead = latencyTicks();
+
+        if (rate <= 0 || ticksAhead <= 0 || samplesPerTick <= 0)
+            return;
+
+        const auto now = audio->samplesElapsed();
+        const auto lead = static_cast<std::int64_t> (ticksAhead) * samplesPerTick;
+
+        for (const auto& snapshot : runs.all())
+        {
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr || run->range < 0 || run->track < 0 || run->isFinished())
+                continue;
+
+            /*  Nothing to count until the launch has been placed and the first
+                range has actually been entered. */
+            if (run->rangeStartedAtSample <= 0 || run->passSamples <= 0)
+                continue;
+
+            /*  THE PASS, from the sample counter. Not a counter the scheduler
+                increments, because a counter would be right during a show and
+                nought through every replay - and because at 50 Hz a pass
+                shorter than 20 ms would be missed entirely by anything that
+                counted edges. */
+            const auto elapsed = std::max<std::int64_t> (0, now - run->rangeStartedAtSample);
+            run->rangeIteration = static_cast<int> (elapsed / run->passSamples) + 1;
+
+            if (run->rangesFinished)
+                continue;
+
+            /*  RE-READ AT EVERY BOUNDARY, which is decision L: a `loops` an
+                operator changed while the range played is honoured from here,
+                and a range deleted while it played is not entered again. What
+                is NOT re-read is the pass length of the range playing now - it
+                is what the clip was armed with, and changing it would need the
+                message thread to re-arm the slot, which is PR 3.10's. */
+            const auto cue = document.findById (run->cue);
+            const auto ranges = rangesOf (cue);
+            const auto count = static_cast<int> (ranges.size());
+
+            /*  The cue lost every range while it played. There is nothing left
+                to advance into, so the range playing now is the last one. */
+            const auto stillThere = run->range < count;
+
+            const auto wanted = stillThere
+                                  ? ranges[static_cast<std::size_t> (run->range)].loops
+                                  : run->passesWanted;
+
+            /*  WHERE THIS RANGE ENDS.
+
+                An advance ends it at the next pass boundary that is still far
+                enough ahead to be placed; a loop count ends it after that many
+                passes; and nought passes with no advance never ends at all,
+                which is what an ambience bed is. */
+            std::int64_t endsAt = 0;
+
+            if (run->advanceRequested)
+            {
+                /*  THE END OF THE PASS IT IS ON, measured from NOW and not from
+                    the placement horizon. Adding the horizon first is the shape
+                    this had when it was written and it never fired: the answer
+                    was always more than a horizon away by construction, so the
+                    check below deferred it for ever and an advance did nothing
+                    at all.
+
+                    The horizon belongs to the PLACEMENT and not to the choice
+                    of instant. If the pass ends too soon to place cleanly, that
+                    is what `run.late` is for. */
+                const auto passesGone = (now - run->rangeStartedAtSample) / run->passSamples;
+
+                endsAt = run->rangeStartedAtSample + (passesGone + 1) * run->passSamples;
+            }
+            else if (wanted > 0)
+            {
+                endsAt = run->rangeStartedAtSample
+                           + static_cast<std::int64_t> (wanted) * run->passSamples;
+            }
+            else
+            {
+                continue;                       // loops for ever, and nobody has asked it not to
+            }
+
+            /*  NOT YET. The boundary is placed when it comes inside the
+                placement horizon and not before, so that an edit made while the
+                range plays is still read in time to change it. */
+            if (endsAt - now > lead)
+                continue;
+
+            /*  ALREADY PLACED. LaunchHandle keeps ONE queued state, so a second
+                stop queued at the same instant would replace the play that was
+                queued with the first - the outgoing range would end and the
+                incoming one would never start. */
+            if (run->boundaryPlacedAt == endsAt)
+                continue;
+
+            /*  TOO LATE TO PLACE CLEANLY, which is what `run.late` is for. The
+                tick thread overslept, or an edit moved the boundary closer than
+                the graph can honour; the transition still happens, at the first
+                instant that can be honoured, and the log says by how much. */
+            const auto blockSize = static_cast<std::int64_t> (audio->blockSize());
+            auto placeAt = endsAt;
+
+            if (placeAt - now < 2 * blockSize)
+            {
+                placeAt = now + 2 * blockSize;
+
+                if (blockSize > 0)
+                {
+                    const auto blocks = (placeAt - endsAt) / blockSize;
+
+                    if (blocks > 0)
+                        engine.submit (origin::engine, "run.late",
+                                       { osc::Value::string (run->id),
+                                         osc::Value::int32 (static_cast<std::int32_t> (blocks)) });
+                }
+            }
+
+            const auto next = run->range + 1;
+            const auto hasNext = next < count;
+
+            /*  THE PAIR, both at the same instant. M12 priced it: the outgoing
+                range is taken down with SlotControlNode's own 40-sample decay,
+                which is 25 to 33 samples of damage and does not grow with the
+                block size, and the incoming range starts on exactly its sample. */
+            audio->stopAtSample (run->track, run->range, placeAt);
+
+            if (hasNext)
+                audio->launchAtSample (run->track, next, placeAt);
+
+            run->boundaryPlacedAt = placeAt;
+            run->advanceRequested = false;
+
+            if (! hasNext)
+            {
+                /*  THE PLAYLIST IS OVER, and saying so here is what stops
+                    `observeEdges` ending the run at every boundary before this
+                    one - see `rangesFinished`. */
+                run->rangesFinished = true;
+                continue;
+            }
+
+            /*  The next range's clock starts at the boundary, so its first pass
+                is measured from where it will actually begin rather than from
+                the tick that decided it. */
+            run->rangeStartedAtSample = placeAt;
+            run->passesWanted = ranges[static_cast<std::size_t> (next)].loops;
+            run->passSamples = samplesForRange (ranges[static_cast<std::size_t> (next)], rate);
+
+            engine.submit (origin::engine, "run.range",
+                           { osc::Value::string (run->id),
+                             osc::Value::int32 (static_cast<std::int32_t> (next)) });
         }
     }
 
@@ -2438,6 +2686,21 @@ namespace wfg::cue
                 as how a stop is noticed. */
             if (run->sawPlaying && ! playing)
             {
+                /*  A BOUNDARY IS NOT AN ENDING, and without this every ranged
+                    cue would end at its first one.
+
+                    At a boundary the outgoing slot stops in the same block the
+                    incoming one starts - but this poll is 20 ms wide and a
+                    block is a fraction of that, so a poll can fall between them
+                    and see neither playing. The run would report itself done
+                    with two ranges still to play, and the sound would go on
+                    without it.
+
+                    `rangesFinished` is set when the LAST range's end has been
+                    placed, so the silence after that one is the cue finishing. */
+                if (run->range >= 0 && ! run->rangesFinished)
+                    continue;
+
                 engine.submit (origin::engine, "run.ended", one (run->id));
                 run->sawPlaying = false;
                 continue;

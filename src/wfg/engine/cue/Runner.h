@@ -248,6 +248,16 @@ namespace wfg::cue
         /** Samples per audio block, for the launch-instant arithmetic. */
         virtual int blockSize() const = 0;
 
+        /*  Samples a second, which is what turns a range's seconds into the
+            boundary arithmetic. Zero with no graph.
+
+            IT IS THE AUDIO SIDE'S NUMBER AND NOT THE SCHEDULE'S. `samplesPerTick`
+            times the tick rate would give the same answer while the two agree,
+            and would give a wrong one the moment a show ran at a tick rate the
+            cue layer had not been told about - which is the kind of thing that
+            is discovered by a range being a hundredth too long. */
+        virtual int sampleRate() const = 0;
+
         /** How many channels a track carries, which is a cue's input width. */
         virtual int channelsPerTrack() const = 0;
     };
@@ -443,6 +453,16 @@ namespace wfg::cue
             the document would be the tick thread handing the message thread a
             tree it may edit meanwhile. */
         std::vector<RangeSpec> rangesOf (const juce::ValueTree& cue) const;
+
+        /*  Counts the pass a ranged run is on and places the boundary out of
+            it, once, when it comes into the placement horizon.
+
+            Tick thread, below the null-player gate, because everything it does
+            is arithmetic on the sample counter. A replay reaches the same
+            answers by re-injecting the `run.range` records this submits - and
+            reaches no answer at all about which PASS, which is right: a pass is
+            a readout and §3.15 says readouts do not replay. */
+        void advanceRanges (Engine& engine);
 
         /*  The kind's own fire path, once every wait is out of the way: a media
             cue asks for a voice, a fade or a stop takes over a level, a network

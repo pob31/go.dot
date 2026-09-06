@@ -168,6 +168,74 @@ namespace wfg::cue
         std::string error;
 
         //======================================================================
+        /*  RANGES (§3.24). A media cue may carry a list of regions of its file,
+            each armed into a launcher slot of its own, and what it plays is the
+            list rather than the whole recording.
+
+            The two published values are of DIFFERENT KINDS, and the difference
+            is §3.15's: entering a range is a transition, so it is an event and
+            a logged command; which pass of it is playing is a continuous
+            readout, so it is computed and never logged. A four-hour bed would
+            otherwise write a record every few seconds for something nobody
+            decided. */
+
+        /*  Which range is playing, from nought - or -1 for a run that is not in
+            one, which is every kind but media and a media cue with no ranges.
+
+            Written by `run.range`'s handler, which is what makes it reproduce:
+            the scheduler submits that record when it PLACES the boundary, so a
+            replay is told which range every run was in at every tick without
+            any audio to look at. */
+        int range = -1;
+
+        /*  Which pass of that range, from one; nought when there is no range. A
+            READOUT, like `position`: computed from the sample counter on the
+            tick thread and never logged. */
+        int rangeIteration = 0;
+
+        /*  The sample the current range's FIRST pass began at - the launch for
+            range nought, and the placed boundary for every range after it.
+
+            Scheduler bookkeeping rather than model state, like
+            `launchedAtSample`: the pass arithmetic is a division from here, and
+            a replay never does it because it has no sample counter. */
+        std::int64_t rangeStartedAtSample = 0;
+
+        /*  How many passes the current range was asked for when it was entered,
+            and how long one pass is in samples. Both RE-READ at every boundary
+            rather than copied at launch, which is decision L's
+            edit-at-next-iteration (author, 2026-09-06): a `loops` changed while
+            the range plays is honoured from the next boundary. */
+        int passesWanted = 1;
+        std::int64_t passSamples = 0;
+
+        /*  The boundary this run has already placed, or -1. Placing the same
+            instant twice would queue a second stop onto a handle that already
+            has one, and LaunchHandle keeps ONE queued state - the second would
+            replace the first, which for a stop-and-play pair means the play
+            gets thrown away. */
+        std::int64_t boundaryPlacedAt = -1;
+
+        /*  An `advance` was asked for: the range playing now finishes the pass
+            it is on and then leaves, whatever its loop count said. §3.24's verb,
+            and the only way out of a range that loops for ever.
+
+            Cleared when the boundary is placed, because a second advance during
+            the same pass is the same instruction and not two of them. */
+        bool advanceRequested = false;
+
+        /*  The last range's end has been placed, so the silence that follows is
+            the cue finishing rather than a gap between two ranges.
+
+            WITHOUT THIS A RANGED CUE ENDS AT ITS FIRST BOUNDARY. `observeEdges`
+            ends a run on the edge from sounding to not, and at a boundary the
+            outgoing slot stops in the same block the incoming one starts - but
+            the tick that polls them is 20 ms wide and a block is a fraction of
+            that, so a poll can fall between and see neither playing. The run
+            would report itself done with two ranges still to play. */
+        bool rangesFinished = false;
+
+        //======================================================================
         /*  THE TREE. A group run is the live instance of a group, and its
             members are runs of their own with it as their parent.
 

@@ -701,12 +701,13 @@
       </optional>
       <optional>
         <attribute name="verb">
-          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for.</a:documentation>
+          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary.</a:documentation>
           <choice>
             <value>hard</value>
             <value>fade</value>
             <value>afterMember</value>
             <value>afterIteration</value>
+            <value>advance</value>
           </choice>
         </attribute>
       </optional>

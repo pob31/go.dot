@@ -131,6 +131,7 @@ namespace wfg::audio
 
     //==============================================================================
     int HostPlayer::slotCount() const  { return audioHost.slotCount(); }
+    int HostPlayer::sampleRate() const { return audioHost.settings().sampleRate; }
 
     bool HostPlayer::launchAtSample (int track, int slot, std::int64_t sample)
     {

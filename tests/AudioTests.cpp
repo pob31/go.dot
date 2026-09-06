@@ -3302,6 +3302,40 @@ namespace
 
         return -1;
     }
+
+    /*  The first frame at or after `from` where the render settles into a
+        segment and STAYS there.
+
+        STABILITY IS NOT FUSSINESS. A boundary is a few dozen samples of one
+        range being taken down while another starts, and somewhere in that decay
+        the outgoing constant passes through the incoming one: 0.5 on its way
+        down from 0.75 reads as segment 1 for a sample or two. A sweep that
+        believed the first matching sample reported five boundaries where there
+        are two, and found the second range a second before it started.
+
+        A tenth of the shortest range is stable enough to be a range and far too
+        long to be a transient. */
+    constexpr int stableFor = 4800;
+
+    int settlesIntoSegmentAt (const RecordingSink& sink, int from, int segment)
+    {
+        int run = 0;
+
+        for (int n = std::max (0, from); n < sink.written; ++n)
+        {
+            if (segmentOf (sink.buffer.getSample (0, n)) == segment)
+            {
+                if (++run >= stableFor)
+                    return n - run + 1;
+            }
+            else
+            {
+                run = 0;
+            }
+        }
+
+        return -1;
+    }
 }
 
 TEST_CASE ("ranges: every slot of every track holds a resident clip")
@@ -3521,4 +3555,390 @@ TEST_CASE ("ranges: arming a cue with none of them puts the whole file back in t
     CHECK (rig.host.trackSourceLengthSeconds (0, 0) > 2.5);   // the whole file
     CHECK (rig.host.trackSourceLengthSeconds (0, 1) < 1.5);   // back to the placeholder
     CHECK (rig.host.trackSourceLengthSeconds (0, 2) < 1.5);
+}
+
+//==============================================================================
+/*  M13 - A RANGE PLAYLIST, PLAYED IN ORDER, WITH EVERY BOUNDARY WHERE IT SAID.
+
+    §3.24's promise, checked from the render and through the whole stack: a show
+    document with three ranges, a GO, and a WAV that says which second of the
+    file was sounding at every instant. The scheduler places the boundaries, the
+    Player carries them to two slots, and Tracktion does the rest.
+
+    THE MEASUREMENT IS ARITHMETIC, not analysis. The file's three seconds are
+    three different constants, so the value at any sample IS the identity of the
+    range playing - 0.25 is the first, 0.5 the second, 0.75 the third. Where the
+    render changes from one to the next IS the boundary, to the sample, with
+    nothing to threshold and nothing to correlate.
+
+    WHAT IS ASSERTED, and each is a different way for this to be wrong:
+
+      - the ranges play IN ORDER and each one only once, so a boundary that
+        fired twice or a slot armed with the wrong region is visible;
+      - every boundary lands within a block plus forty samples of where the
+        arithmetic says, which is the plan's bound and is M12's measured cost of
+        a placed boundary (Tracktion's own stop decay) plus the block it can be
+        quantised to;
+      - the run reports which range it is in while it plays, because a strip
+        that cannot say `2/3` is a strip nobody can cue from;
+      - and it ends when the last range does, rather than at the first boundary,
+        which is the failure `rangesFinished` exists to prevent.
+*/
+TEST_CASE ("M13: three ranges play in order, and every boundary lands where the arithmetic says")
+{
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 3;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSegmentedTone (rig.storage.folder, rate);
+    REQUIRE (tone.existsAsFile());
+
+    //  --- a show: one media cue with three ranges, one pass each -------------
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (11);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    engine.log().openInMemory ({});
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    const auto listId = document.createList ("Sound").id;
+    const auto cueId = document.createCue (listId, 0, "media", "Bed").id;
+
+    document.setAttribute ("/godot/cue/" + cueId + "/file", tone.getFileName().toStdString());
+
+    auto audioNode = document.root().getChildWithName ("Audio");
+    audioNode.setProperty (juce::Identifier ("tracks"), 1, nullptr);
+
+    juce::ValueTree bus { "Bus" };
+    bus.setProperty (juce::Identifier ("id"), "J3MT5XYA", nullptr);
+    bus.setProperty (juce::Identifier ("name"), "Main", nullptr);
+    bus.setProperty (juce::Identifier ("firstChannel"), 0, nullptr);
+    bus.setProperty (juce::Identifier ("width"), 1, nullptr);
+    audioNode.appendChild (bus, nullptr);
+
+    auto cue = document.findById (cueId);
+    juce::ValueTree route { "Route" };
+    route.setProperty (juce::Identifier ("id"), "Z04EH7PH", nullptr);
+    route.setProperty (juce::Identifier ("bus"), "J3MT5XYA", nullptr);
+    route.setProperty (juce::Identifier ("gains"), "1", nullptr);
+    cue.appendChild (route, nullptr);
+
+    for (int segment = 0; segment < 3; ++segment)
+    {
+        const auto edit = document.createRange (cueId, segment, segment + 1);
+        REQUIRE (edit.ok);
+    }
+
+    document.setAttribute (cue::standbyAddressOf (listId), cueId);
+
+    //  --- the audio side -----------------------------------------------------
+    audio::HostPlayer player { rig.host, engine };
+    runner.setPlayer (&player);
+    runner.setSamplesPerTick (rate / 50);
+    runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
+
+    RecordingSink sink;
+    sink.prepare (settings.outputChannels, rate * 5);
+    rig.host.setBlockSink (&sink);
+
+    std::int64_t tick = 0;
+
+    const auto oneTick = [&]
+    {
+        runner.beforeTick (engine, tick);
+        engine.processTick (tick++);
+        player.serviceArms();
+
+        for (int i = 0; i < (rate / 50) / blockSize; ++i)
+            rig.host.processBlock();
+    };
+
+    for (int i = 0; i < 4; ++i)
+        oneTick();
+
+    REQUIRE (engine.submit (origin::cli, "go", {}));
+
+    /*  Pumped until it is sounding rather than for a count, because between the
+        GO and the first sample there is an arm posted to the message thread, a
+        graph rebuild and a disk read - all wall-clock, and how many ticks they
+        add up to is the machine's answer rather than this file's. */
+    for (int i = 0; i < 400 && ! rig.host.isTrackPlaying (0); ++i)
+        oneTick();
+
+    REQUIRE (rig.host.isTrackPlaying (0));
+
+    const auto runId = runs.all().empty() ? std::string {} : runs.all().front().id;
+    REQUIRE_FALSE (runId.empty());
+
+    /*  The run says which range it is in from the moment the launch is placed,
+        which is what a strip reads. */
+    {
+        const auto* run = runs.find (runId);
+        REQUIRE (run != nullptr);
+        CHECK (run->range == 0);
+    }
+
+    /*  Three seconds of ranges plus a second of slack, so the whole playlist and
+        the silence after it are inside the recording. */
+    std::vector<int> rangeSeen;
+
+    for (int i = 0; i < 250; ++i)
+    {
+        oneTick();
+
+        if (const auto* run = runs.find (runId))
+            if (rangeSeen.empty() || rangeSeen.back() != run->range)
+                rangeSeen.push_back (run->range);
+    }
+
+    rig.host.setBlockSink (nullptr);
+
+    /*  --- what the model said -------------------------------------------- */
+
+    /*  IN ORDER AND EACH ONE ONCE. A boundary that fired twice, or a slot armed
+        with the wrong region, shows up here as a repeat or a skip. */
+    REQUIRE (rangeSeen.size() >= 3);
+    CHECK (rangeSeen[0] == 0);
+    CHECK (rangeSeen[1] == 1);
+    CHECK (rangeSeen[2] == 2);
+
+    {
+        const auto* run = runs.find (runId);
+        REQUIRE (run != nullptr);
+
+        INFO ("run state " << run->state << ", range " << run->range
+               << ", pass " << run->rangeIteration);
+
+        /*  AND IT ENDED WHEN THE LAST RANGE DID, rather than at the first
+            boundary - which is what would happen if a poll falling between the
+            outgoing stop and the incoming play were read as the cue finishing. */
+        CHECK (run->isFinished());
+    }
+
+    /*  --- what the render said ------------------------------------------- */
+    const auto first = sink.firstSoundAt (0);
+    REQUIRE (first >= 0);
+
+    /*  Where the render settles into each segment in turn. Each search starts
+        where the last one settled, so a range found out of order is a search
+        that fails rather than one that wraps round and finds it anyway. */
+    const auto firstRange = settlesIntoSegmentAt (sink, first, 0);
+    REQUIRE (firstRange >= 0);
+
+    const auto secondRange = settlesIntoSegmentAt (sink, firstRange + stableFor, 1);
+    REQUIRE (secondRange > firstRange);
+
+    const auto thirdRange = settlesIntoSegmentAt (sink, secondRange + stableFor, 2);
+    REQUIRE (thirdRange > secondRange);
+
+    /*  AND NOTHING AFTER IT, which is what says each range played once. A
+        fourth settling would be a boundary that fired twice or a slot armed
+        with a region that is not its own. */
+    CHECK (settlesIntoSegmentAt (sink, thirdRange + stableFor, 0) < 0);
+    CHECK (settlesIntoSegmentAt (sink, thirdRange + stableFor, 1) < 0);
+
+    /*  EACH BOUNDARY LANDS WHERE THE ARITHMETIC SAYS. The bound is the plan's:
+        a block, because a placed instant can be quantised to one, plus forty
+        samples, which is Tracktion's own stop decay and which M12 measured as
+        the whole cost of a placed boundary.
+
+        The settling point is where the new range is UNAMBIGUOUS, which is at
+        or after the boundary rather than before it, so the comparison is
+        against the boundary plus at most the damage M12 priced. */
+    const auto allowed = blockSize + 40;
+
+    for (const auto boundary : { std::pair<int, int> { secondRange, 1 },
+                                 std::pair<int, int> { thirdRange, 2 } })
+    {
+        const auto expected = first + boundary.second * rate;
+        const auto error = boundary.first - expected;
+
+        INFO ("the boundary into range " << boundary.second << " landed " << error
+               << " samples from where it was placed");
+        CHECK (std::abs (error) <= allowed);
+    }
+}
+
+TEST_CASE ("M13: an advance leaves a range that loops for ever, at the end of the pass it is on")
+{
+    /*  THE DONE-WHEN CLAUSE'S OTHER HALF. §3.24 gives a range a loop count and
+        nought means for ever, which is what an ambience bed is; `advance` is the
+        only way out of one, and what it promises is that the way out is at a
+        boundary rather than wherever the operator's hand came down.
+
+        So: a first range that loops for ever, an advance sent partway through
+        its third pass, and a render that goes on playing the first segment until
+        the pass ends and only then plays the second. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 2;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSegmentedTone (rig.storage.folder, rate);
+    REQUIRE (tone.existsAsFile());
+
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (13);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    engine.log().openInMemory ({});
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    const auto listId = document.createList ("Sound").id;
+    const auto cueId = document.createCue (listId, 0, "media", "Bed").id;
+
+    document.setAttribute ("/godot/cue/" + cueId + "/file", tone.getFileName().toStdString());
+
+    auto audioNode = document.root().getChildWithName ("Audio");
+    audioNode.setProperty (juce::Identifier ("tracks"), 1, nullptr);
+
+    juce::ValueTree bus { "Bus" };
+    bus.setProperty (juce::Identifier ("id"), "J3MT5XYA", nullptr);
+    bus.setProperty (juce::Identifier ("name"), "Main", nullptr);
+    bus.setProperty (juce::Identifier ("firstChannel"), 0, nullptr);
+    bus.setProperty (juce::Identifier ("width"), 1, nullptr);
+    audioNode.appendChild (bus, nullptr);
+
+    auto cue = document.findById (cueId);
+    juce::ValueTree route { "Route" };
+    route.setProperty (juce::Identifier ("id"), "Z04EH7PH", nullptr);
+    route.setProperty (juce::Identifier ("bus"), "J3MT5XYA", nullptr);
+    route.setProperty (juce::Identifier ("gains"), "1", nullptr);
+    cue.appendChild (route, nullptr);
+
+    /*  The bed: one second, for ever. Then the outro, once. */
+    const auto bed = document.createRange (cueId, 0.0, 1.0);
+    REQUIRE (bed.ok);
+    REQUIRE (document.setAttribute ("/godot/range/" + bed.id + "/loops", "0").ok);
+
+    REQUIRE (document.createRange (cueId, 1.0, 2.0).ok);
+
+    document.setAttribute (cue::standbyAddressOf (listId), cueId);
+
+    audio::HostPlayer player { rig.host, engine };
+    runner.setPlayer (&player);
+    runner.setSamplesPerTick (rate / 50);
+    runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
+
+    RecordingSink sink;
+    sink.prepare (settings.outputChannels, rate * 6);
+    rig.host.setBlockSink (&sink);
+
+    std::int64_t tick = 0;
+
+    const auto oneTick = [&]
+    {
+        runner.beforeTick (engine, tick);
+        engine.processTick (tick++);
+        player.serviceArms();
+
+        for (int i = 0; i < (rate / 50) / blockSize; ++i)
+            rig.host.processBlock();
+    };
+
+    for (int i = 0; i < 4; ++i)
+        oneTick();
+
+    REQUIRE (engine.submit (origin::cli, "go", {}));
+
+    for (int i = 0; i < 400 && ! rig.host.isTrackPlaying (0); ++i)
+        oneTick();
+
+    REQUIRE (rig.host.isTrackPlaying (0));
+
+    const auto runId = runs.all().empty() ? std::string {} : runs.all().front().id;
+    REQUIRE_FALSE (runId.empty());
+
+    const auto startedAt = sink.written;
+
+    /*  TWO AND A HALF PASSES OF A ONE-SECOND RANGE, which a loop count of one
+        would have ended long before. Getting this far at all is the wrap doing
+        its work. */
+    for (int i = 0; i < 125; ++i)
+        oneTick();
+
+    {
+        const auto* run = runs.find (runId);
+        REQUIRE (run != nullptr);
+        CHECK (run->range == 0);
+        CHECK (run->rangeIteration >= 3);      // it is on its third pass
+        CHECK_FALSE (run->isFinished());
+    }
+
+    /*  THE ADVANCE, sent partway through a pass. */
+    REQUIRE (engine.submit (origin::cli, "run.advance", { osc::Value::string (runId) }));
+
+    const auto advancedAt = sink.written;
+
+    for (int i = 0; i < 150; ++i)
+        oneTick();
+
+    rig.host.setBlockSink (nullptr);
+
+    /*  --- the render ------------------------------------------------------ */
+    const auto first = sink.firstSoundAt (0);
+    REQUIRE (first >= 0);
+
+    const auto changeAt = settlesIntoSegmentAt (sink, startedAt, 1);
+
+    REQUIRE (changeAt > advancedAt);
+
+    /*  IT WAITED FOR THE BOUNDARY. The advance was sent partway through a pass,
+        so the second range begins at the end of THAT pass - a whole number of
+        seconds after the sound started, and not at the moment of the asking. */
+    const auto sinceFirst = changeAt - first;
+    const auto passes = (sinceFirst + rate / 2) / rate;
+    const auto error = sinceFirst - passes * rate;
+
+    INFO ("advance was asked at " << (advancedAt - first) << " samples in, and the second"
+           " range began at " << sinceFirst << " - " << passes << " whole passes"
+           << (error >= 0 ? " plus " : " minus ") << std::abs (error) << " samples");
+
+    CHECK (std::abs (error) <= blockSize + 40);
+
+    /*  And it did not simply stop: the second range is what plays afterwards. */
+    {
+        const auto* run = runs.find (runId);
+        REQUIRE (run != nullptr);
+        CHECK (run->range == 1);
+    }
 }

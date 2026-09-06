@@ -65,6 +65,7 @@ namespace
         }
 
         int slotCount() const override             { return slots; }
+        int sampleRate() const override            { return rate; }
 
         bool launchAtSample (int track, int slot, std::int64_t sample) override
         {
@@ -124,6 +125,10 @@ namespace
             range or none - every fixture there is, until a case says otherwise.
             A test that wants to be refused for `no-slot` sets it. */
         int slots = 1;
+
+        /*  48 kHz, so that a range of N seconds is N times this many samples
+            and a test can write the number it means. */
+        int rate = 48000;
 
         std::int64_t samples = 0;
 

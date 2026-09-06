@@ -352,6 +352,24 @@ add_test(NAME wfg.replay.triggers.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/triggers
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The twelfth, and the one where the model knows the least about what is
+# actually happening. A ranged media cue's passes are counted from a sample
+# counter that a replay does not have, and its boundaries are placed on a graph
+# a replay does not build - so the ONLY thing that can carry which range a cue
+# was in is a record, and this fixture is what says one is written.
+#
+# It also carries the two ends of §3.24: a range that loops for ever, left with
+# an `advance` at the end of the pass it was on rather than where the operator's
+# hand came down, and a playlist that runs to its end and finishes there.
+add_test(NAME wfg.replay.ambience.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/ambience.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/ambience
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.ambience.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/ambience.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/ambience
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a

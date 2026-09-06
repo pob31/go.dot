@@ -194,6 +194,86 @@ namespace wfg::cue
                         } });
 
         //----------------------------------------------------------------------
+        /*  A TRANSITION, REPORTED WHEN THE BOUNDARY IS PLACED, which is the
+            same moment `run.started` is reported for the same reason: the
+            scheduler decides on a tick, and the tick it decided on is the one
+            a replay has to reproduce. The sound follows a few blocks later,
+            live and on replay both - except that on replay there is none.
+
+            WHICH PASS is not here and never will be. §3.15 splits transitions
+            from continuous readouts: entering a range is something the machine
+            decided, and the third pass of eight is arithmetic on a sample
+            counter. A four-hour bed would otherwise log a record every few
+            seconds for something nobody chose. */
+        registry.add ({ "run.range",
+                        "A ranged media cue entered one of its ranges: the index, from nought.",
+                        { { "run", 's', false }, { "index", 'i', false } },
+                        false,
+                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            auto* run = runs.find (args[0].getString());
+
+                            if (run == nullptr)
+                                return Outcome::rejected (reason::unknownId);
+
+                            /*  Applied and ignored on a run that has finished by
+                                another road - killed while its last boundary was
+                                in flight. Idempotent where it costs nothing,
+                                like every other report here. */
+                            if (run->isFinished())
+                                return Outcome::ok (args);
+
+                            run->range = args[1].getInt32();
+
+                            /*  THE PASS COUNT GOES BACK TO ONE, and it is reset
+                                here rather than by the hook that placed the
+                                boundary, so that a replay - which runs no hooks
+                                - does not leave the strip reading 7/8 for a
+                                range that has just started. */
+                            run->rangeIteration = run->range >= 0 ? 1 : 0;
+
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  AN OPERATOR COMMAND, unlike everything around it. §3.24 gives a
+            ranged cue an `advance` - "leave the range you are on at the end of
+            the pass you are on" - and it is the only way out of a range that
+            loops for ever.
+
+            IT IS A REQUEST AND NOT AN ACT. The scheduler places the boundary at
+            the end of the current pass, which may be seconds away; what this
+            does is set the flag it reads. That is the whole difference between
+            `advance` and a hard stop, and it is why the two are separate verbs
+            rather than one with a duration. */
+        registry.add ({ "run.advance",
+                        "Leaves the range playing now at the end of the pass it is on, and"
+                        " continues into the next one. The way out of a loop that never ends.",
+                        { { "run", 's', false } },
+                        true,
+                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            auto* run = runs.find (args[0].getString());
+
+                            if (run == nullptr)
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (run->isFinished())
+                                return Outcome::rejected (reason::typeMismatch);
+
+                            /*  A RUN THAT IS NOT IN A RANGE HAS NOWHERE TO
+                                ADVANCE TO, and saying so is better than a
+                                silent no-op: an operator who aimed an advance at
+                                the wrong cue has been told, and the log carries
+                                the refusal. */
+                            if (run->range < 0)
+                                return Outcome::rejected (reason::typeMismatch);
+
+                            run->advanceRequested = true;
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "run.done",
                         "A post-wait elapsed, so the run now reports done to whatever was waiting"
                         " on it.",

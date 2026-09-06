@@ -37,7 +37,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock" };
     inline constexpr std::string_view enum_trigger_type[] = { "noteOn", "noteOff", "programChange", "controlChange" };
     inline constexpr std::string_view enum_fade_curve[] = { "linear", "sCurve" };
-    inline constexpr std::string_view enum_stop_verb[] = { "hard", "fade", "afterMember", "afterIteration" };
+    inline constexpr std::string_view enum_stop_verb[] = { "hard", "fade", "afterMember", "afterIteration", "advance" };
     inline constexpr std::string_view enum_stop_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_osc_wait[] = { "none", "sent", "verified" };
     inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc" };
@@ -483,9 +483,9 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "hard",
           false, 0.0, false, 0.0,
-          enum_stop_verb, 4,
+          enum_stop_verb, 5,
           "", 50.0, false, "park",
-          "How it stops. Hard stops now and takes Tracktion's own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for." },
+          "How it stops. Hard stops now and takes Tracktion's own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary." },
         { "stop", "duration",
           ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
           true, "0",
@@ -598,6 +598,20 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "How many blocks the launch was late by, when GO arrived before the arm had finished. Zero is the ordinary case, and the number is here because it is the difference between GO is instant as a claim and as a measurement." },
+        { "run", "range",
+          ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
+          true, "-1",
+          true, -1.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "Which of the cue's ranges is playing, counting from nought, or -1 for a run that is not in one - every kind but media, and a media cue with no ranges. A TRANSITION IS AN EVENT (PRD 3.15): this changes when the boundary into the range is PLACED, which is a logged command, so a replay reproduces which range every run was in at every tick with no audio at all." },
+        { "run", "rangeIteration",
+          ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "Which pass of that range is playing, counting from one, or nought when there is no range. A READOUT and not an event, like position: it is computed from the sample counter rather than logged, because a bed looping for four hours would otherwise write a record every few seconds for something nobody decided. It is the 3 of the strip's 3/8." },
         { "run", "iteration",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
           true, "0",
