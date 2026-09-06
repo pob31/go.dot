@@ -57,6 +57,28 @@ reloads and reparses the megabyte. That is the price of testing against somethin
 it is recorded here so that the next person to wonder where the three seconds went does not
 have to bisect for it.
 
+## `bundles/chain/` and `logs/auto-chain.wfglog`
+
+One press, and a whole scene runs itself: five cues, a nested timeline group and a footer. An
+automatic sequence group advances on its own — a member reports done, the scheduler notices,
+the next one starts — and that noticing happens in a tick hook, which `wfg replay` does not
+run. An engine that advanced its chain from inside a hook would replay a session in which the
+first member played and nothing ever followed it.
+
+Its first job is to fail if a **handler** reports. A replay re-injects every record *and*
+re-runs every handler, so a handler that submitted a report of its own would produce it twice —
+once from the file and once from itself — and this log would grow on replay. The hook decides,
+the handler applies, and a handler never submits; this is where that is checked.
+
+The chain's arithmetic is left visible in the tick numbers rather than described somewhere
+else: a member ends at 3, the next is spawned at 4 and launched at 5. Two ticks, plus whatever
+the audio side needs to place a launch, which is what `/godot/engine/sequenceGapTicks`
+publishes.
+
+Captured from a live session and then rewritten by hand — the identifiers made readable, the
+origin of the press made `cli` — and replayed to confirm the rewrite. Every record was checked
+against the model it claims to show.
+
 ## `bundles/descent/` and `logs/manual-descent.wfglog`
 
 The scheduler, replayed. Every decision a manual sequence group takes is the Runner's, taken

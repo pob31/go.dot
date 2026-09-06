@@ -281,6 +281,28 @@ add_test(NAME wfg.replay.descent.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/descent
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The ninth, and the one that says an AUTOMATIC chain reproduces. A sequence
+# group advances itself: a member reports done, the scheduler notices, the next
+# one starts - and that noticing happens in a tick hook, which a replay does not
+# run. An engine that advanced its chain from inside one would replay a session
+# where the first member played and nothing followed it.
+#
+# Its first job is to fail if a HANDLER reports. A replay re-injects every record
+# and re-runs every handler, so a handler that submitted a report of its own
+# would produce it twice and this log would grow. That is the rule the whole
+# scheduler is shaped around, and this is where it is checked.
+#
+# The chain's arithmetic is in the tick numbers rather than in a comment
+# somewhere: ended at 3, next member spawned at 4, launched at 5.
+add_test(NAME wfg.replay.chain.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/auto-chain.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/chain
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.chain.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/auto-chain.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/chain
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a

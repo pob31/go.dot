@@ -1,0 +1,20 @@
+<Show>
+  <Lists>
+    <List id="ACT20001" name="Act Two">
+      <Group id="CHN00001" advance="auto" name="Storm" number="1">
+        <Cue id="CHN00002" name="Thunder" number="1.1"/>
+        <Cue id="CHN00003" name="Rain" number="1.2" preWait="0.1"/>
+        <Group id="CHN00004" mode="timeline" name="Aftermath" number="1.3">
+          <Cue id="CHN00005" name="Drips" number="1.3.1"/>
+          <Cue id="CHN00006" name="Distant siren" number="1.3.2" preWait="0.2"/>
+        </Group>
+        <Footer id="CHNF0001">
+          <Cue id="CHNF0002" name="Release the channels" number="1.f"/>
+        </Footer>
+      </Group>
+      <Cue id="CHN00007" name="After the storm" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="0"/>
+</Show>

@@ -1,0 +1,90 @@
+# wfg-log 1
+# fixture auto-chain — one GO, and a whole scene runs itself, hand-checked
+# against a live session record for record.
+#
+# WHAT THIS FIXTURE IS FOR. An automatic sequence group advances on its own:
+# a member reports done, the scheduler notices, and the next one starts. That
+# noticing happens in a tick hook, and `wfg replay` runs no hooks at all — so an
+# engine that advanced its chain from inside one would replay a session in which
+# the first member played and nothing ever followed it.
+#
+# Which is why every one of those decisions is a COMMAND. This file is what that
+# buys: a scene of five cues, a nested timeline group and a footer, reproduced
+# from the records below, on a machine with no sound card and no clock of its
+# own.
+#
+# ITS FIRST JOB IS TO FAIL IF A HANDLER REPORTS. A replay re-injects every record
+# AND re-runs every handler, so a handler that submitted a report of its own
+# would produce it twice — once from the file and once from itself — and this
+# log would grow on replay. That is the rule the whole scheduler is shaped
+# around: the hook decides, the handler applies, and a handler never submits.
+#
+# THE CHAIN'S ARITHMETIC IS VISIBLE IN THE TICK NUMBERS, and is worth reading
+# rather than counting later with a stopwatch. A member's `run.ended` is applied
+# during tick n; the scheduler sees it at n+1 and asks for the next member;
+# `run.launch` goes in at n+2. Two ticks, plus whatever the audio side needs to
+# place a launch — which is exactly what `/godot/engine/sequenceGapTicks`
+# publishes, and it is zero here because there is no audio side.
+#
+# GO fires the group the pointer is on. The group is `advance="auto"`, so this
+# is the only press in the file: everything below it is the scheduler.
+A 0 0 cli go s:"RN000001"
+#
+# The first member, spawned then launched. Spawning is separate from launching
+# because that is what lets a chain pay the disk in advance — a media member is
+# armed at the spawn while the one before it is still playing.
+A 1 1 engine run.spawn s:"RN000001" s:"CHN00002" s:"RN000002"
+A 2 2 engine run.launch s:"RN000002"
+A 3 3 engine run.ended s:"RN000002"
+#
+# THE BOUNDARY, and there it is: ended at 3, the next member spawned at 4,
+# launched at 5.
+#
+# The second member has a pre-wait of 0.1 s, which is five ticks. `run.launch`
+# starts the wait; `run.fire` is the far end of it. Two records rather than one
+# because a replay runs no hooks and may skip no handler: the wait has to elapse
+# because the log says it did.
+A 4 4 engine run.spawn s:"RN000001" s:"CHN00003" s:"RN000003"
+A 5 5 engine run.launch s:"RN000003"
+A 10 6 engine run.fire s:"RN000003"
+A 11 7 engine run.ended s:"RN000003"
+#
+# THE THIRD MEMBER IS A TIMELINE GROUP, and a group is a member like any other:
+# spawned, launched, and waited on. What differs is what it does once it starts.
+A 12 8 engine run.spawn s:"RN000001" s:"CHN00004" s:"RN000004"
+A 13 9 engine run.launch s:"RN000004"
+#
+# It schedules EVERYTHING AT ENTRY — both its members on the same tick, and both
+# launched on the next — because a timeline group's members do not follow one
+# another. Their pre-waits are OFFSETS from the moment the group started (§3.6),
+# which is why raising the group's own pre-wait defers a whole scene without
+# disturbing relative timing somebody spent an afternoon getting right.
+A 14 10 engine run.spawn s:"RN000004" s:"CHN00005" s:"RN000005"
+A 14 11 engine run.spawn s:"RN000004" s:"CHN00006" s:"RN000006"
+A 15 12 engine run.launch s:"RN000005"
+A 15 13 engine run.launch s:"RN000006"
+#
+# The first is a plain memo and is over at once. The second is at offset 0.2 s,
+# ten ticks after the launch — and it is ten ticks after the LAUNCH rather than
+# after the first member's end, which is the whole difference between a timeline
+# group and the sequence above it.
+A 16 14 engine run.ended s:"RN000005"
+A 25 15 engine run.fire s:"RN000006"
+A 26 16 engine run.ended s:"RN000006"
+#
+# Every member finished, so the group is done. Nothing waits on the members
+# individually here — a post-wait is inert in a parallel parent (§3.6) — so the
+# group's own end is the only thing the chain above it was holding for.
+A 27 17 engine run.ended s:"RN000004"
+#
+# AND THE FOOTER, which BLOCKS. The last member is done and the group is not:
+# §3.6 makes the footer part of leaving, so a following scene that reallocates
+# the same channels waits for the release rather than racing it. It runs as an
+# ordinary sequence, whatever the group's own mode says.
+A 28 18 engine run.spawn s:"RN000001" s:"CHNF0002" s:"RN000007"
+A 29 19 engine run.launch s:"RN000007"
+A 30 20 engine run.ended s:"RN000007"
+#
+# Only now is the scene over — thirty-one ticks, or a little over half a second,
+# from one press.
+A 31 21 engine run.ended s:"RN000001"
