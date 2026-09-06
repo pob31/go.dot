@@ -1,0 +1,23 @@
+<Show>
+  <Lists>
+    <List id="ACT10001" name="Act One">
+      <Cue id="AAAA1111" name="House to half" number="1"/>
+      <Group id="BBBB2222" name="Scene" number="2">
+        <Header id="HDR30000">
+          <Cue id="HDR40000" name="Pre-arm the rig" number="2.h"/>
+        </Header>
+        <Group id="CCCC5555" name="Inner" number="2.1">
+          <Cue id="DDDD6666" name="Deep one" number="2.1.1"/>
+          <Cue id="EEEE7777" name="Deep two" number="2.1.2"/>
+        </Group>
+        <Cue id="FFFF8888" name="After the inner" number="2.2"/>
+        <Footer id="FTR90000">
+          <Cue id="FTR91000" name="Release the channels" number="2.f"/>
+        </Footer>
+      </Group>
+      <Cue id="GGGG9999" name="Interval" number="3"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="0"/>
+</Show>

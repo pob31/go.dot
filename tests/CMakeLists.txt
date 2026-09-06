@@ -259,6 +259,28 @@ add_test(NAME wfg.replay.waits.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/waits
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The eighth, and the one that says a SCHEDULER reproduces. Every decision a
+# manual group takes is the Runner's, taken in a tick hook - and `wfg replay`
+# runs no hooks. So each of them leaves as a command, and this fixture is what
+# that buys: the pointer descends into two nested groups, a header runs before
+# the members, three presses walk it out again, and a footer blocks the group's
+# end, all of it reproduced from the records with no hook in the room.
+#
+# What it does NOT do is catch the double-spawn that made the nested case worth
+# writing down: that came out of a hook, and a replay runs none. The unit cases
+# in GoTests are what fail if it comes back. This one says the other half - that
+# the records a correct descent writes are a session that reproduces - and it
+# was checked against a live run of the same show, record for record, because a
+# replay cannot tell whether the engine would have written this log at all.
+add_test(NAME wfg.replay.descent.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/manual-descent.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/descent
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.descent.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/manual-descent.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/descent
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a

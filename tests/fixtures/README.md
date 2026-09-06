@@ -57,6 +57,31 @@ reloads and reparses the megabyte. That is the price of testing against somethin
 it is recorded here so that the next person to wonder where the three seconds went does not
 have to bisect for it.
 
+## `bundles/descent/` and `logs/manual-descent.wfglog`
+
+The scheduler, replayed. Every decision a manual sequence group takes is the Runner's, taken
+in a tick hook, and `wfg replay` runs no hooks at all — so each of them leaves as a command,
+and this pair is the proof that the whole of a descent reproduces from the records: the
+pointer starts three levels down where `state.xml` left it, a header runs before any member,
+three presses walk the pointer out of the inner group and then out of the outer one, and a
+footer blocks the group's end.
+
+Hand-written and hand-checked, and then checked a second way, which is worth recording because
+a replay alone cannot do it. Replaying proves every record is applied and that no handler adds
+one; it cannot prove the engine would have written this log in the first place. So the same
+session was driven live over the socket and the two record sequences compared: nineteen
+records, same order, differing only in the origin of the three presses — `cli` here, a
+WebSocket address there.
+
+And a thing this fixture cannot do, said here so nobody assumes it: it does not catch a
+scheduler that spawns the same member twice. That decision is taken in a tick hook, a replay
+runs no hooks, and the extra runs would therefore never appear. The unit cases in
+`tests/GoTests.cpp` are what fail if that returns.
+
+The show is two nested manual groups with a header and a footer on the outer one, plus cues
+either side of it, and no audio at all. It is the bundle to reach for when something needs a
+document that nests.
+
 ## `documents/`
 
 `canonical.xml` is the canonical form of `messy-input.xml` — same show, badly indented, with
