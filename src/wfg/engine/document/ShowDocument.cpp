@@ -674,18 +674,57 @@ namespace wfg::doc
             replay reproduces it with no repair record in the log. */
         std::string repairList, repairStandby;
 
-        if (const auto list = listContaining (parent); list.isValid()
-              && list[standbyProperty].toString().toStdString() == id)
+        const auto list = listContaining (parent);
+        const auto standby = list.isValid()
+                               ? list[standbyProperty].toString().toStdString()
+                               : std::string {};
+
+        /*  PARKED ON IT, OR ON SOMETHING INSIDE IT - and the second is the half
+            that was missing.
+
+            PR 3.4 widened the LOOKUP (a list several levels above the cue) and
+            left the MATCH asking only whether the deleted node WAS the standby.
+            Deleting a group the pointer was standing inside therefore released
+            the pointer's cue and left the list still naming it, which is the
+            invariant broken by the very route the widening was for.
+
+            It does not heal: `standby.next` finds nothing on the path, answers
+            with the identifier it was given, and the write-back is then refused
+            because that cue is no longer in the list - so the pointer is frozen.
+            GO is worse. The standby is not empty, so it passes the early return;
+            the advance fails and its result is discarded; and firing a cue that
+            does not exist does nothing. The operator's GO key goes quietly dead
+            until somebody thinks to move standby by hand.
+
+            `released` is already every identifier under the node, collected
+            above because they all go back to the registry - so asking whether
+            the pointer is one of them is the same question in one test, and
+            cannot come apart from the release the way a second walk could. */
+        const auto parked = ! standby.empty()
+                              && std::find (released.begin(), released.end(), standby)
+                                   != released.end();
+
+        if (parked)
         {
             repairList = list[idProperty].toString().toStdString();
+
+            /*  WHERE THE POINTER GOES IS MEASURED FROM THE NODE BEING DELETED,
+                not from the cue it was on: the cue may be three levels inside
+                the thing that is disappearing, and its own siblings are going
+                with it. What survives is whatever follows the deleted node,
+                which is where `next` would have carried the pointer once the
+                subtree was gone. */
             repairStandby = siblingAfter (parent, id);
 
             if (repairStandby.empty())
                 repairStandby = cue::nextStandby (list, id);
 
-            /*  `nextStandby` answers with the cue itself when there is nowhere
-                to go, and the cue is about to stop existing. */
-            if (repairStandby == id)
+            /*  `nextStandby` answers with the identifier it was given when
+                there is nowhere to go, and that one is about to stop existing.
+                It can also answer with something else inside the doomed
+                subtree, so the whole released set is the test rather than just
+                the node's own identifier. */
+            if (std::find (released.begin(), released.end(), repairStandby) != released.end())
                 repairStandby.clear();
         }
 

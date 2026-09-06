@@ -1103,3 +1103,67 @@ TEST_CASE ("cursor: at either end it stays put, and from empty it stays empty")
     // And something that is not in this list at all does not move it either.
     CHECK (nextStandby (list, "ZZZZZZZZ") == "ZZZZZZZZ");
 }
+
+TEST_CASE ("standby: deleting a group the pointer is INSIDE repairs it, rather than orphaning it")
+{
+    /*  THE BUG THIS IS NAMED FOR, found by an adversarial review of PR 3.4 and
+        not by any test in it.
+
+        PR 3.4 widened the delete repair's LOOKUP - the list parked on a cue can
+        now be several levels above it - and left the MATCH asking only whether
+        the deleted node WAS the standby. So deleting a GROUP the pointer stood
+        inside released the pointer's cue and left the list still naming it: the
+        invariant broken by exactly the route the widening existed for.
+
+        It does not heal itself, which is what made it worth finding. `next`
+        cannot find the cue on the path so it answers with the identifier it was
+        given, and writing that back is refused because the cue is no longer in
+        the list - so the pointer is frozen. GO is worse: the standby is not
+        empty so it passes the early return, the advance fails and its result is
+        discarded, and firing a cue that does not exist does nothing at all. The
+        operator's GO key goes quietly dead. */
+    Rig rig;
+
+    // The pointer descends into the manual group, which is where §3.6 puts it.
+    REQUIRE (rig.run (1, "standby.set", { osc::Value::string (walkIn) }).applied == 1);
+    REQUIRE (rig.standbyOf (mainList) == walkIn);
+
+    // Now delete the GROUP, not the cue.
+    CHECK (rig.run (2, "object.delete", { osc::Value::string (preshow) }).applied == 1);
+
+    /*  There is nothing after the group in this list, so the pointer has
+        nowhere to go and empties - which is a resting state (§3.5) rather than
+        a failure, and is the honest answer. What it must NOT be is the
+        identifier of a cue that has been deleted. */
+    CHECK (rig.standbyOf (mainList) == "");
+    CHECK (rig.document.findById (walkIn).isValid() == false);
+
+    /*  And the pointer still works, which is the half that was actually
+        broken: from empty it stays put (only standby.set arms a list), and
+        parking it again is accepted rather than refused for ever. */
+    CHECK (rig.run (3, "standby.next").applied == 1);
+    CHECK (rig.run (4, "standby.set", { osc::Value::string (houseToHalf) }).applied == 1);
+    CHECK (rig.standbyOf (mainList) == houseToHalf);
+}
+
+TEST_CASE ("standby: deleting a group the pointer is inside lands on what follows the group")
+{
+    /*  The same repair with somewhere to go. Deleting the thing you are
+        standing in should leave you on the next thing along, which is where
+        `next` would have carried the pointer once the subtree had gone -
+        measured from the deleted GROUP rather than from the cue, because the
+        cue's own siblings went with it. */
+    Rig rig;
+
+    REQUIRE (rig.run (1, "cue.create",
+                      { osc::Value::string (mainList), osc::Value::int32 (2),
+                        osc::Value::string ("memo"), osc::Value::string ("After") }).applied == 1);
+
+    const auto after = childrenOf (rig.listNode (mainList)).back();
+
+    REQUIRE (rig.run (2, "standby.set", { osc::Value::string (announce) }).applied == 1);
+    REQUIRE (rig.standbyOf (mainList) == announce);
+
+    CHECK (rig.run (3, "object.delete", { osc::Value::string (preshow) }).applied == 1);
+    CHECK (rig.standbyOf (mainList) == after);
+}
