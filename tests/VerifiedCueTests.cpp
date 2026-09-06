@@ -602,3 +602,51 @@ TEST_CASE ("question K: a cue that asks for verification a target cannot give is
         CHECK (tree::checkNetworkCues (document).size() == 1u);
     }
 }
+
+TEST_CASE ("verified: a cue nobody gave a timeout waits five seconds rather than none")
+{
+    /*  THE OTHER HALF OF A BUG THE GROUP SCHEDULER FOUND. Every one of these
+        attribute reads used to go straight to the ValueTree - and the canonical
+        writer OMITS an attribute holding its default while the reader leaves it
+        absent, so a cue nobody filled in has no such property and the read
+        answers with the type's zero.
+
+        For most rows in the table that IS the default and it looks like it
+        works. `osc/@timeout` defaults to FIVE SECONDS, so a verified cue
+        created and left alone read a timeout of zero and failed on the tick
+        after it asked - reporting `timeout` about a device that had not been
+        given a chance to answer, which sends somebody to look at a network that
+        is working.
+
+        The fix is that every read goes through `ShowDocument::getAttribute`,
+        which resolves the row and supplies the default. What this asserts is
+        the behaviour rather than the mechanism: a cue with no timeout set is
+        still waiting long after one with a zero timeout would have given up. */
+    VerifiedRig rig;
+
+    const auto id = rig.document.createCue (rig.listId, 90, "osc", "Bare").id;
+    const auto base = "/godot/cue/" + id + "/";
+
+    rig.document.setAttribute (base + "address", "/desk/fader");
+    rig.document.setAttribute (base + "value", "f:0.5");
+    rig.document.setAttribute (base + "wait", "verified");
+
+    // Nothing was written, so the property is absent and the row supplies five.
+    REQUIRE (rig.document.findById (id).hasProperty (juce::Identifier ("timeout")) == false);
+    CHECK (rig.document.getAttribute (base + "timeout").value_or ("?") == "5");
+
+    /*  A device that answers with something else, so the cue can never be
+        satisfied and the only way it can end is by running out of patience.
+        Ten ticks is a fifth of a second; a cue that had read its timeout as
+        zero would have given up on the second one. */
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+    rig.fire (id);
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    const auto* run = rig.runOf (id);
+    REQUIRE (run != nullptr);
+    CHECK (run->error != std::string ("timeout"));
+    CHECK_FALSE (run->isFinished());
+}

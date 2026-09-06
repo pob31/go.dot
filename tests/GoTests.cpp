@@ -2077,3 +2077,46 @@ TEST_CASE ("group: killing it takes its members with it")
     // And the third member was never started.
     CHECK (rig.runOf (rig.third) == "");
 }
+
+//==============================================================================
+/*  WHAT A CUE SAYS WHEN IT HAS NOT SAID ANYTHING.
+
+    The canonical writer OMITS an attribute holding its default and the reader
+    leaves it absent, so a cue that has never had a value written to it has no
+    such property on its ValueTree at all. Reading one directly answers with the
+    type's zero - an empty string, 0.0, false - and for most rows in the table
+    that IS the default, so it looks like it works.
+
+    For two of them it is not, and both are the kind of wrong that is quiet:
+    `fade/@level` defaults to -120 and `osc/@timeout` to 5. A fade cue somebody
+    created and did not fill in would have faded UP to 0 dB, which the table
+    describes as the opposite of what a fresh fade cue is for ("a slow cut to
+    nothing, which is a real thing to want and can only ever make the show
+    quieter"). A verified network cue would have given up before it asked.
+
+    Nothing caught it because every fixture and every other test sets these
+    explicitly. The group scheduler found the same bug from the other end -
+    reading `enabled` off the tree answered `false` for every cue in the show -
+    which is what made it worth looking for the rest.
+*/
+
+TEST_CASE ("cue defaults: a fade nobody filled in goes to silence, not to unity")
+{
+    FadeRig rig;
+    const auto media = rig.startMedia();
+
+    /*  A fresh fade cue, pointed at the media and otherwise untouched: no
+        level, no duration, no curve. */
+    const auto bare = rig.document.createCue (rig.listId, 4, "fade", "Bare").id;
+    rig.setCue (bare, "target", rig.mediaId);
+
+    REQUIRE (rig.document.findById (bare).hasProperty (juce::Identifier ("level")) == false);
+    CHECK (rig.document.getAttribute ("/godot/cue/" + bare + "/level").value_or ("?") == "-120");
+
+    rig.fire (bare);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    // A duration of zero is a jump, so the destination is reached at once.
+    CHECK (rig.runs.find (media)->level == doctest::Approx (-120.0));
+}

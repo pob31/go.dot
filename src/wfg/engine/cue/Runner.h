@@ -346,6 +346,24 @@ namespace wfg::cue
                                  const std::string& cueId,
                                  const std::string& runId, bool fireAtOnce);
 
+        /*  A CUE'S ATTRIBUTE, WITH ITS DEFAULT APPLIED.
+
+            Not `cue[Identifier (name)]`, which is what every one of these reads
+            used to be and is wrong in a way that only shows on a cue somebody
+            has not filled in. The canonical writer OMITS an attribute holding
+            its default and the reader leaves it absent, so an untouched cue has
+            no such property at all - and asking the ValueTree answers with the
+            type's zero. For most rows in the table that IS the default and it
+            looks like it works. For `fade/@level` (-120) and `osc/@timeout` (5)
+            it is not, and both are quiet: a fade nobody filled in would have
+            gone UP to unity, and a verified cue would have given up before it
+            asked.
+
+            `ShowDocument::getAttribute` resolves the row and supplies the
+            default, which is what having one door is for. */
+        std::string textOf (const juce::ValueTree& cue, const char* name) const;
+        double numberOf (const juce::ValueTree& cue, const char* name) const;
+
         /*  The kind's own fire path, once every wait is out of the way: a media
             cue asks for a voice, a fade or a stop takes over a level, a network
             cue writes a node, a memo has nothing to do and says so next tick. */

@@ -129,6 +129,21 @@ namespace wfg::cue
         return launchLatencyTicks (audio->blockSize(), samplesPerTick);
     }
 
+    std::string Runner::textOf (const juce::ValueTree& cue, const char* name) const
+    {
+        const auto id = cue[idProperty].toString().toStdString();
+
+        if (id.empty())
+            return {};
+
+        return document.getAttribute ("/godot/cue/" + id + "/" + name).value_or (std::string {});
+    }
+
+    double Runner::numberOf (const juce::ValueTree& cue, const char* name) const
+    {
+        return osc::parseDouble (textOf (cue, name)).value_or (0.0);
+    }
+
     //==============================================================================
     std::string Runner::arm (Engine& engine, std::int64_t tick, const std::string& cueId,
                              const std::string& runId)
@@ -210,8 +225,8 @@ namespace wfg::cue
         /*  THE WAITS, COPIED NOW. §4.10's rule applied to a duration: the run
             instantiates what the cue said when it was fired, so editing the cue
             during the wait changes the next run and not this one. */
-        run->preWaitTicks = ticksFor (static_cast<double> (cue[juce::Identifier ("preWait")]));
-        run->postWaitTicks = ticksFor (static_cast<double> (cue[juce::Identifier ("postWait")]));
+        run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
+        run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
 
         if (! fireAtOnce)
         {
@@ -364,7 +379,7 @@ namespace wfg::cue
         if (audio == nullptr)
             return;
 
-        const auto named = mediaFileOf (cue);
+        const auto named = textOf (cue, "file");
 
         /*  RESOLVED AGAINST THE BUNDLE, and checked here rather than three
             layers down. A cue naming a file the bundle does not have fails its
@@ -428,7 +443,7 @@ namespace wfg::cue
         request.runId = runId;
         request.track = track;
         request.mediaFile = file;
-        request.levelDb = static_cast<double> (cue[juce::Identifier ("level")]);
+        request.levelDb = numberOf (cue, "level");
         request.routing = routing;
 
         run->level = request.levelDb;
@@ -532,31 +547,31 @@ namespace wfg::cue
     void Runner::fireFade (const juce::ValueTree& cue, const std::string& runId)
     {
         beginFade (cue[idProperty].toString().toStdString(),
-                          cue[juce::Identifier ("target")].toString().toStdString(),
+                          textOf (cue, "target"),
                           runId, "fade",
-                          static_cast<double> (cue[juce::Identifier ("level")]),
-                          static_cast<double> (cue[juce::Identifier ("duration")]),
-                          fadeCurveFrom (cue[juce::Identifier ("curve")].toString().toStdString()),
+                          numberOf (cue, "level"),
+                          numberOf (cue, "duration"),
+                          fadeCurveFrom (textOf (cue, "curve")),
                           false);
     }
 
     void Runner::fireStop (const juce::ValueTree& cue, const std::string& runId)
     {
-        const auto verb = cue[juce::Identifier ("verb")].toString();
+        const auto verb = textOf (cue, "verb");
 
         /*  A HARD STOP IS A FADE OF NO LENGTH THAT ALSO STOPS. Saying it that
             way rather than writing a second code path means the two verbs
             cannot drift apart: the ordering, the reporting and the
             target-not-running case are written once and behave the same. */
         const auto seconds = verb == "fade"
-                               ? static_cast<double> (cue[juce::Identifier ("duration")])
+                               ? numberOf (cue, "duration")
                                : 0.0;
 
         beginFade (cue[idProperty].toString().toStdString(),
-                          cue[juce::Identifier ("target")].toString().toStdString(),
+                          textOf (cue, "target"),
                           runId, "stop",
                           silenceDb, seconds,
-                          fadeCurveFrom (cue[juce::Identifier ("curve")].toString().toStdString()),
+                          fadeCurveFrom (textOf (cue, "curve")),
                           true);
     }
 
@@ -762,10 +777,10 @@ namespace wfg::cue
 
         OscJob job;
         job.self = self;
-        job.wait = oscWaitFrom (cue[juce::Identifier ("wait")].toString().toStdString());
+        job.wait = oscWaitFrom (textOf (cue, "wait"));
 
-        const auto address = cue[juce::Identifier ("address")].toString().toStdString();
-        const auto atom = cue[juce::Identifier ("value")].toString().toStdString();
+        const auto address = textOf (cue, "address");
+        const auto atom = textOf (cue, "value");
 
         /*  THE VALUE IS SPELLED THE WAY THE LOG SPELLS ONE, and reusing that
             grammar is worth more than the four lines it saves. A document, a
@@ -834,7 +849,7 @@ namespace wfg::cue
                 job.queryPort = declaration->queryPort;
             }
 
-            const auto seconds = static_cast<double> (cue[juce::Identifier ("timeout")]);
+            const auto seconds = numberOf (cue, "timeout");
             job.ticksAllowed = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
         }
 
@@ -1211,8 +1226,7 @@ namespace wfg::cue
 
                 `getAttribute` resolves the row and supplies the default, which
                 is the whole reason the document has one door. */
-            if (document.getAttribute ("/godot/cue/" + id + "/enabled").value_or ("true")
-                  == "false")
+            if (textOf (child, "enabled") == "false")
                 continue;
 
             out.push_back (id);
@@ -1246,8 +1260,8 @@ namespace wfg::cue
         if (run == nullptr)
             return {};
 
-        run->preWaitTicks = ticksFor (static_cast<double> (cue[juce::Identifier ("preWait")]));
-        run->postWaitTicks = ticksFor (static_cast<double> (cue[juce::Identifier ("postWait")]));
+        run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
+        run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
 
         /*  ARMED AND NOT LAUNCHED. A media member reserves its voice and asks
             for its file here, which is the whole reason spawning is a separate
@@ -1338,7 +1352,7 @@ namespace wfg::cue
                 §3.6 says a mid-run change takes effect at the next member
                 boundary - so a designer flipping a group during a plotting
                 session sees it now, not tomorrow. */
-            const auto timeline = group[juce::Identifier ("mode")].toString() == "timeline";
+            const auto timeline = textOf (group, "mode") == "timeline";
             const auto members = membersOf (group);
 
             if (job.phase == groupPhase::entering)
