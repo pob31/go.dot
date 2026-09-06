@@ -107,6 +107,19 @@ namespace wfg::doc
         /** A fresh identifier, not currently in use, and now reserved. */
         std::string generate();
 
+        /*  A number from the same source, for the one other thing in the engine
+            that needs randomness: the seed a shuffled group draws its rounds
+            from.
+
+            HERE RATHER THAN IN A SECOND GENERATOR, so that "this is the only
+            place in the engine that consumes randomness" stays literally true.
+            The value is written into the log the moment it is used, exactly as
+            a generated identifier is, so a replay is handed it rather than
+            drawing one of its own.
+
+            Reserves nothing: a seed is not an identity. */
+        std::int32_t drawSeed();
+
         /** Reserves an identifier read from a file or replayed from a log.
             False if it was already taken, which is a duplicate in the document
             and a validation error rather than something to paper over. */

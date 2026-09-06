@@ -139,6 +139,15 @@ namespace wfg
             group without me" is a thing somebody may well want and is a
             different group from the one they wrote. */
         inline constexpr const char* needsGo          = "needs-go";
+        /*  The argument's TYPE was right and its VALUE is not one this command
+            accepts - a scope that is neither "round" nor "group", a stop verb
+            nobody has heard of.
+
+            Its own code rather than `type-mismatch`, which says the wrong KIND
+            of thing arrived and sends somebody to look at their encoder. This
+            one says the right kind of thing arrived carrying a word that means
+            nothing here, and the remedy is to read the list. */
+        inline constexpr const char* badValue        = "bad-value";
         inline constexpr const char* badAddress      = "bad-address";
         inline constexpr const char* readOnly        = "read-only";
         inline constexpr const char* notInList       = "not-in-list";

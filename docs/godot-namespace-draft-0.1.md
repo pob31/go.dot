@@ -1196,6 +1196,58 @@ determined, and correct). **Iterations count rounds, not playbacks.** A pruned m
 from the current round or from every round of this run; an emptied round completes the group
 rather than spinning; `afterIteration` and `afterMember` are honoured at the next boundary.
 
+**Seven things PR 3.5 settled while building that paragraph**, recorded here because each of
+them is a choice somebody could reasonably have made differently.
+
+1. **A manual group ignores `selection` and `play`.** Both are the *machine* choosing — which
+   member comes next, and how many — and in a manual sequence the operator is the one choosing
+   (§3.6). The pointer walks the list in document order, so a shuffled round would have the group
+   finishing at whichever member the draw happened to put last, at a moment the operator has no
+   way to see coming; "play two of five" would leave three rows the pointer walks through and
+   nothing happens on. Ignored rather than refused at load, because the pair means something the
+   moment somebody makes the group automatic, which §3.6 expects during tech.
+
+2. **The round lives on the run, and the scheduler re-reads it every tick.** It is what
+   `/godot/run/<id>/round` publishes, it is written by `run.round`'s handler, and the scheduler
+   works from it rather than from a copy — which is what lets a prune reach the round *in
+   progress*, and that is the whole of what an operator asking at 22:40 wants.
+
+3. **`run.round`'s handler drops pruned members too**, and not only the draw. The two commands
+   can arrive in either order inside one tick: the scheduler draws in the hook, and an operator's
+   prune submitted a moment earlier is already in the queue ahead of it, taking a member out of a
+   round that does not exist yet. Filtering in both places makes the result the same whichever
+   way round they land — which a replay needs as much as the operator does.
+
+4. **Every round is a pure function of the seed and the round number** (`seed ^ k·φ`), rather
+   than of a running generator state carried between rounds. So `/godot/run/<id>/seed` means the
+   seed this run drew — stable, and the number to write down after a night somebody liked —
+   rather than "where the stream has got to".
+
+5. **A group that does not shuffle draws no seed and publishes nought.** An unused random number
+   in every group's log is a number somebody will one day try to interpret, and the one thing
+   that differs between two otherwise identical sessions.
+
+6. **The shuffle is written out — SplitMix64 and Fisher-Yates, eight lines — rather than reached
+   for in `<random>`.** That header's *engines* are specified down to the bit and its
+   *distributions* are not, and neither is `std::shuffle`: the same seed gives different orders on
+   different standard libraries. A show rehearsed on one machine has to play the same order in
+   the theatre, and a fixture drawn on one platform has to replay on three. A golden case pins
+   the order for a fixed seed.
+
+7. **`run.stop` has three verbs, not the plan's four.** `hard`, `afterMember` and
+   `afterIteration`; `fade` is deliberately absent. A fade needs a run of its own to report
+   through — it takes time, and something has to say when it arrived — and a command has no cue
+   and therefore no run. A fade-and-stop is a stop *cue*, where the duration and the curve are
+   authored values somebody decided rather than arguments typed at the moment of panic. Aiming
+   one at a specific run waits for PR 3.12, which is where a run's level composition is built.
+
+**And one cost, measured rather than assumed.** `afterIteration` asked for in the same tick as a
+round boundary costs one more round. The scheduler decides in a tick hook, which runs *before*
+that tick's commands are applied, so it has already decided to start another round when the stop
+arrives; a press one tick earlier — twenty milliseconds — is seen. It is the same one-tick
+decision latency `/godot/engine/sequenceGapTicks` publishes, seen from the other side, and it is
+the price of every decision being a logged command. Fixture #11 says so in its own text.
+
 **Disabled cues are skipped** — by the scheduler (not spawned, not run in a header or footer) and
 by the cursor. A GO whose standby is disabled, which only a cue disabled while the pointer sat on
 it can produce, is applied, fires nothing and advances: the one GO that does nothing, logged as

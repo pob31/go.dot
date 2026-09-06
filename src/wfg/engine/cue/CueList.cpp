@@ -236,7 +236,8 @@ namespace wfg::cue
         return false;
     }
 
-    std::string nextStandby (const juce::ValueTree& list, const std::string& current)
+    std::string nextStandby (const juce::ValueTree& list, const std::string& current,
+                             const RunTable* runs)
     {
         if (! list.isValid())
             return current;
@@ -249,6 +250,46 @@ namespace wfg::cue
             what the end-of-list rule is for. */
         if (! from.isValid())
             return current;
+
+        /*  A MANUAL GROUP WITH ROUNDS LEFT KEEPS THE POINTER, which is the one
+            question the cursor asks about what is RUNNING rather than about
+            what is written.
+
+            It has to. The document says a group loops three times; only the run
+            knows it is on round two. Leaving on the last member of round one
+            would take the operator out of a scene that has two thirds of itself
+            still to play, and their next press would fire whatever follows the
+            group while the group was still going.
+
+            The pointer goes to the first member of the round, in document
+            order, which is where the next round will begin: a manual group
+            plays its members as they are written - shuffling and "play N of M"
+            are the machine choosing, and in a manual group the operator is the
+            one choosing (PRD 3.6). `wfg validate` warns about a manual group
+            that declares either.
+
+            RUN-AWARE AND OPTIONAL, so that every caller that has no run table -
+            a validator, a test of the document alone - gets the pure document
+            answer and the same behaviour a group with no loops has. */
+        if (runs != nullptr)
+        {
+            const auto group = from.getParent();
+
+            if (isManualSequence (group))
+            {
+                const auto members = stops (group);
+
+                if (! members.empty() && members.back() == from)
+                {
+                    const auto groupId = group[idProperty].toString().toStdString();
+
+                    if (const auto* run = runs->liveRunOf (groupId))
+                        if (run->iterations == 0 || run->iteration < run->iterations)
+                            return descendTo (members.front())[idProperty]
+                                     .toString().toStdString();
+                }
+            }
+        }
 
         const auto next = stepFrom (list, from, true);
         return next.isValid() ? next[idProperty].toString().toStdString() : current;

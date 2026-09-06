@@ -1,0 +1,14 @@
+<Show>
+  <Lists>
+    <List id="BED00001" name="Ambience">
+      <Group id="BED00002" advance="auto" loops="0" name="Night bed" number="1" seed="7" selection="shuffle">
+        <Cue id="BED00003" name="Crickets" number="1.1"/>
+        <Cue id="BED00004" name="Distant road" number="1.2"/>
+        <Cue id="BED00005" name="Wind in the eaves" number="1.3"/>
+      </Group>
+      <Cue id="BED00006" name="Dawn" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="0"/>
+</Show>

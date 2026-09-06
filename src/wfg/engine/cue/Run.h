@@ -210,6 +210,46 @@ namespace wfg::cue
             are facts about this run, and two places to look for a run's state
             is one place too many. */
 
+        //======================================================================
+        /*  ROUNDS. A group plays its members in rounds - one round is one pass
+            through them - and `loops` says how many. Everything here belongs to
+            a group run and is left at its default by every other kind.
+
+            THE ROUND IS MATERIALISED RATHER THAN COMPUTED, which is what makes
+            a shuffled show reproduce. It is drawn once, written into the log as
+            `run.round`, and read back from there on replay - so the random
+            number generator is consulted on the night and never again. */
+        std::vector<std::string> round;
+
+        /** Which round is in progress, counting from one; 0 before the first. */
+        int iteration = 0;
+
+        /*  How many rounds this run will play, copied from the group when it
+            started - so an edit to `loops` changes the next run and not this
+            one, the same rule the waits follow. Zero is for ever. */
+        int iterations = 1;
+
+        /*  The members dropped from this run, and it is RUN-LOCAL by design
+            (§3.6): what an operator does at 22:40 when one of eight ambiences
+            is wrong tonight. It evaporates with the run, because it is not an
+            edit to the show - tomorrow the cue is back. */
+        std::vector<std::string> pruned;
+
+        /*  What the rounds are drawn from. The group's own seed when it has
+            one, and a fresh one otherwise - drawn when the run starts and
+            written into the log, so a shuffled night reproduces exactly and is
+            still different from the next one. */
+        std::int32_t seed = 0;
+
+        /*  A boundary this run is to stop at, or empty: "member" for the end of
+            the one playing now, "iteration" for the end of this round.
+
+            ENGINE STATE AND PUBLISHED NOWHERE, like the three below it. It is
+            set by a stop that asked for a graceful exit and read at the next
+            boundary; a client watching the group sees the group still playing,
+            which is exactly what is happening. */
+        std::string stopAfter;
+
         /*  WHERE A GROUP RUN IS TO START, when the pointer was not on its
             first member. A cue identifier, and always one of this group's own
             members - so descending three levels sets it on three runs, each

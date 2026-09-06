@@ -78,6 +78,8 @@
 
 #include <wfg/engine/document/ShowDocument.h>
 
+#include <wfg/engine/cue/Run.h>
+
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <string>
@@ -126,7 +128,8 @@ namespace wfg::cue
         plotting session. (§3.6's loop rule, where a manual group's pointer
         wraps while rounds remain, is the one place a run does bear on it, and
         that arrives with rounds in PR 3.5.) */
-    std::string nextStandby (const juce::ValueTree& list, const std::string& current);
+    std::string nextStandby (const juce::ValueTree& list, const std::string& current,
+                             const RunTable* runs = nullptr);
     std::string previousStandby (const juce::ValueTree& list, const std::string& current);
 
     /*  Whether the pointer may stand on this cue: it belongs to this list, and

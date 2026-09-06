@@ -1,0 +1,101 @@
+# wfg-log 1
+# fixture rounds — a shuffled ambience bed, pruned during the show and left at a
+# boundary, hand-checked against a live session record for record.
+#
+# WHAT THIS FIXTURE IS FOR. §3.6 lets a group shuffle its members, play a subset
+# of them, loop the result for ever, and have a member dropped from the run
+# without the show being edited. Every one of those is a DECISION the engine
+# takes rather than a fact the document states — and one of them is taken with a
+# random number generator.
+#
+# So each round is written down. `run.round` carries the seed the run is drawing
+# from and the members in the order they will play, and a replay reads that back
+# rather than drawing it: the generator is consulted on the night and never
+# again. That is the same guarantee a generated identifier has, applied to an
+# order.
+#
+# THE SEED IS THE DOCUMENT'S, seven, which is how a shuffled scene gets
+# rehearsed: the same order at every performance. Left at nought instead, a
+# fresh one is drawn when the run starts and written into the log — so the show
+# is different every night AND every night reproduces exactly.
+#
+# The group loops for ever, which an ambience bed does, and the members are
+# memos so a round takes nine ticks rather than a file's length.
+#
+# GO fires the group the pointer is on.
+A 0 0 cli go s:"RN000001"
+#
+# ROUND ONE, drawn before anything is spawned. The three members in an order
+# nobody wrote — with this seed, the order they happen to be written in.
+A 1 1 engine run.round s:"RN000001" i:7 s:"BED00003" s:"BED00004" s:"BED00005"
+A 1 2 engine run.spawn s:"RN000001" s:"BED00003" s:"RN000002"
+A 2 3 engine run.launch s:"RN000002"
+A 3 4 engine run.ended s:"RN000002"
+A 4 5 engine run.spawn s:"RN000001" s:"BED00004" s:"RN000003"
+A 5 6 engine run.launch s:"RN000003"
+A 6 7 engine run.ended s:"RN000003"
+A 7 8 engine run.spawn s:"RN000001" s:"BED00005" s:"RN000004"
+A 8 9 engine run.launch s:"RN000004"
+A 9 10 engine run.ended s:"RN000004"
+#
+# ROUND TWO, drawn on the tick the last member of round one finished — and
+# obeying §3.6's boundary constraint, which is the half of shuffling that is not
+# obvious: the first of a new round may not be the last of the one before it.
+# Round one ended on `BED00005`, so this one may not begin there, and it does
+# not. A fresh draw is otherwise perfectly entitled to start with the member
+# that has just finished, and hearing the same ambience twice running is exactly
+# what shuffling was asked for to avoid.
+A 10 11 engine run.round s:"RN000001" i:7 s:"BED00003" s:"BED00004" s:"BED00005"
+A 10 12 engine run.spawn s:"RN000001" s:"BED00003" s:"RN000005"
+#
+# AND HERE IS 22:40. One of the three is wrong tonight, and the operator drops
+# it — from this RUN, not from the show. `run.prune` is not an edit: the cue
+# stays in the group, enabled, and tomorrow it is back (§4.10 — the document
+# holds what somebody decided, and this is not that).
+#
+# It reaches the round already in progress, which is the whole point of asking:
+# `BED00004` was second in the order drawn a moment ago and it does not play.
+# The round jumps from `BED00003` straight to `BED00005`.
+A 11 13 cli run.prune s:"RN000001" s:"BED00004" s:"group"
+A 11 14 engine run.launch s:"RN000005"
+A 12 15 engine run.ended s:"RN000005"
+A 13 16 engine run.spawn s:"RN000001" s:"BED00005" s:"RN000006"
+A 14 17 engine run.launch s:"RN000006"
+A 15 18 engine run.ended s:"RN000006"
+#
+# ROUND THREE is drawn from what is left, which is two members — and with two,
+# the boundary constraint decides the order completely. That is correct rather
+# than degenerate: alternating is what somebody asking for two shuffled
+# ambiences means.
+A 16 19 engine run.round s:"RN000001" i:7 s:"BED00003" s:"BED00005"
+A 16 20 engine run.spawn s:"RN000001" s:"BED00003" s:"RN000007"
+A 17 21 engine run.launch s:"RN000007"
+A 18 22 engine run.ended s:"RN000007"
+A 19 23 engine run.spawn s:"RN000001" s:"BED00005" s:"RN000008"
+A 20 24 engine run.launch s:"RN000008"
+A 21 25 engine run.ended s:"RN000008"
+#
+# AND THE WAY OUT OF FOR EVER. `afterIteration` lets the scene reach a boundary
+# it was going to reach anyway and stop there — which is how an infinite loop is
+# left without a cut. `run.kill` would have taken it now, mid-cue, and that is
+# the emergency path rather than this one.
+#
+# IT COSTS ONE MORE ROUND HERE, and the reason is worth reading rather than
+# discovering. The scheduler decides in a tick hook, which runs BEFORE the
+# tick's commands are applied — so on tick 22 it had already decided to start
+# another round when this arrived in the same tick's queue. A press one tick
+# earlier, twenty milliseconds, would have been seen. It is the same one-tick
+# decision latency `/godot/engine/sequenceGapTicks` publishes, seen from the
+# other side, and it is the price of every decision being a logged command.
+A 22 26 cli run.stop s:"RN000001" s:"afterIteration"
+A 22 27 engine run.round s:"RN000001" i:7 s:"BED00003" s:"BED00005"
+A 22 28 engine run.spawn s:"RN000001" s:"BED00003" s:"RN000009"
+A 23 29 engine run.launch s:"RN000009"
+A 24 30 engine run.ended s:"RN000009"
+A 25 31 engine run.spawn s:"RN000001" s:"BED00005" s:"RN000010"
+A 26 32 engine run.launch s:"RN000010"
+A 27 33 engine run.ended s:"RN000010"
+#
+# That round finished, and no other began. The group has no footer, so it
+# reports done on the next tick.
+A 28 34 engine run.ended s:"RN000001"

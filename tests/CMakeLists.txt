@@ -303,6 +303,28 @@ add_test(NAME wfg.replay.chain.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/chain
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The tenth, and the one that says a RANDOM decision reproduces. A shuffled
+# group draws an order with a random number generator, at a moment nobody typed,
+# and a decision nobody wrote down is a session that cannot come back.
+#
+# So it is written down: `run.round` carries the seed and the members in the
+# order they will play, and this replay reads them back. The generator is never
+# consulted here at all - which is the assertion, and it is the same one the
+# generated identifiers have always had, applied to an order.
+#
+# It also carries the two things an operator does to a bed that is running: a
+# member pruned out of the round in progress without the show being edited, and
+# `afterIteration`, which leaves an infinite loop at a boundary rather than
+# cutting it.
+add_test(NAME wfg.replay.rounds.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/rounds.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/rounds
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.rounds.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/rounds.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/rounds
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a

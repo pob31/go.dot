@@ -37,6 +37,7 @@
 */
 
 #include <cstdint>
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -110,6 +111,30 @@ namespace wfg::cue
             group, where nothing is waited on individually because everything
             was scheduled at entry. */
         std::string awaiting;
+
+        /*  THE RUNS OF THE PHASE IN PROGRESS, in the order they appeared.
+
+            Not "the children of the group run", which is a different set and
+            the wrong one: a group collects its header's runs, its members' and
+            its footer's under one parent - that is what makes killing it take
+            the whole scene - and a phase that reasoned about all of them would
+            launch a header cue's run as if it were a member.
+
+            Nor "the children whose cue is in this phase", which is right until
+            a group LOOPS: round two plays the same cues as round one, so the
+            finished runs of round one would answer to that test and the round
+            would look over before it began.
+
+            So the runs are claimed once each, as they appear, by whichever
+            phase was running the cue they belong to. `claimed` is every one
+            this job has ever taken; `phaseRuns` is the ones this phase has. */
+        std::vector<std::string> phaseRuns;
+        std::vector<std::string> claimed;
+
+        bool hasClaimed (const std::string& runId) const
+        {
+            return std::find (claimed.begin(), claimed.end(), runId) != claimed.end();
+        }
 
         /*  The cues of the phase in progress, and how far along them it is.
 

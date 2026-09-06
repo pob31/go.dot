@@ -140,6 +140,18 @@ namespace wfg::doc
         return {};
     }
 
+    std::int32_t IdRegistry::drawSeed()
+    {
+        /*  The low 31 bits, so it is never negative: the parameter row says
+            0.., a client reads it, and a negative seed would be a value the
+            grammar refuses to write back. Zero is reserved for "no seed", so
+            a draw that lands there is nudged - one value out of two billion,
+            and worth not having a special case for later. */
+        const auto drawn = static_cast<std::int32_t> (nextRandom() & 0x7fffffffu);
+
+        return drawn == 0 ? 1 : drawn;
+    }
+
     bool IdRegistry::reserve (std::string_view id)
     {
         if (! Id::isValid (id))

@@ -2691,3 +2691,492 @@ TEST_CASE ("manual group: firing one by name is refused, because nobody would ad
                               { osc::Value::string (rig.groupId) }).applied == 1);
     REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
 }
+
+
+//==============================================================================
+/*  ROUNDS. §3.6 lets a group play its members several times over, in an order
+    it chooses, with some of them left out - and every one of those is a
+    decision the engine takes rather than something the document states. So each
+    one is written down: `run.round` carries the seed and the members in the
+    order they will play, and a replay reads that back rather than drawing it.
+
+    The rig is an automatic sequence of memos, which is the shortest thing that
+    has boundaries at all: a memo ends on the tick after it fires, so a round of
+    three takes a dozen ticks rather than a file's length.
+*/
+namespace
+{
+    struct RoundRig : Rig
+    {
+        RoundRig()
+        {
+            groupId = document.createCue (listId, 2, "group", "Ambience").id;
+            document.setAttribute ("/godot/cue/" + groupId + "/advance", "auto");
+
+            first = document.createCue (groupId, 0, "memo", "One").id;
+            second = document.createCue (groupId, 1, "memo", "Two").id;
+            third = document.createCue (groupId, 2, "memo", "Three").id;
+        }
+
+        void setGroup (const char* name, const std::string& value)
+        {
+            REQUIRE (document.setAttribute ("/godot/cue/" + groupId + "/" + name, value).ok);
+        }
+
+        std::string runOf (const std::string& cueId) const
+        {
+            for (const auto& run : runs.all())
+                if (run.cue == cueId)
+                    return run.id;
+
+            return {};
+        }
+
+        std::string groupRun() const
+        {
+            for (const auto& run : runs.all())
+                if (run.cue == groupId)
+                    return run.id;
+
+            return {};
+        }
+
+        /** Every round this run has drawn, in order, as the log recorded them. */
+        std::vector<std::vector<std::string>> rounds()
+        {
+            std::vector<std::vector<std::string>> out;
+
+            for (const auto& record : LogFile::parse (engine.log().contents()).records)
+            {
+                if (record.command != "run.round")
+                    continue;
+
+                std::vector<std::string> round;
+
+                for (std::size_t i = 2; i < record.args.size(); ++i)
+                    round.push_back (record.args[i].getString());
+
+                out.push_back (std::move (round));
+            }
+
+            return out;
+        }
+
+        /** The cues that have had a run, in the order they were created. */
+        std::vector<std::string> played() const
+        {
+            std::vector<std::string> out;
+
+            for (const auto& run : runs.all())
+                if (run.cue != groupId && ! run.cue.empty())
+                    out.push_back (run.cue);
+
+            return out;
+        }
+
+        void goAndSettle (int ticks = 120)
+        {
+            REQUIRE (submitAndTick ("go").applied == 1);
+
+            for (int n = 0; n < ticks; ++n)
+                tickOnce();
+        }
+
+        std::string groupId, first, second, third;
+    };
+}
+
+TEST_CASE ("rounds: a group with no loops plays its members once, and says which")
+{
+    /*  The ordinary group, and the round is still materialised. It costs one
+        record and it is what makes every other case here readable: the order a
+        group is going to play in is written down before it plays, whether or
+        not anything chose it. */
+    RoundRig rig;
+    rig.setStandby (rig.groupId);
+    rig.goAndSettle();
+
+    const auto drawn = rig.rounds();
+    REQUIRE (drawn.size() == 1u);
+    CHECK (drawn[0] == std::vector<std::string> { rig.first, rig.second, rig.third });
+
+    CHECK (rig.played() == std::vector<std::string> { rig.first, rig.second, rig.third });
+    CHECK (rig.runs.find (rig.groupRun())->isFinished());
+}
+
+TEST_CASE ("rounds: loops plays the members again, and the count is of rounds")
+{
+    RoundRig rig;
+    rig.setGroup ("loops", "3");
+    rig.setStandby (rig.groupId);
+    rig.goAndSettle (200);
+
+    const auto drawn = rig.rounds();
+    REQUIRE (drawn.size() == 3u);
+
+    for (const auto& round : drawn)
+        CHECK (round == std::vector<std::string> { rig.first, rig.second, rig.third });
+
+    //  Nine cues, not three: the count is of ROUNDS (§3.6).
+    CHECK (rig.played().size() == 9u);
+
+    const auto* run = rig.runs.find (rig.groupRun());
+    REQUIRE (run != nullptr);
+    CHECK (run->iteration == 3);
+    CHECK (run->iterations == 3);
+    CHECK (run->isFinished());
+}
+
+TEST_CASE ("rounds: an infinite loop keeps going, and a boundary stop leaves it")
+{
+    /*  The ambience bed. Zero loops is for ever, and for ever has to be
+        LEAVABLE without a cut - which is what the two graceful verbs are for:
+        the scene reaches a boundary it was going to reach anyway and stops
+        there. */
+    RoundRig rig;
+    rig.setGroup ("loops", "0");
+    rig.setStandby (rig.groupId);
+    rig.goAndSettle (200);
+
+    const auto run = rig.groupRun();
+    REQUIRE (! run.empty());
+    CHECK_FALSE (rig.runs.find (run)->isFinished());
+    CHECK (rig.rounds().size() > 3u);
+
+    const auto roundsBefore = rig.rounds().size();
+
+    CHECK (rig.submitAndTick ("run.stop", { osc::Value::string (run),
+                                            osc::Value::string ("afterIteration") }).applied >= 1);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (run)->isFinished(); }));
+
+    /*  It finished the round it was in and did not start another: the whole
+        difference between this and `run.kill`, which would have cut it. */
+    CHECK (rig.rounds().size() == roundsBefore);
+}
+
+TEST_CASE ("rounds: afterMember stops at the end of the one playing, not at the round's")
+{
+    RoundRig rig;
+    rig.setGroup ("loops", "0");
+    rig.setStandby (rig.groupId);
+
+    REQUIRE (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    const auto run = rig.groupRun();
+    const auto playedBefore = rig.played().size();
+
+    CHECK (rig.submitAndTick ("run.stop", { osc::Value::string (run),
+                                            osc::Value::string ("afterMember") }).applied >= 1);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (run)->isFinished(); }));
+
+    /*  At most one more member than were already going: it stopped at the near
+        boundary rather than finishing the round. */
+    CHECK (rig.played().size() <= playedBefore + 1);
+}
+
+TEST_CASE ("rounds: shuffle draws a different order, and never repeats across a boundary")
+{
+    /*  §3.6's boundary constraint, which is the half of shuffling that is not
+        obvious: a fresh draw is allowed to start with the member that just
+        finished, and hearing the same ambience twice running is exactly what
+        somebody asked for shuffling to avoid. */
+    RoundRig rig;
+    rig.setGroup ("selection", "shuffle");
+    rig.setGroup ("loops", "6");
+    rig.setStandby (rig.groupId);
+    rig.goAndSettle (400);
+
+    const auto drawn = rig.rounds();
+    REQUIRE (drawn.size() == 6u);
+
+    for (const auto& round : drawn)
+    {
+        //  Every member, once each: shuffling reorders, it does not select.
+        auto sorted = round;
+        std::sort (sorted.begin(), sorted.end());
+
+        auto members = std::vector<std::string> { rig.first, rig.second, rig.third };
+        std::sort (members.begin(), members.end());
+
+        CHECK (sorted == members);
+    }
+
+    for (std::size_t i = 1; i < drawn.size(); ++i)
+        CHECK (drawn[i].front() != drawn[i - 1].back());
+
+    //  And it is a shuffle rather than the same order six times.
+    const auto allSame = std::all_of (drawn.begin(), drawn.end(),
+                                      [&drawn] (const std::vector<std::string>& round)
+                                      {
+                                          return round == drawn.front();
+                                      });
+    CHECK_FALSE (allSame);
+}
+
+TEST_CASE ("rounds: a seeded shuffle draws the SAME orders on every platform")
+{
+    /*  A GOLDEN, and it is not pedantry. The shuffle is written out in the
+        Runner - SplitMix64 and Fisher-Yates, eight lines - rather than reached
+        for in <random>, because that header's ENGINES are specified down to the
+        bit and its DISTRIBUTIONS are not: `std::shuffle` with one seed gives
+        different orders on different standard libraries.
+
+        Which would mean a show rehearsed on this machine playing a different
+        order in the theatre, and a fixture drawn here failing on the CI
+        runners. This case is what would notice - it runs on three platforms and
+        two locales, and the numbers below came off one of them. */
+    RoundRig rig;
+    rig.setGroup ("selection", "shuffle");
+    rig.setGroup ("loops", "5");
+    rig.setGroup ("seed", "7");
+    rig.setStandby (rig.groupId);
+    rig.goAndSettle (400);
+
+    std::vector<std::vector<int>> byPosition;
+
+    for (const auto& round : rig.rounds())
+    {
+        std::vector<int> positions;
+
+        for (const auto& cueId : round)
+            positions.push_back (cueId == rig.first ? 0 : cueId == rig.second ? 1 : 2);
+
+        byPosition.push_back (std::move (positions));
+    }
+
+    const std::vector<std::vector<int>> expected { { 0, 1, 2 }, { 0, 1, 2 }, { 0, 2, 1 },
+                                                   { 2, 1, 0 }, { 2, 1, 0 } };
+    CHECK (byPosition == expected);
+}
+
+TEST_CASE ("rounds: a seed makes a shuffled group play the same order every night")
+{
+    /*  Which is how a shuffled scene gets rehearsed. Two runs of the same show
+        with the same seed draw the same rounds; the seed is what a designer
+        writes down after a night they liked. */
+    const auto ordersFor = [] (const std::string& seed)
+    {
+        RoundRig rig;
+        rig.setGroup ("selection", "shuffle");
+        rig.setGroup ("loops", "4");
+        rig.setGroup ("seed", seed);
+        rig.setStandby (rig.groupId);
+        rig.goAndSettle (300);
+
+        //  By POSITION rather than by identifier: two rigs have different
+        //  documents, so the cues are the same three members with other names.
+        std::vector<std::vector<int>> out;
+
+        for (const auto& round : rig.rounds())
+        {
+            std::vector<int> byIndex;
+
+            for (const auto& cueId : round)
+                byIndex.push_back (cueId == rig.first ? 0 : cueId == rig.second ? 1 : 2);
+
+            out.push_back (std::move (byIndex));
+        }
+
+        return out;
+    };
+
+    CHECK (ordersFor ("12345") == ordersFor ("12345"));
+    CHECK (ordersFor ("12345") != ordersFor ("999"));
+}
+
+TEST_CASE ("rounds: play N of M plays N, and a different N each round when shuffled")
+{
+    RoundRig rig;
+    rig.setGroup ("selection", "shuffle");
+    rig.setGroup ("play", "2");
+    rig.setGroup ("loops", "5");
+    rig.setStandby (rig.groupId);
+    rig.goAndSettle (300);
+
+    const auto drawn = rig.rounds();
+    REQUIRE (drawn.size() == 5u);
+
+    for (const auto& round : drawn)
+        CHECK (round.size() == 2u);
+
+    CHECK (rig.played().size() == 10u);
+}
+
+TEST_CASE ("rounds: a pruned member sits out the round, or the whole run")
+{
+    /*  What an operator does at 22:40 (§3.6). It is not an edit: the show is
+        untouched, and tomorrow the cue is back - which is why it lives on the
+        run and evaporates with it. */
+    RoundRig rig;
+    rig.setGroup ("loops", "3");
+    rig.setStandby (rig.groupId);
+
+    REQUIRE (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.groupRun().empty(); }));
+
+    const auto run = rig.groupRun();
+
+    CHECK (rig.submitAndTick ("run.prune", { osc::Value::string (run),
+                                             osc::Value::string (rig.second),
+                                             osc::Value::string ("group") }).applied >= 1);
+
+    const auto timesPlayed = [&rig] (const std::string& cueId)
+    {
+        const auto all = rig.played();
+        return std::count (all.begin(), all.end(), cueId);
+    };
+
+    const auto atPrune = timesPlayed (rig.second);
+
+    for (int n = 0; n < 250; ++n)
+        rig.tickOnce();
+
+    //  It never played again, while its neighbours played their three rounds.
+    CHECK (timesPlayed (rig.second) == atPrune);
+    CHECK (timesPlayed (rig.first) == 3);
+    CHECK (timesPlayed (rig.third) == 3);
+
+    //  And the document did not change: the cue is still in the group, enabled.
+    CHECK (rig.document.getAttribute ("/godot/cue/" + rig.second + "/enabled") == "true");
+    CHECK (rig.document.findById (rig.second).isValid());
+}
+
+TEST_CASE ("rounds: pruning every member completes the group rather than spinning")
+{
+    RoundRig rig;
+    rig.setGroup ("loops", "0");
+    rig.setStandby (rig.groupId);
+
+    REQUIRE (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.groupRun().empty(); }));
+
+    const auto run = rig.groupRun();
+
+    for (const auto& cueId : { rig.first, rig.second, rig.third })
+        CHECK (rig.submitAndTick ("run.prune", { osc::Value::string (run),
+                                                 osc::Value::string (cueId),
+                                                 osc::Value::string ("group") }).applied >= 1);
+
+    /*  §3.6: an emptied round completes the group. An infinite loop with
+        nothing left to play would otherwise draw an empty round for ever. */
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (run)->isFinished(); }));
+}
+
+TEST_CASE ("rounds: an unpruned member is back from the NEXT round, not this one")
+{
+    RoundRig rig;
+    rig.setGroup ("loops", "4");
+    rig.setStandby (rig.groupId);
+
+    REQUIRE (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.groupRun().empty(); }));
+
+    const auto run = rig.groupRun();
+
+    CHECK (rig.submitAndTick ("run.prune", { osc::Value::string (run),
+                                             osc::Value::string (rig.third),
+                                             osc::Value::string ("group") }).applied >= 1);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.rounds().size() >= 2u; }));
+
+    const auto timesPlayed = [&rig] (const std::string& cueId)
+    {
+        const auto all = rig.played();
+        return std::count (all.begin(), all.end(), cueId);
+    };
+
+    //  Two rounds drawn and it has played in neither.
+    CHECK (timesPlayed (rig.third) == 0);
+
+    CHECK (rig.submitAndTick ("run.unprune", { osc::Value::string (run),
+                                               osc::Value::string (rig.third) }).applied >= 1);
+
+    for (int n = 0; n < 250; ++n)
+        rig.tickOnce();
+
+    /*  Back, and from the NEXT round: four rounds in all, so it plays in fewer
+        than four of them - putting it into an order already drawn, and possibly
+        already passed, would be a cue arriving somewhere nobody chose. */
+    CHECK (timesPlayed (rig.third) > 0);
+    CHECK (timesPlayed (rig.third) < 4);
+    CHECK (timesPlayed (rig.first) == 4);
+}
+
+TEST_CASE ("rounds: a manual group loops, and the pointer wraps rather than leaving")
+{
+    /*  The half of looping that belongs to the operator. §3.6 makes them the
+        parent of a manual group, so the group only advances when they press GO
+        - and if the pointer left on the last member of round one, their next
+        press would fire whatever follows a group that has two thirds of itself
+        still to play.
+
+        The document cannot answer this on its own: it says the group loops
+        three times, and only the RUN knows which round it is on. This is the
+        one question the cursor asks about what is running. */
+    ManualRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.groupId + "/loops", "2").ok);
+
+    rig.setStandby (rig.first);
+
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+    CHECK (rig.standby() == rig.second);
+
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+    CHECK (rig.standby() == rig.third);
+
+    //  The last member of round one, and the pointer WRAPS instead of leaving.
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+    CHECK (rig.standby() == rig.first);
+
+    /*  Round two, which only begins once round one's members are done - so the
+        presses are spaced the way an operator's are, waiting for the group to
+        get there rather than racing it. */
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto* run = rig.runs.find (rig.runOf (rig.groupId));
+        return run != nullptr && run->iteration == 2;
+    }));
+
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+    CHECK (rig.standby() == rig.second);
+
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+    CHECK (rig.standby() == rig.third);
+
+    //  And now it leaves: there is no round three.
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+
+    CHECK (rig.standby() != rig.first);
+    CHECK (rig.standby() != rig.second);
+    CHECK (rig.standby() != rig.third);
+}
+
+TEST_CASE ("rounds: a manual group ignores shuffle, because the operator is choosing")
+{
+    /*  The pointer walks the list in document order and cannot be made to jump
+        about (§3.5), so a shuffled manual group would have the group finishing
+        at whichever member the draw put last - at a moment the operator has no
+        way to see coming. Ignored rather than refused at load, because the
+        setting means something the moment somebody makes the group automatic. */
+    ManualRig rig;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.groupId + "/selection",
+                                        "shuffle").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.groupId + "/play", "2").ok);
+
+    rig.setStandby (rig.first);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+    std::vector<std::string> round;
+
+    for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+        if (record.command == "run.round")
+            for (std::size_t i = 2; i < record.args.size(); ++i)
+                round.push_back (record.args[i].getString());
+
+    CHECK (round == std::vector<std::string> { rig.first, rig.second, rig.third });
+}

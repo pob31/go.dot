@@ -128,6 +128,72 @@ namespace wfg::cue
                         } });
 
         //----------------------------------------------------------------------
+        /*  A ROUND, MATERIALISED. §3.6 lets a group shuffle its members, play a
+            subset of them and loop the result, and every one of those is a
+            DECISION the engine takes rather than a fact the document states -
+            taken with a random number generator, at a moment nobody typed.
+
+            So it is written down. The record carries the seed the run is
+            drawing from and the members in the order they will play, and a
+            replay reads the round back rather than drawing one: the generator
+            is consulted on the night and never again. That is the same
+            guarantee a generated identifier has, applied to an order.
+
+            A ROUND MAY BE EMPTY, which is why the tail is optional: every
+            member disabled or pruned away is a group with nothing left to play,
+            and §3.6 says it completes rather than spinning. */
+        registry.add ({ "run.round",
+                        "A group drew a round: the seed it is drawing from, and the members in"
+                        " the order they will play.",
+                        { { "run", 's', false }, { "seed", 'i', false },
+                          { "cue", 's', true, true } },
+                        false,
+                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            auto* run = runs.find (args[0].getString());
+
+                            if (run == nullptr)
+                                return Outcome::rejected (reason::unknownId);
+
+                            run->seed = args[1].getInt32();
+                            run->round.clear();
+
+                            /*  PRUNED MEMBERS ARE LEFT OUT HERE TOO, and not
+                                only where the round was drawn.
+
+                                The two can arrive in either order within one
+                                tick. The scheduler draws the round in the hook
+                                and the operator's prune was submitted before
+                                that hook ran, so the queue holds the prune
+                                first - it takes the member out of a round that
+                                does not exist yet, and this record then puts it
+                                back. An operator who asked at 22:40:07 would
+                                have watched the cue they had just dropped play
+                                anyway, once, for reasons nothing on their
+                                screen could explain.
+
+                                Filtering in both places makes the result the
+                                same whichever order they land in, which is what
+                                a replay needs as much as the operator does. */
+                            for (std::size_t i = 2; i < args.size(); ++i)
+                            {
+                                const auto& cueId = args[i].getString();
+
+                                if (std::find (run->pruned.begin(), run->pruned.end(), cueId)
+                                      == run->pruned.end())
+                                    run->round.push_back (cueId);
+                            }
+
+                            /*  COUNTED HERE, because this is the one place a
+                                round begins - live and on replay both. A
+                                counter kept by the scheduler would be right
+                                during a show and zero through every replay,
+                                since a replay runs no hooks. */
+                            ++run->iteration;
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "run.done",
                         "A post-wait elapsed, so the run now reports done to whatever was waiting"
                         " on it.",
@@ -208,6 +274,141 @@ namespace wfg::cue
                                 3 blocks late, and the number is only worth
                                 publishing if it cannot be talked down. */
                             run->late = std::max (run->late, blocks);
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  PRUNING IS WHAT AN OPERATOR DOES AT 22:40, and it is deliberately
+            not an edit.
+
+            §3.6: a member can be dropped from the round in progress or from
+            every round of this run, and either way the SHOW is untouched -
+            tomorrow the cue is back. That is the difference between a note
+            taken during a performance and a decision (§4.10), and it is why
+            this lives on the run rather than on the cue: it evaporates when the
+            run does, which is the behaviour somebody wants at the moment they
+            reach for it and would have to remember to undo otherwise.
+
+            `round` and `group` differ only in how long they last. A member
+            pruned for the round is back in the next one; a member pruned for
+            the group is gone for as long as this run is. Neither can reach a
+            member already playing - it is a decision about what comes next. */
+        registry.add ({ "run.prune",
+                        "Drops a member from this run: for the round in progress, or for the"
+                        " whole of it. The show is not edited.",
+                        { { "run", 's', false }, { "cue", 's', false },
+                          { "scope", 's', true } },
+                        true,
+                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            auto* run = runs.find (args[0].getString());
+
+                            if (run == nullptr)
+                                return Outcome::rejected (reason::unknownId);
+
+                            const auto& cueId = args[1].getString();
+                            const auto scope = args.size() > 2 ? args[2].getString()
+                                                               : std::string { "round" };
+
+                            if (scope != "round" && scope != "group")
+                                return Outcome::rejected (reason::badValue);
+
+                            /*  Out of the round in progress either way, so that
+                                a member not yet reached is not reached. */
+                            run->round.erase (std::remove (run->round.begin(), run->round.end(),
+                                                           cueId),
+                                              run->round.end());
+
+                            if (scope == "group"
+                                  && std::find (run->pruned.begin(), run->pruned.end(), cueId)
+                                       == run->pruned.end())
+                                run->pruned.push_back (cueId);
+
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "run.unprune",
+                        "Puts a pruned member back, from the next round on. The round in progress"
+                        " is not redrawn.",
+                        { { "run", 's', false }, { "cue", 's', false } },
+                        true,
+                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            auto* run = runs.find (args[0].getString());
+
+                            if (run == nullptr)
+                                return Outcome::rejected (reason::unknownId);
+
+                            const auto& cueId = args[1].getString();
+
+                            /*  FROM THE NEXT ROUND, and the round in progress is
+                                left alone. Putting a member back into an order
+                                that has already been drawn - and possibly
+                                already been passed - would be a cue arriving
+                                somewhere nobody chose. The next round is drawn
+                                from the members again and has it. */
+                            run->pruned.erase (std::remove (run->pruned.begin(),
+                                                            run->pruned.end(), cueId),
+                                               run->pruned.end());
+
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  A STOP AIMED AT A RUN, which is §3.8's "may target a specific run
+            pointer" - and the only way to say "that one" when a cue has several
+            runs live at once, which decision 3 made possible for osc, midi and
+            memo cues.
+
+            THREE VERBS AND NOT FOUR. `hard` is the graceful stop §4.4 draws:
+            the members come down and the FOOTER RUNS, because that is where a
+            scene gives back what it was holding. `afterMember` and
+            `afterIteration` are the two boundaries a group was going to reach
+            anyway, which is how an infinite loop is left without a cut.
+
+            `fade` is deliberately absent. A fade needs a run of its own to
+            report through - it takes time, and something has to say when it
+            arrived - and a command has no cue and so no run. A fade-and-stop is
+            a STOP CUE, where the duration and the curve are authored values
+            somebody decided rather than arguments typed at the moment of
+            panic. */
+        registry.add ({ "run.stop",
+                        "Stops one run: now, at the end of the member playing, or at the end of"
+                        " this round. The footer runs either way.",
+                        { { "run", 's', false }, { "verb", 's', true } },
+                        true,
+                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            auto* run = runs.find (args[0].getString());
+
+                            if (run == nullptr)
+                                return Outcome::rejected (reason::unknownId);
+
+                            const auto verb = args.size() > 1 ? args[1].getString()
+                                                              : std::string { "hard" };
+
+                            if (verb != "hard" && verb != "afterMember"
+                                  && verb != "afterIteration")
+                                return Outcome::rejected (reason::badValue);
+
+                            if (run->isFinished())
+                                return Outcome::ok (args);
+
+                            /*  A BOUNDARY IS ONLY A BOUNDARY IF SOMETHING IS
+                                COUNTING. A group has members and rounds to
+                                reach the end of; a media cue has neither, so
+                                asking it to stop after its member is asking for
+                                a boundary that does not exist - and the honest
+                                answer is the stop that was asked for, now,
+                                rather than a request quietly ignored. */
+                            if (verb != "hard" && run->kind == "group")
+                            {
+                                run->stopAfter = verb == "afterMember" ? "member" : "iteration";
+                                return Outcome::ok (args);
+                            }
+
+                            run->state = runState::stopping;
                             return Outcome::ok (args);
                         } });
 

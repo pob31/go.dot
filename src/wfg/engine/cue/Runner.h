@@ -229,6 +229,13 @@ namespace wfg::cue
 
         /** Null is legal and means a show with no audio side. */
         void setPlayer (Player* player) noexcept { audio = player; }
+
+        /*  The runs, for the one caller outside the Runner that has to ask
+            about them: `go`, whose cursor has to know whether a manual group
+            still has rounds to play before it lets the pointer out of it.
+            Const, because the table's one writer is the command handler and
+            that is the whole point of the arrangement. */
+        const RunTable& runTable() const noexcept { return runs; }
         Player* player() const noexcept          { return audio; }
 
         /** How many samples make a tick. Set once, from the tick schedule. */
@@ -456,11 +463,37 @@ namespace wfg::cue
         bool beginPhase (Engine& engine, GroupJob& job, const juce::ValueTree& group,
                          const char* phase);
 
+        /*  The end of a round: starts the next one, or moves the group on.
+
+            A round ending is not the group ending, which is what `loops` buys -
+            and the count is of ROUNDS rather than of playbacks (§3.6), so three
+            loops of "two of five" is six cues. Only the members loop; a header
+            and a footer are preparation and release, and running either twice
+            would undo something that was only done once. */
+        void endOfRound (Engine& engine, GroupJob& job, const juce::ValueTree& group);
+
         /** Moves a group on to its next phase, or ends it. */
         void finishPhase (Engine& engine, GroupJob& job, const juce::ValueTree& group);
 
         /** The cues a group runs, in order: its enabled children. */
         std::vector<std::string> membersOf (const juce::ValueTree& group) const;
+
+        /*  Draws this group run's next round and REPORTS IT, returning what it
+            drew so the caller can schedule against it at once.
+
+            The report is the point. A shuffled round is a decision taken with a
+            random number generator, and a decision nobody wrote down is a
+            session that cannot reproduce - so `run.round` carries the seed and
+            every identifier in the order they were drawn, and a replay reads
+            the round back rather than drawing one. The generator is consulted
+            on the night and never again.
+
+            Empty when there is nothing left to play: every member disabled or
+            pruned away, or a group with none. §3.6 says an emptied round
+            completes the group rather than spinning. */
+        std::vector<std::string> drawRound (Engine& engine, const juce::ValueTree& group,
+                                            const std::string& runId);
+
         void enforceStops();
 
         void launchIfDue (Engine& engine, std::int64_t tick);

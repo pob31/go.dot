@@ -57,6 +57,26 @@ reloads and reparses the megabyte. That is the price of testing against somethin
 it is recorded here so that the next person to wonder where the three seconds went does not
 have to bisect for it.
 
+## `bundles/rounds/` and `logs/rounds.wfglog`
+
+A shuffled ambience bed, pruned during the show and left at a boundary. The engine draws each
+round with a random number generator at a moment nobody typed, so the round is **written
+down** — `run.round` carries the seed the run is drawing from and the members in the order
+they will play — and this replay reads it back. The generator is not consulted at all, which
+is the assertion.
+
+The seed is the document's, so the bed plays the same order at every performance, which is how
+a shuffled scene gets rehearsed. Left at nought, a fresh one is drawn when the run starts and
+written into the log: different every night, and every night reproduces.
+
+It also carries the two things an operator does to a bed that is already running. A member
+**pruned** out of the round in progress, which is not an edit — the cue stays in the group,
+enabled, and tomorrow it is back. And **`afterIteration`**, which leaves an infinite loop at a
+boundary it was going to reach anyway rather than cutting it; the file says out loud why that
+costs one more round when the press lands in the same tick as the boundary.
+
+Captured from a live session and rewritten by hand, then replayed to confirm the rewrite.
+
 ## `bundles/chain/` and `logs/auto-chain.wfglog`
 
 One press, and a whole scene runs itself: five cues, a nested timeline group and a footer. An

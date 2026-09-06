@@ -44,20 +44,26 @@ A 2 2 engine run.launch s:"RN000003"
 A 3 3 engine run.ended s:"RN000003"
 #
 # Tick 4 is the boundary the header's end buys: the members phase begins, and
-# it begins at the member the pointer is inside of rather than at member one.
-# That member is the inner GROUP, and its run already exists — GO made it — so
-# it is adopted rather than spawned again. Nothing is submitted, which is why
-# there is no record for that tick.
+# the first thing it does is MATERIALISE THE ROUND — the members, in the order
+# they will play. Sequential and unpruned here, so it is simply the two of them
+# in the order they are written, and the seed reads zero because nothing was
+# drawn: a group that does not shuffle draws no random number, and an unused one
+# in every group's log is a number somebody will one day try to interpret.
+A 4 4 engine run.round s:"RN000001" i:0 s:"CCCC5555" s:"FFFF8888"
 #
-# Then the inner group is launched by its parent's job, which is the moment
-# §3.6 puts it: after the header, and not before.
-A 5 4 engine run.launch s:"RN000002"
+# The round begins at the member the pointer is inside of rather than at member
+# one. That member is the inner GROUP, and its run already exists — GO made it —
+# so it is adopted rather than spawned again, and there is no spawn record for
+# it. It is launched instead, by its parent's job, which is the moment §3.6 puts
+# it: after the header, and not before.
+A 5 5 engine run.launch s:"RN000002"
 #
-# The inner group has no header, so its own members begin at once — at the cue
-# the pointer was actually on.
-A 6 5 engine run.spawn s:"RN000002" s:"DDDD6666" s:"RN000004"
-A 7 6 engine run.launch s:"RN000004"
-A 8 7 engine run.ended s:"RN000004"
+# The inner group then materialises a round of its own and begins it at once, at
+# the cue the pointer was actually on. It has no header to run first.
+A 6 6 engine run.round s:"RN000002" i:0 s:"DDDD6666" s:"EEEE7777"
+A 6 7 engine run.spawn s:"RN000002" s:"DDDD6666" s:"RN000004"
+A 7 8 engine run.launch s:"RN000004"
+A 8 9 engine run.ended s:"RN000004"
 #
 # AND NOW NOTHING HAPPENS, for twelve ticks, which is the whole of what a manual
 # group is. The member is done and the group is not: §3.6 says a member starts
@@ -68,33 +74,33 @@ A 8 7 engine run.ended s:"RN000004"
 # GO TWO fires the second member of the inner group. No group is created — both
 # are already running — so the record carries one identifier, the member's own.
 # The pointer had already moved to this cue on the previous press.
-A 20 8 cli go s:"RN000005"
-A 21 9 engine run.launch s:"RN000005"
-A 22 10 engine run.ended s:"RN000005"
+A 20 10 cli go s:"RN000005"
+A 21 11 engine run.launch s:"RN000005"
+A 22 12 engine run.ended s:"RN000005"
 #
 # That was the LAST member of the inner group, so the inner group is over: its
 # last member was started and every child of it has finished, which are two
 # different questions and both have to be asked. It has no footer, so it reports
 # done straight away.
-A 23 11 engine run.ended s:"RN000002"
+A 23 13 engine run.ended s:"RN000002"
 #
 # The pointer left the inner group on the press that fired its last member —
 # decision M, 2026-09-06: no GO is ever spent on leaving — so it is now on
 # `FFFF8888`, the outer group's second member.
 #
 # GO THREE fires it, as a child of the outer group's run.
-A 30 12 cli go s:"RN000006"
-A 31 13 engine run.launch s:"RN000006"
-A 32 14 engine run.ended s:"RN000006"
+A 30 14 cli go s:"RN000006"
+A 31 15 engine run.launch s:"RN000006"
+A 32 16 engine run.ended s:"RN000006"
 #
 # AND THE FOOTER, which is the point of having one: the outer group's last
 # member is done, so its release runs — and the group is NOT done until that
 # release has finished. §3.6 makes the footer block for exactly this reason, so
 # that a following scene reallocating the same channels waits for them to be
 # given back rather than racing it.
-A 33 15 engine run.spawn s:"RN000001" s:"FTR91000" s:"RN000007"
-A 34 16 engine run.launch s:"RN000007"
-A 35 17 engine run.ended s:"RN000007"
+A 33 17 engine run.spawn s:"RN000001" s:"FTR91000" s:"RN000007"
+A 34 18 engine run.launch s:"RN000007"
+A 35 19 engine run.ended s:"RN000007"
 #
 # Only now is the scene over.
-A 36 18 engine run.ended s:"RN000001"
+A 36 20 engine run.ended s:"RN000001"

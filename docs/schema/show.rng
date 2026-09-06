@@ -162,6 +162,14 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="loops">
+          <a:documentation>How many ROUNDS this group plays before it is done. Rounds, not playbacks: with play set, a round is a subset of the members, and three loops of two-of-five is six cues rather than three. Zero means for ever, which is what an ambience bed is, and is left by a stop verb, an advance or run.stop rather than by counting.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="mode">
           <a:documentation>Whether members are scheduled at entry or run one after another.</a:documentation>
           <choice>
@@ -189,6 +197,14 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="play">
+          <a:documentation>How many members a round plays, out of however many there are (PRD 3.6 play N of M). Zero means all of them, which is the ordinary group. Larger than the membership is the same as all of them rather than a refusal: a designer deleting a member should not have their show stop loading.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="postWait">
           <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
           <data type="double">
@@ -202,6 +218,23 @@
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="seed">
+          <a:documentation>The seed a shuffled group draws its rounds from. Zero means a fresh one per run, drawn when the run starts and written into its log - so a shuffled show is different every night AND every night reproduces exactly. A seed set here is the other thing somebody wants: the same order at every performance, which is how a shuffled scene gets rehearsed.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="selection">
+          <a:documentation>How the members of a round are ordered. sequential plays them as they are written; shuffle draws a fresh order for each round, redrawing until the first of the new round differs from the last of the one before it - so a member is never heard twice running across a boundary. With two members that constraint decides the order completely, which is correct rather than a degenerate case: alternating is what a designer asking for two shuffled ambiences means.</a:documentation>
+          <choice>
+            <value>sequential</value>
+            <value>shuffle</value>
+          </choice>
         </attribute>
       </optional>
       <zeroOrMore>
@@ -530,10 +563,12 @@
       </optional>
       <optional>
         <attribute name="verb">
-          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident.</a:documentation>
+          <a:documentation>How it stops. Hard stops now and takes Tracktion&apos;s own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for.</a:documentation>
           <choice>
             <value>hard</value>
             <value>fade</value>
+            <value>afterMember</value>
+            <value>afterIteration</value>
           </choice>
         </attribute>
       </optional>

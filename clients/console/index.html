@@ -625,6 +625,19 @@ function runRow(id, depth, out) {
   const phase = tree.run(id, "phase", "");
   if (phase) bits.push(phase);
 
+  /*  WHICH ROUND, which is the number a designer watching a shuffled bed
+      actually wants. Shown only when there is more than one to be on: a group
+      that plays its members once is not counting anything. */
+  const iteration = Number(tree.run(id, "iteration", 0));
+  const iterations = Number(tree.run(id, "iterations", 1));
+
+  if (iteration > 0 && (iterations === 0 || iterations > 1)) {
+    bits.push("round " + iteration + (iterations === 0 ? "" : " of " + iterations));
+  }
+
+  const pruned = tree.run(id, "pruned", "");
+  if (pruned) bits.push(pruned.trim().split(/\s+/).length + " pruned");
+
   const late = Number(tree.run(id, "late", 0));
   if (Number.isFinite(late) && late > 0) bits.push("late " + late);
 

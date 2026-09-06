@@ -500,6 +500,17 @@ namespace wfg::cue
 
             run->state = runState::playing;
 
+            /*  HOW MANY ROUNDS, copied now and not read at each boundary.
+
+                §3.6 says a mid-run toggle of `mode` or `advance` takes effect
+                at the next member boundary, which is why those two are read
+                from the document every tick - but a loop COUNT is not a
+                behaviour, it is how long this run is going to be. Changing it
+                under a running group would move a finish line the operator has
+                already been told about, so it goes with the waits: copied at
+                the start, and the edit reaches the next run. */
+            run->iterations = static_cast<int> (numberOf (cue, "loops"));
+
             /*  ONE JOB PER RUN, and the guard is not defensive tidiness.
 
                 A group run reaches here by two roads - `fireStandby`, for the
@@ -763,6 +774,41 @@ namespace wfg::cue
     void Runner::fireStop (const juce::ValueTree& cue, const std::string& runId)
     {
         const auto verb = textOf (cue, "verb");
+
+        /*  TWO OF THE VERBS ASK FOR A BOUNDARY RATHER THAN FOR SILENCE.
+
+            §3.6's infinite loop has to be leavable, and cutting it off mid-cue
+            is exactly what an ambience bed exists not to do - so `afterMember`
+            and `afterIteration` let the scene reach the end of the member
+            playing now, or the end of this round, and stop there. The footer
+            still runs, because leaving is leaving.
+
+            Only a group has boundaries. Against anything else these are a hard
+            stop, because there is nothing to wait for and a request quietly
+            ignored is worse than one honoured plainly. */
+        if (verb == "afterMember" || verb == "afterIteration")
+        {
+            const auto* target = runs.liveRunOf (textOf (cue, "target"));
+
+            if (target != nullptr)
+                if (auto* run = runs.find (target->id))
+                {
+                    if (run->kind == "group")
+                    {
+                        run->stopAfter = verb == "afterMember" ? "member" : "iteration";
+                        finishing.push_back (runId);
+                        return;
+                    }
+
+                    run->state = runState::stopping;
+                }
+
+            /*  The stop cue's own run is over either way: it asked, and the
+                asking is all it does. Ended on the next tick like a memo,
+                because that is when a report is allowed to leave. */
+            finishing.push_back (runId);
+            return;
+        }
 
         /*  A HARD STOP IS A FADE OF NO LENGTH THAT ALSO STOPS. Saying it that
             way rather than writing a second code path means the two verbs
@@ -1501,6 +1547,149 @@ namespace wfg::cue
         fireNow (engine, tick, runId);
     }
 
+    namespace
+    {
+        constexpr std::uint64_t goldenGamma = 0x9e3779b97f4a7c15ull;
+
+        /*  SplitMix64, which is four lines and is what a shuffle seed wants: it
+            turns a small integer into a well-spread stream, so a seed of 1 and
+            a seed of 2 give unrelated orders.
+
+            WRITTEN OUT RATHER THAN REACHED FOR. <random>'s engines are
+            specified down to the bit and its DISTRIBUTIONS are not, and neither
+            is `std::shuffle` - the same seed gives different orders on
+            different standard libraries. A fixture drawn on this machine has to
+            reproduce on the CI runners, so the order has to be a property of
+            this file. */
+        std::uint64_t splitMix (std::uint64_t& state)
+        {
+            state += goldenGamma;
+            auto z = state;
+            z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ull;
+            z = (z ^ (z >> 27)) * 0x94d049bb133111ebull;
+            return z ^ (z >> 31);
+        }
+
+        /** Fisher-Yates, written out for the reason above. */
+        void shuffleInPlace (std::vector<std::string>& items, std::uint64_t& state)
+        {
+            for (auto i = items.size(); i > 1; --i)
+                std::swap (items[i - 1],
+                           items[static_cast<std::size_t> (splitMix (state) % i)]);
+        }
+    }
+
+    std::vector<std::string> Runner::drawRound (Engine& engine, const juce::ValueTree& group,
+                                                const std::string& runId)
+    {
+        auto* run = runs.find (runId);
+
+        if (run == nullptr)
+            return {};
+
+        auto members = membersOf (group);
+
+        /*  PRUNING IS RUN-LOCAL and is applied here rather than in `membersOf`:
+            that one answers what the DOCUMENT says, and this one answers what
+            this run is going to play. §3.6 - a pruned member is out for this
+            round or for this run, and the show is untouched either way. */
+        members.erase (std::remove_if (members.begin(), members.end(),
+                                       [run] (const std::string& cueId)
+                                       {
+                                           return std::find (run->pruned.begin(),
+                                                             run->pruned.end(), cueId)
+                                                    != run->pruned.end();
+                                       }),
+                       members.end());
+
+        if (members.empty())
+            return {};
+
+        /*  THE SEED THIS RUN IS DRAWING FROM, and it belongs to the RUN rather
+            than to the round: the group's own when it has one, which is how a
+            shuffled scene gets rehearsed - the same order every night - and a
+            fresh one otherwise, so the show is different every night. Written
+            into the log either way, so every night reproduces exactly.
+
+            Every round of a run comes from that one seed mixed with the round
+            number, which is what makes round three a pure function of the seed
+            and the number three. A running state carried between rounds would
+            do as well and would be one more thing that has to survive a replay
+            for no reason. */
+        /*  A MANUAL GROUP PLAYS ITS MEMBERS AS THEY ARE WRITTEN, and neither
+            `selection` nor `play` reaches it.
+
+            Both of those are the MACHINE choosing - which member comes next,
+            and how many of them - and in a manual sequence the operator is the
+            one choosing (§3.6: "a member starts on GO ... the operator is the
+            parent"). The pointer walks the list in document order, so a
+            shuffled round would have the group finishing at whichever member
+            the draw happened to put last, at a moment the operator has no way
+            to see coming; and "play two of five" would leave three rows the
+            pointer walks through and nothing happens on.
+
+            Ignored rather than refused at load, because the pair is meaningful
+            the moment somebody makes the group automatic - which is a toggle
+            §3.6 expects during tech. */
+        const auto manual = textOf (group, "mode") != "timeline"
+                              && textOf (group, "advance") != "auto";
+
+        const auto shuffles = ! manual && textOf (group, "selection") == "shuffle";
+        const auto authored = static_cast<std::int32_t> (numberOf (group, "seed"));
+
+        /*  A GROUP THAT DOES NOT SHUFFLE DRAWS NOTHING, and reads zero. The
+            seed would be unused, and an unused random number in every group's
+            log is a number somebody will one day try to interpret - as well as
+            the one thing in an otherwise identical pair of sessions that
+            differs. */
+        const auto seed = run->iteration > 0
+                            ? run->seed
+                            : (authored != 0 ? authored : (shuffles ? ids.drawSeed() : 0));
+
+        auto state = static_cast<std::uint64_t> (seed)
+                       ^ (static_cast<std::uint64_t> (run->iteration + 1) * goldenGamma);
+
+        if (shuffles && members.size() > 1)
+        {
+            shuffleInPlace (members, state);
+
+            /*  THE BOUNDARY CONSTRAINT (§3.6): a member is never heard twice
+                running across a round boundary, so the first of the new round
+                may not be the last of the one before. Redrawn until it is not -
+                which with two members decides the order completely, and that is
+                right rather than degenerate: alternating is what somebody
+                asking for two shuffled ambiences means.
+
+                Bounded, because a loop whose exit depends on a generator being
+                fair is a loop that can hang a show. With more than one member a
+                redraw succeeds with probability at least 1/n, so sixteen tries
+                is a certainty that does not rely on the generator at all. */
+            const auto last = run->round.empty() ? std::string {} : run->round.back();
+
+            for (int tries = 0; tries < 16 && ! last.empty() && members.front() == last; ++tries)
+                shuffleInPlace (members, state);
+        }
+
+        /*  PLAY N OF M (§3.6). Nought is all of them, and more than there are
+            is all of them too rather than a refusal: deleting a member should
+            not stop a show loading. */
+        const auto play = manual ? std::size_t { 0 }
+                                 : static_cast<std::size_t> (std::max (0.0,
+                                                                       numberOf (group, "play")));
+
+        if (play > 0 && play < members.size())
+            members.resize (play);
+
+        std::vector<osc::Value> args { osc::Value::string (runId),
+                                       osc::Value::int32 (seed) };
+
+        for (const auto& cueId : members)
+            args.push_back (osc::Value::string (cueId));
+
+        engine.submit (origin::engine, "run.round", std::move (args));
+        return members;
+    }
+
     void Runner::advanceGroups (Engine& engine)
     {
         /*  THE HOOK DECIDES AND THE HANDLER APPLIES, which is why nothing here
@@ -1596,6 +1785,28 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  THE ROUND IS THE RUN'S, and it is re-read rather than copied
+                once. `run.prune` takes a member out of the round in progress -
+                which is the whole of what an operator wants at 22:40, and is
+                useless if the scheduler is working from a list it took a copy
+                of before they asked.
+
+                Which also settles where the round LIVES: on the run, written by
+                the command that drew it, read here. The copy the phase starts
+                with is the same list one tick earlier, because the record has
+                not been applied yet when `beginPhase` returns. */
+            if (job.phase == groupPhase::members && run->iteration > 0)
+                job.phaseCues = run->round;
+
+            /*  AN EMPTIED ROUND COMPLETES THE GROUP (§3.6) rather than spinning
+                on nothing - which is what pruning the last member of an
+                infinite loop leaves behind. */
+            if (job.phase == groupPhase::members && job.phaseCues.empty())
+            {
+                endOfRound (engine, job, group);
+                continue;
+            }
+
             const auto timeline = job.phase == groupPhase::members
                                     && textOf (group, "mode") == "timeline";
 
@@ -1618,11 +1829,45 @@ namespace wfg::cue
                          != job.phaseCues.end();
             };
 
+            /*  A run is CLAIMED ONCE, by whichever phase was running the cue it
+                belongs to when it appeared - which is what keeps round two from
+                inheriting round one's finished runs, since both rounds play the
+                same cues. */
+            for (const auto* child : runs.childrenOf (job.run))
+                if (inPhase (child->cue) && ! job.hasClaimed (child->id))
+                {
+                    job.claimed.push_back (child->id);
+                    job.phaseRuns.push_back (child->id);
+                }
+
             std::vector<const Run*> children;
 
-            for (const auto* child : runs.childrenOf (job.run))
-                if (inPhase (child->cue))
+            for (const auto& id : job.phaseRuns)
+                if (const auto* child = runs.find (id))
                     children.push_back (child);
+
+            const auto allFinished = [&children]
+            {
+                return std::all_of (children.begin(), children.end(),
+                                    [] (const Run* child) { return child->isFinished(); });
+            };
+
+            /*  ASKED TO STOP AT A BOUNDARY, and this is the near one: the end
+                of whatever is playing now. `afterIteration` is the far one and
+                is read by `endOfRound`, which simply does not start another.
+
+                Guarded on the phase having started something, because "nothing
+                of this phase is running" is also true of a phase that has not
+                begun - and a group told to stop after its member should not
+                vanish before the member exists. */
+            if (job.phase == groupPhase::members
+                  && run->stopAfter == "member"
+                  && ! children.empty()
+                  && allFinished())
+            {
+                finishPhase (engine, job, group);
+                continue;
+            }
 
             /*  A TIMELINE SCHEDULES EVERYTHING AT ENTRY and each member's
                 pre-wait is its OFFSET from that moment (§3.6) - which is why
@@ -1637,9 +1882,8 @@ namespace wfg::cue
 
                 job.launched = children.size();
 
-                if (children.size() >= job.phaseCues.size()
-                      && runs.allChildrenFinished (job.run))
-                    finishPhase (engine, job, group);
+                if (children.size() >= job.phaseCues.size() && allFinished())
+                    endOfRound (engine, job, group);
 
                 continue;
             }
@@ -1677,11 +1921,14 @@ namespace wfg::cue
                     exactly like one that is over - no child is running either
                     way - so "nothing is running" cannot be the test. What tells
                     them apart is whether the last member was ever started. */
-                const auto lastFired = ! job.phaseCues.empty()
-                                         && runs.hasChildFor (job.run, job.phaseCues.back());
+                const auto& last = job.phaseCues.back();
 
-                if (lastFired && runs.allChildrenFinished (job.run))
-                    finishPhase (engine, job, group);
+                const auto lastFired =
+                    std::any_of (children.begin(), children.end(),
+                                 [&last] (const Run* child) { return child->cue == last; });
+
+                if (lastFired && allFinished())
+                    endOfRound (engine, job, group);
 
                 continue;
             }
@@ -1717,7 +1964,7 @@ namespace wfg::cue
                 continue;
             }
 
-            finishPhase (engine, job, group);
+            endOfRound (engine, job, group);
         }
 
         scheduled.erase (std::remove_if (scheduled.begin(), scheduled.end(),
@@ -1728,8 +1975,12 @@ namespace wfg::cue
     bool Runner::beginPhase (Engine& engine, GroupJob& job, const juce::ValueTree& group,
                              const char* phase)
     {
+        /*  THE MEMBERS PHASE PLAYS A ROUND, which is not the same list as the
+            group's members: it may be shuffled, it may be a subset (§3.6's
+            "play N of M"), and it may have had a member pruned out of it for
+            tonight. A header and a footer are always themselves, in order. */
         const auto cues = phase == groupPhase::members
-                            ? membersOf (group)
+                            ? drawRound (engine, group, job.run)
                             : membersOf (group.getChildWithName (phase == groupPhase::header
                                                                    ? "Header" : "Footer"));
 
@@ -1744,6 +1995,7 @@ namespace wfg::cue
         job.nextMember = 0;
         job.launched = 0;
         job.awaiting.clear();
+        job.phaseRuns.clear();
 
         const auto timeline = phase == groupPhase::members
                                 && textOf (group, "mode") == "timeline";
@@ -1757,6 +2009,8 @@ namespace wfg::cue
             job.nextMember = cues.size();
             return true;
         }
+
+        const auto childRuns = runs.childrenOf (job.run);
 
         /*  A MANUAL SEQUENCE STARTS WHERE THE OPERATOR WAS, which is member one
             in every ordinary case - the pointer descends to it and GO there is
@@ -1788,8 +2042,23 @@ namespace wfg::cue
             identifier. Spawning a second would leave two runs of one cue under
             one parent - a scene playing twice, out of step with itself. It is
             adopted instead: not spawned, and started by the launch above like
-            any other member. */
-        if (runs.hasChildFor (job.run, cues[first]))
+            any other member.
+
+            UNCLAIMED, which is the word that makes this survive a loop. A
+            group's second round plays the same cues as its first, so "is there
+            a child for this cue" answers yes on every round after the first -
+            and the round would adopt a run that finished a minute ago and then
+            wait for it to finish again, for ever. What is being asked is
+            whether something has appeared that no phase has taken charge of
+            yet, and the job records exactly that. */
+        const auto unclaimed =
+            std::any_of (childRuns.begin(), childRuns.end(),
+                         [&job, &cues, first] (const Run* child)
+                         {
+                             return child->cue == cues[first] && ! job.hasClaimed (child->id);
+                         });
+
+        if (unclaimed)
         {
             job.nextMember = first + 1;
             return true;
@@ -1799,6 +2068,34 @@ namespace wfg::cue
                        { osc::Value::string (job.run), osc::Value::string (cues[first]) });
         job.nextMember = first + 1;
         return true;
+    }
+
+    void Runner::endOfRound (Engine& engine, GroupJob& job, const juce::ValueTree& group)
+    {
+        auto* run = runs.find (job.run);
+
+        /*  A ROUND ENDING IS NOT THE GROUP ENDING, which is the whole of what
+            `loops` buys. Another round begins unless one of three things says
+            otherwise: this was the last one, somebody asked the group to stop
+            at a boundary, or there is nothing left to play.
+
+            THE COUNT IS OF ROUNDS AND NOT OF PLAYBACKS (§3.6). With `play` set,
+            a round is a subset of the members, so three loops of two-of-five is
+            six cues rather than three - which is what a designer asking for
+            "two of these, three times" means.
+
+            Only the MEMBERS loop. A header and a footer are the group's own
+            preparation and release; running them twice would release something
+            twice and prepare something that was already prepared. */
+        const auto again = job.phase == groupPhase::members
+                             && run != nullptr
+                             && run->stopAfter.empty()
+                             && (run->iterations == 0 || run->iteration < run->iterations);
+
+        if (again && beginPhase (engine, job, group, groupPhase::members))
+            return;
+
+        finishPhase (engine, job, group);
     }
 
     void Runner::finishPhase (Engine& engine, GroupJob& job, const juce::ValueTree& group)
@@ -2183,7 +2480,10 @@ namespace wfg::cue
                                 which is what lets an operator press GO down a
                                 list at speed without waiting to see what each
                                 one did. */
-                            const auto next = nextStandby (list, standby);
+                            /*  The run table, so that a manual group with
+                                rounds left keeps the pointer instead of letting
+                                it out on the last member of round one. */
+                            const auto next = nextStandby (list, standby, &runner.runTable());
                             document.setAttribute (standbyAddressOf (listId), next);
 
                             /*  EVERY IDENTIFIER THIS GO CREATED, not just one.

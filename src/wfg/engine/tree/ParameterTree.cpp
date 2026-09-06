@@ -877,6 +877,11 @@ namespace wfg::tree
                 else if (name == "parent")    text = run.parent;
                 else if (name == "children")  text = joinIds (run.children);
                 else if (name == "error")     text = run.error;
+                else if (name == "iteration")  text = std::to_string (run.iteration);
+                else if (name == "iterations") text = std::to_string (run.iterations);
+                else if (name == "round")      text = joinIds (run.round);
+                else if (name == "pruned")     text = joinIds (run.pruned);
+                else if (name == "seed")       text = std::to_string (run.seed);
                 else                          text = std::string (row->defaultText);
 
                 runtime.push_back (makeLeaf (base + "/" + name, *row, text));
