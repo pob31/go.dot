@@ -83,7 +83,7 @@ namespace wfg::cue
                         "The run finished, or was stopped. Its track is free from this tick.",
                         { { "run", 's', false } },
                         false,
-                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             auto* run = runs.find (args[0].getString());
 
@@ -94,9 +94,61 @@ namespace wfg::cue
                                 one of them says why, and overwriting that with
                                 "done" would throw away the only account of what
                                 went wrong. */
-                            if (run->state != runState::failed)
-                                run->state = runState::done;
+                            if (run->state == runState::failed)
+                                return Outcome::ok (args);
 
+                            /*  ENDED IS NOT DONE WHEN THERE IS A POST-WAIT.
+
+                                §3.6: a post-wait is "how long after completion
+                                this cue reports done to its parent". The sound
+                                has stopped, the message has gone - and the cue
+                                is not finished, because something is holding on
+                                it. Publishing `done` here and keeping a private
+                                timer would tell every client the opposite of
+                                what the sequence above it was doing.
+
+                                Applied a second time it is idempotent the way
+                                the rest of this file is: a run already holding
+                                its post-wait keeps the deadline it has rather
+                                than restarting it. */
+                            if (run->postWaitTicks > 0 && ! run->isWaiting())
+                            {
+                                run->state = runState::postWait;
+                                run->dueTick = context.tick + run->postWaitTicks;
+                                return Outcome::ok (args);
+                            }
+
+                            if (run->state != runState::postWait)
+                            {
+                                run->state = runState::done;
+                                run->endedAtTick = context.tick;
+                            }
+
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "run.done",
+                        "A post-wait elapsed, so the run now reports done to whatever was waiting"
+                        " on it.",
+                        { { "run", 's', false } },
+                        false,
+                        [&runs] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            auto* run = runs.find (args[0].getString());
+
+                            if (run == nullptr)
+                                return Outcome::rejected (reason::unknownId);
+
+                            /*  Applied and ignored on a run that has finished by
+                                another road - killed during its post-wait, say.
+                                Idempotent where it costs nothing, like every
+                                other report here. */
+                            if (run->isFinished())
+                                return Outcome::ok (args);
+
+                            run->state = runState::done;
+                            run->endedAtTick = context.tick;
                             return Outcome::ok (args);
                         } });
 
@@ -106,7 +158,7 @@ namespace wfg::cue
                         " bad-route.",
                         { { "run", 's', false }, { "reason", 's', false } },
                         false,
-                        [&runs] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             auto* run = runs.find (args[0].getString());
 
@@ -128,6 +180,7 @@ namespace wfg::cue
                             run->state = runState::failed;
                             run->error = why;
                             run->track = -1;
+                            run->endedAtTick = context.tick;
 
                             return Outcome::ok (args);
                         } });

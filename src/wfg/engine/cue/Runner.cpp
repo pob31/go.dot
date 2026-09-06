@@ -21,6 +21,7 @@
 #include <wfg/engine/tree/MountSender.h>
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
@@ -103,6 +104,16 @@ namespace wfg::cue
         return 1 + static_cast<int> (ticks);
     }
 
+    int ticksFor (double seconds) noexcept
+    {
+        if (! (seconds > 0.0))
+            return 0;
+
+        const auto ticks = std::llround (seconds * static_cast<double> (TickClock::rateHz));
+
+        return ticks > 0 ? static_cast<int> (ticks) : 0;
+    }
+
     //==============================================================================
     Runner::Runner (const doc::ShowDocument& documentToRead, RunTable& runsToDrive,
                     doc::IdRegistry& runIds, Focus& focusToUse)
@@ -119,17 +130,20 @@ namespace wfg::cue
     }
 
     //==============================================================================
-    std::string Runner::arm (Engine& engine, const std::string& cueId, const std::string& runId)
+    std::string Runner::arm (Engine& engine, std::int64_t tick, const std::string& cueId,
+                             const std::string& runId)
     {
-        return armInternal (engine, cueId, runId, false);
+        return armInternal (engine, tick, cueId, runId, false);
     }
 
-    std::string Runner::fire (Engine& engine, const std::string& cueId, const std::string& runId)
+    std::string Runner::fire (Engine& engine, std::int64_t tick, const std::string& cueId,
+                              const std::string& runId)
     {
-        return armInternal (engine, cueId, runId, true);
+        return armInternal (engine, tick, cueId, runId, true);
     }
 
-    std::string Runner::armInternal (Engine& engine, const std::string& cueId,
+    std::string Runner::armInternal (Engine& engine, std::int64_t tick,
+                                     const std::string& cueId,
                                      const std::string& runId, bool fireAtOnce)
     {
         const auto cue = document.findById (cueId);
@@ -139,45 +153,50 @@ namespace wfg::cue
 
         const auto kind = kindOfCue (cue);
 
-        /*  A fade and a stop act on a run somebody else started, so they take
-            their own path - and they only make sense fired, never armed: there
-            is nothing to make ready. */
-        if (kind == "fade")
-            return fireAtOnce ? fireFade (cue, runId) : std::string {};
-
-        if (kind == "stop")
-            return fireAtOnce ? fireStop (cue, runId) : std::string {};
-
-        /*  And a network cue, which is the same shape: it acts on something
-            that is not a track, so there is no voice to reserve and nothing to
-            make ready. */
-        if (kind == "osc")
-            return fireAtOnce ? fireOsc (cue, runId) : std::string {};
-
-        /*  A memo is a line in the book and a group has no runner until Phase 3.
-            Both are legal things to press GO on; neither makes a run. */
-        if (kind != "media")
+        /*  A group organises time, order and lifetime, and none of that exists
+            until PR 3.3. Pressing GO on one is legal and makes nothing. */
+        if (kind.empty() || kind == "group")
             return {};
 
-        if (const auto* live = runs.liveRunOf (cueId))
-        {
-            /*  ARMED IS NOT RUNNING, and the difference is the whole point of
-                arming ahead. A cue armed when it reached standby is sitting on
-                a reserved voice with its media ready and no sound coming out;
-                GO is what turns that into a launch. Treating it as "already
-                running" would have made the fast path - the one the design
-                exists for - the one where GO does nothing at all.
+        /*  ARMING IS A MEDIA IDEA. A fade takes over a level, a network cue
+            writes a node, a memo is a line in the book: none of them has
+            anything to make ready, so there is nothing for an arm to do and a
+            run left sitting in `armed` would look like progress that was not
+            happening. `audio.arm` refuses them at the command; this is the same
+            answer for the standby path. */
+        if (! fireAtOnce && kind != "media")
+            return {};
 
-                DECISION B, 2026-09-05, is about a cue that is actually
-                SOUNDING: the GO is applied, standby has advanced, and the
-                playing instance carries on untouched. No restart, and no second
-                instance stacked on another voice. */
-            if (fireAtOnce && live->state == runState::armed)
-                if (auto* armed = runs.find (live->id))
-                    armed->launchRequested = true;
+        /*  DECISION N, 2026-09-06: a refire is decided per kind, and this is
+            the half of it that says "not again".
 
-            return live->id;
-        }
+            Media and groups are IGNORED - the GO is applied, standby has
+            advanced, and the sounding instance carries on untouched. A fade or
+            a stop RESTARTS, which is the takeover `beginFade` already
+            implements from whatever level the target has reached. An osc, midi
+            or memo cue gets a SECOND INSTANCE, because there is nothing to
+            collide over: two messages is what firing twice means.
+
+            ARMED IS NOT SOUNDING, and the difference is the whole point of
+            arming ahead. A cue armed when it reached standby is sitting on a
+            reserved voice with its media ready and no sound coming out; GO is
+            what turns that into a launch. Treating it as "already running"
+            would have made the fast path - the one the design exists for - the
+            one where GO does nothing at all. A cue in its PRE-WAIT is the same
+            case one step earlier, and is left alone for the same reason: it is
+            already on its way. */
+        if (kind == "media")
+            if (const auto* live = runs.liveRunOf (cueId))
+            {
+                if (fireAtOnce && live->state == runState::armed)
+                    if (auto* armed = runs.find (live->id))
+                    {
+                        armed->launchRequested = true;
+                        armed->launchRequestedAtTick = tick;
+                    }
+
+                return live->id;
+            }
 
         auto id = runId;
 
@@ -190,13 +209,142 @@ namespace wfg::cue
         if (run == nullptr)
             return {};
 
-        run->launchRequested = fireAtOnce;
+        /*  THE WAITS, COPIED NOW. §4.10's rule applied to a duration: the run
+            instantiates what the cue said when it was fired, so editing the cue
+            during the wait changes the next run and not this one. */
+        run->preWaitTicks = ticksFor (static_cast<double> (cue[juce::Identifier ("preWait")]));
+        run->postWaitTicks = ticksFor (static_cast<double> (cue[juce::Identifier ("postWait")]));
+
+        if (! fireAtOnce)
+        {
+            armMedia (engine, cue, id);
+            return id;
+        }
+
+        /*  A PRE-WAIT DELAYS THE FIRING AND NOT THE ARMING, which is the whole
+            reason it is worth having on a media cue: the seconds it waits are
+            seconds the disk spends getting ready. So the voice is reserved and
+            the file is mapped during the wait, and `run.fire` at the far end of
+            it has nothing left to do but place the launch.
+
+            Everything else waits with nothing to prepare, which is correct: a
+            fade cannot take over a level before it is time to, and a network
+            cue must not write early. */
+        if (run->preWaitTicks > 0)
+        {
+            run->state = runState::waiting;
+            run->dueTick = tick + run->preWaitTicks;
+
+            if (kind == "media")
+                armMedia (engine, cue, id);
+
+            return id;
+        }
+
+        fireKind (engine, tick, cue, kind, id);
+        return id;
+    }
+
+    //==============================================================================
+    void Runner::fireNow (Engine& engine, std::int64_t tick, const std::string& runId)
+    {
+        auto* run = runs.find (runId);
+
+        if (run == nullptr || run->isFinished())
+            return;
+
+        const auto cue = document.findById (run->cue);
+
+        if (! cue.isValid())
+            return;
+
+        /*  Out of the wait first, so that `fireKind` sees the state every other
+            path sees. A media cue armed during its wait is still `armed` at this
+            point and stays there until the launch is placed. */
+        run->state = run->track >= 0 ? runState::armed : runState::playing;
+
+        fireKind (engine, tick, cue, run->kind, runId);
+    }
+
+    void Runner::fireKind (Engine& engine, std::int64_t tick, const juce::ValueTree& cue,
+                           const std::string& kind, const std::string& runId)
+    {
+        if (kind == "fade")
+        {
+            fireFade (cue, runId);
+            return;
+        }
+
+        if (kind == "stop")
+        {
+            fireStop (cue, runId);
+            return;
+        }
+
+        if (kind == "osc")
+        {
+            fireOsc (cue, runId);
+            return;
+        }
+
+        if (kind == "memo")
+        {
+            /*  A MEMO IS A LINE IN THE BOOK, and now it is a line with a run.
+
+                Not because a memo does anything, but because §3.6 makes "done"
+                the thing a sequence group advances on, and a group whose second
+                member is a note to the operator has to know when to move to the
+                third. Giving every kind a run is what puts that answer in ONE
+                place - the run table - instead of asking each kind's job list
+                whether it has heard of an identifier.
+
+                It ends on the NEXT tick, exactly as a network cue with `wait:
+                none` does, because that is when a report is allowed to leave.
+                Its pre-wait and post-wait work like anything else's, which is
+                what makes a memo the cheapest way to put a pause in a sequence. */
+            if (auto* run = runs.find (runId))
+                run->state = runState::playing;
+
+            finishing.push_back (runId);
+            return;
+        }
+
+        if (kind != "media")
+            return;
+
+        auto* run = runs.find (runId);
+
+        if (run == nullptr)
+            return;
+
+        run->launchRequested = true;
+        run->launchRequestedAtTick = tick;
+
+        /*  Armed already if it came through a pre-wait or through standby; this
+            is the arm for a cue fired from cold, which is the case that pays
+            the disk. */
+        if (run->track < 0)
+            armMedia (engine, cue, runId);
+    }
+
+    void Runner::armMedia (Engine& engine, const juce::ValueTree& cue, const std::string& runId)
+    {
+        auto* run = runs.find (runId);
+
+        if (run == nullptr || run->track >= 0)
+            return;
 
         /*  NO AUDIO SIDE IS A COMPLETE CONFIGURATION, not a failure. A show
             replayed has no Player and must still create the run, advance
-            standby and write the same log - only the sound is missing. */
+            standby and write the same log - only the sound is missing.
+
+            IT IS ALSO WHAT KEEPS THE REPORTS BELOW HONEST. They are submitted
+            from inside a command handler, which a replay re-runs - so they
+            would arrive twice, once from the handler and once from the log. The
+            return above is what stops that: a replay has no Player, so it never
+            reaches them, and the log's copy is the only one. */
         if (audio == nullptr)
-            return id;
+            return;
 
         const auto named = mediaFileOf (cue);
 
@@ -216,9 +364,9 @@ namespace wfg::cue
               || (! mediaFolder.empty() && ! juce::File (juce::String (file)).existsAsFile()))
         {
             engine.submit (origin::engine, "run.failed",
-                           { osc::Value::string (id),
+                           { osc::Value::string (runId),
                              osc::Value::string (runError::mediaMissing) });
-            return id;
+            return;
         }
 
         /*  The lowest free voice, and a playing one is never stolen. Lowest
@@ -229,9 +377,9 @@ namespace wfg::cue
         if (track < 0)
         {
             engine.submit (origin::engine, "run.failed",
-                           { osc::Value::string (id),
+                           { osc::Value::string (runId),
                              osc::Value::string (runError::noTrack) });
-            return id;
+            return;
         }
 
         /*  Where it goes, resolved through the buses the show declares, so the
@@ -242,9 +390,9 @@ namespace wfg::cue
         if (! problem.empty())
         {
             engine.submit (origin::engine, "run.failed",
-                           { osc::Value::string (id),
+                           { osc::Value::string (runId),
                              osc::Value::string (runError::badRoute) });
-            return id;
+            return;
         }
 
         /*  Reserved from here, so a second arm on the same tick cannot pick the
@@ -252,8 +400,14 @@ namespace wfg::cue
             and the disk are ready; until then the run is armed and silent. */
         run->track = track;
 
+        /*  A run holding a voice is `armed`, whatever it was before. A cue in
+            its pre-wait keeps `waiting` - the operator's answer to "what is that
+            cue doing" is the wait, not the plumbing underneath it. */
+        if (! run->isWaiting())
+            run->state = runState::armed;
+
         ArmRequest request;
-        request.runId = id;
+        request.runId = runId;
         request.track = track;
         request.mediaFile = file;
         request.levelDb = static_cast<double> (cue[juce::Identifier ("level")]);
@@ -262,7 +416,6 @@ namespace wfg::cue
         run->level = request.levelDb;
 
         audio->requestArm (request);
-        return id;
     }
 
     //==============================================================================
@@ -358,9 +511,9 @@ namespace wfg::cue
     }
 
     //==============================================================================
-    std::string Runner::fireFade (const juce::ValueTree& cue, const std::string& runId)
+    void Runner::fireFade (const juce::ValueTree& cue, const std::string& runId)
     {
-        return beginFade (cue[idProperty].toString().toStdString(),
+        beginFade (cue[idProperty].toString().toStdString(),
                           cue[juce::Identifier ("target")].toString().toStdString(),
                           runId, "fade",
                           static_cast<double> (cue[juce::Identifier ("level")]),
@@ -369,7 +522,7 @@ namespace wfg::cue
                           false);
     }
 
-    std::string Runner::fireStop (const juce::ValueTree& cue, const std::string& runId)
+    void Runner::fireStop (const juce::ValueTree& cue, const std::string& runId)
     {
         const auto verb = cue[juce::Identifier ("verb")].toString();
 
@@ -381,7 +534,7 @@ namespace wfg::cue
                                ? static_cast<double> (cue[juce::Identifier ("duration")])
                                : 0.0;
 
-        return beginFade (cue[idProperty].toString().toStdString(),
+        beginFade (cue[idProperty].toString().toStdString(),
                           cue[juce::Identifier ("target")].toString().toStdString(),
                           runId, "stop",
                           silenceDb, seconds,
@@ -389,30 +542,29 @@ namespace wfg::cue
                           true);
     }
 
-    std::string Runner::beginFade (const std::string& selfCueId,
-                                   const std::string& targetCueId,
-                                   const std::string& selfRunId, const std::string& kind,
-                                   double toDb, double seconds, FadeCurve curve,
-                                   bool stopWhenDone)
+    void Runner::beginFade (const std::string& selfCueId,
+                            const std::string& targetCueId,
+                            const std::string& selfRunId, const std::string& kind,
+                            double toDb, double seconds, FadeCurve curve,
+                            bool stopWhenDone)
     {
-        /*  The fade cue gets a run of its own whatever happens next, because a
-            fade IS a cue: pressing GO on it is a thing that happened, it needs
-            an address while it runs, and a group will need it to finish (§3.6). */
-        auto self = selfRunId;
+        juce::ignoreUnused (selfCueId, kind);
 
-        if (self.empty())
-            self = ids.generate();
+        /*  THE RUN ALREADY EXISTS, and did not before PR 3.1. Every kind's run
+            is now created in one place - `armInternal` - so that a pre-wait can
+            sit between "the cue was fired" and "the fade starts" without each
+            kind having to learn about waits. What is left here is the fade.
 
-        /*  THE RUN BELONGS TO THE FADE CUE, not to the cue it is fading. A run
+            THE RUN BELONGS TO THE FADE CUE, not to the cue it is fading. A run
             says which cue it instantiates, and getting that wrong made
             liveRunOf answer with the fade's own run when asked about the media
-            it was supposed to be moving - so the fade faded itself. */
-        runs.create (self, selfCueId, kind);
-
+            it was supposed to be moving - so the fade faded itself. That is
+            true of the run `armInternal` made, for the same reason. */
+        const auto self = selfRunId;
         auto* selfRun = runs.find (self);
 
         if (selfRun == nullptr)
-            return self;
+            return;
 
         /*  RUNNING FROM THE TICK IT STARTS, because a fade has no arming phase:
             no voice to reserve and no file to make ready, so the `armed` a run
@@ -438,7 +590,7 @@ namespace wfg::cue
             FadeJob orphan;
             orphan.self = self;
             running.push_back (orphan);
-            return self;
+            return;
         }
 
         const auto targetId = target->id;
@@ -551,22 +703,15 @@ namespace wfg::cue
                 stopping->state = runState::stopping;
 
         running.push_back (job);
-        return self;
     }
 
-    std::string Runner::fireOsc (const juce::ValueTree& cue, const std::string& runId)
+    void Runner::fireOsc (const juce::ValueTree& cue, const std::string& runId)
     {
-        auto self = runId;
-
-        if (self.empty())
-            self = ids.generate();
-
-        runs.create (self, cue[idProperty].toString().toStdString(), "osc");
-
+        const auto self = runId;
         auto* selfRun = runs.find (self);
 
         if (selfRun == nullptr)
-            return self;
+            return;
 
         /*  Running from the tick it fires, like a fade: there is nothing to
             arm, so `armed` would be a state it is never in. */
@@ -590,7 +735,7 @@ namespace wfg::cue
         {
             job.failure = reason::typeMismatch;
             sending.push_back (job);
-            return self;
+            return;
         }
 
         /*  NO MOUNT TABLE IS A COMPLETE CONFIGURATION. A replay has none and
@@ -600,7 +745,7 @@ namespace wfg::cue
         if (mounts == nullptr)
         {
             sending.push_back (job);
-            return self;
+            return;
         }
 
         const auto written = mounts->write (address, *value);
@@ -609,7 +754,7 @@ namespace wfg::cue
         {
             job.failure = written.reason;
             sending.push_back (job);
-            return self;
+            return;
         }
 
         /*  IT REACHED THE TREE; NOW IT REACHES THE WIRE. The two are separate
@@ -651,13 +796,27 @@ namespace wfg::cue
         }
 
         sending.push_back (job);
-        return self;
+        return;
     }
 
     void Runner::advanceSends (Engine& engine)
     {
         for (auto& job : sending)
         {
+            /*  Killed while it waited. A network cue holds no voice either, so
+                the same gap as a fade's: `stopping` with nothing to act on it.
+                A `verified` cue that somebody gave up on is the case - the
+                device is not answering and the operator would like the show to
+                stop asking. */
+            const auto* selfRun = runs.find (job.self);
+
+            if (selfRun != nullptr && selfRun->state == runState::stopping)
+            {
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                job.finished = true;
+                continue;
+            }
+
             if (! job.failure.empty())
             {
                 engine.submit (origin::engine, "run.failed",
@@ -786,6 +945,53 @@ namespace wfg::cue
 
         for (auto& job : running)
         {
+            /*  KILLED, and this is the half of `run.kill` that did not exist.
+
+                `enforceStops` below stops a voice, and a fade holds no voice -
+                it holds a level and a schedule - so killing a fade's own run
+                marked it `stopping` and changed nothing: the fade went on
+                writing levels into somebody else's cue for the rest of its
+                duration, and the run sat in `stopping` for ever because nothing
+                was ever going to report it ended.
+
+                THE STOP GOES WITH IT, and that is the difference between a kill
+                and a takeover. A fade arriving over a fade-and-stop inherits the
+                arrival, because the operator riding a level back up did not
+                withdraw the stop (author, 2026-09-06). `run.kill` is the other
+                thing entirely: it is the immediate path, the one Esc and
+                double-Esc will be built on, and it asks nothing of the cue. Kill
+                the run of a stop cue and the stop it was going to perform is
+                what you killed.
+
+                WHICH MEANS PUTTING THE TARGET BACK, and that is a decision taken
+                here rather than one the sources settle - overrule it early. A
+                stop cue marks its target `stopping` the moment it fires, because
+                a cue on its way out should say so. If the stop is killed and the
+                mark is left, `enforceStops` finds a run that is `stopping` and
+                that no job is holding, and stops it - so killing a ten-second
+                fade-and-stop would stop the cue INSTANTLY, which is the opposite
+                of every reading of what was asked for.
+
+                The other reading is that killing the fade leaves the stop behind
+                and it lands at once. It is defensible, and it is not what
+                `run.kill` says it does: it asks nothing of the cue, and stopping
+                somebody else's sound is a great deal to ask. So the target goes
+                back to playing, at whatever level the fade had reached - exactly
+                where a killed plain fade leaves it. */
+            const auto* selfRun = runs.find (job.self);
+
+            if (selfRun != nullptr && selfRun->state == runState::stopping)
+            {
+                if (job.stopWhenDone)
+                    if (auto* held = runs.find (job.target))
+                        if (held->state == runState::stopping && ! held->stopIssued)
+                            held->state = runState::playing;
+
+                job.retired = true;
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                continue;
+            }
+
             /*  The LEVEL stops advancing when it arrives; the JOB may not be
                 over, because it can still be holding a stop that is due later.
                 Before the author settled that, the two were the same thing and
@@ -860,6 +1066,68 @@ namespace wfg::cue
                        running.end());
     }
 
+    void Runner::advanceWaits (Engine& engine, std::int64_t tick)
+    {
+        /*  A WAIT COMING DUE IS A DECISION, so it is a record.
+
+            The hook could simply do the firing here and save a command. It must
+            not: `wfg replay` runs no hooks at all, so a wait that expired only
+            in a hook would never expire on replay and every cue with a pre-wait
+            would sit in `waiting` for ever. Submitting is what puts the moment
+            in the log, and the log is what a replay has.
+
+            Which is the same shape as everything else the Runner observes -
+            `run.started`, `run.ended`, a read-back arriving. A wait elapsing is
+            one more thing the machine noticed. */
+        /*  A KILLED RUN THAT NOTHING IS GOING TO END.
+
+            `run.kill` writes `stopping` over whatever the run was, which is
+            right - it is on its way out and says so - but it means a run killed
+            during its pre-wait has lost the only mark that said who was looking
+            after it. A voice is stopped by `enforceStops`; a fade and a network
+            cue are ended by their own job loops; a run that is waiting, holding
+            a post-wait, or a memo between firing and reporting has NO owner at
+            all, and before this it stayed `stopping` until the show closed -
+            with any group holding on it holding for ever.
+
+            So: anything `stopping` that holds no voice and that no job claims is
+            ended here. The ownership test is what keeps this from reporting the
+            same run twice, because the job loops run after this one in the same
+            tick and will end the ones they own. */
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.state != runState::stopping || snapshot.track >= 0)
+                continue;
+
+            const auto owned =
+                std::any_of (running.begin(), running.end(),
+                             [&snapshot] (const FadeJob& job) { return job.self == snapshot.id; })
+                || std::any_of (sending.begin(), sending.end(),
+                                [&snapshot] (const OscJob& job) { return job.self == snapshot.id; });
+
+            if (! owned)
+                engine.submit (origin::engine, "run.ended", one (snapshot.id));
+        }
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (! snapshot.isWaiting() || tick < snapshot.dueTick)
+                continue;
+
+            engine.submit (origin::engine,
+                           snapshot.state == runState::waiting ? "run.fire" : "run.done",
+                           one (snapshot.id));
+        }
+
+        /*  And the runs that had nothing to wait for in the first place. A memo
+            ends the tick after it fired; the list is drained whole because
+            nothing can be added to it between here and the submit. */
+        for (const auto& id : finishing)
+            engine.submit (origin::engine, "run.ended", one (id));
+
+        finishing.clear();
+    }
+
     //==============================================================================
     void Runner::beforeTick (Engine& engine, std::int64_t tick)
     {
@@ -868,6 +1136,14 @@ namespace wfg::cue
             same ticks, or it would not reproduce the session it is replaying. */
         currentTick = tick;
 
+        /*  ABOVE THE NULL-PLAYER GATE, all three of them, and that is not an
+            ordering detail. `wfg serve` without `--hosted` has no Player at all
+            and must still run a show made of memos, network cues and fades -
+            which is the configuration a designer works in on a train, and the
+            configuration every replay is in. A wait that only elapsed when
+            there was a sound card would be a cue list that only worked in a
+            theatre. */
+        advanceWaits (engine, tick);
         advanceFades (engine, tick);
         advanceSends (engine);
 
@@ -930,6 +1206,48 @@ namespace wfg::cue
                 run->launchedAtSample = target;
 
                 engine.submit (origin::engine, "run.started", one (run->id));
+
+                /*  AND HOW LATE IT WAS, which until now nothing measured.
+
+                    `run.late` has been registered, documented and tested since
+                    PR 2.3 and had no producer, because the number is not
+                    visible from here: this loop places the launch a fixed
+                    number of ticks ahead of the tick it happens to run on, so
+                    by its own arithmetic it is never late. What it did not
+                    know was which tick the launch was ASKED FOR on.
+
+                    The run knows, so the difference is arithmetic: the ticks
+                    between the GO and the launch, in samples, in blocks. It is
+                    zero for a cue that was armed and waiting, which is the
+                    ordinary case and the one the design exists to produce; it
+                    is the disk when somebody pressed GO on a cold cue.
+
+                    ONE TICK IS NOT LATE, and subtracting it is the difference
+                    between measuring the show and measuring the architecture. A
+                    GO is applied in a tick's DRAIN and this hook runs BEFORE the
+                    drain, so the earliest tick that can see a launch request is
+                    the one after it - always, for every cue, including the ones
+                    that were armed and ready. Counting that tick would report
+                    seven blocks late for a cue that did exactly what it was
+                    asked to.
+
+                    So what is reported is the EXCESS over the best case, which
+                    is what the number is for: zero when arming did its job, and
+                    the disk when somebody pressed GO on a cold cue.
+
+                    Reported only when there is something to report - a `late 0`
+                    record for every cue in a show would be a log of the clock. */
+                const auto lateTicks = tick - run->launchRequestedAtTick - 1;
+
+                if (lateTicks > 0 && blockSize > 0)
+                {
+                    const auto blocks = (lateTicks * samplesPerTick) / blockSize;
+
+                    if (blocks > 0)
+                        engine.submit (origin::engine, "run.late",
+                                       { osc::Value::string (run->id),
+                                         osc::Value::int32 (static_cast<std::int32_t> (blocks)) });
+                }
             }
         }
     }
@@ -1051,7 +1369,7 @@ namespace wfg::cue
                         { { "cue", 's', false }, { "run", 's', true } },
                         true,
                         [&engine, &runner, &document, withRun]
-                        (CommandContext&, const std::vector<osc::Value>& args)
+                        (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             const auto cueId = args[0].getString();
                             const auto cue = document.findById (cueId);
@@ -1070,7 +1388,8 @@ namespace wfg::cue
                                                             : std::string {};
 
                             return Outcome::ok (withRun (args, 1,
-                                                         runner.arm (engine, cueId, id)));
+                                                         runner.arm (engine, context.tick,
+                                                                     cueId, id)));
                         } });
 
         //----------------------------------------------------------------------
@@ -1079,7 +1398,7 @@ namespace wfg::cue
                         { { "run", 's', true } },
                         true,
                         [&engine, &runner, &document, &focus, withRun]
-                        (CommandContext&, const std::vector<osc::Value>& args)
+                        (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             const auto list = focus.list (document);
 
@@ -1110,7 +1429,8 @@ namespace wfg::cue
                                                          : args[0].getString();
 
                             return Outcome::ok (withRun (args, 0,
-                                                         runner.fire (engine, standby, id)));
+                                                         runner.fire (engine, context.tick,
+                                                                      standby, id)));
                         } });
 
         //----------------------------------------------------------------------
@@ -1120,7 +1440,7 @@ namespace wfg::cue
                         { { "cue", 's', false }, { "run", 's', true } },
                         true,
                         [&engine, &runner, &document, withRun]
-                        (CommandContext&, const std::vector<osc::Value>& args)
+                        (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             const auto cueId = args[0].getString();
 
@@ -1131,7 +1451,42 @@ namespace wfg::cue
                                                             : std::string {};
 
                             return Outcome::ok (withRun (args, 1,
-                                                         runner.fire (engine, cueId, id)));
+                                                         runner.fire (engine, context.tick,
+                                                                      cueId, id)));
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  AND THE OTHER END OF A PRE-WAIT, which lives here for the reason
+            `audio.arm` does: it is an ACTION. RunCommands holds what the machine
+            says HAPPENED, and this makes something happen - a voice is launched,
+            a level starts moving, a datagram goes out.
+
+            It is a command rather than something the hook simply does, because
+            `wfg replay` runs no hooks: a wait that expired only inside one would
+            never expire on replay, and every cue with a pre-wait would sit in
+            `waiting` for the length of the session. The record is what a replay
+            has, so the record is what the moment has to be.
+
+            ANYONE MAY SEND IT, deliberately, as with every engine-origin
+            command: one a replay could not send would be one a replay could not
+            reproduce. Sent early it does what the wait would have done, which is
+            "fire this now" - a legitimate thing to want and the same thing
+            `cue.fire` means. */
+        registry.add ({ "run.fire",
+                        "A run's pre-wait elapsed: fire it now. What the engine sends itself at the"
+                        " far end of a wait.",
+                        { { "run", 's', false } },
+                        true,
+                        [&engine, &runner] (CommandContext& context,
+                                            const std::vector<osc::Value>& args)
+                        {
+                            const auto runId = args[0].getString();
+
+                            if (! runner.knowsRun (runId))
+                                return Outcome::rejected (reason::unknownId);
+
+                            runner.fireNow (engine, context.tick, runId);
+                            return Outcome::ok (args);
                         } });
     }
 }

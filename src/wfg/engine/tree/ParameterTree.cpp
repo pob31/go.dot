@@ -710,13 +710,32 @@ namespace wfg::tree
             in the cached half: published from there it would have been frozen
             at whatever it read the last time somebody edited a cue.
 
-            Finished runs are published too, and keep their addresses. A client
-            that asked what happened can still be told, and Phase 3 is where
-            pruning becomes a real question because a group's several runs make
-            "which one" worth asking. */
+            A finished run keeps its address for `cue::retentionTicks` and is
+            then dropped - five seconds, which is long enough for a client
+            polling at the tick rate to see the `done` it was waiting for and
+            for a person to read it. Gogo is the pure present tense (§7), and a
+            four-hour show would otherwise publish four hours of finished runs
+            on every one of its 720 000 ticks.
+
+            IT RETIRES FROM THE TREE AND NOT FROM THE TABLE, and the difference
+            is the whole design of it. Erasing the run would make the MODEL
+            depend on something only a live session does: hooks do not run
+            during a replay, so a `run.kill` arriving six seconds after its run
+            ended would be rejected live (the run is gone) and applied on replay
+            (it is not), and the session would fail to reproduce itself.
+            Nothing else can tell the difference - `liveRunOf` and
+            `lowestFreeTrack` both skip finished runs already - so what is left
+            is a tree that stops growing, which was the only real problem.
+
+            The clock it reads is the run's OWN ending tick, written by the
+            handler that finished it, so what is published at tick N is the same
+            set live and replayed. */
         for (const auto& run : runs.all())
         {
             if (run.id.empty())
+                continue;
+
+            if (run.endedAtTick >= 0 && tick - run.endedAtTick > cue::retentionTicks)
                 continue;
 
             const auto base = std::string (godot) + "/run/" + run.id;

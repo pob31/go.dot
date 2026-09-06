@@ -150,6 +150,30 @@ There is deliberately no record of the silence in the timeout case — a device 
 reply has told us nothing, and a log of what did not happen would be a log of the network
 rather than of the show.
 
+## `bundles/waits/` and `logs/waits.wfglog`
+
+The seventh fixture, and the one that says a **deadline** reproduces.
+
+A wait is the easiest thing in this engine to get right live and wrong on replay. The obvious
+way to write one is a counter in a tick hook — and `wfg replay` runs no hooks at all, because it
+applies the ticks the log HAS and skips the thousands between them. A cue with a two-second
+pre-wait would then fire perfectly in the theatre and sit in `waiting` for the whole of the
+replayed session.
+
+So a wait coming due is a **command**: `run.fire` at the near end, `run.done` at the far one.
+Every wait in this log elapses because the log says it did, on the tick the log says, with no
+clock of its own in the room.
+
+The show is four memo cues — a pre-wait, a post-wait, both, and one that waits ten seconds and is
+killed in the middle of it. `Audio tracks="0"` is a real answer rather than a placeholder: a show
+of memos with no audio side is exactly what a designer writes on a train, and it is the
+configuration every replay is in.
+
+The fourth cue is the case that had no owner. A waiting run holds no voice, no job and no level,
+and `run.kill` writes `stopping` over the `waiting` that said who was looking after it — so before
+the Runner swept for runs nothing was going to end, it stayed `stopping` until the show closed,
+and a group holding on it would have held for ever.
+
 ## `tree/cue-F7HR8TVD.json`
 
 The OSCQuery reply for one cue, written by hand rather than generated, so it can disagree

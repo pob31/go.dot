@@ -271,13 +271,41 @@ TEST_CASE ("go: with nothing in standby it is applied and does nothing")
     CHECK (rig.audio.arms.empty());
 }
 
-TEST_CASE ("go: a memo cue advances standby and makes no run")
+TEST_CASE ("go: a memo cue advances standby, makes a run, and that run finishes")
 {
+    /*  THIS TEST USED TO ASSERT THE OPPOSITE, and the change is the point of
+        PR 3.1 rather than a side effect of it.
+
+        Phase 2 gave a memo no run, which was true to what a memo is - a line in
+        the book - and made "is this cue done?" a question with as many answers
+        as there were kinds: ask the fade jobs, ask the network jobs, poll the
+        voice, and for a memo there was nobody to ask. §3.6 makes `done` the
+        thing a sequence group advances on, so a group whose second member is a
+        note to the operator has to know when to move to the third.
+
+        So every kind gets a run and the run table is the one place that
+        answers. A memo's run finishes on the tick AFTER it fired, exactly as a
+        network cue with `wait: none` does, because that is when a report is
+        allowed to leave. */
     Rig rig;
     rig.setStandby (rig.memoId);
 
     CHECK (rig.submitAndTick ("go").applied == 1);
-    CHECK (rig.runs.all().empty());
+
+    REQUIRE (rig.runs.all().size() == 1u);
+    const auto id = rig.runs.all().front().id;
+
+    CHECK (rig.runs.all().front().kind == "memo");
+    CHECK (rig.runs.all().front().state == cue::runState::playing);
+    CHECK (rig.audio.arms.empty());                 // nothing to make ready
+
+    /*  The hook submits on the next tick and the handler applies it on the one
+        after - the ordinary two-step every engine-origin report takes. */
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (rig.runs.find (id) != nullptr);
+    CHECK (rig.runs.find (id)->state == cue::runState::done);
 }
 
 //==============================================================================
@@ -1363,4 +1391,371 @@ TEST_CASE ("stop: minus a hundred and twenty decibels is digital silence, not ne
 
     for (int n = 0; n < 64; ++n)
         REQUIRE (juce::exactlyEqual (out.getSample (0, n), 0.0f));
+}
+
+//==============================================================================
+/*  WAITS: the two ends of a cue, and what holds on them.
+
+    §3.6 gives every cue a pre-wait and a post-wait, and the namespace draft
+    §2.4 says they COMPOSE with a group's rather than being replaced by them.
+    Groups arrive in PR 3.3; what is here is the pair working on a cue of its
+    own, which is what a group will then wrap.
+
+    THE DURATIONS ARE MEASURED RATHER THAN COUNTED. Every case below ticks until
+    the state changes and asserts how many ticks that took, because a test that
+    asserted "state at tick 6" restates the implementation's arithmetic and
+    passes against any off-by-one it happens to share. What a wait promises is a
+    LENGTH.
+*/
+namespace
+{
+    /*  Ticks until `run` leaves `state`, and answers how many ticks it took.
+        Bounded, so a wait that never ends fails the test rather than hanging
+        the suite. */
+    template <typename R>
+    int ticksSpentIn (R& rig, const std::string& run, const char* state, int bound = 400)
+    {
+        for (int n = 0; n < bound; ++n)
+        {
+            const auto* found = rig.runs.find (run);
+
+            if (found == nullptr || found->state != state)
+                return n;
+
+            rig.tickOnce();
+        }
+
+        return bound;
+    }
+}
+
+TEST_CASE ("ticksFor: seconds as the document spells them, ticks as the engine counts them")
+{
+    /*  ONE PLACE, because there were two and both were the literal 50 while
+        TickClock::rateHz sat there being the definition. The rounding is to
+        NEAREST rather than down, so a wait somebody typed as 0.02 is one tick
+        rather than none - a wait that silently became no wait at all is the
+        worst of the three possible answers. */
+    CHECK (cue::ticksFor (0.0) == 0);
+    CHECK (cue::ticksFor (1.0) == 50);
+    CHECK (cue::ticksFor (0.02) == 1);
+    CHECK (cue::ticksFor (0.5) == 25);
+    CHECK (cue::ticksFor (2.5) == 125);
+
+    // Not a wait. The schema refuses these; this is the second net.
+    CHECK (cue::ticksFor (-1.0) == 0);
+    CHECK (cue::ticksFor (0.001) == 0);
+}
+
+TEST_CASE ("pre-wait: the run exists from the GO and fires when the wait has elapsed")
+{
+    Rig rig;
+    rig.setStandby (rig.memoId);
+    rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/preWait", "0.2");   // 10 ticks
+
+    const auto goTick = rig.tick;
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    /*  THE RUN EXISTS FROM THE GO, which is what makes a pre-wait something an
+        operator can watch rather than a gap where a cue should be. */
+    REQUIRE (rig.runs.all().size() == 1u);
+    const auto id = rig.runs.all().front().id;
+
+    CHECK (rig.runs.find (id)->state == cue::runState::waiting);
+    CHECK (rig.runs.find (id)->dueTick == goTick + 10);
+
+    /*  Standby did on the GO what it always does: it moved to the next sibling.
+        The memo is the last cue in this list and there is no wrap (§3.5), so it
+        stayed where it was - what matters is that it did not wait for the cue. */
+    CHECK (rig.standby() == rig.memoId);
+
+    CHECK (ticksSpentIn (rig, id, cue::runState::waiting) == 10);
+    CHECK (rig.runs.find (id)->state == cue::runState::playing);
+}
+
+TEST_CASE ("pre-wait: a media cue arms during its wait, so the disk is paid for before it fires")
+{
+    /*  The reason a pre-wait is worth having on a sound cue rather than merely
+        tolerable: the seconds it waits are seconds the disk spends getting
+        ready. Arming during the wait is what turns a delay into preparation,
+        and it is why the wait sits between the arm and the launch rather than
+        in front of both. */
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+    rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/preWait", "0.2");   // 10 ticks
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    REQUIRE (rig.runs.all().size() == 1u);
+    const auto id = rig.runs.all().front().id;
+
+    // The voice is reserved and the media requested, while the run still waits.
+    REQUIRE (rig.audio.arms.size() == 1u);
+    CHECK (rig.audio.arms[0].track == 0);
+    CHECK (rig.runs.find (id)->track == 0);
+    CHECK (rig.runs.find (id)->state == cue::runState::waiting);
+    CHECK (rig.audio.launches.empty());
+
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    // Ready, and still not launched: armed is not fired.
+    CHECK (rig.runs.find (id)->state == cue::runState::waiting);
+    CHECK (rig.audio.launches.empty());
+
+    while (rig.runs.find (id)->state == cue::runState::waiting)
+        rig.tickOnce();
+
+    /*  And once the wait is over the launch goes in on the next tick, because
+        there is nothing left to make ready. That is the whole point. */
+    rig.tickOnce();
+    CHECK (rig.audio.launches.size() == 1u);
+}
+
+TEST_CASE ("post-wait: the run holds after its own work is over, and only then reports done")
+{
+    /*  §3.6: a post-wait is "how long after completion this cue reports done to
+        its parent". So `postWait` is a PUBLISHED state and not a private timer:
+        a group holding on this run has to keep holding, and a client watching it
+        has to be told the same thing the group believes. */
+    Rig rig;
+    rig.setStandby (rig.memoId);
+    rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/postWait", "0.2");   // 10 ticks
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    REQUIRE (rig.runs.all().size() == 1u);
+    const auto id = rig.runs.all().front().id;
+
+    // The memo's own work ends on the next tick, and the post-wait begins there.
+    CHECK (ticksSpentIn (rig, id, cue::runState::playing) == 1);
+    CHECK (rig.runs.find (id)->state == cue::runState::postWait);
+
+    CHECK (ticksSpentIn (rig, id, cue::runState::postWait) == 10);
+    CHECK (rig.runs.find (id)->state == cue::runState::done);
+}
+
+TEST_CASE ("waits: both ends of one cue, in order and without running into each other")
+{
+    Rig rig;
+    rig.setStandby (rig.memoId);
+    rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/preWait", "0.1");    // 5
+    rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/postWait", "0.3");   // 15
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    REQUIRE (rig.runs.all().size() == 1u);
+    const auto id = rig.runs.all().front().id;
+
+    CHECK (ticksSpentIn (rig, id, cue::runState::waiting) == 5);
+    CHECK (ticksSpentIn (rig, id, cue::runState::playing) == 1);
+    CHECK (ticksSpentIn (rig, id, cue::runState::postWait) == 15);
+
+    CHECK (rig.runs.find (id)->state == cue::runState::done);
+}
+
+TEST_CASE ("waits: a run copies them when it is created, so editing the cue changes the next one")
+{
+    /*  §4.10's rule applied to a duration. The run instantiates what the cue
+        said when it was fired; a designer lengthening a wait while it runs is
+        writing the show, not steering tonight's performance. */
+    Rig rig;
+    rig.setStandby (rig.memoId);
+    rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/preWait", "0.1");    // 5 ticks
+
+    const auto goTick = rig.tick;
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto id = rig.runs.all().front().id;
+    CHECK (rig.runs.find (id)->dueTick == goTick + 5);
+
+    // Ten seconds from now on, and the run already in flight does not care.
+    rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/preWait", "10");
+
+    CHECK (ticksSpentIn (rig, id, cue::runState::waiting) == 5);
+    CHECK (rig.runs.find (id)->state == cue::runState::playing);
+}
+
+//==============================================================================
+/*  run.kill ON A RUN THAT HOLDS NO VOICE.
+
+    `enforceStops` stops a TRACK, and a fade, a network cue and a waiting run
+    have none. Before this they were marked `stopping` and nothing acted on it:
+    the fade went on writing levels for the rest of its duration and the run sat
+    in `stopping` until the show closed - which a group would have waited on for
+    ever.
+*/
+
+TEST_CASE ("run.kill: it reaches a fade, which holds a level rather than a voice")
+{
+    FadeRig rig;
+    const auto media = rig.startMedia();
+
+    rig.setCue (rig.fadeId, "duration", "10");        // long enough to catch in the act
+    rig.setCue (rig.fadeId, "level", "-60");
+
+    rig.fire (rig.fadeId);
+
+    const auto fadeRun = rig.runs.all().back().id;
+    REQUIRE (rig.runs.find (fadeRun)->kind == "fade");
+
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    const auto partWay = rig.runs.find (media)->level;
+    CHECK (partWay < 0.0);
+    CHECK (partWay > -60.0);
+
+    REQUIRE (rig.submitAndTick ("run.kill",
+                                { osc::Value::string (fadeRun) }).applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (fadeRun)->state == cue::runState::done);
+
+    /*  And the level it had reached is where it stays. A killed fade abandons
+        its ramp; it does not snap the cue to a destination it never got to. */
+    const auto after = rig.runs.find (media)->level;
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (media)->level == after);
+    CHECK (rig.runs.find (media)->state == cue::runState::playing);
+}
+
+TEST_CASE ("run.kill: killing a fade-and-stop takes the stop with it")
+{
+    /*  The difference between a kill and a takeover, worth stating because they
+        look alike and are opposite.
+
+        A fade arriving over a fade-and-stop INHERITS the arrival (author,
+        2026-09-06): riding a level back up does not withdraw the stop, because
+        the operator who fired it has not changed their mind about the cue going
+        away. `run.kill` is the other thing entirely - the immediate path, the
+        one Esc and double-Esc will be built on, which asks nothing of the cue.
+        Kill the run of a stop cue and the stop it was going to perform is what
+        you killed. */
+    FadeRig rig;
+    rig.startMedia();
+
+    rig.setCue (rig.stopId, "verb", "fade");
+    rig.setCue (rig.stopId, "duration", "10");
+
+    rig.fire (rig.stopId);
+
+    const auto stopRun = rig.runs.all().back().id;
+    REQUIRE (rig.runs.find (stopRun)->kind == "stop");
+
+    rig.tickOnce();
+
+    REQUIRE (rig.submitAndTick ("run.kill",
+                                { osc::Value::string (stopRun) }).applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (stopRun)->state == cue::runState::done);
+
+    /*  AND THE TARGET IS PLAYING AGAIN. The stop cue marked it `stopping` the
+        moment it fired; killing the stop has to lift that mark, or
+        `enforceStops` finds a run no job is holding and stops it - so killing a
+        ten-second fade-and-stop would stop the cue instantly, which is the
+        opposite of every reading of what was asked for. */
+    const auto media = rig.runs.all().front().id;
+    CHECK (rig.runs.find (media)->state == cue::runState::playing);
+
+    // Well past where the stop would have landed, and nothing was ever stopped.
+    for (int n = 0; n < 600; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.audio.stopped.empty());
+}
+
+TEST_CASE ("run.kill: it reaches a run that is still in its pre-wait")
+{
+    /*  A waiting run has no voice, no job and no level, so nothing owned it -
+        and `run.kill` writes `stopping` over the `waiting` that said who was
+        looking after it. Without the ownership sweep it stayed `stopping` until
+        the show closed. */
+    Rig rig;
+    rig.setStandby (rig.memoId);
+    rig.document.setAttribute ("/godot/cue/" + rig.memoId + "/preWait", "10");
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto id = rig.runs.all().front().id;
+    CHECK (rig.runs.find (id)->state == cue::runState::waiting);
+
+    REQUIRE (rig.submitAndTick ("run.kill", { osc::Value::string (id) }).applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->state == cue::runState::done);
+}
+
+//==============================================================================
+/*  run.late, WHICH NOTHING PRODUCED UNTIL NOW.
+
+    Registered, documented and tested since PR 2.3 and never once submitted,
+    because the number is not visible from where the launch is placed:
+    `launchIfDue` puts one a fixed number of ticks ahead of the tick it happens
+    to run on, so by its own arithmetic it can never be late. What it did not
+    know was the tick the launch was ASKED for on. The run knows.
+*/
+
+TEST_CASE ("run.late: a cue fired from cold reports the blocks the disk cost it")
+{
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+
+    const auto goTick = rig.tick;
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    const auto id = rig.runs.all().front().id;
+
+    // The disk takes its time: twenty ticks before the arm comes back.
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.audio.launches.empty());
+    CHECK (rig.runs.find (id)->late == 0);
+
+    rig.audio.completeArms (rig.engine);
+
+    while (rig.audio.launches.empty())
+        rig.tickOnce();
+
+    const auto launchTick = rig.tick - 1;             // tickOnce post-increments
+
+    REQUIRE (rig.audio.launches.size() == 1u);
+    CHECK (rig.runs.find (id)->late > 0);
+
+    /*  The lateness is the EXCESS over the best case, in blocks. One tick is
+        never late: a GO is applied in a tick's drain and the launch hook runs
+        before the drain, so the earliest tick that can see the request is the
+        one after it - for every cue, including one that was armed and ready.
+
+        Derived here from what the test itself observed rather than restated
+        from the implementation, so that changing either means changing both. */
+    const auto lateTicks = launchTick - goTick - 1;
+    CHECK (rig.runs.find (id)->late
+             == static_cast<int> ((lateTicks * 960) / rig.audio.block));
+}
+
+TEST_CASE ("run.late: a cue armed at standby is not late, which is what arming is for")
+{
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+
+    // Armed ahead, which is what standby will do from PR 3.3.
+    REQUIRE (rig.submitAndTick ("audio.arm",
+                                { osc::Value::string (rig.mediaId) }).applied == 1);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    const auto id = rig.runs.all().front().id;
+    CHECK (rig.runs.find (id)->state == cue::runState::armed);
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    while (rig.audio.launches.empty())
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->late == 0);
 }

@@ -1,0 +1,69 @@
+# wfg-log 1
+# fixture waits — a pre-wait and a post-wait, hand-written and hand-checked.
+#
+# WHAT THIS FIXTURE IS FOR. A wait is a deadline, and a deadline is the easiest
+# thing in an engine to get right live and wrong on replay: the obvious way to
+# write one is a counter in a tick hook, and `wfg replay` runs no hooks at all.
+# A cue with a two-second pre-wait would then sit in `waiting` for the whole of
+# the replayed session while the live one fired it perfectly.
+#
+# So a wait coming due is a COMMAND — `run.fire` at the near end, `run.done` at
+# the far one — and this file is what that buys: every wait below elapses
+# because the log says it did, on the tick the log says, with no clock of its
+# own in the room.
+#
+# It needs the bundle because GO reads standby out of the show. It needs no
+# audio side: `Audio tracks="0"` is a real answer rather than a placeholder, and
+# a show of memos is exactly the show a designer writes on a train.
+#
+# THE FIRST CUE HAS A PRE-WAIT of 0.2 s, which is ten ticks. GO creates the run
+# at once — a cue somebody can see coming, rather than a gap where a cue should
+# be — and standby advances immediately (§3.5), whatever the cue then does.
+A 0 0 cli go s:"G7W9EF36"
+#
+# Ten ticks later the wait is over and the engine tells itself so. The run
+# leaves `waiting` and the cue fires.
+A 10 1 engine run.fire s:"G7W9EF36"
+#
+# A memo has nothing to do, so it ends on the next tick — the same tick a
+# network cue with `wait: none` ends on, and for the same reason: that is when a
+# report is allowed to leave, not because anything was waited for. With no
+# post-wait it goes straight to `done`.
+A 11 2 engine run.ended s:"G7W9EF36"
+#
+# THE SECOND CUE HAS A POST-WAIT of 0.3 s, fifteen ticks, and no pre-wait. So it
+# fires on the GO itself and there is no `run.fire`.
+A 20 3 cli go s:"H2K4M6NP"
+#
+# Its own work is over on the next tick — and it is NOT done. §3.6 makes a
+# post-wait "how long after completion this cue reports done to its parent", so
+# the run moves to `postWait` and anything holding on it keeps holding.
+A 21 4 engine run.ended s:"H2K4M6NP"
+#
+# Fifteen ticks after that, it reports done. This record is the whole reason
+# `run.done` exists rather than a timer somewhere.
+A 36 5 engine run.done s:"H2K4M6NP"
+#
+# THE THIRD CUE HAS BOTH, five ticks each, and they do not run into each other:
+# the pre-wait, then the cue, then the post-wait, in that order.
+A 50 6 cli go s:"Q6RS8TW2"
+A 55 7 engine run.fire s:"Q6RS8TW2"
+A 56 8 engine run.ended s:"Q6RS8TW2"
+A 71 9 engine run.done s:"Q6RS8TW2"
+#
+# THE FOURTH CUE WAITS TEN SECONDS, and nobody is going to wait for it.
+A 80 10 cli go s:"V3XY5Z7B"
+#
+# Killed in its pre-wait, from a surface. This is the case that had no owner: a
+# waiting run holds no voice, no job and no level, and `run.kill` writes
+# `stopping` over the `waiting` that said who was looking after it. Before the
+# Runner swept for it, the run stayed `stopping` until the show closed — and a
+# group holding on it would have held for ever.
+A 90 11 udp:10.0.0.5:9000 run.kill s:"V3XY5Z7B"
+A 91 12 engine run.ended s:"V3XY5Z7B"
+#
+# And a wait that came due for a run nobody created is refused rather than
+# inventing one to fire. `run.fire` may be sent by anyone — a command only the
+# inside of the process could send would be one a replay could not send — so it
+# has to answer for an argument it does not recognise.
+R 100 13 cli unknown-id run.fire s:"NOSUCHID"

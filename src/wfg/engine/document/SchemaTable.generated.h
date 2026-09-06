@@ -39,7 +39,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_stop_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_osc_wait[] = { "none", "sent", "verified" };
     inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc" };
-    inline constexpr std::string_view enum_run_state[] = { "armed", "playing", "stopping", "done", "failed" };
+    inline constexpr std::string_view enum_run_state[] = { "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
     inline constexpr std::string_view enum_group_mode[] = { "timeline", "sequence" };
     inline constexpr std::string_view enum_group_advance[] = { "auto", "manual" };
     inline constexpr std::string_view enum_mount_transport[] = { "udp", "tcp", "ws" };
@@ -403,9 +403,9 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           true, "armed",
           false, 0.0, false, 0.0,
-          enum_run_state, 5,
+          enum_run_state, 7,
           "", 50.0, false, "park",
-          "Where the run is. Armed means its track is held and its media is being made ready; playing means the launch has been placed; stopping means a stop was asked for and has not landed; done and failed are both finished, and a failed run says why in error." },
+          "Where the run is. Waiting means its pre-wait is running and nothing has fired yet; armed means its track is held and its media is being made ready; playing means the launch has been placed; stopping means a stop was asked for and has not landed; postWait means its own work is over and it is holding before it reports done to whatever is waiting on it; done and failed are both finished, and a failed run says why in error." },
         { "run", "track",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
           true, "-1",

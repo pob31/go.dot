@@ -97,6 +97,19 @@ namespace wfg::cue
     */
     int launchLatencyTicks (int blockSize, int samplesPerTick) noexcept;
 
+    /*  Seconds as the document spells them, in ticks as the engine counts them.
+
+        ONE PLACE, because there were two and they were both the literal 50. A
+        tick rate that is a constant in TickClock and a magic number in the cue
+        layer is a rate that only appears to be defined in one place, and the
+        rounding rule - nearest, so a 0.02 s wait is one tick rather than none -
+        is worth stating once as well.
+
+        Negative seconds are not a wait. The schema already refuses them
+        (`preWait` and `postWait` are `0..`), so this is the second net rather
+        than the first. */
+    int ticksFor (double seconds) noexcept;
+
     //==============================================================================
     /*  One coefficient of a cue's output stage: from one of the cue's own
         channels to one HARDWARE output channel, at a gain.
@@ -243,13 +256,32 @@ namespace wfg::cue
             empty when the cue is not one that plays.
 
             `runId` is the identifier to use when one has to be created - the
-            command layer draws it so that the log record carries it. */
-        std::string fire (Engine& engine, const std::string& cueId,
+            command layer draws it so that the log record carries it.
+
+            `tick` IS THE COMMAND'S OWN TICK and not the Runner's, because a
+            pre-wait is a deadline and a deadline computed during a replay must
+            land where it landed live. The hooks that set `currentTick` do not
+            run in a replay; `CommandContext::tick` is right in both. */
+        std::string fire (Engine& engine, std::int64_t tick, const std::string& cueId,
                           const std::string& runId);
 
         /*  Arms a cue without firing it: the standby path. Same return. */
-        std::string arm (Engine& engine, const std::string& cueId,
+        std::string arm (Engine& engine, std::int64_t tick, const std::string& cueId,
                          const std::string& runId);
+
+        /*  A run whose pre-wait has elapsed, doing what firing it would have
+            done had there been no wait. What the `run.fire` command calls.
+
+            SEPARATE FROM `fire` because by now the run exists, its identifier
+            is in the log, and its cue may have been edited since - so this
+            takes a RUN and not a cue, and re-reads nothing that was already
+            decided. */
+        void fireNow (Engine& engine, std::int64_t tick, const std::string& runId);
+
+        /** Whether the run table has this identifier. What `run.fire` asks
+            before it acts, so that an unknown one is REJECTED rather than
+            quietly doing nothing. */
+        bool knowsRun (const std::string& runId) const { return runs.find (runId) != nullptr; }
 
         /*  Where a cue's destinations land on the rig, resolved through the
             buses the show declares.
@@ -291,8 +323,22 @@ namespace wfg::cue
         const std::vector<OscJob>& sends() const noexcept { return sending; }
 
     private:
-        std::string armInternal (Engine& engine, const std::string& cueId,
+        std::string armInternal (Engine& engine, std::int64_t tick,
+                                 const std::string& cueId,
                                  const std::string& runId, bool fireAtOnce);
+
+        /*  The kind's own fire path, once every wait is out of the way: a media
+            cue asks for a voice, a fade or a stop takes over a level, a network
+            cue writes a node, a memo has nothing to do and says so next tick. */
+        void fireKind (Engine& engine, std::int64_t tick, const juce::ValueTree& cue,
+                       const std::string& kind, const std::string& runId);
+
+        /*  A media cue reserving a voice and asking for its media. Reports
+            `run.failed` when the show cannot honour it, which it may do because
+            it is reached from a hook or from a handler that a replay runs with
+            no audio side - see the note in armInternal. */
+        void armMedia (Engine& engine, const juce::ValueTree& cue,
+                       const std::string& runId);
 
         /*  A fade or a stop cue firing. Both act on a run that already exists,
             which is what makes them different from a media cue: they create a
@@ -304,25 +350,26 @@ namespace wfg::cue
             that reported would produce a record twice on replay - once from the
             log and once from itself. Not being able to reach the engine is how
             that stays true when somebody adds the next case. */
-        std::string fireFade (const juce::ValueTree& cue, const std::string& runId);
-        std::string fireStop (const juce::ValueTree& cue, const std::string& runId);
+        void fireFade (const juce::ValueTree& cue, const std::string& runId);
+        void fireStop (const juce::ValueTree& cue, const std::string& runId);
 
         /*  A network cue firing: one write to a mounted node, queued for the
             end of this tick. No Engine here either, and for the same reason. */
-        std::string fireOsc (const juce::ValueTree& cue, const std::string& runId);
+        void fireOsc (const juce::ValueTree& cue, const std::string& runId);
 
         /*  `selfCueId` is the fade or stop cue being fired; `targetCueId` is
             the cue it acts on. They are two arguments and not one because the
             run being created belongs to the FIRST - a run says which cue it
             instantiates - while the level being moved belongs to the second.
             Conflating them made liveRunOf answer with the fade's own run. */
-        std::string beginFade (const std::string& selfCueId,
-                               const std::string& targetCueId,
-                               const std::string& selfRunId, const std::string& kind,
-                               double toDb, double seconds, FadeCurve, bool stopWhenDone);
+        void beginFade (const std::string& selfCueId,
+                        const std::string& targetCueId,
+                        const std::string& selfRunId, const std::string& kind,
+                        double toDb, double seconds, FadeCurve, bool stopWhenDone);
 
         void advanceFades (Engine& engine, std::int64_t tick);
         void advanceSends (Engine& engine);
+        void advanceWaits (Engine& engine, std::int64_t tick);
         void enforceStops();
 
         void launchIfDue (Engine& engine, std::int64_t tick);
@@ -338,6 +385,16 @@ namespace wfg::cue
         std::string mediaFolder;
 
         std::vector<FadeJob> running;
+
+        /*  Runs with nothing left to do, ending on the next tick.
+
+            A MEMO IS THE WHOLE POPULATION and it is here rather than nowhere
+            because §3.6 needs every kind of cue to report done: a sequence group
+            whose second member is a note to the operator has to know when to
+            move to the third. It ends on the tick AFTER it fired, exactly as a
+            network cue with `wait: none` does, because that is when a report is
+            allowed to leave and not because anything was waited for. */
+        std::vector<std::string> finishing;
 
         /*  The tick being processed, so a stop fired inside a command
             handler can be scheduled against the same clock the tick hook

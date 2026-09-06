@@ -238,6 +238,27 @@ add_test(NAME wfg.replay.verified.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/network
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The seventh replay fixture, and the one that says a DEADLINE reproduces. A
+# wait is the easiest thing in an engine to get right live and wrong on replay:
+# the obvious way to write one is a counter in a tick hook, and `wfg replay`
+# runs no hooks at all - so a cue with a two-second pre-wait would sit in
+# `waiting` for the whole replayed session while the live one fired it
+# perfectly.
+#
+# Which is why a wait coming due is a COMMAND rather than something a hook
+# quietly does, and why this fixture is the proof: every wait in it elapses
+# because the log says it did, on the tick the log says, with no clock of its
+# own. It also carries the case that had no owner at all - a run killed while it
+# was still waiting.
+add_test(NAME wfg.replay.waits.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/waits.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/waits
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.waits.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/waits.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/waits
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a

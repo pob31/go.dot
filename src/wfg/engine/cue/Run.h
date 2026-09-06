@@ -59,6 +59,15 @@ namespace wfg::cue
     */
     namespace runState
     {
+        /*  Its pre-wait is running and nothing has fired yet.
+
+            A STATE AND NOT A GAP. A cue with a two-second pre-wait is a cue
+            somebody can see coming, so it has an address and a state from the
+            moment GO is pressed rather than appearing when it finally makes a
+            sound. It is also what a group waits on: a member in its pre-wait is
+            a member that has not finished. */
+        inline constexpr const char* waiting = "waiting";
+
         /** Its track is reserved and its media is being made ready. */
         inline constexpr const char* armed = "armed";
 
@@ -67,6 +76,15 @@ namespace wfg::cue
 
         /** A stop has been asked for and has not landed yet. */
         inline constexpr const char* stopping = "stopping";
+
+        /*  Its own work is over and its post-wait is running.
+
+            §3.6: a post-wait is "how long after completion this cue reports done
+            to its parent", so the run is genuinely not finished yet - a sequence
+            group holding on it must keep holding. Publishing it as `done` and
+            keeping a private timer would tell every client the opposite of what
+            the group is doing. */
+        inline constexpr const char* postWait = "postWait";
 
         /** It finished, or it was stopped. Its track is free. */
         inline constexpr const char* done = "done";
@@ -140,6 +158,34 @@ namespace wfg::cue
         std::string error;
 
         //======================================================================
+        /*  THE WAITS, IN TICKS, COPIED FROM THE CUE WHEN THE RUN IS CREATED.
+
+            Copied rather than looked up, so that editing a cue under a run that
+            is already waiting changes the NEXT run and not this one - the same
+            rule §4.10 applies to every other authored value a run instantiates.
+            (A group's mode and advance are deliberately not copied: §3.6 says a
+            mid-run toggle takes effect at the next member boundary, which means
+            reading them there.)
+
+            In ticks rather than seconds because that is the clock every
+            deadline in the engine is kept in, and converting once at creation
+            is one place to be wrong instead of one per tick. */
+        int preWaitTicks = 0;
+        int postWaitTicks = 0;
+
+        /*  When the wait it is in comes due, as an ABSOLUTE tick.
+
+            The `FadeJob::stopsAtTick` shape, for the reason that one gives:
+            nothing between here and there can move it. Meaningful only while
+            `state` is `waiting` or `postWait`.
+
+            It is computed in a command HANDLER, from the command's own tick,
+            and never from the Runner's idea of the current tick - a handler
+            runs during a replay and the hooks do not, so the Runner's tick is
+            zero there and a deadline built on it would be due immediately. */
+        std::int64_t dueTick = 0;
+
+        //======================================================================
         /*  ENGINE STATE, PUBLISHED NOWHERE. These three are how the Runner
             remembers what it is in the middle of; a client has no use for them
             and no business writing them, so they carry no parameter row.
@@ -150,6 +196,22 @@ namespace wfg::cue
 
         /** A GO has happened and the launch has not been placed yet. */
         bool launchRequested = false;
+
+        /*  The tick that GO was applied on, so that lateness can be MEASURED.
+
+            `run.late` has been declared, documented and tested since PR 2.3 and
+            nothing has ever produced it, because `launchIfDue` has no way to
+            know what the launch instant SHOULD have been - it computes one from
+            the tick it happens to run on, which is by construction never late.
+            The difference between that tick and this one, in blocks, is the
+            number the command was written for. */
+        std::int64_t launchRequestedAtTick = 0;
+
+        /*  The tick it reached `done` or `failed`, or -1 while it has not.
+
+            Set in the handler that finishes the run, so it is the same number
+            live and on replay. Retention reads it - see `retentionTicks`. */
+        std::int64_t endedAtTick = -1;
 
         /** The audio side has confirmed a voice and made the media ready. */
         bool armConfirmed = false;
@@ -179,12 +241,39 @@ namespace wfg::cue
             return state == runState::done || state == runState::failed;
         }
 
+        /** Whether it is holding on a wait, either end. */
+        bool isWaiting() const noexcept
+        {
+            return state == runState::waiting || state == runState::postWait;
+        }
+
         /** Whether it is holding a track, and so whether that track is busy. */
         bool holdsTrack() const noexcept
         {
             return track >= 0 && ! isFinished();
         }
     };
+
+    //==============================================================================
+    /*  HOW LONG A FINISHED RUN KEEPS ITS ADDRESS, in ticks. Five seconds.
+
+        Gogo is the pure present tense (PRD §7) and a four-hour show would
+        otherwise publish four hours of finished runs on every one of its
+        720 000 ticks. Five seconds is long enough for a client polling at the
+        tick rate to see the `done` it was waiting for, and for a person to read
+        it.
+
+        IT RETIRES FROM THE TREE AND NOT FROM THE TABLE, and the difference is
+        the whole reason this is a constant here rather than an erase somewhere.
+        Pruning the table would make the model depend on a hook, and hooks do not
+        run during a replay: a `run.kill` arriving six seconds after its run
+        finished would be REJECTED live (the run is gone) and APPLIED on replay
+        (it is not), which is a session that does not reproduce itself. Nothing
+        else can tell the difference - `liveRunOf` and `lowestFreeTrack` both
+        skip finished runs already - so what is left is a tree that stops
+        growing, which was the only real problem.
+    */
+    inline constexpr int retentionTicks = 250;
 
     //==============================================================================
     /*  Every run of this session, in the order they were created.
