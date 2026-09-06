@@ -68,6 +68,24 @@ def run(locale: "str | None") -> int:
         with Server(bundle, locale=locale, ui=CLIENT) as server:
             status, body = common.http_get(server.http_port, "/ui")
 
+            """AND THE TERMINAL SAID WHERE IT IS, which is the assertion that
+            would have saved an evening. `wfg: http 5010` is a fact and not an
+            instruction: the obvious thing to do with a client sitting in the
+            repository is to double-click it, which opens it as a `file:` URL
+            with no engine behind it and no cue list in it. So the engine prints
+            an address, spelled the way it has to be typed, ending in `/ui`."""
+            told = [line for line in server.notices if "/ui" in line]
+
+            report.check(bool(told), "starting with --ui prints an address to open",
+                         "\n".join(server.notices))
+
+            if told:
+                report.check(told[0].endswith("/ui"),
+                             "and it ends in /ui, which is the part that is easy to lose",
+                             told[0])
+                report.check("http://" in told[0],
+                             "and it is a URL rather than a port number", told[0])
+
             report.equal(status, 200, "GET /ui answers with the page")
             report.check("<title>Go.dot</title>" in body,
                          "and it is the client rather than something else")
