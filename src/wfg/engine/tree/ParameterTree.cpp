@@ -243,13 +243,26 @@ namespace wfg::tree
         }
 
         /** The child identifiers of a container, in order, space-separated. */
-        std::string orderOf (const juce::ValueTree& node)
+        /*  The identifiers of a container's children, in order, space-separated.
+
+            `only` narrows it to one element name, which is what a group's
+            header and footer need: `order` is the group's MEMBERS and a header
+            is not one of them - a client reading `order` is reading the cue
+            list, and the two cues that run before and after it are a different
+            question with two nodes of their own. */
+        std::string orderOf (const juce::ValueTree& node, const char* only = nullptr)
         {
             std::string out;
 
             for (const auto& child : node)
             {
                 if (! child.hasProperty (idProperty))
+                    continue;
+
+                const auto element = child.getType().toString();
+
+                if (only != nullptr ? element != only
+                                    : (element == "Header" || element == "Footer"))
                     continue;
 
                 if (! out.empty())
@@ -405,6 +418,10 @@ namespace wfg::tree
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
                 else if (name == "order")  text = orderOf (node);
+                else if (name == "headerOrder")
+                    text = orderOf (node.getChildWithName ("Header"));
+                else if (name == "footerOrder")
+                    text = orderOf (node.getChildWithName ("Footer"));
                 else                       text = storedText (attribute, node);
 
                 out.push_back (makeLeaf (base + "/" + name, *row, text));
@@ -417,14 +434,43 @@ namespace wfg::tree
                 if (! child.hasProperty (idProperty))
                     continue;
 
-                /*  A ROUTE IS NOT A NESTED CUE, and the recursion below would
-                    have made it one - it takes any identified child. A
-                    destination has its own top-level address so that changing
+                /*  NOT EVERY IDENTIFIED CHILD IS A NESTED CUE, and the
+                    recursion below takes any that reaches it - so the element
+                    has to be asked what it is.
+
+                    A ROUTE has a top-level address of its own, so that changing
                     one gain is a write to one node rather than a rewrite of the
-                    cue's whole routing (author, 2026-09-05). */
-                if (child.getType().toString() == "Route")
+                    cue's whole routing (author, 2026-09-05).
+
+                    A HEADER OR A FOOTER is an ordinary cue list (§3.6) and
+                    carries nothing but an identifier, so it publishes no node of
+                    its own - but the cues INSIDE it are cues, published like any
+                    other, with `role` saying where in the group they sit. What
+                    it must not do is take an index among the members: a header
+                    is not the group's first member, and letting it have index 0
+                    would have shifted every real member by one.
+
+                    Written as a lookup rather than as a second `if` because the
+                    list is now three long and the plan has ranges and triggers
+                    joining it - and because the failure mode of forgetting one
+                    is silent: it becomes a cue at `/godot/cue/<id>`, with the
+                    rows of a kind it is not. */
+                const auto element = child.getType().toString();
+
+                if (element == "Route")
                 {
                     collectRoute (child, out);
+                    continue;
+                }
+
+                if (element == "Header" || element == "Footer")
+                {
+                    int roleIndex = 0;
+
+                    for (const auto& roleChild : child)
+                        if (roleChild.hasProperty (idProperty))
+                            collectCue (roleChild, id, roleIndex++, out);
+
                     continue;
                 }
 

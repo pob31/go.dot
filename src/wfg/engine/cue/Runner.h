@@ -421,6 +421,16 @@ namespace wfg::cue
         void advanceWaits (Engine& engine, std::int64_t tick);
         void advanceGroups (Engine& engine);
 
+        /*  Starts a group's header, members or footer, and answers whether
+            there was anything to start. False lets the caller fall through to
+            the next phase, so a group with no header does not spend a tick in
+            one. */
+        bool beginPhase (Engine& engine, GroupJob& job, const juce::ValueTree& group,
+                         const char* phase);
+
+        /** Moves a group on to its next phase, or ends it. */
+        void finishPhase (Engine& engine, GroupJob& job, const juce::ValueTree& group);
+
         /** The cues a group runs, in order: its enabled children. */
         std::vector<std::string> membersOf (const juce::ValueTree& group) const;
         void enforceStops();

@@ -241,6 +241,20 @@ namespace wfg::cue
             noticed. */
         bool sawPlaying = false;
 
+        /*  Whether this run was KILLED rather than stopped, which for a group
+            decides whether its footer runs.
+
+            §4.4 draws the distinction before Phase 10 builds the keys for it.
+            Esc is graceful: it stops what is running and RUNS FOOTERS, "the
+            same code path as normal completion, entered early - a group aborted
+            at 04:12 releases its channels and kills its LFOs exactly as it
+            would have at 06:00". Double Esc is immediate and skips them.
+
+            A stop cue is the first; `run.kill` is the second. Both write
+            `stopping`, because both are true statements about the run - so the
+            state alone cannot say which was meant, and this is what does. */
+        bool skipFooter = false;
+
         /*  Whether the tick thread has already told the audio side to stop this
             run's voice.
 

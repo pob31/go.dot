@@ -1836,6 +1836,14 @@ namespace
             return bound;
         }
 
+        /** The group's header or footer, made if it has none. */
+        std::string roleOf (const std::string& group, const char* role)
+        {
+            const auto edit = document.createRole (group, role);
+            REQUIRE (edit.ok);
+            return edit.id;
+        }
+
         /** The run of a cue, or empty. */
         std::string runOf (const std::string& cueId) const
         {
@@ -2119,4 +2127,178 @@ TEST_CASE ("cue defaults: a fade nobody filled in goes to silence, not to unity"
 
     // A duration of zero is a jump, so the destination is reached at once.
     CHECK (rig.runs.find (media)->level == doctest::Approx (-120.0));
+}
+
+//==============================================================================
+/*  HEADERS AND FOOTERS: what runs before a group's members, and what runs
+    after them and BLOCKS.
+
+    §3.6 makes them independent of each other and of everything else: "the user
+    decides whether to use either". A header is where §3.12's prepare/commit
+    will live, extended from one row to a whole block. A footer is an ordinary
+    cue list that runs at group exit - "kill LFOs and AutoMotion in WFS-DIY,
+    stop effects processing, release audio interface channels" - and it is NOT
+    an inverse of the header.
+
+    FOOTERS BLOCK, which is the load-bearing half: the group is not done until
+    its footer's cues report done, so a following scene that reallocates the
+    same interface channels waits for the release rather than racing it.
+*/
+
+TEST_CASE ("group: a header runs before the members and a footer runs after them")
+{
+    GroupRig rig;
+
+    const auto header = rig.roleOf (rig.groupId, "header");
+    const auto footer = rig.roleOf (rig.groupId, "footer");
+
+    const auto opening = rig.document.createCue (header, 0, "memo", "Pre-arm").id;
+    const auto closing = rig.document.createCue (footer, 0, "memo", "Release").id;
+
+    rig.setStandby (rig.groupId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto groupRun = rig.runs.all().front().id;
+    CHECK (rig.runToCompletion (groupRun) < 400);
+
+    /*  Five runs: the group, one header cue, three members, one footer cue -
+        and the order they were created in is the order they ran in, because a
+        run is created when it is spawned. */
+    std::vector<std::string> ran;
+
+    for (const auto& run : rig.runs.all())
+        if (run.parent == groupRun)
+            ran.push_back (run.cue);
+
+    CHECK (ran == std::vector<std::string> { opening, rig.first, rig.second, rig.third, closing });
+}
+
+TEST_CASE ("group: a header and a footer are each optional, and independent of the other")
+{
+    /*  §3.6: "Independent of each other; the user decides whether to use
+        either." A group with only a footer must not spend a tick in a header
+        it does not have. */
+    GroupRig rig;
+
+    const auto footer = rig.roleOf (rig.groupId, "footer");
+    const auto closing = rig.document.createCue (footer, 0, "memo", "Release").id;
+
+    rig.setStandby (rig.groupId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto groupRun = rig.runs.all().front().id;
+    CHECK (rig.runToCompletion (groupRun) < 400);
+
+    CHECK (rig.runOf (closing) != "");
+    CHECK (rig.runs.find (rig.runOf (closing))->state == cue::runState::done);
+}
+
+TEST_CASE ("group: the footer blocks - the group is not done until its cues are")
+{
+    /*  The property a following scene depends on. A footer that released
+        interface channels while the group reported done would be a race the
+        next scene loses about one time in ten, which is the worst kind of
+        show bug: it works in the tech and fails on a Friday. */
+    GroupRig rig;
+
+    const auto footer = rig.roleOf (rig.groupId, "footer");
+    const auto closing = rig.document.createCue (footer, 0, "memo", "Release").id;
+    rig.setCue (closing, "postWait", "0.4");             // 20 ticks of holding on
+
+    rig.setStandby (rig.groupId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto groupRun = rig.runs.all().front().id;
+
+    // Wait until the footer cue is holding its post-wait...
+    REQUIRE (rig.tickUntil ([&]
+    {
+        const auto id = rig.runOf (closing);
+        return ! id.empty() && rig.runs.find (id)->state == cue::runState::postWait;
+    }));
+
+    // ...and the group is still not done, because the footer is not.
+    CHECK_FALSE (rig.runs.find (groupRun)->isFinished());
+
+    CHECK (rig.runToCompletion (groupRun) < 400);
+}
+
+TEST_CASE ("group: a stop cue runs the footer, and run.kill does not")
+{
+    /*  §4.4's first two levels of stop, drawn now so that Phase 10 has only to
+        bind keys to them.
+
+        ESC IS GRACEFUL AND RUNS FOOTERS - "the same code path as normal
+        completion, entered early: a group aborted at 04:12 releases its
+        channels and kills its LFOs exactly as it would have at 06:00". The
+        releasing is what a footer is FOR, so a graceful stop that skipped it
+        would leave the channels held by a scene that has gone.
+
+        DOUBLE ESC IS IMMEDIATE AND SKIPS THEM. "The world may be left in a
+        state nobody declared; that is the price of an emergency."
+
+        Both write `stopping` to the run, because both are true statements about
+        it - so the state cannot say which was meant, and a flag does. */
+    GroupRig rig;
+
+    const auto footer = rig.roleOf (rig.groupId, "footer");
+    const auto closing = rig.document.createCue (footer, 0, "memo", "Release").id;
+    rig.setCue (rig.first, "preWait", "10");             // hold the group in its members
+
+    SUBCASE ("a stop cue is graceful")
+    {
+        const auto stopId = rig.document.createCue (rig.listId, 3, "stop", "Abort").id;
+        rig.setCue (stopId, "target", rig.groupId);
+
+        rig.setStandby (rig.groupId);
+        CHECK (rig.submitAndTick ("go").applied == 1);
+
+        const auto groupRun = rig.runs.all().front().id;
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string (stopId) });
+        CHECK (rig.runToCompletion (groupRun) < 400);
+
+        // The footer ran on the way out.
+        CHECK (rig.runOf (closing) != "");
+    }
+
+    SUBCASE ("run.kill is immediate")
+    {
+        rig.setStandby (rig.groupId);
+        CHECK (rig.submitAndTick ("go").applied == 1);
+
+        const auto groupRun = rig.runs.all().front().id;
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+        rig.submitAndTick ("run.kill", { osc::Value::string (groupRun) });
+        CHECK (rig.runToCompletion (groupRun) < 400);
+
+        // And the footer did not.
+        CHECK (rig.runOf (closing) == "");
+    }
+}
+
+TEST_CASE ("group: a header's cues are published as cues, and are not members of the group")
+{
+    /*  A header is an ordinary cue list, so what is in it is ordinary cues with
+        addresses of their own. What it must NOT be is a member: `order` is the
+        group's cue list, and a header taking index 0 in it would have shifted
+        every real member by one. */
+    GroupRig rig;
+
+    const auto header = rig.roleOf (rig.groupId, "header");
+    const auto opening = rig.document.createCue (header, 0, "memo", "Pre-arm").id;
+
+    /*  The header's cue is a cue: it exists, it is addressable, and it is
+        reachable by its own identifier like any other. (That it is NOT in the
+        group's `order` is asserted in TreeTests, where `order` lives - it is a
+        derived value and the document does not store one.) */
+    CHECK (rig.document.findById (opening).isValid());
+    CHECK (rig.document.getAttribute ("/godot/cue/" + opening + "/name").value_or ("?")
+             == "Pre-arm");
+
+    /*  And asking for the same role twice answers with the one that exists,
+        rather than making a second: a group has at most one of each. */
+    CHECK (rig.roleOf (rig.groupId, "header") == header);
 }

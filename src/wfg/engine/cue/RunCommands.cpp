@@ -237,6 +237,13 @@ namespace wfg::cue
                                 `run.ended` when it actually has. Saying done
                                 here would publish a silence that had not
                                 happened. */
+                            /*  AND IT SKIPS THE FOOTER. §4.4's second level:
+                                immediate, drops everything, "runs no footers".
+                                A stop cue is the other one - graceful, the same
+                                path as normal completion entered early - and it
+                                leaves this alone, so a group it stops still
+                                releases what it was holding. */
+                            run->skipFooter = true;
                             run->state = runState::stopping;
                             return Outcome::ok (args);
                         } });

@@ -137,6 +137,24 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        registry.add ({ "group.role",
+                        "Gives a group its header or its footer - the cue lists that run before"
+                        " its members and at its exit. Asking twice answers with the one it has.",
+                        { { "group", 's', false }, { "role", 's', false },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.createRole (args[0].getString(),
+                                                                   args[1].getString(),
+                                                                   id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "mount.create",
                         "Declares a foreign namespace to be mounted at a prefix.",
                         { { "prefix", 's', false }, { "namespace", 's', false },

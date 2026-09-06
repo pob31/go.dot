@@ -137,6 +137,24 @@ namespace wfg::doc
         EditResult createRoute (const std::string& cueId, const std::string& busId,
                                 const std::string& id = {});
 
+        /*  Gives a group its header or its footer, and answers with the one it
+            already had if it has one.
+
+            §3.6 makes these ordinary cue lists: a header runs before the
+            group's members and a footer runs at group exit and BLOCKS, so the
+            group is not done until the footer's cues are. They hold cues, which
+            is why they are containers rather than a word on each cue - and they
+            carry an identifier, because `cue.create` and `object.move` address
+            a parent by one and without it there would be no way to put a cue in
+            a footer.
+
+            `role` is "header" or "footer". At most one of each, which is why
+            asking twice answers with the first rather than making a second: two
+            headers is not a thing a group can have, and the friendliest moment
+            to say so is before it exists. */
+        EditResult createRole (const std::string& groupId, const std::string& role,
+                               const std::string& id = {});
+
         EditResult createMount (const std::string& prefix, const std::string& namespaceFile,
                                 const std::string& id = {});
 

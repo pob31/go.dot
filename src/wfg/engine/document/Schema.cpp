@@ -125,7 +125,30 @@ namespace wfg::doc
                 { "Lists",  false, { "List" },             { "lists" } },
                 { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, { "list" } },
                 { "Cue",    true,  {},                     { "cue" } },
-                { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, { "cue", "group" } },
+                { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
+                                     "Header", "Footer" },                { "cue", "group" } },
+
+                /*  A HEADER AND A FOOTER ARE ORDINARY CUE LISTS (§3.6), which
+                    is why they are elements holding cues rather than a word on
+                    each cue: "an ordinary cue list that runs at group exit" is
+                    what the section says a footer IS, and a container is what a
+                    cue list is made of.
+
+                    They carry an identifier and nothing else. The identifier is
+                    not decoration - `cue.create` and `object.move` address a
+                    parent BY id, so without one there would be no way to put a
+                    cue in a footer.
+
+                    AT MOST ONE OF EACH, checked by validate() rather than by
+                    the grammar. The generator emits a container's children as
+                    an unordered `zeroOrMore` of a choice, which is the right
+                    shape for the eight things a group can hold and the wrong
+                    one for "optionally one of these"; teaching it ordered
+                    content models to express a rule that fits in one line of
+                    validate() would be paying a great deal for a smaller
+                    diagnostic. */
+                { "Header", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, {} },
+                { "Footer", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, {} },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
                     pattern a Group already set. `kind` stays derived from the

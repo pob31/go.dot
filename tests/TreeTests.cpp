@@ -262,6 +262,48 @@ TEST_CASE ("tree: a collection carries nodes of its own, beside its members")
     CHECK (snapshot->find ("/godot/list") != nullptr);
 }
 
+TEST_CASE ("tree: a header's cues are cues, and are not members of the group")
+{
+    /*  A header and a footer are ordinary cue lists (§3.6), so what is in one
+        is an ordinary cue with an address of its own. What a header must NOT be
+        is a member: `order` is the group's cue list, and letting the header take
+        index 0 in it would have shifted every real member by one - which is the
+        silent version of this bug, and the reason the walk asks the element what
+        it is rather than assuming every identified child is a cue. */
+    Rig rig;
+
+    const auto preshowId = std::string ("D9FH2JKA");
+    const auto header = rig.document.createRole (preshowId, "header");
+    REQUIRE (header.ok);
+
+    const auto opening = rig.document.createCue (header.id, 0, "memo", "Pre-arm");
+    REQUIRE (opening.ok);
+
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+
+    const auto valueAt = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    // The group's order is its members, unchanged by gaining a header.
+    CHECK (valueAt ("/godot/cue/" + preshowId + "/order")
+             == osc::Value::string ("E4GP6QSC F7HR8TVD"));
+
+    // The header has an order of its own, and its cue is published as a cue.
+    CHECK (valueAt ("/godot/cue/" + preshowId + "/headerOrder")
+             == osc::Value::string (opening.id));
+    CHECK (valueAt ("/godot/cue/" + opening.id + "/kind") == osc::Value::string ("memo"));
+    CHECK (valueAt ("/godot/cue/" + opening.id + "/parent") == osc::Value::string (preshowId));
+
+    // And the header container itself publishes nothing: it carries no value.
+    CHECK (snapshot->find ("/godot/cue/" + header.id + "/kind") == nullptr);
+}
+
 TEST_CASE ("tree: a cue keeps its address when it moves, and its index changes")
 {
     /*  Identity addressing, which is what makes a client's subscription and a

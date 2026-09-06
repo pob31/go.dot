@@ -53,8 +53,27 @@ namespace wfg::cue
         /** Before anything: the group's own pre-wait. */
         inline constexpr const char* entering = "entering";
 
+        /*  Its header: an ordinary cue list that runs before the members, as a
+            sequence whatever the group's own mode is.
+
+            A SEQUENCE ALWAYS, because a header is preparation and preparation
+            has an order: §3.12 puts prepare/commit here, and "pre-position
+            sources, preload media, pre-arm bindings for eight cues" is a list
+            of steps rather than a set of things to fire at once. The group's
+            `mode` describes what it does with its MEMBERS. */
+        inline constexpr const char* header = "header";
+
         /** Its members, scheduled per its mode. */
         inline constexpr const char* members = "members";
+
+        /*  Its footer, which BLOCKS: the group is not done until the footer's
+            cues report done (§3.6), so a following scene that reallocates the
+            same interface channels waits for the release rather than racing it.
+
+            It runs on the way out however the group is leaving - the end of its
+            members, or a stop cue aimed at it. The one thing that skips it is
+            `run.kill`, which is the emergency path and asks nothing of the cue. */
+        inline constexpr const char* footer = "footer";
 
         /** Done, and waiting for nothing. The job is retired next tick. */
         inline constexpr const char* complete = "complete";
@@ -91,6 +110,15 @@ namespace wfg::cue
             group, where nothing is waited on individually because everything
             was scheduled at entry. */
         std::string awaiting;
+
+        /*  The cues of the phase in progress, and how far along them it is.
+
+            Reused by the header, the members and the footer rather than three
+            sets of fields, because all three are the same job: a list of cues,
+            spawned in order, waited on. What differs is only which list, and a
+            timeline group's members are the one case that launches them all at
+            once instead of one at a time. */
+        std::vector<std::string> phaseCues;
 
         /** Finished and waiting to be forgotten. */
         bool retired = false;

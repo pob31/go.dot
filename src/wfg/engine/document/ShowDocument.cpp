@@ -190,6 +190,11 @@ namespace wfg::doc
               || element == "Fade" || element == "Stop"
               || element == "Osc")                                  return "cue";
         if (element == "Lists")                     return "lists";
+        /*  A header and a footer are addressed by nothing: they carry no
+            attribute but their identifier, and the cues inside them are
+            addressed as cues like any other. Naming an owner for them would be
+            promising a `/godot/header/<id>/…` that has nothing in it. */
+        if (element == "Header" || element == "Footer")   return {};
         if (element == "Route")                     return "route";
         if (element == "List")                      return "list";
         if (element == "Mount")                     return "mount";
@@ -533,6 +538,41 @@ namespace wfg::doc
 
         return insertObject (cue, cue.getNumChildren(), "Route", id,
                              { { "bus", busId } });
+    }
+
+    EditResult ShowDocument::createRole (const std::string& groupId, const std::string& role,
+                                         const std::string& id)
+    {
+        auto group = findById (groupId);
+
+        if (! group.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        /*  Only a group has members to run before or after. A header on a media
+            cue would be a statement about an order that does not exist. */
+        if (group.getType().toString() != "Group")
+            return EditResult::failed (reason::typeMismatch);
+
+        const auto element = role == "header" ? "Header"
+                           : role == "footer" ? "Footer"
+                                              : "";
+
+        if (*element == '\0')
+            return EditResult::failed (reason::typeMismatch);
+
+        /*  ASKING TWICE ANSWERS WITH THE FIRST. A group has at most one of
+            each, so a second is not a thing to refuse OR to create - the caller
+            wanted the group's footer and there it is. It also makes the command
+            idempotent, which is what a replay needs from anything that can
+            arrive more than once. */
+        if (const auto existing = group.getChildWithName (element); existing.isValid())
+            return EditResult::succeeded (existing[idProperty].toString().toStdString());
+
+        /*  AT THE END, whatever it is. Where a header sits among the members is
+            not what makes it a header - the element is - and inserting it at
+            the top would reorder the members of every group that gained one
+            later. */
+        return insertObject (group, group.getNumChildren(), element, id, {});
     }
 
     EditResult ShowDocument::createMount (const std::string& prefix,

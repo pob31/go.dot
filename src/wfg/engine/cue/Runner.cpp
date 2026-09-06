@@ -1310,7 +1310,14 @@ namespace wfg::cue
             goes in at n+2 - which is `/godot/engine/sequenceGapTicks`, published
             rather than left for somebody to discover with a stopwatch. §3.6's
             sequence group is discrete children relaunched; the sample-accurate
-            join is §3.24's range, which is a different mechanism on purpose. */
+            join is §3.24's range, which is a different mechanism on purpose.
+
+            THREE PHASES AND ONE PIECE OF MACHINERY. A header, the members and a
+            footer are all "a list of cues, spawned in order, waited on"; what
+            differs is which list, and the one case that launches everything at
+            once instead of one at a time (a timeline group's members). So the
+            phases share `phaseCues` and the spawn/await loop rather than having
+            three copies that could come to disagree about what "done" means. */
         for (auto& job : scheduled)
         {
             auto* run = runs.find (job.run);
@@ -1318,24 +1325,6 @@ namespace wfg::cue
             if (run == nullptr || run->isFinished())
             {
                 job.retired = true;
-                continue;
-            }
-
-            /*  Killed, or stopped by a stop cue. Its members go with it: a
-                group's lifetime is the thing a group owns (§4.12), so ending
-                one ends what it was organising. */
-            if (run->state == runState::stopping)
-            {
-                for (const auto* child : runs.childrenOf (job.run))
-                    if (! child->isFinished())
-                        engine.submit (origin::engine, "run.kill", one (child->id));
-
-                if (runs.allChildrenFinished (job.run))
-                {
-                    engine.submit (origin::engine, "run.ended", one (job.run));
-                    job.retired = true;
-                }
-
                 continue;
             }
 
@@ -1348,89 +1337,91 @@ namespace wfg::cue
                 continue;
             }
 
-            /*  READ AT EVERY BOUNDARY rather than copied at entry, because
-                §3.6 says a mid-run change takes effect at the next member
-                boundary - so a designer flipping a group during a plotting
-                session sees it now, not tomorrow. */
-            const auto timeline = textOf (group, "mode") == "timeline";
-            const auto members = membersOf (group);
+            /*  ASKED TO STOP, and which way decides whether the footer runs.
 
-            if (job.phase == groupPhase::entering)
+                A STOP CUE IS GRACEFUL AND RUNS THE FOOTER: it is the same path
+                as normal completion entered early, which is exactly what §4.4
+                promises of Esc - "a group aborted at 04:12 releases its channels
+                and kills its LFOs exactly as it would have at 06:00". The
+                footer is where that releasing lives, and skipping it would leave
+                the channels held by a scene that has gone.
+
+                `run.kill` SKIPS IT: the immediate path, which "runs no footers
+                and asks nothing of the cue", and which Phase 10's double-Esc
+                will be built on. The two are told apart by the flag `run.kill`
+                sets, because both write the same `stopping` state and the state
+                alone cannot say which was meant. */
+            if (run->state == runState::stopping && job.phase != groupPhase::footer)
             {
-                job.phase = groupPhase::members;
+                for (const auto* child : runs.childrenOf (job.run))
+                    if (! child->isFinished())
+                        engine.submit (origin::engine, "run.kill", one (child->id));
 
-                if (members.empty())
+                if (! runs.allChildrenFinished (job.run))
+                    continue;
+
+                if (run->skipFooter || ! beginPhase (engine, job, group, groupPhase::footer))
                 {
-                    /*  A group with nothing in it is COMPLETE, not stuck. An
-                        empty round completes the group rather than spinning
-                        (§3.6), and this is the same answer one level up. */
                     engine.submit (origin::engine, "run.ended", one (job.run));
                     job.retired = true;
-                    continue;
                 }
 
-                if (timeline)
-                {
-                    /*  EVERY MEMBER AT ENTRY, and each member's pre-wait is its
-                        OFFSET from that moment (§3.6). Which is why the group's
-                        own pre-wait defers the whole scene without disturbing
-                        anything: raising one number moves the entry, and every
-                        offset is measured from it.
-
-                        Voices are claimed here too, so a member that finds none
-                        fails at entry - visibly, while there is still time to do
-                        something about it - rather than at its offset. */
-                    for (const auto& member : members)
-                        engine.submit (origin::engine, "run.spawn",
-                                       { osc::Value::string (job.run),
-                                         osc::Value::string (member) });
-
-                    job.nextMember = members.size();
-                    continue;
-                }
-
-                engine.submit (origin::engine, "run.spawn",
-                               { osc::Value::string (job.run),
-                                 osc::Value::string (members.front()) });
-                job.nextMember = 1;
                 continue;
             }
 
-            if (job.phase != groupPhase::members)
+            if (job.phase == groupPhase::entering)
+            {
+                if (beginPhase (engine, job, group, groupPhase::header))
+                    continue;
+
+                if (beginPhase (engine, job, group, groupPhase::members))
+                    continue;
+
+                /*  Nothing to run at all - no header, no members. Complete
+                    rather than stuck: §3.6 says an emptied round completes the
+                    group rather than spinning, and this is the same answer one
+                    level up. The footer still runs, because a group that
+                    reserved nothing may still have a footer that says so. */
+                if (! beginPhase (engine, job, group, groupPhase::footer))
+                {
+                    engine.submit (origin::engine, "run.ended", one (job.run));
+                    job.retired = true;
+                }
+
                 continue;
+            }
+
+            const auto timeline = job.phase == groupPhase::members
+                                    && textOf (group, "mode") == "timeline";
 
             const auto children = runs.childrenOf (job.run);
 
-            /*  A TIMELINE GROUP WAITS FOR ALL OF THEM and a sequence for the
-                one it is on. §3.6's completion table, read off the run states -
-                which is what giving every kind a run bought: there is one place
-                to ask, and it answers the same way for a memo, a fade and a
-                nested group. */
+            /*  A TIMELINE SCHEDULES EVERYTHING AT ENTRY and each member's
+                pre-wait is its OFFSET from that moment (§3.6) - which is why
+                raising the group's own pre-wait defers a whole scene without
+                disturbing the relative timing somebody spent an afternoon
+                getting right. The launches are a tick after the spawns because
+                the identifiers do not exist until the spawns have applied. */
             if (timeline)
             {
-                /*  EVERYTHING SPAWNED AT ENTRY IS ALSO STARTED AT ENTRY, one
-                    tick later, because the identifiers do not exist until the
-                    spawns have been applied. From there each member's own
-                    pre-wait is its offset and the group waits for all of them. */
                 for (auto i = job.launched; i < children.size(); ++i)
                     engine.submit (origin::engine, "run.launch", one (children[i]->id));
 
                 job.launched = children.size();
 
-                if (children.size() >= members.size() && runs.allChildrenFinished (job.run))
-                {
-                    engine.submit (origin::engine, "run.ended", one (job.run));
-                    job.retired = true;
-                }
+                if (children.size() >= job.phaseCues.size()
+                      && runs.allChildrenFinished (job.run))
+                    finishPhase (engine, job, group);
 
                 continue;
             }
 
-            /*  A sequence: launch what was spawned, then wait for it. */
+            /*  A sequence, which a header and a footer always are: launch what
+                was spawned, wait for it, then spawn the next. */
             if (job.awaiting.empty())
             {
                 for (const auto* child : children)
-                    if (child->state == runState::armed && child->parent == job.run)
+                    if (child->state == runState::armed)
                     {
                         job.awaiting = child->id;
                         engine.submit (origin::engine, "run.launch", one (child->id));
@@ -1447,22 +1438,80 @@ namespace wfg::cue
 
             job.awaiting.clear();
 
-            if (job.nextMember < members.size())
+            if (job.nextMember < job.phaseCues.size())
             {
                 engine.submit (origin::engine, "run.spawn",
                                { osc::Value::string (job.run),
-                                 osc::Value::string (members[job.nextMember]) });
+                                 osc::Value::string (job.phaseCues[job.nextMember]) });
                 ++job.nextMember;
                 continue;
             }
 
-            engine.submit (origin::engine, "run.ended", one (job.run));
-            job.retired = true;
+            finishPhase (engine, job, group);
         }
 
         scheduled.erase (std::remove_if (scheduled.begin(), scheduled.end(),
                                          [] (const GroupJob& job) { return job.retired; }),
                          scheduled.end());
+    }
+
+    bool Runner::beginPhase (Engine& engine, GroupJob& job, const juce::ValueTree& group,
+                             const char* phase)
+    {
+        const auto cues = phase == groupPhase::members
+                            ? membersOf (group)
+                            : membersOf (group.getChildWithName (phase == groupPhase::header
+                                                                   ? "Header" : "Footer"));
+
+        /*  AN ABSENT OR EMPTY PHASE IS SKIPPED RATHER THAN ENTERED, and saying
+            so with a `false` is what lets the caller fall through to the next
+            one. A group with no header should not spend a tick in a header. */
+        if (cues.empty())
+            return false;
+
+        job.phase = phase;
+        job.phaseCues = cues;
+        job.nextMember = 0;
+        job.launched = 0;
+        job.awaiting.clear();
+
+        const auto timeline = phase == groupPhase::members
+                                && textOf (group, "mode") == "timeline";
+
+        if (timeline)
+        {
+            for (const auto& cue : cues)
+                engine.submit (origin::engine, "run.spawn",
+                               { osc::Value::string (job.run), osc::Value::string (cue) });
+
+            job.nextMember = cues.size();
+            return true;
+        }
+
+        engine.submit (origin::engine, "run.spawn",
+                       { osc::Value::string (job.run), osc::Value::string (cues.front()) });
+        job.nextMember = 1;
+        return true;
+    }
+
+    void Runner::finishPhase (Engine& engine, GroupJob& job, const juce::ValueTree& group)
+    {
+        /*  Header, then members, then footer, and the group is done when the
+            last of them is. The footer BLOCKS (§3.6), which is not a special
+            case here: it is a phase like the other two, and the group's
+            `run.ended` comes after it because it comes after all of them. */
+        if (job.phase == groupPhase::header)
+        {
+            if (beginPhase (engine, job, group, groupPhase::members))
+                return;
+        }
+
+        if (job.phase != groupPhase::footer)
+            if (beginPhase (engine, job, group, groupPhase::footer))
+                return;
+
+        engine.submit (origin::engine, "run.ended", one (job.run));
+        job.retired = true;
     }
 
     //==============================================================================
