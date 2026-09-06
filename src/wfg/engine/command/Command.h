@@ -98,6 +98,18 @@ namespace wfg
         inline constexpr const char* typeMismatch    = "type-mismatch";
         inline constexpr const char* nonFinite       = "non-finite";
         inline constexpr const char* unknownId       = "unknown-id";
+
+        /*  The cue exists, is in this list, and is somewhere the pointer may
+            not stand: inside a timeline or an automatic group, or in a header
+            or a footer.
+
+            ITS OWN CODE rather than `not-in-list`, because it sends somebody
+            somewhere different. `not-in-list` means "you named the wrong list";
+            this means "that cue is one the MACHINE advances" (§3.5 - only GO
+            moves standby, and a pointer the scheduler also moved would be two
+            things moving one pointer). The remedy is to make the group manual,
+            or to park on the group instead. */
+        inline constexpr const char* notManualPath   = "not-manual-path";
         inline constexpr const char* badAddress      = "bad-address";
         inline constexpr const char* readOnly        = "read-only";
         inline constexpr const char* notInList       = "not-in-list";

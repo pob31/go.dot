@@ -100,8 +100,26 @@ namespace wfg::cue
                                     cue.getType().toString().toStdString()) != "cue")
                                 return Outcome::rejected (reason::unknownId);
 
-                            if (! isTopLevelChild (list, cueId))
-                                return Outcome::rejected (reason::notInList);
+                            /*  THE MANUAL PATH, not the top level, since PR
+                                3.4 - the pointer descends into a manual
+                                sequence group (§3.6), so a member of one is a
+                                legal place to park.
+
+                                The two refusals are told apart because they
+                                send somebody somewhere different. `not-in-list`
+                                means the cue belongs to another list.
+                                `not-manual-path` means it is in THIS list and
+                                is one the machine advances - inside an
+                                automatic chain, or in a header - and the remedy
+                                is to make the group manual or to park on the
+                                group instead. */
+                            if (! isOnManualPath (list, cueId))
+                            {
+                                const auto elsewhere = ! isInList (list, cueId);
+
+                                return Outcome::rejected (elsewhere ? reason::notInList
+                                                                    : reason::notManualPath);
+                            }
 
                             return moveStandbyTo (document, list, cueId, args);
                         } });
@@ -142,7 +160,7 @@ namespace wfg::cue
                                 reaches the end of a list would bury the
                                 rejections that matter. */
                             return moveStandbyTo (document, list,
-                                                  nextOf (list, standbyOf (list)), args);
+                                                  nextStandby (list, standbyOf (list)), args);
                         } });
 
         //----------------------------------------------------------------------
@@ -159,7 +177,7 @@ namespace wfg::cue
                                 return Outcome::rejected (reason::notInList);
 
                             return moveStandbyTo (document, list,
-                                                  previousOf (list, standbyOf (list)), args);
+                                                  previousStandby (list, standbyOf (list)), args);
                         } });
 
         //----------------------------------------------------------------------

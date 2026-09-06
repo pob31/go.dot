@@ -1884,7 +1884,7 @@ namespace wfg::cue
                                 which is what lets an operator press GO down a
                                 list at speed without waiting to see what each
                                 one did. */
-                            const auto next = nextOf (list, standby);
+                            const auto next = nextStandby (list, standby);
                             document.setAttribute (standbyAddressOf (listId), next);
 
                             const auto id = args.empty() ? std::string {}

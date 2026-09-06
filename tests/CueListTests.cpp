@@ -118,35 +118,41 @@ TEST_CASE ("standby: traversal walks the top-level children, in order")
 
     CHECK (childrenOf (list) == std::vector<std::string> { houseToHalf, preshow });
 
-    CHECK (nextOf (list, houseToHalf) == preshow);
-    CHECK (previousOf (list, preshow) == houseToHalf);
+    /*  The group is a MANUAL sequence by default, so the pointer goes inside
+        it - to its first member rather than to the group row (decision M). */
+    CHECK (nextStandby (list, houseToHalf) == walkIn);
+    CHECK (previousStandby (list, walkIn) == houseToHalf);
 
     CHECK (isTopLevelChild (list, houseToHalf));
     CHECK (isTopLevelChild (list, preshow));
     CHECK_FALSE (isTopLevelChild (list, walkIn));       // it is inside the group
+
+    // ...but it IS somewhere the pointer may stand, which is a different question.
+    CHECK (isOnManualPath (list, walkIn));
 }
 
-TEST_CASE ("standby: a group is one sibling and is never descended into (a Phase 1 choice)")
+TEST_CASE ("standby: a manual group IS descended into, which was the Phase 1 choice reversed")
 {
-    /*  PRD §3.6 says the pointer descends into a manual sequence group, and
-        Phase 3 will do that. A Phase 1 group has no runtime behaviour to
-        descend into, and the namespace draft's standby.set constraint already
-        requires a top-level child - so traversal steps over it as one sibling.
+    /*  THE FAILURE THIS TEST WAS NAMED FOR. Phase 1 asserted the opposite and
+        said so in as many words: "a Phase 1 group has no runtime behaviour to
+        descend into ... Named for the choice, not for a rule: when Phase 3
+        makes this fail, the failure is the point."
 
-        Named for the choice, not for a rule: when Phase 3 makes this fail, the
-        failure is the point. */
+        It has. PRD §3.6: in a manual sequence group "a member starts on GO. The
+        standby pointer DESCENDS INTO the group; the operator is the parent."
+        The fixture's group is a manual sequence, because that is what both
+        attributes default to. */
     Rig rig;
     const auto list = rig.listNode (mainList);
 
-    // The group is reached...
-    CHECK (nextOf (list, houseToHalf) == preshow);
+    // Into it, one member at a time - the group ROW is not a stop of its own.
+    CHECK (nextStandby (list, houseToHalf) == walkIn);
+    CHECK (nextStandby (list, walkIn) == announce);
 
-    // ...and stepping again leaves the list, rather than entering the group.
-    CHECK (nextOf (list, preshow) == preshow);
-
-    // Its children are never a destination.
-    CHECK (nextOf (list, walkIn) == walkIn);
-    CHECK (previousOf (list, announce) == announce);
+    // And out again: after the last member comes whatever follows the group.
+    CHECK (nextStandby (list, announce) == announce);   // it is the end of the list
+    CHECK (previousStandby (list, announce) == walkIn);
+    CHECK (previousStandby (list, walkIn) == houseToHalf);
 }
 
 TEST_CASE ("standby: at either end it stays put, and from empty it stays empty")
@@ -158,27 +164,45 @@ TEST_CASE ("standby: at either end it stays put, and from empty it stays empty")
     Rig rig;
     const auto list = rig.listNode (mainList);
 
-    CHECK (nextOf (list, preshow) == preshow);              // last, stays
-    CHECK (previousOf (list, houseToHalf) == houseToHalf);  // first, stays
+    CHECK (nextStandby (list, announce) == announce);       // last, stays
+    CHECK (previousStandby (list, houseToHalf) == houseToHalf);  // first, stays
 
-    CHECK (nextOf (list, "") == "");                        // empty, stays empty
-    CHECK (previousOf (list, "") == "");
+    CHECK (nextStandby (list, "") == "");                   // empty, stays empty
+    CHECK (previousStandby (list, "") == "");
 }
 
 TEST_CASE ("standby: a disabled cue is not skipped (a Phase 1 choice)")
 {
-    /*  A disabled cue is still a row in the list. Skipping is a
-        running-behaviour decision, and Phase 1 has no runner to justify it;
-        Phase 3 revisits it when a GO that does nothing becomes a real failure.
-        Asserted so the choice is visible rather than incidental. */
+    /*  THE OTHER CHOICE PHASE 1 NAMED FOR THIS MOMENT: "a disabled cue is
+        still a row in the list. Skipping is a running-behaviour decision, and
+        Phase 1 has no runner to justify it; Phase 3 revisits it when a GO that
+        does nothing becomes a real failure rather than a hypothetical one."
+
+        It has a runner now, and the runner already skips a disabled member
+        (§3.6's completion table cannot wait on a cue that will never play). So
+        a pointer that stopped on one would be a pointer standing where nothing
+        is going to happen - which is a GO that does nothing, and the failure
+        the sentence above was written about. */
     Rig rig;
 
     REQUIRE (rig.run (1, "node.set",
                       { osc::Value::string ("/godot/cue/" + preshow + "/enabled"),
                         osc::Value::boolean (false) }).applied == 1);
 
+    // The disabled group is stepped over entirely, members and all.
     const auto list = rig.listNode (mainList);
-    CHECK (nextOf (list, houseToHalf) == preshow);
+    CHECK (nextStandby (list, houseToHalf) == houseToHalf);   // nothing after it
+    CHECK_FALSE (isOnManualPath (list, walkIn));
+
+    // And a disabled MEMBER is skipped without the group being skipped.
+    REQUIRE (rig.run (2, "node.set",
+                      { osc::Value::string ("/godot/cue/" + preshow + "/enabled"),
+                        osc::Value::boolean (true) }).applied == 1);
+    REQUIRE (rig.run (3, "node.set",
+                      { osc::Value::string ("/godot/cue/" + walkIn + "/enabled"),
+                        osc::Value::boolean (false) }).applied == 1);
+
+    CHECK (nextStandby (rig.listNode (mainList), houseToHalf) == announce);
 }
 
 //==============================================================================
@@ -211,13 +235,26 @@ TEST_CASE ("standby.set: the cue must exist, be a cue, and be at the list's top 
     CHECK (rig.run (2, "standby.set", { osc::Value::string (wfsMount) }).rejected == 1);
     CHECK (rig.engine.lastError().find (reason::unknownId) != std::string::npos);
 
-    /*  A real cue, in this list, but nested inside a group - which is where the
-        opaque-sibling choice and the referential invariant meet. */
-    CHECK (rig.run (3, "standby.set", { osc::Value::string (walkIn) }).rejected == 1);
-    CHECK (rig.engine.lastError().find (reason::notInList) != std::string::npos);
+    /*  A cue nested inside a MANUAL group is now legal, because that is where
+        §3.6 puts the pointer - "the operator is the parent". Phase 1 refused it
+        and this is the assertion turning over. */
+    CHECK (rig.run (3, "standby.set", { osc::Value::string (walkIn) }).applied == 1);
+    CHECK (rig.standbyOf (mainList) == walkIn);
 
-    // And none of it moved the standby.
-    CHECK (rig.standbyOf (mainList) == houseToHalf);
+    /*  Inside an AUTOMATIC one it is refused, and with a code of its own. The
+        machine advances that chain, so a pointer in it would be a pointer two
+        things move - which is how an operator presses GO expecting cue 12 and
+        gets 14 (§3.5). `not-in-list` would have sent them to look at the wrong
+        thing: the cue is in this list, and what is wrong is the group. */
+    REQUIRE (rig.run (4, "node.set",
+                      { osc::Value::string ("/godot/cue/" + preshow + "/advance"),
+                        osc::Value::string ("auto") }).applied == 1);
+
+    CHECK (rig.run (5, "standby.set", { osc::Value::string (announce) }).rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::notManualPath) != std::string::npos);
+
+    // And the refusal left the pointer where it was.
+    CHECK (rig.standbyOf (mainList) == walkIn);
 }
 
 TEST_CASE ("standby.set: every kind of cue can be parked on, not only a memo and a group")
@@ -315,11 +352,23 @@ TEST_CASE ("standby: a direct node write goes through the same invariant")
                     { osc::Value::string (address), osc::Value::string ("banana") }).rejected == 1);
     CHECK (rig.engine.lastError().find (reason::notInList) != std::string::npos);
 
-    // A real cue that is not a top-level child of THIS list.
+    /*  A cue inside a MANUAL group is accepted here for the same reason
+        `standby.set` accepts it: both doors ask `isOnManualPath`, which is the
+        same walk the cursor takes. Two answers to "where may the pointer be"
+        would eventually be two different answers, and the one that went stale
+        would be whichever this door used. */
     CHECK (rig.run (3, "node.set",
-                    { osc::Value::string (address), osc::Value::string (walkIn) }).rejected == 1);
+                    { osc::Value::string (address), osc::Value::string (walkIn) }).applied == 1);
+    CHECK (rig.standbyOf (mainList) == walkIn);
 
-    CHECK (rig.standbyOf (mainList) == preshow);
+    // And inside an automatic one it is refused here too, with the same code.
+    REQUIRE (rig.run (31, "node.set",
+                      { osc::Value::string ("/godot/cue/" + preshow + "/advance"),
+                        osc::Value::string ("auto") }).applied == 1);
+
+    CHECK (rig.run (32, "node.set",
+                    { osc::Value::string (address), osc::Value::string (announce) }).rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::notManualPath) != std::string::npos);
 
     // Emptying it is always legal.
     CHECK (rig.run (4, "node.set",
@@ -439,17 +488,36 @@ TEST_CASE ("standby: deleting some other cue leaves it exactly where it was")
     CHECK (rig.standbyOf (mainList) == houseToHalf);
 }
 
-TEST_CASE ("standby: moving the cue out of the list's top level clears it")
+TEST_CASE ("standby: moving the cue off the manual path clears it, and along it does not")
 {
-    /*  Advancing would be guessing that the operator meant to stay where they
-        were. Clearing says plainly that what they were parked on has gone
-        somewhere else. */
+    /*  WIDENED IN PR 3.4 from "out of the list's top level", because the
+        pointer can now stand inside a manual sequence group. What matters is
+        not the depth the cue moved to but whether the pointer is still allowed
+        to be there.
+
+        Clearing says plainly that what they were parked on has gone somewhere
+        else; advancing would be guessing that the operator meant to stay where
+        they were. */
     Rig rig;
     REQUIRE (rig.standbyOf (mainList) == houseToHalf);
 
+    /*  Into a MANUAL group: still on the path, so the pointer follows the cue.
+        It stores an identifier, and §3.5 says it does not move as a side effect
+        of the show being edited around it. */
     CHECK (rig.run (1, "object.move",
                     { osc::Value::string (houseToHalf), osc::Value::string (preshow),
                       osc::Value::int32 (0) }).applied == 1);
+
+    CHECK (rig.standbyOf (mainList) == houseToHalf);
+
+    // Into an AUTOMATIC one: off the path, so it clears.
+    REQUIRE (rig.run (2, "node.set",
+                      { osc::Value::string ("/godot/cue/" + preshow + "/advance"),
+                        osc::Value::string ("auto") }).applied == 1);
+
+    CHECK (rig.run (3, "object.move",
+                    { osc::Value::string (houseToHalf), osc::Value::string (preshow),
+                      osc::Value::int32 (1) }).applied == 1);
 
     CHECK (rig.standbyOf (mainList) == "");
 }
@@ -472,7 +540,7 @@ TEST_CASE ("standby: reordering the list does not move it")
 
     CHECK (childrenOf (list) == std::vector<std::string> { preshow, houseToHalf });
     CHECK (rig.standbyOf (mainList) == houseToHalf);        // same cue, new position
-    CHECK (previousOf (list, houseToHalf) == preshow);      // and traversal followed the list
+    CHECK (previousStandby (list, houseToHalf) == announce);  // traversal followed the list
 }
 
 //==============================================================================
@@ -576,7 +644,9 @@ TEST_CASE ("standby: the commands act on the focused list and on no other")
     CHECK (rig.run (11, "standby.next").applied == 1);
     CHECK (rig.run (12, "standby.next").applied == 1);
 
-    CHECK (rig.standbyOf (mainList) == preshow);              // moved, then stayed at the end
+    /*  Two steps down the manual path: into the group's first member, then to
+        its second. The group row is not a stop of its own (decision M). */
+    CHECK (rig.standbyOf (mainList) == announce);
     CHECK (rig.standbyOf (secondList) == secondChildren[1]);  // and the other did not move
 
     // Now focus the second and traverse it; the first must hold still.
@@ -584,7 +654,7 @@ TEST_CASE ("standby: the commands act on the focused list and on no other")
     CHECK (rig.run (14, "standby.previous").applied == 1);
 
     CHECK (rig.standbyOf (secondList) == secondChildren[0]);
-    CHECK (rig.standbyOf (mainList) == preshow);
+    CHECK (rig.standbyOf (mainList) == announce);
 }
 
 //==============================================================================
@@ -593,11 +663,17 @@ TEST_CASE ("standby: a saved state naming a cue that is not there is reported an
     /*  The invariant lives at the single write door, so the load path gets it
         too - which is the case that matters, because a state file written
         against a different show is exactly where a nonsense standby comes
-        from. The show still opens; the pointer does not. */
+        from. The show still opens; the pointer does not.
+
+        IT NAMES A MOUNT, which is valid, real, and not a cue of this list at
+        all. It used to name a cue nested inside the group - illegal in Phase 1,
+        legal since PR 3.4, because the pointer descends into a manual sequence
+        group (§3.6). What this case is about has not changed, so it names
+        something that still cannot be a standby. */
     Rig rig;
 
     const auto stateText = "<State formatVersion=\"1\">\n"
-                           "  <List id=\"" + mainList + "\" standby=\"" + walkIn + "\"/>\n"
+                           "  <List id=\"" + mainList + "\" standby=\"" + wfsMount + "\"/>\n"
                            "</State>\n";
 
     doc::ShowDocument reopened;
@@ -645,8 +721,18 @@ TEST_CASE ("replay: a standby session reproduces itself, its show and its state"
 
         const auto ids = childrenOf (document.findById (listId));
 
-        /*  A cue INSIDE the group, so the not-in-list refusal below is really
-            that refusal and not an unknown identifier wearing its coat. */
+        /*  Something valid that is not a cue of this list, for the refusal. */
+        engine.submit (origin::cli, "mount.create",
+                       { osc::Value::string ("/desk"), osc::Value::string ("desk.json") });
+        engine.processTick (5);
+
+        const auto mountId = document.root().getChildWithName ("Mounts")
+                               .getChild (0).getProperty ("id").toString().toStdString();
+
+        /*  A cue INSIDE the group. Since PR 3.4 that is a place the pointer
+            goes rather than one it refuses: the group is a manual sequence -
+            what both attributes default to - and §3.6 puts the pointer inside
+            one, because there the operator is the parent. */
         engine.submit (origin::cli, "cue.create",
                        { osc::Value::string (ids[1]), osc::Value::int32 (0),
                          osc::Value::string ("memo"), osc::Value::string ("Nested") });
@@ -656,24 +742,33 @@ TEST_CASE ("replay: a standby session reproduces itself, its show and its state"
 
         engine.submit (origin::cli, "list.focus", { osc::Value::string (listId) });
         engine.submit (origin::cli, "standby.set", { osc::Value::string (ids[0]) });
-        engine.submit ("ws:127.0.0.1:51234", "standby.next");     // -> the group
-        engine.submit (origin::cli, "standby.next");              // -> the third cue
+        engine.submit ("ws:127.0.0.1:51234", "standby.next");     // -> INTO the group
+        engine.submit (origin::cli, "standby.next");              // -> out, to the third cue
         engine.processTick (9);
 
-        // Past the end: applied, and it stays put.
+        // Past the end: applied, and it stays put. There is no wrap.
         engine.submit (origin::cli, "standby.next");
 
-        // Refused: a cue inside the group is not a top-level child.
-        engine.submit (origin::cli, "standby.set", { osc::Value::string (nested) });
+        /*  Refused, and it has to be something the pointer still cannot reach
+            or the rejection record would stop being one: a mount is a valid
+            identifier that is not a cue of this list. */
+        engine.submit (origin::cli, "standby.set", { osc::Value::string (mountId) });
 
-        engine.submit (origin::cli, "standby.previous");           // -> back to the group
+        // Back the way it came: out of the third cue, into the group again.
+        engine.submit (origin::cli, "standby.previous");
         engine.processTick (14);
 
-        /*  THE REPAIR, and it has to be the cue the standby is actually on -
-            which after that sequence is the GROUP, ids[1], not ids[0]. Deleting
-            anything else would leave the repair branch in ShowDocument::remove()
-            unentered and this fixture would pass with the whole repair deleted. */
-        engine.submit (origin::cli, "object.delete", { osc::Value::string (ids[1]) });
+        /*  THE REPAIR, and it has to delete the cue the standby is actually on
+            - which after that sequence is the NESTED one, inside the group.
+            Deleting anything else would leave the repair branch in
+            ShowDocument::remove() unentered and this fixture would pass with
+            the whole repair deleted.
+
+            It is also the case the repair had to grow for: the pointer is
+            several levels down, so the list that is parked on the cue is not
+            its parent, and asking only the parent would have left a standby
+            naming a cue that had gone. */
+        engine.submit (origin::cli, "object.delete", { osc::Value::string (nested) });
         engine.processTick (20);
 
         (void) focus;
@@ -692,20 +787,26 @@ TEST_CASE ("replay: a standby session reproduces itself, its show and its state"
     const auto original = LogFile::parse (session.log().contents());
 
     REQUIRE (original.errors.empty());
-    REQUIRE (original.records.size() == 13);
+    /*  Fourteen since PR 3.4: the session gained a `mount.create`, because the
+        refusal it needs has to name something the pointer still cannot reach
+        and a cue inside a manual group is no longer one of those. The count is
+        pinned rather than derived so that a record appearing or disappearing is
+        something somebody has to look at. */
+    REQUIRE (original.records.size() == 14);
 
     /*  The session must END somewhere specific, or the state comparison below
         would be comparing two empty files and passing. The last thing it did
-        was delete the cue it was parked on, so the repair must have moved the
-        pointer to the third cue - and that is the claim the replay then has to
-        reproduce without any repair record in the log. */
+        was delete the cue it was parked on - the only member of the group - so
+        the repair had nowhere to advance to inside it and climbed out to what
+        follows the group. That is the claim the replay then has to reproduce
+        without any repair record in the log. */
     const auto sessionIds = childrenOf (sessionDocument.root()
                                           .getChildWithName ("Lists").getChild (0));
 
-    REQUIRE (sessionIds.size() == 2);       // the group went with the delete
+    REQUIRE (sessionIds.size() == 3);       // the group is still there; its member is not
 
     INFO ("state.xml: " << sessionState);
-    CHECK (sessionState.find ("standby=\"" + sessionIds[1] + "\"") != std::string::npos);
+    CHECK (sessionState.find ("standby=\"" + sessionIds[2] + "\"") != std::string::npos);
 
     Engine fresh;
     doc::ShowDocument freshDocument;
@@ -828,4 +929,177 @@ TEST_CASE ("container nodes: a focus naming a list the show no longer has resolv
 
     // The request is still on file and no longer resolves, so the first list has it.
     CHECK (rig.focus.listId (rig.document) == mainList);
+}
+
+//==============================================================================
+/*  THE STANDBY CURSOR: the manual path through a show.
+
+    PRD §3.6, on a manual sequence group: "a member starts on GO. The standby
+    pointer DESCENDS INTO the group; the operator is the parent." And on the
+    other two kinds, the machine is the parent - a timeline schedules everything
+    at entry and an automatic sequence advances itself - so there is nothing
+    inside for the pointer to do, and §3.5 sends it positionally past the whole
+    chain the instant GO is pressed.
+
+    Phase 1 stepped over all of them and named the test for the choice so that
+    this moment would be visible. The test below is that one, rewritten.
+*/
+namespace
+{
+    /*  A list shaped to have somewhere to descend into and somewhere to step
+        over: a cue, a MANUAL group of three, an AUTO group of two, a cue. */
+    struct CursorRig : Rig
+    {
+        CursorRig() : Rig (false)
+        {
+            doc::registerDocumentCommands (engine.commands(), document);
+
+            listId = document.createList ("Main").id;
+
+            top = document.createCue (listId, 0, "memo", "Top").id;
+
+            manual = document.createCue (listId, 1, "group", "Manual").id;
+            m1 = document.createCue (manual, 0, "memo", "M1").id;
+            m2 = document.createCue (manual, 1, "memo", "M2").id;
+            m3 = document.createCue (manual, 2, "memo", "M3").id;
+
+            auto_ = document.createCue (listId, 2, "group", "Auto").id;
+            document.setAttribute ("/godot/cue/" + auto_ + "/advance", "auto");
+            a1 = document.createCue (auto_, 0, "memo", "A1").id;
+            a2 = document.createCue (auto_, 1, "memo", "A2").id;
+
+            tail = document.createCue (listId, 3, "memo", "Tail").id;
+        }
+
+        juce::ValueTree list() const { return document.findById (listId); }
+
+        std::string listId, top, manual, m1, m2, m3, auto_, a1, a2, tail;
+    };
+}
+
+TEST_CASE ("cursor: it descends into a manual group and climbs back out")
+{
+    CursorRig rig;
+    const auto list = rig.list();
+
+    /*  Down: the top cue, then the manual group's members one at a time -
+        the group ROW is not a stop, because the operator's next press is the
+        first member and a press that only entered would be a GO that did
+        nothing (decision M, 2026-09-06). */
+    CHECK (nextStandby (list, rig.top) == rig.m1);
+    CHECK (nextStandby (list, rig.m1) == rig.m2);
+    CHECK (nextStandby (list, rig.m2) == rig.m3);
+
+    // Out: after the last member comes what follows the GROUP.
+    CHECK (nextStandby (list, rig.m3) == rig.auto_);
+
+    // And back up, the same path in reverse.
+    CHECK (previousStandby (list, rig.auto_) == rig.m3);
+    CHECK (previousStandby (list, rig.m3) == rig.m2);
+    CHECK (previousStandby (list, rig.m1) == rig.top);
+}
+
+TEST_CASE ("cursor: an automatic group is one sibling, and its members are not stops")
+{
+    /*  §3.5: standby lands on the cue positionally AFTER the whole automated
+        chain, the instant GO is pressed. The machine is the parent there, and a
+        pointer inside a chain the machine is also advancing would be two things
+        moving one pointer - which is how an operator presses GO expecting cue
+        12 and gets 14. */
+    CursorRig rig;
+    const auto list = rig.list();
+
+    CHECK (nextStandby (list, rig.auto_) == rig.tail);
+    CHECK (previousStandby (list, rig.tail) == rig.auto_);
+
+    // Its members are not on the path at all.
+    CHECK_FALSE (isOnManualPath (list, rig.a1));
+    CHECK_FALSE (isOnManualPath (list, rig.a2));
+
+    // Nor is a timeline group's, whatever its advance says.
+    rig.document.setAttribute ("/godot/cue/" + rig.manual + "/mode", "timeline");
+    CHECK (nextStandby (rig.list(), rig.top) == rig.manual);
+    CHECK_FALSE (isOnManualPath (rig.list(), rig.m2));
+}
+
+TEST_CASE ("cursor: a disabled cue is not a stop, and a disabled group is not entered")
+{
+    /*  Phase 1 asserted the opposite and said why: "skipping is a
+        running-behaviour decision that Phase 1 has no runner to justify; Phase
+        3 revisits it when a GO that does nothing becomes a real failure rather
+        than a hypothetical one."
+
+        It has. The scheduler already skips a disabled member, so a pointer that
+        stopped on one would be a pointer standing where nothing will happen. */
+    CursorRig rig;
+
+    rig.document.setAttribute ("/godot/cue/" + rig.m2 + "/enabled", "false");
+    CHECK (nextStandby (rig.list(), rig.m1) == rig.m3);
+    CHECK (previousStandby (rig.list(), rig.m3) == rig.m1);
+
+    rig.document.setAttribute ("/godot/cue/" + rig.manual + "/enabled", "false");
+    CHECK (nextStandby (rig.list(), rig.top) == rig.auto_);
+    CHECK_FALSE (isOnManualPath (rig.list(), rig.m1));
+}
+
+TEST_CASE ("cursor: a header and a footer are never entered")
+{
+    /*  They are cue lists the group runs for ITSELF (§3.6). The pointer is the
+        operator's position in the show, and the operator does not step through
+        a group's preparation. */
+    CursorRig rig;
+
+    const auto header = rig.document.createRole (rig.manual, "header");
+    REQUIRE (header.ok);
+    const auto opening = rig.document.createCue (header.id, 0, "memo", "Pre-arm").id;
+
+    const auto footer = rig.document.createRole (rig.manual, "footer");
+    REQUIRE (footer.ok);
+    const auto closing = rig.document.createCue (footer.id, 0, "memo", "Release").id;
+
+    CHECK (nextStandby (rig.list(), rig.top) == rig.m1);
+    CHECK (nextStandby (rig.list(), rig.m3) == rig.auto_);
+
+    CHECK_FALSE (isOnManualPath (rig.list(), opening));
+    CHECK_FALSE (isOnManualPath (rig.list(), closing));
+}
+
+TEST_CASE ("cursor: nested manual groups, and an empty one the pointer stands on")
+{
+    CursorRig rig;
+
+    // A manual group inside the manual group, between M1 and M2.
+    const auto inner = rig.document.createCue (rig.manual, 1, "group", "Inner").id;
+    const auto i1 = rig.document.createCue (inner, 0, "memo", "I1").id;
+    const auto i2 = rig.document.createCue (inner, 1, "memo", "I2").id;
+
+    CHECK (nextStandby (rig.list(), rig.m1) == i1);
+    CHECK (nextStandby (rig.list(), i1) == i2);
+    CHECK (nextStandby (rig.list(), i2) == rig.m2);       // out one level, not two
+    CHECK (previousStandby (rig.list(), rig.m2) == i2);
+
+    /*  AN EMPTY MANUAL GROUP IS ITS OWN STOP. There is nowhere inside to
+        descend to, and a pointer that skipped it would make a container
+        somebody has not filled in yet invisible; GO on it completes it, which
+        is what an empty group does (§3.6). */
+    const auto empty = rig.document.createCue (rig.listId, 4, "group", "Empty").id;
+    CHECK (nextStandby (rig.list(), rig.tail) == empty);
+    CHECK (nextStandby (rig.list(), empty) == empty);     // last, and stays put
+}
+
+TEST_CASE ("cursor: at either end it stays put, and from empty it stays empty")
+{
+    /*  Unchanged from Phase 1, and it has to be: there is no wrap anywhere, and
+        only standby.set arms a list. */
+    CursorRig rig;
+    const auto list = rig.list();
+
+    CHECK (previousStandby (list, rig.top) == rig.top);
+    CHECK (nextStandby (list, rig.tail) == rig.tail);
+
+    CHECK (nextStandby (list, "") == "");
+    CHECK (previousStandby (list, "") == "");
+
+    // And something that is not in this list at all does not move it either.
+    CHECK (nextStandby (list, "ZZZZZZZZ") == "ZZZZZZZZ");
 }

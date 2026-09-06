@@ -38,13 +38,24 @@
     standby commands, a direct write to its node, a load, and the structural
     repair below. Nothing else touches it.
 
-    GROUPS ARE OPAQUE SIBLINGS, and that is a PHASE 1 CHOICE rather than a
-    conclusion. PRD §3.6 says the pointer descends into a manual sequence group,
-    and Phase 3 will implement that; a Phase 1 group has no runtime behaviour to
-    descend into, and the namespace draft's `standby.set` constraint already
-    says the cue must be a top-level child. So traversal steps over a group as
-    one sibling, and the test that asserts it is named for the choice rather
-    than for a rule.
+    THE POINTER DESCENDS INTO A MANUAL SEQUENCE GROUP, and steps over every
+    other kind as one sibling. PRD §3.6: "manual - a member starts on GO. The
+    standby pointer DESCENDS INTO the group; the operator is the parent."
+
+    Which is the whole distinction. A timeline group schedules its members at
+    entry and an automatic sequence advances itself, so in both the machine is
+    the parent and there is nothing for the pointer to do inside: it steps past
+    the whole chain to the next sibling, the instant GO is pressed (§3.5). In a
+    manual group the operator is the parent, so the pointer has to be able to
+    stand on each member in turn.
+
+    Phase 1 stepped over ALL of them and said so where it asserted it - "a
+    Phase 1 group has no runtime behaviour to descend into" - and named the test
+    for the choice so that this moment would be visible rather than a surprise.
+
+    A HEADER AND A FOOTER ARE NEVER ENTERED. They are cue lists the group runs
+    for itself (§3.6); the pointer is the operator's position in the show, and
+    the operator does not step through a group's preparation.
 
     FOCUS IS RESOLVED RATHER THAN MAINTAINED, and since PR 3.2 it is also
     PUBLISHED. Phase 1 settled it at the smallest thing that made `standby.next`
@@ -95,11 +106,44 @@ namespace wfg::cue
         list, and skipping is a running-behaviour decision that Phase 1 has no
         runner to justify; Phase 3 revisits it when a GO that does nothing
         becomes a real failure rather than a hypothetical one. */
-    std::string nextOf (const juce::ValueTree& list, const std::string& current);
-    std::string previousOf (const juce::ValueTree& list, const std::string& current);
+    /*  Where the standby goes next, and where it came from.
+
+        THESE REPLACED A FLAT `nextOf`/`previousOf` in PR 3.4 rather than
+        joining them, because two answers to "where does the pointer go" would
+        eventually be two DIFFERENT answers - and the one that would have gone
+        stale is the one the invariant is checked against.
+
+        It descends into an enabled manual sequence group to its first enabled
+        member, steps over a timeline or automatic group as one sibling
+        (positionally past the whole chain - §3.5), skips disabled cues, never
+        enters a header or a footer, and climbs back out to the group's next
+        sibling when its members are exhausted.
+
+        THE DOCUMENT IS ENOUGH TO ANSWER THIS. Which way the pointer goes is a
+        question about the SHOW - what is a manual group, what is enabled - and
+        not about what happens to be running, so a cursor that needed the run
+        table would be one that answered differently in a rehearsal from in a
+        plotting session. (§3.6's loop rule, where a manual group's pointer
+        wraps while rounds remain, is the one place a run does bear on it, and
+        that arrives with rounds in PR 3.5.) */
+    std::string nextStandby (const juce::ValueTree& list, const std::string& current);
+    std::string previousStandby (const juce::ValueTree& list, const std::string& current);
+
+    /*  Whether the pointer may stand on this cue: it belongs to this list, and
+        every group between it and the list is a manual sequence.
+
+        The rule §3.5 implies rather than states. A pointer inside an automatic
+        chain would be a pointer the machine also moves, and two things moving
+        one pointer is how an operator presses GO expecting cue 12 and gets 14. */
+    bool isOnManualPath (const juce::ValueTree& list, const std::string& cueId);
 
     /** True when `cueId` is one of `list`'s immediate children. */
     bool isTopLevelChild (const juce::ValueTree& list, const std::string& cueId);
+
+    /** True when `cueId` is anywhere in this list, at any depth - including
+        places the pointer may not stand. What tells "another list's cue" from
+        "this list's cue, inside a chain the machine advances". */
+    bool isInList (const juce::ValueTree& list, const std::string& cueId);
 
     //==============================================================================
     /*  Which list the argument-less standby commands act on.

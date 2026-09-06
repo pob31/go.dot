@@ -15,6 +15,8 @@
 */
 
 #include <wfg/engine/document/ShowDocument.h>
+
+#include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -28,29 +30,48 @@ namespace wfg::doc
         const juce::Identifier idProperty { "id" };
         const juce::Identifier standbyProperty { "standby" };
 
-        /*  Whether a value is a legal standby for this list: one of THAT list's
-            own immediate children, or nothing at all.
+        /*  Whether a value is a legal standby for this list: somewhere on its
+            MANUAL PATH, or nothing at all.
 
             Named for the question rather than for the shape, because
-            cue::isTopLevelChild answers the shape question and answers it
-            differently - the empty string is not a top-level child of anything,
-            but it IS a legal standby. Two same-named predicates disagreeing on
-            the empty string is a trap, so only one of them carries that name. */
+            cue::isOnManualPath answers the shape question and answers it
+            differently on one input - the empty string is nowhere at all, and
+            it IS a legal standby, because an empty pointer is a resting state
+            (§3.5) rather than a failure. Two same-named predicates disagreeing
+            on the empty string is a trap, so only one of them carries the name. */
         bool isLegalStandbyFor (const juce::ValueTree& list, const std::string& cueId)
         {
             if (cueId.empty())
                 return true;             // empty is the resting value, always legal
 
-            for (const auto& child : list)
-                if (child.hasProperty (idProperty)
-                    && child[idProperty].toString().toStdString() == cueId)
-                    return true;
+            /*  THE MANUAL PATH, not the top level, since PR 3.4.
 
-            return false;
+                PRD §3.6 puts the pointer INSIDE a manual sequence group - "the
+                operator is the parent" - so a member of one is a legal place to
+                stand. A member of a timeline or an automatic group is not: the
+                machine advances those, and a pointer the machine also moves is
+                how an operator presses GO expecting cue 12 and gets 14 (§3.5).
+
+                It asks `cue::isOnManualPath`, which is the same walk the cursor
+                takes, so the pointer cannot be PUT anywhere `next` could not
+                have carried it. Two answers to that question would eventually
+                be two different answers. */
+            return cue::isOnManualPath (list, cueId);
         }
 
         /*  The identifier after `cueId` among a container's children, or empty
             when it is the last one or is not there. */
+        /*  The list a cue belongs to, however deep it is - or an invalid tree
+            when it is not in one. The standby repairs below need it because a
+            cue can now be several levels down. */
+        juce::ValueTree listContaining (juce::ValueTree node)
+        {
+            while (node.isValid() && node.getType().toString() != "List")
+                node = node.getParent();
+
+            return node;
+        }
+
         std::string siblingAfter (const juce::ValueTree& container, const std::string& cueId)
         {
             bool found = false;
@@ -389,7 +410,21 @@ namespace wfg::doc
         if (target.attribute->name() == "standby"
             && target.node.getType().toString() == "List"
             && ! isLegalStandbyFor (target.node, value.getString()))
-            return EditResult::failed (reason::notInList);
+        {
+            /*  TWO REFUSALS, because they send somebody somewhere different -
+                and this door has to give the same answer `standby.set` gives,
+                or a client would learn one thing from the command and another
+                from the node.
+
+                `not-in-list`: that cue belongs somewhere else, or is not a cue.
+                `not-manual-path`: it is in THIS list, inside a chain the
+                MACHINE advances, and the remedy is to make the group manual or
+                to park on the group instead. */
+            const auto elsewhere = ! cue::isInList (target.node, value.getString());
+
+            return EditResult::failed (elsewhere ? reason::notInList
+                                                 : reason::notManualPath);
+        }
 
         /*  nullptr is the UndoManager, and it stays nullptr until Phase 5 — see
             the header for the two measured reasons. */
@@ -622,13 +657,36 @@ namespace wfg::doc
             on should leave you parked on the next one. Done inside the applied
             command rather than as a second event, so a replay reproduces it for
             free and the log does not need a repair record nobody sent. */
+        /*  DEEPER THAN A LIST'S TOP LEVEL, since PR 3.4. The pointer can stand
+            inside a manual sequence group, so the list that is parked on this
+            cue may be several levels above it - and asking only the immediate
+            parent would have left a standby pointing at a cue that had gone.
+
+            Where it goes is the next remaining SIBLING, which is the same
+            answer one level down as it was at the top: during tech, deleting
+            the cue you are parked on should leave you parked on the next one.
+            When it was the last member of a group, that is empty and the
+            walk below falls back to the group's own successor - which is where
+            `next` would have taken the pointer anyway.
+
+            Worked out BEFORE the cue disappears, because afterwards there is no
+            sequence left to ask, and done inside the applied command so a
+            replay reproduces it with no repair record in the log. */
         std::string repairList, repairStandby;
 
-        if (parent.getType().toString() == "List"
-            && parent[standbyProperty].toString().toStdString() == id)
+        if (const auto list = listContaining (parent); list.isValid()
+              && list[standbyProperty].toString().toStdString() == id)
         {
-            repairList = parent[idProperty].toString().toStdString();
+            repairList = list[idProperty].toString().toStdString();
             repairStandby = siblingAfter (parent, id);
+
+            if (repairStandby.empty())
+                repairStandby = cue::nextStandby (list, id);
+
+            /*  `nextStandby` answers with the cue itself when there is nowhere
+                to go, and the cue is about to stop existing. */
+            if (repairStandby == id)
+                repairStandby.clear();
         }
 
         parent.removeChild (node, nullptr);
@@ -684,12 +742,20 @@ namespace wfg::doc
             advanced. Advancing would be guessing that the operator meant to
             stay where they were; clearing says plainly that what they were
             parked on has gone somewhere else. */
-        const auto leavingTopLevel = oldParent != newParent
-                                       && oldParent.getType().toString() == "List"
-                                       && oldParent[standbyProperty].toString().toStdString() == id;
+        /*  WIDENED IN PR 3.4 from "leaving a list's top level" to "leaving the
+            manual path", because the pointer can now stand inside a manual
+            sequence group. Moving a cue from one place on that path to another
+            leaves the pointer alone - it stores an identifier, and §3.5 is
+            explicit that it does not follow the shape of the list around. What
+            clears it is the cue landing somewhere the pointer is not allowed to
+            be: inside an automatic group, inside a header, or in another list. */
+        const auto vacated = listContaining (oldParent);
 
-        const auto vacatedList = leavingTopLevel
-                                   ? oldParent[idProperty].toString().toStdString()
+        const auto wasParkedOnIt = vacated.isValid()
+                                     && vacated[standbyProperty].toString().toStdString() == id;
+
+        const auto vacatedList = wasParkedOnIt
+                                   ? vacated[idProperty].toString().toStdString()
                                    : std::string {};
 
         if (oldParent == newParent)
@@ -704,7 +770,11 @@ namespace wfg::doc
             newParent.addChild (node, std::min (newIndex, newParent.getNumChildren()), nullptr);
         }
 
-        if (! vacatedList.empty())
+        /*  Asked AFTER the move, because whether the cue is still somewhere the
+            pointer may be is a question about where it has landed. A cue that
+            moved within the manual path of the same list keeps the pointer. */
+        if (! vacatedList.empty()
+              && ! cue::isOnManualPath (findById (vacatedList), id))
             setAttribute ("/godot/list/" + vacatedList + "/standby", "");
 
         return EditResult::succeeded (id);

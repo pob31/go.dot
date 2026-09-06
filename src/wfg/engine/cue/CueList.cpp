@@ -62,30 +62,215 @@ namespace wfg::cue
     }
 
     //==============================================================================
-    std::string nextOf (const juce::ValueTree& list, const std::string& current)
+    namespace
     {
-        const auto ids = childrenOf (list);
-        const auto at = std::find (ids.begin(), ids.end(), current);
+        /*  Whether a cue is a group the pointer goes INSIDE: a manual sequence.
 
-        /*  Empty, or naming something that is not a top-level child: stays
-            where it is. Only standby.set arms a list, so there is nothing here
-            that turns "nowhere" into "the first cue". */
-        if (at == ids.end())
-            return current;
+            Read from the document with its defaults applied - `mode` defaults
+            to `sequence` and `advance` to `manual`, so a group somebody made
+            and did not configure is one the operator drives, which is the
+            gentler default of the two. An attribute absent from a ValueTree is
+            the default and not an empty string, and reading it directly gets
+            that wrong; here the elements are checked against the same words the
+            table uses. */
+        bool isManualSequence (const juce::ValueTree& cue)
+        {
+            if (! cue.isValid() || cue.getType().toString() != "Group")
+                return false;
 
-        const auto after = at + 1;
-        return after == ids.end() ? current : *after;
+            const auto mode = cue[juce::Identifier ("mode")].toString();
+            const auto advance = cue[juce::Identifier ("advance")].toString();
+
+            return (mode.isEmpty() || mode == "sequence")
+                     && (advance.isEmpty() || advance == "manual");
+        }
+
+        /*  ABSENT MEANS THE DEFAULT, AND PRESENT MEANS ITS OWN TYPE - which
+            is two ways to get this wrong and the reason it is written out.
+
+            The canonical writer omits an attribute holding its default, so a
+            cue nobody has disabled has no `enabled` property at all and the
+            answer is `true`. And a cue somebody HAS disabled holds a BOOLEAN
+            false, not the text "false": every value goes into the tree through
+            the schema, typed. Comparing the text would have answered "0" and
+            matched nothing, which is exactly what the first version did. */
+        bool isEnabled (const juce::ValueTree& cue)
+        {
+            const juce::Identifier enabled { "enabled" };
+
+            return ! cue.hasProperty (enabled) || static_cast<bool> (cue[enabled]);
+        }
+
+        /** Whether this element is a cue at all - not a header, footer or route. */
+        bool isCueElement (const juce::ValueTree& node)
+        {
+            const auto element = node.getType().toString();
+
+            return element == "Cue" || element == "Group" || element == "Media"
+                     || element == "Fade" || element == "Stop" || element == "Osc";
+        }
+
+        /** The cues the pointer may stand on among a container's children. */
+        std::vector<juce::ValueTree> stops (const juce::ValueTree& container)
+        {
+            std::vector<juce::ValueTree> out;
+
+            for (const auto& child : container)
+                if (child.hasProperty (idProperty) && isCueElement (child) && isEnabled (child))
+                    out.push_back (child);
+
+            return out;
+        }
+
+        /*  The first place the pointer can stand at or below this cue: itself,
+            unless it is a manual group, in which case its first member - and so
+            on down, because a manual group's first member may be one too.
+
+            An EMPTY manual group has nowhere inside it, so the pointer stands
+            on the group row itself: GO there completes it, which is the honest
+            thing for a container somebody has not filled in yet. */
+        juce::ValueTree descendTo (const juce::ValueTree& cue)
+        {
+            if (! isManualSequence (cue))
+                return cue;
+
+            const auto inside = stops (cue);
+
+            return inside.empty() ? cue : descendTo (inside.front());
+        }
+
+        /** The last place the pointer can stand at or below this cue. */
+        juce::ValueTree descendToLast (const juce::ValueTree& cue)
+        {
+            if (! isManualSequence (cue))
+                return cue;
+
+            const auto inside = stops (cue);
+
+            return inside.empty() ? cue : descendToLast (inside.back());
+        }
+
+        /*  The cue with this identifier, searched only where the pointer may
+            go: down through manual groups, never into a header or a footer. */
+        juce::ValueTree findOnPath (const juce::ValueTree& container, const std::string& cueId)
+        {
+            for (const auto& child : stops (container))
+            {
+                if (child[idProperty].toString().toStdString() == cueId)
+                    return child;
+
+                if (isManualSequence (child))
+                    if (const auto found = findOnPath (child, cueId); found.isValid())
+                        return found;
+            }
+
+            return {};
+        }
+
+        /*  The step after `from` within its own container, descending into what
+            it finds; or an invalid tree when there is nothing after it, which is
+            what tells the caller to climb.
+
+            `list` is the top, so climbing stops there rather than walking out of
+            the show. */
+        juce::ValueTree stepFrom (const juce::ValueTree& list, const juce::ValueTree& from,
+                                  bool forwards)
+        {
+            auto cue = from;
+
+            while (cue.isValid() && cue != list)
+            {
+                const auto parent = cue.getParent();
+                const auto siblings = stops (parent);
+
+                const auto at = std::find (siblings.begin(), siblings.end(), cue);
+
+                if (at != siblings.end())
+                {
+                    if (forwards)
+                    {
+                        if (at + 1 != siblings.end())
+                            return descendTo (*(at + 1));
+                    }
+                    else if (at != siblings.begin())
+                    {
+                        return descendToLast (*(at - 1));
+                    }
+                }
+
+                /*  Exhausted where it was, so it climbs: the next place after
+                    the last member of a group is whatever follows the GROUP,
+                    and the place before its first member is whatever precedes
+                    it.
+
+                    THE GROUP ROW ITSELF IS NEVER A STOP, which is decision M
+                    (2026-09-06) seen from the inside: GO at a manual group's row
+                    fires its first member, so the row and the first member are
+                    one position rather than two, and `descendTo` never leaves
+                    the pointer on the row going forwards. Stopping there going
+                    backwards would have made the path asymmetric - a press of
+                    `previous` followed by `next` would not have come back to
+                    where it started. */
+                cue = parent;
+            }
+
+            return {};
+        }
     }
 
-    std::string previousOf (const juce::ValueTree& list, const std::string& current)
+    bool isInList (const juce::ValueTree& list, const std::string& cueId)
     {
-        const auto ids = childrenOf (list);
-        const auto at = std::find (ids.begin(), ids.end(), current);
+        if (cueId.empty() || ! list.isValid())
+            return false;
 
-        if (at == ids.end() || at == ids.begin())
+        for (const auto& child : list)
+        {
+            if (child.hasProperty (idProperty)
+                  && child[idProperty].toString().toStdString() == cueId)
+                return true;
+
+            if (isInList (child, cueId))
+                return true;
+        }
+
+        return false;
+    }
+
+    std::string nextStandby (const juce::ValueTree& list, const std::string& current)
+    {
+        if (! list.isValid())
             return current;
 
-        return *(at - 1);
+        const auto from = findOnPath (list, current);
+
+        /*  Nowhere, or somewhere the pointer cannot be: it stays put. Only
+            `standby.set` arms a list, so there is nothing here that turns
+            "nowhere" into "the first cue" - and no wrap at either end, which is
+            what the end-of-list rule is for. */
+        if (! from.isValid())
+            return current;
+
+        const auto next = stepFrom (list, from, true);
+        return next.isValid() ? next[idProperty].toString().toStdString() : current;
+    }
+
+    std::string previousStandby (const juce::ValueTree& list, const std::string& current)
+    {
+        if (! list.isValid())
+            return current;
+
+        const auto from = findOnPath (list, current);
+
+        if (! from.isValid())
+            return current;
+
+        const auto previous = stepFrom (list, from, false);
+        return previous.isValid() ? previous[idProperty].toString().toStdString() : current;
+    }
+
+    bool isOnManualPath (const juce::ValueTree& list, const std::string& cueId)
+    {
+        return cueId.empty() || findOnPath (list, cueId).isValid();
     }
 
     //==============================================================================
