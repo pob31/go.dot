@@ -1,0 +1,33 @@
+<Show>
+  <Lists>
+    <List id="7K2QM9X4" name="Act One">
+      <Cue id="B3N8R5TW" name="House to half" number="1"/>
+      <Group id="D9FH2JKA" name="Preshow" number="2">
+        <Header id="H1AAAA22">
+          <Cue id="H2BBBB33" name="Pre-arm the rig" number="2.h"/>
+        </Header>
+        <Cue id="E4GP6QSC" name="Walk-in music" number="2.1" preWait="0.4"/>
+        <Cue id="F7HR8TVD" name="Announce" number="2.2" postWait="1.5"/>
+        <Cue id="P4QRST67" name="Doors" number="2.3"/>
+        <Footer id="F1CCCC44">
+          <Cue id="F2DDDD55" name="Release channels" number="2.f"/>
+        </Footer>
+      </Group>
+      <Group id="G5ATKR01" advance="auto" name="Storm sequence" number="3">
+        <Cue id="G6ATKR02" name="Thunder" number="3.1"/>
+        <Cue id="G7ATKR03" name="Rain" number="3.2" preWait="0.6"/>
+        <Group id="G8ATKR04" mode="timeline" name="Aftermath" number="3.3">
+          <Cue id="G9ATKR05" name="Drips" number="3.3.1"/>
+          <Cue id="GAATKR06" name="Distant siren" number="3.3.2" preWait="1.2"/>
+        </Group>
+      </Group>
+      <Cue id="M5TQ7XVA" name="Interval" number="4" postWait="2"/>
+      <Cue id="Z9DSAB12" enabled="false" name="Cut in tech" number="5"/>
+    </List>
+    <List id="K2TRGX99" name="Background">
+      <Cue id="K3TRGX01" name="Foyer loop" number="B1"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="0"/>
+</Show>
