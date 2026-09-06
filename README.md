@@ -29,7 +29,7 @@ The specification lives in `docs/`, and it is the spec — not background readin
 
 ---
 
-## Status: Phase 1 complete, Phase 2 begun
+## Status: Phase 2 complete but for the hardware pass
 
 Phase 0 — *"a repo that builds on three platforms"* — is complete, and the seven
 Tracktion Engine validation spikes have been run (`docs/spikes/`; all pass).
@@ -41,22 +41,41 @@ in CI on three platforms under two locales. There is a headless engine, a show d
 a parameter tree, a 50 Hz clock, a cue list, an OSC codec, an OSCQuery server and a
 `serve` verb that puts them together.
 
-**Phase 2 is under way.** PR 2.1 has landed, which is the audio graph and nothing above it:
-Tracktion Engine hosted with no device, one Edit *generated* from the show document and never
+**Phase 2 makes a sound.** Its criterion was *`Rien à faire` → load show → GO → sound → fade →
+GO → next cue, driven entirely over OSC, and the replay log reproduces it*;
+`tests/blackbox/first_sound.py` is that sentence as a program, and it runs in CI on three
+platforms under two locales against a mock device written in another language.
+
+Underneath it: Tracktion Engine hosted, one Edit **generated** from the show document and never
 saved, a fixed set of tracks each holding a resident clip in a launcher slot, and Go.dot's own
-output plugin at the end of every one of them carrying a level and a routing matrix. One
-output device spans the whole rig, so where a cue goes is a coefficient rather than a rewiring
-of the graph. `wfg serve --hosted` runs a show with the graph under the clock and no hardware
-attached, and `--render=<wav>` writes what came out, which is how a machine with no audio
-interface can be shown that something made a sound.
+output plugin at the end of every one carrying a level and a routing matrix. One output device
+spans the whole rig, so where a cue goes is a coefficient rather than a rewiring of the graph.
+Above that: runs, arming, GO, fades and stops, network cues with a three-valued wait, and a
+mount that now sends.
 
-It is measured rather than asserted: a cue reaches the outputs it names at the gains it names
-and reaches no others, from one channel into two up to eight channels into sixty-four; and one
-block of thirty-two cues into sixty-four outputs at 96 kHz costs a third of its real-time
-budget, so the wide device fits with room. The numbers, and the two defects the measurement
-found, are in §11.8 of the namespace draft.
+**It is measured rather than asserted**, which is the part worth reading before the code. A cue
+reaches the outputs it names at the gains it names and no others, from one channel into two up
+to eight into sixty-four. A launch lands on the sample it was placed at, across fifteen
+rate-and-block configurations. Arming a second cue while a first is playing leaves the first
+**bit-identical**. A rendered fade follows the curve it was given to within two millionths of a
+decibel, tick by tick, and a fade to −120 dB renders exact zeros rather than something small.
+The numbers are in §11.8 of the namespace draft and in the commit messages of PRs 2.1–2.8.
 
-There is no GO yet: nothing fires a cue, so the render is silence. That is PR 2.3.
+**What is not done is the hardware pass.** `wfg devices` lists what a machine can play through
+and `wfg serve --device=` runs a show on one — both work on the Windows box, where the first
+interface anybody tried granted 480 frames for a request of 256, which is exactly why PRD §6.2
+says the rate is observed and never set. But nothing has been *listened to*: every statement
+above is about counters and return values.
+[`docs/handoffs/2026-09-06-audio-hardware-checklist.md`](docs/handoffs/2026-09-06-audio-hardware-checklist.md)
+is what is left, including M8's mid-show rate change, which needs the Dante because it is the
+only interface here that can change rate under a running process.
+
+Two decisions are still the author's and both are written down rather than guessed:
+§4.2's wording about what Tracktion does inside its own callback, and §6.2's mismatch policy —
+a device that opens at a rate nobody asked for currently **refuses**, which is the one of
+*refuse / warn / resample* that cannot be wrong quietly.
+[`docs/godot-open-questions-0.1.md`](docs/godot-open-questions-0.1.md) carries those, and what
+to check in QLab about fades that compound.
 
 The documents come first, and they are the thing to read before the code:
 
@@ -109,7 +128,7 @@ The documents come first, and they are the thing to read before the code:
   worst, because that is the number an operator wants when a show feels loose. Not a
   `juce::Timer`: spike 05 measured that instrument's own idle floor at 0.76 ms median and
   2.60 ms at the 99th percentile, before doing any work. A paced stand-in for the audio
-  device drives it until Phase 2 brings a real one.
+  device drives it; `--device=` opens a real one, and `wfg devices` lists what a machine has.
 - **The `/godot` parameter tree**, published once per tick as an immutable snapshot. It is a
   projection and owns no value: a node under `/godot/cue` reads an attribute of `show.xml`,
   one under `/godot/engine` reads a counter the tick thread keeps, and a write to either is
@@ -128,7 +147,7 @@ The documents come first, and they are the thing to read before the code:
   published at its own prefix. PRD §3.22 makes the template format *be* an OSCQuery
   description, so a capture from a running processor and a file written by hand are the same
   kind of thing to the engine — the fixtures are one of each, and they go through one reader.
-  Phase 1 reads a mount, publishes it, accepts writes to it, logs them and sends nothing;
+  Phase 1 read a mount, published it, accepted writes to it, logged them and sent nothing; from Phase 2 it sends,
   what keeps that stub honest is that a captured value is dropped rather than believed, a
   read-only node still refuses a write, and every mounted node carries the four declarations
   PRD §3.3 requires.
@@ -184,7 +203,8 @@ The documents come first, and they are the thing to read before the code:
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
 **What does not exist yet.** Nothing is *sent* to a mounted target: writes land in the tree
-and the log and stop there, because there is no transport to a target until Phase 2.
+the log AND the wire: everything a tick writes to a mounted node leaves together at the end of it,
+so the twelve messages of one GO are one gesture rather than a dribble (§3.4).
 Nothing *fires* a cue, so the standby is a pointer with nothing at the end of it yet. A
 group is an opaque sibling to that pointer, and descending into one is Phase 3, along with
 parallel lists and the published focus node.

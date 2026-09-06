@@ -914,6 +914,37 @@ calls it the *default for own processors*. Question K is how a mount says which 
 a `verified` cue against a target that can never answer is refused when the show loads rather
 than discovered during it. The survey behind this is in `docs/godot-reuse-map-0.1.md`.
 
+### 11.9 What Phase 2 built, against what §11 drew
+
+Written at close-out, 2026-09-06. §11 was drawn before any of it existed, which was the point:
+the pull requests had a text to be reviewed against rather than a memory. It came out close,
+and the differences are worth naming because each is a thing the drawing could not have known.
+
+- **`mount` gained four attributes nobody had drawn**: `host` and `port` (PR 2.5) because
+  nothing in §2.5's table said where a mount SENDS — correct while it sent nothing, a gap the
+  moment it did — and `readback` and `queryPort` (PR 2.6) as question K's answer. `port` is
+  required with no default, for a harder reason than `audio/@tracks`: UDP never reports that
+  nobody was listening, so a mount that guessed would send into the dark and report success.
+- **`osc` has no `timeout` until it has `verified`.** The enum grew in two steps, one per PR,
+  because a grammar that accepted a word the engine ignored would be a show that looked like it
+  was checking and was not.
+- **`run` gained `stopIssued` and a fade job gained `stopsAtTick`**, neither published. The
+  first is because two paths can now stop a voice; the second because the author settled that a
+  stop happens when it should even if a later fade takes over the level (2026-09-06).
+- **`mount/<id>/sent`** was added as a readout. UDP cannot report delivery; how many times
+  Go.dot sent is the honest thing it CAN say, and it is the first question at a tech rehearsal
+  when a device is not moving.
+- **The engine-origin commands are not origin-checked.** §11.4 says they are rejected from any
+  other origin. No engine-origin command has ever checked, so `mount.readback` does not either
+  — adding it to one would be a rule with a single member. It is on the deferred list.
+
+Everything else in §11 was built as drawn, including the launch-tick rule, the two-value
+`kind`-derivation, the run table, and the rule that state transitions are events and continuous
+readouts are not — which turned out to be the load-bearing sentence of the whole phase: it is
+why a fade replays with no audio, why a verified cue replays with no network, and the one time
+something reported from a command handler instead of a tick hook, a replay fixture caught it in
+the same afternoon.
+
 ### 11.8 What PR 2.1 measured, and the two things it changed its mind about
 
 Everything below is measured on the graph that plays, on the Windows box, at the pin. The
