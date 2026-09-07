@@ -136,3 +136,46 @@ What to check, on the Windows box and on the M4 Pro:
    worth watching the tick lateness while one is running.
 5. A cable pulled out mid-show. JUCE's input goes quiet; nothing should fall over, and the
    question is whether anything says so.
+
+---
+
+## MIDI cues, out — added at Phase 3's close-out (2026-09-07)
+
+The other direction, and the one with a measured reason to be listened to rather than asserted.
+`wfg serve --midi-out=<port name>=<device>` binds a `<Port>` the show declares to a cable this
+machine has; a MIDI cue names the port by identifier and `MidiSender` puts the bytes on the wire
+from a thread of its own.
+
+Every event type PRD §3.10 lists is checked byte for byte in the unit suite through a recording
+sink, which needs no port at all. What that cannot tell anybody is whether the bytes reach a
+device and whether the device does what the show meant.
+
+6. `wfg midi` lists the output, by a name that can be typed back into `--midi-out=`.
+7. A **program change** reaches a lighting desk and changes what it should. This is the cue that
+   exists in every theatre and the one the whole kind is for.
+8. A **system-exclusive dump** of a hundred bytes or more arrives intact — and, while it is
+   going, the tick lateness at `/godot/engine/lateness` does not move. On Windows
+   `sendMessageNow` busy-waits the calling thread for about thirty milliseconds on a dump that
+   size, which is a tick and a half; the sender has a thread of its own precisely so that number
+   never lands on the one that owns the model. Watching it is how anybody knows the thread is
+   where it is supposed to be.
+9. A cue naming a port that was **declared and never bound** fails its run with `no-port` while
+   the rest of the show runs. A rig that has not been patched yet is a rehearsal.
+10. `--midi-out=` naming a device this machine does not have refuses to start, and the message
+    lists what the machine does have. That is the one failure that is always a name spelled
+    differently.
+
+## A loop boundary, listened to — added at Phase 3's close-out (2026-09-07)
+
+M12 measured the clip's own loop wrap against two alternatives and it won every configuration —
+at 96 kHz it leaves **no damaged sample at all** at every block size from 64 to 1024. At 48 kHz
+it leaves nothing at 64 and 128 either.
+
+The one cell where it leaves anything is 48 kHz with 512- and 1024-frame blocks: 55 samples at
+about 5% of full scale, which is 1.1 ms of very slightly wrong audio at every wrap. Inaudible on
+a bed, and the question is what it does to a transient.
+
+11. An ambience bed looping a two-second range, at **48 kHz with 512-frame blocks**, listened to
+    for a minute. Then the same file with a transient at the loop point.
+12. The same at 128 and 256 frames, which is what a show runs at, and where the measurement says
+    there is nothing to hear.
