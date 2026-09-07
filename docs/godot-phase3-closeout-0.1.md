@@ -4,6 +4,10 @@
 (proposed, never edited here), what it deliberately left undone, what it measured that the next
 phase will be built on, and what is still needed from the author.*
 
+*This is the author-facing half. The builder-facing half — which seams Phase 4 replaces and what
+they are today, the traps that cost this phase time, and where to start — is
+[`handoffs/2026-09-07-phase4-handoff.md`](handoffs/2026-09-07-phase4-handoff.md).*
+
 ---
 
 ## 1. PRD amendments, proposed

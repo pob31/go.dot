@@ -191,21 +191,25 @@ def span_at(samples: "list[float]", level: float) -> int:
 def ranges_entered(log: Path, run: str) -> "list[int]":
     """Every range this run entered, in order, out of the session's own log.
 
-    ASKED OF THE LOG AND NOT OF THE TREE, and the reason is a race the first
-    version of this driver lost on a macOS runner.
+    ASKED OF THE LOG AND NOT BY POLLING, and the reason is what a macOS runner
+    said: `expected 1, got 0` after eight seconds of watching
+    `/godot/run/<id>/range`, on a bed whose range is two seconds long.
 
-    A range is entered and left again; on a two-second range that is a state
-    which exists for two seconds of AUDIO, and the hosted engine renders as fast
-    as the machine allows rather than in real time. So on a quick machine the
-    middle range can come and go between two polls of `/godot/run/<id>/range`,
-    and a driver watching for it reports that it never happened - which is
-    exactly what a macOS runner said while every other check, including "and the
-    second range runs out into the third", passed.
+    AUDIO TIME IS NOT WALL TIME on a loaded machine. The hosted driver is
+    real-time paced - it waits until an absolute per-block deadline - but when a
+    Debug build on a busy runner cannot render a block inside a block period, it
+    delivers every block late and never catches up. Audio time then runs slower
+    than the clock on the wall, by whatever factor the machine is short by, and
+    every timeout expressed in seconds means a different number of samples on
+    every machine that runs it.
 
-    The log cannot miss it. §3.15 makes entering a range an EVENT precisely
-    because it is a transition somebody has to be able to see afterwards, and
-    `run.range` is that record. Reading it here is asking the design's own
-    guarantee rather than racing the thing it was built to make unnecessary.
+    So this asks the log, which is not a clock at all. §3.15 makes entering a
+    range an EVENT rather than a readout precisely because it is a transition
+    somebody has to be able to see afterwards, and `run.range` is that record -
+    the same one a replay reads back. It is also a stronger claim than a poll
+    could make: three ranges, once each, in order.
+
+    Where this file does have to wait, it waits on `wait_ticks` below.
     """
     wanted = f's:"{run}"'
     out = []
@@ -255,6 +259,37 @@ def wait_for(server: Server, address: str, wanted, seconds: float = 20.0):
         time.sleep(0.02)
 
     return actual
+
+
+def wait_ticks(server: Server, count: int, seconds: float = 120.0) -> bool:
+    """Waits until the engine's own tick has advanced by `count`.
+
+    THE ENGINE'S CLOCK AND NOT THE WALL'S. `/godot/engine/tick` is driven by the
+    sample counter, so a hundred and fifty ticks is three seconds of AUDIO
+    however long the machine takes to render it - which is the only measure a
+    check about "three seconds in, the bed is still in its first range" can
+    honestly be made against.
+
+    The wall-clock argument is a backstop rather than the measure: it is there
+    so that an engine that has stopped ticking fails the driver instead of
+    hanging it.
+    """
+    start = value_of(server, "/godot/engine/tick")
+
+    if not isinstance(start, int):
+        return False
+
+    deadline = time.monotonic() + seconds
+
+    while time.monotonic() < deadline:
+        now = value_of(server, "/godot/engine/tick")
+
+        if isinstance(now, int) and now - start >= count:
+            return True
+
+        time.sleep(0.02)
+
+    return False
 
 
 def run_for_cue(server: Server, cue: str, seconds: float = 20.0) -> str:
@@ -353,7 +388,13 @@ def run(locale: "str | None") -> int:
                 # --- the bed loops -------------------------------------------
                 # Its first range is two seconds and loops for ever, so three
                 # seconds in it is on its second pass and has NOT moved on.
-                time.sleep(3.0)
+                #
+                # THREE SECONDS OF AUDIO, counted on the engine's own tick. A
+                # sleep would be three seconds of the wall, which on a loaded
+                # runner is a different and smaller number of samples - and the
+                # check below is about how much of the file has played.
+                report.check(wait_ticks(server, 150),
+                             "the engine keeps ticking while the bed plays")
 
                 report.equal(value_of(server, f"/godot/run/{bed_run}/range"), 0,
                              "three seconds in, the bed is still in its first range")
@@ -382,7 +423,9 @@ def run(locale: "str | None") -> int:
                 report.equal(standby(server, LIST_MAIN), before,
                              "and firing a cue by name moves no pointer (PRD 3.5)")
 
-                time.sleep(1.0)
+                # A second of AUDIO with it sounding, so the render has something
+                # of it to carry.
+                wait_ticks(server, 50)
 
                 # --- the trigger, on the other list --------------------------
                 # §3.7: a trigger fires its cue and moves NOTHING. The foyer
@@ -408,7 +451,13 @@ def run(locale: "str | None") -> int:
                 # WAITED FOR ON A TERMINAL STATE, not on a transient one. Which
                 # ranges were entered and in what order is asked of the log
                 # below, where it cannot be missed.
-                report.equal(wait_for(server, f"/godot/run/{bed_run}/state", "done", 25.0),
+                # SIXTY SECONDS AND NOT TWENTY-FIVE, and the number is a backstop
+                # rather than an expectation: what has to happen is four seconds
+                # of AUDIO - the rest of the pass, then two ranges - and a Debug
+                # build on a loaded runner renders that in whatever wall time it
+                # takes. Eight seconds was not enough once, which is what sent
+                # the sequence check to the log.
+                report.equal(wait_for(server, f"/godot/run/{bed_run}/state", "done", 60.0),
                              "done", "the advance carries the bed out of its endless"
                                      " range, and the playlist runs to its end")
 
@@ -438,7 +487,9 @@ def run(locale: "str | None") -> int:
                                           "done", 20.0),
                                  "done", "and the group is done once its footer is")
 
-                time.sleep(0.5)
+                # And a stretch of silence after everything, so "and then digital
+                # silence" has something to look at.
+                wait_ticks(server, 25)
 
     # --- which ranges it entered, and in what order ------------------------
         # THE LOG IS THE EVIDENCE, for the reason in `ranges_entered`: a range
