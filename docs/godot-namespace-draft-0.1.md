@@ -1589,4 +1589,90 @@ relationship between Go.dot and the processors it commands.
 
 ### 12.15 What Phase 3 built, against what §12 drew
 
-*Written at close-out.*
+Written at close-out, 2026-09-07. §12 was drawn before any of it existed, which was the point:
+the pull requests had a text to be reviewed against rather than a memory. It came out close,
+and the differences are worth naming because each is a thing the drawing could not have known.
+
+**The four things §12 got wrong, and what they cost to find.**
+
+- **`midi/@port` was drawn as a name and had to become an identifier.** §12.11 said a MIDI cue
+  names "a declared `Port`", and the first build read that as the port's name — which made it
+  the one reference in the whole document outside the mechanism the `refers` column exists to
+  be, and would have silenced every cue that used a port somebody renamed. It names the
+  identifier now, the way a route names its bus; `--midi-out=<port name>=<device>` still takes
+  the name, because that is what a person types and what the show file says out loud.
+
+- **`Midi` could not be both a cue kind and a section.** Two elements of one name are one
+  element as far as the schema is concerned, and the one that loses is the one nobody can find.
+  The section is `MidiPorts`.
+
+- **Adding a section to `<Show>` invalidated every show file in the tree**, because the
+  generator emitted a container child as a required `<ref>`. Thirteen fixtures reported
+  "Expecting an element, got nothing" at once. Containers are `<optional>` now — an empty
+  `<Mounts/>` and no `<Mounts>` at all say the same thing, and yesterday's saved show has to
+  open tomorrow. §12.12's plumbing list had named this and it had not been paid for.
+
+- **`validate()` had to become two lists.** §12.12 said a dangling reference is "a `wfg
+  validate` warning and a run-time `failed bad-target`, never a load refusal" — and `validate()`
+  WAS the load-refusal list, so returning one from it made a saved show refuse to open. Refusals
+  and warnings are separate functions now: a trigger listening inside `/godot`, a start offset
+  beside a range and a MIDI cue asking to be verified are refusals, because there is no reading
+  of the file under which they do what they say; a pointer at something that is not there is a
+  warning, because §3.8 makes it a silent no-op during tech.
+
+**Three things §12 drew and the engine turned out to need differently.**
+
+- **Standby arming a group was owed by PR 3.3 and built by PR 3.13**, which is late by five
+  pull requests and was found by the black-box driver's first check. `armStandby` armed a media
+  cue and returned for anything else. A pointer on a group is a pointer on a whole scene, and
+  not arming it meant GO on a group paid the disk with the operator's hand already down.
+
+- **A group has to ADOPT what standby armed**, which §12 did not draw at all. The arm creates a
+  run with no parent; a group that spawned its own would leave the first holding a voice nobody
+  was going to launch and pay the disk twice. `run.spawn` adopts by identifier, so the record
+  carries it either way.
+
+- **`observeEdges` had to learn that a boundary is not an ending.** At a range boundary the
+  outgoing slot stops in the same block the incoming one starts, and the poll that watches for
+  the edge is 20 ms wide — so it can fall between them and see neither playing. A ranged cue
+  would have reported itself done at its first boundary with two ranges still to play. `run`
+  gained `rangesFinished`, unpublished, set when the LAST range's end is placed.
+
+**What the measurements changed.**
+
+- **M9 moved the mounted namespace out of the document half.** It was drawn as part of it, on
+  the argument that it changes only when a mount does — true, and beside the point, because the
+  document half is also rebuilt by everything else. 3.13 ms of every applied mutation with
+  WFS-DIY's capture, twenty-nine times the rest of the tree put together. It is its own cache
+  now, invalidated by a revision counter on the mount table rather than by a flag somebody has
+  to remember to set.
+
+- **M12 removed work rather than adding it.** §12.9 said "range clips are armed looping; every
+  boundary is placed by Go.dot" and left the wrap's quality open. The wrap won every one of ten
+  configurations by between 5.5× and 23 000× in damage energy, so Go.dot places nothing INSIDE a
+  range: a bed looping for four hours costs no command, no placed instant and no run record.
+
+- **M10 had to be asked of a different collection before it meant anything.** The node-id check
+  had looked at `orderedNodes` since Phase 2, and a launcher slot is not in it — a graph with
+  eight slots on every track has exactly as many ordered nodes as one with a single slot. What
+  decides state adoption across a rebuild is `sortedNodes`, which recurses through the internal
+  nodes.
+
+**Two rows §12 drew that were not built, and why.**
+
+- **`group/@play`** — "play N of M" — is in the table and honoured by the scheduler, but no
+  fixture or driver exercises it beyond the unit suite. It is not a gap so much as a thing
+  nobody has yet needed on a stage.
+
+- **`media/@rate` and `media/@rateMode`** are PR 3.10, which the plan marked droppable and which
+  is dropped. §12.10's own finding is why: rate cannot change on a playing launcher clip at this
+  pin, so what could be built is rate at ARM, and §3.24's "rate is a node, so it is automatable,
+  fader-bindable and can carry a lane" cannot be honoured without a TE-side change. Building the
+  half would have put a row in the document that does not do what the PRD says it does. It goes
+  to the author as an amendment instead.
+
+**Everything else in §12 was built as drawn**, including the boundary arithmetic — the
+sequence gap is `2 + launchLatencyTicks` and is published — the hook-decides-handler-applies
+rule, the run tree, the refire policy per kind, the manual cursor's descent and climb, rounds
+with a logged seed, the three trigger matchers as pure functions, ranges as looping clips with
+placed boundaries, MIDI cues on a sender thread, and group fades as trims.

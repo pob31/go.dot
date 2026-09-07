@@ -29,7 +29,7 @@ The specification lives in `docs/`, and it is the spec — not background readin
 
 ---
 
-## Status: Phase 3 begun; Phase 2 complete but for the hardware pass
+## Status: Phase 3's criterion is met; Phase 2 complete but for the hardware pass
 
 Phase 0 — *"a repo that builds on three platforms"* — is complete, and the seven
 Tracktion Engine validation spikes have been run (`docs/spikes/`; all pass).
@@ -77,10 +77,13 @@ a device that opens at a rate nobody asked for currently **refuses**, which is t
 [`docs/godot-open-questions-0.1.md`](docs/godot-open-questions-0.1.md) carries those, and what
 to check in QLab about fades that compound.
 
-**Phase 3 — groups, triggers, ranges — has begun**, with its documentation first, as Phase 2's
-did. Its criterion is *a complex background auto-sequence with a looping ambience runs while
-manual foreground cues fire on top; an advance cue exits the loop cleanly; the replay log
-reproduces all of it*. What it builds: groups as runs in a tree with a scheduler whose every
+**Phase 3 — groups, triggers, ranges — meets its criterion.** That criterion is *a complex
+background auto-sequence with a looping ambience runs while manual foreground cues fire on
+top; an advance cue exits the loop cleanly; the replay log reproduces all of it*, and
+`tests/blackbox/phase3_groups.py` is that sentence as a program: twenty-nine checks against
+`wfg serve --hosted`, driven over UDP the way a console would, read over HTTP the way a
+client would, and then read back off the WAV that came out. It runs in CI on three platforms
+under two locales. What it builds: groups as runs in a tree with a scheduler whose every
 decision is a logged command, headers and blocking footers, shuffle with materialised rounds, a
 standby pointer that descends into a manual group, parallel lists with a published focus, triggers
 from OSC, MIDI and the wall clock, ranges and in-cue loops as looping clips with every boundary
@@ -116,9 +119,19 @@ both sample rates — by between five and twenty thousand times, and at 96 kHz i
 is not a join at all, the render being the reference — so a looping range is
 left alone (`docs/spikes/spike03b-loop-joins.md`).
 
-What is left of the phase is the rest of the audio line — in-cue loop counts, the
-boundary between two ranges, `advance`, rate at arm — MIDI cues, and
-group-targeted fades as trims.
+Ranges, MIDI cues and group fades as trims all landed after that was
+written, and so did the two items the tree layer owed: a mounted processor's
+namespace is cached apart from the show's now (it cost 3.1 ms of every cue
+rename, which was twenty-nine times the rest of the tree), and an
+identifier-valued attribute says in the parameter table what it must point at,
+so a dangling target is a `wfg validate` warning and a `bad-target` at run time
+rather than something nobody notices until the night it matters.
+
+What is **not** built is rate at arm, which the plan marked droppable and which
+is dropped: rate cannot change on a playing launcher clip at this Tracktion pin,
+so what could be built is half of what §3.24 promises, and half of it in the
+document would be a row that does not do what the PRD says. It goes to the
+author as an amendment instead.
 
 **There is now something to look at, and to work in.** `wfg serve <bundle>
 --ui=clients/console` serves a client from `/ui` on the OSCQuery port; open that
@@ -158,6 +171,12 @@ The documents come first, and they are the thing to read before the code:
 - **[`docs/godot-reuse-map-0.1.md`](docs/godot-reuse-map-0.1.md)** — what WFS-DIY,
   spatcore and juce_simpleweb already provide, per phase, and what stops each piece being
   used as-is.
+- **The close-outs** —
+  [`docs/godot-phase2-closeout-0.1.md`](docs/godot-phase2-closeout-0.1.md) and
+  [`docs/godot-phase3-closeout-0.1.md`](docs/godot-phase3-closeout-0.1.md) — one per
+  finished phase: the PRD amendments it proposes (proposed, never applied — the PRD is
+  the author's), what it deliberately left undone, what it measured, and what is still
+  needed from the author. A phase that changed its mind about something says so here.
 
 **What exists**
 
