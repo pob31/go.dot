@@ -252,8 +252,32 @@ namespace wfg::doc
                     containers.push_back (std::string (child));
             }
 
+            /*  A CONTAINER CHILD IS OPTIONAL, and it took a fourteenth section
+                to make that obvious.
+
+                <Lists>, <Mounts>, <Audio> and <MidiPorts> are places to put
+                things rather than things, and the canonical writer emits the
+                ones a document was built with whether or not they hold
+                anything. Emitted as a bare <ref> they were REQUIRED - so adding
+                <MidiPorts> to the Show in PR 3.11 made every show file already
+                in the tree invalid against the grammar at once, thirteen
+                fixtures reporting "Expecting an element, got nothing".
+
+                That is the wrong answer twice over. A hand-written show that
+                leaves out a section it does not use is a show somebody meant,
+                and yesterday's saved file has to open tomorrow (the rule the
+                whole `refers` design turns on). What a container's PRESENCE
+                could ever have been guarding is nothing: an empty <Mounts/> and
+                no <Mounts> at all say the same thing.
+
+                The plan named this under PR 3.2's plumbing - "<optional> for
+                single children" - and this is where it was paid for. */
             for (const auto& container : containers)
-                line (out, 3, "<ref name=\"" + container + "\"/>");
+            {
+                line (out, 3, "<optional>");
+                line (out, 4, "<ref name=\"" + container + "\"/>");
+                line (out, 3, "</optional>");
+            }
 
             if (! objects.empty())
             {

@@ -178,6 +178,7 @@ namespace wfg::doc
         if (kind == "fade")  return "Fade";
         if (kind == "stop")  return "Stop";
         if (kind == "osc")   return "Osc";
+        if (kind == "midi")  return "Midi";
         return {};
     }
 
@@ -209,7 +210,7 @@ namespace wfg::doc
             and a cue that becomes a group keeps its address. */
         if (element == "Cue" || element == "Group" || element == "Media"
               || element == "Fade" || element == "Stop"
-              || element == "Osc")                                  return "cue";
+              || element == "Osc" || element == "Midi")             return "cue";
         if (element == "Lists")                     return "lists";
         /*  A header and a footer are addressed by nothing: they carry no
             attribute but their identifier, and the cues inside them are
@@ -218,6 +219,7 @@ namespace wfg::doc
         if (element == "Header" || element == "Footer")   return {};
         if (element == "Route")                     return "route";
         if (element == "Range")                     return "range";
+        if (element == "Port")                      return "port";
         if (element == "Trigger")                   return "trigger";
         if (element == "List")                      return "list";
         if (element == "Mount")                     return "mount";
@@ -1093,6 +1095,41 @@ namespace wfg::doc
         };
 
         Offsets { problems }.visit (showNode);
+
+        /*  A MIDI CUE CANNOT WAIT TO BE VERIFIED, because nothing will ever
+            answer.
+
+            §3.11's `verified` asks the target for the value back and compares
+            it, which is a thing an OSCQuery node can do and a MIDI cable
+            cannot: there is no read-back, no address to ask about, and no
+            protocol to ask in. A cue that asked for one would wait for its
+            timeout and then fail, every time, at half past seven.
+
+            REFUSED WHEN THE SHOW IS READ, like the trigger address inside
+            /godot and the start offset beside a range, and for the same reason:
+            there is no reading of the file under which the cue does what it
+            says. The row's own enum already excludes it, so this catches the
+            hand-edited file rather than the one a client wrote. */
+        struct MidiWaits
+        {
+            std::vector<std::string>& problems;
+
+            void visit (const juce::ValueTree& node)
+            {
+                if (node.getType().toString() == "Midi"
+                      && node[juce::Identifier ("wait")].toString() == "verified")
+                    problems.push_back ("/Show/.../Midi["
+                                         + node[juce::Identifier ("id")].toString().toStdString()
+                                         + "]: a MIDI cue cannot wait to be verified - there is"
+                                           " no read-back on a MIDI cable, so nothing would ever"
+                                           " answer");
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        MidiWaits { problems }.visit (showNode);
         return problems;
     }
 }

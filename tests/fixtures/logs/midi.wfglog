@@ -1,0 +1,49 @@
+# wfg-log 1
+# fixture midi — three MIDI cues fired, and nothing reaches a port.
+#
+# WHAT THIS FIXTURE IS FOR. A MIDI cue's whole visible effect is bytes leaving a
+# cable, and a machine replaying a log has no cable: JUCE cannot even make a
+# virtual port on Windows, and no CI runner has a MIDI interface at all. So the
+# same rule the mounts and the triggers already follow applies here, and this is
+# what says it holds — the SENDER is a seam the cue layer knows nothing about,
+# and a replay installs none. The runs reproduce, the log reproduces, and no
+# byte goes anywhere.
+#
+# THE PORT IS THE SHOW'S NAME AND NOT A DEVICE (PRD 4.10). <MidiPorts> declares
+# "Lights" and "The desk"; which cable each is on is --midi-out's answer and a
+# fact about the building. So a show travels, and this file replays on a machine
+# that has never heard of either.
+#
+# GO on the first cue: a program change on channel three. Standby moves on.
+A 0 0 udp:10.0.0.5:9000 go s:"MD000001"
+#
+# A memo-shaped ending: a MIDI cue whose wait is `none` is done on the tick
+# after it fires, which is when a report is allowed to leave.
+A 1 1 engine run.ended s:"MD000001"
+#
+# GO on the second: a system-exclusive dump, and a wait of `sent`. The wait is
+# the difference between the two kinds of MIDI cue there are — this one is not
+# done until the bytes have gone, which on a real rig is a queue and a thread
+# and about thirty milliseconds for a hundred bytes.
+#
+# WITH NO SENDER THERE IS NOTHING TO WAIT FOR, so it too finishes on the next
+# tick — and that is the honest answer rather than a hang: the cue asked for
+# confirmation that the message left this machine, and on a machine with no port
+# nothing was ever queued to leave.
+A 100 2 udp:10.0.0.5:9000 go s:"MD000002"
+A 101 3 engine run.ended s:"MD000002"
+#
+# GO on the third, which names a port nothing was bound to. On a real rig this
+# fails with `no-port` while the rest of the show runs — a rig that has not been
+# patched yet is a rehearsal, not a broken show.
+#
+# HERE IT DOES NOT FAIL, and the difference is worth having written down: with
+# no sender at all there is nobody to say the port is missing, so the cue is
+# applied and finishes like the two above. A replay reproduces what the ENGINE
+# decided; whether a cable existed is not one of the engine's decisions.
+A 200 4 udp:10.0.0.5:9000 go s:"MD000003"
+A 201 5 engine run.ended s:"MD000003"
+#
+# And the memo that follows, so the standby has somewhere to have moved to.
+A 300 6 udp:10.0.0.5:9000 go s:"MD000004"
+A 301 7 engine run.ended s:"MD000004"

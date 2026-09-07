@@ -92,6 +92,11 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/TriggerIndex.cpp
     wfg/engine/midi/MidiInputs.h
     wfg/engine/midi/MidiInputs.cpp
+    wfg/engine/midi/MidiSink.h
+    wfg/engine/midi/MidiMessages.h
+    wfg/engine/midi/MidiMessages.cpp
+    wfg/engine/midi/MidiSender.h
+    wfg/engine/midi/MidiSender.cpp
     wfg/engine/audio/AudioCommands.h
     wfg/engine/audio/AudioCommands.cpp
     wfg/engine/audio/AudioHost.h

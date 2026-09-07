@@ -134,6 +134,23 @@ the fade says so by ending rather than by failing.
 
 The arithmetic is checked where it can be, in the unit suite, decibel by decibel.
 
+## `bundles/midi/` and `logs/midi.wfglog`
+
+Three MIDI cues fired, and **nothing reaches a port**. A MIDI cue's whole visible effect is
+bytes leaving a cable, and a machine replaying a log has no cable — JUCE cannot even make a
+virtual port on Windows, and no CI runner has a MIDI interface at all. So the sender is a seam
+the cue layer knows nothing about, a replay installs none, and this is what says the runs and
+the log reproduce with nothing going anywhere.
+
+The show declares its ports in `<MidiPorts>` — "Lights", "The desk" — and says nothing about
+which cable each is on; that is `--midi-out=<port>=<device>` and a fact about the building
+(§4.10). Which is why this file replays on a machine that has never heard of either.
+
+The third cue names a port nothing was bound to. On a real rig it fails with `no-port` while
+the rest of the show runs, because a rig that has not been patched yet is a rehearsal; here it
+does not fail at all, and the difference is written down in the file. A replay reproduces what
+the **engine** decided, and whether a cable existed is not one of the engine's decisions.
+
 ## `bundles/chain/` and `logs/auto-chain.wfglog`
 
 One press, and a whole scene runs itself: five cues, a nested timeline group and a footer. An

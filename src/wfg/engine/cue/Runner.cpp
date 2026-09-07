@@ -16,6 +16,8 @@
 
 #include <wfg/engine/cue/Runner.h>
 
+#include <wfg/engine/midi/MidiMessages.h>
+
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/MountSender.h>
@@ -51,6 +53,7 @@ namespace wfg::cue
             if (element == "Fade")  return "fade";
             if (element == "Stop")  return "stop";
             if (element == "Osc")   return "osc";
+            if (element == "Midi")  return "midi";
 
             return {};
         }
@@ -541,6 +544,12 @@ namespace wfg::cue
         if (kind == "osc")
         {
             fireOsc (cue, runId);
+            return;
+        }
+
+        if (kind == "midi")
+        {
+            fireMidi (cue, runId);
             return;
         }
 
@@ -1232,6 +1241,70 @@ namespace wfg::cue
 
         sending.push_back (job);
         return;
+    }
+
+    void Runner::fireMidi (const juce::ValueTree& cue, const std::string& runId)
+    {
+        const auto self = runId;
+        auto* selfRun = runs.find (self);
+
+        if (selfRun == nullptr)
+            return;
+
+        /*  Running from the tick it fires, like a fade and a network cue: there
+            is nothing to arm, so `armed` is a state it is never in. */
+        selfRun->state = runState::playing;
+
+        /*  IT REUSES THE NETWORK CUE'S JOB, and the reason is that it is the
+            same job. Both are "a message left this machine, and here is when
+            this cue counts as done"; the only difference is which wire, and
+            that is decided before the job exists. A second job type would be a
+            second copy of the kill path, the report path and the wait, and the
+            three would drift.
+
+            `verified` is the one thing an OscJob can do that this cannot, and
+            it is refused when the show LOADS rather than here - a wait for an
+            answer that can never come would otherwise be a cue that hangs at
+            half past seven. */
+        OscJob job;
+        job.self = self;
+        job.wait = oscWaitFrom (textOf (cue, "wait"));
+
+        if (job.wait == OscWait::verified)
+            job.wait = OscWait::sent;
+
+        midi::MessageSpec spec;
+        spec.type = textOf (cue, "type");
+        spec.channel = static_cast<int> (numberOf (cue, "channel"));
+        spec.number = static_cast<int> (numberOf (cue, "number"));
+        spec.data = static_cast<int> (numberOf (cue, "data"));
+        spec.sysex = textOf (cue, "sysex");
+
+        const auto built = midi::messageFor (spec);
+
+        if (! built.ok())
+        {
+            job.failure = runError::badMessage;
+            sending.push_back (job);
+            return;
+        }
+
+        /*  NO SINK IS A COMPLETE CONFIGURATION, for the reason no mount table
+            is: a replay has none and must still create the run and finish it on
+            the tick the log says. What it cannot do is put bytes on a cable,
+            and there is no cable. */
+        if (midiOut == nullptr)
+        {
+            sending.push_back (job);
+            return;
+        }
+
+        const auto problem = midiOut->send (textOf (cue, "port"), built.bytes);
+
+        if (! problem.empty())
+            job.failure = problem;
+
+        sending.push_back (job);
     }
 
     void Runner::advanceSends (Engine& engine)

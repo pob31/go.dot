@@ -65,6 +65,11 @@ namespace wfg
     class Engine;
 }
 
+namespace wfg::midi
+{
+    struct MidiSink;
+}
+
 namespace wfg::tree
 {
     class MountProbe;
@@ -297,6 +302,12 @@ namespace wfg::cue
             that exists, or the run fails before it gets there. */
         void setMediaFolder (std::string folder) { mediaFolder = std::move (folder); }
 
+        /*  Where a MIDI cue's bytes go. Null is legal and is what a replay has:
+            the run is created and finishes on the ticks the log says, and
+            nothing reaches a port - exactly as a mount table's absence leaves a
+            network cue's record reproducing with nothing on the wire. */
+        void setMidiSink (midi::MidiSink* sink) noexcept { midiOut = sink; }
+
         /** The published `/godot/engine/launchLatencyTicks`, or 0 with no audio. */
         int latencyTicks() const noexcept;
 
@@ -504,6 +515,7 @@ namespace wfg::cue
         /*  A network cue firing: one write to a mounted node, queued for the
             end of this tick. No Engine here either, and for the same reason. */
         void fireOsc (const juce::ValueTree& cue, const std::string& runId);
+        void fireMidi (const juce::ValueTree& cue, const std::string& runId);
 
         /*  `selfCueId` is the fade or stop cue being fired; `targetCueId` is
             the cue it acts on. They are two arguments and not one because the
@@ -617,6 +629,7 @@ namespace wfg::cue
 
         tree::MountTable* mounts = nullptr;
         tree::MountSender* sender_ = nullptr;
+        midi::MidiSink* midiOut = nullptr;
 
         /*  Who asks a target what a value is. Null everywhere a replay or
             a tree dump runs, and a verified cue there finishes on its own

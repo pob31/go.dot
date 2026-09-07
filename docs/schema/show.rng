@@ -37,9 +37,18 @@
           <data type="integer"/>
         </attribute>
       </optional>
-      <ref name="Lists"/>
-      <ref name="Mounts"/>
-      <ref name="Audio"/>
+      <optional>
+        <ref name="Lists"/>
+      </optional>
+      <optional>
+        <ref name="Mounts"/>
+      </optional>
+      <optional>
+        <ref name="Audio"/>
+      </optional>
+      <optional>
+        <ref name="MidiPorts"/>
+      </optional>
     </element>
   </define>
 
@@ -70,6 +79,7 @@
           <ref name="Fade"/>
           <ref name="Stop"/>
           <ref name="Osc"/>
+          <ref name="Midi"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -248,6 +258,7 @@
           <ref name="Fade"/>
           <ref name="Stop"/>
           <ref name="Osc"/>
+          <ref name="Midi"/>
           <ref name="Header"/>
           <ref name="Footer"/>
           <ref name="Trigger"/>
@@ -269,6 +280,7 @@
           <ref name="Fade"/>
           <ref name="Stop"/>
           <ref name="Osc"/>
+          <ref name="Midi"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -287,6 +299,7 @@
           <ref name="Fade"/>
           <ref name="Stop"/>
           <ref name="Osc"/>
+          <ref name="Midi"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -804,6 +817,142 @@
       <zeroOrMore>
         <ref name="Trigger"/>
       </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Midi">
+    <element name="Midi">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="channel">
+          <a:documentation>The channel, one to sixteen. One-based because that is what is written on every device a musician has ever looked at, and unlike a TRIGGER&apos;s channel there is no &apos;any&apos;: a message has to go somewhere.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">16</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="data">
+          <a:documentation>The velocity, controller value, or the fourteen-bit pitch bend. One row for the three because they are one thing - the payload - and a bend that needed a row of its own would be a second place for a number to be wrong. Nought to 127 for everything but the bend, where 8192 is the centre.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">16383</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="port">
+          <a:documentation>The declared port this cue sends on - a &lt;Port&gt; the show names, never a device. The document says &apos;Lights&apos; because that is what somebody decided (PRD 4.10); which cable that is on this machine is --midi-out&apos;s answer and a fact about the building. A port that is not bound fails the RUN and never the load, so a show travels to a rig that has not been patched yet.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="sysex">
+          <a:documentation>The bytes of a system-exclusive message, in hex, F0 to F7 inclusive - written the way a manual prints them, because that is where a designer is copying from. Ignored by every other type. A dump of any size is legal and the send is off the tick thread for exactly that reason: on Windows a hundred bytes busy-waits the calling thread for about thirty milliseconds.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="type">
+          <a:documentation>Which event to send. Every type PRD 3.10 lists, including sysex, because a show that can send seven of eight is a show somebody has to keep a second program open for. The type decides which of the fields below mean anything, which wfg validate says out loud rather than the grammar refusing - one element per type would be eight elements for one concept.</a:documentation>
+          <choice>
+            <value>noteOn</value>
+            <value>noteOff</value>
+            <value>programChange</value>
+            <value>controlChange</value>
+            <value>pitchBend</value>
+            <value>aftertouch</value>
+            <value>channelPressure</value>
+            <value>sysex</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="wait">
+          <a:documentation>How long the cue takes to be done. As a network cue, minus verified: MIDI has no read-back, so there is nothing that could answer, and asking for one is refused when the show loads rather than waiting for ever at half past seven. sent says the bytes reached the port.</a:documentation>
+          <choice>
+            <value>none</value>
+            <value>sent</value>
+          </choice>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <ref name="Trigger"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="MidiPorts">
+    <element name="MidiPorts">
+      <zeroOrMore>
+        <ref name="Port"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Port">
+    <element name="Port">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the show calls this port. The document holds what somebody decided (PRD 4.10), so it says &apos;Lights&apos; or &apos;The desk&apos;; --midi-out=&lt;name&gt;=&lt;device&gt; is what binds it to a cable on this machine, and the two are separate for the reason a bus and a hardware channel are.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
     </element>
   </define>
 

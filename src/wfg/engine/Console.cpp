@@ -23,6 +23,7 @@
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/midi/MidiInputs.h>
+#include <wfg/engine/midi/MidiSender.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/tree/MountProbe.h>
@@ -1241,6 +1242,36 @@ namespace
                 midiInputNames.push_back (argument.text.fromFirstOccurrenceOf ("=", false, false)
                                             .toStdString());
 
+        /*  `--midi-out=<port>=<device>`, repeatable, and TWO names rather than
+            one because they are two different kinds of fact.
+
+            The port is the SHOW'S - "Lights", "The desk" - and lives in the
+            document because it is what somebody decided (§4.10). The device is
+            this BUILDING'S, and lives on the command line beside the audio
+            interface for the same reason. Binding them is what makes a show
+            travel: the same file at the next venue is the same file, and the
+            patch is one line of the command that starts it. */
+        std::vector<std::pair<std::string, std::string>> midiOutputBindings;
+
+        for (const auto& argument : args.arguments)
+        {
+            if (! argument.text.startsWith ("--midi-out="))
+                continue;
+
+            const auto pair = argument.text.fromFirstOccurrenceOf ("=", false, false);
+            const auto port = pair.upToFirstOccurrenceOf ("=", false, false).toStdString();
+            const auto device = pair.fromFirstOccurrenceOf ("=", false, false).toStdString();
+
+            if (port.empty() || device.empty() || ! pair.contains ("="))
+            {
+                std::cerr << "wfg serve: --midi-out wants <port>=<device>, and \""
+                          << pair << "\" is not that" << std::endl;
+                return 2;
+            }
+
+            midiOutputBindings.push_back ({ port, device });
+        }
+
         /*  `--ui=<directory>` serves a client from `/ui` on the OSCQuery port.
 
             A DIRECTORY RATHER THAN A COPY IN THE BINARY, while the layout is
@@ -1479,6 +1510,32 @@ namespace
         if (midiIn.count() > 0)
             std::cout << "wfg: listening on " << midiIn.count()
                       << " MIDI input(s)" << std::endl;
+
+        /*  THE OUTPUT SIDE, and its failure is fatal for the reason the input
+            side's is: a cue that cannot reach the desk and does not say so is
+            worse than a show that refuses to start. A port that is DECLARED and
+            not bound is a different thing and is not fatal - that cue fails its
+            run with `no-port` while the rest of the show runs, because a rig
+            that has not been patched yet is a rehearsal. */
+        wfg::midi::MidiSender midiOut;
+
+        for (const auto& binding : midiOutputBindings)
+            midiOut.bind (binding.first, binding.second);
+
+        if (! midiOut.problems().empty())
+        {
+            for (const auto& problem : midiOut.problems())
+                std::cerr << "wfg serve: " << problem << std::endl;
+
+            return 2;
+        }
+
+        midiOut.start();
+        runner.setMidiSink (&midiOut);
+
+        if (! midiOutputBindings.empty())
+            std::cout << "wfg: sending on " << midiOutputBindings.size()
+                      << " MIDI port(s)" << std::endl;
 
         /*  The loop closed. From here a mounted write reaches a socket; before
             it, the same write reached the tree and the log and stopped. */
@@ -2152,7 +2209,7 @@ int wfg::runConsole (int argc, char** argv)
 
     app.addCommand ({ "serve",
                       "serve <bundle> --sample-rate=N --buffer=N [--hosted [--render=<wav>]]"
-                      " [--ui=<dir>] [--midi-in=<device>]"
+                      " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},

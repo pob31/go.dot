@@ -16,6 +16,8 @@
 
 #include <wfg/engine/cue/CueList.h>
 
+#include <wfg/engine/document/ShowDocument.h>
+
 #include <algorithm>
 
 namespace wfg::cue
@@ -101,13 +103,25 @@ namespace wfg::cue
             return ! cue.hasProperty (enabled) || static_cast<bool> (cue[enabled]);
         }
 
-        /** Whether this element is a cue at all - not a header, footer or route. */
+        /*  Whether this element is a cue at all - not a header, a footer, a
+            route, a range or a trigger.
+
+            ASKED THROUGH THE OWNER WORD rather than by listing the kinds, and
+            the reason is that the list was here and was wrong: a MIDI cue was
+            added in PR 3.11 and the standby pointer could not stand on one,
+            which showed up as a saved show refusing to restore its own pointer
+            with `not-manual-path` - a message about nesting, for a cue at the
+            top level of its list.
+
+            `ownerForElement` answers "cue" for every kind there is, because
+            that is what decides the ADDRESS a cue is published at; a kind that
+            is not in it is a kind nothing else works for either. The same
+            generalisation `createTrigger` made, for the same reason, after the
+            same list had grown twice and been forgotten twice. */
         bool isCueElement (const juce::ValueTree& node)
         {
-            const auto element = node.getType().toString();
-
-            return element == "Cue" || element == "Group" || element == "Media"
-                     || element == "Fade" || element == "Stop" || element == "Osc";
+            return doc::ShowDocument::ownerForElement (node.getType().toString().toStdString())
+                     == "cue";
         }
 
         /** The cues the pointer may stand on among a container's children. */

@@ -424,6 +424,7 @@ namespace wfg::tree
             const auto isFade = element == "Fade";
             const auto isStop = element == "Stop";
             const auto isOsc = element == "Osc";
+            const auto isMidi = element == "Midi";
             const auto id = node[idProperty].toString().toStdString();
 
             if (id.empty())
@@ -458,6 +459,10 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("osc"))
                     rows.push_back (row);
 
+            if (isMidi)
+                for (auto* row : doc::Schema::rowsForOwner ("midi"))
+                    rows.push_back (row);
+
             for (const auto* row : rows)
             {
                 const doc::Attribute attribute { element, row };
@@ -472,6 +477,7 @@ namespace wfg::tree
                                                   : isFade  ? "fade"
                                                   : isStop  ? "stop"
                                                   : isOsc   ? "osc"
+                                                  : isMidi  ? "midi"
                                                             : "memo";
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
@@ -675,6 +681,30 @@ namespace wfg::tree
                             text = storedText (attribute, mount);
 
                         nodes.push_back (makeLeaf (base + "/" + name, *row, text));
+                    }
+                }
+            }
+            else if (containerName == "MidiPorts")
+            {
+                /*  THE PORTS THE SHOW DECLARES, and nothing about which cable
+                    each one is. A Port carries a name somebody chose - "Lights",
+                    "The desk" - and what it is bound to on this machine is
+                    `--midi-out`'s answer and never the document's (§4.10). */
+                for (const auto& port : container)
+                {
+                    const auto id = port[idProperty].toString().toStdString();
+
+                    if (id.empty())
+                        continue;
+
+                    const auto base = std::string (godot) + "/port/" + id;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("port"))
+                    {
+                        const doc::Attribute attribute { "Port", row };
+
+                        nodes.push_back (makeLeaf (base + "/" + std::string (row->name),
+                                                   *row, storedText (attribute, port)));
                     }
                 }
             }

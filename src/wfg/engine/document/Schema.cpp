@@ -116,17 +116,20 @@ namespace wfg::doc
         const std::vector<Containment>& containmentTable()
         {
             static const std::vector<Containment> table {
-                { "Show",   false, { "Lists", "Mounts", "Audio" }, { "document" } },
+                { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts" },
+                                                                          { "document" } },
                 /*  THE CONTAINER CARRIES A VALUE, which is why it is no
                     longer an empty pair of brackets. `focus` is a fact about
                     the collection of lists rather than about any list in it -
                     exactly as `Audio` carries the track count, which is a fact
                     about the whole show and not about any bus. */
                 { "Lists",  false, { "List" },             { "lists" } },
-                { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, { "list" } },
+                { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
+                                     "Midi" }, { "list" } },
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
                 { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
-                                     "Header", "Footer", "Trigger" },     { "cue", "group" } },
+                                     "Midi", "Header", "Footer", "Trigger" },
+                                                                          { "cue", "group" } },
 
                 /*  A HEADER AND A FOOTER ARE ORDINARY CUE LISTS (§3.6), which
                     is why they are elements holding cues rather than a word on
@@ -147,8 +150,10 @@ namespace wfg::doc
                     content models to express a rule that fits in one line of
                     validate() would be paying a great deal for a smaller
                     diagnostic. */
-                { "Header", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, {} },
-                { "Footer", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc" }, {} },
+                { "Header", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
+                                     "Midi" }, {} },
+                { "Footer", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
+                                     "Midi" }, {} },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
                     pattern a Group already set. `kind` stays derived from the
@@ -226,6 +231,34 @@ namespace wfg::doc
                     else's node, named by address, and the mount it belongs
                     to already says where that is. */
                 { "Osc",    true,  { "Trigger" },                     { "cue", "osc" } },
+
+                /*  A MIDI CUE IS A NETWORK CUE ON A DIFFERENT WIRE, and it is
+                    an element of its own for the reason every other kind is:
+                    `kind` stays derived and read-only, and the grammar can
+                    refuse a `sysex` on a cue that plays a file.
+
+                    It names a PORT the show declares rather than a device
+                    (§4.10 - the document holds what somebody decided), which is
+                    the same separation a Route's bus has from a hardware
+                    channel: a show travels to another rig and the ports are
+                    re-bound rather than every cue rewritten. */
+                { "Midi",   true,  { "Trigger" },                     { "cue", "midi" } },
+
+                /*  WHERE THE SHOW SAYS WHAT ITS PORTS ARE CALLED. A section of
+                    the Show beside Audio, holding one Port per name a cue may
+                    address - "Lights", "The desk" - and nothing about which
+                    cable that is. `wfg serve --midi-out=<name>=<device>` says
+                    that, because it is a fact about this building.
+
+                    Anonymous, like Lists and Audio: there is one of it.
+
+                    NAMED `MidiPorts` AND NOT `Midi`, which the cue kind already
+                    is. Two elements of one name would be one element as far as
+                    the schema is concerned, and the one that lost would be the
+                    one nobody could find - a <Midi> section reading as a cue
+                    with no list to be in. */
+                { "MidiPorts", false, { "Port" },          {} },
+                { "Port",   true,  {},                     { "port" } },
                 { "Mounts", false, { "Mount" },            {} },
                 { "Mount",  true,  {},                     { "mount" } },
                 { "Audio",  false, { "Bus" },              { "audio" } },

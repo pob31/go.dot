@@ -65,7 +65,7 @@ OUT_PATH = REPO_ROOT / "src" / "wfg" / "engine" / "document" / "SchemaTable.gene
 #   to know that one of them is spelled differently.
 KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 "audio", "bus", "media", "route", "range", "run", "runs",
-                "fade", "stop", "osc", "trigger")
+                "fade", "stop", "osc", "trigger", "midi", "port")
 
 VALUE_TYPES = {
     "s": "string",

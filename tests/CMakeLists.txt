@@ -385,6 +385,20 @@ add_test(NAME wfg.replay.group-fade.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/group-fade
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The fourteenth, and the one where the thing the cues DO cannot happen. A MIDI
+# cue's whole visible effect is bytes leaving a cable, and JUCE cannot even make
+# a virtual port on Windows - no CI runner has a MIDI interface at all. So the
+# sender is a seam the cue layer knows nothing about, a replay installs none,
+# and this says the runs and the log reproduce with nothing going anywhere.
+add_test(NAME wfg.replay.midi.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/midi.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/midi
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.midi.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/midi.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/midi
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a

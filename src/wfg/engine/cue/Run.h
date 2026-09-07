@@ -121,6 +121,24 @@ namespace wfg::cue
             made, and the document keeps it. */
         inline constexpr const char* noSlot = "no-slot";
 
+        /*  A MIDI cue names a port nothing was bound to.
+
+            The show says "Lights" and this machine was never told which cable
+            that is, which is a fact about the building rather than about the
+            show (PRD 4.10) - so it fails the RUN and never the load, and the
+            show travels to a rig that has not been patched yet and still
+            opens. */
+        inline constexpr const char* noPort = "no-port";
+
+        /*  A MIDI cue's own fields do not make a message anybody could send: a
+            channel outside one to sixteen, a velocity past 127, a sysex dump
+            whose hex is not hex or whose framing is half there.
+
+            The schema refuses each of those when the document is written, so
+            this is the second net - the one that catches a value that arrived
+            over the wire. */
+        inline constexpr const char* badMessage = "bad-message";
+
         /*  A message could not be put on the wire.
 
             Distinct from every refusal above it because it is the only one that

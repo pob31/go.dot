@@ -121,6 +121,24 @@ TEST_CASE ("schema: the table describes the elements a show is made of")
     CHECK (schema.element ("Media")->mayContain ("Trigger"));
     CHECK (schema.element ("Cue")->mayContain ("Trigger"));
 
+    /*  A MIDI CUE IS A CUE and its ports are the show's. Two elements that
+        both wanted to be called `Midi` - the kind and the section - are why the
+        section is `MidiPorts`: two elements of one name would be one element as
+        far as the schema is concerned. */
+    REQUIRE (schema.element ("Midi") != nullptr);
+    REQUIRE (schema.element ("MidiPorts") != nullptr);
+    REQUIRE (schema.element ("Port") != nullptr);
+
+    CHECK (schema.element ("List")->mayContain ("Midi"));
+    CHECK (schema.element ("Group")->mayContain ("Midi"));
+    CHECK (schema.element ("Show")->mayContain ("MidiPorts"));
+    CHECK (schema.element ("MidiPorts")->mayContain ("Port"));
+    CHECK_FALSE (schema.element ("MidiPorts")->mayContain ("Midi"));
+
+    REQUIRE (schema.attribute ("Midi", "sysex") != nullptr);
+    REQUIRE (schema.attribute ("Midi", "name") != nullptr);      // a cue first
+    CHECK (schema.attribute ("Midi", "file") == nullptr);        // and not a media one
+
     REQUIRE (schema.attribute ("Range", "in") != nullptr);
     REQUIRE (schema.attribute ("Range", "loops") != nullptr);
     CHECK (schema.attribute ("Range", "index") == nullptr);   // derived, so not stored

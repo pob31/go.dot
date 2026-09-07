@@ -33,14 +33,16 @@
 namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
-    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "stop", "osc" };
+    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi" };
     inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock" };
     inline constexpr std::string_view enum_trigger_type[] = { "noteOn", "noteOff", "programChange", "controlChange" };
     inline constexpr std::string_view enum_fade_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_stop_verb[] = { "hard", "fade", "afterMember", "afterIteration", "advance" };
     inline constexpr std::string_view enum_stop_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_osc_wait[] = { "none", "sent", "verified" };
-    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc" };
+    inline constexpr std::string_view enum_midi_type[] = { "noteOn", "noteOff", "programChange", "controlChange", "pitchBend", "aftertouch", "channelPressure", "sysex" };
+    inline constexpr std::string_view enum_midi_wait[] = { "none", "sent" };
+    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi" };
     inline constexpr std::string_view enum_run_state[] = { "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
     inline constexpr std::string_view enum_group_mode[] = { "timeline", "sequence" };
     inline constexpr std::string_view enum_group_advance[] = { "auto", "manual" };
@@ -224,7 +226,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           true, "memo",
           false, 0.0, false, 0.0,
-          enum_cue_kind, 6,
+          enum_cue_kind, 7,
           "", 50.0, false, "park",
           "What kind of cue this is, derived from the element rather than stored: a Group is a group and a Media is media. Deriving it is what stops a client turning one kind into another by writing a word, and what lets the grammar refuse a file attribute on a cue that plays nothing." },
         { "cue", "number",
@@ -528,6 +530,62 @@ namespace wfg::doc::generated
           nullptr, 0,
           "s", 50.0, false, "park",
           "How long verified waits for an answer before failing the run. Ignored by the other two waits. Five seconds because it is long enough for a device that is thinking and short enough that a cue which is never going to answer does not hold a show past the point anybody would have given up on it. Zero means the first reply or nothing." },
+        { "midi", "port",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "The declared port this cue sends on - a <Port> the show names, never a device. The document says 'Lights' because that is what somebody decided (PRD 4.10); which cable that is on this machine is --midi-out's answer and a fact about the building. A port that is not bound fails the RUN and never the load, so a show travels to a rig that has not been patched yet." },
+        { "midi", "type",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          true, "noteOn",
+          false, 0.0, false, 0.0,
+          enum_midi_type, 8,
+          "", 50.0, false, "park",
+          "Which event to send. Every type PRD 3.10 lists, including sysex, because a show that can send seven of eight is a show somebody has to keep a second program open for. The type decides which of the fields below mean anything, which wfg validate says out loud rather than the grammar refusing - one element per type would be eight elements for one concept." },
+        { "midi", "channel",
+          ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show,
+          true, "1",
+          true, 1.0, true, 16.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "The channel, one to sixteen. One-based because that is what is written on every device a musician has ever looked at, and unlike a TRIGGER's channel there is no 'any': a message has to go somewhere." },
+        { "midi", "number",
+          ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show,
+          true, "0",
+          true, 0.0, true, 127.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "The note, controller or program number. Ignored by pitchBend, channelPressure and sysex, which have no such thing." },
+        { "midi", "data",
+          ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show,
+          true, "0",
+          true, 0.0, true, 16383.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "The velocity, controller value, or the fourteen-bit pitch bend. One row for the three because they are one thing - the payload - and a bend that needed a row of its own would be a second place for a number to be wrong. Nought to 127 for everything but the bend, where 8192 is the centre." },
+        { "midi", "sysex",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "The bytes of a system-exclusive message, in hex, F0 to F7 inclusive - written the way a manual prints them, because that is where a designer is copying from. Ignored by every other type. A dump of any size is legal and the send is off the tick thread for exactly that reason: on Windows a hundred bytes busy-waits the calling thread for about thirty milliseconds." },
+        { "midi", "wait",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          true, "none",
+          false, 0.0, false, 0.0,
+          enum_midi_wait, 2,
+          "", 50.0, false, "park",
+          "How long the cue takes to be done. As a network cue, minus verified: MIDI has no read-back, so there is nothing that could answer, and asking for one is refused when the show loads rather than waiting for ever at half past seven. sent says the bytes reached the port." },
+        { "port", "name",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "What the show calls this port. The document holds what somebody decided (PRD 4.10), so it says 'Lights' or 'The desk'; --midi-out=<name>=<device> is what binds it to a cable on this machine, and the two are separate for the reason a bus and a hardware channel are." },
         { "runs", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
@@ -546,7 +604,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
           false, 0.0, false, 0.0,
-          enum_run_kind, 6,
+          enum_run_kind, 7,
           "", 50.0, false, "park",
           "The kind of the cue this run instantiates, copied at launch so a client reading a run does not have to go and look the cue up - and so the answer survives the cue being edited underneath it." },
         { "run", "parent",
@@ -653,7 +711,7 @@ namespace wfg::doc::generated
           false, 0.0, false, 0.0,
           nullptr, 0,
           "", 50.0, false, "park",
-          "Why it failed, when it did: no-track when every voice was busy, media-missing when the file is not in the bundle or a range is not inside it, no-slot when the cue has more ranges than the graph has launcher slots - which is a range added since the show was loaded, and needs a reload rather than an edit - bad-route when the destination cannot be honoured, send-failed when a message could not be put on the wire, and the write refusals - bad-address, read-only, type-mismatch - when a network cue names a node the target does not have or will not take. timeout when a verified cue asked and nothing answered in time, and disagreed when something answered with a different value, which is the one failure that means the device is there and is not doing what it was told. Empty otherwise. A failed run was still an APPLIED command - the request was legal and the show could not honour it, which is a different thing from a request that was malformed." },
+          "Why it failed, when it did: no-track when every voice was busy, media-missing when the file is not in the bundle or a range is not inside it, no-port when a MIDI cue names a port nothing was bound to, bad-message when its own fields do not make a message anybody could send, no-slot when the cue has more ranges than the graph has launcher slots - which is a range added since the show was loaded, and needs a reload rather than an edit - bad-route when the destination cannot be honoured, send-failed when a message could not be put on the wire, and the write refusals - bad-address, read-only, type-mismatch - when a network cue names a node the target does not have or will not take. timeout when a verified cue asked and nothing answered in time, and disagreed when something answered with a different value, which is the one failure that means the device is there and is not doing what it was told. Empty otherwise. A failed run was still an APPLIED command - the request was legal and the show could not honour it, which is a different thing from a request that was malformed." },
         { "group", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

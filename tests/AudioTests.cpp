@@ -3658,8 +3658,7 @@ TEST_CASE ("M13: three ranges play in order, and every boundary lands where the 
     runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
 
     RecordingSink sink;
-    sink.prepare (settings.outputChannels, rate * 5);
-    rig.host.setBlockSink (&sink);
+    sink.prepare (settings.outputChannels, rate * 6);
 
     std::int64_t tick = 0;
 
@@ -3673,16 +3672,30 @@ TEST_CASE ("M13: three ranges play in order, and every boundary lands where the 
             rig.host.processBlock();
     };
 
+    /*  THE DISK IS WAITED FOR BEFORE THE RECORDING STARTS, and that is not
+        tidiness - it is what makes this test the same length on every machine.
+
+        Standby arms the cue, and between the arm and the file being mapped
+        there is a graph rebuild and a read that Tracktion's cache does on a
+        thread of its own. Those are WALL CLOCK. Recorded through, they fill the
+        buffer with silence for however long the machine took - which on this
+        box is a few ticks and on a loaded macOS runner was enough that the
+        third range had nowhere left to be written, and the test failed saying
+        the range had not played when it had. */
     for (int i = 0; i < 4; ++i)
         oneTick();
 
+    for (int i = 0; i < 600 && ! rig.host.isTrackSourceReady (0); ++i)
+        oneTick();
+
+    REQUIRE (rig.host.isTrackSourceReady (0));
+
+    rig.host.setBlockSink (&sink);
+
     REQUIRE (engine.submit (origin::cli, "go", {}));
 
-    /*  Pumped until it is sounding rather than for a count, because between the
-        GO and the first sample there is an arm posted to the message thread, a
-        graph rebuild and a disk read - all wall-clock, and how many ticks they
-        add up to is the machine's answer rather than this file's. */
-    for (int i = 0; i < 400 && ! rig.host.isTrackPlaying (0); ++i)
+    /*  Now the wait is only the launch latency, which is ticks and not disks. */
+    for (int i = 0; i < 100 && ! rig.host.isTrackPlaying (0); ++i)
         oneTick();
 
     REQUIRE (rig.host.isTrackPlaying (0));
@@ -3767,16 +3780,18 @@ TEST_CASE ("M13: three ranges play in order, and every boundary lands where the 
         against the boundary plus at most the damage M12 priced. */
     const auto allowed = blockSize + 40;
 
-    for (const auto boundary : { std::pair<int, int> { secondRange, 1 },
-                                 std::pair<int, int> { thirdRange, 2 } })
+    const auto landedWhereItWasPlaced = [&] (int settledAt, int index)
     {
-        const auto expected = first + boundary.second * rate;
-        const auto error = boundary.first - expected;
+        const auto expected = first + index * rate;
+        const auto error = settledAt - expected;
 
-        INFO ("the boundary into range " << boundary.second << " landed " << error
+        INFO ("the boundary into range " << index << " landed " << error
                << " samples from where it was placed");
         CHECK (std::abs (error) <= allowed);
-    }
+    };
+
+    landedWhereItWasPlaced (secondRange, 1);
+    landedWhereItWasPlaced (thirdRange, 2);
 }
 
 TEST_CASE ("M13: an advance leaves a range that loops for ever, at the end of the pass it is on")
@@ -3860,8 +3875,7 @@ TEST_CASE ("M13: an advance leaves a range that loops for ever, at the end of th
     runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
 
     RecordingSink sink;
-    sink.prepare (settings.outputChannels, rate * 6);
-    rig.host.setBlockSink (&sink);
+    sink.prepare (settings.outputChannels, rate * 8);
 
     std::int64_t tick = 0;
 
@@ -3875,12 +3889,20 @@ TEST_CASE ("M13: an advance leaves a range that loops for ever, at the end of th
             rig.host.processBlock();
     };
 
+    /*  The disk before the recording, for the reason above. */
     for (int i = 0; i < 4; ++i)
         oneTick();
 
+    for (int i = 0; i < 600 && ! rig.host.isTrackSourceReady (0); ++i)
+        oneTick();
+
+    REQUIRE (rig.host.isTrackSourceReady (0));
+
+    rig.host.setBlockSink (&sink);
+
     REQUIRE (engine.submit (origin::cli, "go", {}));
 
-    for (int i = 0; i < 400 && ! rig.host.isTrackPlaying (0); ++i)
+    for (int i = 0; i < 100 && ! rig.host.isTrackPlaying (0); ++i)
         oneTick();
 
     REQUIRE (rig.host.isTrackPlaying (0));
