@@ -135,6 +135,18 @@ M (GO on a manual group) and O (a group fade is a trim). The phase's own shape i
 §12 of that draft; ranges turned out **not** to map onto TE follow actions and the
 line above saying they do is superseded there.
 
+**COMPLETE, 2026-09-07.** The done-when above is `tests/blackbox/phase3_groups.py`,
+twenty-nine checks against the shipped binary over a socket and read back off the
+WAV, in CI on three platforms under two locales. `docs/godot-phase3-closeout-0.1.md`
+is what it amends in the PRD, what it left undone, and what it measured.
+
+One line of the list above was **not** built: *rate as varispeed/stretch toggle*.
+Rate cannot change on a playing launcher clip at this Tracktion pin, so what could
+be built is rate at ARM — half of what §3.24 promises — and half of it in the
+document would be a row that does not do what the PRD says. It is a proposed
+amendment rather than a deferral, and the engine-side change that would settle it
+is named in the close-out.
+
 ---
 
 ## Phase 4 — Prepare/commit, solver, allocator · L
