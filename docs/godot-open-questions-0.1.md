@@ -9,6 +9,13 @@ the commit that implements it and the phase that reconciles the documents. *Upda
 with the Phase 3 plan: the group-fade question and the second-GO question now have answers
 (decisions O and N, namespace draft §9); the relative-fade half of §2 does not.*
 
+*Updated again 2026-09-07, at Phase 3's close-out: decision O is built, so §2's `base + Σ trims`
+is a structure in the engine rather than a shape on paper, and §3's DCA is the same arithmetic
+reached from a different direction. **§1 is still entirely open** — the QLab checks want a
+person at a machine with QLab on it, and nothing in Phase 3 could answer them. Phase 3 added
+five PRD amendments of its own; they are in `docs/godot-phase3-closeout-0.1.md` §1 rather than
+here, because they are proposals about the PRD and this page is questions about the world.*
+
 ---
 
 ## 1. What to check in QLab
@@ -133,10 +140,16 @@ run into the gap twice — the fade-over-stop case above, and the group-fade cas
   got wrong, and it is the reason a desk keeps the accumulated offset separately from the
   applied one.
 
-**Go.dot's shape for it, now decided rather than provisional:** a run's level becomes
-`base + Σ trims` rather than a single number — Phase 3's PR 3.12 builds it for group fades
-(decision O) — where an absolute fade moves `base` and a relative fade would move an entry in
-`trims`. That is the structure `run/<id>/level` publishes, and it is also exactly what a DCA is
+**Go.dot's shape for it, now BUILT rather than decided** *(PR 3.12, 2026-09-07)*: a run's
+level is `ownLevel + every ancestor run's ownLevel` rather than a single number, where an
+absolute fade moves the run's own and a group fade moves an ancestor's. A relative fade would
+move an entry the same way.
+
+The line that makes it compose rather than accumulate turned out to be *which number a fade
+takes over from*: its own, and not what it is heard at. Taking over from the effective level
+folds the trim into the base — the member is six decibels low while the fade runs and keeps the
+six when the group lets go — and that is the thing a relative fade will get wrong first if it is
+built any other way. That is the structure `run/<id>/level` publishes, and it is also exactly what a DCA is
 (below) — which is why building the group fade first costs nothing later. What a *relative fade
 cue* is — which parameters admit one, how the ends clamp — is still the author's, and a PRD
 amendment.
