@@ -1,0 +1,43 @@
+<Show>
+  <Lists>
+    <List id="P3ACT001" name="Act One">
+      <Group id="P3GRP001" advance="auto" name="The night" number="1">
+        <Media id="P3BED001" file="segments.wav" name="The bed" number="1.1">
+          <Range id="P3RNG001" in="0" loops="0" name="Crickets" out="2"/>
+          <Range id="P3RNG002" in="2" name="The turn" out="4"/>
+          <Range id="P3RNG003" in="4" name="The outro" out="6"/>
+          <Route id="P3RTE001" bus="P3BSA001" gains="1 0"/>
+        </Media>
+        <Osc id="P3MSG001" address="/desk/fader" name="Tell the desk" number="1.2" preWait="0.2" value="f:0.75" wait="sent"/>
+        <Group id="P3GRP002" mode="timeline" name="Two at once" number="1.3">
+          <Media id="P3TWA001" file="segments.wav" level="-6" name="Left of it" number="1.3.1">
+            <Route id="P3RTE002" bus="P3BSB001" gains="1 0"/>
+          </Media>
+          <Media id="P3TWB001" file="segments.wav" level="-6" name="Right of it" number="1.3.2" preWait="0.4">
+            <Route id="P3RTE003" bus="P3BSB001" gains="0 1"/>
+          </Media>
+        </Group>
+        <Footer id="P3FTR001">
+          <Osc id="P3MSG002" address="/desk/mute" name="Release the channels" number="1.f" value="T" wait="sent"/>
+        </Footer>
+      </Group>
+      <Media id="P3TPX001" file="segments.wav" level="-12" name="On top of it" number="2">
+        <Route id="P3RTE004" bus="P3BSA001" gains="0 1"/>
+      </Media>
+      <Fade id="P3FAD001" duration="0.3" level="-20" name="Under the dialogue" number="3" target="P3TPX001"/>
+      <Stop id="P3STP001" name="Move the bed on" number="4" target="P3BED001" verb="advance"/>
+    </List>
+    <List id="P3FYR001" name="Foyer">
+      <Cue id="P3MEM001" name="Doors" number="1">
+        <Trigger id="P3TRG001" address="/foyer/doors" kind="osc"/>
+      </Cue>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="P3MNT001" namespace="namespaces/desk.json" port="9000" prefix="/desk" queryPort="5005" readback="oscquery"/>
+  </Mounts>
+  <Audio tracks="4">
+    <Bus id="P3BSA001" name="Main L/R" width="2"/>
+    <Bus id="P3BSB001" firstChannel="2" name="Foldback" width="2"/>
+  </Audio>
+</Show>

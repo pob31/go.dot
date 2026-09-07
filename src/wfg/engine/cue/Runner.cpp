@@ -1735,8 +1735,43 @@ namespace wfg::cue
 
         auto id = runId;
 
+        /*  A RUN THE POINTER ALREADY ARMED IS ADOPTED, not made a second time.
+
+            Standby on a group arms what the group would launch first, which is
+            the whole reason arming ahead exists: the disk is paid while the
+            operator reads the next line. That arm creates a run with no parent.
+            If the group then SPAWNED a second run for the same cue, the arm
+            would have bought nothing - the first run would sit holding a voice
+            nobody was going to launch, the second would pay the disk again with
+            the operator's hand already down, and a client watching /godot/run
+            would see the same cue twice.
+
+            So the group takes the one that is there. It is adopted by id, which
+            is what keeps it replayable: the record carries the identifier
+            either way, and a replay re-supplies it. */
+        if (id.empty())
+            if (const auto* armed = runs.liveRunOf (cueId))
+                if (armed->parent.empty() && armed->state == runState::armed)
+                    id = armed->id;
+
         if (id.empty())
             id = ids.generate();
+
+        if (auto* existing = runs.find (id))
+        {
+            /*  ADOPTION, and the parent is the whole of it: the waits and the
+                arm were settled when the run was created, and re-reading them
+                here would be reading the document at a different moment from
+                the one the run was born at. */
+            existing->parent = parentRun;
+
+            if (auto* parent = runs.find (parentRun))
+                if (std::find (parent->children.begin(), parent->children.end(), id)
+                      == parent->children.end())
+                    parent->children.push_back (id);
+
+            return id;
+        }
 
         runs.create (id, cueId, kind, parentRun);
 
@@ -2395,21 +2430,98 @@ namespace wfg::cue
 
         const auto cue = document.findById (standby);
 
+        if (! cue.isValid())
+            return;
+
+        /*  A GROUP AT STANDBY ARMS WHAT IT WOULD LAUNCH FIRST, which is the
+            other half of arming ahead and was owed from PR 3.3.
+
+            A pointer on a group is a pointer on a whole scene, and the scene's
+            first sound is as much "the next thing" as a media cue would be. Not
+            arming it meant GO on a group paid the disk with the operator's hand
+            already down - the exact cost arming ahead exists to avoid, moved
+            one level of nesting away where it was harder to see. */
+        for (const auto& id : armablesFor (cue))
+        {
+            /*  Already running or already armed: nothing to do. `audio.arm`
+                would answer with the live run and change nothing, but not
+                asking is cheaper and keeps the log about things that
+                happened. */
+            if (runs.liveRunOf (id) != nullptr)
+                continue;
+
+            engine.submit (origin::engine, "audio.arm", one (id));
+        }
+    }
+
+    std::vector<std::string> Runner::armablesFor (const juce::ValueTree& cue) const
+    {
+        const auto element = cue.getType().toString();
+
         /*  ONLY A MEDIA CUE HAS ANYTHING TO MAKE READY. Asking to arm a memo
             would be a rejection every time the pointer passed over one, which
-            would fill the log with a refusal about something nobody did wrong.
-            (A group at standby arms what it would launch first - PR 3.4, with
-            the cursor that knows how to look inside one.) */
-        if (! cue.isValid() || cue.getType().toString() != "Media")
-            return;
+            would fill the log with a refusal about something nobody did wrong. */
+        if (element == "Media")
+        {
+            const auto id = cue[idProperty].toString().toStdString();
+            return id.empty() ? std::vector<std::string> {} : std::vector<std::string> { id };
+        }
 
-        /*  Already running or already armed: nothing to do. `audio.arm` would
-            answer with the live run and change nothing, but not asking is
-            cheaper and keeps the log about things that happened. */
-        if (runs.liveRunOf (standby) != nullptr)
-            return;
+        if (element != "Group")
+            return {};
 
-        engine.submit (origin::engine, "audio.arm", one (standby));
+        const auto timeline = textOf (cue, "mode") == "timeline";
+
+        std::vector<std::string> out;
+
+        for (const auto& child : cue)
+        {
+            if (! child.hasProperty (idProperty))
+                continue;
+
+            const auto childElement = child.getType().toString().toStdString();
+
+            /*  A header's cues run before the members and are cues in their own
+                right, but they are not what the group LAUNCHES first in the
+                sense that matters here - they are memos and messages far more
+                often than sound, and a header that did hold a media cue would
+                be armed by the scheduler when the header ran. Skipping them
+                keeps this about the members. */
+            if (doc::ShowDocument::ownerForElement (childElement) != "cue")
+                continue;
+
+            /*  A disabled member is not spawned, so arming it would reserve a
+                voice for a cue that is never going to play - and a voice held
+                by nothing is a cue that fails with `no-track` later. */
+            if (child.hasProperty (juce::Identifier ("enabled"))
+                  && ! static_cast<bool> (child[juce::Identifier ("enabled")]))
+                continue;
+
+            if (! timeline)
+            {
+                /*  A SEQUENCE LAUNCHES ONE THING, so the first enabled member
+                    is the whole answer - and recursively, because that member
+                    may be a group of its own. */
+                return armablesFor (child);
+            }
+
+            /*  A TIMELINE LAUNCHES EVERYTHING AT ENTRY and the pre-waits are
+                offsets (§3.6), so what starts at the entry instant is every
+                member whose offset is nought. The rest have time to be armed by
+                the scheduler while the first ones play, which is what their
+                offsets are.
+
+                Reading the wait rather than assuming: a scene whose members all
+                start together is one where every one of them is armed ahead,
+                and a scene that opens with one is one where one is. */
+            if (numberOf (child, "preWait") > 0.0)
+                continue;
+
+            for (auto& id : armablesFor (child))
+                out.push_back (std::move (id));
+        }
+
+        return out;
     }
 
     //==============================================================================

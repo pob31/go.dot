@@ -151,6 +151,27 @@ the rest of the show runs, because a rig that has not been patched yet is a rehe
 does not fail at all, and the difference is written down in the file. A replay reproduces what
 the **engine** decided, and whether a cable existed is not one of the engine's decisions.
 
+## `bundles/phase3/` — the phase's done-when, with no log of its own
+
+The only bundle here that has no `.wfglog` beside it, and deliberately: it is driven by
+`blackbox/phase3_groups.py`, which produces its own log during the session and then replays it.
+A hand-written one would be a second opinion about what the scheduler does, and the point of
+this bundle is to find out.
+
+It is the devplan's sentence, arranged: *a complex background auto-sequence with a looping
+ambience runs while manual foreground cues fire on top; an advance cue exits the loop cleanly;
+the replay log reproduces all of it.* One list holds an automatic sequence group — a media cue
+with three ranges whose first loops for ever, a network cue with a pre-wait, a nested
+**timeline** group of two cues at different offsets on the other pair of channels, and a footer
+that tells the desk — followed by a media cue to fire on top, a fade, and a stop cue whose verb
+is `advance`. A second list holds a memo with an OSC trigger, which exists to be fired without
+moving anything.
+
+`media/segments.wav` is written by the driver: three two-second segments, three different
+constants, so the value on a channel says which range is sounding as arithmetic. The show's
+three ranges are exactly those three segments, which is what makes "the render says which range
+is playing" true by construction.
+
 ## `bundles/chain/` and `logs/auto-chain.wfglog`
 
 One press, and a whole scene runs itself: five cues, a nested timeline group and a footer. An

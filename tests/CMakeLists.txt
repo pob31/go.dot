@@ -611,6 +611,28 @@ add_test(NAME blackbox.device.C
 set_tests_properties(blackbox.device.C PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# PHASE 3'S DONE-WHEN CLAUSE, on the shipped binary, over a socket, and read
+# back off the WAV that came out. The devplan states it in one sentence - "a
+# complex background auto-sequence with a looping ambience runs while manual
+# foreground cues fire on top; an advance cue exits the loop cleanly; the replay
+# log reproduces all of it" - and every clause of it is a check in there.
+#
+# The longest driver in the suite by some way, because it drives a whole scene:
+# a ranged bed that loops for ever, a nested timeline group, a footer, a
+# foreground cue landing on top, a trigger that moves nothing, and an advance.
+# Three hundred seconds is generous on a loaded runner and still a tenth of what
+# a hang would cost.
+add_test(NAME blackbox.phase3.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase3_groups.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.phase3.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase3.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase3_groups.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase3.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The wiring the unit suite cannot reach: a real datagram, on a real socket, on
 # a thread that may not read the document, reaching the right cue - and the
 # operator's pointer not moving when it does.

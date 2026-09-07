@@ -486,6 +486,20 @@ namespace wfg::cue
             moves, including the ones nothing else is touching. */
         void applyLevels();
 
+        /*  What arming the standby means when the pointer is on a GROUP.
+
+            §3.6's chain has to be gapless, and the disk is 0.4 s for a local
+            file (§11.8): a group whose first member is armed only when GO
+            arrives pays that after the operator's hand has come down. So the
+            pointer arms what the group WOULD LAUNCH FIRST - the first member of
+            a sequence, or every member of a timeline that starts at offset
+            zero - and recursively, because that member may itself be a group.
+
+            A vector rather than one identifier, because a timeline group starts
+            several things at once and arming one of them would be a scene that
+            is gapless in one channel. */
+        std::vector<std::string> armablesFor (const juce::ValueTree& cue) const;
+
         /*  The kind's own fire path, once every wait is out of the way: a media
             cue asks for a voice, a fade or a stop takes over a level, a network
             cue writes a node, a memo has nothing to do and says so next tick. */
