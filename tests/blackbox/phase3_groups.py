@@ -188,6 +188,43 @@ def span_at(samples: "list[float]", level: float) -> int:
     return 0 if first < 0 else last - first + 1
 
 
+def ranges_entered(log: Path, run: str) -> "list[int]":
+    """Every range this run entered, in order, out of the session's own log.
+
+    ASKED OF THE LOG AND NOT OF THE TREE, and the reason is a race the first
+    version of this driver lost on a macOS runner.
+
+    A range is entered and left again; on a two-second range that is a state
+    which exists for two seconds of AUDIO, and the hosted engine renders as fast
+    as the machine allows rather than in real time. So on a quick machine the
+    middle range can come and go between two polls of `/godot/run/<id>/range`,
+    and a driver watching for it reports that it never happened - which is
+    exactly what a macOS runner said while every other check, including "and the
+    second range runs out into the third", passed.
+
+    The log cannot miss it. §3.15 makes entering a range an EVENT precisely
+    because it is a transition somebody has to be able to see afterwards, and
+    `run.range` is that record. Reading it here is asking the design's own
+    guarantee rather than racing the thing it was built to make unnecessary.
+    """
+    wanted = f's:"{run}"'
+    out = []
+
+    for line in log.read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+
+        # A applied-record line: A <tick> <seq> <origin> <command> <args...>
+        if len(parts) < 7 or parts[0] != "A" or parts[4] != "run.range":
+            continue
+
+        if parts[5] != wanted or not parts[6].startswith("i:"):
+            continue
+
+        out.append(int(parts[6][2:]))
+
+    return out
+
+
 # =============================================================================
 # Driving
 # =============================================================================
@@ -368,14 +405,12 @@ def run(locale: "str | None") -> int:
                 # playing now finishes the pass it is on and then leaves.
                 fire(server, ADVANCE)
 
-                report.equal(wait_for(server, f"/godot/run/{bed_run}/range", 1, 8.0), 1,
-                             "the advance moves the bed into its second range")
-
-                report.equal(wait_for(server, f"/godot/run/{bed_run}/range", 2, 8.0), 2,
-                             "and the second range runs out into the third")
-
-                report.equal(wait_for(server, f"/godot/run/{bed_run}/state", "done", 12.0),
-                             "done", "and the playlist ends when the last range does")
+                # WAITED FOR ON A TERMINAL STATE, not on a transient one. Which
+                # ranges were entered and in what order is asked of the log
+                # below, where it cannot be missed.
+                report.equal(wait_for(server, f"/godot/run/{bed_run}/state", "done", 25.0),
+                             "done", "the advance carries the bed out of its endless"
+                                     " range, and the playlist runs to its end")
 
                 # --- and only THEN does the chain move on --------------------
                 # The bed was the group's first member. With it finished, the
@@ -404,6 +439,17 @@ def run(locale: "str | None") -> int:
                                  "done", "and the group is done once its footer is")
 
                 time.sleep(0.5)
+
+    # --- which ranges it entered, and in what order ------------------------
+        # THE LOG IS THE EVIDENCE, for the reason in `ranges_entered`: a range
+        # is a state that exists for as long as it sounds, and the engine
+        # renders as fast as the machine allows. What the design guarantees is
+        # that every transition is written down, so that is what is asked.
+        entered = ranges_entered(log, bed_run)
+
+        report.equal(entered, [0, 1, 2],
+                     "the bed entered its three ranges once each, in order",
+                     f"{entered}")
 
     # --- what came out ----------------------------------------------------
         channels, samples = first_sound.read_render(render)
