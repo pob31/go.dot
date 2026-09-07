@@ -227,6 +227,29 @@ namespace
         return out;
     }
 
+    /*  Declares a <Port> and answers with its identifier, which is what a cue
+        carries. Hand-built because there is no `port.create` command: a show's
+        ports are authored, not made by a client at half past seven. */
+    std::string declarePort (doc::ShowDocument& document, const std::string& name)
+    {
+        auto ports = document.root().getChildWithName ("MidiPorts");
+
+        if (! ports.isValid())
+        {
+            ports = juce::ValueTree { "MidiPorts" };
+            document.root().appendChild (ports, nullptr);
+        }
+
+        const auto id = document.ids().generate();
+
+        juce::ValueTree port { "Port" };
+        port.setProperty (juce::Identifier ("id"), juce::String (id), nullptr);
+        port.setProperty (juce::Identifier ("name"), juce::String (name), nullptr);
+        ports.appendChild (port, nullptr);
+
+        return id;
+    }
+
     midi::Bytes bytesFor (const midi::MessageSpec& spec)
     {
         const auto built = midi::messageFor (spec);
@@ -403,7 +426,12 @@ TEST_CASE ("midi cue: firing one puts its bytes on the port the show named")
 
     REQUIRE_FALSE (cueId.empty());
 
-    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/port", "Lights").ok);
+    /*  THE CUE NAMES THE PORT BY IDENTIFIER, the way a route names its bus:
+        the name is what a person reads and what `--midi-out` is given, and
+        renaming a port must not silence every cue that used it. */
+    const auto portId = declarePort (document, "Lights");
+
+    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/port", portId).ok);
     REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/type", "programChange").ok);
     REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/channel", "3").ok);
     REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/number", "12").ok);
@@ -412,7 +440,7 @@ TEST_CASE ("midi cue: firing one puts its bytes on the port the show named")
     engine.processTick (0);
 
     REQUIRE (sink.sent.size() == 1u);
-    CHECK (sink.sent.front().port == "Lights");
+    CHECK (sink.sent.front().port == portId);
     CHECK (sink.sent.front().bytes == midi::Bytes { 0xc2, 0x0c });
 
     /*  AND ITS RUN IS A MIDI RUN, so a client watching /godot/run sees which
@@ -434,7 +462,6 @@ TEST_CASE ("midi cue: a port nothing was bound to fails the run and not the load
     cue::Runner runner { document, runs, runIds, focus };
 
     RecordingSink sink;
-    sink.bound = "The desk";                 // and not "Lights"
     runner.setMidiSink (&sink);
 
     doc::registerDocumentCommands (engine.commands(), document);
@@ -445,7 +472,14 @@ TEST_CASE ("midi cue: a port nothing was bound to fails the run and not the load
     const auto listId = document.createList ("Show").id;
     const auto cueId = document.createCue (listId, 0, "midi", "House lights").id;
 
-    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/port", "Lights").ok);
+    const auto declared = declarePort (document, "Lights");
+    const auto bound = declarePort (document, "The desk");
+
+    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/port", declared).ok);
+
+    /*  Bound to the OTHER port, so the cue's own is declared and unpatched -
+        which is a rig that has not been patched yet rather than a broken show. */
+    sink.bound = bound;
 
     REQUIRE (engine.submit (origin::cli, "cue.fire", { osc::Value::string (cueId) }));
     engine.processTick (0);

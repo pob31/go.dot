@@ -1,9 +1,9 @@
 <Show>
   <Lists>
     <List id="MDX00001" name="Cues">
-      <Midi id="MDX00002" channel="3" name="House to half" number="12" port="Lights" type="programChange"/>
-      <Midi id="MDX00003" name="The stinger" port="The desk" sysex="F0 7E 00 06 01 F7" type="sysex" wait="sent"/>
-      <Midi id="MDX00004" data="100" name="Ping the unpatched" number="60" port="Nobody bound this"/>
+      <Midi id="MDX00002" channel="3" name="House to half" number="12" port="MDXP0001" type="programChange"/>
+      <Midi id="MDX00003" name="The stinger" port="MDXP0002" sysex="F0 7E 00 06 01 F7" type="sysex" wait="sent"/>
+      <Midi id="MDX00004" data="100" name="Ping the unpatched" number="60" port="MDXP0003"/>
       <Cue id="MDX00005" name="And on with the show" number="4"/>
     </List>
   </Lists>
@@ -12,5 +12,6 @@
   <MidiPorts>
     <Port id="MDXP0001" name="Lights"/>
     <Port id="MDXP0002" name="The desk"/>
+    <Port id="MDXP0003" name="Nobody bound this"/>
   </MidiPorts>
 </Show>

@@ -878,7 +878,7 @@
       </optional>
       <optional>
         <attribute name="port">
-          <a:documentation>The declared port this cue sends on - a &lt;Port&gt; the show names, never a device. The document says &apos;Lights&apos; because that is what somebody decided (PRD 4.10); which cable that is on this machine is --midi-out&apos;s answer and a fact about the building. A port that is not bound fails the RUN and never the load, so a show travels to a rig that has not been patched yet.</a:documentation>
+          <a:documentation>The identifier of the declared &lt;Port&gt; this cue sends on. An identifier and not a name, for the reason a route names its bus by one: the name is what a person reads and what --midi-out is given, and renaming a port must not silence every cue that used it. A port that is declared and not bound fails the RUN with no-port and never the load, because which cable &quot;Lights&quot; is on is a fact about the building (PRD 4.10) and a show travels to a rig that has not been patched yet.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

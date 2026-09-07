@@ -229,6 +229,22 @@ namespace wfg::doc
             fails this is never handed to the engine. */
         std::vector<std::string> validate() const;
 
+        /*  What is WRONG WITH THE SHOW but does not stop it opening.
+
+            TWO LISTS AND NOT ONE, and the difference is the whole rule. What
+            `validate` returns is a refusal: a trigger listening inside /godot,
+            a start offset beside a range, a MIDI cue asking to be verified -
+            things with no reading under which the file does what it says. What
+            this returns is a pointer at something that is not there, and PRD
+            §3.8 is explicit that such a thing is a silent no-op during tech
+            rather than a broken show. `object.delete` repairs nothing
+            referential by design, because repairing it would mean deciding
+            what somebody meant.
+
+            So yesterday's saved show opens tomorrow, `wfg validate` prints
+            these, and a cue that is actually fired fails its run. */
+        std::vector<std::string> warnings() const;
+
         //======================================================================
         /** The element name for a `kind` value, or empty. "memo" is a Cue,
             "group" is a Group. */

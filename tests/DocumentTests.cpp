@@ -771,3 +771,118 @@ TEST_CASE ("replay: a session that builds a cue list reproduces itself and its d
     // And the document the replay arrived at is the same show.
     CHECK (CanonicalXml::write (freshDocument) == sessionXml);
 }
+
+//==============================================================================
+TEST_CASE ("refers: a pointer at something that is not there is a warning, never a refusal")
+{
+    /*  THE `refers` COLUMN, and the rule it encodes. An identifier in a
+        document is a pointer at another object, and until the column existed
+        every one of them was checked by hand or not at all - the standby
+        pointer had a function of its own and `fade/@target` had nothing.
+
+        A WARNING AND NEVER A LOAD REFUSAL. PRD §3.8 makes a stop aimed at a cue
+        that is not there a silent no-op during tech; `object.delete` repairs
+        nothing referential, by design, because repairing it would mean deciding
+        what somebody meant; and yesterday's saved show has to open tomorrow. So
+        the file loads, validate says which pointer is dangling, and a cue that
+        is actually fired fails its run. */
+    ShowDocument document;
+
+    const auto listId = document.createList ("Main").id;
+    const auto target = document.createCue (listId, 0, "media", "Thunder").id;
+    const auto fade = document.createCue (listId, 1, "fade", "Under").id;
+
+    REQUIRE (document.setAttribute ("/godot/cue/" + fade + "/target", target).ok);
+    CHECK (document.warnings().empty());
+
+    /*  The cue it was aimed at is deleted, which the document allows and does
+        not repair - the fade keeps pointing at a thing that has gone. */
+    REQUIRE (document.remove (target).ok);
+
+    const auto problems = document.warnings();
+
+    /*  A WARNING AND NOT A REFUSAL, which is the property this is here for:
+        the show still loads. */
+    CHECK (document.validate().empty());
+
+    REQUIRE (problems.size() == 1);
+    INFO (problems[0]);
+    CHECK (problems[0].find (target) != std::string::npos);
+    CHECK (problems[0].find ("target") != std::string::npos);
+}
+
+TEST_CASE ("refers: a pointer at the wrong KIND of thing is caught too")
+{
+    /*  HALF A CHECK IS WORSE THAN NONE. A fade whose target is a bus would
+        otherwise pass validate and fail at half past seven with a message about
+        a run rather than about a show. The column says `cue`, so the thing
+        found has to be one. */
+    ShowDocument document;
+
+    const auto listId = document.createList ("Main").id;
+    const auto fade = document.createCue (listId, 0, "fade", "Under").id;
+
+    /*  A bus, which is an object with an identifier and is not a cue. */
+    auto audio = document.root().getChildWithName ("Audio");
+    REQUIRE (audio.isValid());
+
+    const auto busId = document.ids().generate();
+
+    juce::ValueTree bus { "Bus" };
+    bus.setProperty (juce::Identifier ("id"), juce::String (busId), nullptr);
+    bus.setProperty (juce::Identifier ("name"), "Main L/R", nullptr);
+    audio.appendChild (bus, nullptr);
+
+    /*  Written past setAttribute, which would refuse it: the point is a file
+        somebody hand-edited, or one written by an older build. */
+    auto cue = document.findById (fade);
+    cue.setProperty (juce::Identifier ("target"), juce::String (busId), nullptr);
+
+    const auto problems = document.warnings();
+
+    CHECK (document.validate().empty());
+
+    REQUIRE (problems.size() == 1);
+    INFO (problems[0]);
+    CHECK (problems[0].find ("bus") != std::string::npos);
+    CHECK (problems[0].find ("not a cue") != std::string::npos);
+}
+
+TEST_CASE ("refers: an empty pointer is a resting state and not a dangling one")
+{
+    /*  A list with no standby and a fade with no target yet are both things
+        somebody is in the middle of making. §3.5 says an empty pointer is a
+        resting value; a warning about one would be a warning about every show
+        anybody has started writing. */
+    ShowDocument document;
+
+    const auto listId = document.createList ("Main").id;
+    document.createCue (listId, 0, "fade", "Under");
+
+    CHECK (document.warnings().empty());
+    CHECK (document.validate().empty());
+}
+
+TEST_CASE ("refers: the table is what says which attributes point at things")
+{
+    /*  The five the column declares, read back off the schema rather than
+        re-listed here - a second list would be the thing this column exists to
+        remove. */
+    const auto& schema = Schema::instance();
+
+    const auto pointsAt = [&schema] (const char* element, const char* attribute)
+    {
+        const auto* row = schema.attribute (element, attribute);
+        return row != nullptr ? std::string (row->refers()) : std::string ("(no such row)");
+    };
+
+    CHECK (pointsAt ("List", "standby") == "cue");
+    CHECK (pointsAt ("Fade", "target") == "cue");
+    CHECK (pointsAt ("Stop", "target") == "cue");
+    CHECK (pointsAt ("Route", "bus") == "bus");
+    CHECK (pointsAt ("Midi", "port") == "port");
+
+    /*  And a value that is not a pointer says so by saying nothing. */
+    CHECK (pointsAt ("Cue", "name").empty());
+    CHECK (pointsAt ("Media", "file").empty());
+}

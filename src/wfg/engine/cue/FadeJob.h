@@ -122,6 +122,15 @@ namespace wfg::cue
             fade-and-stop is exactly that shape. */
         bool retired = false;
 
+        /*  From `runError`, when the fade was never going to do anything: its
+            target names an identifier this show does not contain.
+
+            EMPTY IS THE ORDINARY CASE, including "the target is not running",
+            which §3.8 makes a silent no-op rather than a failure. A pointer at
+            nothing is not that, and the difference is what the `refers` column
+            made checkable. */
+        std::string failure;
+
         /** Whether the level has reached its destination. */
         bool isFinished() const noexcept { return ticksDone >= ticksTotal; }
 

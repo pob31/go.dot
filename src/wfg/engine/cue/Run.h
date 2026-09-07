@@ -121,6 +121,20 @@ namespace wfg::cue
             made, and the document keeps it. */
         inline constexpr const char* noSlot = "no-slot";
 
+        /*  A fade or a stop names a cue that is not in this show at all.
+
+            DIFFERENT FROM A TARGET THAT IS NOT RUNNING, which PRD §3.8 makes a
+            silent no-op on purpose: fading something that already finished is
+            what an operator does when a cue ended sooner than they expected,
+            and it is not a mistake. This one is - the pointer names nothing,
+            and it names nothing whether or not anybody presses GO.
+
+            It fails the run and never the load, for the reason `no-port` does:
+            `object.delete` repairs nothing referential by design, and
+            yesterday's saved show has to open tomorrow. `wfg validate` is where
+            a person is told about it before the night it matters. */
+        inline constexpr const char* badTarget = "bad-target";
+
         /*  A MIDI cue names a port nothing was bound to.
 
             The show says "Lights" and this machine was never told which cable

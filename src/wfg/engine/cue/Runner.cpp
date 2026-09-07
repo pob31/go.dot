@@ -1065,6 +1065,24 @@ namespace wfg::cue
             operator does when a cue ended earlier than they expected, and it is
             not a mistake - there is simply nothing to fade. The fade's own run
             reports done at once, so a group waiting on it is not held up. */
+        /*  A POINTER AT NOTHING IS NOT THE SAME AS A CUE THAT IS NOT RUNNING,
+            and telling the two apart is what the `refers` column bought.
+
+            §3.8 makes a fade aimed at a cue that has finished a silent no-op:
+            the cue was real and it ended, which happens. A fade aimed at an
+            identifier this show does not contain is a different thing - it
+            names nothing, and it will name nothing on every GO for the rest of
+            the run. That is a `bad-target`, said out loud, and `wfg validate`
+            has already said it once on a laptop with nothing plugged in. */
+        if (! targetCueId.empty() && ! document.findById (targetCueId).isValid())
+        {
+            FadeJob orphan;
+            orphan.self = self;
+            orphan.failure = runError::badTarget;
+            running.push_back (orphan);
+            return;
+        }
+
         const auto* target = runs.liveRunOf (targetCueId);
 
         if (target == nullptr)
@@ -1486,6 +1504,19 @@ namespace wfg::cue
                 somebody else's sound is a great deal to ask. So the target goes
                 back to playing, at whatever level the fade had reached - exactly
                 where a killed plain fade leaves it. */
+            /*  A POINTER AT NOTHING, said out loud on the first tick the job
+                lives. Reported from here rather than from `beginFade` for the
+                reason every report is: only the tick hook may submit, because
+                a handler that did would produce the record twice on replay. */
+            if (! job.failure.empty())
+            {
+                engine.submit (origin::engine, "run.failed",
+                               { osc::Value::string (job.self),
+                                 osc::Value::string (job.failure) });
+                job.retired = true;
+                continue;
+            }
+
             const auto* selfRun = runs.find (job.self);
 
             if (selfRun != nullptr && selfRun->state == runState::stopping)

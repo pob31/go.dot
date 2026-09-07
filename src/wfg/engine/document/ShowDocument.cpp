@@ -1130,6 +1130,97 @@ namespace wfg::doc
         };
 
         MidiWaits { problems }.visit (showNode);
+
+        return problems;
+    }
+
+    std::vector<std::string> ShowDocument::warnings() const
+    {
+        std::vector<std::string> problems;
+
+        /*  EVERY REFERENCE THE TABLE DECLARES, checked in one place.
+
+            An identifier in a document is a pointer at another object, and
+            until the `refers` column there was no one place that knew it: the
+            standby pointer had a function of its own, `fade/@target` and
+            `stop/@target` had nothing at all, and this file carried a note
+            saying the generalisation would be worth writing when there was a
+            second case. Phase 3 brought four more - a range's cue, a MIDI
+            cue's port, a run's parent, a trigger's cue - and this is it.
+
+            A WARNING AND NEVER A LOAD REFUSAL, which is the whole shape of it.
+            §3.8 makes a stop aimed at a cue that is not there a silent no-op
+            during tech; `object.delete` repairs nothing referential, by
+            design, because repairing it would mean deciding what somebody
+            meant; and yesterday's saved show has to open tomorrow. So the file
+            loads, `wfg validate` says which pointer is dangling, and a cue
+            that is actually fired fails its run.
+
+            THE TARGET IS LOOKED UP BY IDENTIFIER AND THEN BY KIND, both,
+            because half a check is worse than none: a fade whose target is a
+            BUS would otherwise pass, and would fail at half past seven with a
+            message about a run rather than about a show. */
+        struct References
+        {
+            std::vector<std::string>& problems;
+            const ShowDocument& document;
+
+            void visit (const juce::ValueTree& node)
+            {
+                const auto element = node.getType().toString().toStdString();
+
+                if (const auto* described = Schema::instance().element (element))
+                {
+                    for (const auto& attribute : described->attributes)
+                    {
+                        const auto refers = attribute.refers();
+
+                        if (refers.empty())
+                            continue;
+
+                        const juce::Identifier name { juce::String (std::string (attribute.name())) };
+
+                        if (! node.hasProperty (name))
+                            continue;
+
+                        const auto value = node[name].toString().toStdString();
+
+                        /*  Empty is a pointer at nothing on purpose - a list
+                            with no standby, a cue with no target yet - and is a
+                            resting state rather than a dangling reference. */
+                        if (value.empty())
+                            continue;
+
+                        const auto target = document.findById (value);
+
+                        const auto here = "/Show/.../" + element + "["
+                                            + node[idProperty].toString().toStdString() + "]/@"
+                                            + std::string (attribute.name());
+
+                        if (! target.isValid())
+                        {
+                            problems.push_back (here + ": names \"" + value
+                                                 + "\", which is not in this show");
+                            continue;
+                        }
+
+                        const auto found = ownerForElement (
+                            target.getType().toString().toStdString());
+
+                        if (found != refers)
+                            problems.push_back (here + ": names \"" + value + "\", which is a "
+                                                 + (found.empty() ? std::string ("thing of no kind")
+                                                                  : std::string (found))
+                                                 + " and not a " + std::string (refers));
+                    }
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        References { problems, *this }.visit (showNode);
         return problems;
     }
 }

@@ -25,7 +25,8 @@ namespace wfg::midi
         stop();
     }
 
-    bool MidiSender::bind (const std::string& portName, const std::string& deviceName)
+    bool MidiSender::bind (const std::string& portId, const std::string& label,
+                           const std::string& deviceName)
     {
         const auto devices = juce::MidiOutput::getAvailableDevices();
 
@@ -41,7 +42,8 @@ namespace wfg::midi
                 device that is not there is a cue that will fail at half past
                 seven for a reason nobody can see from the show file, so the
                 sentence has to be enough to fix it by. */
-            std::string line = "no MIDI output called \"" + deviceName + "\"";
+            std::string line = "the port \"" + label + "\" wants a MIDI output called \""
+                                 + deviceName + "\", and there is none";
 
             if (devices.isEmpty())
             {
@@ -63,7 +65,8 @@ namespace wfg::midi
 
         if (device == nullptr)
         {
-            refusals.push_back ("could not open the MIDI output \"" + deviceName + "\"");
+            refusals.push_back ("could not open the MIDI output \"" + deviceName
+                                  + "\" for the port \"" + label + "\"");
             return false;
         }
 
@@ -71,22 +74,22 @@ namespace wfg::midi
             `--midi-out=Lights=...` on one command line is somebody correcting
             themselves, and the last one is what they meant. */
         const auto existing = std::find_if (bound.begin(), bound.end(),
-                                            [&portName] (const Bound& b)
-                                            { return b.port == portName; });
+                                            [&portId] (const Bound& b)
+                                            { return b.port == portId; });
 
         if (existing != bound.end())
             existing->device = std::move (device);
         else
-            bound.push_back ({ portName, std::move (device) });
+            bound.push_back ({ portId, std::move (device) });
 
         return true;
     }
 
-    bool MidiSender::isBound (const std::string& portName) const
+    bool MidiSender::isBound (const std::string& portId) const
     {
         return std::any_of (bound.begin(), bound.end(),
-                            [&portName] (const Bound& b)
-                            { return b.port == portName && b.device != nullptr; });
+                            [&portId] (const Bound& b)
+                            { return b.port == portId && b.device != nullptr; });
     }
 
     void MidiSender::start()

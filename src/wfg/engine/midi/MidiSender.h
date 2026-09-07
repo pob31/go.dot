@@ -61,9 +61,17 @@ namespace wfg::midi
         MidiSender() = default;
         ~MidiSender() override;
 
-        /*  Binds one of the show's port names to one of this machine's devices.
-            False, with a line in `problems()`, when there is no such device. */
-        bool bind (const std::string& portName, const std::string& deviceName);
+        /*  Binds one of the show's declared ports to one of this machine's
+            devices. False, with a line in `problems()`, when there is no such
+            device.
+
+            THE PORT IS ITS IDENTIFIER, because that is what a cue carries -
+            `--midi-out` is given the NAME, which is what a person reads, and
+            whoever parses the command line resolves the one to the other
+            against the document. `label` is that name, kept only so that a
+            refusal is a sentence somebody can act on. */
+        bool bind (const std::string& portId, const std::string& label,
+                   const std::string& deviceName);
 
         /** Starts the sending thread. Nothing leaves before this. */
         void start();

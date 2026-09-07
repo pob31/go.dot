@@ -128,6 +128,23 @@ namespace wfg::doc
         bool anticipatable;
         std::string_view panic;
 
+        /*  WHAT THIS ATTRIBUTE POINTS AT, as an owner word - `cue`, `list`,
+            `bus`, `port` - or empty when it points at nothing.
+
+            An identifier in a document is a reference, and until this column
+            existed every one of them was checked by hand or not at all: the
+            standby pointer had a function of its own, `fade/@target` and
+            `stop/@target` had nothing, and the note in ShowDocument said the
+            generalisation would be worth writing when there was a second case.
+            Phase 3 brought four more.
+
+            A DANGLING REFERENCE IS A WARNING AND NEVER A LOAD REFUSAL. §3.8
+            makes a stop aimed at a cue that is not there a silent no-op during
+            tech, `object.delete` repairs nothing referential, and yesterday's
+            saved show has to open tomorrow. So `wfg validate` says so, the run
+            fails with `bad-target` if it is ever fired, and the file loads. */
+        std::string_view refers;
+
         std::string_view description;
     };
 }

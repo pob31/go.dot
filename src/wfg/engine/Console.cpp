@@ -962,6 +962,18 @@ namespace
         for (auto& problem : wfg::tree::checkNetworkCues (document))
             result.problems.push_back (std::move (problem));
 
+        /*  AND THE POINTERS THAT POINT AT NOTHING, which are warnings rather
+            than refusals: PRD §3.8 makes a stop aimed at a cue that is not
+            there a silent no-op during tech, and `object.delete` repairs
+            nothing referential by design. The show loads and runs; what fails
+            is the cue, if it is ever fired.
+
+            Reported HERE because this is the verb somebody runs when they have
+            time to fix it, and because a dangling target is exactly the kind of
+            thing that is invisible until the night it matters. */
+        for (auto& problem : document.warnings())
+            result.problems.push_back (std::move (problem));
+
         for (const auto& problem : result.problems)
             std::cerr << "    " << problem << std::endl;
 
@@ -1520,7 +1532,34 @@ namespace
         wfg::midi::MidiSender midiOut;
 
         for (const auto& binding : midiOutputBindings)
-            midiOut.bind (binding.first, binding.second);
+        {
+            /*  THE NAME ON THE COMMAND LINE, THE IDENTIFIER IN THE CUE. A cue
+                carries the <Port>'s id, so that renaming a port does not
+                silence every cue that used it; a person types the name,
+                because that is what the show file says out loud and what is
+                written on the patch panel. This is where the two meet. */
+            std::string portId;
+
+            for (const auto& ports : document.root())
+            {
+                if (ports.getType().toString() != "MidiPorts")
+                    continue;
+
+                for (const auto& port : ports)
+                    if (port[juce::Identifier ("name")].toString().toStdString()
+                          == binding.first)
+                        portId = port[juce::Identifier ("id")].toString().toStdString();
+            }
+
+            if (portId.empty())
+            {
+                std::cerr << "wfg serve: this show declares no MIDI port called \""
+                          << binding.first << "\"" << std::endl;
+                return 2;
+            }
+
+            midiOut.bind (portId, binding.first, binding.second);
+        }
 
         if (! midiOut.problems().empty())
         {

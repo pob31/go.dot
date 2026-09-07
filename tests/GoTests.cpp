@@ -3519,3 +3519,59 @@ TEST_CASE ("trim: a fade on a trimmed member starts from where the member is, no
     /*  And what it is HEARD at is that plus the trim, still. */
     CHECK (rig.levelOf (rig.member) == doctest::Approx (ownLevel - 6.0));
 }
+
+TEST_CASE ("fade: a target this show does not contain is a bad-target, not a no-op")
+{
+    /*  THE DIFFERENCE THE `refers` COLUMN MADE CHECKABLE. §3.8 makes a fade
+        aimed at a cue that has FINISHED a silent no-op - the cue was real and
+        it ended, which happens during tech and is not a mistake. A fade aimed
+        at an identifier this show does not contain is a different thing: it
+        names nothing, and it will name nothing on every GO for the rest of the
+        run.
+
+        `wfg validate` has already said so on a laptop with nothing plugged in.
+        This is what happens if nobody read it. */
+    Rig rig;
+
+    const auto fade = rig.document.createCue (rig.listId, 2, "fade", "Under").id;
+
+    /*  Written past setAttribute, which refuses an identifier that names
+        nothing: the point is a show somebody edited by hand, or one whose
+        target was deleted after it was written. */
+    auto cue = rig.document.findById (fade);
+    cue.setProperty (juce::Identifier ("target"), "ZZZZZZZZ", nullptr);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string (fade) });
+    rig.tickOnce();
+
+    const auto runId = rig.runOf (fade);
+    REQUIRE_FALSE (runId.empty());
+
+    const auto* run = rig.runs.find (runId);
+    REQUIRE (run != nullptr);
+
+    CHECK (run->error == cue::runError::badTarget);
+    CHECK (run->state == cue::runState::failed);
+}
+
+TEST_CASE ("fade: a target that is real and not running is still a silent no-op")
+{
+    /*  The other side of the same line, and the reason it is a line: §3.8 says
+        so, and an operator whose cue ended early has not made a mistake. */
+    Rig rig;
+
+    const auto fade = rig.document.createCue (rig.listId, 2, "fade", "Under").id;
+    rig.document.setAttribute ("/godot/cue/" + fade + "/target", rig.mediaId);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string (fade) });
+    rig.tickOnce();
+
+    const auto runId = rig.runOf (fade);
+    REQUIRE_FALSE (runId.empty());
+
+    const auto* run = rig.runs.find (runId);
+    REQUIRE (run != nullptr);
+
+    CHECK (run->error.empty());
+    CHECK (run->state == cue::runState::done);
+}

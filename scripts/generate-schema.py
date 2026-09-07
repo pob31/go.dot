@@ -158,7 +158,7 @@ def read_rows():
         reader = csv.DictReader(handle, restkey=OVERFLOW, restval=None)
         expected = ["owner", "address", "type", "access", "default", "range",
                     "unit", "kind", "rate_cap", "anticipatable", "panic",
-                    "persist", "description"]
+                    "persist", "refers", "description"]
         if reader.fieldnames != expected:
             fail("the table's columns changed.\n    expected: %s\n    found:    %s"
                  % (",".join(expected), ",".join(reader.fieldnames or [])))
@@ -254,6 +254,20 @@ def build(rows):
         if anticipatable not in ("yes", "no"):
             fail("%s: anticipatable must be yes or no, found %r" % (label, anticipatable))
 
+        # WHAT AN IDENTIFIER-VALUED ATTRIBUTE POINTS AT, blank when it points at
+        # nothing. An owner word, so the same vocabulary the first column uses:
+        # a `cue`, a `list`, a `bus`, a `port`.
+        #
+        # Checked against KNOWN_OWNERS here rather than left as free text,
+        # because the whole value of writing it down is that one place decides
+        # what a reference is - and a typo that named `cues` would be a check
+        # that silently never fired.
+        refers = (row["refers"] or "").strip()
+
+        if refers and refers not in KNOWN_OWNERS:
+            fail("%s: refers %r is not an owner (expected one of %s)"
+                 % (label, refers, ", ".join(KNOWN_OWNERS)))
+
         has_min, low, has_max, high, enum_values = parse_range(row["range"], label)
 
         default = (row["default"] or "").strip()
@@ -286,6 +300,7 @@ def build(rows):
                 "anticipatable": anticipatable == "yes",
                 "panic": (row["panic"] or "").strip(),
                 "persist": PERSIST[persist],
+                "refers": refers,
                 "description": (row["description"] or "").strip(),
         })
 
@@ -371,6 +386,7 @@ def render(entries):
         add("          %s, %s, %s, %s," % (cpp_string(e["unit"]), number_literal(e["rateCap"]),
                                            "true" if e["anticipatable"] else "false",
                                            cpp_string(e["panic"])))
+        add("          %s," % cpp_string(e["refers"]))
         add("          %s }," % cpp_string(e["description"]))
 
     add("    };")

@@ -71,6 +71,10 @@ namespace wfg::doc
 
         bool isEnum() const noexcept                  { return row->numEnumValues > 0; }
 
+        /*  The owner word this attribute's value must name an object of, or
+            empty. See AttributeRow::refers. */
+        std::string_view refers() const noexcept      { return row->refers; }
+
         /** Whether it holds a run of its type rather than one. See AttributeRow. */
         bool isList() const noexcept                  { return row->isList; }
         bool isEnumValue (std::string_view v) const noexcept;
