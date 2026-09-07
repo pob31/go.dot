@@ -16,6 +16,11 @@ person at a machine with QLab on it, and nothing in Phase 3 could answer them. P
 five PRD amendments of its own; they are in `docs/godot-phase3-closeout-0.1.md` §1 rather than
 here, because they are proposals about the PRD and this page is questions about the world.*
 
+*Updated 2026-09-07, evening: **§3 is settled** — PRD §3.28, a DCA is an object of its own. The
+sampler-group, rack-slot and persistent-cue designs of the same day went into the PRD directly
+(§3.9e, §3.18, §3.27–3.29), at the author's direction, rather than through this page; what they
+left *(proposed)* is listed in PRD §6.9 and what they need measured in §6.11.*
+
 ---
 
 ## 1. What to check in QLab
@@ -188,6 +193,10 @@ fade and one that fights it.
 time, order and lifetime (§4.12); a DCA organises *level* across members that may be in different
 groups. Those are different axes, and PRD §4.12's "containers describe behaviour, content
 describes output; nothing inherits downward" is the sentence that has to be reconciled with it.
+
+*(**Settled 2026-09-07 — PRD §3.28**: an object of its own, cross-cutting the hierarchy, nestable,
+with a mapping per assignment. The reconciliation with §4.12 is that membership is a mark on the
+member carrying its mapping, so nothing flows down; the DCA adds terms to the sum PR 3.12 built.)*
 
 ---
 

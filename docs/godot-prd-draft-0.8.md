@@ -234,6 +234,12 @@ Two attributes, not three types:
     group; the operator is the parent. Toggleable during tech; a mid-run change
     takes effect at the next member boundary.
 
+*Amended 2026-09-07.* A third mode exists, the **sampler group** (§3.27): the
+scheduler launches none of its members and the operator's hand launches them
+from faders and pads, in any order, any number of times, several at once. It is
+a scheduling mode and not a third kind of container — lifetime, header, footer
+and the group trim are exactly as above.
+
 The **cue list is, virtually, a sequence group in manual mode** — one model, no
 special case at the top — but need not be *displayed* as one.
 
@@ -348,7 +354,9 @@ audio+video+OSC group exposes nothing useful.
 
 Because the trim is arithmetic over member values rather than a property pushed
 down a hierarchy, a group fader works identically whether its members sit on one
-slot, twelve slots, or a mix of slots and buses.
+slot, twelve slots, or a mix of slots and buses. A DCA proper — a cross-cutting
+object that members in different groups are assigned to — is §3.28; it adds
+terms to the same sum.
 
 Repetition of an assignment across members is **not** inheritance. It is
 multi-select edit and copy-assignment (§3.9), which work across a selection that
@@ -369,7 +377,10 @@ trigger list:
 - **wall clock**
 - **OSC** message
 - **MIDI** message
-- **fader movement** (§3.9)
+- **fader movement** (§3.9a): a fader leaving -inf starts, a released fader at
+  -inf stops
+- **pad press and release** (§3.27): the same trigger at one bit, from a pad, a
+  key, a MIDI note or a Stream Deck tile
 
 Debounce/false-start guarding is a **user preference** (e.g. GO debounce time),
 not a hard-coded constant.
@@ -390,9 +401,22 @@ Targeting a group stops it recursively by default. A stop cue whose target is
 not running is a **silent no-op, not an error** — that case is constant during
 rehearsal jumps.
 
-**Open:** if a cue is fired while already running, does it restart or run a
-second instance? Pick one per cue type, make it visible, and let stop target
-either all instances or the most recent.
+**Settled per kind** (decision N, `docs/godot-namespace-draft-0.1.md` §9,
+2026-09-06; extended 2026-09-07). A second trigger on a cue that is already
+running:
+
+| Kind | Second trigger |
+|---|---|
+| media (audio, video), any trigger | **no-op** |
+| group, any trigger | **no-op** — except a sampler group, where it is a *refresh* (§3.27) |
+| fade, stop | **restart**, taking over from the level the target is at |
+| OSC, MIDI, memo | **second instance** |
+| sampler clip in *hold* mode | cannot happen from the origin holding it |
+| sampler clip in *play-out* mode | **restart** or **no-op**, per clip; *stop* as a third value *(proposed)* — it is what §3.16 already gives the Stream Deck, kill on press |
+
+A stop or fade aimed at a cue with several live runs acts on the newest.
+**Layering** — a second instance of a media cue — is deliberately absent: a
+crowd hit that overlaps itself is two clips on two pads.
 
 ### 3.9 Exclusive resources: faders, processor slots, interface channels
 
@@ -420,6 +444,24 @@ Requirements:
 Fader-start is only possible because of §3.12: by the time the finger moves,
 the file is open, the transport armed, the channels allocated and the processor
 verified. Nothing remains but the unmute.
+
+*Amended 2026-09-07*, three additions from the sampler-group design (§3.27):
+
+- **Roles are the layout's.** Each strip is either a **DCA strip** — pinned,
+  bound to a DCA (§3.28) — or a **sampler strip** — unpinned, filled by whichever
+  sampler group is armed. They may be mixed; among sampler strips, order is
+  left to right. This is §3.16's *layout*, in the document, and not the device
+  profile, which only says what each strip physically has.
+- **A start edge counts only from a parked fader** *(proposed)*: released at
+  -inf, past the hysteresis. A dip to the bottom while touched is a ride,
+  neither a release nor a press — or a play-out clip set to restart would
+  restart every time the operator dips. Faders without touch reporting
+  *(proposed)*: a dwell at -inf declared in the device profile counts as a
+  release; failing that, such a fader is play-out only.
+- **The start value is reasserted at every handover**, not only in prepare: a
+  strip flies to -inf before a new clip's binding goes live on it, so a fader
+  left at -10 by a clip that ended on its own never sits over a clip that has
+  not started.
 
 #### 3.9b Audio destinations: buses and slots
 
@@ -514,6 +556,41 @@ Fader bindings are **show state** and live in the document, so the document has
 a hardware dependency. Loading a 16-fader show on 8 faders, or none, must
 **degrade rather than fail** — the show should run from a laptop in an
 emergency, badly but completely.
+
+#### 3.9e Slots, defined
+
+*Added 2026-09-07. The word was used in §3.9b for a processor input and in §3.25
+for a launcher slot and defined in neither; the sampler and rack designs of
+§3.27 and §3.18 add two more instances, so the concept is stated once here.*
+
+A **slot** is one position in a **pool of fixed size, declared at load**;
+**typed**, by width or by a class such as the rack's mono→stereo; **exclusive**;
+**held for a live range**; **released by a policy**; and with a **failure policy
+of its own kind**. Four instances:
+
+| Slot kind | Pool declared by | Type | Released | When a claim finds none |
+|---|---|---|---|---|
+| **voice** — a track (§3.25) | `Show/Audio/@tracks` | width | clip end; footer for anything with a tail | fails at entry, visibly (Phase 3); a sampler group's claim **waits** (§3.27) |
+| **strip** — a fader or pad (§3.16) | the layout | role: DCA or sampler | the clip's run ends, however it ends | **waits**, or **evicts** when the arming sampler group says so (§3.27) |
+| **rack channel**, exclusive kind (§3.18) | `Show/Audio/Rack` | in→out width class | footer-timed — a tail may still be running | **degrades**: the cue plays dry and says so; §3.9c's edit-time analysis is what keeps it from happening in the show |
+| **processor input** (§3.9b) | the processor, by OSCQuery *(proposed)* | width | footer-timed | waits for the release rather than racing it (§3.9b) |
+
+**Buses are not slots** — a summing point is shared by construction. A rack
+channel of the *shared* kind, a reverb or a delay that many cues send into, is
+a bus with a chain and is not allocated.
+
+Two rules, which are the whole of what the instances share:
+
+- **A waiting claim.** A claim on a busy slot is neither a failure nor a race:
+  it lands when the holder's run ends. The claimant shows *pending* — in words,
+  never colour alone (§4.8) — and GO has already returned (§4.1). A holder that
+  never ends on its own, an infinite loop, is the operator's to end.
+- **Eviction is a close, not a kill.** Where a policy lets a claim evict, the
+  evicted holder launches nothing new, plays out what is playing, and releases
+  each slot as its own run ends; its footer runs when its last run does.
+
+The allocator of §3.9c is the allocator of this table, and the
+usage-over-show-time plot is drawn per slot kind.
 
 ### 3.10 Bindings and automation
 
@@ -669,13 +746,15 @@ unpinned follow the show; the display always says which.
 
 #### Endpoint classes
 
-Three, not one — this drops in a whole family of devices without special-casing:
+Four, not one — this drops in a whole family of devices without special-casing
+*(the fourth added 2026-09-07)*:
 
 | Class | Example | Semantics |
 |---|---|---|
 | **absolute** | motor fader | position is value; soft takeover / touch |
 | **relative** | endless encoder | increments |
 | **rate** | SpaceMouse, spring-centred joystick, pedal | deflection is rate of change; deadzone; defined behaviour on release mid-deflection |
+| **gate** | pad, key, MIDI note, Stream Deck tile | press and release; optionally a value at press, which is what velocity is, and whether anything maps it is a per-clip mapping defaulting to none. No pressure, no XY: the MPE-like Sampler in WFS-DIY is deliberately not reproduced here (§3.27) |
 
 A 6DOF controller driving a WFS source position is better than two faders —
 three axes plus orientation is what the parameter actually is.
@@ -858,6 +937,45 @@ added above: **"strip marked failed" must disable the call**, or one crashed
 plugin quietly eats the audio budget of the whole show. And the budget is
 properly stated as *deadline × maximum simultaneously-failed strips*, not as a
 single number.
+
+#### Rack channels are slots *(added 2026-09-07)*
+
+The rack is a **pool of channels declared at load** — so many of each width
+class, **mono→mono, mono→stereo, stereo→stereo** (stereo→mono is deliberately
+absent; wider comes later) — each with its plugin chain, exactly as `@tracks`
+declares polyphony. A cue **claims** a channel through §3.9e's allocator and
+writes **coefficients and plugin parameters**; it never inserts a plugin or
+changes a send's bus. The pool is forced by the engine, not chosen: a plugin
+chain and an aux bus number are structural, and Tracktion restarts playback
+when either changes, while a send level is a parameter (`tracktion_Edit.cpp`,
+the tree watcher). Sends are therefore the same coefficient trick as the cue
+output stage, and Go.dot's rack channels are plain tracks with a plugin list,
+**never Tracktion Racks**, whose own enable is structural.
+
+Each channel is declared **shared** or **exclusive** (§3.9e): a reverb is a bus
+with a chain, a per-source insert is a slot.
+
+**Bypass does not rebuild the graph, and the price of a stack is latency, not
+CPU.** Verified against the pinned engine, 2026-09-07:
+
+- enabling or disabling an ordinary plugin restarts nothing — the watcher does
+  so only when the engine behaviour asks for bypassed plugins to be removed from
+  the graph, and the default says no;
+- a disabled plugin costs nothing per block on the node's fast path, which every
+  built-in and every zero-latency external plugin takes; a disabled external
+  plugin that declares latency keeps a delay line running instead, so a
+  channel's timing does not jump when it is toggled;
+- re-enabling resets the plugin, so a reverb returns without a stale tail.
+
+So a channel may hold a **stack of candidate plugins, all bypassed, and a cue
+enables the ones it wants** *(proposed)* — unlimited possibilities without a
+rebuild. What it costs: memory and instantiation at load for every instance; a
+process per third-party plugin under the out-of-process default; and, because
+the bypassed delay line keeps timing constant, **a channel's latency is the sum
+of every plugin in its stack whether on or off**. For playback effects that is a
+number Go.dot reads and compensates in prepare; for the live rack it is the
+budget itself. The summed latency is shown at the moment somebody adds a plugin
+to a channel, never discovered on the night.
 
 Choosing the deadline follows from the same table — the smallest value that
 misses nothing while healthy, since that value is also what a failure costs. On
@@ -1272,6 +1390,13 @@ load and only slot contents change.
 - The launcher slots **are** the exclusive resources the §3.9c allocator hands
   out: prepare loads the clip into a free slot, GO launches it. Same object, no
   translation.
+- *2026-09-07:* a track is a **voice** in §3.9e's sense. For a sampler group
+  (§3.27) the claim is shaped differently *(proposed)*: the group declares its
+  voices, claims that many tracks at entry, and preloads its members across
+  those tracks' launcher slots. If the launcher keeps one playing slot per track
+  — how Waveform's launcher behaves; **to measure** before the allocator is
+  written — a member launching stops whatever its track was playing, which is a
+  sampler's choke group for free.
 
 *Amended in 0.8 — `docs/spikes/spike04-graph-stability.md`, `spike01-bus-routing.md`.*
 Both halves are now measured rather than assumed.
@@ -1495,6 +1620,182 @@ has settled what a cue's content *is* for a mounted namespace, because a capture
 is exactly a solved state written down. Phase 11's integrations is the earliest
 honest home for it.
 
+### 3.27 Sampler groups — strips, takeover and refresh
+
+*Added in 0.8, at the author's direction (2026-09-07).*
+
+§3.9a describes fader-start one cue at a time. The scene-sized form of it —
+"for this scene, these eight faders are these eight sounds" — is the thing the
+competitor table holds against QLab, and the author has shipped it once already:
+WFS-DIY's Sampler is sets of cells, one set active per input, switched by a QLab
+cue, with a set level over per-cell attenuation. Go.dot's form is a **group**.
+
+**A sampler group is a scheduling mode, not a third container** (§3.6). The
+scheduler launches none of its members; **the hand does**, from strips, in any
+order, any number of times, several at once. GO on the group **arms** it: every
+member is loaded onto a strip and the group runs until it is stopped. Everything
+else a group is survives untouched — lifetime; header, which is where §3.12's
+prepare horizon does the arming; footer, which frees the strips, voices and
+channels; and the group trim of §3.6, which is the bank's **set level**. Its
+members are ordinary media cues (audio; video *TBC* — opacity from zero is
+fader-start for a picture, Phase 8's problem) and own their outputs, levels and
+mappings as §4.12 requires. What reads as the group's direct out is §3.5's
+bulk-edit view over its members, never a property of the group.
+
+**Strips.** §3.16's word for a fader or a pad. Each strip's role is the
+layout's (§3.9a): a **DCA strip** is pinned; a **sampler strip** is filled by
+whichever sampler group is armed, in member order, left to right. A member may
+pin its strip *(proposed)* — "the gunshot is always the rightmost fader" is a
+decision somebody may want to write down; derived from order is the half that
+exists first. **A pad is a fader-start fader without a motor**: the same
+binding at one bit, a *gate* endpoint (§3.16). No pressure, no XY.
+
+**Per clip, on the member's fader-movement trigger** (§3.7), edited across the
+bank through the bulk-edit view so that nothing inherits downward:
+
+| Attribute | Values | On a pad | On a touch fader |
+|---|---|---|---|
+| **release** | `hold` \| `playOut` | hold stops on release, with a short release fade so it does not click; play-out runs to the end | hold stops on release at -inf, §3.9a's fader-stop word for word; play-out means -inf is a mute and the clip runs to its end |
+| **second press**, play-out only | `restart` \| `noop`, and `stop` *(proposed)* | as named | a start edge from a *parked* fader (§3.9a) |
+
+A trigger that has no release — a fired command, an OSC message — on a `hold`
+clip plays it out *(proposed)*; hold only means something to a trigger that can
+let go. The same clip pressed from a second surface while held *(proposed)*: the
+origin that started it owns it, a press from elsewhere is a no-op and so is that
+origin's release — origin tagging exists for exactly this. Layering is absent
+(§3.8).
+
+**Takeover.** Two modes, one attribute on the group that arms — the scene change
+is where the designer is thinking about it, and §4.10 wants the decision in the
+file:
+
+- **group exclusive** — the whole group takes over; every other sampler group
+  is closed.
+- **strip exclusive** — only the strips this group uses are taken; the others
+  keep whatever an earlier sampler group put on them. Several sampler groups run
+  at once, each owning what nobody has taken from it, and a group that has lost
+  every strip has nothing left to offer and **completes**, as an emptied round
+  completes a loop (§3.6).
+
+Taking over follows §3.9e's rules: **eviction is a close, not a kill.** The
+evicted group launches nothing new; **a playing clip always finishes before its
+strip switches** — however it ends: file end, release at -inf, a stop cue, Esc;
+idle strips hand over at once; the new member on a busy strip shows *pending*
+until it lands. At every handover the strip flies to -inf first (§3.9a). Two
+sampler groups on different strips coexist, and §3.9c's conservative analysis
+does not warn about successive banks on the same strips, because a sampler
+claim declares its eviction policy and the overlap is the intended pattern. A
+**stop cue** (§3.8) aimed at the group is the explicit disarm; no new cue kind.
+
+**Refresh.** A GO on a running sampler group **re-issues the claims of every
+member that has no strip, in the group's own takeover mode**. A complete group
+has no such member, so the GO does nothing and decision N needs no exception. A
+refresh cannot conjure strips the layout does not have — that is §3.9d's
+banking question, unchanged; only claims lost to eviction come back. The row
+shows *partially armed* (§3.6) in words, so the state the operator sees and the
+action GO performs line up.
+
+**Pointers and the solver.** GO on a sampler group advances standby to the next
+sibling and never descends; members are refused by standby-set the way header
+and footer cues are. Fader-start and pad presses fire without moving standby
+(§3.5). Strip ownership under strip-exclusive takeover is history-dependent, so
+load-to-time (§3.13) replays arms and refreshes in list order from the last
+waypoint — which its forward walk does, provided a refresh is an event it sees.
+A show-long soundboard needs none of this: a parallel list with only fader
+triggers is live all night with no arm and no release. The sampler group is the
+scene-scoped form.
+
+**Voices.** Each playing member is a track (§3.25), and a full bank as one
+track per cell is the wrong price; the group declares its voices, and the claim
+shape is §3.25's *(proposed)* item, to be measured before the allocator is
+written.
+
+### 3.28 DCAs — an object of their own
+
+*Added in 0.8, at the author's direction (2026-09-07). This settles the question
+`docs/godot-open-questions-0.1.md` §3 left open: a DCA is neither a cue nor a
+group.*
+
+**A DCA is an object of its own, cross-cutting the hierarchy.** Audio cues,
+video cues and groups may be **assigned** to one; DCAs may be assigned to DCAs,
+so influences nest; and each assignment says **what the DCA controls on that
+member and with what mapping**.
+
+- **The arithmetic is §3.6's, unchanged.** A run's level is already its own
+  plus every ancestor's trim; a DCA **adds terms to the same sum**, and a nested
+  DCA adds its parent's term to its own. Sums are order-independent, which is
+  the property that matters because cues arrive in whatever order the operator
+  pressed GO. A cycle is refused at edit time.
+- **Membership is a mark on the member, carrying its mapping** — not a list on
+  the DCA. Assigning eight cues to a DCA is a multi-select edit (§4.12); the DCA
+  object holds only a name, a role and a strip. Assigning a *group* adds the
+  DCA's term to the group run's trim, which is what §3.6's derived exposure
+  already is.
+- **How a trim composes is a fact about the parameter's type**, not about the
+  DCA: additive in dB on a level, multiplicative on an opacity, additive in
+  metres on a position. It is the same derivation the relative-fade question
+  wants (`docs/godot-open-questions-0.1.md` §2), decided once for both.
+- **A DCA sits on a pinned strip** (§3.9a) and is a node like any other, so a
+  show loaded on a laptop with no faders still has its DCAs on screen (§4.11).
+  On release the trim parks (§3.6).
+
+### 3.29 Persistent cues — a section that is checked, not fired
+
+*Added in 0.8, at the author's direction (2026-09-07). How the user sets them up
+is deliberately not designed here.*
+
+A **persistent cue** is the thing that should be running at all times and is
+**relaunched if it is not**. It lives in a **section of its own** in the cue
+list — not the header: a header fires once, ahead, and what it set is never
+reset, while a persistent cue re-asserts. They are opposites on exactly the
+point that matters. Typical content: an effect chain that must run all show, a
+video overlay, a background bed, and — since §3.5 already says a list with only
+event triggers is a background dataflow process — **an OSC or MIDI state
+machine**, which is the deferred state-machine phase given a home and the
+self-healing it lacked. §3.10's *persistent* binding lifetime is the same word
+for the same reason.
+
+**The rule, in one sentence:** a persistent cue is **asserted at every trigger
+in the engine while its container runs**; the first assertion launches it, later
+ones relaunch it if it is not running or re-send its state where the world
+differs, and the container's footer ends it. *Asserted* is §3.13's
+reconstruct-and-diff applied to a designated set at trigger time — the check
+reuses the solver rather than a second mechanism. The section belongs to the
+list; a group may carry one too *(proposed)*, the same mark giving act-scoped
+persistence for nothing. Checking at triggers rather than every tick is
+deliberate: a tick-rate check makes a stop impossible, a trigger-rate check is
+human-paced, and a timecode list firing makes it as frequent as anyone needs.
+
+What suspends the assertion, and what does not:
+
+- a **stop cue** in the list does — it is the last writer, and the document
+  holds the decision (§4.10);
+- a **kill from the running pane** does *(proposed)*, run-local like a prune,
+  or the operator fights the machine;
+- a **double Esc** does not: the next GO restoring the declared world is the
+  point of declaring it, and it is §4.4's price of an emergency, paid once;
+- **Esc** on a persistent *media* cue is a **pause** *(proposed; the author's
+  lean)*: a stop that remembers its position, resumed at that offset by the
+  next assertion — load-to-time's operation at load-to-time's cost (§3.25:
+  offset in prepare, nudge when already playing). No footer runs on a pause.
+  For a still, an effect chain or a data process there is nothing to remember
+  and the resume is a relaunch. If adopted, §4.4 gains one sentence and
+  `CLAUDE.md` is re-copied.
+
+A relaunch is a **machine action**: logged with its origin, shown on the run,
+and it never moves standby (§3.5). A stateful data process — a counter, a latch
+— loses its state on relaunch and restarts at its resting state (§4.6); the
+solver cannot rebuild it, because the stream that fed it is not in the list. A
+stateless transform relaunches for free, and §4.9 holds either way. Persistent
+rows are not GO targets; the cursor skips the section as it skips a footer.
+
+**Why sampler groups, rack channels and persistent cues share one design.** Not
+economy of mechanism: it is that everything that runs has a row in a list, a
+run in the running pane, a lifetime a footer ends, the same three stop levels
+and the same solver as any other cue. A sampler bank, a rack chain and a state
+machine differ only in what starts them. That is what keeps them from being
+panels bolted onto the side of a cue list.
+
 ---
 
 ## 4. Constraints as law
@@ -1542,10 +1843,11 @@ proceeds; the columns below say what belongs to the first complete product, not
 the order in which it gets built.
 
 **v1** — cue lists (parallel) + groups + triggers, audio playback with ranges
-and in-cue loops, built-in video, bindings and DCA, fader linking with
-fader-start/stop, fades and lanes, closed-loop cues, prepare/commit with
-headers/footers, state solver with waypoints, timecode chase+generate, Mackie
-surface profile, tablet client, plugin rack, XML document + schema.
+and in-cue loops, built-in video, bindings and DCAs (§3.28), sampler groups
+(§3.27), persistent cues (§3.29), fader linking with fader-start/stop, fades and
+lanes, closed-loop cues, prepare/commit with headers/footers, state solver with
+waypoints, timecode chase+generate, Mackie surface profile, tablet client,
+plugin rack with channels as slots (§3.18), XML document + schema.
 
 **v1.x** — further surface profiles (HUI, OSC, Icon/Behringer/PreSonus, Stream
 Deck, SpaceMouse), script nodes, engine redundancy, experiment protocol runner,
@@ -1676,7 +1978,10 @@ math; Lua for orchestration outside it. Verify EEL2 licence terms.
 
 ### 6.6 Restart-vs-second-instance (§3.8); banking policy (§3.9d)
 
-Both decided step by step with the hardware.
+Restart-vs-second-instance is **settled** per kind — §3.8's table, decision N
+plus the 2026-09-07 sampler additions. Banking policy is still decided with the
+hardware, and a sampler group's *refresh* (§3.27) does not change it: a refresh
+re-claims strips lost to eviction and cannot conjure strips the layout lacks.
 
 ### 6.7 Modifier vocabulary (§3.17) — after the needs are collected
 
@@ -1699,9 +2004,28 @@ crossfaded joins (§3.24); per-destination latency and machine-level storage
 (§3.19c). The infinite-loop load-to-time case (§3.24) is settled as
 solve-in-practice.
 
+Added 2026-09-07, with the sections that carry them: a member pinning its strip
+(§3.27); the parked-fader start edge and the dwell for faders without touch
+(§3.9a); `stop` as a second-press value (§3.8); release-less triggers on a hold
+clip and the second-surface rule (§3.27); the voices claim shape (§3.25, to
+measure); the bypassed stack in a rack channel (§3.18); a group carrying a
+persistent section, the running-pane kill suspending a persistent assertion, and
+Esc as a pause on persistent media (§3.29).
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
+
+### 6.11 Measurements the 2026-09-07 additions need
+
+- **One playing slot per track?** Whether the launcher stops a track's playing
+  clip when another slot on the same track is launched. Decides the sampler
+  claim shape (§3.25) and comes before Phase 4's allocator.
+- **The bypassed stack at load** (§3.18): instantiation time and memory for a
+  realistic stack per channel, in-process and through the proxy.
+- **Pause and resume at an offset** (§3.29): whether a relaunch at a remembered
+  position is clean when the offset is set in prepare, and when a playing clip
+  is nudged instead — the same question load-to-time asks.
 
 ---
 
@@ -1721,6 +2045,13 @@ notice nothing; the designer should notice everything.
 | *They do not move.* | show complete, all silent |
 | *Répétition* | shipped demo/tutorial show |
 | **Ubu** | reserved: a future assistant director's helper application |
+| **strip** | a fader or a pad on a surface (§3.16); as a resource, a slot of the layout (§3.9e) |
+| **slot** | one position in a fixed, typed, exclusive pool declared at load (§3.9e) |
+| **sampler group** | a group the hand plays from strips; GO arms it (§3.27) |
+| **takeover** | how an arming sampler group treats what is already on its strips: group exclusive or strip exclusive (§3.27) |
+| **refresh** | GO on a running sampler group: strips lost to eviction are re-claimed (§3.27) |
+| **DCA** | a trim object that cues and groups are assigned to; nestable (§3.28) |
+| **persistent cue** | a cue asserted at every trigger and relaunched if it is not running (§3.29) |
 
 ---
 

@@ -1,7 +1,9 @@
 # Go.dot — Development Plan (suggestion for Claude Code)
 
 **Draft 0.1**, derived from PRD draft 0.7 (still current against 0.8 — the 0.8
-amendments record spike results and change no phase ordering). A proposed phase order, not a
+amendments record spike results and change no phase ordering; *updated 2026-09-07* — PRD
+§3.9e, §3.18 and §3.27–3.29 add work to Phases 4, 6, 8, 9, 10 and 11 and reorder nothing; each
+of those phases says what below). A proposed phase order, not a
 schedule. Each phase ends with something runnable and a replay-log fixture that
 becomes a regression test. Phases will be broken into subphases as they go.
 
@@ -171,13 +173,30 @@ safety.
   handling, claim-in-prepare and release-at-footer.
 - **Slot destination model** (PRD §3.9b) with the QLab-style bus matrix kept
   as-is.
+- **Slots as one concept** (PRD §3.9e, 2026-09-07): the allocator hands out
+  voices, strips, rack channels and processor inputs from one table, with a
+  release policy and a failure policy per kind. Two things it must not
+  foreclose: the **waiting claim** — a claim on a busy slot lands when the
+  holder's run ends and shows *pending* meanwhile — and **eviction as a close**,
+  which is the sampler group's takeover (PRD §3.27). Phase 3's fail-at-entry
+  stays the default for a voice.
+- **The rack pool declared at load** (`Show/Audio/Rack`, PRD §3.18): so many
+  channels per width class, each shared or exclusive. The pool and its claims
+  are this phase's; the plugins inside are Phase 9's.
+- **The persistent assertion** (PRD §3.29) is the solver's reconstruct-and-diff
+  run over a designated set at every trigger. Build it as a mode of the solver,
+  not a second mechanism; the section's UX is the author's and comes later.
+- **Measure before the allocator is written:** whether the launcher keeps one
+  playing slot per track (PRD §6.11). It decides what a sampler claim is
+  (PRD §3.25).
 
 **Done when:** load-to-time into the middle of a scene lands the right cues at
 the right offsets with the right slots claimed; reordering cues produces the
-right overlap warnings; all headless.
+right overlap warnings; a claim on a busy slot waits and says so; all headless.
 
 **Needs from the author:** the *(proposed)* items in §3.9b (stereo → two mono
-slots; processor-declared slots).
+slots; processor-declared slots); the voices claim shape once §6.11's
+measurement is in; whether a rack channel's failure policy is *degrade* (§3.9e).
 
 ---
 
@@ -229,13 +248,29 @@ whatever is needed to exercise the engine and no more.
 - **Banking**: implement the simplest option first; decide in practice (PRD
   §3.9d).
 - Standing test: two surfaces on different protocols bound to the same node.
+- **Sampler groups** (PRD §3.27, 2026-09-07): the scheduling mode; strip roles
+  in the layout (DCA strips pinned, sampler strips following the show, left to
+  right); the two takeover modes; finish-first handover with the start value
+  reasserted; refresh on GO; per-clip `hold`/`playOut` and second-press
+  behaviour on the fader-movement trigger. The disarm is the existing stop cue.
+- **The gate endpoint** (PRD §3.16): pads, keys, MIDI notes and Stream Deck
+  tiles as press and release, no pressure. A start edge only from a parked
+  fader (PRD §3.9a).
+- **DCAs as objects** (PRD §3.28): membership as a mark on the member with its
+  mapping; nested DCAs; a cycle refused at edit time; composition by parameter
+  type.
 
 **Done when:** a fader-start cue fires from the D700 with the audio already
 armed; a group DCA follows automation on motorised faders; the scribble strips
-show provenance.
+show provenance; a sampler group arms onto the D700 and a bank change finishes a
+playing clip before its strip switches; a DCA assigned to two cues in different
+groups trims both.
 
 **Needs from the author:** Asparion extension byte list or the chosen vendor
-package; banking policy as it emerges; the OLED field layout he wants.
+package; banking policy as it emerges; the OLED field layout he wants; the
+*(proposed)* items of §3.27 and §3.9a — `stop` as a second-press value, the
+dwell for faders without touch, the second-surface rule, release-less triggers
+on a hold clip, members pinning their strips.
 
 ---
 
@@ -274,6 +309,8 @@ while the desktop shows the cue list.
 - **Latency offsets**: user-set, signed, stored in machine config; video the
   fixed reference (PRD §3.19c). Test clip is v1.x.
 - Clock-skew readout per device.
+- **Video cues on sampler strips** (PRD §3.27): opacity from zero is fader-start
+  for a picture; nothing new beyond the parameter the strip trims.
 
 **Done when:** an audio+video scene plays in sync for a full act with the mesh
 aligned from the tablet.
@@ -294,11 +331,20 @@ list; blend-space choice confirmation.
 - **Live rack** with a stated latency budget; TE PDC behaviour on live tracks
   understood and controlled (spike #6).
 - VST3 / AU / LV2 all exercised.
+- **Rack channels as slots** (PRD §3.18, 2026-09-07): plain tracks with a plugin
+  list, never Tracktion Racks; sends as coefficients fixed at load; width
+  classes mono→mono, mono→stereo, stereo→stereo. Bypass toggles nothing
+  structural (verified against the pin); the **bypassed stack** is
+  *(proposed)*, and a channel's summed latency is shown the moment a plugin is
+  added to it.
 
 **Done when:** live input runs through a sandboxed third-party plugin, the plugin
-is killed mid-show, and the show continues with the strip marked failed.
+is killed mid-show, and the show continues with the strip marked failed; a cue
+claims an exclusive rack channel and enables one plugin of its chain without a
+graph rebuild.
 
-**Needs from the author:** the built-in plugin list; the rack's latency budget.
+**Needs from the author:** the built-in plugin list; the rack's latency budget;
+whether a channel holds a bypassed stack (§3.18 *(proposed)*).
 
 ---
 
@@ -313,12 +359,16 @@ is killed mid-show, and the show continues with the strip marked failed.
   early trigger within the anticipation window. Revert-of-GO (§4.5).
 - Panic values on every node honoured.
 - Debounce as a user preference.
+- **Esc on a persistent media cue as a pause** (PRD §3.29, *(proposed)*): if
+  adopted, §4.4 gains a sentence and `CLAUDE.md` is re-copied, never edited. A
+  kill from the running pane suspends a persistent assertion; a double Esc does
+  not, and the next GO restores the declared world.
 
 **Done when:** a show chases timecode from an external source without drift or
 discontinuity, and each stop level does exactly its guarantee and nothing more.
 
 **Needs from the author:** the Go Doh! inventory of in-flight objects (PRD
-§4.4, deferred).
+§4.4, deferred); the Esc-as-pause decision (§3.29).
 
 ---
 
@@ -336,6 +386,10 @@ discontinuity, and each stop level does exactly its guarantee and nothing more.
   state written down, so it wants §3.13 finished.
 - **Stream Deck** profile (bitmap renderable, triggering role); **SpaceMouse**
   as a rate endpoint; further surface profiles.
+- **OSC and MIDI processing cues as persistent processes** (PRD §3.29): the
+  state-machine phase §3.5 deferred, arriving as rows in the persistent section;
+  a stateful process restarts at its resting state, and no fixed pool is needed
+  because the control graph has no rebuild cost.
 
 **Done when:** the sound operator's Choufleur column is populated from Go.dot
 and a Go.dot warning taps the wrist.
