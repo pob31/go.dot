@@ -3,10 +3,12 @@
 Everything below the rule is a **post written for the JUCE Forum, Tracktion Engine category**, kept
 here verbatim so the finding does not live only in a browser tab.
 
-**Status: posted 2026-09-04, edited the same day.**
+**Status: CONFIRMED AND FIXED UPSTREAM, 2026-09-07.**
 <https://forum.juce.com/t/duplicate-playback-graph-node-ids-from-tracktion-hash-combine/69430>
-— no replies yet. The copy below is the report as first filed; the addendum at the foot was later
-folded into it by edit, so the live thread is ahead of this file and is the authority.
+Posted 2026-09-04, edited the same day; answered by dave96 three days later. The copy below is
+the report as first filed; the addendum at the foot was later folded into it by edit, so the live
+thread is ahead of this file and is the authority. **The outcome is recorded immediately below —
+read that first.**
 
 Tracktion do not accept third-party pull requests — *"We don't accept third party GitHub pull
 requests directly due to copyright restrictions but if you would like to contribute any changes
@@ -21,9 +23,72 @@ their sum — which collides `MidiInputDeviceNode`'s `hash (midiSourceID, target
 and `PatternGenerator`'s hash is persisted in the Edit file, so changing the mixer silently stops
 pattern auto-update in previously-saved documents. Both are Tracktion's calls to make, not ours.
 
-Record Tracktion's answer here when it comes — in particular whether they treat `hash_combine`'s
-output as a compatibility surface across versions, since that is the question the report puts to
-them and the one that decides what a fix can look like.
+## Outcome — fixed in `a806e7262ac`
+
+dave96 reproduced it exactly — *"same base hashes for 1010 and 1022, same collision at
+16973511083447948622"* — and confirmed both the mechanism and the severity:
+
+> The combine was close to affine, so small input differences survived and could cancel out a few
+> folds later. Flipping one input bit changed ~1.5 output bits on average; a proper mixer gives
+> ~32. The 2024 change to the multiply/divide variant only moved which inputs collided.
+
+> Cross-type duplicates were harmless because `findNodeWithID` filters by type, but same-type
+> duplicates adopted `shared_ptr` state from the wrong node on graph rebuild, which is **a real
+> data race in Release**.
+
+That last sentence is the one to keep: the report argued the severity from reading the adoption
+path, without ever observing an audible failure, and the maintainer confirmed it independently.
+
+**The fix**
+([PR #409](https://github.com/Tracktion/tracktion_engine/pull/409), commit `a806e7262ac`):
+
+```cpp
+inline std::uint64_t hash_mix (std::uint64_t x) noexcept   // splitmix64 finaliser
+{
+    x ^= x >> 30;  x *= 0xbf58476d1ce4e5b9ull;
+    x ^= x >> 27;  x *= 0x94d049bb133111ebull;
+    x ^= x >> 31;  return x;
+}
+
+template<typename T>
+void hash_combine (size_t& seed, const T& v)
+{
+    constexpr std::uint64_t goldenRatio = 0x9e3779b97f4a7c15ull;
+    seed = hash_mix ((seed + 1) * goldenRatio + std::hash<T>()(v));
+}
+```
+
+Verified here from the formula alone, without building anything:
+
+| | old mixer | new mixer |
+|---|---|---|
+| the reported 1010/1022 collision | **collides** | distinct |
+| bits changed per flipped **value** bit | 2.0 | **31.9** (ideal 32) |
+| bits changed per flipped **seed** bit | 23.9 | **32.1** |
+| span of 64 sequential ALSN base hashes | 9 172 | 1.77 × 10¹⁹ |
+
+**The compatibility question the report put to them is answered: yes, `hash_combine`'s output is a
+compatibility surface, and they migrated rather than invalidated.** `PatternGenerator` keeps the
+old formula as `legacyPatternHashV2` and `editFinishedLoading` upgrades a stored v1 *or* v2 hash to
+v3 on load, so auto-update keeps working in Edits saved by older builds — which is the
+`hashNotes` version 3 the report speculated would be needed. Thumbnail caches regenerate. The
+change is listed in `BREAKING-CHANGES.md` with the old formula quoted so third-party persisted
+values can still be recognised.
+
+They also avoided the trap that stopped us proposing our own candidate fix: multiplying the seed by
+an odd constant *before* adding the value keeps the result asymmetric in `(seed, value)`, where our
+splitmix-only version depended on the two arguments through their sum and would have collided
+`MidiInputDeviceNode`'s `hash (midiSourceID, targetID)`.
+
+**What this means for Go.dot.** Nothing has to change, and nothing is at risk:
+
+- We persist no `core::hash` values and use no `PatternGenerator`, so the breaking change costs us
+  a thumbnail regeneration and nothing else.
+- The load-time collision check in `AudioHost.cpp` stays worth keeping. It is not made redundant by
+  the fix — it asks whether *this* graph is sound, which is a better question than whether a known
+  bug is absent, and it is the thing that would catch the next one.
+- The open "default fixed track count" decision loses the correctness dimension this bug gave it
+  and goes back to being purely about polyphony.
 
 **Nobody had reported this before.** A six-angle sweep of the forum found no prior thread. The
 negative rests on exact identifiers rather than fuzzy phrasing — `areNodeIDsUnique`,
