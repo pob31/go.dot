@@ -57,11 +57,20 @@ namespace wfg::tree
     class TreeSnapshot
     {
     public:
-        /*  Both vectors must be sorted by address and must not share an
-            address between them. ParameterTree is what builds them; nothing
-            else should be constructing one of these. */
+        /*  All three must be sorted by address and must not share an address
+            between them. ParameterTree is what builds them; nothing else
+            should be constructing one of these.
+
+            THREE AND NOT TWO SINCE M9. The show's own nodes and a mounted
+            processor's change at completely different rates - a cue edit moves
+            the first, a `mount.load` moves the second - and holding them
+            together meant re-materialising a megabyte of somebody else's
+            namespace every time a cue was renamed. Measured at 3.1 ms of every
+            applied mutation with WFS-DIY's own capture, against 0.1 ms for
+            everything else. */
         TreeSnapshot (std::int64_t tickIndex,
                       std::shared_ptr<const std::vector<Node>> documentNodes,
+                      std::shared_ptr<const std::vector<Node>> mountedNodes,
                       std::vector<Node> runtimeNodes);
 
         /** The tick this was published at. */
@@ -83,6 +92,7 @@ namespace wfg::tree
     private:
         std::int64_t tickAt = 0;
         std::shared_ptr<const std::vector<Node>> document;
+        std::shared_ptr<const std::vector<Node>> mounted;
         std::vector<Node> runtime;
     };
 

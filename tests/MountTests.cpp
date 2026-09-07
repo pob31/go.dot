@@ -44,6 +44,8 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
+
+#include <chrono>
 #include <wfg/engine/tree/TreeCommands.h>
 
 #include <juce_core/juce_core.h>
@@ -648,4 +650,136 @@ TEST_CASE ("json: our reader is exact, and JUCE's is why we have one")
 
     CHECK (ourFailures == 0);
     CHECK (juceFailures > 0);
+}
+
+//==============================================================================
+/*  M9 - WHAT ONE `node.set` COSTS WHEN A REAL PROCESSOR IS MOUNTED.
+
+    THE QUESTION, from the Phase 3 plan: the document half of the tree is
+    rebuilt whole on ANY applied mutation, and the mounted namespace is part of
+    it. With WFS-DIY's own capture that is a megabyte of JSON's worth of nodes
+    re-materialised and re-sorted every time somebody writes a cue's name.
+
+    Phase 1 knew and said so - "when there is a show big enough to measure,
+    measure it" - and Phase 3 is what makes it matter: a trigger firing forty
+    times a minute is forty rebuilds a minute, on the thread that owns the model
+    and has twenty milliseconds to do everything in.
+
+    WHAT IS MEASURED. The wall clock of `markStale()` plus `publish()` with the
+    capture mounted, against the same thing with nothing mounted. The difference
+    is what the mounted half costs per mutation, which is the number that
+    decides whether it has to be split out and cached separately.
+
+    IT REPORTS, IT DOES NOT GATE, like M3 and M11: a wall-clock threshold
+    asserted on a shared CI runner is a flaky test that teaches people to re-run
+    the suite, and Debug is not the number a show runs at. The numbers go in the
+    PR and the decision is taken from them.
+*/
+TEST_CASE ("M9: what a mounted processor costs on every applied mutation")
+{
+    /*  A hundred publishes, so one slow one does not become the answer, and the
+        two configurations measured the same way in one process. */
+    constexpr int publishes = 100;
+
+    const auto timePublishes = [] (ParameterTree& parameters, int howMany)
+    {
+        /*  One outside the timing, so what is measured is a REBUILD rather than
+            a first build - the caches Tracktion and the allocator warm on the
+            way through are not what this is about. */
+        EngineState state;
+        parameters.markStale();
+        parameters.publish (0, state);
+
+        const auto start = std::chrono::steady_clock::now();
+
+        for (int n = 0; n < howMany; ++n)
+        {
+            parameters.markStale();
+            parameters.publish (n, state);
+        }
+
+        const auto elapsed = std::chrono::steady_clock::now() - start;
+
+        return std::chrono::duration<double, std::milli> (elapsed).count()
+                 / static_cast<double> (howMany);
+    };
+
+    Rig withMount;
+    const auto mounted = withMount.publish (0);
+
+    REQUIRE (mounted != nullptr);
+
+    /*  The same document with the mount table emptied, so the difference is the
+        mounted nodes and nothing else - same show, same commands, same sort. */
+    MountTable empty;
+    cue::RunTable runs;
+    ParameterTree bare { withMount.document, withMount.engine.commands(), empty, runs };
+
+    EngineState state;
+    bare.markStale();
+    const auto without = bare.publish (0, state);
+
+    REQUIRE (without != nullptr);
+
+    const auto mountedNodes = static_cast<int> (mounted->all().size());
+    const auto bareNodes = static_cast<int> (without->all().size());
+
+    const auto withCost = timePublishes (withMount.parameters, publishes);
+    const auto withoutCost = timePublishes (bare, publishes);
+
+    MESSAGE ("M9: " << mountedNodes << " nodes with WFS-DIY mounted, " << bareNodes
+              << " without - so the mount is " << (mountedNodes - bareNodes) << " of them");
+
+    MESSAGE ("M9: one applied mutation costs " << juce::String (withCost, 3)
+              << " ms with the mount and " << juce::String (withoutCost, 3)
+              << " ms without; the mounted half is " << juce::String (withCost - withoutCost, 3)
+              << " ms of that");
+
+    MESSAGE ("M9: a 20 ms tick is " << juce::String (100.0 * withCost / 20.0, 1)
+              << "% spent on one rebuild");
+
+    /*  THE MOUNT REALLY IS THE BULK OF IT, or this measured two versions of the
+        same small thing and the comparison says nothing. WFS-DIY's capture is a
+        megabyte; the minimal show is four cues. */
+    CHECK (mountedNodes > bareNodes * 4);
+
+    /*  And both configurations produced a tree, which is the part that can be
+        asserted honestly. */
+    CHECK (withCost > 0.0);
+    CHECK (withoutCost > 0.0);
+
+    /*  WHAT THE SPLIT GUARANTEES, COUNTED RATHER THAN TIMED.
+
+        The numbers above are a wall clock and a wall-clock threshold on a
+        shared runner is a flaky test that teaches people to re-run the suite.
+        What the split actually promises is exact: editing the SHOW does not
+        rebuild the mounted half at all. A hundred and one publishes have
+        happened by now - the timing loop's, plus the ones before it - and the
+        mounted half was built ONCE.
+
+        Put back the way it was, this is a hundred and one. */
+    INFO ("mounted rebuilds after " << (publishes + 2) << " publishes");
+    CHECK (withMount.parameters.mountRebuilds() == 1u);
+
+    /*  AND IT DOES REBUILD WHEN THE MOUNT MOVES, which is the other half of a
+        cache being right. Written through the table, so the invalidation is the
+        production path and not a test reaching past it. */
+    const auto address = std::string ("/wfs/input/1/positionX");
+
+    if (withMount.mounts.nodeAt (address) != nullptr)
+    {
+        REQUIRE (withMount.mounts.write (address, osc::Value::float32 (0.25f)).ok);
+
+        withMount.publish (1);
+        CHECK (withMount.parameters.mountRebuilds() == 2u);
+
+        /*  And the new value is in the published tree, which is what the cache
+            existed to keep true. */
+        const auto after = withMount.publish (2);
+        const auto* node = after->find (address);
+
+        REQUIRE (node != nullptr);
+        REQUIRE (node->soleValue().has_value());
+        CHECK (node->soleValue()->getFloat32() == doctest::Approx (0.25f));
+    }
 }

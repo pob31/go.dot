@@ -181,6 +181,22 @@ namespace wfg::tree
 
         std::size_t size() const noexcept { return mounts.size(); }
 
+        /*  WHICH VERSION OF THIS TABLE THIS IS, bumped by every change to any
+            mounted node - a load, an unload, a write, a read-back.
+
+            IT EXISTS SO THAT NOBODY HAS TO REMEMBER. M9 measured a mounted
+            WFS-DIY capture at 3.1 ms of every applied mutation, twenty-nine
+            times the rest of the tree put together, so the mounted half is
+            cached separately from the show's - and a cache is only as good as
+            its invalidation. A second `markStale` somebody had to call from
+            every mount path would have been forgotten the first time a path was
+            added; a counter the table bumps itself cannot be.
+
+            A number rather than a flag, because the reader is a cache asking
+            "is what I have still current" rather than a consumer clearing a
+            signal it has taken. */
+        std::uint64_t revision() const noexcept { return version; }
+
         //======================================================================
         /*  A write to a mounted node.
 
@@ -241,6 +257,9 @@ namespace wfg::tree
         };
 
         Node* findNode (const std::string& address);
+
+        /** Bumped by every mutation, whatever kind. See `revision`. */
+        std::uint64_t version = 1;
 
         std::map<std::string, Entry> mounts;   // by mount id, so the order is stable
 

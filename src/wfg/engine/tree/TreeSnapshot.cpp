@@ -55,26 +55,39 @@ namespace wfg::tree
     //==============================================================================
     TreeSnapshot::TreeSnapshot (std::int64_t tickIndex,
                                 std::shared_ptr<const std::vector<Node>> documentNodes,
+                                std::shared_ptr<const std::vector<Node>> mountedNodes,
                                 std::vector<Node> runtimeNodes)
         : tickAt (tickIndex),
           document (std::move (documentNodes)),
+          mounted (std::move (mountedNodes)),
           runtime (std::move (runtimeNodes))
     {
     }
 
     const Node* TreeSnapshot::find (std::string_view address) const
     {
-        /*  Runtime first: it is the smaller of the two and the one a diagnostic
-            client polls, so the common lookup is the cheap one. */
+        /*  RUNTIME FIRST, THEN THE SHOW, THEN THE MOUNTS, which is smallest to
+            largest and also most-polled to least: a diagnostic client watches
+            the tick and the runs, an operator watches the cues, and nobody
+            polls somebody else's namespace through us. */
         if (const auto* node = findIn (runtime, address))
             return node;
 
-        return document != nullptr ? findIn (*document, address) : nullptr;
+        if (document != nullptr)
+            if (const auto* node = findIn (*document, address))
+                return node;
+
+        /*  The mounted half LAST, and it is the biggest: a lookup that found
+            its answer in the show's own nodes has already returned, and a
+            client polling /godot is not polling somebody else's namespace. */
+        return mounted != nullptr ? findIn (*mounted, address) : nullptr;
     }
 
     std::size_t TreeSnapshot::size() const noexcept
     {
-        return runtime.size() + (document != nullptr ? document->size() : 0);
+        return runtime.size()
+                 + (document != nullptr ? document->size() : 0)
+                 + (mounted != nullptr ? mounted->size() : 0);
     }
 
     std::vector<const Node*> TreeSnapshot::all() const
@@ -84,20 +97,39 @@ namespace wfg::tree
 
         const std::vector<Node> empty;
         const auto& docNodes = document != nullptr ? *document : empty;
+        const auto& mountNodes = mounted != nullptr ? *mounted : empty;
 
-        /*  A merge rather than a concatenate-and-sort: both sides are already in
-            address order, so this is linear and the result is too. */
+        /*  A THREE-WAY MERGE rather than a concatenate-and-sort: all three are
+            already in address order, so this is linear and the result is too.
+            Written as "take the smallest head of whichever still has one",
+            which is the same rule the two-way version had and reads the same at
+            three as it did at two. */
         auto a = docNodes.begin();
         auto b = runtime.begin();
+        auto c = mountNodes.begin();
 
-        while (a != docNodes.end() && b != runtime.end())
-            result.push_back (a->address <= b->address ? &*a++ : &*b++);
+        for (;;)
+        {
+            const auto* least = static_cast<const Node*> (nullptr);
+            int from = -1;
 
-        for (; a != docNodes.end(); ++a)
-            result.push_back (&*a);
+            if (a != docNodes.end())                                { least = &*a; from = 0; }
+            if (b != runtime.end()   && (least == nullptr
+                                          || b->address < least->address))
+                                                                    { least = &*b; from = 1; }
+            if (c != mountNodes.end() && (least == nullptr
+                                          || c->address < least->address))
+                                                                    { least = &*c; from = 2; }
 
-        for (; b != runtime.end(); ++b)
-            result.push_back (&*b);
+            if (from < 0)
+                break;
+
+            result.push_back (least);
+
+            if (from == 0)      ++a;
+            else if (from == 1) ++b;
+            else                ++c;
+        }
 
         return result;
     }

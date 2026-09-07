@@ -150,7 +150,14 @@ namespace wfg::tree
         void setSender (const MountSender* senderToRead) noexcept { sender = senderToRead; }
 
         /** The show changed; rebuild before the next publish. */
+        /*  The SHOW moved. The mounted half is not touched by this: it has a
+            cache of its own, invalidated by the mount table's own revision
+            counter, because M9 measured it at twenty-nine times the cost of
+            everything else and a cue rename must not pay it. */
         void markStale() noexcept { stale = true; }
+
+        /** How many times the mounted half has been rebuilt. See the member. */
+        std::size_t mountRebuilds() const noexcept { return mountRebuildCount; }
 
         /*  Any thread. The most recently published snapshot, or an empty one
             before the first publish - never nullptr, so a caller never has to
@@ -159,6 +166,7 @@ namespace wfg::tree
 
     private:
         void rebuildDocumentPart();
+        void rebuildMountPart();
 
         const doc::ShowDocument& document;
         const CommandRegistry& commands;
@@ -167,6 +175,32 @@ namespace wfg::tree
         const cue::RunTable& runs;
 
         std::shared_ptr<const std::vector<Node>> documentPart;
+
+        /*  SOMEBODY ELSE'S NAMESPACE, CACHED APART FROM THE SHOW'S.
+
+            M9's answer. With WFS-DIY's own capture mounted - 2487 nodes of a
+            megabyte of JSON - one applied mutation cost 3.24 ms in a Release
+            build, of which 3.13 ms was re-materialising and re-sorting the
+            mounted half. That is 16% of a twenty-millisecond tick spent
+            rebuilding a namespace that had not changed, every time a cue was
+            renamed; and Phase 3 adds mutation RATE, because a trigger can fire
+            forty times a minute.
+
+            So it has a cache of its own, and the thing that invalidates it is
+            the mount table's own revision counter rather than a flag anybody
+            has to remember to set. */
+        std::shared_ptr<const std::vector<Node>> mountPart;
+        std::uint64_t mountRevision = 0;
+
+        /*  How many times the mounted half has actually been rebuilt.
+
+            PUBLISHED SO THE SPLIT CAN BE ASSERTED RATHER THAN TIMED. M9's
+            numbers are a wall clock, and a wall-clock threshold on a shared CI
+            runner is a flaky test that teaches people to re-run the suite. What
+            the split guarantees is countable and exact: a hundred edits to the
+            SHOW rebuild the mounted half no times at all. Put back the way it
+            was, that count is a hundred. */
+        std::size_t mountRebuildCount = 0;
         bool stale = true;
 
         /*  A plain mutex rather than the RtSnapshot spin lock, and the

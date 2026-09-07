@@ -778,19 +778,43 @@ namespace wfg::tree
             nodes.push_back (std::move (node));
         }
 
-        /*  Somebody else's namespace, at its own prefix. It is part of the
-            document half rather than the runtime half because it changes only
-            when a mount is loaded or written to, both of which mark the tree
-            stale - and because a show with four mounted processors has rather
-            more mounted nodes than it has cues. */
-        for (auto& mounted : mounts.allNodes())
-            nodes.push_back (std::move (mounted));
-
         addContainers (nodes, {}, true);
         sortByAddress (nodes);
 
         documentPart = std::make_shared<const std::vector<Node>> (std::move (nodes));
         stale = false;
+    }
+
+    /*  SOMEBODY ELSE'S NAMESPACE, at its own prefix and on its own clock.
+
+        It used to be part of the document half, on the argument that it changes
+        only when a mount is loaded or written to - both of which mark the tree
+        stale. True, and beside the point: the document half is ALSO rebuilt by
+        everything else, and a mounted WFS-DIY capture is 2487 nodes to a show's
+        150.
+
+        M9 measured what that cost. One applied mutation with the capture
+        mounted: 3.24 ms in Release, of which 3.13 ms was this - twenty-nine
+        times the rest of the tree put together, and 16% of a tick, paid every
+        time anybody renamed a cue. In Debug it is 78 ms, which is four ticks.
+
+        So it is its own cache now, rebuilt when the mount table says it has
+        moved and not otherwise. */
+    void ParameterTree::rebuildMountPart()
+    {
+        auto nodes = mounts.allNodes();
+
+        /*  THE CONTAINERS ALONG EACH MOUNT'S PREFIX come with it, because they
+            describe a path that exists only because the mount does: /wfs and
+            /wfs/input are nobody's nodes until somebody mounts a processor
+            there. Built here rather than in the document half so that
+            unloading a mount takes its path with it. */
+        addContainers (nodes, {}, false);
+        sortByAddress (nodes);
+
+        mountPart = std::make_shared<const std::vector<Node>> (std::move (nodes));
+        mountRevision = mounts.revision();
+        ++mountRebuildCount;
     }
 
     namespace
@@ -818,6 +842,13 @@ namespace wfg::tree
     {
         if (stale || documentPart == nullptr)
             rebuildDocumentPart();
+
+        /*  ASKED RATHER THAN TOLD. The mount table bumps its own revision on
+            every load, unload, write and read-back, so this cannot be left
+            behind by a mount path somebody adds later - which a second
+            `markStale` would have been the first time one was. */
+        if (mountPart == nullptr || mounts.revision() != mountRevision)
+            rebuildMountPart();
 
         std::vector<Node> runtime;
 
@@ -1008,7 +1039,8 @@ namespace wfg::tree
                        false);
         sortByAddress (runtime);
 
-        auto result = std::make_shared<const TreeSnapshot> (tick, documentPart, std::move (runtime));
+        auto result = std::make_shared<const TreeSnapshot> (tick, documentPart, mountPart,
+                                                            std::move (runtime));
 
         {
             const std::lock_guard<std::mutex> lock { publishMutex };
@@ -1030,6 +1062,7 @@ namespace wfg::tree
         /*  Never nullptr, so no caller has to check. An empty tree at tick -1
             is the honest description of an engine that has not ticked yet. */
         return std::make_shared<const TreeSnapshot> (
-            -1, std::make_shared<const std::vector<Node>>(), std::vector<Node> {});
+            -1, std::make_shared<const std::vector<Node>>(),
+            std::make_shared<const std::vector<Node>>(), std::vector<Node> {});
     }
 }

@@ -159,8 +159,11 @@ namespace
                        return a.address < b.address;
                    });
 
-        return std::make_shared<const tree::TreeSnapshot> (7, nodes,
-                                                           std::vector<tree::Node> {});
+        /*  No mounted half: these cases are about /godot and what a client
+            reads off it. An empty one is a complete one. */
+        return std::make_shared<const tree::TreeSnapshot> (
+            7, nodes, std::make_shared<const std::vector<tree::Node>>(),
+            std::vector<tree::Node> {});
     }
 
     //==========================================================================

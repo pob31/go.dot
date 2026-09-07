@@ -112,8 +112,9 @@ namespace
                        { return a.address < b.address; });
 
             const std::lock_guard<std::mutex> lock { guard };
-            published = std::make_shared<const tree::TreeSnapshot> (1, nodes,
-                                                                    std::vector<tree::Node> {});
+            published = std::make_shared<const tree::TreeSnapshot> (
+                1, nodes, std::make_shared<const std::vector<tree::Node>>(),
+                std::vector<tree::Node> {});
         }
 
         std::shared_ptr<const tree::TreeSnapshot> snapshot() const override

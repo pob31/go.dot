@@ -364,20 +364,24 @@ namespace wfg::tree
                 would publish a namespace nobody has, and the operator would be
                 looking at nodes that are no longer described. */
             mounts.erase (mount.id);
+            ++version;
             return result;
         }
 
         mounts[mount.id] = Entry { mount, result.nodes };
+        ++version;
         return result;
     }
 
     bool MountTable::unload (const std::string& mountId)
     {
+        ++version;
         return mounts.erase (mountId) > 0;
     }
 
     void MountTable::clear()
     {
+        ++version;
         mounts.clear();
     }
 
@@ -494,6 +498,7 @@ namespace wfg::tree
             is in the tree, the event is in the log, and a replay reproduces
             both. Phase 2 puts a socket after this line. */
         node->values = { *coerced };
+        ++version;
 
         /*  IT LANDS HERE AND STOPS HERE, still. What goes on the wire is a
             MountSender's business and the caller's to arrange - this class
