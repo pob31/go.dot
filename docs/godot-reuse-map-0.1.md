@@ -492,6 +492,25 @@ Around the cue model, then, three things are reusable and one claim of the Phase
 | Ranges and in-cue loops "on TE follow actions" (PRD §3.25, devplan) | — | **not the mechanism after all, and measured** (M12, `docs/spikes/spike03b-loop-joins.md`): the clip's own wrap beat both alternatives at every one of ten configurations, by 5.5x to 23 000x in damage energy, so Go.dot places nothing inside a looping range at all. Read at the pin: every follow-action knob is on the graph's restart list, and the slot node stops a non-looping clip at its length before any loop lever can wrap it. Range clips are armed *looping* and Go.dot places every boundary as a queued stop/play pair (namespace draft §12.9). A PRD amendment is proposed at Phase 3's close-out |
 | A **wall-clock** trigger | — | nothing in the author's repos reads calendar time for control; Go.dot reads it in the `serve` wiring only, never in the model, and the firing is a record |
 
+### Phase 4 — prepare, solve, allocate (planned 2026-09-07)
+
+**Almost nothing, and for a better reason than in Phase 3.** The cue model had nothing to reuse
+because no sibling project has one. The *solver* has nothing to reuse because no sibling project has
+a show: WFS-DIY, XOA and Tight-WFS are processors, and a processor's state is whatever it was last
+told — it has no list, no lifetime and therefore no notion of what should be true at a moment
+nobody has played up to. §3.13 is the feature the competitor table is built around, and it is
+Go.dot's alone. The shape Phase 4 gives the tree is namespace draft §13.
+
+Four things around it, and one that is a gap rather than a reuse:
+
+| Need | Reuse | Status |
+|---|---|---|
+| **Bulk read-back** of a mounted target (§13.10, M21) | `Plugin/Source/Shared/OscQueryClient` — already adopted in Phase 2 as a pattern and rewritten: HTTP over a raw `juce::StreamingSocket` because `juce::URL` re-encodes a bare `?VALUE` | **the same transport, a different path.** Reading a subtree is `GET <prefix>` rather than `GET <address>?VALUE`, so nothing new is opened; what is new is parsing many values out of one reply, through Go.dot's own JSON reader rather than JUCE's (which overflows `int64`, measured 2026-09-06). M21 decides whether one subtree GET or *n* single GETs is cheaper against a 2 487-node capture |
+| **A media file's duration** (§13.8) | `tracktion::engine::AudioFile` — which `AudioHost` already asks whether a file is valid | **taken, and deliberately not JUCE's.** `juce_audio_formats` reaches the engine but only its writers are used, and it is compiled without `JUCE_USE_MP3AUDIOFORMAT`; a reader built on it would answer nought for a file Tracktion plays. Asking the engine that plays the file is the only answer that cannot disagree with itself |
+| **A slot allocator** | — | **nothing to lift.** WFS-DIY has inputs and a Sampler with cells, and both are fixed at configuration rather than allocated over a timeline; the live-range analysis of §3.9c has no precedent in any of these repos. It is written from the PRD |
+| **Per-domain undo** for the document edits Phase 4 adds | `spatcore/control/state/TreeParameterStore` | **still Phase 5's**, listed below and unchanged. Phase 4 adds document elements and no undo of its own |
+| **Time-tagged OSC bundles** to Go.dot's own processors (§3.12) | `spatcore/control/osc/OSCParser.h` | **BLOCKED, and this is the reuse map's own open gap below**: spatcore parses a bundle's time tag and discards it, so WFS-DIY and XOA would apply a tick-N+1 value on arrival rather than at its timetag — which is worse than not sending one. §3.12's second paragraph waits on a spatcore change, and §13.15 records it as not built rather than attempted |
+
 ### Phase 5 — desktop UI and undo
 
 | Need | Reuse |

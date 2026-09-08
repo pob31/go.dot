@@ -21,6 +21,12 @@ sampler-group, rack-slot and persistent-cue designs of the same day went into th
 (§3.9e, §3.18, §3.27–3.29), at the author's direction, rather than through this page; what they
 left *(proposed)* is listed in PRD §6.9 and what they need measured in §6.11.*
 
+*Updated 2026-09-07, with the Phase 4 plan: **§5 is settled** — decision Q, and §13.7 of the
+namespace draft. **§1 is still entirely open**, and its QLab checks are now the oldest thing on this
+page; nothing in Phase 4 can answer them either, since they want a person at a machine with QLab on
+it. §4's forgotten item is still unidentified, and question J of the namespace draft's §9 is still
+the author's.*
+
 ---
 
 ## 1. What to check in QLab
@@ -221,6 +227,16 @@ third, it belongs there or here depending on whether it changes the namespace.
 
 ## 5. The header as a preset sheet
 
+> **SETTLED 2026-09-07 with the Phase 4 plan — decision Q** (`godot-namespace-draft-0.1.md` §9),
+> and built as §13.7 of that draft. `cue/@preset` names the **ancestor group whose header prepares
+> this cue**; the header line is **derived and never written**, so there is one object rather than
+> two. The author added the gesture the idea was missing: *dragging* a cue onto a header at one
+> level or another of the groups it sits inside, with a mark on its own row and a tendril showing
+> which header it went to — and written header cues stay, because "we may have to add cues
+> manually too". The four things below that had to be settled first are settled by that shape, and
+> each is answered in place. The section is kept rather than deleted because the reasoning is what
+> makes the answers checkable.
+
 *Raised by the author on 2026-09-06, looking at the first web client: "since this is something
 that preloads and prepares OSC parameters ahead of time, the parameters of the groups could have
 a preload/preset tickbox to add them in the header, and we could add cues manually too. The
@@ -259,10 +275,23 @@ where they were typed rather than in a second place.
   derived line goes with it, which is exactly what a repair rule has to be written for, and is
   the same class of problem as the standby pointer inside a deleted subtree.
 
+**How decision Q answers all four, 2026-09-07.** The mark is `cue/@preset`, an identifier naming an
+**ancestor group** rather than a boolean, because the drag gesture has a target: a cue three groups
+deep may be prepared by its own group, by the act, or by the scene that opens the show, and which
+one is a decision about how early. Everything else follows from the line being derived rather than
+stored. **Where it lives**: on the member, and `group/@headerDerived` is a reading of it, so the
+same fact is never in two places. **Editing a derived line**: there is no line to edit — the
+inspector opens the member, which is the double-click the author asked for. **Their order**:
+derived first, then written, because a written header cue may reasonably depend on what a preset set
+and the reverse has no example. **When the member goes**: so does the line, with no repair rule to
+write, which is the one of these four that would otherwise have been a real mechanism.
+
 **Where it lands.** The mechanism is Phase 4's, beside prepare/commit and the allocator; the
-italics and the double-click are Phase 5's. Nothing in Phase 3 forecloses it: `Header` is already
-an identified element holding ordinary cues, `role` is already a derived node, and the cursor and
-the scheduler already refuse to treat a header cue as a member.
+italics, the tendril and the double-click are Phase 5's. Nothing in Phase 3 forecloses it: `Header`
+is already an identified element holding ordinary cues, and the cursor and the scheduler already
+refuse to treat a header cue as a member. One correction to the sentence this paragraph used to
+carry: **`role` is not "already a derived node"** — it was drawn in namespace draft §12.5 and never
+built, has no row in the parameter table and no emitter, and PR 4.1 is where it arrives.
 
 ---
 

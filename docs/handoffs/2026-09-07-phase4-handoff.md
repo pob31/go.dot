@@ -52,7 +52,14 @@ tree changes meaning.
 `Header` is an identified element holding ordinary cues; `groupPhase::header` runs them **as a
 sequence whatever the group's own mode is**, and the members wait for it. The comment on that
 enum already says why: "a header is preparation and preparation has an order". The cursor never
-enters one, `standby.set` refuses one, and a cue inside publishes `role = header`.
+enters one, and `standby.set` refuses one.
+
+> **Correction, 2026-09-07**, found while auditing the claims Phase 4's namespace section rests on.
+> This paragraph originally ended *"and a cue inside publishes `role = header`"*. **It does not.**
+> `role` was drawn in namespace draft §12.5 and never built: there is no row for it in
+> `docs/parameters/godot-parameters.csv` and nothing in `ParameterTree` emits it. What a group does
+> publish is `headerOrder` and `footerOrder`. `role` arrives in PR 4.1 with the other debts
+> (§13.13), and it grows a fourth value, `persistent`, when §13.11's section lands.
 
 **Nothing forecloses the prepare horizon**, and two things actively invite it: the phase is
 already a distinct state a client can watch, and the header already blocks its members. What

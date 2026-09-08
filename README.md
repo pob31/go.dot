@@ -133,6 +133,31 @@ so what could be built is half of what §3.24 promises, and half of it in the
 document would be a row that does not do what the PRD says. It goes to the
 author as an amendment instead.
 
+**Phase 4 is drawn and not yet built.** It is the phase that makes a rehearsal
+possible rather than a performance: anticipation, so a scene is ready before the
+operator's hand comes down; a shared allocator, so two cues cannot fight over one
+processor input and the show says so at edit time rather than at half past ten at
+night; and a state solver, so an operator can jump into the middle of an act and
+have the right cues playing at the right offsets with the right things claimed.
+§13 of the namespace draft is that shape written before the code, as §11 and §12
+were for the two phases before it, and §9 records the four decisions the author
+took with the plan — where a processor's inputs are declared, what a *preset* is,
+that waypoints are invisible, and that a persistent cue killed from the running
+pane stays killed.
+
+One thing worth knowing about how §13 was written. Every claim it makes about the
+code as it stands was audited one at a time, adversarially, by a reader whose job
+was to refute it — because §12.15 records four such claims that survived an
+ordinary review and were paid for afterwards instead. Thirty-four were checked and
+thirteen came back wrong or incomplete, most of them corrections to a sentence.
+The rest are **debts**, and they are what PR 4.1 does before anything is built on
+them: a `startOffset` row that does nothing at all, two separate ways for a cue to
+hold a voice for the rest of the session, two nodes drawn in these documents and
+emitted by nothing, two log-header lines that these documents show and no code
+writes, and a load refusal that a settled decision asked for and never got. None
+of them is new to Phase 4; all of them are things Phase 4 would have discovered by
+standing on them.
+
 **There is now something to look at, and to work in.** `wfg serve <bundle>
 --ui=clients/console` serves a client from `/ui` on the OSCQuery port; open that
 address in a browser and the cue list, the groups nested inside it, the standby
@@ -160,9 +185,11 @@ The documents come first, and they are the thing to read before the code:
   *shape* of the `/godot` namespace and the show document: how a node is addressed, what
   metadata it carries, how a mutation happens and how it is recorded. A living document,
   because Go.dot is not a port of something that already works and there is no finished
-  parameter list to transcribe. Its §11 draws the shape Phase 2 adds — runs, the four cue
-  kinds, the audio graph — written ahead of that code so the pull requests have something
-  to be reviewed against.
+  parameter list to transcribe. Its §11, §12 and §13 draw the shapes Phases 2, 3 and 4 add
+  — runs and the cue kinds, then groups, triggers and ranges, then slots, the prepare
+  horizon and the solver — each written ahead of its code so the pull requests have
+  something to be reviewed against rather than a memory. §11.9 and §12.15 then say what
+  was built against what was drawn, which is where the drawing earns its keep.
 - **[`docs/parameters/godot-parameters.csv`](docs/parameters/godot-parameters.csv)** —
   *what* exists, added to as each phase lands. One table generating four surfaces: the
   document schema, the parameter tree, the RELAX NG schema and the OSCQuery reply. WFS-DIY

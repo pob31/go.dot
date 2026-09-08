@@ -776,6 +776,40 @@ back on if nobody feels strongly by then.
   — a delta rather than a destination — remain a PRD amendment for the author; the structure that
   will carry them is this one.
 
+- **P — The slot pool is declared in the document** (settled 2026-09-07, with the Phase 4 plan):
+  `Mount/Slot` names a processor's input, its width, the bus that feeds it and where in that bus it
+  begins; `Show/Audio/Rack` declares the rack's channels the same way. PRD §3.9b's *(proposed)*
+  "the processor declares its own slots" — Go.dot discovering inputs over OSCQuery — becomes a
+  later authoring gesture that **writes** these rows rather than a mechanism that replaces them,
+  and `wfg validate` warns when a slot names an address the mounted namespace does not contain.
+  How many inputs of a processor a show is using is something somebody decided (§4.10), and a pool
+  that changed when somebody reconfigured a processor would change a show nobody had edited.
+
+- **Q — A preset is a mark on the member** (settled 2026-09-07): `cue/@preset` names the **ancestor
+  group whose header prepares this cue**, and the header line is derived rather than written. The
+  author's picture is dragging a cue onto a header at one level or another of the groups it sits
+  inside, with a mark on its own row and a tendril to the header it went to; written header cues
+  stay, since "we may have to add cues manually too". This answers all four questions
+  `godot-open-questions-0.1.md` §5 left open — where the preset lives, what editing a derived line
+  does, their order among the written ones, and what happens when the member goes — because a
+  derived line has no existence of its own to answer them about.
+
+- **R — Waypoints are invisible** (settled 2026-09-07): there is no authored waypoint object.
+  Structural waypoints stay inside the solver, and what an operator gets is the list's own history
+  of steps, kept without being asked for and offered when they go back. The author's words: *"If
+  this could be invisible to the user this would be great, something they don't have to manage but
+  can suggest several states to pick from when needed… something that keeps track of a history in
+  the various steps of the cuelist."* A mark on a group, and a waypoint cue kind holding captured
+  values, were both offered and set aside.
+
+- **S — The persistent section is the list's, and a kill suspends** (settled 2026-09-07):
+  `List/Persistent` holds media, osc and midi cues, asserted after every applied trigger through
+  the solver (§13.11). PRD §3.29's *(proposed)* "a kill from the running pane suspends a persistent
+  assertion" is taken as **yes** — run-local, for the session — because without it the operator
+  fights the machine, and every other run-local gesture here already evaporates the same way. A
+  group carrying its own persistent section, and Esc as a pause on persistent media, stay
+  *(proposed)*.
+
 ### Open, with the subphase that forces each
 
 | # | Question | Forced by | Fallback if undecided |
@@ -795,6 +829,15 @@ machine somebody is sitting at when they have time to fix it. The answer names t
 rather than only the capability, so that Phase 4's three other ways of getting a value back
 (a polled get-convention, a subscription, a bespoke sync command) each become another word here
 rather than another boolean.
+
+**And the word "refused" above is not what PR 2.6 built** — found on 2026-09-07 while auditing the
+claims §13 rests on, and recorded here rather than quietly rewritten, because the decision and the
+code disagree and the decision is the one that was approved. The check exists and finds the cue, but
+it only *reports*: `wfg serve`, `wfg tree` and `wfg replay` print it to stderr and open the show
+anyway, so the cue fires and fails on a timeout during the act. Only `wfg validate` turns it into a
+non-zero exit. The fallback this decision took was chosen as "the strictest reading, and the one
+that cannot fail silently", so the load refusal is a debt rather than a change of mind, and PR 4.1
+pays it beside the others in §13.13.
 
 None of these blocks the next subphase. B (tombstones) and A (standby persistence) were the
 two due soonest and both are now settled. J changes no code either way; it changes what §4.2
@@ -1676,3 +1719,802 @@ sequence gap is `2 + launchLatencyTicks` and is published — the hook-decides-h
 rule, the run tree, the refire policy per kind, the manual cursor's descent and climb, rounds
 with a logged seed, the three trigger matchers as pure functions, ranges as looping clips with
 placed boundaries, MIDI cues on a sender thread, and group fades as trims.
+
+## 13. Phase 4 — prepare, solve, allocate: what the tree, the commands and the log gain
+
+Written on 2026-09-07, before any of it exists, as §11 and §12 were: the approved Phase 4 plan
+drawn as a text the pull requests 4.1–4.11 can be reviewed against rather than against memory.
+Rows reach `parameters/godot-parameters.csv` with the PR that implements each of them, never
+before. Where this section and the code come to disagree, §13.16 at close-out says which won.
+
+Four decisions the author took with the plan shape it — **P** (the slot pool is declared in the
+document), **Q** (a preset is a mark on the member), **R** (waypoints are invisible) and **S**
+(the persistent section, and a kill suspends) — all in §9. Phase 3's rule holds and does more
+work here than it did there: *the hook decides, the handler applies, and a handler never
+submits.* Phase 4 adds one of its own.
+
+### 13.1 Anticipation is only as good as its revocation — and one walk answers three questions
+
+**Nothing is sent ahead of GO that cannot be put back, and putting it back means knowing what was
+there.** PRD §3.12 makes anticipation a property of the *parameter*: imperceptible **and
+revocable**. The second half is the one with a mechanism in it. A value pre-sent to a processor is
+revocable only if Go.dot asked the processor what it held first, so the prepare path **reads
+before it writes**, and the answer it got is what a revocation replays.
+
+Which settles a question the parameter table could not: a node marked `anticipatable` on a mount
+that declares no read-back is **not pre-sent**, whatever the node says, because there would be
+nothing to put back. `wfg validate` says so on a laptop with nothing plugged in, the way a
+`verified` cue against an unaskable mount already is (§9, decision K).
+
+That is also why the horizon claims early and sends late. A **claim** is revocable by construction
+— releasing a slot nobody heard costs nothing — so claims and arms run as far ahead as the pointer
+can see. A **value** is revocable only as far as the read-back reaches. The two halves of §3.12
+have different budgets, and the row says which it got: `armed` when there was nothing to verify,
+`verified` when every pre-sent value read back equal, `partial` when something in the block
+declined to be sent early (§3.6's own word for it).
+
+**And the solver is one walk asked three questions.** *What should be true at this moment* is
+load-to-time (§3.13). *What should be true of this designated set, now* is the persistent
+assertion — PRD §3.29 says it in those words: "*asserted* is §3.13's reconstruct-and-diff applied
+to a designated set at trigger time — the check reuses the solver rather than a second mechanism".
+*What was true before this prepare* is a revocation. Three walks would be three sets of bugs in
+one piece of arithmetic. There is one `solve`, and what differs between the three is which cues it
+is pointed at and what is done with the plan it returns.
+
+**And the arithmetic comes out one tick better than a sequence boundary, which is worth knowing
+before somebody assumes otherwise.** A claim that cannot be met is *pending*, and it lands when the
+holder's `run.ended` is applied in tick *n*'s drain — the same handler releases the slot and hands
+it to the head of the queue — so the launch it was blocking goes in on the hook at *n+1*:
+**`1 + launchLatencyTicks`** between release and sound. A sequence boundary costs
+`2 + launchLatencyTicks` (§12.1) because the scheduler has to *decide* which member is next, and a
+decision costs a hook, a submit and a drain. Granting a slot decides nothing. §13.4 says why that
+means the claim needs no records of its own; the shortfall against the intended launch is reported
+on the run by the existing `run.late`.
+
+### 13.2 `/godot/slot` — one table, three kinds in Phase 4 and a fourth reserved
+
+PRD §3.9e defines a slot once, having used the word in §3.9b and §3.25 and defined it in neither:
+**one position in a pool of fixed size declared at load; typed; exclusive; held for a live range;
+released by a policy; with a failure policy of its own kind.** Four instances. Phase 4 builds three
+and reserves the fourth.
+
+| kind | pool declared by | typed by | released | a claim that finds none |
+|---|---|---|---|---|
+| `voice` | `Show/Audio/@tracks` (Phase 2) | width | at run end, as today | **fails at entry**, `no-track`, visibly — Phase 3's behaviour, unchanged |
+| `processorInput` | `Mount/Slot` (§13.3) | width | **footer-timed**: when the holding run's group ends, or at run end at the top level | **waits**: the claim is `pending` and lands when the holder releases |
+| `rackChannel` | `Show/Audio/Rack` (§13.3) | width class | footer-timed | **degrades**: the cue plays dry and the run says so, `no-channel` |
+| `strip` | the layout — **Phase 6** | role | when the clip's run ends | waits, or evicts |
+
+**A declared slot is an object and is addressed like one.** §1's first rule — objects are
+identity-addressed, and order is a separate read-only node on the container — applies to a `Slot`
+and a rack `Channel` exactly as it does to a cue: `/godot/slot/<id>` wherever the element sits in
+the document. So one address carries both halves, the stored rows the show decided and the derived
+rows the engine computed, which is what `/godot/cue/<id>` already does with `name` beside `kind`:
+
+| Node | Type | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/slot/order` | `s` | ro | none | every declared slot, in document order — the container-level node §12.12 built the machinery for |
+| `/godot/slot/<id>/kind` | `s` | ro | none | `processorInput \| rackChannel` — derived from which element it is |
+| `/godot/slot/<id>/name` | `s` | rw | show | what the designer called it. §3.9b: the names appear in the dropdown and on the OLED, the channel numbers do not |
+| `/godot/slot/<id>/address`, `bus` | `s` | rw | show | a processor input's own rows (§13.3) |
+| `/godot/slot/<id>/width`, `firstChannel` | `i` | rw | show | as above |
+| `/godot/slot/<id>/class`, `access` | `s` | rw | show | a rack channel's own rows (§13.3) |
+| `/godot/slot/<id>/holder` | `s` | ro | none | the run holding it, or empty |
+| `/godot/slot/<id>/pending` | `s` | ro | none | the runs waiting for it, in the order they claimed. A queue rather than a set, so "who gets it next" is read rather than inferred |
+| `/godot/slot/<id>/usage` | `s` | ro | none | the live ranges §13.5 computes, as `<first> <last>` cue pairs — the data behind §3.9c's usage-over-show-time plot, which Phase 5 draws |
+| `/godot/slot/<id>/overlaps` | `s` | ro | none | the cue pairs whose live ranges intersect on this slot |
+
+**Voices appear in neither table, and both absences are deliberate.**
+
+They are not in the *namespace* because a track is not an object anybody declared: nobody wrote it
+down, it has no identifier, and `@tracks` is a count rather than a list. Inventing
+`/godot/slot/voice3` would put a made-up key beside real ones, and it would force one address to be
+`persist = show` for a declared slot and `persist = none` for a track, which no row can be. Where a
+voice is held has been readable since Phase 2 at `/godot/run/<id>/track`, and the ceiling at
+`/godot/audio/tracks`.
+
+They are not in the *implementation* either: `RunTable::isTrackBusy` and `lowestFreeTrack` stay
+exactly what they are — the lowest track no unfinished run holds, lowest rather than round-robin
+*so that a show replayed puts the same cue on the same track* — and the slot table asks the run
+table for the voice kind rather than keeping a second copy that could come to disagree with it.
+Every replay fixture in the tree depends on that answer, and a second implementation that happened
+to allocate identically today would still be a second thing to keep identical for ever.
+
+What *is* one mechanism is the rule set: a voice is claimed, held for a live range, released by a
+policy and refused by a policy, and the table at the head of this section says which. Being one
+mechanism does not oblige it to be one data structure, and here it is cheaper not to be. If §3.9c's
+usage plot wants voices drawn beside the others, that is a derived view over the run table, and it
+belongs in Phase 5 where the plot is.
+
+**A run says what it holds and what it is waiting for**, which is the half an operator needs:
+
+| Node | Type | Meaning |
+|---|---|---|
+| `/godot/run/<id>/claims` | `s` | the slots this run holds, by identifier; a voice is not among them, it is the run's own `track` |
+| `/godot/run/<id>/pending` | `s` | the slots it has claimed and not yet been given |
+| `/godot/run/<id>/warning` | `s` | `no-channel \| late-claim \| revoked` |
+
+**`warning` is beside `error` and is not a weaker version of it.** An `error` is a run that did not
+do what it said; a `warning` is a run that did something less than it meant to and is still going.
+That distinction is what keeps §3.9e's *degrade* honest: a cue that lost its rack channel and
+played dry is not a failure — the show continued, which is the entire point of the policy — and
+reporting it as one would either stop the scene or teach an operator to ignore the state that means
+stopped. In words, never colour alone (§4.8).
+
+### 13.3 The document grows five elements, and one of them is a section
+
+**`Mount/Slot` — a processor's input, declared where the processor is** (decision P). §3.9b marks
+*"the processor declares its own slots"* as *(proposed)*: Go.dot would read a mounted namespace and
+infer how many inputs exist and at what width. The author's decision is that the **show** declares
+them and the mounted namespace is what a validate pass **checks against** — a slot naming an
+address the capture does not contain is a warning. Discovery becomes a later authoring gesture that
+writes these rows rather than a mechanism that replaces them, which is §4.10 applied to a pool: how
+many inputs a processor is being used for is something somebody decided.
+
+| `slot` row | type, default | meaning |
+|---|---|---|
+| `name` | `s` | *"Voix solo"*, *"Ambiance G"* — what the dropdown and the OLED show |
+| `address` | `s` | the processor's input prefix, e.g. `/wfs/input/3`. Under the mount's own prefix, checked at load; the parameters underneath it are ordinary mounted nodes an osc cue writes |
+| `width` | `i`, 1 | how many channels the input takes |
+| `bus` | `s`, `refers=bus` | the bus that carries audio into it |
+| `firstChannel` | `i`, 0 | where in that bus this slot's channels begin |
+
+**`firstChannel` is the attribute that makes one wide send ordinary.** A rig feeding a
+twelve-input processor has one twelve-channel bus, not twelve buses, and the third input is
+channel two of it. It is exactly `Bus/@firstChannel`'s idea one level down — an offset into the
+thing above — and declaring twelve buses to avoid it would put a hardware layout in the document
+twice. `firstChannel + width ≤ bus.width` is checked when the show loads.
+
+**`Show/Audio/Rack` and `Rack/Channel` — the pool, not the plugins** (§3.18, added 2026-09-07).
+The rack is *"a pool of channels declared at load — so many of each width class — each with its
+plugin chain, exactly as `@tracks` declares polyphony"*. Phase 4 declares the pool and allocates
+from it; Phase 9 puts the tracks, the sends and the plugins underneath. A cue claims a channel and
+Phase 4 records the claim; the audio does not yet go anywhere, and the section says so rather than
+implying a rack that works.
+
+| `rackChannel` row | type, default | meaning |
+|---|---|---|
+| `name` | `s` | what the designer called it |
+| `class` | `s` | `mono \| monoToStereo \| stereo`. Stereo-to-mono is deliberately absent (§3.18); wider comes later |
+| `access` | `s`, `exclusive` | `exclusive \| shared`. A **shared** channel is a reverb many cues send into: a bus with a chain, and §3.9e says a bus is not a slot, so it is declared, published and **never claimed** |
+
+**`Media/Feed` and `Media/Insert` — a cue's destinations are a list** (§3.9b: *"a cue may hold a
+slot and a bus routing simultaneously — a source into WFS plus a stereo feed to foldback is
+ordinary"*). A `Route` sends a cue to a bus; a `Feed` sends it to a **slot**, which means to the
+slot's own channels of the slot's bus, and claims the slot; an `Insert` claims a rack channel.
+
+| `feed` row | type, default | meaning |
+|---|---|---|
+| `slot` | `s`, `refers=slot` | which processor input |
+| `gains` | `d*` | the coefficients from the cue's channels to the slot's, row-major: length is the cue's channel count times `slot/width`, refused when the show loads if it is not |
+| `shared` | `T`, false | this cue is meant to share the slot with another: §3.9c's *"allow marking deliberate sharing"*, and what silences the overlap warning of §13.5 |
+
+| `insert` row | type, default | meaning |
+|---|---|---|
+| `channel` | `s`, `refers=rackChannel` | which rack channel |
+| `shared` | `T`, false | as `feed/shared`, for a channel two cues are meant to share |
+
+**A Feed is a routing and a claim in one object, and that is the point.** The coefficient reaches
+hardware output `bus/firstChannel + slot/firstChannel + j` with gain `gains[i × slot/width + j]` —
+the `Route` arithmetic with one more offset term, through the same code — so audio arrives at the
+processor's input on the day the slot is declared, and the claim that keeps two cues from fighting
+over the position, the trajectory and the LFO state behind that input (§3.9b) is the same object
+that carries it there. Two separate objects would let a show route a cue somewhere it had not
+claimed.
+
+**Gains are required, exactly as a Route's are.** An identity matrix when the widths match would be
+the one inference that is defensible, and it is still an inference; §3.9b's rule is that width is
+explicit and never automatic. What makes it not tedious is the authoring gesture §3.9b already
+names — copy-assignment and multi-select edit — rather than a default that is right until the day
+it is not.
+
+**`List/Persistent` — a section of its own** (§3.29, and §13.11). An optional identified child of
+`List` holding ordinary cues, the `Header`/`Footer` precedent exactly: identified because
+`cue.create` addresses a parent by identifier, carrying no attributes of its own, at most one per
+list as a `validate()` rule. It is emphatically **not** a header — *"a header fires once, ahead, and
+what it set is never reset, while a persistent cue re-asserts. They are opposites on exactly the
+point that matters"*.
+
+### 13.4 What the engine reports to itself, and the one thing it does not
+
+Three engine-origin commands, registered like §11.4's and §12.3's, handlers replay-idempotent,
+origin `engine`:
+
+| Command | Args | When |
+|---|---|---|
+| `run.prepare` | `s` cue, `[s run]` | the horizon reached a cue or a group and made it ready: a group run is created in `preparing` and its header's preparable cues run under it. The generated ID is the record's last argument, as every generated ID is |
+| `run.revoke` | `s` run | the horizon left before a GO: the pre-sent values are put back, the claims released, the run and its children ended |
+| `run.assert` | `s` cue, `[s run]` | a persistent cue was found not running, or found disagreeing with the world, and was re-asserted (§13.11) |
+
+Two operator commands:
+
+| Command | Node | Params | Notes |
+|---|---|---|---|
+| `list.aim` | `/godot/cmd/list/aim` | `s` list, `s` cue, `d` offset | moves the state-position pointer. Solves and publishes; changes nothing in the world |
+| `list.loadToTime` | `/godot/cmd/list/loadToTime` | `s` list, `s` cue, `d` offset, `[s run…]` | applies the solve. As many identifiers as the jump created, in the order they were made — the `go` pattern (§12.6), because a replay never draws one of its own |
+
+`audio.arm`, `go`, `cue.fire` and `trigger.fire` are unchanged in signature.
+
+**And the claim lifecycle has no records at all, which is a conclusion rather than an omission.**
+The approved plan carried a fourth engine-origin command, `claim.land`, and writing this section is
+what removed it. Every other decision in this engine is a logged command because a hook took it and
+a replay runs no hooks. A claim takes no decisions:
+
+- it is **issued** inside `armMedia`, which is already inside a handler — `audio.arm`'s, or
+  `run.spawn`'s, or `run.prepare`'s;
+- it is **released** inside `run.ended`'s handler, which is already there;
+- and it is **granted** in that same handler, to the head of the slot's pending queue, which is a
+  fact about the queue rather than a choice about the show.
+
+So a replay reproduces every claim from records it already has. Adding a `claim.land` record would
+be adding a second way for the model to reach a state it can already reach, and the two would
+eventually disagree — which is the shape of §12.5's third finding, where a round had to be filtered
+in both the hook and the handler because either one alone was wrong.
+
+**It also makes a waiting claim one tick cheaper than a sequence boundary, and the reason is worth
+keeping.** At a sequence boundary the scheduler must *decide* which member is next — the mode, the
+round, the prune — so the decision costs a hook, a submit and a drain: `2 + launchLatencyTicks`
+(§12.1). A grant decides nothing, so the release and the grant land in one drain and the held
+launch goes in on the next tick: **`1 + launchLatencyTicks`**. Both numbers are the same
+arithmetic; the difference is whether anybody had to choose.
+
+**A pending claim holds the whole cue, not the part that wants the slot.** A media cue with a
+`Feed` to a busy slot and a `Route` to foldback launches neither until the claim lands. Half a cue
+is not a cue, sending it into a slot somebody else holds is the fighting §3.9b exists to prevent,
+and the foldback arriving alone would be an operator hearing the cue and finding it is not the one
+they fired. GO has already returned (§4.1); the row says *pending* (§3.9e); and a holder that never
+ends on its own — an infinite loop — is the operator's to end, which the PRD states and this does
+not try to improve on.
+
+### 13.5 Liveness at edit time — the warning nobody has to ask for
+
+§3.9c: each binding has a live range over show time, overlapping ranges cannot share a resource,
+and the reorder warning is liveness re-analysis on edit. Over the document alone, per slot, Phase 4
+computes the **live range of every claim in list order** — from the claiming cue's row to its
+release, which is its group's end, or a stop cue aimed at it, or the end of the list when nothing
+ends it — with exact times inside timeline and automatic chains, where offsets and durations are
+known, and list positions across manual boundaries, where they are not.
+
+**Conservative, in the direction the section names**: some ranges are indefinite — loops, manual
+groups, operator-paced material — so the analysis can prove possible overlap and never impossible.
+Two ranges that intersect on one slot are a **warning, never a refusal**, and marking either cue's
+`Feed` or `Insert` `shared` says the sharing is meant and silences the pair. The analysis runs
+**across lists**, since two lists can be live at once; a cross-list pair is the same warning.
+§3.9c's *(proposed)* cross-list refusal is not built — *warn, don't refuse* is the section's own
+rule, and the override it asks for is the `shared` mark, which one attribute already gives.
+
+| Node | Type | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/document/warnings` | `s` | ro | none | every warning the document has, one per line, each naming its own kind: the dangling references `ShowDocument::warnings()` already finds, and the overlaps this adds. Newline-separated rather than space-separated, because a warning is a sentence and sentences contain spaces |
+
+**And an overlap must not change `wfg validate`'s exit code, which is a distinction that verb does
+not draw today.** It currently returns 1 for *any* problem, a dangling reference included — fine for
+a reference, which is a mistake somebody made and can fix by fixing it. An overlap is not that. The
+analysis is **conservative on purpose**: it reports possible overlap and cannot report impossible,
+so a show with a bed looping indefinitely and two cues on one processor input produces an overlap
+that is correct, unavoidable and completely fine. A check that fails a build on findings it is
+designed to over-report is a check somebody turns off within a week, and then the reference
+warnings go with it.
+
+So `wfg validate` grows a third outcome: refusals and reference warnings keep exit 1, **overlaps are
+printed and leave the exit code alone**, and `shared` is how a designer says of one specific pair
+that they meant it — permanently, in the document, where the next person reading the show can see
+that somebody considered it. §3.9c asks for exactly that: "**Warn, don't refuse**; allow marking
+deliberate sharing."
+
+**It is a cache asked rather than told**, which is M9's shape and the handoff's instruction:
+`ShowDocument` gains a revision counter that its own write door bumps, and the analysis rebuilds
+when the revision it was built at differs. Not a `markStale` call somebody has to remember at every
+new write path — the mounted namespace was moved off exactly that pattern in PR 3.2 for exactly
+that reason. `/godot/engine/analysisRebuilds` publishes the count so **M18** asserts the guarantee
+by counting rather than by timing, which is what makes such a test survive a shared CI runner.
+
+### 13.6 Prepare and commit — the horizon, and the states a row can be in
+
+**`run/state` gains `preparing`, and `GroupJob` gains two phases.** Today a header runs at entry.
+Phase 4 runs its *preparable* part when the horizon reaches the group, and holds:
+
+| phase | what runs | leaves when |
+|---|---|---|
+| `preparing` | the header's preparable cues, as a sequence — derived preset lines first (§13.7), then the written ones | they are done |
+| `prepared` | nothing at all | a GO adopts the run |
+| `header` | the header's **remainder** — the cues that could not be prepared | as today |
+| `members`, `footer` | as today | as today |
+
+**The hold phase is one line and it is not decoration.** `Runner::finishPhase` moves a group on to
+the next phase that has anything in it and ends the run when none has: from `header` it tries the
+members and then the footer, from anything else it tries the footer, and from the footer it ends
+outright. There is no branch that waits. So a job whose `preparing` cues were exhausted would arrive
+there through `endOfRound`, **run the group's footer, and end the scene before anybody pressed GO**.
+`prepared` is the phase `finishPhase` returns from without doing anything, and that return is the
+whole of its job.
+
+**`preparing` is a state a *group* run is in, and nothing else.** A media cue at standby is prepared
+exactly as it is armed today, so its run is `armed` as it has been since PR 2.3; the members armed
+underneath a prepared group are `armed` too, with the prepared run as their parent. That keeps the
+new state out of every path that reasons about media.
+
+**Which matters, because `liveRunOf` has nine callers and not the five a reading suggests.** It
+means *the newest unfinished run of this cue*, and `preparing` is unfinished. Three of the nine are
+gated on `kind == "media"` or on a media cue and never see a group run. The ones that do:
+
+- **the standby cursor's wrap test** (`nextStandby`, a free function rather than a Runner method):
+  a prepared group run has `iteration 0, iterations 1`, so `iteration < iterations` holds and the
+  pointer would wrap to a second round of a group **nobody had entered yet** rather than leaving it;
+- **`fireStandby`'s ancestor walk**, whose "already running is the ordinary case" branch would take
+  the prepared run as a parent without firing the group or recording where the pointer entered — the
+  scene would start from the inside out;
+- **`fireStop` twice and `beginFade` once**, which look a target cue's live run up: a stop or a fade
+  aimed at a scene nobody has entered should be §3.8's silent no-op, and a prepared run would make
+  it act on a group that is not playing.
+
+The ninth is **`spawnChild`'s adoption**, and it fails in the opposite direction: its test accepts
+only a run whose state is `armed`, so a prepared one is rejected and a *second* run for the same
+group is created beside it. Skipping `preparing` in `liveRunOf` does not fix that one — which is
+why adoption is written where the next paragraph puts it.
+
+So **`liveRunOf` skips `preparing`**, which gives the five above the answer they already expect, and
+the one place that wants a prepared run asks `preparedRunOf` for it by name.
+
+**GO adopts, and it is `fireStandby`'s own branch rather than `spawnChild`'s.** `spawnChild` does
+adopt a parentless `armed` run rather than making a second one — PR 3.13's finding, that an arm
+which buys nothing is worse than no arm — but that test is reachable only when the caller passes no
+run identifier, which is the scheduler's own `run.spawn`; `fireStandby` always generates one and
+takes the other branch, which re-parents whatever that identifier names. So the adoption is written
+where the ancestor walk already is: for each group between the pointer and the list, find its
+prepared run — already parented, since the horizon built the chain that way — write where the
+pointer entered onto **both the run and the job** (the job holds its own copy, taken when it was
+created, and `beginPhase` reads that one), and move its job into the header's remainder.
+
+**And nothing further is needed for the nested case, because PR 3.3 already built it.**
+`beginPhase` spawns a member only when no *unclaimed* child run for that cue exists, and adopts one
+when it does — the mechanism written for a GO descending into a manual group, where the press
+created the member's run before the group's job could ask for it. A prepared chain parented by
+`fireStandby` presents exactly that situation one level up: when the outer group's job reaches the
+inner group as a member, its run is already there and unclaimed, so the job takes it rather than
+starting a second scene beside it.
+
+**What is preparable, decided by the parameter and never by the cue** (§3.12):
+
+| kind | prepared how | why not more |
+|---|---|---|
+| `media` | the voice reserved, the file made ready, the slots claimed | already revocable by construction; this is Phase 2's arm with claims beside it |
+| `osc` | **only** where the node is `anticipatable` and its mount `canBeAsked()`: read the target, keep what it held, write, verify | a value on a mount that cannot answer has nothing to put back (§13.1) |
+| `midi` | never | MIDI has no read-back; `verified` on a MIDI cue is already refused at load (§12.11) |
+| `fade`, `stop`, `memo` | nothing to prepare | a fade cannot take over a level before it is time to |
+
+**Read-before-write is a state of the network job**, not a new mechanism. `OscJob` gains `reading`:
+ask the target, wait for the `mount.readback` record, keep the answer as the restore value, then
+write and verify exactly as a `verified` cue does today. The existing path clears the remembered
+read-back at the moment it writes and asks afterwards, which is right for verification and is the
+opposite of what a restore needs — so the order is the difference, and the state is what carries it.
+
+| Node | Type | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/cue/<id>/prepare` | `s` | ro | none | `idle \| preparing \| pending \| partial \| armed \| verified` |
+
+`idle` before the horizon arrives. `preparing` while it works. Then one of four: **`pending`** when
+a claim is waiting (§3.9e's word, on the row where the operator is looking), **`partial`** when
+something in the block declined to be sent early — §3.6's own term for a member that is not
+anticipatable — **`armed`** when there was nothing to verify, and **`verified`** when every
+pre-sent value read back equal. A value that read back *different* is not a fifth word: that run
+fails with `disagreed`, which `oscError` already has, and the block shows `partial` because part of
+it did not take.
+
+**The horizon is one block, not the show.** It reaches the standby's own cue; and when the pointer
+is on a group, or inside one, it reaches **every group between the pointer and the list, outermost
+first** — each one's header prepared in the order those headers would run — and then what the
+innermost would launch first: the first member of a sequence, the offset-nought members of a
+timeline, recursively, which is `armablesFor` asked further ahead. Outermost first because that is
+the order a GO would run them in, and because a chain prepared inside-out would position a source
+and then have an outer header move it again. **The chain is parented as it is prepared**, each
+level's run to the level above, exactly as `fireStandby` parents the chain a GO creates — so
+adoption has only to say where the pointer entered and move the jobs on, and a revocation of the
+outermost reaches all of them by following `children`.
+
+It does **not** reach the next sibling group. §3.12 says a header extends the horizon "from one row
+to a block", and preparing two scenes at once would hold two scenes' worth of slots — in a mechanism
+whose entire subject is that slots are scarce.
+
+**Rollback is a record and the handler does the work itself.** The hook that notices needs no new
+state to do it: `armedStandby` already holds the cue the pointer was on until the moment it is
+reassigned, so the hook asks `preparedRunOf` for that cue and submits `run.revoke` against what it
+gets, outermost run only, since the chain is parented.
+
+The handler then queues the restore value for every node the horizon pre-sent, releases every claim,
+and **ends the prepared run and its children itself** — state, track, `endedAtTick`,
+`warning = revoked`. It does not ask the audio side to stop something and then wait to observe it
+stopping, because a run that was armed and never launched is never observed to stop: that is the
+second leak §13.13 closes, and revocation is the path that would meet it on its first tick.
+
+**And `mount/@rateCap` is finally read.** Declared in Phase 1, unread ever since, and named in
+`MountSender`'s own header as Phase 4's to honour. A prepare and a load-to-time are the first two
+things in this engine that send a burst at one tick, so the sender gains a per-tick budget per
+mount with the remainder spilling to the next tick — which is a rate cap in the sense §3.3 means:
+a cap on outbound dispatch, not a cap on what may be asked for.
+
+### 13.7 The header as a preset sheet — a mark on the member (decision Q)
+
+The author, looking at the first web client on 2026-09-06: *"since this is something that preloads
+and prepares OSC parameters ahead of time, the parameters of the groups could have a preload/preset
+tickbox to add them in the header… The preloaded or preset lines would appear in italics showing
+they are set from a cue from the group. Double clicking on them would lead to the edit panel."*
+And with the Phase 4 plan, on where the gesture points: *"we could drag a cue to be preloaded to a
+header from one level or another of the nested groups it's in… a visual aide to show it's a header
+item would be great and maybe some form of tendril showing the header it's in. We may have to add
+cues manually too."*
+
+| `cue` row | type, default | meaning |
+|---|---|---|
+| `preset` | `s`, empty, `refers=cue` | the **ancestor group whose header prepares this cue**. Empty means it is prepared with its own group, as everything is |
+
+| `group` row | type, access | meaning |
+|---|---|---|
+| `headerDerived` | `s`, ro | the cues whose `preset` names this group, in list order — the lines somebody did not write |
+
+**The mark is the decision and the line is a reading of it**, which is §4.10 and answers the first
+of open questions §5's four. Nothing is copied into the `Header` element; `headerDerived` is derived
+the way `order` and `headerOrder` are. So editing a derived line is editing the member — the
+double-click the author describes — deleting the member removes the line with no repair rule to
+write, and the two can never come to disagree because there is only one of them.
+
+**It names an ancestor rather than a boolean**, which is what the drag gesture means: a cue three
+groups deep can be prepared by its own group, by the act, or by the show's opening scene, and which
+one is a decision about how early. A `preset` naming a group that is not an ancestor is a `wfg
+validate` warning and is ignored — not a refusal, because the repair is somebody dragging it
+somewhere sensible and yesterday's show must still open (§12.12).
+
+**Derived lines run before written ones**, which answers §5's third: a written header cue may
+reasonably depend on what the presets set — position the source, then move it — and the reverse
+dependency has no natural example. A header is a sequence whatever the group's mode says
+(`GroupJob.h`, and §3.12 puts prepare/commit there because "preparation has an order").
+
+**What the horizon does with a preset member is its preparable part and nothing else** (§13.6): a
+media member is armed and its slots claimed under the group's prepared run; an osc member is read,
+pre-sent and verified. The member still runs where it sits, at its own moment, in its own group.
+That is the whole difference between this and moving the cue: the header line says *this is got
+ready here*, and the cue list still says *this happens there*.
+
+### 13.8 The solver — a pure function, and the coordinate it works in
+
+**The coordinate is a cue and an offset, never a wall time.** A manual list has no time between two
+GOs — it has however long the actor took — so "the state at 04:12" is a question the document cannot
+answer. What it can answer is *cue C has been running for `offset` seconds*, with **`offset = -1`
+meaning before C has fired at all**: standby on C, nothing of C done. That is the position an
+operator actually asks for when they say "take it back to cue 12", and it is what a step in §13.10's
+history is.
+
+`Solver::solve (snapshot, {list, cue, offset}) → Plan` — tick thread, no side effects, no audio, no
+network. It is a function of the document and the aim, so it is unit-tested with neither, and the
+same call answers load-to-time, the persistent assertion and a revocation (§13.1).
+
+**One forward pass, and §3.13 says backward.** The section's step 1 is *"walk back through the list
+accumulating the last writer of each parameter"*, which describes the answer rather than the
+direction, and the direction turns out to matter: a backward walk cannot know when it is finished,
+because the set of parameters the show writes is not known until the whole list has been read, so it
+walks to the top in the general case and pays for the machinery of stopping early without ever
+stopping early. A forward pass from the top accumulates last-writers into a map, tracks each run's
+lifetime as it goes, and answers both halves in one sweep at O(cues). **This is a PRD amendment to
+propose** (§13.15), not a disagreement about behaviour — the state it computes is identical.
+
+**What a structural waypoint actually bounds, which is half of what it looks like.** §3.13 makes
+group boundaries structural waypoints so "the walk can stop at one rather than going to the top of
+the show". That is true of *what is running* and false of *what values are set*: when a group
+completes, its footer has run and nothing it started is still going — that is what blocking footers
+buy — but the values its cues wrote are still there. So the **run reconstruction** starts at the
+last completed group boundary before the target and the **value reconstruction** is the full
+last-writer pass, which is cheap because it is one map and one sweep. Saying so is what keeps
+somebody from later "optimising" the value half to stop at a boundary and quietly losing a level
+somebody set in act one.
+
+**What the plan holds:**
+
+| | |
+|---|---|
+| **standby** | where the pointer lands: positionally after the target (§3.5) |
+| **runs** | what should be live: cue, its chain of ancestor groups, offset into the file, range index and pass, and for each group the round, iteration and member |
+| **values** | address, value, and the cue that last wrote it — **event-kind nodes excluded**, §3.13 step 4, so a jump does not re-fire the pyro |
+| **trims** | group fades partway or complete, as `base + Σ trims` (PR 3.12) |
+| **confused** | every place the walk could not know, each with the default it took |
+
+**The confused list is the feature, not the apology.** §3.24 settles the infinite-loop case as
+*solve-in-practice* and says plainly that "a confused solver that says so is better than one that
+guesses". Four things the walk cannot know, and what it does:
+
+- **an infinite range** fired at an earlier manual step: which pass, and how far into it, is
+  operator-timed. Lands at that range's start, pass one, and says so.
+- **a shuffled group** that ran earlier with `seed = 0`: the round was drawn on the night and is not
+  in the document, so which members played is unknown. Takes document order and says so.
+- **a media cue with no duration** — the file is missing, or unreadable: whether it is still playing
+  cannot be computed. Treats it as finished and says so.
+- **a manual loop** the operator was inside: standby says which member, and nothing says which
+  round. Takes the first and says so.
+
+| Node | Type | Access | Persist | Rate cap | Meaning |
+|---|---|---|---|---|---|
+| `/godot/list/<id>/aim` | `s` | rw | none | 50 | `"<cue> <offset>"` — the state-position pointer of §3.13, which a client drags. Writing it is `list.aim` |
+| `/godot/list/<id>/solve` | `s` | ro | none | 5 | the plan for the current aim, as JSON. A structure rather than a value, so it is one node holding a document rather than a subtree of nodes appearing and vanishing under a finger |
+| `/godot/list/<id>/statePosition` | `s` | ro | none | 50 | where the last `list.loadToTime` landed — §3.13's second pointer. After a jump the two agree; after a manual tweak they do not, and that divergence is what the running view shows |
+
+**Durations, which nothing has ever known.** `/godot/cue/<id>/duration` (`d`, seconds, ro,
+`persist = none`) is read once when the show is opened, on the thread that opens it, beside the walk
+that already counts tracks, buses and ranges there. Not at arm, which would know only the cues
+somebody armed; not stored, because it is a fact about a file rather than something anybody decided
+(§4.10). A file that will not read is `0` and a confused entry, never a refusal to load — the same
+rule as a missing media file, which has failed the arm and not the load since Phase 2. A range's
+length is `out - in`, and the pass count follows from it.
+
+**It is read through Tracktion's own `AudioFile`, not through a JUCE format reader**, so that the
+files which have a duration are exactly the files which play. `juce_audio_formats` does reach the
+engine, but only its writers are used, and it is compiled without `JUCE_USE_MP3AUDIOFORMAT` — so a
+reader built on it would answer nought for an MP3 that Tracktion opens perfectly well, and the
+solver would call a cue confused because a second format registry disagreed with the first. The
+engine already asks Tracktion this question when it checks that a file is valid; the duration comes
+off the same answer.
+
+**The test that decides whether the solver is right**, and it is worth naming here because it is the
+reason to trust any of this: for every fixture whose timing is deterministic, **the plan at tick *T*
+must equal what that session's own log says was live at *T*** — the runs, the ranges, the
+iterations, read back out of `run.started`, `run.ended`, `run.range` and `run.round`. The scheduler
+and the solver are two answers to one question, and a solver that disagrees with the scheduler is
+wrong by definition. §3.15 made every transition an event precisely so that it could be checked
+afterwards; this is the check.
+
+### 13.9 `list.loadToTime` — one record, and a run tree adopted mid-way
+
+The handler applies the current plan as a single logged command whose applied arguments carry every
+run identifier it drew, in the order it drew them — the `go` pattern (§12.6), because a replay never
+draws one of its own. It:
+
+- **sets the standby** positionally after the target;
+- **builds the run tree mid-way** and hands it to the existing scheduler: each group run gets its
+  `round`, `iteration`, `iterations` and `seed`, its finished members get runs that are already
+  `done`, its live member gets one that is armed with its launch asked for, and a timeline group
+  gets a run for *every* member — the finished, the sounding and the ones still to come at their
+  remaining offsets. The scheduler then continues from there on the next tick, because a group job
+  re-reads the round from the run every tick rather than keeping a copy (§12.5's second finding,
+  built so a prune could reach the round in progress, and paying again here).
+
+  **Two of those fields have to be written by hand and it is not obvious which.** A run made by
+  `RunTable::create` leaves `iterations` at 1 and `seed` at nought; `iterations` is otherwise set
+  when a group is *fired* and `seed` and `round` when a round is *drawn*, and a jump does neither.
+  A group adopted without them ends after one round, or draws its next shuffle from a seed the show
+  never used. The job's own list of runs it has taken charge of is filled at the same moment, because
+  the loop that claims a child on sight does not run on a job's first tick;
+- **launches at an offset**: the run carries a start offset that the arm applies as the clip's own
+  offset. Engine state on the run and never the document — the show says where a cue starts, and
+  this is where an operator jumped to (§4.10). For a ranged cue it is the range's clip that takes
+  the offset, never the range's `in`, whose distance from `out` is the length of every later pass;
+  the run's range-start sample is back-dated so that the pass count and the next boundary come out
+  right;
+- **claims** what the plan says should be held, `pending` where something else holds it;
+- and **diffs and sends**. For a mount that can be asked, the plan's addresses are read back and
+  only what differs is sent — §3.13's *"a rehearsal jump is a minimal correction, not a shotgun
+  blast"* — and because each answer arrives as a `mount.readback` record, the diff replays exactly.
+  For a mount that cannot be asked, everything the plan names is sent, and the plan says which mount
+  got which treatment rather than leaving an operator to wonder.
+
+**A cue already playing at the wrong offset is stopped and relaunched**, unless **M17** finds that
+`LaunchHandle::nudge` lands on the sample, in which case it is nudged. Spike 02 established the
+shape of this choice: setting a clip's offset is a graph rebuild and is therefore done in prepare,
+while nudge is rebuild-free and is therefore what a playing clip gets. The measurement decides which
+this is, and it is taken before the code that depends on it.
+
+### 13.10 The step history — the waypoints nobody has to keep (decision R)
+
+§3.13 keeps manual waypoints available "as a way to force a divergent world back into agreement",
+and the author's decision is that **the operator should not have to keep any**: *"If this could be
+invisible to the user this would be great, something they don't have to manage but can suggest
+several states to pick from when needed… It would be something that keeps track of a history in the
+various steps of the cuelist."*
+
+So there is no waypoint object. Structural waypoints stay inside the solver (§13.8), and what an
+operator gets is the **list's own history of steps**, kept by the engine and offered when they go
+back.
+
+| Node | Type | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/list/<id>/history` | `s` | ro | none | the last 64 steps, newest first: `<tick>:<cue>:<g\|f\|t>` — when, what, and whether it was a GO, a fire or a trigger |
+
+**Every applied `go`, `cue.fire` and `trigger.fire` appends a step in the handler**, which is what
+makes it model state a replay reproduces rather than something a hook noticed. `persist = none`, so
+`state.xml` never carries it: a history is what the machine happened to be doing (§4.10), and a show
+reopened tomorrow starts a new one. It publishes from the runtime half of the tree beside the runs,
+not the document half, because the document half rebuilds when something tells it to and a replay
+tells it nothing.
+
+**A step is a load-to-time target**: *before cue 12* is `list.loadToTime <list> <cue 12> -1`, which
+is why the coordinate has a `-1` in it. Going back is picking a row rather than typing a time.
+
+**And every applied trigger reads the world back**, rate-capped to once a second per mount and only
+for mounts that can be asked, over the addresses the show writes to that mount. That is what makes a
+step's world *observed* rather than only computed: a level somebody moved on the desk between two
+GOs is in the log at the step that saw it, so a jump back to that step restores what was actually
+there rather than what the cue list believes. It is the same mechanism the persistent assertion and
+load-to-time's diff already need — one bulk read, three users — and **M21** prices it against
+WFS-DIY's own 2 487-node capture before it is relied on.
+
+This history is also the inventory §4.4 defers **Go Doh!** until: *"Specification deferred until the
+full inventory of in-flight objects exists."* Phase 10 does not have to invent one.
+
+### 13.11 The persistent section — checked, not fired (decision S)
+
+§3.29: a persistent cue is the thing that should be running at all times and is relaunched if it is
+not, in **a section of its own** — not the header, because a header fires once and never resets
+while a persistent cue re-asserts.
+
+| Node | Type | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/list/<id>/persistentOrder` | `s` | ro | none | the cues in this list's persistent section, in order |
+| `/godot/cue/<id>/role` | `s` | ro | none | `member \| header \| footer \| persistent` — where a cue sits. Drawn in §12.5 and never built; §13.13 |
+
+**Kinds honoured in Phase 4: media, osc and midi.** A fade, a stop or a group in the section is a
+`wfg validate` warning and is ignored — a fade asserts nothing, a stop is the thing that suspends an
+assertion, and a group is a lifetime rather than a state. The cursor skips the section as it skips a
+footer, `standby.set` refuses its cues with `not-manual-path`, and they are not GO targets.
+
+**The assertion is a mode of the solver, not a second mechanism** — §3.29 says so in those words.
+After any applied `go`, `cue.fire` or `trigger.fire`, the next tick's hook solves for the persistent
+set alone and submits `run.assert` for each cue that is not as declared: a media cue with no live
+run is relaunched, an osc cue is re-sent where the read-back differs (and always where the mount
+cannot be asked), a midi cue is re-sent. Checking at triggers rather than every tick is deliberate
+and the PRD gives the reason: *"a tick-rate check makes a stop impossible, a trigger-rate check is
+human-paced"*.
+
+**What suspends it, and what does not:**
+
+- a **stop cue** placed before standby whose target is the persistent cue does — it is the last
+  writer and the document holds the decision (§4.10), which is exactly what the solver's own
+  last-writer walk sees, so this needs no special case at all;
+- a **kill from the running pane** does — §3.29's *(proposed)* item, **taken as yes** (decision S):
+  run-local like a prune, for the session, until a load-to-time re-solves. Without it the operator
+  fights the machine, and every other run-local gesture in this engine already evaporates the same
+  way;
+- a **double Esc** does not, by §3.29. Phase 10's.
+
+A relaunch is a machine action: logged with its origin, shown on the run, and it never moves standby
+(§3.5). A stateful data process loses its state on relaunch and restarts at its resting state
+(§4.6); the solver cannot rebuild it, because the stream that fed it is not in the list.
+
+### 13.12 The document layer — plumbing, and the rows in one place
+
+Five new elements mean five entries in each of the places the schema is hand-written, and naming
+them together is what stops the fifth from being discovered by a fixture failing:
+
+- **`KNOWN_OWNERS`** in `generate-schema.py` gains `slot`, `rack`, `rackChannel`, `feed`, `insert`
+  and `slots`; it gates the `refers` column as well as the `owner` column, so a reference to a new
+  owner word fails generation until the word exists.
+- **The containment table** gains `Slot` under `Mount` (which has no children today), `Rack` under
+  `Audio` and `Channel` under it, `Feed` and `Insert` under `Media`, and `Persistent` under `List`.
+- **`ownerForElement`** — a hand-written mapping, and the by-kind half of the `refers` check — gains
+  one line per element. That is the whole cost of making `refers` work for a nested element, which
+  is what PR 3.2 bought when it generalised the standby check rather than writing a fifth by hand.
+- **`collectCue`** gains a branch per new child of `Media`, because it recurses into any identified
+  child it does not recognise **as though it were a nested cue** — so a `Feed` would otherwise be
+  published at `/godot/cue/<id>` carrying a cue's rows.
+- **`Mount` is a childless leaf today**, so `Slot` is the first child it has ever had: the
+  containment entry and the branch that publishes it are both new, and there is no existing
+  behaviour to extend or to break. The mounted namespace itself is published by the other half of
+  the tree, under the mount's own prefix, and is untouched by any of this.
+- **`slot.create`, `channel.create`, `feed.create` and `insert.create`** follow `route.create` and
+  `range.create` exactly: a parent identifier, an index, and the generated id logged as applied.
+
+**And the routing arithmetic is factored rather than copied.** `resolveRouting` walks a cue's
+`Route` children and turns each into coefficients against its bus's first channel and width; the
+per-bus half becomes a function of `(firstChannel, width, gains)` that a `Feed` calls after
+resolving slot to bus, adding the slot's own offset within it. One arithmetic, two callers, and the
+`bad-route` failure keeps its meaning for both.
+
+**The gains length check finally happens where the table says it does.** `route/gains`'s own
+description has said *"a length that does not match is refused when the show loads rather than
+discovered mid-cue"* since Phase 2, and nothing has ever checked it: the only check is at arm, which
+fails the run. It moves to `validate()` for `Route` and `Feed` alike, which is where the row already
+claims it is (§13.13).
+
+**Everything the parameter table gains:**
+
+| owner | rows |
+|---|---|
+| `slot` (new; `Mount/Slot`) | `name`, `address`, `width`, `bus` (`refers=bus`), `firstChannel`; derived `kind`, `holder`, `pending`, `usage`, `overlaps` |
+| `rackChannel` (new; `Rack/Channel`) | `name`, `class`, `access`; and **the same five derived rows**, because both kinds publish under `/godot/slot/<id>` and a client should read one shape whichever kind it found. Two owners rather than one shared owner so that `refers` can tell a processor input from a rack channel — the by-kind check asks `ownerForElement`, which answers with one word |
+| `rack` (new; `Audio/Rack`) | none — a container element like `Mounts`, holding `Channel` and carrying nothing itself |
+| `feed` (new; `Media/Feed`) | `slot` (`refers=slot`), `gains` (`d*`), `shared` |
+| `insert` (new; `Media/Insert`) | `channel` (`refers=rackChannel`), `shared` |
+| `slots` (new container, `/godot/slot`) | `order` |
+| `cue` | `role` (ro), `prepare` (ro), `preset` (`refers=cue`), `duration` (ro, media) |
+| `group` | `headerDerived` (ro) |
+| `run` | `phase` (ro), `claims`, `pending`, `warning`, `offset` (ro); `state` grows `preparing` |
+| `list` | `aim`, `solve`, `statePosition`, `history`, `persistentOrder` |
+| `document` | `warnings` |
+| `engine` | `analysisRebuilds` |
+| `media` | `startOffset` honoured at last (§13.13) |
+| `mount` | `anticipatable` and `rateCap` honoured at last (§13.1, §13.6) |
+| commands | engine-origin `run.prepare`, `run.revoke`, `run.assert`; operator `list.aim`, `list.loadToTime` |
+
+`d*` joins `route/gains` as the second list-typed row, which needs nothing special: list handling is
+generic on the type suffix everywhere it occurs.
+
+### 13.13 Debts, paid before anything is built on them
+
+Each of these is a row, a sentence or a settled decision that already claims to be true. PR 4.1
+makes them true, and they come first because the rest of the phase leans on them. They were found
+by auditing, one at a time and adversarially, every claim about the current code that this section
+rests on — which is worth saying because §12.15 records four such claims that survived review and
+were paid for later instead.
+
+**`media/startOffset` does nothing.** The row exists, `validate()` refuses it beside a `Range`, and
+no code reads it at arm: the arm request is built from the file, the level, the routing and the
+ranges. A show that declares a start offset gets none. Load-to-time needs exactly this mechanism, so
+it is made true first rather than added as part of a jump.
+
+**Two voice leaks, and revocation and load-to-time both create exactly the runs that leak.** Nothing
+ends an armed run when standby moves away, so a pointer scrolled down a list holds a voice per media
+cue it passed — and once every voice is held, the *next* cue the pointer reaches fails its arm with
+`no-track`, which is the first symptom anybody would see and points at the wrong thing entirely. And
+a kill cannot free one either: killing a run that was armed and never launched writes `stopping`,
+the audio side is told, and the hook that ends a run waits to observe a playing-to-stopped edge —
+which a run that never started never gives it — while the sweep that collects abandoned `stopping`
+runs skips anything still holding a track. It stays `stopping`, holding its voice, for the session.
+Revocation would meet the second on its first tick.
+
+**Four things are drawn and absent, three of them in this document.** `cue/role` was drawn in §12.5
+and never built — no row, no emitter. `run/phase` has no row either, and `clients/console/index.html`
+already reads it, so the running pane has been rendering an empty string since the day the group
+scheduler landed. And a real log header is **exactly two lines** — `# wfg-log 1` and
+`# bundle <folder> sha256:<hex>` — so both the `# media <path> <bytes>` line of §11.6 **and the
+`# clock sampleRate=… blockSize=… samplesPerTick=…` line this document shows in §7's own example**
+are written by nothing at all. The clock line is the one that matters beyond tidiness: §11.5 makes
+the launch tick "a pure function of the log header", and the header does not carry the numbers that
+function needs. Both are written in 4.1, with the duration beside the size, since that is the moment
+the file is read anyway.
+
+**And decision K's load refusal was never built.** A `verified` cue aimed at a mount that cannot be
+asked is *reported* to stderr and the show opens anyway, so the cue fires and fails on a timeout in
+front of an audience — which is the exact failure the decision was taken to prevent, and it was
+settled as "the strictest reading, and the one that cannot fail silently" (§9). It becomes a
+refusal. Phase 4 has a second reason to care: §13.6 refuses to pre-send to such a mount too, and two
+rules about the same unaskable target should not disagree about how loudly they say so.
+
+### 13.14 What Phase 4 has to measure, and in which order
+
+| | what | why it gates |
+|---|---|---|
+| **M16** | whether launching a clip in slot *b* of a track stops the clip playing in slot *a* — the launcher's one-playing-slot-per-track question (PRD §6.11) | it decides what a sampler group's claim is (§3.25, *(proposed)*), and §6.11 says it comes **before the allocator is written**. The answer goes to the author with the question |
+| **M17** | a clip armed with an offset lands on the sample; and whether `LaunchHandle::nudge` on a playing clip does | load-to-time relaunches or nudges; PRD §6.11's pause-and-resume question is the same measurement |
+| **M18** | the liveness analysis over a synthetic 500-cue, 20-slot show under a burst of moves: rebuilds counted, and the wall clock | one mutation, one rebuild — asserted by counting, the M9 shape |
+| **M19** | a prepared header of twenty anticipatable osc cues against the mock target: ticks from the pointer landing to `verified`, and the read-before-write round trips | the horizon's cost is known before a designer builds a scene that depends on it |
+| **M20** | `solve` over the Phase 3 bundle and over the 500-cue show, wall clock per call | a solve behind a dragged finger has to fit inside a tick with room |
+| **M21** | bulk read-back of the WFS-DIY capture: one subtree GET and parse against one GET per written address | decides the probe's shape and the per-trigger cap |
+
+M16 and M17 are PR 4.1's and are taken before the allocator and the jump respectively. The rest sit
+with the PR that needs them.
+
+### 13.15 The direction this phase does not build
+
+**Eviction.** §3.9e's second shared rule — *eviction is a close, not a kill* — is Phase 6's, where a
+sampler group's takeover needs it. Nothing here forecloses it: a claim carries a release policy, a
+release never ends a run, and the pending queue is already a queue. What Phase 4 must not do is make
+a release synchronous with a stop, because a close is exactly a release that waits.
+
+**Strips.** The fourth slot kind. The table has the column and Phase 6 fills it.
+
+**The rack's audio.** The pool is declared and allocated; the tracks, the sends and the plugins are
+Phase 9's (§3.18). An `Insert` in Phase 4 claims a channel and changes no sound, and the row says so
+rather than implying a rack that works.
+
+**Time-tagged bundles to Go.dot's own processors.** §3.12's second paragraph — *"own processors may
+receive tick N+1 values during tick N as OSC bundles with timetags, erasing network jitter"* — is
+not built, and the reason is on the other side of the wire: spatcore's OSC parser drops bundle time
+tags, so the author's own processors would ignore the timetag and apply the values early, which is
+worse than not sending them. It wants a spatcore change first, and that is recorded in the reuse map
+rather than attempted here.
+
+**Authored waypoints**, per decision R. **A group-level persistent section** and **Esc as a pause on
+persistent media**, both *(proposed)* in §3.29 and both left there. **The other three read-back
+mechanisms** (§11.7): a polled get-convention, a subscription, a bespoke sync command —
+`mount/@readback` names the mechanism precisely so each becomes another word, and Phase 4 adds none.
+
+**PRD amendments this phase will propose at close-out**, recorded now so they are not rediscovered:
+§3.13's *"walk back"* against the forward pass (§13.8); §3.9b's *"the processor declares its own
+slots"* against decision P; §3.12 gaining the read-before-write sentence that makes revocation
+mean something; and §3.9c's *(proposed)* cross-list refusal, which the `shared` mark replaces.

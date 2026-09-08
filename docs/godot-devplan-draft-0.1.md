@@ -198,6 +198,20 @@ right overlap warnings; a claim on a busy slot waits and says so; all headless.
 slots; processor-declared slots); the voices claim shape once §6.11's
 measurement is in; whether a rack channel's failure policy is *degrade* (§3.9e).
 
+**Four answered 2026-09-07** with the Phase 4 plan — decisions **P**, **Q**, **R**
+and **S** in `godot-namespace-draft-0.1.md` §9. P settles §3.9b's
+processor-declared slots: the **show** declares a processor's inputs and the
+mounted namespace is what a validate pass checks them against, so discovery
+becomes a later authoring gesture rather than a mechanism. Q settles the header
+preset (open questions §5) as a mark on the member naming an ancestor group, with
+the header line derived. R settles waypoints: there is no authored waypoint, only
+the list's own step history. S settles the persistent section at list level and
+takes §3.29's *(proposed)* running-pane kill as a **yes**. *Stereo → two mono
+slots* needs no separate answer — two `Feed` rows are what it means — and
+*degrade* is built as §3.9e writes it unless the author says otherwise. **Still
+open: the voices claim shape**, which waits on M16. The phase's own shape, drawn
+before the code as §11 and §12 were, is §13 of that draft.
+
 ---
 
 ## Phase 5 — Minimal desktop UI (Didi and Gogo) · L
