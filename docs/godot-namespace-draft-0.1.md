@@ -1832,16 +1832,22 @@ belongs in Phase 5 where the plot is.
 |---|---|---|
 | `/godot/run/<id>/claims` | `s` | the slots this run holds, by identifier; a voice is not among them, it is the run's own `track` |
 | `/godot/run/<id>/pending` | `s` | the slots it has claimed and not yet been given |
-| `/godot/run/<id>/warning` | `s` | `no-channel \| late-claim \| revoked` |
+| `/godot/run/<id>/warning` | `s` | `no-channel \| revoked` |
 
 **`warning` is beside `error` and is not a weaker version of it.** An `error` is a run that did not
 do what it said; a `warning` is a run that did something less than it meant to and is still going.
 That distinction is what keeps §3.9e's *degrade* honest: a cue that lost its rack channel and
 played dry is not a failure — the show continued, which is the entire point of the policy — and
 reporting it as one would either stop the scene or teach an operator to ignore the state that means
-stopped. In words, never colour alone (§4.8).
+stopped.
 
-### 13.3 The document grows five elements, and one of them is a section
+**A claim that landed late is neither**, which is why there is no atom for it here. The run did what
+it said, one tick after the holder released it, so the shortfall is a measurement rather than a
+warning: `/godot/run/<id>/late` already carries it in blocks — the intended launch tick is the tick
+GO was applied on, so a run held by a pending claim reports its wait with no new arithmetic (§13.1)
+— and `pending` above says which slot it was waiting for. In words, never colour alone (§4.8).
+
+### 13.3 The document grows six elements, and one of them is a section
 
 **`Mount/Slot` — a processor's input, declared where the processor is** (decision P). §3.9b marks
 *"the processor declares its own slots"* as *(proposed)*: Go.dot would read a mounted namespace and
@@ -1941,10 +1947,29 @@ what removed it. Every other decision in this engine is a logged command because
 a replay runs no hooks. A claim takes no decisions:
 
 - it is **issued** inside `armMedia`, which is already inside a handler — `audio.arm`'s, or
-  `run.spawn`'s, or `run.prepare`'s;
-- it is **released** inside `run.ended`'s handler, which is already there;
-- and it is **granted** in that same handler, to the head of the slot's pending queue, which is a
-  fact about the queue rather than a choice about the show.
+  `run.spawn`'s, or `run.prepare`'s — and **above that function's `audio == nullptr` return**, the
+  way §12.1's new hooks sit above `beforeTick`'s. A claim is derived from the document alone: the
+  cue's `Feed` and `Insert` children against the declared pool. It needs no Player, so `wfg replay`
+  and `wfg serve` without `--hosted` take it exactly as a hosted session does. What stays *below*
+  that return is the half that does need one — the file, the voice, the routing, the `ArmRequest`,
+  and the `run.failed` reports the return exists to keep from arriving twice. So a `Feed`'s two
+  halves land on opposite sides of one line, the claim above it and the coefficients below, and it
+  is worth saying here rather than rediscovering it at the first replay fixture;
+- it is **released wherever a run reaches `done` or `failed`** — `run.ended`'s done branch,
+  `run.done` when a post-wait was holding it, and **`run.failed`, which is the exit that sends no
+  `run.ended` at all**. That last one matters: a media run has taken its claims in `armMedia` by the
+  time the message thread refuses a range that is not inside the file, and a release written only
+  against `run.ended` would leave that slot held for the session. It is the same moment the voice is
+  freed today — `holdsTrack()` is `track >= 0 && ! isFinished()`, and `isFinished()` is `done` or
+  `failed` — so the claim's release and the voice's are one rule written in two places rather than
+  two rules. A run *waiting* for a slot leaves the queue by the same rule, so a killed, failed or
+  revoked waiter is never found at a head;
+- and it is **granted** in whichever of those handlers released it, to the head of the slot's
+  pending queue, which is a fact about the queue rather than a choice about the show.
+
+One guard the implementer will not see coming: `run.ended`'s handler returns early on a run that is
+already `failed`, so a release written below that guard is skipped for exactly the runs whose claims
+would otherwise leak.
 
 So a replay reproduces every claim from records it already has. Adding a `claim.land` record would
 be adding a second way for the model to reach a state it can already reach, and the two would
@@ -2016,10 +2041,20 @@ Phase 4 runs its *preparable* part when the horizon reaches the group, and holds
 
 | phase | what runs | leaves when |
 |---|---|---|
-| `preparing` | the header's preparable cues, as a sequence — derived preset lines first (§13.7), then the written ones | they are done |
+| `preparing` | the **prepare** of every header cue that has one, as a sequence — derived preset lines first (§13.7), then the written ones | every prepare has finished: an osc pre-send verified, a media arm armed |
 | `prepared` | nothing at all | a GO adopts the run |
-| `header` | the header's **remainder** — the cues that could not be prepared | as today |
+| `header` | the header's **remainder** — every header cue except those whose prepare *was* their execution. A prepared media cue is still in this list and is launched here | as today |
 | `members`, `footer` | as today | as today |
+
+**Prepared is not run, except where the prepare was the whole of it** — and the phase split is
+therefore of *work* rather than of cues. An anticipatable osc pre-send **is** that cue's execution:
+the value is at the target and read back equal, and there is nothing left for GO to do, so the cue
+leaves the header's list. A media cue's prepare is an **arm** — the voice reserved, the file made
+ready, the slots claimed, and the sound still to come — so it stays in the list and is launched in
+the `header` phase, adopting the run its prepare created rather than spawning a second beside it.
+That is §13.7's rule for a preset member, *the member still runs where it sits, at its own moment*,
+applied to a cue whose own moment is the header. An osc cue whose block came out `partial` stays
+too, and sends the nodes that declined to be sent early.
 
 **The hold phase is one line and it is not decoration.** `Runner::finishPhase` moves a group on to
 the next phase that has anything in it and ends the run when none has: from `header` it tries the
@@ -2066,19 +2101,43 @@ prepared run — already parented, since the horizon built the chain that way �
 pointer entered onto **both the run and the job** (the job holds its own copy, taken when it was
 created, and `beginPhase` reads that one), and move its job into the header's remainder.
 
-**And nothing further is needed for the nested case, because PR 3.3 already built it.**
+**And parenting the arms costs that test its other half.** `spawnChild` adopts a run that is `armed`
+**and parentless**, and the horizon has just given every prepared member a parent — so the test
+PR 3.13 wrote to stop an arm buying nothing would stop adopting the very runs this phase prepares.
+It loses the parentless half. An adoptable run is one that is unfinished, still `armed`, not yet
+asked to launch, claimed by no job, and either parentless **or** held under a run in the spawning
+run's own ancestry. That is exactly what a prepared member is, whether the horizon armed it under
+its own group — the offset-nought members of a timeline, which `beginPhase` spawns all at once with
+no unclaimed test of its own — or an ancestor's header prepared it there (§13.7). Adoption
+re-parents it to the spawning group's run and the prepared parent drops it from `children`; a
+revocation before GO still reaches it, because until GO it is still under the run that prepared it.
+Without this, a timeline's members are spawned a second time, both runs land in the phase's own
+list, and the phase launches both: one cue, two voices, a tick apart — which is the failure the
+parentless test was written to prevent, returning because the parent is no longer empty.
+
+**And nothing further is needed for the nested case, because PR 3.4's descent already built it.**
 `beginPhase` spawns a member only when no *unclaimed* child run for that cue exists, and adopts one
 when it does — the mechanism written for a GO descending into a manual group, where the press
-created the member's run before the group's job could ask for it. A prepared chain parented by
+created the member's run before the group's job could ask for it. The adoption came with the
+nested-descent fix on top of PR 3.4, and the *unclaimed* test with PR 3.5's rounds, which is what
+makes it survive a loop. A prepared chain parented by
 `fireStandby` presents exactly that situation one level up: when the outer group's job reaches the
 inner group as a member, its run is already there and unclaimed, so the job takes it rather than
 starting a second scene beside it.
+
+**With one extension, because that test only ever had to cover one cue.** `beginPhase` asks it of
+the phase's **first** cue — which was enough for a descent, where the pointer's own member is the
+one the press created — and the branch that advances a sequence to its next member spawns
+`phaseCues[nextMember]` with no such test at all. A horizon prepares whatever it can reach, which is
+not always the first thing in a list, so the adopt-an-unclaimed-child test moves onto the advance
+path beside it. Without that, a prepared cue standing second in a header gets a second run when its
+turn comes, and the one that was prepared keeps its voice until the show is reloaded.
 
 **What is preparable, decided by the parameter and never by the cue** (§3.12):
 
 | kind | prepared how | why not more |
 |---|---|---|
-| `media` | the voice reserved, the file made ready, the slots claimed | already revocable by construction; this is Phase 2's arm with claims beside it |
+| `media` | the slots claimed, and — where there is an audio side — the voice reserved and the file made ready | already revocable by construction; this is Phase 2's arm with claims beside it |
 | `osc` | **only** where the node is `anticipatable` and its mount `canBeAsked()`: read the target, keep what it held, write, verify | a value on a mount that cannot answer has nothing to put back (§13.1) |
 | `midi` | never | MIDI has no read-back; `verified` on a MIDI cue is already refused at load (§12.11) |
 | `fade`, `stop`, `memo` | nothing to prepare | a fade cannot take over a level before it is time to |
@@ -2171,9 +2230,11 @@ dependency has no natural example. A header is a sequence whatever the group's m
 
 **What the horizon does with a preset member is its preparable part and nothing else** (§13.6): a
 media member is armed and its slots claimed under the group's prepared run; an osc member is read,
-pre-sent and verified. The member still runs where it sits, at its own moment, in its own group.
-That is the whole difference between this and moving the cue: the header line says *this is got
-ready here*, and the cue list still says *this happens there*.
+pre-sent and verified. The member still runs where it sits, at its own moment, in its own group —
+and its own group **adopts** the arm the ancestor made rather than making a second one (§13.6), so
+the voice reserved early is the voice that sounds. That is the whole difference between this and
+moving the cue: the header line says *this is got ready here*, and the cue list still says *this
+happens there*.
 
 ### 13.8 The solver — a pure function, and the coordinate it works in
 
@@ -2266,6 +2327,20 @@ The handler applies the current plan as a single logged command whose applied ar
 run identifier it drew, in the order it drew them — the `go` pattern (§12.6), because a replay never
 draws one of its own. It:
 
+- **ends what the jump abandons, before it builds anything.** Every run of *this list* the plan does
+  not name — group runs and their jobs, the members under them, the armed run at the old standby —
+  is ended the way `run.kill` ends one (§12.4): every descendant, **and no footer**. A footer is
+  arbitrary and need not be an inverse, which is exactly why §3.13 recomputes forward rather than
+  unwinding; running one here would be arbitrary work fighting the values the jump is about to
+  send, and a footer that blocks on a fade would make the jump wait for it. The handler does this
+  itself, as §13.6's revocation ends a prepared chain itself, so the jump is still one record and a
+  replay reaches the same state from the identifiers already in it. **Their claims are released
+  before the plan's are issued, in the same drain**, so the new claims land rather than queue behind
+  runs the jump has just ended. Two things it does not touch: the runs of **other lists**, because a
+  jump is scoped to its own list and two lists can be live at once (§13.5) — a slot held by another
+  list is precisely the "something else" the claim bullet below means — and the **persistent
+  section**, whose cues §13.11 re-asserts rather than restarts, which is what decision S's "until a
+  load-to-time re-solves" already promises;
 - **sets the standby** positionally after the target;
 - **builds the run tree mid-way** and hands it to the existing scheduler: each group run gets its
   `round`, `iteration`, `iterations` and `seed`, its finished members get runs that are already
@@ -2378,20 +2453,40 @@ A relaunch is a machine action: logged with its origin, shown on the run, and it
 
 ### 13.12 The document layer — plumbing, and the rows in one place
 
-Five new elements mean five entries in each of the places the schema is hand-written, and naming
-them together is what stops the fifth from being discovered by a fixture failing:
+Six new elements mean six entries in each of the places the schema is hand-written, and naming them
+together is what stops the sixth from being discovered by a fixture failing:
 
 - **`KNOWN_OWNERS`** in `generate-schema.py` gains `slot`, `rack`, `rackChannel`, `feed`, `insert`
-  and `slots`; it gates the `refers` column as well as the `owner` column, so a reference to a new
-  owner word fails generation until the word exists.
+  and `slots` — six words, though not the six elements: `persistent` is absent because `Persistent`
+  carries no rows of its own, and `slots` is the new tree container rather than an element. It gates
+  the `refers` column as well as the `owner` column, so a reference to a new owner word fails
+  generation until the word exists.
 - **The containment table** gains `Slot` under `Mount` (which has no children today), `Rack` under
   `Audio` and `Channel` under it, `Feed` and `Insert` under `Media`, and `Persistent` under `List`.
 - **`ownerForElement`** — a hand-written mapping, and the by-kind half of the `refers` check — gains
   one line per element. That is the whole cost of making `refers` work for a nested element, which
   is what PR 3.2 bought when it generalised the standby check rather than writing a fifth by hand.
-- **`collectCue`** gains a branch per new child of `Media`, because it recurses into any identified
-  child it does not recognise **as though it were a nested cue** — so a `Feed` would otherwise be
-  published at `/godot/cue/<id>` carrying a cue's rows.
+- **The tree walk trusts an identified child's element name in two hand-written places, and the new
+  elements break both.** `collectCue` gains a branch per new child of `Media`, because it recurses
+  into any identified child it does not recognise **as though it were a nested cue** — so a `Feed`
+  would otherwise be published at `/godot/cue/<id>` carrying a cue's rows. The list's own child loop
+  makes the same mistake one level up: it calls `collectCue` on every identified child of a `List`,
+  so `Persistent` needs its branch **there** rather than inside `collectCue`, which never sees the
+  section as a child. It recurses into it with the *list's* identifier as parent and without taking
+  a member index, exactly as the `Header`/`Footer` branch does inside a group — a section that took
+  index 0 would shift every real member by one. Without it, the section is published at
+  `/godot/cue/<id>` as a memo cue.
+- **`orderOf`'s exclusion list is hand-written** — `Header` and `Footer` today — so `Persistent`
+  joins it. `order` is the list's *members*, and a client reading `/godot/list/<id>/order` is
+  reading the cue list: the console renders a row per entry, and `persistentOrder` (§13.11) is where
+  the section's own cues are read. The one walk that needs nothing is the cursor, which asks
+  `ownerForElement` and gets the same empty answer for `Persistent` as it does for a header — which
+  is what §13.11 means by "the cursor skips the section as it skips a footer".
+- **`Rack` needs none of this**, because §13.3 makes it a container element like `Mounts`, carrying
+  no identifier: the loop that publishes every identified child of `Audio` as a bus passes over it
+  on the empty-identifier guard it already has. Had `Rack` been identified, `/godot/bus` would have
+  gained a bus with a default width, and the show's buses would have stopped being what that
+  container holds.
 - **`Mount` is a childless leaf today**, so `Slot` is the first child it has ever had: the
   containment entry and the branch that publishes it are both new, and there is no existing
   behaviour to extend or to break. The mounted namespace itself is published by the other half of
@@ -2421,13 +2516,13 @@ claims it is (§13.13).
 | `feed` (new; `Media/Feed`) | `slot` (`refers=slot`), `gains` (`d*`), `shared` |
 | `insert` (new; `Media/Insert`) | `channel` (`refers=rackChannel`), `shared` |
 | `slots` (new container, `/godot/slot`) | `order` |
-| `cue` | `role` (ro), `prepare` (ro), `preset` (`refers=cue`), `duration` (ro, media) |
+| `cue` | `role` (ro), `prepare` (ro), `preset` (`refers=cue`) |
 | `group` | `headerDerived` (ro) |
 | `run` | `phase` (ro), `claims`, `pending`, `warning`, `offset` (ro); `state` grows `preparing` |
 | `list` | `aim`, `solve`, `statePosition`, `history`, `persistentOrder` |
 | `document` | `warnings` |
 | `engine` | `analysisRebuilds` |
-| `media` | `startOffset` honoured at last (§13.13) |
+| `media` | `duration` (ro) — on owner **`media`** and not `cue`, or every memo, group and fade would grow one: owner `cue` rows publish for every kind, while the media branch publishes `rowsForOwner ("media")`. It still addresses as `/godot/cue/<id>/duration`, which is what §13.8 writes. And `startOffset` honoured at last (§13.13) |
 | `mount` | `anticipatable` and `rateCap` honoured at last (§13.1, §13.6) |
 | commands | engine-origin `run.prepare`, `run.revoke`, `run.assert`; operator `list.aim`, `list.loadToTime` |
 
@@ -2457,10 +2552,11 @@ which a run that never started never gives it — while the sweep that collects 
 runs skips anything still holding a track. It stays `stopping`, holding its voice, for the session.
 Revocation would meet the second on its first tick.
 
-**Four things are drawn and absent, three of them in this document.** `cue/role` was drawn in §12.5
-and never built — no row, no emitter. `run/phase` has no row either, and `clients/console/index.html`
-already reads it, so the running pane has been rendering an empty string since the day the group
-scheduler landed. And a real log header is **exactly two lines** — `# wfg-log 1` and
+**Four things are drawn and absent, and all four are drawn in this document.** `cue/role` was drawn
+in §12.5 and never built — no row, no emitter. `run/phase` was drawn in §12.2's own run table,
+*groups: `header | members | footer`*, and has no row either, so `clients/console/index.html` has
+been rendering an empty string there since the day the group scheduler landed. And a real log header
+is **exactly two lines** — `# wfg-log 1` and
 `# bundle <folder> sha256:<hex>` — so both the `# media <path> <bytes>` line of §11.6 **and the
 `# clock sampleRate=… blockSize=… samplesPerTick=…` line this document shows in §7's own example**
 are written by nothing at all. The clock line is the one that matters beyond tidiness: §11.5 makes
