@@ -161,6 +161,20 @@ namespace wfg::cue
         /** The cue's authored level, in dB. Not what a fade will write. */
         double levelDb = 0.0;
 
+        /*  How far into the file it starts, in seconds - the cue's own
+            `startOffset`, which had a row and a grammar and no reader at all
+            until PR 4.1.
+
+            Carried in the request like the level rather than read at the far
+            end, because the far end is the message thread and the document is
+            the tick thread's. It applies only to a cue with no ranges: the
+            document refuses an offset beside a range list, since a cue with
+            ranges plays its ranges and the offset belongs in the first one's
+            `in`. Phase 4's load-to-time writes the same field from the RUN
+            rather than from the cue, which is why it is a value here and not a
+            second lookup. */
+        double startOffset = 0.0;
+
         /** Where it goes. Empty is legal and means a cue routed nowhere yet. */
         std::vector<Coefficient> routing;
 

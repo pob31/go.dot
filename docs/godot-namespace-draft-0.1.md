@@ -2305,13 +2305,21 @@ somebody armed; not stored, because it is a fact about a file rather than someth
 rule as a missing media file, which has failed the arm and not the load since Phase 2. A range's
 length is `out - in`, and the pass count follows from it.
 
-**It is read through Tracktion's own `AudioFile`, not through a JUCE format reader**, so that the
-files which have a duration are exactly the files which play. `juce_audio_formats` does reach the
-engine, but only its writers are used, and it is compiled without `JUCE_USE_MP3AUDIOFORMAT` — so a
-reader built on it would answer nought for an MP3 that Tracktion opens perfectly well, and the
-solver would call a cue confused because a second format registry disagreed with the first. The
-engine already asks Tracktion this question when it checks that a file is valid; the duration comes
-off the same answer.
+**It is read through JUCE's own format manager, and this paragraph used to say Tracktion's
+`AudioFile`** — corrected while building PR 4.1, which is the first thing in this section the code
+argued with. `te::AudioFile` needs a `te::Engine&`, and at the moment a show is read there is not
+one: `wfg tree` and `wfg validate` build no audio at all, and `wfg serve` brings the engine up
+three hundred lines after the document is loaded and the first snapshot is published. Standing an
+engine up to ask a file's length would also set flush-to-zero on the calling thread for the rest of
+the process, which this project has been bitten by once already and scopes deliberately everywhere
+else.
+
+So it is `juce::AudioFormatManager` with the basic formats registered, in `audio/MediaInfo.h`,
+behind a signature that names no JUCE type — because the tree and the document both read it and
+neither of them names an audio library. Tracktion reads through the same JUCE readers, so the two
+agree about every format the engine can actually play; where they could differ is a format JUCE's
+basic set excludes, and there the duration is nought, which is the same answer a missing file gives
+and which the confused list already covers.
 
 **The test that decides whether the solver is right**, and it is worth naming here because it is the
 reason to trust any of this: for every fixture whose timing is deterministic, **the plan at tick *T*
@@ -2369,11 +2377,13 @@ draws one of its own. It:
   For a mount that cannot be asked, everything the plan names is sent, and the plan says which mount
   got which treatment rather than leaving an operator to wonder.
 
-**A cue already playing at the wrong offset is stopped and relaunched**, unless **M17** finds that
-`LaunchHandle::nudge` lands on the sample, in which case it is nudged. Spike 02 established the
-shape of this choice: setting a clip's offset is a graph rebuild and is therefore done in prepare,
-while nudge is rebuild-free and is therefore what a playing clip gets. The measurement decides which
-this is, and it is taken before the code that depends on it.
+**A cue already playing at the wrong offset is stopped and relaunched** — settled by **M17**, taken
+in PR 4.1 before anything depended on it. The arm-side offset is exact, on the sample at every
+offset tried, so a jump can place a cue anywhere in a file and trust it. `LaunchHandle::nudge` is
+not the alternative it looked like: it is reachable from Tracktion and from nothing Go.dot exposes,
+so there was no entry point to measure and none to call. Spike 02's shape still holds — an offset
+is a graph rebuild and belongs in prepare — and a nudge path is a thing to add, and measure, when
+something wants it.
 
 ### 13.10 The step history — the waypoints nobody has to keep (decision R)
 
@@ -2516,9 +2526,9 @@ claims it is (§13.13).
 | `feed` (new; `Media/Feed`) | `slot` (`refers=slot`), `gains` (`d*`), `shared` |
 | `insert` (new; `Media/Insert`) | `channel` (`refers=rackChannel`), `shared` |
 | `slots` (new container, `/godot/slot`) | `order` |
-| `cue` | `role` (ro), `prepare` (ro), `preset` (`refers=cue`) |
+| `cue` | `role` (ro — built in 4.1, and its enum likewise declares `persistent` from the start although nothing can produce it until §13.11's section exists), `prepare` (ro), `preset` (`refers=cue`) |
 | `group` | `headerDerived` (ro) |
-| `run` | `phase` (ro), `claims`, `pending`, `warning`, `offset` (ro); `state` grows `preparing` |
+| `run` | `phase` (ro — built in 4.1, and its enum declares the two prepare phases now rather than growing under a client later: `entering \| preparing \| prepared \| header \| members \| footer`, which is wider than the three §12.2 drew), `claims`, `pending`, `warning`, `offset` (ro); `state` grows `preparing` |
 | `list` | `aim`, `solve`, `statePosition`, `history`, `persistentOrder` |
 | `document` | `warnings` |
 | `engine` | `analysisRebuilds` |
@@ -2585,6 +2595,32 @@ rules about the same unaskable target should not disagree about how loudly they 
 M16 and M17 are PR 4.1's and are taken before the allocator and the jump respectively. The rest sit
 with the PR that needs them.
 
+#### What M16 and M17 answered *(PR 4.1, 2026-09-08)*
+
+Both on the Windows box, Debug, through the hosted rig that renders to a buffer. Both **report**
+rather than gate, which is the house style for a measurement whose answer belongs to the engine
+rather than to us.
+
+| | verdict | the numbers |
+|---|---|---|
+| **M16** | **A track keeps BOTH slots playing, and they sum** | One track, two slots, two ranges of different material, both armed looping. Slot 0 launched and playing: mean level 0.25, every sampled frame slot 0's material. Slot 1 then launched on the same track: **both slots report playing**, and the mean level goes to 1.0 — the two levels added — with no sampled frame belonging to either segment alone. |
+| **M17** | **An offset lands exactly on the sample** | A ramp file whose value is its own position, armed at 0.5 s, 1.25 s and 2.0 s. Every one landed on the sample asked for: **out by 0 samples, 0.000 ms, at all three.** Not one block, not one sample: exact. |
+
+**M16 is the one that changes something, and it changes it against the guess.** PRD §3.25's
+*(proposed)* sampler claim was written around Waveform's behaviour — *"if the launcher keeps one
+playing slot per track… a member launching stops whatever its track was playing, which is a
+sampler's choke group for free"* — and §6.11 asked for this measurement precisely because that
+sentence was a hope. It is not what this engine does. Two slots on one track sound together and
+their outputs add, so **a sampler group's claim is per slot and not per track**: a bank of eight
+cells that can sound at once is eight voices, and the choke group §3.27 wanted comes free from
+nothing. That is a question for the author (§13.15) rather than an answer this section may take.
+
+**M17 removes a hedge from §13.9.** *"Relaunch, unless M17 finds `nudge` lands on the sample"* has
+half an answer: the arm-side offset is exact, so load-to-time can place a cue anywhere in a file and
+trust it. The nudge half is **not measured and cannot be from here** — `LaunchHandle::nudge` is
+reachable from Tracktion and from nothing Go.dot exposes, so there is no entry point to measure. So
+load-to-time **relaunches**, and a nudge path is a thing to add and measure when something wants it.
+
 ### 13.15 The direction this phase does not build
 
 **Eviction.** §3.9e's second shared rule — *eviction is a close, not a kill* — is Phase 6's, where a
@@ -2593,6 +2629,16 @@ release never ends a run, and the pending queue is already a queue. What Phase 4
 a release synchronous with a stop, because a close is exactly a release that waits.
 
 **Strips.** The fourth slot kind. The table has the column and Phase 6 fills it.
+
+**The voices claim shape, which is the author's and now has its measurement.** §3.25 marks it
+*(proposed)* and §6.11 said the measurement came first; M16 has been taken and it answers against
+the guess (§13.14). A track does not choke: two slots on one track sound together and add. So a
+sampler group's members cannot share a voice by sharing a track, and the shapes left are that the
+group **declares its voices** and claims that many tracks, spreading members across their slots and
+accepting that any two members sounding at once need two tracks — or that a claim is simply per
+slot and a bank of eight is eight voices. Phase 6 builds whichever the author says; Phase 4's
+allocator must only avoid assuming the choke that is not there, which is why the measurement came
+before the table was written.
 
 **The rack's audio.** The pool is declared and allocated; the tracks, the sends and the plugins are
 Phase 9's (§3.18). An `Insert` in Phase 4 claims a channel and changes no sound, and the row says so

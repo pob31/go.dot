@@ -532,20 +532,27 @@ TEST_CASE ("question K: a cue that asks for verification a target cannot give is
         The check is on the document alone: the cue names an address, the
         address falls under a mount's prefix, and the mount says whether it can
         answer. So it runs on a laptop with nothing plugged in, which is the
-        machine somebody is sitting at when they have time to fix it. */
+        machine somebody is sitting at when they have time to fix it.
+
+        AND IT IS A LOAD REFUSAL, which decision K asked for and PR 2.6 did
+        not build: the check sat in the mount loader, where serve, tree and
+        replay printed it and opened the show anyway. Asking `validate()` is
+        asking the thing that decides whether a show opens at all. */
     doc::ShowDocument document;
 
     const auto listId = document.createList ("Cues").id;
 
-    juce::ValueTree mounts { "Mounts" };
-    juce::ValueTree mount { "Mount" };
-    mount.setProperty (juce::Identifier ("id"), "K3PV7WRB", nullptr);
-    mount.setProperty (juce::Identifier ("prefix"), "/desk", nullptr);
-    mount.setProperty (juce::Identifier ("namespace"), "namespaces/desk.json", nullptr);
-    mount.setProperty (juce::Identifier ("port"), 9000, nullptr);
-    mounts.appendChild (mount, nullptr);
+    /*  THROUGH THE DOCUMENT'S OWN DOOR rather than by appending a second
+        <Mounts> container by hand. The check lives in `validate()` now, which
+        walks the whole tree - so a hand-built duplicate container would be a
+        second thing for it to find, and the test would be measuring the rig. */
+    const auto mountEdit = document.createMount ("/desk", "namespaces/desk.json");
+    REQUIRE (mountEdit.ok);
 
-    document.root().appendChild (mounts, nullptr);
+    const auto mountId = mountEdit.id;
+    auto mount = document.findById (mountId);
+    REQUIRE (mount.isValid());
+    mount.setProperty (juce::Identifier ("port"), 9000, nullptr);
 
     const auto cueId = document.createCue (listId, 0, "osc", "Desk").id;
     document.setAttribute ("/godot/cue/" + cueId + "/address", "/desk/fader");
@@ -555,7 +562,7 @@ TEST_CASE ("question K: a cue that asks for verification a target cannot give is
     {
         document.setAttribute ("/godot/cue/" + cueId + "/wait", "verified");
 
-        const auto problems = tree::checkNetworkCues (document);
+        const auto problems = document.validate();
 
         REQUIRE (problems.size() == 1u);
         INFO (problems.front());
@@ -568,7 +575,7 @@ TEST_CASE ("question K: a cue that asks for verification a target cannot give is
         document.setAttribute ("/godot/cue/" + cueId + "/wait", "verified");
         document.setAttribute ("/godot/cue/" + cueId + "/address", "/nowhere/fader");
 
-        const auto problems = tree::checkNetworkCues (document);
+        const auto problems = document.validate();
 
         REQUIRE (problems.size() == 1u);
         INFO (problems.front());
@@ -581,7 +588,7 @@ TEST_CASE ("question K: a cue that asks for verification a target cannot give is
             the same mount is perfectly sound. The refusal is about the promise
             the cue makes, not about the device. */
         document.setAttribute ("/godot/cue/" + cueId + "/wait", "sent");
-        CHECK (tree::checkNetworkCues (document).empty());
+        CHECK (document.validate().empty());
     }
 
     SUBCASE ("a mount that says it can be asked")
@@ -590,7 +597,7 @@ TEST_CASE ("question K: a cue that asks for verification a target cannot give is
         mount.setProperty (juce::Identifier ("queryPort"), 5005, nullptr);
 
         document.setAttribute ("/godot/cue/" + cueId + "/wait", "verified");
-        CHECK (tree::checkNetworkCues (document).empty());
+        CHECK (document.validate().empty());
     }
 
     SUBCASE ("readback declared but no port to ask on")
@@ -600,7 +607,7 @@ TEST_CASE ("question K: a cue that asks for verification a target cannot give is
         mount.setProperty (juce::Identifier ("readback"), "oscquery", nullptr);
 
         document.setAttribute ("/godot/cue/" + cueId + "/wait", "verified");
-        CHECK (tree::checkNetworkCues (document).size() == 1u);
+        CHECK (document.validate().size() == 1u);
     }
 }
 

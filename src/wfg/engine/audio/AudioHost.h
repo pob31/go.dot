@@ -276,9 +276,17 @@ namespace wfg::audio
             refusal - `false`, with `lastError` saying so - because the slot
             count is fixed when the graph is built (§3.25).
 
+            `startOffset` is how far into the file the cue begins, in seconds,
+            and it applies ONLY to that empty-range shape: the document refuses
+            an offset beside a range list, because a cue with ranges plays its
+            ranges and the offset belongs in the first one's `in`. An offset at
+            or past the end of the file is a refusal, asked here for the reason
+            a range's bounds are - this is where the file is finally open.
+
             Message thread. One rebuild for the lot, rather than one per range. */
         bool setTrackRanges (int trackIndex, const std::string& mediaFile,
-                             const std::vector<RangeSpec>& ranges);
+                             const std::vector<RangeSpec>& ranges,
+                             double startOffset = 0.0);
 
         /** How many slots every track was built with: the show's widest cue. */
         int slotCount() const noexcept;

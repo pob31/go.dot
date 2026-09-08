@@ -76,8 +76,11 @@ namespace wfg::cue
             `run.kill`, which is the emergency path and asks nothing of the cue. */
         inline constexpr const char* footer = "footer";
 
-        /** Done, and waiting for nothing. The job is retired next tick. */
-        inline constexpr const char* complete = "complete";
+        /*  There is deliberately no `complete`. One was declared here and never
+            assigned anywhere: a job that is done sets `retired` and is swept
+            out of the scheduler's list on the same tick, so a phase meaning
+            "finished" would be a state nothing could ever observe. A constant
+            nobody writes is a constant somebody eventually reads. */
     }
 
     //==============================================================================

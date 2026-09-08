@@ -734,6 +734,14 @@ namespace wfg::cue
         request.routing = routing;
         request.ranges = rangesOf (cue);
 
+        /*  READ THE SAME WAY THE LEVEL IS, and the reason it is worth a line of
+            its own: this row has existed since Phase 2, the grammar has always
+            accepted it, `validate()` has always refused it beside a range - and
+            nothing has ever read it, so a show that asked to start two seconds
+            in has always started at the top. Found by auditing §13's claims
+            against the code rather than by anybody hearing it. */
+        request.startOffset = numberOf (cue, "startOffset");
+
         /*  NO SLOT, and it is a refusal rather than a truncation. The graph is
             built with as many launcher slots as the show's widest cue has
             ranges, once, when the show loads (§3.25) - so a range added during
@@ -1991,6 +1999,17 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  THE PHASE, MIRRORED FOR SOMEBODY TO LOOK AT, and mirrored here
+                rather than published from the job because `ParameterTree` sees
+                the run table and never the scheduler's own state.
+
+                A readout and not a decision, so writing it from a hook breaks
+                no rule: the same shape as `rangeIteration`, which `advanceRanges`
+                computes from the sample counter a few functions down. A replay
+                runs no hooks and so leaves it empty, which is what a readout
+                does there. */
+            run->phase = job.phase;
+
             const auto group = document.findById (run->cue);
 
             if (! group.isValid())
@@ -2965,10 +2984,40 @@ namespace wfg::cue
 
             const auto playing = audio->isPlaying (run->track);
 
+            /*  A RUN THAT WILL NEVER GIVE AN EDGE, because it never sounded.
+
+                The test below waits for a playing-to-stopped edge, which is the
+                right question for every run that played. A run that was ARMED
+                and never launched - the pointer reached its cue, the voice was
+                reserved and the file made ready - and is then killed gives no
+                such edge, ever: it stays `stopping`, and `holdsTrack()` is
+                `track >= 0 && ! isFinished()`, so it holds its voice for the
+                rest of the session. The sweep in `advanceWaits` does not reach
+                it either, because that one deliberately skips anything holding
+                a track: a group and a fade hold none, and it was written for
+                them.
+
+                So a show whose operator armed eight cues and killed them has
+                eight voices gone, and the symptom arrives later and somewhere
+                else - the NEXT cue the pointer reaches fails with `no-track`.
+
+                `stopIssued` is what makes this safe rather than a race.
+                `enforceStops` sets it when it has told the audio side, and its
+                stop is immediate and reaches every slot of the track, so a
+                launch that was placed for a sample in the future has been
+                cancelled by the time this runs. Never sounded, told to stop,
+                and not sounding now: there is nothing left to wait for. */
+            if (run->state == runState::stopping && run->stopIssued
+                  && ! run->sawPlaying && ! playing)
+            {
+                engine.submit (origin::engine, "run.ended", one (run->id));
+                continue;
+            }
+
             /*  A run that was sounding and is not any more has ended. The
-                launcher clip stops itself at the end of its length, which is
-                the file's, so this is the ordinary way a cue finishes as well
-                as how a stop is noticed. */
+                launcher clip stops itself at the end of its length - the file's,
+                less whatever a start offset skips - so this is the ordinary way
+                a cue finishes as well as how a stop is noticed. */
             if (run->sawPlaying && ! playing)
             {
                 /*  A BOUNDARY IS NOT AN ENDING, and without this every ranged

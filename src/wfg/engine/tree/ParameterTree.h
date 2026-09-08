@@ -57,6 +57,7 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -149,6 +150,22 @@ namespace wfg::tree
             nowhere to send it. */
         void setSender (const MountSender* senderToRead) noexcept { sender = senderToRead; }
 
+        /*  How long each media file is, read once when the show was opened, for
+            `/godot/cue/<id>/duration`. Keyed by the `file` the document names.
+
+            The same shape as the sender above, and absent for the same kind of
+            reason: a caller that never read any media - a replay, a test, a
+            tree dump of a bundle with no media folder - leaves every duration
+            at nought, which is what nought means anyway (`audio/MediaInfo.h`).
+
+            Held by pointer and not owned; the map must outlive the tree. Marks
+            the document half stale, because that is the half a cue lives in. */
+        void setMediaDurations (const std::map<std::string, double>* durationsToPublish) noexcept
+        {
+            durations = durationsToPublish;
+            stale = true;
+        }
+
         /** The show changed; rebuild before the next publish. */
         /*  The SHOW moved. The mounted half is not touched by this: it has a
             cache of its own, invalidated by the mount table's own revision
@@ -172,6 +189,7 @@ namespace wfg::tree
         const CommandRegistry& commands;
         const MountTable& mounts;
         const MountSender* sender = nullptr;
+        const std::map<std::string, double>* durations = nullptr;
         const cue::RunTable& runs;
 
         std::shared_ptr<const std::vector<Node>> documentPart;

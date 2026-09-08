@@ -993,15 +993,45 @@ namespace wfg::doc
             them in document order - mounts are written after the lists. */
         std::vector<std::string> prefixes;
 
+        /*  The same pass also collects what each mount can be ASKED, which the
+            verified-cue check below needs. One traversal, because the two
+            questions are about the same elements and a second walk would be a
+            second thing to keep in step. */
+        struct MountFacts
+        {
+            std::string id;
+            std::string prefix;
+            bool canBeAsked = false;
+        };
+
+        std::vector<MountFacts> mountFacts;
+
         for (const auto& mounts : showNode)
         {
             if (mounts.getType().toString() != "Mounts")
                 continue;
 
             for (const auto& mount : mounts)
-                if (mount.hasProperty (juce::Identifier ("prefix")))
-                    prefixes.push_back (mount[juce::Identifier ("prefix")]
-                                          .toString().toStdString());
+            {
+                if (! mount.hasProperty (juce::Identifier ("prefix")))
+                    continue;
+
+                const auto prefix = mount[juce::Identifier ("prefix")].toString().toStdString();
+                prefixes.push_back (prefix);
+
+                /*  `canBeAsked`, restated in document terms: readback names the
+                    MECHANISM and a query port says where to use it. The same
+                    rule lives on `tree::MountDeclaration`, which is what the
+                    engine asks at run time; this is the read-time half, and the
+                    two say the same sentence because question K's answer is one
+                    sentence. */
+                const auto readback = mount[juce::Identifier ("readback")].toString();
+                const auto queryPort = static_cast<int> (mount[juce::Identifier ("queryPort")]);
+
+                mountFacts.push_back ({ mount[juce::Identifier ("id")].toString().toStdString(),
+                                        prefix,
+                                        readback == "oscquery" && queryPort > 0 });
+            }
         }
 
         struct Triggers
@@ -1130,6 +1160,70 @@ namespace wfg::doc
         };
 
         MidiWaits { problems }.visit (showNode);
+
+        /*  A CUE THAT WAITS FOR AN ANSWER NOBODY CAN GIVE - question K, and
+            the refusal decision K actually asked for.
+
+            §3.11's `verified` writes a value and then asks the target what it
+            holds. That needs a target that can be asked, which a mount says by
+            declaring `readback` and a `queryPort` (§9, decision K). Aimed at a
+            mount that declares neither - or at an address under no mount at all
+            - the cue writes, waits its whole timeout, and fails. Every time,
+            and only ever during the show.
+
+            REFUSED WHEN THE SHOW IS READ, which is what decision K settled and
+            what was NOT built: PR 2.6 put the check in the mount loader, where
+            every verb printed it to stderr and opened the show anyway, so the
+            only thing it changed was `wfg validate`'s exit code. It sits here
+            now, beside the MIDI rule it is the twin of, so that the refusal
+            arrives the way the other refusals do - a trigger listening inside
+            /godot, a start offset beside a range, a MIDI cue asking to be
+            verified. The check is on the document alone and needs no mount
+            table, no socket and no device, so it still runs on a laptop with
+            nothing plugged in, which is the machine somebody is sitting at when
+            they have time to fix it. */
+        struct VerifiedCues
+        {
+            std::vector<std::string>& problems;
+            const std::vector<MountFacts>& mounts;
+
+            void visit (const juce::ValueTree& node)
+            {
+                for (const auto& child : node)
+                    visit (child);
+
+                if (node.getType().toString() != "Osc"
+                      || node[juce::Identifier ("wait")].toString() != "verified")
+                    return;
+
+                const auto id = node[juce::Identifier ("id")].toString().toStdString();
+                const auto address = node[juce::Identifier ("address")].toString().toStdString();
+
+                const MountFacts* owner = nullptr;
+
+                for (const auto& mount : mounts)
+                    if (address.size() > mount.prefix.size()
+                          && address.compare (0, mount.prefix.size(), mount.prefix) == 0
+                          && address[mount.prefix.size()] == '/')
+                        owner = &mount;
+
+                if (owner == nullptr)
+                {
+                    problems.push_back ("/Show/.../Osc[" + id + "]: \"" + address
+                                          + "\" is under no mounted namespace, so nothing can be"
+                                            " asked about it");
+                    return;
+                }
+
+                if (! owner->canBeAsked)
+                    problems.push_back ("/Show/.../Osc[" + id + "]: waits for verification from "
+                                          + owner->id + ", which declares no readback. A cue that"
+                                            " cannot succeed is worse than one that fails, because"
+                                            " it holds the list");
+            }
+        };
+
+        VerifiedCues { problems, mountFacts }.visit (showNode);
 
         return problems;
     }

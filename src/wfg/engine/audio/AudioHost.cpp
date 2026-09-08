@@ -707,7 +707,8 @@ namespace wfg::audio
 
             It does not dispatch: the caller does, once, so that arming eight
             slots is one round of pending updates rather than eight. */
-        bool pointSlotAtFile (int trackIndex, int slotIndex, const juce::File& file)
+        bool pointSlotAtFile (int trackIndex, int slotIndex, const juce::File& file,
+                              double startOffset = 0.0)
         {
             auto* clip = clipOn (trackIndex, slotIndex);
 
@@ -718,15 +719,61 @@ namespace wfg::audio
 
             /*  The new file's own loop info, not the placeholder's. Everything
                 below reads a length off the clip, and until this runs those
-                lengths still describe the file that was there before. */
+                lengths still describe the file that was there before.
+
+                IT DESCRIBES THE WHOLE FILE even when an offset means only part
+                of it will sound. `numBeats` is what makes auto-tempo 1:1 at
+                60 bpm, and it is read against the SOURCE's own length - set it
+                to the shortened length and the file's declared tempo rises
+                above sixty, Tracktion stretches it, and a cue starting two
+                seconds in would also play back fast. */
             makeClipPlayAtItsOwnRate (*clip);
+
+            const auto sourceSeconds = clip->getSourceLength().inSeconds();
+
+            /*  AN OFFSET PAST THE END IS A FAILED ARM, asked here for the same
+                reason a range is (`armRangeInto` below): the document could not
+                have known how long the file is, because the file arrives on a
+                different machine from the one the show was written on. */
+            if (startOffset > 0.0 && startOffset >= sourceSeconds)
+            {
+                const auto seconds = [] (double value)
+                {
+                    return juce::String (value, 3).toStdString();
+                };
+
+                error = "a start offset of " + seconds (startOffset) + " seconds is not inside \""
+                          + file.getFileName().toStdString() + "\", which is "
+                          + seconds (sourceSeconds) + " seconds long";
+                return false;
+            }
 
             /*  Looping is off before anything else touches position: turning it
                 off rewrites the clip's offset, so doing it afterwards would
                 silently discard whatever was set. */
             clip->disableLooping();
+
+            /*  THE LENGTH IS WHAT WILL SOUND, which is the file less whatever
+                the offset skips. Leaving it at the source's length would give a
+                cue that played to the end of the file and then `startOffset`
+                seconds of nothing - with the launch handle still reporting that
+                it was playing, and `Runner::observeEdges` waiting on a
+                stopped edge that arrives late by exactly the offset. */
             clip->setLength (tracktion::TimeDuration::fromSeconds (
-                                 clip->getSourceLength().inSeconds()), false);
+                                 sourceSeconds - std::max (0.0, startOffset)), false);
+
+            /*  AND THE OFFSET LAST, after both of the calls that rewrite it.
+                `disableLooping` assigns one outright, and `setLength` with
+                `preserveSync` false subtracts the change in length from it -
+                which here is a change of two seconds or more, since the
+                resident clip was created one second long against the silent
+                placeholder. An offset set before either call comes out
+                negative, `Clip::setOffset` clamps it to nought, and the cue
+                plays from the top with nothing reported. That is the same
+                silent-wrong shape as the beat-count bug above, and this is the
+                order that avoids it. */
+            if (startOffset > 0.0)
+                clip->setOffset (tracktion::TimeDuration::fromSeconds (startOffset));
 
             return true;
         }
@@ -802,7 +849,8 @@ namespace wfg::audio
         }
 
         bool setTrackRanges (int trackIndex, const std::string& mediaFile,
-                             const std::vector<AudioHost::RangeSpec>& ranges)
+                             const std::vector<AudioHost::RangeSpec>& ranges,
+                             double startOffset)
         {
             const juce::File file { juce::String (mediaFile) };
 
@@ -864,12 +912,20 @@ namespace wfg::audio
                     still holding the last cue's third range would sound if
                     anything ever launched it, and the thing that eventually
                     launches it is a bug in a later phase rather than never. */
+                /*  THE ONE PLACE A START OFFSET CAN APPLY, and the document
+                    guarantees it: `validate()` refuses a `startOffset` beside a
+                    `Range`, because a cue with ranges plays its ranges and the
+                    offset belongs in the first one's `in`. So the whole-file
+                    arm is the only branch that takes it. */
                 if (ranges.empty() && slot == 0)
                 {
-                    armed = pointSlotAtFile (trackIndex, 0, file) && armed;
+                    armed = pointSlotAtFile (trackIndex, 0, file, startOffset) && armed;
                     continue;
                 }
 
+                /*  Never the placeholder: a silent one-second clip has nothing
+                    to start two seconds into, and an offset would fail its own
+                    past-the-end check. */
                 pointSlotAtFile (trackIndex, slot, placeholder);
             }
 
@@ -1412,9 +1468,9 @@ namespace wfg::audio
     }
 
     bool AudioHost::setTrackRanges (int trackIndex, const std::string& mediaFile,
-                                    const std::vector<RangeSpec>& ranges)
+                                    const std::vector<RangeSpec>& ranges, double startOffset)
     {
-        return impl->setTrackRanges (trackIndex, mediaFile, ranges);
+        return impl->setTrackRanges (trackIndex, mediaFile, ranges, startOffset);
     }
 
     int AudioHost::slotCount() const noexcept  { return impl->editSlots; }

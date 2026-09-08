@@ -37,6 +37,9 @@
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/audio/MediaInfo.h>
+
+#include <tuple>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/document/Bundle.h>
@@ -3963,4 +3966,423 @@ TEST_CASE ("M13: an advance leaves a range that loops for ever, at the end of th
         REQUIRE (run != nullptr);
         CHECK (run->range == 1);
     }
+}
+
+//==============================================================================
+TEST_CASE ("media: how long a file is, asked without an engine")
+{
+    /*  §3.13's solver cannot answer "is this cue still playing at T" without a
+        duration, and nothing in Go.dot has ever known one.
+
+        ASKED OF JUCE AND NOT OF TRACKTION, which the namespace draft first
+        said: `te::AudioFile` needs a `te::Engine&`, and at the moment a show is
+        read there is none - `wfg tree` and `wfg validate` build no audio at
+        all. Tracktion reads through the same JUCE readers, so the two agree
+        about every format the engine can actually play. */
+    ScopedStorage storage;
+    constexpr int rate = 48000;
+
+    const auto tone = writeSegmentedTone (storage.folder, rate);
+    REQUIRE (tone.existsAsFile());
+
+    CHECK (audio::mediaDurationSeconds (tone.getFullPathName().toStdString())
+             == doctest::Approx (3.0).epsilon (0.001));
+
+    /*  A FILE THAT WILL NOT READ IS NOUGHT, and that is the answer rather than
+        an error: a missing file has failed the ARM and never the load since
+        Phase 2, and the solver reads a nought as "I do not know how long this
+        is" rather than as "this has ended". */
+    CHECK (audio::mediaDurationSeconds ("") == doctest::Approx (0.0));
+    CHECK (audio::mediaDurationSeconds (storage.folder.getChildFile ("absent.wav")
+                                          .getFullPathName().toStdString())
+             == doctest::Approx (0.0));
+
+    const auto notAudio = storage.folder.getChildFile ("notes.txt");
+    notAudio.replaceWithText ("this is not a sound");
+    CHECK (audio::mediaDurationSeconds (notAudio.getFullPathName().toStdString())
+             == doctest::Approx (0.0));
+}
+
+//==============================================================================
+TEST_CASE ("offset: a start offset plays the part of the file it names, and stops when it ends")
+{
+    /*  THE ROW THAT DID NOTHING. `media/startOffset` has been in the parameter
+        table since Phase 2, the grammar has always accepted it and `validate()`
+        has always refused it beside a range - and no code ever read it, so a
+        show that asked to start two seconds in started at the top. Found by
+        auditing §13's claims against the code rather than by anybody hearing
+        it.
+
+        TWO PROPERTIES, and the second is the one that is easy to miss.
+
+        The first: the cue sounds from the offset. The second: it STOPS at the
+        end of the file rather than playing the file and then `startOffset`
+        seconds of nothing. The clip's length has to shorten with the offset, or
+        the launcher goes on reporting that it is playing for as long as the
+        offset lasts - and `Runner::observeEdges` waits on a stopped edge, so
+        the run would end late by exactly that much. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSegmentedTone (rig.storage.folder, rate);
+    REQUIRE (tone.existsAsFile());
+
+    /*  No ranges and an offset of one second: the Phase 2 whole-file shape,
+        starting at the second segment. */
+    REQUIRE (rig.host.setTrackRanges (0, tone.getFullPathName().toStdString(), {}, 1.0));
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+    auto* matrix = rig.host.trackMatrix (0);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->snapToTargets();
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    RecordingSink sink;
+    sink.prepare (settings.outputChannels, rate * 4);
+    rig.host.setBlockSink (&sink);
+
+    const auto target = rig.host.clock().samplesElapsed() + 4 * (rate / 50);
+    REQUIRE (rig.host.launchTrackAt (0, 0, rig.host.beatsAtSample (target)));
+
+    for (int block = 0; block < 3 * rate / blockSize + 400; ++block)
+        rig.host.processBlock();
+
+    rig.host.setBlockSink (nullptr);
+
+    const auto first = sink.firstSoundAt (0);
+    REQUIRE (first >= 0);
+
+    /*  IT STARTS AT THE SECOND SEGMENT. Starting at the first would mean the
+        offset never reached the clip - which is what happened for two Tracktion
+        reasons at once, since `disableLooping` assigns an offset outright and
+        `setLength` subtracts the change in length from it. */
+    CHECK (segmentOf (sink.buffer.getSample (0, first + 1000)) == 1);
+
+    /*  And it runs on into the third, so the offset moved the start rather than
+        trimming the file to one segment. */
+    REQUIRE (sink.written > first + rate + rate / 2);
+    CHECK (segmentOf (sink.buffer.getSample (0, first + rate + rate / 2)) == 2);
+
+    /*  AND IT IS OVER AFTER TWO SECONDS, not three. Sampled a quarter of a
+        second past where the shortened clip ends, which is well inside the
+        second the un-shortened one would still have been sounding through. */
+    REQUIRE (sink.written > first + 2 * rate + rate / 4);
+    CHECK (segmentOf (sink.buffer.getSample (0, first + 2 * rate + rate / 4)) == -1);
+
+    CHECK_FALSE (rig.host.isTrackPlaying (0));
+}
+
+TEST_CASE ("offset: one past the end of the file is a failed arm, not a silence")
+{
+    /*  Asked where a range's bounds are asked, and for the same reason: the
+        document could not have known how long the file is, because a show is
+        authored on one machine and its media copied onto another. */
+    constexpr int rate = 48000;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSegmentedTone (rig.storage.folder, rate);
+    REQUIRE (tone.existsAsFile());
+
+    CHECK_FALSE (rig.host.setTrackRanges (0, tone.getFullPathName().toStdString(), {}, 5.0));
+
+    INFO (rig.host.lastError());
+    CHECK (rig.host.lastError().find ("start offset") != std::string::npos);
+
+    /*  And an offset the file DOES contain is fine, so the refusal is about the
+        number rather than about offsets. */
+    CHECK (rig.host.setTrackRanges (0, tone.getFullPathName().toStdString(), {}, 2.0));
+}
+
+//==============================================================================
+/*  A file whose sample value IS its position: value at sample n is n / total,
+    so a rendered sample says where in the file it came from. The segmented tone
+    above answers "which second"; this answers "which sample", which is what a
+    landing has to be measured in.  */
+namespace
+{
+    juce::File writeRamp (const juce::File& folder, int rate, int seconds = 4)
+    {
+        const auto file = folder.getChildFile ("ramp.wav");
+        folder.createDirectory();
+
+        juce::WavAudioFormat format;
+        std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
+
+        if (stream == nullptr)
+            return {};
+
+        auto writer = format.createWriterFor (stream,
+                                              juce::AudioFormatWriterOptions{}
+                                                .withSampleRate (static_cast<double> (rate))
+                                                .withNumChannels (1)
+                                                .withBitsPerSample (24));
+
+        if (writer == nullptr)
+            return {};
+
+        const auto total = rate * seconds;
+        juce::AudioBuffer<float> buffer { 1, total };
+
+        for (int n = 0; n < total; ++n)
+            buffer.setSample (0, n, 0.8f * static_cast<float> (n) / static_cast<float> (total));
+
+        writer->writeFromAudioSampleBuffer (buffer, 0, total);
+        return file;
+    }
+
+    /** Which sample of the ramp a rendered value came from, or -1. */
+    int rampPositionOf (float sample, int rate, int seconds = 4)
+    {
+        if (sample <= 0.0f)
+            return -1;
+
+        return static_cast<int> (std::lround (static_cast<double> (sample) / 0.8
+                                                * static_cast<double> (rate * seconds)));
+    }
+}
+
+TEST_CASE ("M16: whether a second slot launching stops the first, on one track")
+{
+    /*  PRD §6.11 asks this BEFORE the allocator is written, because it decides
+        what a sampler group's claim is (§3.25, *(proposed)*). If a track keeps
+        one playing slot, a member launching stops whatever its track was
+        playing - which is a sampler's choke group for free, and a claim can be
+        per track. If both sound, a claim has to be per SLOT and a bank of eight
+        cells is eight voices rather than one.
+
+        REPORTED AND NOT ASSERTED. The answer is Tracktion's rather than
+        Go.dot's, and what a measurement owes the author is the number. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 2;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSegmentedTone (rig.storage.folder, rate);
+    REQUIRE (tone.existsAsFile());
+
+    /*  Two ranges on one track: the first segment in slot nought, the third in
+        slot one. Different material, so the render says which is sounding. */
+    REQUIRE (rig.host.setTrackRanges (0, tone.getFullPathName().toStdString(),
+                                      { { 0.0, 1.0, 0 }, { 2.0, 3.0, 0 } }));
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+    auto* matrix = rig.host.trackMatrix (0);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->snapToTargets();
+
+    for (int i = 0; i < 8; ++i)
+        rig.host.processBlock();
+
+    const auto firstAt = rig.host.clock().samplesElapsed() + 4 * (rate / 50);
+    REQUIRE (rig.host.launchTrackAt (0, 0, rig.host.beatsAtSample (firstAt)));
+
+    for (int block = 0; block < rate / blockSize; ++block)
+        rig.host.processBlock();
+
+    REQUIRE (rig.host.trackPlayState (0, 0).playing);
+
+    /*  What the track carried while only slot nought was playing, so the
+        after-picture has a before to be read against. */
+    RecordingSink before;
+    before.prepare (settings.outputChannels, rate / 2);
+    rig.host.setBlockSink (&before);
+
+    for (int block = 0; block < rate / (4 * blockSize); ++block)
+        rig.host.processBlock();
+
+    rig.host.setBlockSink (nullptr);
+
+    RecordingSink sink;
+    sink.prepare (settings.outputChannels, rate * 2);
+    rig.host.setBlockSink (&sink);
+
+    const auto secondAt = rig.host.clock().samplesElapsed() + 4 * (rate / 50);
+    REQUIRE (rig.host.launchTrackAt (0, 1, rig.host.beatsAtSample (secondAt)));
+
+    for (int block = 0; block < rate / blockSize; ++block)
+        rig.host.processBlock();
+
+    rig.host.setBlockSink (nullptr);
+
+    const bool slotZero = rig.host.trackPlayState (0, 0).playing;
+    const bool slotOne = rig.host.trackPlayState (0, 1).playing;
+
+    const auto tally = [] (const RecordingSink& rendered, int from)
+    {
+        int first = 0, third = 0, neither = 0;
+        double sum = 0.0;
+        int taken = 0;
+
+        for (int n = from; n < rendered.written - 500; n += 97)
+        {
+            const auto value = rendered.buffer.getSample (0, n);
+            const auto segment = segmentOf (value);
+
+            if (segment == 0)      ++first;
+            else if (segment == 2) ++third;
+            else                   ++neither;
+
+            sum += std::abs (value);
+            ++taken;
+        }
+
+        return std::tuple { first, third, neither, taken > 0 ? sum / taken : 0.0 };
+    };
+
+    const auto [beforeFirst, beforeThird, beforeNeither, beforeLevel] = tally (before, 500);
+    const auto [afterFirst, afterThird, afterNeither, afterLevel] = tally (sink, sink.written / 2);
+
+    MESSAGE ("M16: before the second launch - slot 0's material " << beforeFirst
+              << ", slot 1's " << beforeThird << ", neither " << beforeNeither
+              << ", mean level " << juce::String (beforeLevel, 4).toStdString());
+    MESSAGE ("M16: after it - slot 0's material " << afterFirst
+              << ", slot 1's " << afterThird << ", neither " << afterNeither
+              << ", mean level " << juce::String (afterLevel, 4).toStdString());
+    MESSAGE ("M16: play states after - slot 0 "
+              << std::string (slotZero ? "playing" : "stopped")
+              << ", slot 1 " << std::string (slotOne ? "playing" : "stopped"));
+    MESSAGE ("M16: THE ANSWER - a track "
+              << std::string (slotZero
+                                ? "KEEPS BOTH SLOTS PLAYING, so a sampler claim is per SLOT and a"
+                                  " bank of eight cells is eight voices"
+                                : "KEEPS ONE PLAYING SLOT, so a member launching chokes its track:"
+                                  " a sampler's choke group for free, and a claim can be per TRACK"));
+
+    /*  The one thing asserted is that the measurement happened: the second slot
+        did start, or there is nothing to report either way. */
+    CHECK (slotOne);
+}
+
+TEST_CASE ("M17: where a clip armed with a start offset actually begins")
+{
+    /*  Load-to-time places a cue at an offset and has to trust it to the
+        sample: §13.9 sets the offset in prepare, which is a graph rebuild, and
+        nudges anything already playing. This is the first half - the arm - and
+        it is measured on a ramp, whose rendered value IS its position in the
+        file.
+
+        REPORTED WITH A BOUND rather than gated on an exact sample: a launch is
+        placed at a block boundary, so the first sample out is the placement
+        rounded up to one, and the number worth knowing is how far that is. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+    constexpr int seconds = 4;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto ramp = writeRamp (rig.storage.folder, rate, seconds);
+    REQUIRE (ramp.existsAsFile());
+
+    auto* matrix = rig.host.trackMatrix (0);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->snapToTargets();
+
+    for (const double offset : { 0.5, 1.25, 2.0 })
+    {
+        REQUIRE (rig.host.setTrackRanges (0, ramp.getFullPathName().toStdString(), {}, offset));
+        REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+
+        for (int i = 0; i < 8; ++i)
+            rig.host.processBlock();
+
+        RecordingSink sink;
+        sink.prepare (settings.outputChannels, rate);
+        rig.host.setBlockSink (&sink);
+
+        const auto target = rig.host.clock().samplesElapsed() + 4 * (rate / 50);
+        REQUIRE (rig.host.launchTrackAt (0, 0, rig.host.beatsAtSample (target)));
+
+        for (int block = 0; block < rate / (2 * blockSize); ++block)
+            rig.host.processBlock();
+
+        rig.host.setBlockSink (nullptr);
+
+        const auto first = sink.firstSoundAt (0);
+        REQUIRE (first >= 0);
+
+        const auto landed = rampPositionOf (sink.buffer.getSample (0, first + 64), rate, seconds);
+        const auto wanted = static_cast<int> (offset * rate) + 64;
+
+        MESSAGE ("M17: an offset of " << offset << " s asked for sample " << wanted
+                  << " and got " << landed << " - out by " << (landed - wanted)
+                  << " samples (" << juce::String (1000.0 * (landed - wanted) / rate, 3)
+                  << " ms)");
+
+        /*  A block either way is the placement grid; anything larger means the
+            offset itself missed rather than the launch instant. */
+        CHECK (std::abs (landed - wanted) <= blockSize * 2);
+
+        rig.host.stopTrack (0);
+
+        for (int i = 0; i < 8; ++i)
+            rig.host.processBlock();
+    }
+
+    MESSAGE ("M17: nudge on an already-playing clip is NOT measured here - "
+              "`LaunchHandle::nudge` is not reachable from Go.dot's own code "
+              "(no AudioHost entry point exposes it), so load-to-time relaunches "
+              "rather than nudges until one is added");
 }

@@ -133,7 +133,7 @@ so what could be built is half of what §3.24 promises, and half of it in the
 document would be a row that does not do what the PRD says. It goes to the
 author as an amendment instead.
 
-**Phase 4 is drawn and not yet built.** It is the phase that makes a rehearsal
+**Phase 4 has started, and its first pull request pays six debts.** It is the phase that makes a rehearsal
 possible rather than a performance: anticipation, so a scene is ready before the
 operator's hand comes down; a shared allocator, so two cues cannot fight over one
 processor input and the show says so at edit time rather than at half past ten at
@@ -157,6 +157,19 @@ emitted by nothing, two log-header lines that these documents show and no code
 writes, and a load refusal that a settled decision asked for and never got. None
 of them is new to Phase 4; all of them are things Phase 4 would have discovered by
 standing on them.
+
+**PR 4.1 is those debts paid.** A cue that says it starts two seconds in now does;
+a voice armed and abandoned comes back when the run is killed; `role` and `phase`
+are published, so the running pane stops rendering an empty string where a group's
+phase belongs; the log header carries the clock and one line per media file, which
+is what §11.5 meant by calling the launch tick a pure function of it; and a cue
+that waits for an answer its target cannot give is refused when the show is read
+rather than reported and run anyway. It also gives Go.dot the first thing it has
+ever known about how long a sound is — `/godot/cue/<id>/duration`, read once when
+the show opens — which is the number the state solver cannot work without. Two
+measurements come with it, both reporting rather than gating: whether a second
+launcher slot stops the first on one track, which decides what a sampler group
+claims, and where a clip armed at an offset actually begins.
 
 **There is now something to look at, and to work in.** `wfg serve <bundle>
 --ui=clients/console` serves a client from `/ui` on the OSCQuery port; open that

@@ -184,80 +184,9 @@ namespace wfg::tree
                 problems.push_back (problem);
         }
 
-        /*  And the cues that depend on them, checked here so that every verb
-            which opens a show gets it: serve, tree, replay. `wfg validate`
-            calls it directly, because it reads a document and never mounts
-            anything. */
-        for (auto& problem : checkNetworkCues (document))
-            problems.push_back (std::move (problem));
-
         return problems;
     }
 
-    //==============================================================================
-    std::vector<std::string> checkNetworkCues (const doc::ShowDocument& document)
-    {
-        std::vector<std::string> problems;
-
-        /*  The mounts first, as prefix and capability, so the cue walk below is
-            a lookup rather than a second document traversal per cue. */
-        struct Target
-        {
-            std::string id;
-            std::string prefix;
-            bool canBeAsked = false;
-        };
-
-        std::vector<Target> targets;
-
-        for (const auto& id : declaredMountIds (document))
-            if (const auto declaration = mountDeclarationFor (document, id))
-                targets.push_back ({ id, declaration->prefix, declaration->canBeAsked() });
-
-        /*  Walked here rather than through a document accessor, because
-            there is no "every cue" accessor and adding one for this would put a
-            traversal in ShowDocument that only this cares about. */
-        const std::function<void (const juce::ValueTree&)> visit =
-            [&] (const juce::ValueTree& node)
-        {
-            for (const auto& child : node)
-                visit (child);
-
-            if (node.getType().toString() != "Osc")
-                return;
-
-            if (node[juce::Identifier ("wait")].toString() != "verified")
-                return;
-
-            const auto id = node[juce::Identifier ("id")].toString().toStdString();
-            const auto address = node[juce::Identifier ("address")].toString().toStdString();
-
-            const Target* owner = nullptr;
-
-            for (const auto& target : targets)
-                if (address.size() > target.prefix.size()
-                      && address.compare (0, target.prefix.size(), target.prefix) == 0
-                      && address[target.prefix.size()] == '/')
-                    owner = &target;
-
-            if (owner == nullptr)
-            {
-                problems.push_back (id + ": \"" + address + "\" is under no mounted namespace,"
-                                         " so nothing can be asked about it");
-                return;
-            }
-
-            if (! owner->canBeAsked)
-                problems.push_back (id + ": waits for verification from " + owner->id
-                                       + ", which declares no readback. A cue that cannot"
-                                         " succeed is worse than one that fails, because it"
-                                         " holds the list");
-        };
-
-        visit (document.root());
-
-        return problems;
-    }
 
     //==============================================================================
     void registerMountCommands (CommandRegistry& registry, const doc::ShowDocument& document,

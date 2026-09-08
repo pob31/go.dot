@@ -72,25 +72,19 @@ namespace wfg::tree
     std::optional<MountDeclaration> mountDeclarationFor (const doc::ShowDocument& document,
                                                          const std::string& mountId);
 
-    /** Reads that mount's namespace file out of the bundle and loads it. */
-    /*  Every network cue that asks for something its target cannot give.
+    /*  Every network cue that asks for something its target cannot give used to
+        be checked HERE, and it is now a load refusal in `ShowDocument::validate`
+        - which is what question K settled and what this never was.
 
-        QUESTION K, ANSWERED THE STRICT WAY (namespace draft §9). `transport`
-        says how to send and nothing says whether a box can be ASKED, so a cue
-        whose wait is `verified` aimed at a write-only device is a cue that can
-        never succeed - and without this check nothing notices until somebody is
-        standing in a theatre wondering why the list has stopped.
-
-        It is a check on the DOCUMENT and needs no mount table, no socket and no
-        device: the cue names an address, the address falls under a mount's
-        prefix, and the mount says whether it can answer. So it runs wherever a
-        show is read, including `wfg validate` on a laptop with nothing plugged
-        in - which is the machine somebody is actually sitting at when they have
-        time to fix it.
-
-        One message per offending cue, empty when the show is sound. */
-    std::vector<std::string> checkNetworkCues (const doc::ShowDocument&);
-
+        Worth the note rather than a silent deletion. The check itself was
+        right; where it sat was not. From the mount loader it could only be
+        REPORTED: `wfg serve`, `wfg tree` and `wfg replay` printed it to stderr
+        and opened the show anyway, so a cue that could never succeed still went
+        into the list and still failed at half past seven, and the only verb the
+        check changed was `wfg validate`. It reads the document and nothing else
+        - the cue names an address, the address falls under a mount's prefix,
+        the mount says whether it can be asked - so it belongs where the other
+        refusals of that shape are and needs nothing from this layer. */
     MountResult loadMountFromBundle (const doc::ShowDocument& document, MountTable& mounts,
                                      const juce::File& bundleFolder, const std::string& mountId);
 

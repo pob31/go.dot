@@ -34,6 +34,7 @@ namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi" };
+    inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock" };
     inline constexpr std::string_view enum_trigger_type[] = { "noteOn", "noteOff", "programChange", "controlChange" };
     inline constexpr std::string_view enum_fade_curve[] = { "linear", "sCurve" };
@@ -43,6 +44,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_midi_type[] = { "noteOn", "noteOff", "programChange", "controlChange", "pitchBend", "aftertouch", "channelPressure", "sysex" };
     inline constexpr std::string_view enum_midi_wait[] = { "none", "sent" };
     inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi" };
+    inline constexpr std::string_view enum_run_phase[] = { "entering", "preparing", "prepared", "header", "members", "footer" };
     inline constexpr std::string_view enum_run_state[] = { "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
     inline constexpr std::string_view enum_group_mode[] = { "timeline", "sequence" };
     inline constexpr std::string_view enum_group_advance[] = { "auto", "manual" };
@@ -326,6 +328,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "Position among siblings, zero-based." },
+        { "cue", "role",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
+          true, "member",
+          false, 0.0, false, 0.0,
+          enum_cue_role, 4,
+          "", 50.0, false, "park",
+          "",
+          "Where this cue sits in the thing that contains it: an ordinary member, one of the cues in its group's header or footer, or one of the list's persistent cues. Derived from the element that contains it rather than stored, like `kind` and for the same reason - a client that could write it could move a cue between a group's preparation and its members without the group knowing. A cue at the top level of a list is a member. The whole vocabulary is declared here although `persistent` cannot occur until the section exists, because an enum that grows later grows under a client that has already read it." },
         { "media", "file",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",
@@ -350,6 +360,14 @@ namespace wfg::doc::generated
           "s", 50.0, false, "park",
           "",
           "How far into the file playback begins. A cue that starts at the downbeat rather than at the top of the recording." },
+        { "media", "duration",
+          ValueType::number, 'd', false, Access::read, Kind::state, Persist::none,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "s", 1.0, false, "park",
+          "",
+          "How long the file is, in seconds, read from its header once when the show is opened. On owner `media` and not `cue`, or every memo, group and fade would grow one - and `fade` and `stop` already carry a duration of their own, which is a different thing entirely. A READOUT about a file rather than a decision anybody took, so it is never stored (PRD 4.10) and never logged. Nought means the file is missing, unreadable, or in a format this build has no reader for; the state solver reads that as -I do not know how long this is- and says so rather than guessing." },
         { "route", "bus",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",
@@ -702,6 +720,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "The runs this group run is organising, in the order they were spawned, space-separated. A group owns time, order and lifetime and no output of its own (PRD 4.12), so this is the whole of what it holds." },
+        { "run", "phase",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
+          false, "",
+          false, 0.0, false, 0.0,
+          enum_run_phase, 6,
+          "", 50.0, false, "park",
+          "",
+          "Which part of itself a group run is in: its own pre-wait, its header, its members, its footer. A READOUT and never a model input, like `position` and `rangeIteration` - the scheduler holds it on the job and mirrors it here for a client to watch, so it is not written to the log and a replay, which runs no scheduler, leaves it empty. Empty on every run that is not a group. The two prepare values arrive with the horizon (PR 4.5) and are declared here so the enum does not grow under a client that has already read it." },
         { "run", "state",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           true, "armed",

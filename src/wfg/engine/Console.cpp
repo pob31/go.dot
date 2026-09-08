@@ -33,6 +33,7 @@
 
 #include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/rt/RtCheck.h>
+#include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/HostPlayer.h>
 #include <wfg/engine/audio/DeviceLayer.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
@@ -881,6 +882,22 @@ namespace
 
         wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
 
+        /*  HOW LONG EVERY MEDIA FILE IS, read once, here, on the thread that
+            opened the show - before the first snapshot is published and long
+            before any audio exists. §3.13's solver cannot answer "is this cue
+            still playing" without it, and nothing in Go.dot has ever known.
+
+            It outlives `parameters` because it is declared beside it and the
+            tree only borrows it. */
+        const auto durations =
+            wfg::audio::mediaDurations (document,
+                                        target.isDirectory()
+                                          ? target.getChildFile ("media")
+                                                  .getFullPathName().toStdString()
+                                          : std::string());
+
+        parameters.setMediaDurations (&durations);
+
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;
         state.documentPath = target.getFullPathName().toStdString();
@@ -954,15 +971,12 @@ namespace
             return 2;
         }
 
-        /*  THE CUES THAT ASK FOR SOMETHING THEIR TARGET CANNOT GIVE, checked
-            here as well as at mount-load time, because this is the verb
-            somebody runs on a laptop with nothing plugged in - and that is the
-            machine they are sitting at when they have time to fix it. It reads
-            the document and needs no device, no socket and no mount table. */
-        for (auto& problem : wfg::tree::checkNetworkCues (document))
-            result.problems.push_back (std::move (problem));
+        /*  A cue that asks for something its target cannot give is no longer
+            asked about here: it is a load refusal now, so the read above has
+            already failed and `result.ok` says so. This verb sees it in the
+            problems it already carries.
 
-        /*  AND THE POINTERS THAT POINT AT NOTHING, which are warnings rather
+            AND THE POINTERS THAT POINT AT NOTHING, which are warnings rather
             than refusals: PRD §3.8 makes a stop aimed at a cue that is not
             there a silent no-op during tech, and `object.delete` repairs
             nothing referential by design. The show loads and runs; what fails
@@ -1426,6 +1440,23 @@ namespace
 
         wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
 
+        /*  HOW LONG EVERY MEDIA FILE IS, read once, here, on the thread that
+            opened the show - before the first snapshot is published and long
+            before any audio exists. §3.13's solver cannot answer "is this cue
+            still playing" without a duration, and nothing in Go.dot has ever
+            known one. The log header below writes the same numbers down.
+
+            It outlives `parameters` because it is declared beside it; the tree
+            only borrows it. */
+        const auto durations =
+            wfg::audio::mediaDurations (document,
+                                        target.isDirectory()
+                                          ? target.getChildFile ("media")
+                                                  .getFullPathName().toStdString()
+                                          : std::string());
+
+        parameters.setMediaDurations (&durations);
+
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;
         state.documentPath = target.getFullPathName().toStdString();
@@ -1466,9 +1497,52 @@ namespace
                                ? args.getValueForOption ("--log").toStdString()
                                : std::string();
 
+        /*  THE HEADER THE DOCUMENTS DRAW, which until now was one line.
+
+            §7's own example shows a `clock` line and §11.6 asks for a `media`
+            line per file, and neither was written by anything. The clock one is
+            the one that matters beyond tidiness: §11.5 calls the launch tick "a
+            pure function of the log header", and the header did not carry the
+            numbers that function needs, so a replay could not have recomputed a
+            launch instant even in principle.
+
+            WRITTEN HERE RATHER THAN IN `Bundle`, because only this scope knows
+            them. `logHeaderLines` is handed a folder and can hash what is in it;
+            it cannot know the sample rate, and it cannot know which media files
+            the SHOW references as against which files happen to sit in the
+            folder. Both of those are right here, nineteen lines after the
+            clock was made and a hundred after the document was read.
+
+            The rate and block size are what was ASKED for. A device that grants
+            a different rate refuses to start at all, so the two agree or there
+            is no session; a device may grant a different BLOCK size, and this
+            says so rather than pretending. */
+        auto headerLines = wfg::doc::Bundle::logHeaderLines (target);
+
+        headerLines.push_back ("clock sampleRate=" + std::to_string (sampleRate)
+                                 + " blockSize=" + std::to_string (blockSize)
+                                 + " samplesPerTick=" + std::to_string (schedule->samplesPerTick()));
+
+        /*  One line per media file the show references, with its size and its
+            length - so a replay can see what was read without hashing a show's
+            media on every open, and so a log read a year later says how long
+            the sounds were even if the sounds have gone. A file that is missing
+            is written with nought bytes and nought seconds rather than skipped:
+            that it was named and absent is the interesting part. */
+        for (const auto& [named, seconds] : durations)
+        {
+            const auto file = target.isDirectory()
+                                ? target.getChildFile ("media").getChildFile (juce::String (named))
+                                : juce::File (juce::String (named));
+
+            headerLines.push_back ("media " + named + " "
+                                     + std::to_string (file.existsAsFile() ? file.getSize() : 0)
+                                     + " " + juce::String (seconds, 3).toStdString());
+        }
+
         if (! logPath.empty())
         {
-            if (! engine.log().open (logPath, wfg::doc::Bundle::logHeaderLines (target)))
+            if (! engine.log().open (logPath, headerLines))
             {
                 std::cerr << "wfg serve: cannot write the log at " << logPath << std::endl;
                 return 2;
@@ -1476,7 +1550,7 @@ namespace
         }
         else
         {
-            engine.log().openInMemory (wfg::doc::Bundle::logHeaderLines (target));
+            engine.log().openInMemory (headerLines);
         }
 
         //  --- the transports ------------------------------------------------

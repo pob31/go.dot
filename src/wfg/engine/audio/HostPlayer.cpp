@@ -91,7 +91,8 @@ namespace wfg::audio
             for (const auto& range : request.ranges)
                 ranges.push_back ({ range.in, range.out, range.loops });
 
-            if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges))
+            if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges,
+                                            request.startOffset))
             {
                 /*  MEDIA-MISSING COVERS BOTH, for now: a file that is not there
                     and a range that is not inside it are both "this cue cannot

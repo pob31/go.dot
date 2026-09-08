@@ -105,6 +105,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/CueMatrix.cpp
     wfg/engine/audio/DeviceLayer.h
     wfg/engine/audio/DeviceLayer.cpp
+    wfg/engine/audio/MediaInfo.h
+    wfg/engine/audio/MediaInfo.cpp
     wfg/engine/audio/CueOutputPlugin.h
     wfg/engine/audio/CueOutputPlugin.cpp
     wfg/engine/audio/HostPlayer.h

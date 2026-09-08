@@ -3575,3 +3575,118 @@ TEST_CASE ("fade: a target that is real and not running is still a silent no-op"
     CHECK (run->error.empty());
     CHECK (run->state == cue::runState::done);
 }
+
+//==============================================================================
+TEST_CASE ("kill: a cue armed and never launched gives its voice back")
+{
+    /*  THE LEAK PR 4.1 CLOSES, and it is the second of two.
+
+        `observeEdges` ends a run on a playing-to-stopped edge, which is the
+        right question for every run that played. A run ARMED at standby and
+        killed before it ever sounded gives no such edge, ever: it stayed
+        `stopping`, and `holdsTrack()` is `track >= 0 && ! isFinished()`, so it
+        held its voice for the rest of the session. The sweep in `advanceWaits`
+        did not reach it either - that one skips anything holding a track,
+        because it was written for fades and groups, which hold none.
+
+        The symptom arrives somewhere else entirely: the next cue the pointer
+        reaches fails with `no-track`, pointing at a rig that is fine. */
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    REQUIRE (rig.runs.all().size() == 1u);
+    const auto id = rig.runs.all().front().id;
+
+    REQUIRE (rig.runs.find (id)->state == cue::runState::armed);
+    REQUIRE (rig.runs.find (id)->track == 0);
+    REQUIRE (rig.runs.lowestFreeTrack (4) == 1);     // held, and rightly so
+
+    rig.submitAndTick ("run.kill", { osc::Value::string (id) });
+
+    /*  One tick to tell the audio side and see that nothing is sounding. */
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->isFinished());
+    CHECK (rig.runs.lowestFreeTrack (4) == 0);
+}
+
+TEST_CASE ("kill: every voice an operator armed and abandoned comes back")
+{
+    /*  The same thing at the scale it is felt at. A pointer walked down a list
+        of media cues arms each one it lands on; killing them all must leave the
+        rig exactly as it was found, or the show runs out of voices for a reason
+        nobody can see. */
+    Rig rig;
+
+    std::vector<std::string> cues;
+
+    for (int n = 0; n < 4; ++n)
+    {
+        const auto id = rig.document.createCue (rig.listId, 2 + n, "media",
+                                                "Sound " + std::to_string (n)).id;
+        rig.document.setAttribute ("/godot/cue/" + id + "/file", "thunder.wav");
+        cues.push_back (id);
+    }
+
+    for (const auto& cueId : cues)
+    {
+        rig.setStandby (cueId);
+        rig.audio.completeArms (rig.engine);
+        rig.tickOnce();
+    }
+
+    REQUIRE (rig.runs.all().size() == cues.size());
+    CHECK (rig.runs.lowestFreeTrack (4) == -1);      // every voice held
+
+    for (const auto& run : rig.runs.all())
+        rig.submitAndTick ("run.kill", { osc::Value::string (run.id) });
+
+    rig.tickOnce();
+
+    CHECK (rig.runs.lowestFreeTrack (4) == 0);
+
+    for (const auto& run : rig.runs.all())
+        CHECK (run.isFinished());
+}
+
+//==============================================================================
+TEST_CASE ("group: a run says which part of itself it is in")
+{
+    /*  `/godot/run/<id>/phase` was drawn in §12.2 and published by nothing, so
+        the console has been rendering an empty string in its place since the
+        group scheduler landed.
+
+        A READOUT, mirrored from the job that holds it: the scheduler decides
+        the phase and the run carries a copy for a client to watch. So it is
+        never logged, and a replay - which runs no scheduler - leaves it empty,
+        exactly as it leaves `position` and `rangeIteration`. */
+    GroupRig rig;
+    rig.setStandby (rig.groupId);
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    REQUIRE (rig.runs.all().size() == 1u);
+    const auto groupRun = rig.runs.all().front().id;
+
+    /*  IT STARTS IN `entering`, which is its own pre-wait, and reaches its
+        members on the tick after - because the mirror runs at the top of the
+        job loop, before the phase it is about to move to has been chosen. A
+        readout is a tick behind the decision by construction, which is what a
+        readout is. */
+    rig.tickOnce();
+    CHECK (rig.runs.find (groupRun)->phase == "entering");
+
+    /*  And then its members: this group has no header, and an absent phase is
+        skipped rather than entered. */
+    rig.tickOnce();
+    CHECK (rig.runs.find (groupRun)->phase == "members");
+
+    /*  And a member's own run has none. A phase is a thing a group has. */
+    const auto member = rig.runOf (rig.first);
+    REQUIRE (! member.empty());
+    CHECK (rig.runs.find (member)->phase.empty());
+
+    CHECK (rig.runToCompletion (groupRun) < 400);
+}

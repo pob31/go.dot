@@ -313,6 +313,21 @@ namespace wfg::cue
         std::string parent;
         std::vector<std::string> children;
 
+        /*  WHICH PART OF ITSELF A GROUP RUN IS IN - its own entry, its header,
+            its members, its footer - mirrored here from the job that holds it
+            so a client can watch it.
+
+            A READOUT, like `position` and `rangeIteration`, and not a model
+            input: the scheduler decides the phase and this is a copy for
+            looking at. So it is never logged, and a replay - which runs no
+            scheduler at all - leaves it empty, exactly as it leaves the other
+            two. Empty on every run that is not a group.
+
+            §12.2 drew this node and nothing ever published it; the console has
+            been rendering an empty string in its place since the day the group
+            scheduler landed. */
+        std::string phase;
+
         //======================================================================
         /*  THE WAITS, IN TICKS, COPIED FROM THE CUE WHEN THE RUN IS CREATED.
 

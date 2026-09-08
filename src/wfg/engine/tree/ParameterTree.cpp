@@ -415,8 +415,15 @@ namespace wfg::tree
             }
         }
 
+        /*  `role` is where this cue sits in the thing that contains it, and it
+            is a parameter rather than something read off the node because the
+            node cannot know: a Media element is the same element whether it is
+            a member, a header cue or a footer cue, and what differs is only
+            which branch below recursed into it. */
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
-                         std::vector<Node>& out)
+                         std::vector<Node>& out,
+                         const std::map<std::string, double>* durations,
+                         const char* role = "member")
         {
             const auto element = node.getType().toString().toStdString();
             const auto isGroup = element == "Group";
@@ -481,6 +488,23 @@ namespace wfg::tree
                                                             : "memo";
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
+                else if (name == "role")   text = role;
+                else if (name == "duration")
+                {
+                    /*  READ ONCE WHEN THE SHOW WAS OPENED, and nought when
+                        nobody read any: a replay, a tree dump of a bundle with
+                        no media folder, a test. Nought is the same answer a
+                        missing or unreadable file gives, and §3.13's solver
+                        reads it as "I do not know how long this is" rather than
+                        as "this has ended". */
+                    const auto named = node[juce::Identifier ("file")].toString().toStdString();
+                    const auto found = durations != nullptr ? durations->find (named)
+                                                            : std::map<std::string, double>::const_iterator {};
+
+                    text = (durations != nullptr && found != durations->end())
+                             ? osc::formatDouble (found->second)
+                             : osc::formatDouble (0.0);
+                }
                 else if (name == "order")  text = orderOf (node);
                 else if (name == "headerOrder")
                     text = orderOf (node.getChildWithName ("Header"));
@@ -547,15 +571,16 @@ namespace wfg::tree
                 if (childElement == "Header" || childElement == "Footer")
                 {
                     int roleIndex = 0;
+                    const auto* childRole = childElement == "Header" ? "header" : "footer";
 
                     for (const auto& roleChild : child)
                         if (roleChild.hasProperty (idProperty))
-                            collectCue (roleChild, id, roleIndex++, out);
+                            collectCue (roleChild, id, roleIndex++, out, durations, childRole);
 
                     continue;
                 }
 
-                collectCue (child, id, childIndex++, out);
+                collectCue (child, id, childIndex++, out, durations);
             }
         }
     }
@@ -644,7 +669,7 @@ namespace wfg::tree
 
                     for (const auto& cue : list)
                         if (cue.hasProperty (idProperty))
-                            collectCue (cue, id, index++, nodes);
+                            collectCue (cue, id, index++, nodes, durations);
                 }
             }
             else if (containerName == "Mounts")
@@ -1012,6 +1037,7 @@ namespace wfg::tree
                 else if (name == "late")      text = std::to_string (run.late);
                 else if (name == "parent")    text = run.parent;
                 else if (name == "children")  text = joinIds (run.children);
+                else if (name == "phase")     text = run.phase;
                 else if (name == "error")     text = run.error;
                 else if (name == "iteration")  text = std::to_string (run.iteration);
                 else if (name == "iterations") text = std::to_string (run.iterations);
