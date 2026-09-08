@@ -1,0 +1,28 @@
+<Show>
+  <Lists>
+    <List id="7K2QM9X4" name="Cues">
+      <Media id="MED00001" file="voice.wav" name="Voix solo" number="1">
+        <Feed id="FED00001" gains="1" slot="SA000001"/>
+        <Insert id="FN000001" channel="CHN00001"/>
+        <Route id="RTE00001" bus="BS000002" gains="0.7 0.7"/>
+      </Media>
+      <Media id="MED00002" file="crowd.wav" name="Crowd" number="2">
+        <Feed id="FED00002" gains="1 0 0 1" slot="SA000002"/>
+      </Media>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="K3PV7WRB" namespace="namespaces/wfs.json" port="9000" prefix="/wfs">
+      <Slot id="SA000001" address="/wfs/input/3" bus="BS000001" firstChannel="2" name="Voix solo" width="1"/>
+      <Slot id="SA000002" address="/wfs/input/5" bus="BS000001" firstChannel="4" name="Ambiance G/D" width="2"/>
+    </Mount>
+  </Mounts>
+  <Audio tracks="4">
+    <Bus id="BS000001" firstChannel="8" name="WFS send" width="12"/>
+    <Bus id="BS000002" firstChannel="0" name="Foldback" width="2"/>
+    <Rack>
+      <Channel id="CHN00001" access="exclusive" class="mono" name="Vocal verb"/>
+      <Channel id="CHN00002" access="shared" class="stereo" name="Hall"/>
+    </Rack>
+  </Audio>
+</Show>

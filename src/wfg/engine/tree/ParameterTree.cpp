@@ -420,6 +420,54 @@ namespace wfg::tree
             node cannot know: a Media element is the same element whether it is
             a member, a header cue or a footer cue, and what differs is only
             which branch below recursed into it. */
+        /*  ONE DECLARED SLOT, wherever the document keeps it.
+
+            §1's first rule applies to a slot as it does to a cue: objects are
+            identity-addressed, so a `Slot` under a mount and a `Channel` under
+            the rack both live at `/godot/slot/<id>` and a client holding an
+            identifier never has to know which container it came out of. What
+            differs is the rows, and that is what the second owner is for - the
+            `Media` shape exactly, where a media cue is a cue first.
+
+            A VOICE IS NOT HERE. A track is not an object anybody declared: no
+            identifier, and `@tracks` is a count rather than a list. Inventing
+            `/godot/slot/voice3` would force one address to be `persist=show`
+            for a declared slot and `none` for a track, which no row can be.
+            Where a voice is held has been readable at `/godot/run/<id>/track`
+            since Phase 2. */
+        void collectSlot (const juce::ValueTree& node, const char* element,
+                          const char* extraOwner, const char* kindText,
+                          std::vector<Node>& out)
+        {
+            const auto id = node[idProperty].toString().toStdString();
+
+            if (id.empty())
+                return;
+
+            const auto base = std::string (godot) + "/slot/" + id;
+
+            auto rows = doc::Schema::rowsForOwner ("slot");
+
+            for (auto* row : doc::Schema::rowsForOwner (extraOwner))
+                rows.push_back (row);
+
+            for (const auto* row : rows)
+            {
+                const doc::Attribute attribute { element, row };
+                const auto name = std::string (row->name);
+
+                /*  Derived from the element that holds it, never stored - the
+                    `cue/kind` rule, and for the same reason: a client that
+                    could write it could turn a processor input into a rack
+                    channel by writing a word, and the two are released and
+                    refused by different policies. */
+                const auto text = name == "kind" ? std::string (kindText)
+                                                 : storedText (attribute, node);
+
+                out.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
+        }
+
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
                          std::vector<Node>& out,
                          const std::map<std::string, double>* durations,
@@ -552,6 +600,35 @@ namespace wfg::tree
                     continue;
                 }
 
+                /*  A DESTINATION IS NOT A NESTED CUE. The recursion at the foot
+                    of this loop takes anything that reaches it, so a `Feed`
+                    left unlisted would be published at `/godot/cue/<id>` with
+                    the rows of a kind it is not - which is the failure mode the
+                    comment above names, and the reason this is a lookup. */
+                if (childElement == "Feed" || childElement == "Insert")
+                {
+                    const auto* owner = childElement == "Feed" ? "feed" : "insert";
+                    const auto childId = child[idProperty].toString().toStdString();
+
+                    if (! childId.empty())
+                    {
+                        const auto childBase = std::string (godot) + "/"
+                                                 + std::string (owner) + "/" + childId;
+
+                        for (const auto* row : doc::Schema::rowsForOwner (owner))
+                        {
+                            const doc::Attribute attribute { childElement.toStdString(), row };
+                            const auto name = std::string (row->name);
+                            const auto text = name == "cue" ? id
+                                                            : storedText (attribute, child);
+
+                            out.push_back (makeLeaf (childBase + "/" + name, *row, text));
+                        }
+                    }
+
+                    continue;
+                }
+
                 if (childElement == "Range")
                 {
                     /*  Counted separately from the cue index, because a range
@@ -619,6 +696,12 @@ namespace wfg::tree
         }
 
         //----------------------------------------------------------------------
+        /*  Every declared slot, in the order the document keeps them: a mount's
+            processor inputs first, because mounts are written before the audio
+            section, then the rack's channels. Gathered while the containers are
+            walked rather than by a second traversal. */
+        std::vector<std::string> slotOrder;
+
         for (const auto& container : showNode)
         {
             const auto containerName = container.getType().toString().toStdString();
@@ -707,6 +790,26 @@ namespace wfg::tree
 
                         nodes.push_back (makeLeaf (base + "/" + name, *row, text));
                     }
+
+                    /*  AND THE INPUTS THE SHOW USES OF IT (decision P). The
+                        processor could describe its own - §3.9b marks that
+                        *(proposed)* - and the author's decision is that the SHOW
+                        declares them and the mounted namespace is what a
+                        validate pass checks against. How many inputs of a
+                        processor a show is using is something somebody decided
+                        (§4.10), and a pool that changed when a processor was
+                        reconfigured would change a show nobody had edited. */
+                    for (const auto& slot : mount)
+                    {
+                        if (slot.getType().toString() != "Slot")
+                            continue;
+
+                        collectSlot (slot, "Slot", "processorInput", "processorInput", nodes);
+
+                        if (const auto slotId = slot[idProperty].toString().toStdString();
+                            ! slotId.empty())
+                            slotOrder.push_back (slotId);
+                    }
                 }
             }
             else if (containerName == "MidiPorts")
@@ -761,6 +864,11 @@ namespace wfg::tree
 
                 for (const auto& bus : container)
                 {
+                    /*  THE RACK IS PASSED OVER HERE by the guard below rather
+                        than by a name test: `Rack` is a container element and
+                        carries no identifier, exactly like `Mounts`. Had it
+                        carried one, `/godot/bus` would have grown a bus with a
+                        default width and stopped being the show's buses. */
                     const auto id = bus[idProperty].toString().toStdString();
 
                     if (id.empty())
@@ -776,7 +884,49 @@ namespace wfg::tree
                                                    *row, storedText (attribute, bus)));
                     }
                 }
+
+                /*  The rack's channels, which are slots of the second kind
+                    (§3.9e). The pool is declared here and Phase 9 puts the
+                    tracks, the sends and the plugins inside a channel. */
+                for (const auto& rack : container)
+                {
+                    if (rack.getType().toString() != "Rack")
+                        continue;
+
+                    for (const auto& channel : rack)
+                    {
+                        if (channel.getType().toString() != "Channel")
+                            continue;
+
+                        collectSlot (channel, "Channel", "rackChannel", "rackChannel", nodes);
+
+                        if (const auto channelId = channel[idProperty].toString().toStdString();
+                            ! channelId.empty())
+                            slotOrder.push_back (channelId);
+                    }
+                }
             }
+        }
+
+        //----------------------------------------------------------------------
+        /*  `/godot/slot/order`, the container's own node, beside
+            `/godot/list/order` and `/godot/run/order` and built on the same
+            machinery §12.12 put in for them. */
+        {
+            std::string joined;
+
+            for (const auto& id : slotOrder)
+            {
+                if (! joined.empty())
+                    joined += ' ';
+
+                joined += id;
+            }
+
+            for (const auto* row : doc::Schema::rowsForOwner ("slots"))
+                nodes.push_back (makeLeaf (std::string (godot) + "/slot/"
+                                             + std::string (row->name),
+                                           *row, joined));
         }
 
         //----------------------------------------------------------------------

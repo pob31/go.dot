@@ -156,6 +156,79 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  PHASE 4'S SLOTS, declared. Four commands rather than one, because
+            they are four different objects and §4.11 wants each gesture named:
+            a processor input belongs to a mount, a rack channel to the rack,
+            and a feed and an insert to a cue. */
+        registry.add ({ "slot.create",
+                        "Declares one of a processor's inputs on its mount: a slot a cue can"
+                        " claim, at an address under that mount's prefix.",
+                        { { "mount", 's', false }, { "address", 's', false },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.createSlot (args[0].getString(),
+                                                                   args[1].getString(),
+                                                                   id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "channel.create",
+                        "Adds a channel to the live rack: one position in the pool a cue's insert"
+                        " claims. Makes the rack if the show has none.",
+                        { { "class", 's', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 1 ? args[1].getString() : std::string {};
+
+                            const auto edit = document.createRackChannel (args[0].getString(), id);
+
+                            return fromEdit (edit, withId (args, 1, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "feed.create",
+                        "Adds a destination to a media cue that is a processor input rather than"
+                        " a bus: the audio goes there and the cue claims the slot.",
+                        { { "cue", 's', false }, { "slot", 's', false },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.createFeed (args[0].getString(),
+                                                                   args[1].getString(),
+                                                                   id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "insert.create",
+                        "Puts a media cue through a rack channel. In Phase 4 the claim is"
+                        " bookkeeping: the pool is here and the plugins are Phase 9's.",
+                        { { "cue", 's', false }, { "channel", 's', false },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.createInsert (args[0].getString(),
+                                                                     args[1].getString(),
+                                                                     id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "trigger.create",
                         "Adds a trigger to a cue: what fires it when nobody presses GO.",
                         { { "cue", 's', false }, { "kind", 's', false },

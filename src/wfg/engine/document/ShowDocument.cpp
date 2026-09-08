@@ -20,6 +20,8 @@
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <map>
+#include <cctype>
 #include <algorithm>
 #include <unordered_set>
 
@@ -226,7 +228,33 @@ namespace wfg::doc
         if (element == "Bus")                       return "bus";
         if (element == "Show")                      return "document";
         if (element == "Audio")                     return "audio";
+
+        /*  A SLOT AND A RACK CHANNEL ANSWER DIFFERENTLY, and they have to: this
+            is the by-kind half of the `refers` check, so `feed/@slot` naming a
+            rack channel and `insert/@channel` naming a processor input are both
+            caught here rather than at run time. They share the owner `slot` for
+            the rows they have in common; what they do not share is the word
+            this returns. */
+        if (element == "Slot")                      return "slot";
+        if (element == "Channel")                   return "rackChannel";
+        if (element == "Feed")                      return "feed";
+        if (element == "Insert")                    return "insert";
+
+        /*  `Rack` is addressed by nothing, like `Mounts` and like a header: a
+            container that holds channels and carries nothing of its own. */
+        if (element == "Rack")                      return {};
+
         return {};
+    }
+
+    std::string_view ShowDocument::addressOwnerFor (std::string_view element)
+    {
+        /*  The one place the two answers differ, and the reason is in the
+            header: a rack channel and a processor input share an address space
+            and not a kind. Everything else is addressed under its own owner. */
+        if (element == "Channel")                   return "slot";
+
+        return ownerForElement (element);
     }
 
     //==============================================================================
@@ -349,7 +377,7 @@ namespace wfg::doc
                 /godot/list/<a cue's id>/name does not quietly address the cue.
                 An identifier alone is unambiguous; the word is there for the
                 reader, and a reader that can be wrong is worse than no reader. */
-            if (ownerForElement (node.getType().toString().toStdString()) != owner)
+            if (addressOwnerFor (node.getType().toString().toStdString()) != owner)
                 return out;
         }
 
@@ -577,6 +605,81 @@ namespace wfg::doc
 
         return insertObject (cue, cue.getNumChildren(), "Route", id,
                              { { "bus", busId } });
+    }
+
+    EditResult ShowDocument::createSlot (const std::string& mountId,
+                                         const std::string& address,
+                                         const std::string& id)
+    {
+        auto mount = findById (mountId);
+
+        if (! mount.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        /*  A slot belongs to the processor it is an input of. Declared on the
+            mount rather than in a pool of its own, because "which of WFS-DIY's
+            inputs this show uses" is a fact about that mount and moves with it
+            when somebody re-points the show at another box. */
+        if (mount.getType().toString() != "Mount")
+            return EditResult::failed (reason::typeMismatch);
+
+        return insertObject (mount, mount.getNumChildren(), "Slot", id,
+                             { { "address", address } });
+    }
+
+    EditResult ShowDocument::createRackChannel (const std::string& channelClass,
+                                                const std::string& id)
+    {
+        auto audio = showNode.getChildWithName ("Audio");
+
+        if (! audio.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        /*  THE RACK IS MADE ON DEMAND, the way a group's header is: there is at
+            most one, it carries nothing itself, and a show with no rack should
+            not have an empty one in the file for the sake of it. */
+        auto rack = audio.getChildWithName ("Rack");
+
+        if (! rack.isValid())
+        {
+            rack = juce::ValueTree ("Rack");
+            audio.addChild (rack, -1, nullptr);
+        }
+
+        return insertObject (rack, rack.getNumChildren(), "Channel", id,
+                             { { "class", channelClass } });
+    }
+
+    EditResult ShowDocument::createFeed (const std::string& cueId,
+                                         const std::string& slotId,
+                                         const std::string& id)
+    {
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (cue.getType().toString() != "Media")
+            return EditResult::failed (reason::typeMismatch);
+
+        return insertObject (cue, cue.getNumChildren(), "Feed", id,
+                             { { "slot", slotId } });
+    }
+
+    EditResult ShowDocument::createInsert (const std::string& cueId,
+                                           const std::string& channelId,
+                                           const std::string& id)
+    {
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (cue.getType().toString() != "Media")
+            return EditResult::failed (reason::typeMismatch);
+
+        return insertObject (cue, cue.getNumChildren(), "Insert", id,
+                             { { "channel", channelId } });
     }
 
     EditResult ShowDocument::createRange (const std::string& cueId, double in, double out,
@@ -1224,6 +1327,167 @@ namespace wfg::doc
         };
 
         VerifiedCues { problems, mountFacts }.visit (showNode);
+
+        //----------------------------------------------------------------------
+        /*  PHASE 4'S SLOTS, and the destinations that name them (PRD §3.9b,
+            §3.9e). Four rules, all of them about numbers the document can
+            check itself.
+
+            The widths first, so the walks below are lookups rather than a
+            traversal per destination. */
+        std::map<std::string, int> busWidth;
+        std::map<std::string, int> slotWidth;
+
+        const auto intAttribute = [] (const juce::ValueTree& node, const char* name, int fallback)
+        {
+            const juce::Identifier key { name };
+            return node.hasProperty (key) ? static_cast<int> (node[key]) : fallback;
+        };
+
+        for (const auto& audio : showNode)
+        {
+            if (audio.getType().toString() != "Audio")
+                continue;
+
+            for (const auto& bus : audio)
+                if (bus.getType().toString() == "Bus")
+                    busWidth[bus[idProperty].toString().toStdString()]
+                        = intAttribute (bus, "width", 1);
+        }
+
+        for (const auto& mounts : showNode)
+        {
+            if (mounts.getType().toString() != "Mounts")
+                continue;
+
+            for (const auto& mount : mounts)
+            {
+                const auto prefix = mount[juce::Identifier ("prefix")].toString().toStdString();
+
+                for (const auto& slot : mount)
+                {
+                    if (slot.getType().toString() != "Slot")
+                        continue;
+
+                    const auto slotId = slot[idProperty].toString().toStdString();
+                    const auto width = intAttribute (slot, "width", 1);
+                    const auto firstChannel = intAttribute (slot, "firstChannel", 0);
+                    const auto address = slot[juce::Identifier ("address")].toString().toStdString();
+                    const auto busId = slot[juce::Identifier ("bus")].toString().toStdString();
+
+                    slotWidth[slotId] = width;
+
+                    const auto where = "/Show/.../Slot[" + slotId + "]: ";
+
+                    /*  AN INPUT OF THAT PROCESSOR, and not of some other one. A
+                        slot whose address falls outside its own mount's prefix
+                        would claim exclusivity over parameters the mount does
+                        not carry - and the osc cues that write those parameters
+                        would go somewhere else entirely. */
+                    if (! prefix.empty()
+                          && ! (address.size() > prefix.size()
+                                  && address.compare (0, prefix.size(), prefix) == 0
+                                  && address[prefix.size()] == '/'))
+                        problems.push_back (where + "\"" + address + "\" is not under \"" + prefix
+                                              + "\", which is the prefix of the mount that"
+                                                " declares it");
+
+                    /*  AND IT HAS TO FIT IN ITS BUS. `firstChannel` is an offset
+                        into the bus, exactly as a bus's own is an offset into
+                        the hardware outputs, so a slot that ran off the end
+                        would send part of a source into channels nobody
+                        declared. A bus that is not there at all is the `refers`
+                        column's warning rather than this refusal - deleting a
+                        bus must not stop yesterday's show opening. */
+                    if (const auto bus = busWidth.find (busId); bus != busWidth.end())
+                        if (firstChannel + width > bus->second)
+                            problems.push_back (where + "channels " + std::to_string (firstChannel)
+                                                  + " to " + std::to_string (firstChannel + width - 1)
+                                                  + " do not fit in a bus " + std::to_string (bus->second)
+                                                  + " channels wide");
+                }
+            }
+        }
+
+        /*  AND THE COEFFICIENTS, which the parameter table has said were
+            refused when the show loads since Phase 2 and which nothing has ever
+            checked: the only check was at arm, where it failed the run.
+
+            WHAT IS CHECKABLE HERE is that the list is a whole number of input
+            channels wide. How many channels the cue HAS is the file's, and the
+            file arrives on a different machine from the one the show was
+            written on - so `gains.size() % width` is the question the document
+            can answer, and "eight gains into a bus three wide" is a matrix that
+            is not a matrix whoever plays it. */
+        struct Destinations
+        {
+            std::vector<std::string>& problems;
+            const std::map<std::string, int>& busWidth;
+            const std::map<std::string, int>& slotWidth;
+
+            static std::size_t countTokens (const std::string& text)
+            {
+                std::size_t count = 0, i = 0;
+
+                while (i < text.size())
+                {
+                    while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) != 0)
+                        ++i;
+
+                    if (i >= text.size())
+                        break;
+
+                    ++count;
+
+                    while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) == 0)
+                        ++i;
+                }
+
+                return count;
+            }
+
+            void check (const juce::ValueTree& node, const char* element, const char* target,
+                        const std::map<std::string, int>& widths)
+            {
+                const auto id = node[idProperty].toString().toStdString();
+                const auto targetId = node[juce::Identifier (target)].toString().toStdString();
+                const auto found = widths.find (targetId);
+
+                if (found == widths.end())
+                    return;                 // dangling: the `refers` column's warning
+
+                const auto width = static_cast<std::size_t> (std::max (1, found->second));
+                const auto gains = countTokens (node[juce::Identifier ("gains")]
+                                                  .toString().toStdString());
+
+                /*  A cue routed nowhere YET is an ordinary state for a show
+                    being written, and it is silent rather than wrong -
+                    `resolveRouting` says so in as many words at arm time. Only
+                    a list that exists and does not divide is a mistake. */
+                if (gains == 0)
+                    return;
+
+                if (gains % width != 0)
+                    problems.push_back (std::string ("/Show/.../") + element + "[" + id + "]: "
+                                          + std::to_string (gains) + " coefficients do not divide"
+                                            " into a destination " + std::to_string (width)
+                                          + " channels wide - a routing matrix is one row per"
+                                            " channel the cue has");
+            }
+
+            void visit (const juce::ValueTree& node)
+            {
+                const auto element = node.getType().toString();
+
+                if (element == "Route")       check (node, "Route", "bus", busWidth);
+                else if (element == "Feed")   check (node, "Feed", "slot", slotWidth);
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        Destinations { problems, busWidth, slotWidth }.visit (showNode);
 
         return problems;
     }

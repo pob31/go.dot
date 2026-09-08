@@ -777,49 +777,38 @@ namespace wfg::cue
 
         const auto audioNode = document.root().getChildWithName ("Audio");
 
-        for (const auto& route : cue)
+        /*  ONE PIECE OF ARITHMETIC, TWO KINDS OF DESTINATION.
+
+            A `Route` sends the cue to a bus. A `Feed` sends it to a processor
+            input, which means to that slot's own channels OF the slot's bus -
+            the same coefficients landing at one more offset (§13.3). Written
+            once so the two cannot come to disagree about what a gains list
+            means, and so `bad-route` keeps one meaning for both. */
+        const auto emit = [&] (int firstChannel, int width,
+                               const std::vector<double>& gains) -> bool
         {
-            if (route.getType().toString() != "Route")
-                continue;
-
-            const auto busId = route[juce::Identifier ("bus")].toString().toStdString();
-            const auto bus = document.findById (busId);
-
-            /*  A destination naming a bus the show does not have is a routing
-                the rig cannot honour. It fails the run rather than the load: a
-                show with one mis-pointed cue is still a show somebody has to
-                run tonight. */
-            if (! bus.isValid() || bus.getType().toString() != "Bus"
-                  || bus.getParent() != audioNode)
-            {
-                problem = "route names no bus of this show";
-                return {};
-            }
-
-            const auto firstChannel = static_cast<int> (bus[juce::Identifier ("firstChannel")]);
-            const auto width = static_cast<int> (bus[juce::Identifier ("width")]);
-
             if (width <= 0)
             {
-                problem = "a bus of no width";
-                return {};
+                problem = "a destination of no width";
+                return false;
             }
-
-            const auto gains = gainsOf (route);
 
             /*  A cue routed nowhere yet is an ordinary state for a show being
                 written, and it is silent rather than wrong. */
             if (gains.empty())
-                continue;
+                return true;
 
             /*  THE SHAPE IS THE CHECK. A gains list is the cue's channels times
-                the bus's width, row by row, so a length that does not divide by
-                the width is not a shorter routing - it is a different one, and
-                a client that wrote it meant something the show cannot do. */
+                the destination's width, row by row, so a length that does not
+                divide by the width is not a shorter routing - it is a different
+                one, and a client that wrote it meant something the show cannot
+                do. `validate()` refuses the same shape when the show loads;
+                this is the same question asked of a file that is finally
+                open. */
             if (gains.size() % static_cast<std::size_t> (width) != 0)
             {
-                problem = "gains do not divide by the bus width";
-                return {};
+                problem = "gains do not divide by the destination width";
+                return false;
             }
 
             const auto inputs = static_cast<int> (gains.size()) / width;
@@ -827,7 +816,7 @@ namespace wfg::cue
             if (inputs > trackChannels)
             {
                 problem = "the cue is wider than a track";
-                return {};
+                return false;
             }
 
             for (int input = 0; input < inputs; ++input)
@@ -854,6 +843,93 @@ namespace wfg::cue
                     out.push_back ({ input, firstChannel + channel,
                                      static_cast<float> (gain) });
                 }
+
+            return true;
+        };
+
+        /*  The bus a destination lands in, or an invalid tree. A destination
+            naming a bus the show does not have is a routing the rig cannot
+            honour: it fails the RUN rather than the load, because a show with
+            one mis-pointed cue is still a show somebody has to run tonight. */
+        const auto busNamed = [&] (const std::string& busId)
+        {
+            const auto bus = document.findById (busId);
+
+            if (! bus.isValid() || bus.getType().toString() != "Bus"
+                  || bus.getParent() != audioNode)
+                return juce::ValueTree {};
+
+            return bus;
+        };
+
+        for (const auto& destination : cue)
+        {
+            const auto element = destination.getType().toString();
+
+            if (element == "Route")
+            {
+                const auto bus = busNamed (destination[juce::Identifier ("bus")]
+                                             .toString().toStdString());
+
+                if (! bus.isValid())
+                {
+                    problem = "route names no bus of this show";
+                    return {};
+                }
+
+                if (! emit (static_cast<int> (bus[juce::Identifier ("firstChannel")]),
+                            static_cast<int> (bus[juce::Identifier ("width")]),
+                            gainsOf (destination)))
+                    return {};
+
+                continue;
+            }
+
+            if (element == "Feed")
+            {
+                /*  A FEED IS A ROUTING AND A CLAIM IN ONE OBJECT, and this is
+                    the routing half: the audio reaches the processor through an
+                    ordinary bus, and the claim that keeps a second cue out of
+                    the position and the LFO state behind that input is the same
+                    object carrying it there (§13.3). Two separate objects would
+                    let a show route a cue somewhere it had not claimed. */
+                const auto slot = document.findById (destination[juce::Identifier ("slot")]
+                                                       .toString().toStdString());
+
+                if (! slot.isValid() || slot.getType().toString() != "Slot")
+                {
+                    problem = "feed names no slot of this show";
+                    return {};
+                }
+
+                const auto bus = busNamed (slot[juce::Identifier ("bus")].toString().toStdString());
+
+                if (! bus.isValid())
+                {
+                    problem = "the slot this feed names has no bus of this show";
+                    return {};
+                }
+
+                const auto slotFirst = static_cast<int> (slot[juce::Identifier ("firstChannel")]);
+                const auto slotWidth = static_cast<int> (slot[juce::Identifier ("width")]);
+                const auto busFirst = static_cast<int> (bus[juce::Identifier ("firstChannel")]);
+                const auto busWidth = static_cast<int> (bus[juce::Identifier ("width")]);
+
+                /*  Checked at load too, and again here for the reason every
+                    arm-time check exists: this is the moment the thing is
+                    actually used, and a document edited since it was read is a
+                    document nobody validated. */
+                if (slotFirst < 0 || slotWidth <= 0 || slotFirst + slotWidth > busWidth)
+                {
+                    problem = "the slot does not fit in its bus";
+                    return {};
+                }
+
+                if (! emit (busFirst + slotFirst, slotWidth, gainsOf (destination)))
+                    return {};
+
+                continue;
+            }
         }
 
         return out;

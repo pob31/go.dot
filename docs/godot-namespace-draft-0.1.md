@@ -2466,11 +2466,13 @@ A relaunch is a machine action: logged with its origin, shown on the run, and it
 Six new elements mean six entries in each of the places the schema is hand-written, and naming them
 together is what stops the sixth from being discovered by a fixture failing:
 
-- **`KNOWN_OWNERS`** in `generate-schema.py` gains `slot`, `rack`, `rackChannel`, `feed`, `insert`
-  and `slots` — six words, though not the six elements: `persistent` is absent because `Persistent`
-  carries no rows of its own, and `slots` is the new tree container rather than an element. It gates
-  the `refers` column as well as the `owner` column, so a reference to a new owner word fails
-  generation until the word exists.
+- **`KNOWN_OWNERS`** in `generate-schema.py` gains `slots`, `slot`, `processorInput`,
+  `rackChannel`, `feed` and `insert` — six words, and **not the six elements**, which is worth
+  saying because the two sixes are different sixes. There is no `rack`: `Audio/Rack` is a container
+  element like `Mounts` and carries no rows, so it needs no owner word. `persistent` is likewise
+  absent because `Persistent` carries none either. And `slot` is not one element's owner but the
+  one **both** declared kinds share. It gates the `refers` column as well as the `owner` column, so
+  a reference to a new owner word fails generation until the word exists.
 - **The containment table** gains `Slot` under `Mount` (which has no children today), `Rack` under
   `Audio` and `Channel` under it, `Feed` and `Insert` under `Media`, and `Persistent` under `List`.
 - **`ownerForElement`** — a hand-written mapping, and the by-kind half of the `refers` check — gains
@@ -2497,6 +2499,14 @@ together is what stops the sixth from being discovered by a fixture failing:
   on the empty-identifier guard it already has. Had `Rack` been identified, `/godot/bus` would have
   gained a bus with a default width, and the show's buses would have stopped being what that
   container holds.
+- **An object's ADDRESS and its KIND turned out to be two questions**, and PR 4.2 found it by
+  failing: a rack channel is published at `/godot/slot/<id>` beside a processor input, and the
+  document's address resolver checked the segment against `ownerForElement` — which answers
+  `rackChannel`, so every write to a channel was unresolvable while every read worked. They are
+  separated now: `addressOwnerFor` says which container an object is addressed under and
+  `ownerForElement` says what kind it is, and only one element makes them differ. Worth the note
+  because sharing an address space between two kinds is what this section chose, and this is the
+  cost of that choice rather than an accident.
 - **`Mount` is a childless leaf today**, so `Slot` is the first child it has ever had: the
   containment entry and the branch that publishes it are both new, and there is no existing
   behaviour to extend or to break. The mounted namespace itself is published by the other half of
@@ -2520,9 +2530,10 @@ claims it is (§13.13).
 
 | owner | rows |
 |---|---|
-| `slot` (new; `Mount/Slot`) | `name`, `address`, `width`, `bus` (`refers=bus`), `firstChannel`; derived `kind`, `holder`, `pending`, `usage`, `overlaps` |
-| `rackChannel` (new; `Rack/Channel`) | `name`, `class`, `access`; and **the same five derived rows**, because both kinds publish under `/godot/slot/<id>` and a client should read one shape whichever kind it found. Two owners rather than one shared owner so that `refers` can tell a processor input from a rack channel — the by-kind check asks `ownerForElement`, which answers with one word |
-| `rack` (new; `Audio/Rack`) | none — a container element like `Mounts`, holding `Channel` and carrying nothing itself |
+| `slot` (new; shared by `Mount/Slot` **and** `Rack/Channel`) | `name`; derived `kind`. What both declared kinds have, so it is written once and neither can drift from the other — the `Media` shape, where a media cue carries `{ cue, media }` because it is a cue first |
+| `processorInput` (new; `Mount/Slot`) | `address`, `width`, `bus` (`refers=bus`), `firstChannel` |
+| `rackChannel` (new; `Rack/Channel`) | `class`, `access` |
+| `rack` | **no owner word at all** — `Audio/Rack` is a container element like `Mounts`, holding channels and carrying nothing itself. PR 4.2 corrects an earlier line here that said otherwise |
 | `feed` (new; `Media/Feed`) | `slot` (`refers=slot`), `gains` (`d*`), `shared` |
 | `insert` (new; `Media/Insert`) | `channel` (`refers=rackChannel`), `shared` |
 | `slots` (new container, `/godot/slot`) | `order` |

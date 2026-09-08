@@ -272,33 +272,62 @@ namespace wfg::doc
 
                 The plan named this under PR 3.2's plumbing - "<optional> for
                 single children" - and this is where it was paid for. */
+            /*  AND WHEN AN ELEMENT HAS BOTH KINDS OF CHILD, THE ORDER BETWEEN
+                THEM CANNOT MATTER.
+
+                RELAX NG content is ORDERED. Emitted one after the other, an
+                optional container followed by a zeroOrMore of objects says the
+                container must come FIRST - so `<Audio>` with its buses written
+                before its `<Rack>` is refused, and the canonical writer emits
+                children in the order the document holds them.
+
+                It never bit until PR 4.2, because until then no element had
+                both: `<Show>` is all containers, a `<List>` and a `<Group>` are
+                all objects. `<Audio>` is the first with a rack among its buses,
+                and the first place a show could be written in an order its own
+                grammar rejected.
+
+                `interleave` is the one construct that says "these, in any
+                order", and the names are distinct so it is legal here. Emitted
+                only when both kinds are present, because a lone group of either
+                is unordered already and wrapping it would be noise in a file
+                somebody reads. */
+            const auto both = ! containers.empty() && ! objects.empty();
+            const auto indent = both ? 4 : 3;
+
+            if (both)
+                line (out, 3, "<interleave>");
+
             for (const auto& container : containers)
             {
-                line (out, 3, "<optional>");
-                line (out, 4, "<ref name=\"" + container + "\"/>");
-                line (out, 3, "</optional>");
+                line (out, indent, "<optional>");
+                line (out, indent + 1, "<ref name=\"" + container + "\"/>");
+                line (out, indent, "</optional>");
             }
 
             if (! objects.empty())
             {
-                line (out, 3, "<zeroOrMore>");
+                line (out, indent, "<zeroOrMore>");
 
                 if (objects.size() == 1)
                 {
-                    line (out, 4, "<ref name=\"" + objects.front() + "\"/>");
+                    line (out, indent + 1, "<ref name=\"" + objects.front() + "\"/>");
                 }
                 else
                 {
-                    line (out, 4, "<choice>");
+                    line (out, indent + 1, "<choice>");
 
                     for (const auto& object : objects)
-                        line (out, 5, "<ref name=\"" + object + "\"/>");
+                        line (out, indent + 2, "<ref name=\"" + object + "\"/>");
 
-                    line (out, 4, "</choice>");
+                    line (out, indent + 1, "</choice>");
                 }
 
-                line (out, 3, "</zeroOrMore>");
+                line (out, indent, "</zeroOrMore>");
             }
+
+            if (both)
+                line (out, 3, "</interleave>");
 
             /*  RELAX NG cannot say "nothing here" by leaving it out: a pattern
                 has to be present, and <empty/> is the one that matches nothing.

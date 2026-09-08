@@ -171,6 +171,16 @@ measurements come with it, both reporting rather than gating: whether a second
 launcher slot stops the first on one track, which decides what a sampler group
 claims, and where a clip armed at an offset actually begins.
 
+**PR 4.2 is the pools themselves.** A show can now declare which of a
+processor's inputs it uses and at what width, and how many channels the live
+rack has; a media cue can send into one of those inputs rather than only to a
+bus, and can say which rack channel it goes through. A feed is a routing and a
+claim in one object, which is the point of it: the audio reaches the processor
+through an ordinary bus, and the claim that keeps a second cue out of the
+position and the LFO state behind that input is the same row that carries it
+there. What is not here yet is the claiming — that is the next pull request, and
+the analysis that warns you at edit time is the one after.
+
 **There is now something to look at, and to work in.** `wfg serve <bundle>
 --ui=clients/console` serves a client from `/ui` on the OSCQuery port; open that
 address in a browser and the cue list, the groups nested inside it, the standby

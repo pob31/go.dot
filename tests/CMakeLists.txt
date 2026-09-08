@@ -85,6 +85,7 @@ add_executable(wfg_tests
     GoTests.cpp
     TriggerTests.cpp
     RangeTests.cpp
+    SlotTests.cpp
     MidiTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
@@ -445,6 +446,18 @@ add_test(NAME wfg.validate.C
                  --wfg-locale=C)
 add_test(NAME wfg.validate.fr_FR
          COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/minimal"
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# And a bundle that declares Phase 4's slots: two processor inputs on a mount,
+# two rack channels, and cues that feed and insert into them. It is the only
+# fixture carrying any of those elements, so it is what proves the grammar, the
+# containment table and the validate rules agree about a show that uses them -
+# and, through `schema.fixtures` below, what puts them in front of lxml.
+add_test(NAME wfg.validate.slots.C
+         COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/slots"
+                 --wfg-locale=C)
+add_test(NAME wfg.validate.slots.fr_FR
+         COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/slots"
                  --wfg-locale=${WFG_LOCALE_FR})
 
 # The parameter tree, printed by the product binary. Registered under both

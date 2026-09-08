@@ -385,6 +385,8 @@
       <zeroOrMore>
         <choice>
           <ref name="Route"/>
+          <ref name="Feed"/>
+          <ref name="Insert"/>
           <ref name="Range"/>
           <ref name="Trigger"/>
         </choice>
@@ -1050,6 +1052,9 @@
           </choice>
         </attribute>
       </optional>
+      <zeroOrMore>
+        <ref name="Slot"/>
+      </zeroOrMore>
     </element>
   </define>
 
@@ -1063,9 +1068,14 @@
           </data>
         </attribute>
       </optional>
-      <zeroOrMore>
-        <ref name="Bus"/>
-      </zeroOrMore>
+      <interleave>
+        <optional>
+          <ref name="Rack"/>
+        </optional>
+        <zeroOrMore>
+          <ref name="Bus"/>
+        </zeroOrMore>
+      </interleave>
     </element>
   </define>
 
@@ -1094,6 +1104,145 @@
           <data type="integer">
             <param name="minInclusive">1</param>
           </data>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Rack">
+    <element name="Rack">
+      <zeroOrMore>
+        <ref name="Channel"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Channel">
+    <element name="Channel">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="access">
+          <a:documentation>Whether a cue holds this channel alone. A per-source insert is exclusive and is allocated; a reverb many cues send into is SHARED, which PRD 3.9e says is a bus with a chain rather than a slot - declared and published here, and never claimed.</a:documentation>
+          <choice>
+            <value>exclusive</value>
+            <value>shared</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="class">
+          <a:documentation>What this channel takes in and puts out. Stereo-to-mono is deliberately absent (PRD 3.18) and wider comes later. The class is the type a claim is matched against, the way a processor input-s width is.</a:documentation>
+          <choice>
+            <value>mono</value>
+            <value>monoToStereo</value>
+            <value>stereo</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the designer called it. PRD 3.9b: the names appear in the dropdown and on the OLED, and the channel numbers do not - -Voix solo- is what somebody wrote down and -input 3- is a fact about a patch that will change.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Slot">
+    <element name="Slot">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="address">
+          <a:documentation>The address of the input this slot is, under its own mount-s prefix: /wfs/input/3 and not input 3. The parameters underneath it - a position, a send, an LFO rate - are ordinary mounted nodes that an osc cue writes; this says which of them belong to the source a cue claims, which is what stops two cues fighting over one trajectory (PRD 3.9b).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="bus">
+          <a:documentation>The bus that carries audio into this input. A slot is a routing and a claim in one object: the audio reaches the processor through an ordinary bus, and the claim is what keeps a second cue out of the position and the LFO state behind it. Two separate objects would let a show route a cue somewhere it had not claimed.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="firstChannel">
+          <a:documentation>Where in that bus this slot-s channels begin, counting from zero. The attribute that makes one wide send ordinary: a rig feeding a twelve-input processor has one twelve-channel bus rather than twelve buses, and the third input is channel two of it. Exactly bus/firstChannel-s idea one level down. firstChannel + width must fit inside the bus, checked when the show loads.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the designer called it. PRD 3.9b: the names appear in the dropdown and on the OLED, and the channel numbers do not - -Voix solo- is what somebody wrote down and -input 3- is a fact about a patch that will change.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="width">
+          <a:documentation>How many channels the input takes. Explicit and never inferred, like a bus-s: PRD 3.9b refuses a silent downmix or upmix, and a slot is the one destination where width is enforced, because a slot has one and a bus is a summing point that does not care.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+          </data>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Feed">
+    <element name="Feed">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="gains">
+          <a:documentation>The coefficients from the cue-s channels to the slot-s, row by row, exactly as a route-s are. Its length is the cue-s channel count times the slot-s width, and a length that does not match is refused when the show loads. Required rather than defaulted to an identity: PRD 3.9b says width is explicit and never automatic, and what keeps that from being tedious is copy-assignment and multi-select edit rather than a default that is right until it is not.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shared">
+          <a:documentation>This cue is MEANT to share the slot with another. PRD 3.9c-s -allow marking deliberate sharing-: the live-range analysis is conservative by design and reports overlaps it cannot prove impossible, so this is how a designer says of one pair that they considered it. It silences that pair-s warning and nothing else.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="slot">
+          <a:documentation>The processor input this cue feeds. A cue-s destinations are a list, not a choice (PRD 3.9b): a source into WFS plus a stereo feed to foldback is ordinary, so a Feed sits beside a Route rather than instead of one.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Insert">
+    <element name="Insert">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="channel">
+          <a:documentation>The rack channel this cue processes through. In Phase 4 the claim is bookkeeping and changes no sound: the pool and its claims are this phase-s, and the tracks, the sends and the plugins inside a channel are Phase 9-s (PRD 3.18).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shared">
+          <a:documentation>As feed/shared, for an exclusive channel two cues are meant to share.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
     </element>

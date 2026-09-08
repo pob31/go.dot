@@ -65,7 +65,13 @@ OUT_PATH = REPO_ROOT / "src" / "wfg" / "engine" / "document" / "SchemaTable.gene
 #   to know that one of them is spelled differently.
 KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 "audio", "bus", "media", "route", "range", "run", "runs",
-                "fade", "stop", "osc", "trigger", "midi", "port")
+                "fade", "stop", "osc", "trigger", "midi", "port",
+                # Phase 4's slots (PRD 3.9e). `slot` is what both declared kinds
+                # share and what a Feed refers to; `processorInput` and
+                # `rackChannel` are what each kind adds. There is no `rack`:
+                # Audio/Rack is a container element like Mounts and carries no
+                # rows of its own.
+                "slots", "slot", "processorInput", "rackChannel", "feed", "insert")
 
 VALUE_TYPES = {
     "s": "string",

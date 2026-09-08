@@ -167,6 +167,32 @@ namespace wfg::doc
             a range whose bounds are both nought is not a shorter way of saying
             anything: it is a range of no length, and every path that would then
             have to tolerate one is a path that could have refused it here. */
+        /*  PHASE 4'S SLOTS (PRD §3.9e). A slot is one position in a pool of
+            fixed size declared at load; typed; exclusive; held for a live
+            range. These declare the pool.
+
+            `createSlot` adds a processor input to a mount: the show says which
+            of a processor's inputs it is using and at what width (decision P).
+            `createRackChannel` adds a channel to the rack, making the `Rack`
+            container on demand the way `createRole` makes a `Header`.
+
+            `createFeed` and `createInsert` are what a CUE says about them - a
+            destination that is a slot rather than a bus, and a channel the cue
+            processes through. Destinations are a list and not a choice
+            (§3.9b), so both sit beside a cue's routes rather than instead of
+            them. */
+        EditResult createSlot (const std::string& mountId, const std::string& address,
+                               const std::string& id = {});
+
+        EditResult createRackChannel (const std::string& channelClass,
+                                      const std::string& id = {});
+
+        EditResult createFeed (const std::string& cueId, const std::string& slotId,
+                               const std::string& id = {});
+
+        EditResult createInsert (const std::string& cueId, const std::string& channelId,
+                                 const std::string& id = {});
+
         EditResult createRange (const std::string& cueId, double in, double out,
                                 const std::string& id = {});
 
@@ -253,6 +279,18 @@ namespace wfg::doc
         /** The parameter table's owner word for an element, for addressing:
             Cue and Group are both `cue`. */
         static std::string_view ownerForElement (std::string_view element);
+
+        /*  The container an object is ADDRESSED under, which is usually its
+            owner word and is not always.
+
+            A rack `Channel` is addressed at `/godot/slot/<id>` beside a
+            processor input, because §1's first rule is that objects are
+            identity-addressed and a client holding an identifier should not
+            have to know which container it came out of. What it answers to the
+            `refers` column is `rackChannel`, because THAT question is about
+            kind - a feed naming a rack channel is a mistake the document can
+            catch before the show runs. Two questions, two answers. */
+        static std::string_view addressOwnerFor (std::string_view element);
 
         /*  The address segment an element without an identifier is reached by,
             or empty for one that is reached by id. `Show` is `document`,

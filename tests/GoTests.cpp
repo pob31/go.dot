@@ -43,6 +43,8 @@
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 
+#include <set>
+
 using namespace wfg;
 
 namespace
@@ -695,6 +697,107 @@ TEST_CASE ("routing: a bus is a place on the rig, and the cue never names a chan
     CHECK (routing[1].input == 1);
     CHECK (routing[1].output == 5);
     CHECK (routing[1].gain == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("feed: a slot is a routing and a claim in one object")
+{
+    /*  PR 4.2. A `Route` sends a cue to a bus; a `Feed` sends it to a PROCESSOR
+        INPUT, which means to that slot's own channels of the slot's bus - the
+        same coefficients landing at one more offset - and claims the slot.
+
+        THE TWO HALVES ARE ONE OBJECT DELIBERATELY. The audio reaches the
+        processor through an ordinary bus, and the claim that keeps a second cue
+        out of the position, the trajectory and the LFO state behind that input
+        (§3.9b) is the same row that carries it there. Two separate objects
+        would let a show route a cue somewhere it had not claimed. The claim
+        itself is PR 4.3's; that this routes is here.
+
+        `firstChannel` on the slot is the attribute that makes one wide send
+        ordinary: a rig feeding a twelve-input processor has ONE twelve-channel
+        bus, and the third input is channel two of it. Exactly the bus's own
+        idea one level down. */
+    RoutedRig rig;
+
+    const auto wide = rig.addBus ("WFS send", 8, 12);
+
+    const auto mountEdit = rig.document.createMount ("/wfs", "namespaces/wfs.json");
+    REQUIRE (mountEdit.ok);
+
+    const auto slot = rig.document.createSlot (mountEdit.id, "/wfs/input/3");
+    REQUIRE (slot.ok);
+
+    auto slotNode = rig.document.findById (slot.id);
+    slotNode.setProperty (juce::Identifier ("bus"), juce::String (wide), nullptr);
+    slotNode.setProperty (juce::Identifier ("width"), 1, nullptr);
+    slotNode.setProperty (juce::Identifier ("firstChannel"), 2, nullptr);
+
+    const auto feed = rig.document.createFeed (rig.mediaId, slot.id);
+    REQUIRE (feed.ok);
+
+    rig.document.findById (feed.id)
+       .setProperty (juce::Identifier ("gains"), "1", nullptr);
+
+    std::string problem;
+    auto routing = rig.routingOf (rig.mediaId, problem);
+
+    INFO (problem);
+    CHECK (problem.empty());
+    REQUIRE (routing.size() == 1u);
+
+    /*  Hardware channel 10: the bus starts at 8 and this input is two channels
+        into it. The cue said neither number. */
+    CHECK (routing[0].input == 0);
+    CHECK (routing[0].output == 10);
+    CHECK (routing[0].gain == doctest::Approx (1.0f));
+
+    /*  AND IT SITS BESIDE A ROUTE RATHER THAN INSTEAD OF ONE (§3.9b): "a source
+        into WFS plus a stereo feed to foldback is ordinary". */
+    rig.addRoute (rig.mediaId, rig.foldback, "1 0");
+
+    routing = rig.routingOf (rig.mediaId, problem);
+
+    INFO (problem);
+    CHECK (problem.empty());
+    REQUIRE (routing.size() == 2u);
+
+    std::set<int> outputs;
+
+    for (const auto& coefficient : routing)
+        outputs.insert (coefficient.output);
+
+    CHECK (outputs == std::set<int> { 4, 10 });
+}
+
+TEST_CASE ("feed: a slot that does not fit its bus fails the arm rather than the load")
+{
+    /*  `validate()` refuses this shape when the show is read. Asked again here
+        for the reason every arm-time check exists: this is the moment the thing
+        is actually used, and a document edited since it was read is a document
+        nobody validated. */
+    RoutedRig rig;
+
+    const auto mountEdit = rig.document.createMount ("/wfs", "namespaces/wfs.json");
+    REQUIRE (mountEdit.ok);
+
+    const auto slot = rig.document.createSlot (mountEdit.id, "/wfs/input/1");
+    REQUIRE (slot.ok);
+
+    auto slotNode = rig.document.findById (slot.id);
+    slotNode.setProperty (juce::Identifier ("bus"), juce::String (rig.foldback), nullptr);
+    slotNode.setProperty (juce::Identifier ("width"), 2, nullptr);
+    slotNode.setProperty (juce::Identifier ("firstChannel"), 1, nullptr);   // 1 and 2 of two
+
+    const auto feed = rig.document.createFeed (rig.mediaId, slot.id);
+    REQUIRE (feed.ok);
+    rig.document.findById (feed.id)
+       .setProperty (juce::Identifier ("gains"), "1 0", nullptr);
+
+    std::string problem;
+    const auto routing = rig.routingOf (rig.mediaId, problem);
+
+    CHECK (routing.empty());
+    INFO (problem);
+    CHECK (problem.find ("does not fit") != std::string::npos);
 }
 
 TEST_CASE ("routing: destinations are a list, and a cue reaches all of them")

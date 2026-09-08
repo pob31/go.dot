@@ -167,7 +167,8 @@ namespace wfg::doc
                     like any other, and it is addressed at /godot/cue/<id> so a
                     client holding an identifier never has to know which kind it
                     got. */
-                { "Media",  true,  { "Route", "Range", "Trigger" }, { "cue", "media" } },
+                { "Media",  true,  { "Route", "Feed", "Insert", "Range", "Trigger" },
+                                                          { "cue", "media" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,
@@ -260,9 +261,33 @@ namespace wfg::doc
                 { "MidiPorts", false, { "Port" },          {} },
                 { "Port",   true,  {},                     { "port" } },
                 { "Mounts", false, { "Mount" },            {} },
-                { "Mount",  true,  {},                     { "mount" } },
-                { "Audio",  false, { "Bus" },              { "audio" } },
+                { "Mount",  true,  { "Slot" },             { "mount" } },
+                { "Audio",  false, { "Bus", "Rack" },      { "audio" } },
                 { "Bus",    true,  {},                     { "bus" } },
+
+                /*  PHASE 4'S SLOTS (PRD §3.9e). A slot is one position in a
+                    pool of fixed size declared at load; typed; exclusive; held
+                    for a live range. Two of the four instances are document
+                    objects and are declared here.
+
+                    BOTH CARRY THE OWNER `slot`, which is what they share - a
+                    name and a derived kind - and each adds its own. The `Media`
+                    precedent exactly: a media cue is `{ "cue", "media" }`,
+                    because it is a cue first and a media cue second.
+
+                    `Rack` carries no owner at all, like `Mounts`: it is a
+                    container holding channels and says nothing itself. */
+                { "Rack",    false, { "Channel" },         {} },
+                { "Channel", true,  {},                    { "slot", "rackChannel" } },
+                { "Slot",    true,  {},                    { "slot", "processorInput" } },
+
+                /*  And what a cue says about them. A `Route` sends a cue to a
+                    bus; a `Feed` sends it to a SLOT, which means to that slot's
+                    own channels of the slot's bus, and claims the slot; an
+                    `Insert` claims a rack channel. Destinations are a list and
+                    not a choice (§3.9b). */
+                { "Feed",    true,  {},                    { "feed" } },
+                { "Insert",  true,  {},                    { "insert" } },
             };
 
             return table;
