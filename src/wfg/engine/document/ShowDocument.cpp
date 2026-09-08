@@ -277,12 +277,57 @@ namespace wfg::doc
         juce::ValueTree audio { "Audio" };
         audio.setProperty ("tracks", 0, nullptr);
         showNode.addChild (audio, -1, nullptr);
+
+        /*  LAST, so that building the empty containers above does not count as
+            three changes to a document nobody has opened yet. A fresh document
+            is at revision 1 and stays there until somebody writes something. */
+        showNode.addListener (this);
+    }
+
+    ShowDocument::ShowDocument (ShowDocument&& other)
+        : showNode (juce::ValueTree()), registry (IdRegistry::withSystemEntropy())
+    {
+        *this = std::move (other);
+    }
+
+    ShowDocument& ShowDocument::operator= (ShowDocument&& other)
+    {
+        if (this == &other)
+            return *this;
+
+        showNode.removeListener (this);
+        other.showNode.removeListener (&other);
+
+        showNode = std::move (other.showNode);
+        registry = std::move (other.registry);
+        changeCount = other.changeCount;
+
+        showNode.addListener (this);
+        return *this;
+    }
+
+    ShowDocument::~ShowDocument()
+    {
+        showNode.removeListener (this);
     }
 
     void ShowDocument::adopt (juce::ValueTree newRoot, IdRegistry newRegistry)
     {
+        /*  The listener follows the document. A listener left on the tree that
+            was just replaced would report nothing (nobody writes to it any
+            more) and would outlive nothing, but it would also mean the NEW tree
+            is unwatched - so every edit after a load would be invisible to
+            `revision()`, and a cache built before the load would look current
+            for ever. */
+        showNode.removeListener (this);
+
         showNode = std::move (newRoot);
         registry = std::move (newRegistry);
+
+        showNode.addListener (this);
+
+        /*  A load is the largest change there is. */
+        ++changeCount;
     }
 
     //==============================================================================

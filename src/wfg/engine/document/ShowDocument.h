@@ -55,6 +55,7 @@
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <cstdint>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -105,7 +106,7 @@ namespace wfg::doc
         bool isValid() const noexcept { return node.isValid() && attribute != nullptr; }
     };
 
-    class ShowDocument
+    class ShowDocument : private juce::ValueTree::Listener
     {
     public:
         /** An empty show: a root, an empty Lists and an empty Mounts. Every
@@ -244,6 +245,30 @@ namespace wfg::doc
             the reader; nothing else should need it. */
         void adopt (juce::ValueTree newRoot, IdRegistry newRegistry);
 
+        /*  HOW MANY TIMES THE SHOW HAS CHANGED, so that a derived answer can be
+            a cache ASKED rather than a flag somebody has to remember to set.
+
+            The mounted half of the parameter tree was moved onto exactly this
+            shape in PR 3.2 and for exactly this reason: a `markStale` call is a
+            line every future write path has to remember, and the one that
+            forgets produces a stale reading that looks like a correct one. A
+            counter on the thing itself cannot be forgotten.
+
+            It counts CHANGES AND NOT EDITS, and the difference matters when
+            reading it: one `object.move` is a remove and an add, so it may
+            advance by more than one. Nothing should read the DIFFERENCE - only
+            whether it differs from the number a cached answer was built at.
+
+            It is bumped by a listener on the tree rather than by the write
+            doors, which is the same argument one level down: `setAttribute`,
+            `createCue` and `remove` are today's doors, the tests write through
+            `ValueTree::setProperty` directly, and a phase that adds a fourth
+            door would have to remember this one. The tree cannot forget.
+
+            Never zero: a fresh document is at 1, so `0` is available to a cache
+            as "never built". */
+        std::uint64_t revision() const noexcept { return changeCount; }
+
         //======================================================================
         /*  Checks the whole tree against the schema: unknown elements and
             attributes, values that do not parse, duplicate or malformed
@@ -309,7 +334,49 @@ namespace wfg::doc
 
         void collectIds (const juce::ValueTree& node, std::vector<std::string>& out) const;
 
+        /*  The listener half of `revision()`. Every one of these bumps the
+            counter and does nothing else; `valueTreeRedirected` is included
+            because a redirect replaces the content wholesale, which is the
+            biggest change of all. */
+        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override
+        {
+            ++changeCount;
+        }
+
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override    { ++changeCount; }
+        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++changeCount; }
+        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override     { ++changeCount; }
+        void valueTreeParentChanged (juce::ValueTree&) override                   { ++changeCount; }
+        void valueTreeRedirected (juce::ValueTree&) override                      { ++changeCount; }
+
         juce::ValueTree showNode;
         IdRegistry registry;
+
+        /*  Starts at 1 so that nought means "no cache has ever been built".
+            See `revision()`. */
+        std::uint64_t changeCount = 1;
+
+    public:
+        /*  MOVED WITH CARE AND NEVER COPIED, because the listener behind
+            `revision()` is registered with the tree BY ADDRESS.
+
+            A defaulted move would carry the listener registration of the object
+            being moved from, and the moved-to document would hear nothing: its
+            revision would stand still while its show changed underneath it,
+            which is the one failure a revision counter exists to prevent. So
+            the move deregisters there and registers here.
+
+            A copy is refused outright. `juce::ValueTree` is a reference type, so
+            a copied document would not be a second show but a second handle on
+            one - two objects that could be edited through either and would
+            disagree about their identifier registries. Nothing wants that;
+            saying so at compile time is cheaper than finding out. */
+        ShowDocument (const ShowDocument&) = delete;
+        ShowDocument& operator= (const ShowDocument&) = delete;
+
+        ShowDocument (ShowDocument&&);
+        ShowDocument& operator= (ShowDocument&&);
+
+        ~ShowDocument() override;
     };
 }

@@ -215,6 +215,7 @@ button:disabled { color: var(--ink-faint); cursor: default; }
         color: var(--ink-faint); }
 .tail .trig { color: var(--waiting); letter-spacing: 0; }
 .tail .flag { letter-spacing: .05em; text-transform: uppercase; }
+.tail .flag.warn { color: var(--waiting); text-transform: none; letter-spacing: 0; cursor: help; }
 .tail .standby-word { color: var(--standby); }
 
 .band {
@@ -318,6 +319,7 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     <span class="stat"><b>late max</b><span class="num" id="s-late">—</span></span>
     <span class="stat"><b>go→sound</b><span class="num" id="s-latency">—</span></span>
     <span class="stat" id="s-rt-wrap"><b>rt</b><span class="num" id="s-rt">—</span></span>
+    <span class="stat" id="s-warn-wrap" title="nothing to report"><b>warnings</b><span class="num" id="s-warn">—</span></span>
     <span id="link"><span class="dot"></span><span id="link-text">connecting</span></span>
   </div>
 
@@ -445,7 +447,41 @@ const tree = {
     return found;
   },
   run(id, name, fallback) { return this.get("/godot/run/" + id + "/" + name, fallback); },
+  slot(id, name, fallback) { return this.get("/godot/slot/" + id + "/" + name, fallback); },
+
+  /*  WHICH CUES THE ENGINE SAYS COULD BE FIGHTING OVER A SLOT.
+
+      Read off every declared slot's `overlaps`, which is the edit-time
+      analysis of PRD §3.9c published as cue pairs. Built once per render and
+      handed to the rows rather than asked per row: a show has hundreds of rows
+      and a handful of slots.
+
+      A WARNING AND NEVER AN ERROR. The analysis is conservative by design - it
+      reports what it cannot prove impossible - so a bed looping for ever beside
+      a second cue on one input is a pair that is correct, unavoidable and
+      completely fine. The row says so in a word, never in colour alone (§4.8),
+      and `shared` on either destination is how a designer says they meant it. */
+  overlaps() {
+    const found = new Map();
+
+    for (const id of this.ids("/godot/slot/order")) {
+      const pairs = this.ids("/godot/slot/" + id + "/overlaps");
+      const name = this.slot(id, "name", "") || id;
+
+      for (let n = 0; n + 1 < pairs.length; n += 2) {
+        for (const [cue, other] of [[pairs[n], pairs[n + 1]], [pairs[n + 1], pairs[n]]]) {
+          if (!found.has(cue)) found.set(cue, []);
+          found.get(cue).push({ slot: name, other: other });
+        }
+      }
+    }
+
+    return found;
+  },
 };
+
+/*  The current answer, refreshed by `renderLists` and read by `cueRow`. */
+let overlapping = new Map();
 
 /* -------------------------------------------------------------------- OSC */
 
@@ -581,6 +617,16 @@ function seconds(value) {
 
 /*  ONE CUE ROW. `depth` is the indent, `role` is member / header / footer, and
     `standby` is the identifier the pointer is on for this list. */
+/*  A cue as somebody would say it out loud: its number and its name, falling
+    back to the identifier for a cue that has neither yet. Used where one row
+    has to talk about another. */
+function cueName(id) {
+  const number = tree.cue(id, "number", "");
+  const name = tree.cue(id, "name", "");
+  const said = [number, name].filter((part) => part !== "" && part !== undefined).join(" ");
+  return said || id;
+}
+
 function cueRow(id, depth, role, standby, out) {
   const kind = tree.cue(id, "kind", "memo");
   const isGroup = kind === "group";
@@ -610,6 +656,9 @@ function cueRow(id, depth, role, standby, out) {
       these can go off without them. */
   const triggers = tree.triggersOf(id);
 
+  /*  And a cue the engine cannot promise has its slot to itself. */
+  const shares = overlapping.get(id) || [];
+
   const twist = isGroup
     ? '<span class="twist" data-fold="' + id + '">' + (open ? "▼" : "▶") + "</span>"
     : '<span class="twist"></span>';
@@ -631,6 +680,13 @@ function cueRow(id, depth, role, standby, out) {
         (triggers.length
            ? '<span class="flag trig" title="' + triggers.length +
              ' trigger(s)">\u26A1' + (triggers.length > 1 ? triggers.length : "") + "</span>"
+           : "") +
+        (shares.length
+           ? '<span class="flag warn" title="' +
+             esc(shares.map((s) => "slot " + s.slot + " is also claimed by " + cueName(s.other))
+                       .join("; ") +
+                 " \u2014 mark either Feed or Insert shared if that is meant") +
+             '">shares ' + shares.length + "</span>"
            : "") +
         (id === standby ? '<span class="flag standby-word">standby</span>' : "") +
       "</div>" +
@@ -657,6 +713,8 @@ function cueRow(id, depth, role, standby, out) {
 }
 
 function renderLists() {
+  overlapping = tree.overlaps();
+
   const lists = tree.ids("/godot/list/order");
   const focus = tree.get("/godot/list/focus", "") || lists[0] || "";
 
@@ -1057,6 +1115,22 @@ function renderStrip() {
   const rt = Number(tree.get("/godot/engine/rtViolations", 0));
   el("s-rt").textContent = Number.isFinite(rt) ? String(rt) : "—";
   el("s-rt-wrap").className = rt > 0 ? "stat warn" : "stat";
+
+  /*  EVERYTHING WRONG WITH THE SHOW THAT DID NOT STOP IT OPENING: the
+      references that point at nothing, and the slot overlaps the edit-time
+      analysis found. One per LINE, which no other list-shaped readout here is,
+      because a warning is a sentence and sentences contain spaces.
+
+      A count on the strip and the sentences in the tooltip, because the strip
+      is glanceable and a warning is not - what an operator needs from here is
+      whether there is anything at all. */
+  const warningText = String(tree.get("/godot/document/warnings", ""));
+  const warningLines = warningText.length ? warningText.split("\n") : [];
+
+  el("s-warn").textContent = String(warningLines.length);
+  el("s-warn-wrap").className = warningLines.length ? "stat warn" : "stat";
+  el("s-warn-wrap").title = warningLines.length ? warningLines.join("\n")
+                                                : "nothing to report";
 
   /*  A LIST WITH NO POINTER, said where the buttons that do nothing are. */
   const focused = tree.get("/godot/list/focus", "") || tree.ids("/godot/list/order")[0] || "";

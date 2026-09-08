@@ -437,6 +437,7 @@ namespace wfg::tree
             since Phase 2. */
         void collectSlot (const juce::ValueTree& node, const char* element,
                           const char* extraOwner, const char* kindText,
+                          const cue::SlotAnalysis& analysis,
                           std::vector<Node>& out)
         {
             const auto id = node[idProperty].toString().toStdString();
@@ -469,8 +470,17 @@ namespace wfg::tree
                 if (name == "holder" || name == "pending")
                     continue;
 
-                const auto text = name == "kind" ? std::string (kindText)
-                                                 : storedText (attribute, node);
+                /*  `usage` and `overlaps` ARE from here, and the difference is
+                    what they are about. They change when somebody edits the
+                    show and at no other time - they are a reading of the
+                    document, exactly as `name` and `width` are - so the cached
+                    half is where they belong. What they are read out of is a
+                    cache of their own, because the walk behind them is the
+                    whole show and this half rebuilds on a cue rename. */
+                const auto text = name == "kind"     ? std::string (kindText)
+                                : name == "usage"    ? analysis.usageOf (id)
+                                : name == "overlaps" ? analysis.overlapsOf (id)
+                                                     : storedText (attribute, node);
 
                 out.push_back (makeLeaf (base + "/" + name, *row, text));
             }
@@ -812,7 +822,8 @@ namespace wfg::tree
                         if (slot.getType().toString() != "Slot")
                             continue;
 
-                        collectSlot (slot, "Slot", "processorInput", "processorInput", nodes);
+                        collectSlot (slot, "Slot", "processorInput", "processorInput",
+                                     analysis, nodes);
 
                         if (const auto slotId = slot[idProperty].toString().toStdString();
                             ! slotId.empty())
@@ -906,7 +917,8 @@ namespace wfg::tree
                         if (channel.getType().toString() != "Channel")
                             continue;
 
-                        collectSlot (channel, "Channel", "rackChannel", "rackChannel", nodes);
+                        collectSlot (channel, "Channel", "rackChannel", "rackChannel",
+                                     analysis, nodes);
 
                         if (const auto channelId = channel[idProperty].toString().toStdString();
                             ! channelId.empty())
@@ -1032,6 +1044,13 @@ namespace wfg::tree
     std::shared_ptr<const TreeSnapshot> ParameterTree::publish (std::int64_t tick,
                                                                 const EngineState& state)
     {
+        /*  ASKED, AND ASKED FIRST. Both halves below read it - the document
+            half for a slot's `usage` and `overlaps`, the runtime half for
+            `/godot/document/warnings` - and it answers out of a cache keyed on
+            the document's own revision, so a tick that changed nothing costs a
+            comparison of two integers. M18 counts the rebuilds. */
+        analysis.ensureBuilt (document, durations);
+
         if (stale || documentPart == nullptr)
             rebuildDocumentPart();
 
@@ -1090,6 +1109,8 @@ namespace wfg::tree
             else if (name == "rtForeignAllocations")
                                                text = std::to_string (state.rtForeignAllocations);
             else if (name == "lastError")      text = state.lastError;
+            else if (name == "analysisRebuilds")
+                                               text = std::to_string (analysis.rebuilds());
             else                               text = std::string (row->defaultText);
 
             engineValue (*row, "engine", text);
@@ -1106,6 +1127,14 @@ namespace wfg::tree
             if (name == "path")       text = state.documentPath;
             else if (name == "name")  text = state.documentName;
             else if (name == "dirty") text = state.documentDirty ? "true" : "false";
+
+            /*  FROM THE RUNTIME HALF although it is a reading of the document,
+                because it must never be stale: a client asking what is wrong
+                with the show is asking about the show as it is now, and the
+                cached half rebuilds only when somebody remembered to say so.
+                The answer itself costs nothing here - the walk behind it is the
+                analysis cache, which the top of `publish` already asked. */
+            else if (name == "warnings") text = analysis.warningText();
             else                      text = std::string (row->defaultText);
 
             engineValue (*row, "document", text);

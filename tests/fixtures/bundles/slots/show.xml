@@ -9,6 +9,12 @@
       <Media id="MED00002" file="crowd.wav" name="Crowd" number="2">
         <Feed id="FED00002" gains="1 0 0 1" slot="SA000002"/>
       </Media>
+      <Media id="MED00003" file="voice.wav" name="Voix solo, reprise" number="3">
+        <Feed id="FED00003" gains="1" slot="SA000001"/>
+      </Media>
+      <Media id="MED00004" file="crowd.wav" name="Crowd, deliberately beside" number="4">
+        <Feed id="FED00004" gains="1 0 0 1" shared="true" slot="SA000002"/>
+      </Media>
     </List>
   </Lists>
   <Mounts>

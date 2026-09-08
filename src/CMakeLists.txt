@@ -83,6 +83,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/OscJob.cpp
     wfg/engine/cue/Run.h
     wfg/engine/cue/Run.cpp
+    wfg/engine/cue/SlotAnalysis.h
+    wfg/engine/cue/SlotAnalysis.cpp
     wfg/engine/cue/RunCommands.h
     wfg/engine/cue/RunCommands.cpp
     wfg/engine/cue/Runner.h

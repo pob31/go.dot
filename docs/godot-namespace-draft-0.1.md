@@ -1781,9 +1781,19 @@ and reserves the fourth.
 | kind | pool declared by | typed by | released | a claim that finds none |
 |---|---|---|---|---|
 | `voice` | `Show/Audio/@tracks` (Phase 2) | width | at run end, as today | **fails at entry**, `no-track`, visibly — Phase 3's behaviour, unchanged |
-| `processorInput` | `Mount/Slot` (§13.3) | width | **footer-timed**: when the holding run's group ends, or at run end at the top level | **waits**: the claim is `pending` and lands when the holder releases |
-| `rackChannel` | `Show/Audio/Rack` (§13.3) | width class | footer-timed | **degrades**: the cue plays dry and the run says so, `no-channel` |
+| `processorInput` | `Mount/Slot` (§13.3) | width | **at run end**, exactly as a voice is — see below | **waits**: the claim is `pending` and lands when the holder releases |
+| `rackChannel` | `Show/Audio/Rack` (§13.3) | width class | at run end | **degrades**: the cue plays dry and the run says so, `no-channel` |
 | `strip` | the layout — **Phase 6** | role | when the clip's run ends | waits, or evicts |
+
+**Released at run end, and this paragraph is a correction** *(PR 4.3, 2026-09-08)*. The table
+above said *footer-timed* when it was written, meaning a claim held until the group containing the
+holder had run its footer. What was built releases at **run end**, which is the same moment
+`holdsTrack()` stops being true. Two reasons, and the second is the one that decided it. A group is
+not done until its members are (§3.6), so by the time a footer runs the members' runs have ended
+anyway — footer-timing and run-end timing differ only for the footer's own duration. And a slot
+released by one rule and a voice by another is two rules that will one day disagree, in a place
+where disagreeing means a cue holding a processor input nothing can take back. One rule, written in
+`releaseSlotsOf` and reached from the three handlers that end a run.
 
 **A declared slot is an object and is addressed like one.** §1's first rule — objects are
 identity-addressed, and order is a separate read-only node on the container — applies to a `Slot`
@@ -2045,11 +2055,22 @@ that somebody considered it. §3.9c asks for exactly that: "**Warn, don't refuse
 deliberate sharing."
 
 **It is a cache asked rather than told**, which is M9's shape and the handoff's instruction:
-`ShowDocument` gains a revision counter that its own write door bumps, and the analysis rebuilds
-when the revision it was built at differs. Not a `markStale` call somebody has to remember at every
-new write path — the mounted namespace was moved off exactly that pattern in PR 3.2 for exactly
-that reason. `/godot/engine/analysisRebuilds` publishes the count so **M18** asserts the guarantee
-by counting rather than by timing, which is what makes such a test survive a shared CI runner.
+`ShowDocument` gains a revision counter, and the analysis rebuilds when the revision it was built at
+differs. Not a `markStale` call somebody has to remember at every new write path — the mounted
+namespace was moved off exactly that pattern in PR 3.2 for exactly that reason.
+`/godot/engine/analysisRebuilds` publishes the count so **M18** asserts the guarantee by counting
+rather than by timing, which is what makes such a test survive a shared CI runner.
+
+**And the counter is a listener on the tree rather than a line in each write door** *(PR 4.4)*,
+which is the same argument one level further down. `setAttribute`, `createCue`, `remove` and `move`
+are today's doors; the tests write through `ValueTree::setProperty` directly; and the phase that
+adds a fifth door would have to remember this one. A `juce::ValueTree::Listener` on the root hears
+every property, child and order change anywhere beneath it, so there is nothing to remember and
+nothing that can be forgotten. It counts CHANGES rather than edits — one `object.move` is a
+remove and an add — so nothing may read the difference between two revisions, only whether they
+differ, which is all a cache ever asks. The one thing it costs is that a `ShowDocument` may no
+longer be copied: a copied one would share the tree, since `ValueTree` is a reference type, and hear
+none of its changes.
 
 ### 13.6 Prepare and commit — the horizon, and the states a row can be in
 
@@ -2648,6 +2669,31 @@ half an answer: the arm-side offset is exact, so load-to-time can place a cue an
 trust it. The nudge half is **not measured and cannot be from here** — `LaunchHandle::nudge` is
 reachable from Tracktion and from nothing Go.dot exposes, so there is no entry point to measure. So
 load-to-time **relaunches**, and a nudge path is a thing to add and measure when something wants it.
+
+#### What M18 answered *(PR 4.4, 2026-09-09)*
+
+Five hundred media cues over twenty declared slots, one claim each, on the Windows box in a
+**Debug** build — so the milliseconds are an upper bound with a wide margin, and the counts are
+exact under any build.
+
+| | the number | what it says |
+|---|---|---|
+| twenty publishes with nothing edited | **0 rebuilds** | the guarantee, asserted by counting. The cache is asked and never told |
+| twenty `object.move`, each followed by a publish | **20 rebuilds** | one mutation, one rebuild. Not two for a move that is a remove and an add, and not one per publish afterwards |
+| one analysis of the 500-cue show | **208 ms**, of which **131 ms** is `ShowDocument::warnings()` | the slot walk itself is ~77 ms in Debug for five hundred cues |
+| one `object.move` and the publish after it | **632 ms** | of which the analysis is 208 and the rest is the document half of the tree, seven thousand nodes rebuilt and sorted — Phase 1's cost and untouched by this |
+
+**The number worth carrying forward is the 131.** It is not the liveness analysis at all: it is the
+existing reference walk, which asks `findById` once per persisted reference and each of those is a
+depth-first walk of the whole show. `ShowDocument::findById` says of itself that *"if this ever
+shows up in a profile, the fix is a cache invalidated in one place, not a second map maintained in
+five"*. It has now shown up in one, and the cache it asks for is the revision counter this PR just
+added. Left alone deliberately: it is a different concern from liveness, it is already paid at most
+once per edit rather than once per tick, and it is the whole of what makes `/godot/document/warnings`
+affordable to publish at all.
+
+**Nothing here gates.** A wall clock on a shared CI runner is a flaky test that teaches people to
+re-run the suite; the counts are what the design promises and the counts are what is asserted.
 
 ### 13.15 The direction this phase does not build
 

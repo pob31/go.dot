@@ -29,6 +29,7 @@
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/OscQueryJson.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/SlotAnalysis.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <wfg/engine/audio/AudioCommands.h>
@@ -985,23 +986,66 @@ namespace
             Reported HERE because this is the verb somebody runs when they have
             time to fix it, and because a dangling target is exactly the kind of
             thing that is invisible until the night it matters. */
-        for (auto& problem : document.warnings())
-            result.problems.push_back (std::move (problem));
+        /*  A DOCUMENT THAT DID NOT LOAD IS NOT A SHOW TO LOOK AT, so nothing
+            below is asked of it. What it already carries is what the read
+            found, and that is the whole of what can honestly be said. */
+        if (! result.ok)
+        {
+            for (const auto& problem : result.problems)
+                std::cerr << "    " << problem << std::endl;
+
+            std::cerr << "wfg validate: " << what << " could not be loaded" << std::endl;
+            return 1;
+        }
+
+        /*  ONE WALK FOR BOTH ANSWERS. `SlotAnalysis` holds the show's dangling
+            references beside its slot overlaps because both are functions of
+            the document at one revision, and asking `warnings()` here as well
+            would be the same depth-first walk of the whole show a second time
+            for the same list. */
+        wfg::cue::SlotAnalysis analysis;
+        analysis.ensureBuilt (document, nullptr);
+
+        for (const auto& problem : analysis.referenceWarnings())
+            result.problems.push_back (problem);
 
         for (const auto& problem : result.problems)
             std::cerr << "    " << problem << std::endl;
 
-        if (! result.ok)
-        {
-            std::cerr << "wfg validate: " << what << " could not be loaded" << std::endl;
-            return 1;
-        }
+        /*  AND THE THIRD OUTCOME, which is neither of the two above.
+
+            PRD §3.9c's liveness analysis reports which cues can be holding one
+            slot at once, and it is CONSERVATIVE BY DESIGN: it proves possible
+            overlap and can never prove impossible, so a show with an ambience
+            looping for ever and two cues on one processor input reports an
+            overlap that is correct, unavoidable and completely fine.
+
+            A check that fails a build on findings it is designed to over-report
+            is a check somebody turns off inside a week - and the dangling
+            references above, which ARE mistakes somebody can fix by fixing
+            them, would go out with it. So an overlap is printed, and the exit
+            code is left alone. `shared` on either cue's `Feed` or `Insert` is
+            how a designer says of one pair that they meant it, permanently and
+            in the document, where the next person reading the show can see that
+            somebody considered it. */
+        for (const auto& overlap : analysis.overlapWarnings())
+            std::cerr << "    " << overlap << std::endl;
 
         if (! result.problems.empty())
         {
             std::cerr << "wfg validate: " << what
                       << " loaded, but the problems above need attention" << std::endl;
             return 1;
+        }
+
+        const auto overlaps = analysis.overlapWarnings().size();
+
+        if (overlaps != 0)
+        {
+            std::cout << what << " is valid, with " << overlaps
+                      << (overlaps == 1 ? " slot overlap" : " slot overlaps")
+                      << " reported above" << std::endl;
+            return 0;
         }
 
         std::cout << what << " is valid" << std::endl;

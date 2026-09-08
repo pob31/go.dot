@@ -52,6 +52,7 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/SlotAnalysis.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -176,6 +177,14 @@ namespace wfg::tree
         /** How many times the mounted half has been rebuilt. See the member. */
         std::size_t mountRebuilds() const noexcept { return mountRebuildCount; }
 
+        /*  How many times the edit-time liveness analysis has been rebuilt.
+            The same shape and the same argument as the count above: what the
+            cache guarantees is countable and exact - a hundred publishes with
+            nothing edited rebuild it no times at all - and a wall clock on a
+            shared CI runner is a flaky test. M18 asserts it. */
+        std::size_t analysisRebuilds() const noexcept { return analysis.rebuilds(); }
+
+
         /*  Any thread. The most recently published snapshot, or an empty one
             before the first publish - never nullptr, so a caller never has to
             check. */
@@ -197,6 +206,11 @@ namespace wfg::tree
             run and the document half is a cache. */
         std::vector<std::string> declaredSlots;
         const cue::RunTable& runs;
+
+        /*  Which cues can be holding one slot at once, and every dangling
+            reference the show has - both functions of the document at one
+            revision, so both out of one cache asked by that revision. */
+        cue::SlotAnalysis analysis;
 
         std::shared_ptr<const std::vector<Node>> documentPart;
 
