@@ -527,6 +527,17 @@ namespace wfg::cue
         void armMedia (Engine& engine, const juce::ValueTree& cue,
                        const std::string& runId);
 
+        /*  The slots a cue's `Feed` and `Insert` children name, claimed for its
+            run (PRD §3.9b, §3.9e).
+
+            ISSUED ABOVE THE NULL-PLAYER RETURN in `armMedia`, the way §12.1's
+            hooks sit above `beforeTick`'s: a claim is derived from the document
+            alone - the cue's children against the declared pool - so it needs
+            no Player, and `wfg replay` and `wfg serve` without `--hosted` take
+            it exactly as a hosted session does. What stays below that return is
+            the half that does need one. */
+        void claimSlotsFor (const juce::ValueTree& cue, const std::string& runId);
+
         /*  A fade or a stop cue firing. Both act on a run that already exists,
             which is what makes them different from a media cue: they create a
             run of their own to report what they did, and they change one that

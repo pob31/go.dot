@@ -461,6 +461,14 @@ namespace wfg::tree
                     could write it could turn a processor input into a rack
                     channel by writing a word, and the two are released and
                     refused by different policies. */
+                /*  `holder` and `pending` are NOT emitted here. They change
+                    with every run while nothing about the show does, and this
+                    half is a cache - published from here they would freeze at
+                    whatever they were when a cue was last edited. The runtime
+                    half emits them, against the roster this walk leaves behind. */
+                if (name == "holder" || name == "pending")
+                    continue;
+
                 const auto text = name == "kind" ? std::string (kindText)
                                                  : storedText (attribute, node);
 
@@ -927,6 +935,15 @@ namespace wfg::tree
                 nodes.push_back (makeLeaf (std::string (godot) + "/slot/"
                                              + std::string (row->name),
                                            *row, joined));
+
+            /*  KEPT FOR THE RUNTIME HALF, which has no document to walk. Who
+                holds a slot changes several times a second while nothing about
+                the show does, so `holder` and `pending` cannot be published
+                from this cached half - they would freeze at whatever they were
+                when somebody last edited a cue, which for a show that is
+                running and not being edited means for ever. Same reason
+                `/godot/audio/status` is not published here either. */
+            declaredSlots = slotOrder;
         }
 
         //----------------------------------------------------------------------
@@ -1159,6 +1176,48 @@ namespace wfg::tree
             runOrder += run.id;
         }
 
+        /*  WHO HOLDS EACH DECLARED SLOT, AND WHO IS WAITING FOR IT.
+
+            Read off the run table rather than kept beside it, which is the
+            answer `isTrackBusy` already gives for a voice: a second record of
+            who holds what is a second thing to keep in step, and the one that
+            is wrong is always the copy. So this is a scan, and it is the same
+            scan on a replay.
+
+            The roster comes from the document half, which walked the show the
+            last time it changed. */
+        for (const auto& slotId : declaredSlots)
+        {
+            const auto base = std::string (godot) + "/slot/" + slotId;
+
+            for (const auto* row : doc::Schema::rowsForOwner ("slot"))
+            {
+                const auto name = std::string (row->name);
+
+                if (name != "holder" && name != "pending")
+                    continue;
+
+                std::string text;
+
+                if (name == "holder")
+                {
+                    const auto* holder = runs.holderOf (slotId);
+                    text = holder != nullptr ? holder->id : std::string {};
+                }
+                else
+                {
+                    std::vector<std::string> waiting;
+
+                    for (const auto* run : runs.waitersFor (slotId))
+                        waiting.push_back (run->id);
+
+                    text = joinIds (waiting);
+                }
+
+                runtime.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
+        }
+
         for (const auto* row : doc::Schema::rowsForOwner ("runs"))
             runtime.push_back (makeLeaf (std::string (godot) + "/run/" + std::string (row->name),
                                          *row, runOrder));
@@ -1188,6 +1247,9 @@ namespace wfg::tree
                 else if (name == "parent")    text = run.parent;
                 else if (name == "children")  text = joinIds (run.children);
                 else if (name == "phase")     text = run.phase;
+                else if (name == "claims")    text = joinIds (run.claims);
+                else if (name == "pending")   text = joinIds (run.pending);
+                else if (name == "warning")   text = run.warning;
                 else if (name == "error")     text = run.error;
                 else if (name == "iteration")  text = std::to_string (run.iteration);
                 else if (name == "iterations") text = std::to_string (run.iterations);

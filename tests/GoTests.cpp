@@ -768,6 +768,269 @@ TEST_CASE ("feed: a slot is a routing and a claim in one object")
     CHECK (outputs == std::set<int> { 4, 10 });
 }
 
+//==============================================================================
+/*  CLAIMS: the half of a slot that is not a routing.
+
+    PRD §3.9e's two shared rules, and they are the whole of what the four slot
+    kinds have in common. A claim on a busy slot is neither a failure nor a
+    race: it lands when the holder's run ends, and the claimant shows *pending*
+    meanwhile. And the failure policy is the SLOT'S rather than the claim's - a
+    voice fails at entry, a processor input waits, a rack channel degrades.
+
+    There is no record of any of it, and that is a conclusion rather than an
+    omission: a claim is issued in an arm, released in the handler that ends the
+    run, and handed to the head of a queue in that same handler. Every step is
+    already inside a command a replay has, and handing a slot to the head of a
+    queue decides nothing.
+*/
+namespace
+{
+    /*  The routed rig, plus a processor input and a second media cue to fight
+        over it with. */
+    struct ClaimRig : RoutedRig
+    {
+        ClaimRig()
+        {
+            wide = addBus ("WFS send", 8, 12);
+
+            const auto mountEdit = document.createMount ("/wfs", "namespaces/wfs.json");
+            REQUIRE (mountEdit.ok);
+
+            slotId = document.createSlot (mountEdit.id, "/wfs/input/3").id;
+            REQUIRE_FALSE (slotId.empty());
+
+            auto slot = document.findById (slotId);
+            slot.setProperty (juce::Identifier ("bus"), juce::String (wide), nullptr);
+            slot.setProperty (juce::Identifier ("width"), 1, nullptr);
+            slot.setProperty (juce::Identifier ("firstChannel"), 2, nullptr);
+
+            secondId = document.createCue (listId, 3, "media", "Second").id;
+            document.setAttribute ("/godot/cue/" + secondId + "/file", "thunder.wav");
+
+            feedTo (mediaId);
+            feedTo (secondId);
+        }
+
+        void feedTo (const std::string& cueId)
+        {
+            const auto feed = document.createFeed (cueId, slotId);
+            REQUIRE (feed.ok);
+
+            document.findById (feed.id)
+                    .setProperty (juce::Identifier ("gains"), "1", nullptr);
+        }
+
+        /** Arms whatever standby is on, the way the pointer does. */
+        std::string armAt (const std::string& cueId)
+        {
+            setStandby (cueId);
+            audio.completeArms (engine);
+            tickOnce();
+
+            const auto* live = runs.liveRunOf (cueId);
+            return live != nullptr ? live->id : std::string {};
+        }
+
+        std::string wide, slotId, secondId;
+    };
+}
+
+TEST_CASE ("claim: a feed takes its slot at the arm, and gives it back at the end")
+{
+    ClaimRig rig;
+
+    const auto first = rig.armAt (rig.mediaId);
+    REQUIRE_FALSE (first.empty());
+
+    /*  HELD FROM THE ARM, not from the launch: the whole point of arming ahead
+        is that everything scarce is settled before the operator's hand comes
+        down. */
+    CHECK (rig.runs.find (first)->claims == std::vector<std::string> { rig.slotId });
+    CHECK (rig.runs.find (first)->pending.empty());
+
+    REQUIRE (rig.runs.holderOf (rig.slotId) != nullptr);
+    CHECK (rig.runs.holderOf (rig.slotId)->id == first);
+
+    /*  And back at the end, which is the same moment the voice comes back. */
+    rig.submitAndTick ("run.kill", { osc::Value::string (first) });
+    rig.tickOnce();
+
+    REQUIRE (rig.runs.find (first)->isFinished());
+    CHECK (rig.runs.find (first)->claims.empty());
+    CHECK (rig.runs.holderOf (rig.slotId) == nullptr);
+}
+
+TEST_CASE ("claim: a second cue waits, in words, and does not sound meanwhile")
+{
+    /*  §3.9e: "A claim on a busy slot is neither a failure nor a race: it lands
+        when the holder's run ends. The claimant shows *pending* - in words,
+        never colour alone - and GO has already returned." */
+    ClaimRig rig;
+
+    const auto first = rig.armAt (rig.mediaId);
+    REQUIRE_FALSE (first.empty());
+
+    rig.setStandby (rig.secondId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    const auto* second = rig.runs.liveRunOf (rig.secondId);
+    REQUIRE (second != nullptr);
+
+    /*  It has the slot in `pending` and not in `claims`, and the first still
+        holds it. */
+    CHECK (second->pending == std::vector<std::string> { rig.slotId });
+    CHECK (second->claims.empty());
+    CHECK (rig.runs.holderOf (rig.slotId)->id == first);
+
+    /*  AND IT MAKES NO SOUND. A pending claim holds the whole cue: half a cue
+        is not a cue, and a cue sent into a slot somebody else holds is the
+        fighting the claim exists to prevent. */
+    const auto launchesBefore = rig.audio.launches.size();
+
+    for (int n = 0; n < 8; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.audio.launches.size() == launchesBefore);
+
+    /*  THE HOLDER ENDS, AND IT LANDS - in the handler that ended the run,
+        without a record of its own. */
+    rig.submitAndTick ("run.kill", { osc::Value::string (first) });
+    rig.tickOnce();
+
+    const auto secondId = rig.runs.liveRunOf (rig.secondId)->id;
+
+    CHECK (rig.runs.find (secondId)->pending.empty());
+    CHECK (rig.runs.find (secondId)->claims == std::vector<std::string> { rig.slotId });
+    CHECK (rig.runs.holderOf (rig.slotId)->id == secondId);
+
+    /*  And now it can sound. */
+    for (int n = 0; n < 8; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.audio.launches.size() > launchesBefore);
+}
+
+TEST_CASE ("claim: a run that FAILS gives its slots back, and nothing sends run.ended")
+{
+    /*  The exit a reading misses. `run.failed` sets `failed` and `endedAtTick`
+        and sends no `run.ended` at all, so a media cue that dies after taking
+        its claims would hold them for the session - and the symptom would
+        arrive on a later cue, as a wait that never ends. */
+    ClaimRig rig;
+
+    const auto first = rig.armAt (rig.mediaId);
+    REQUIRE_FALSE (first.empty());
+    REQUIRE (rig.runs.holderOf (rig.slotId) != nullptr);
+
+    rig.submitAndTick ("run.failed", { osc::Value::string (first),
+                                       osc::Value::string (cue::runError::mediaMissing) });
+
+    CHECK (rig.runs.find (first)->state == cue::runState::failed);
+    CHECK (rig.runs.find (first)->claims.empty());
+    CHECK (rig.runs.holderOf (rig.slotId) == nullptr);
+}
+
+TEST_CASE ("claim: a rack channel degrades rather than waits")
+{
+    /*  §3.9e gives each slot kind a failure policy of its own, and the rack's is
+        DEGRADE: the cue plays dry and says so. A scene that stopped because a
+        reverb was busy would be worse than a dry scene, and §3.9c's edit-time
+        analysis is what keeps it from happening on the night at all. */
+    ClaimRig rig;
+
+    const auto channel = rig.document.createRackChannel ("mono");
+    REQUIRE (channel.ok);
+
+    for (const auto& cueId : { rig.mediaId, rig.secondId })
+    {
+        const auto insert = rig.document.createInsert (cueId, channel.id);
+        REQUIRE (insert.ok);
+    }
+
+    const auto first = rig.armAt (rig.mediaId);
+    REQUIRE_FALSE (first.empty());
+    CHECK (rig.runs.find (first)->warning.empty());
+    REQUIRE (rig.runs.holderOf (channel.id) != nullptr);
+
+    /*  The second cue finds it busy. It does NOT wait - the channel is not in
+        its pending list - and it carries a warning saying what it lost. */
+    rig.setStandby (rig.secondId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+
+    const auto* second = rig.runs.liveRunOf (rig.secondId);
+    REQUIRE (second != nullptr);
+
+    CHECK (second->warning == cue::runWarning::noChannel);
+    CHECK (std::find (second->pending.begin(), second->pending.end(), channel.id)
+             == second->pending.end());
+
+    /*  A WARNING IS NOT AN ERROR. The run is going: it did something smaller
+        than it meant to, and reporting that as a failure would either stop the
+        scene or teach an operator to ignore the state that means stopped. */
+    CHECK (second->error.empty());
+    CHECK_FALSE (second->isFinished());
+}
+
+TEST_CASE ("claim: a shared rack channel is declared and never claimed")
+{
+    /*  §3.9e: a reverb many cues send into is a bus with a chain, and a bus is
+        shared by construction with nothing to allocate. */
+    ClaimRig rig;
+
+    const auto channel = rig.document.createRackChannel ("stereo");
+    REQUIRE (channel.ok);
+    rig.document.findById (channel.id)
+       .setProperty (juce::Identifier ("access"), "shared", nullptr);
+
+    for (const auto& cueId : { rig.mediaId, rig.secondId })
+        REQUIRE (rig.document.createInsert (cueId, channel.id).ok);
+
+    const auto first = rig.armAt (rig.mediaId);
+    REQUIRE_FALSE (first.empty());
+
+    CHECK (rig.runs.holderOf (channel.id) == nullptr);
+    CHECK (std::find (rig.runs.find (first)->claims.begin(),
+                      rig.runs.find (first)->claims.end(), channel.id)
+             == rig.runs.find (first)->claims.end());
+    CHECK (rig.runs.find (first)->warning.empty());
+}
+
+TEST_CASE ("claim: a replay takes the same claims, with no audio at all")
+{
+    /*  THE ARGUMENT FOR HAVING NO RECORD, made executable. A claim is derived
+        from the document alone - the cue's `Feed` children against the declared
+        pool - so it is issued ABOVE `armMedia`'s null-player return and a
+        session with no audio side takes it exactly as a hosted one does.
+
+        Were it issued below, every claim would be absent from every replay and
+        from every `wfg serve` without `--hosted` - which is precisely the
+        sessions the log is supposed to reproduce. */
+    ClaimRig rig;
+    rig.runner.setPlayer (nullptr);
+
+    rig.setStandby (rig.mediaId);
+    rig.tickOnce();
+
+    const auto* live = rig.runs.liveRunOf (rig.mediaId);
+
+    if (live != nullptr)
+    {
+        CHECK (live->claims == std::vector<std::string> { rig.slotId });
+        CHECK (live->track == -1);          // no voice, because there is no audio
+    }
+    else
+    {
+        /*  Standby does not arm without a Player at all, which is the older
+            behaviour and equally fine: what must not happen is a run that
+            exists and holds nothing. */
+        CHECK (rig.runs.all().empty());
+    }
+}
+
 TEST_CASE ("feed: a slot that does not fit its bus fails the arm rather than the load")
 {
     /*  `validate()` refuses this shape when the show is read. Asked again here

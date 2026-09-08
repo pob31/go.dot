@@ -100,6 +100,32 @@ namespace wfg::cue
         be done - and the log says so. A rejection means the request was
         malformed; a failed run means the show is not in a state to honour it.
     */
+    /*  What a run did LESS of than it meant to, while still going.
+
+        A separate vocabulary from `runError` on purpose, and the separation is
+        the point rather than tidiness. An error is a run that did not do what
+        it said; a warning is a run that did something smaller and carried on.
+        Folding them together would make a cue that played dry look like a cue
+        that did not play - and an operator who learns that the state meaning
+        "stopped" sometimes means "fine" has learned to ignore it.
+    */
+    namespace runWarning
+    {
+        /*  An exclusive rack channel was busy, so the cue plays dry.
+
+            §3.9e calls this DEGRADE and gives it to the rack alone: a voice
+            fails at entry, a processor input waits, and a rack channel carries
+            on without its processing. The show continuing is the entire point
+            of the policy, and §3.9c's edit-time analysis is what keeps it from
+            happening on the night. */
+        inline constexpr const char* noChannel = "no-channel";
+
+        /*  The horizon prepared this run and the pointer moved away before a
+            GO. Phase 4's revocation (PR 4.5); declared here so the enum does
+            not grow under a client that has already read it. */
+        inline constexpr const char* revoked = "revoked";
+    }
+
     namespace runError
     {
         /** Every track was busy. A playing track is never stolen. */
@@ -327,6 +353,41 @@ namespace wfg::cue
             been rendering an empty string in its place since the day the group
             scheduler landed. */
         std::string phase;
+
+        //======================================================================
+        /*  THE SLOTS THIS RUN HOLDS, AND THE ONES IT IS STILL WAITING FOR.
+
+            PRD §3.9e's shared rules, and they are the whole of what the four
+            slot kinds have in common: a claim on a busy slot is neither a
+            failure nor a race - it lands when the holder's run ends - and the
+            claimant shows *pending* meanwhile, in words rather than colour.
+
+            KEPT ON THE RUN AND NOT IN A TABLE OF THEIR OWN, which is the same
+            answer the voice allocator already gives: `isTrackBusy` asks the
+            runs whether anybody holds a track rather than keeping a second
+            record of it, because a second record is a second thing to keep in
+            step and the one that is wrong is always the copy. Who holds a slot
+            is therefore a scan, and it is the same scan on a replay.
+
+            A VOICE IS NOT IN HERE. It is `track`, where it has been since
+            Phase 2. One mechanism does not oblige one data structure.
+
+            Both are released when the run reaches `done` or `failed`, which is
+            exactly when `holdsTrack()` stops being true - so the claim's
+            release and the voice's are one rule in two places, rather than two
+            rules that will one day disagree. */
+        std::vector<std::string> claims;
+        std::vector<std::string> pending;
+
+        /*  Something this run did less of than it meant to, and carried on.
+
+            NOT A WEAKER `error`. An error is a run that did not do what it
+            said; a warning is a run that did something smaller and is still
+            going. `no-channel` is a cue that lost an exclusive rack channel and
+            played dry, which §3.9e calls DEGRADE and which is the entire point
+            of that policy: reporting it as a failure would either stop the
+            scene or teach an operator to ignore the state that means stopped. */
+        std::string warning;
 
         //======================================================================
         /*  THE WAITS, IN TICKS, COPIED FROM THE CUE WHEN THE RUN IS CREATED.
@@ -586,6 +647,36 @@ namespace wfg::cue
             show replayed puts the same cue on the same track, so two logs of
             one session compare line for line. A playing track is never stolen. */
         int lowestFreeTrack (int trackCount) const;
+
+        /*  The run holding this slot, or null. The `isTrackBusy` question asked
+            of a declared slot instead of a track, and answered the same way:
+            by looking, rather than by consulting a record kept beside the
+            runs. */
+        const Run* holderOf (const std::string& slotId) const;
+
+        /*  The runs waiting for it, oldest claim first. Creation order IS the
+            queue: a run is made when the log said so, so the order two runs
+            claimed a slot in is the order the log made them, and a replay hands
+            the slot to the same one. */
+        std::vector<const Run*> waitersFor (const std::string& slotId) const;
+
+        /*  Gives up every slot this run holds, and hands each one to the head
+            of its queue.
+
+            CALLED WHERE A RUN REACHES `done` OR `failed`, which is the same
+            moment `holdsTrack()` stops being true - so a slot and a voice are
+            freed by one rule written in two places rather than by two rules.
+            `run.failed` matters most and is the one a reading misses: it sets
+            `failed` and sends no `run.ended` at all, so a media cue that dies
+            on a missing file AFTER taking its claims would otherwise hold them
+            for the session.
+
+            NO RECORD OF ITS OWN. Every step is already inside a command a
+            replay has - the claim was issued in an arm and the release is in
+            the handler that ended the run - and handing a slot to the head of a
+            queue decides nothing: it is a fact about the queue rather than a
+            choice about the show. That is why there is no `claim.land`. */
+        void releaseSlotsOf (const std::string& runId);
 
         const std::vector<Run>& all() const noexcept { return runs; }
 

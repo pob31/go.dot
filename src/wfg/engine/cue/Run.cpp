@@ -113,4 +113,74 @@ namespace wfg::cue
 
         return -1;
     }
+
+    namespace
+    {
+        bool holds (const Run& run, const std::string& slotId)
+        {
+            return std::find (run.claims.begin(), run.claims.end(), slotId) != run.claims.end();
+        }
+    }
+
+    const Run* RunTable::holderOf (const std::string& slotId) const
+    {
+        if (slotId.empty())
+            return nullptr;
+
+        for (const auto& run : runs)
+            if (! run.isFinished() && holds (run, slotId))
+                return &run;
+
+        return nullptr;
+    }
+
+    std::vector<const Run*> RunTable::waitersFor (const std::string& slotId) const
+    {
+        std::vector<const Run*> waiting;
+
+        if (slotId.empty())
+            return waiting;
+
+        for (const auto& run : runs)
+            if (! run.isFinished()
+                  && std::find (run.pending.begin(), run.pending.end(), slotId)
+                       != run.pending.end())
+                waiting.push_back (&run);
+
+        return waiting;
+    }
+
+    void RunTable::releaseSlotsOf (const std::string& runId)
+    {
+        auto* run = find (runId);
+
+        if (run == nullptr)
+            return;
+
+        const auto released = run->claims;
+
+        run->claims.clear();
+        run->pending.clear();
+
+        for (const auto& slotId : released)
+        {
+            /*  THE HEAD OF THE QUEUE, and creation order is the queue: a run is
+                made when the log said so, so two runs that claimed one slot are
+                in the order the log made them and a replay hands it to the same
+                one. */
+            const auto waiting = waitersFor (slotId);
+
+            if (waiting.empty())
+                continue;
+
+            auto* next = find (waiting.front()->id);
+
+            if (next == nullptr)
+                continue;
+
+            next->pending.erase (std::remove (next->pending.begin(), next->pending.end(), slotId),
+                                 next->pending.end());
+            next->claims.push_back (slotId);
+        }
+    }
 }

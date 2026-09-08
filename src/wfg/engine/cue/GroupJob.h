@@ -128,15 +128,15 @@ namespace wfg::cue
             finished runs of round one would answer to that test and the round
             would look over before it began.
 
-            So the runs are claimed once each, as they appear, by whichever
-            phase was running the cue they belong to. `claimed` is every one
+            So the runs are taken once each, as they appear, by whichever
+            phase was running the cue they belong to. `taken` is every one
             this job has ever taken; `phaseRuns` is the ones this phase has. */
         std::vector<std::string> phaseRuns;
-        std::vector<std::string> claimed;
+        std::vector<std::string> taken;
 
-        bool hasClaimed (const std::string& runId) const
+        bool hasTaken (const std::string& runId) const
         {
-            return std::find (claimed.begin(), claimed.end(), runId) != claimed.end();
+            return std::find (taken.begin(), taken.end(), runId) != taken.end();
         }
 
         /*  The cues of the phase in progress, and how far along them it is.

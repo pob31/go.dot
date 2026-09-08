@@ -124,6 +124,13 @@ namespace wfg::cue
                                 run->endedAtTick = context.tick;
                             }
 
+                            /*  AND ITS SLOTS GO BACK, to the head of each
+                                queue. The same moment the voice is freed -
+                                `holdsTrack()` is a track and an unfinished run
+                                - so the two are one rule in two places rather
+                                than two rules (§13.4). */
+                            runs.releaseSlotsOf (run->id);
+
                             return Outcome::ok (args);
                         } });
 
@@ -295,6 +302,11 @@ namespace wfg::cue
 
                             run->state = runState::done;
                             run->endedAtTick = context.tick;
+
+                            /*  The other end of a post-wait: `run.ended` put the
+                                run here rather than finishing it, so this is
+                                where its slots go back. */
+                            runs.releaseSlotsOf (run->id);
                             return Outcome::ok (args);
                         } });
 
@@ -327,6 +339,13 @@ namespace wfg::cue
                             run->error = why;
                             run->track = -1;
                             run->endedAtTick = context.tick;
+
+                            /*  AND THE SLOTS IT HAD ALREADY TAKEN, which is the
+                                exit a reading misses: this one sends no
+                                `run.ended` at all, so a media cue that dies on a
+                                missing file after claiming a processor input
+                                would hold it for the rest of the session. */
+                            runs.releaseSlotsOf (run->id);
 
                             return Outcome::ok (args);
                         } });

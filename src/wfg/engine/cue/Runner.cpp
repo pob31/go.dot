@@ -647,12 +647,84 @@ namespace wfg::cue
             armMedia (engine, cue, runId);
     }
 
+
+    void Runner::claimSlotsFor (const juce::ValueTree& cue, const std::string& runId)
+    {
+        auto* run = runs.find (runId);
+
+        if (run == nullptr)
+            return;
+
+        for (const auto& destination : cue)
+        {
+            const auto element = destination.getType().toString();
+            const auto isFeed = element == "Feed";
+            const auto isInsert = element == "Insert";
+
+            if (! isFeed && ! isInsert)
+                continue;
+
+            const auto slotId = destination[juce::Identifier (isFeed ? "slot" : "channel")]
+                                  .toString().toStdString();
+            const auto slot = document.findById (slotId);
+
+            /*  A destination naming a slot the show does not have is the
+                `refers` column's warning at validate time and nothing here: it
+                will fail the routing when the arm reaches it, with a reason. */
+            if (! slot.isValid())
+                continue;
+
+            /*  A SHARED RACK CHANNEL IS NEVER CLAIMED. §3.9e: a reverb many
+                cues send into is a bus with a chain, and a bus is shared by
+                construction with nothing to allocate. */
+            if (isInsert
+                  && slot[juce::Identifier ("access")].toString() == "shared")
+                continue;
+
+            const auto* holder = runs.holderOf (slotId);
+
+            if (holder == nullptr)
+            {
+                run->claims.push_back (slotId);
+                continue;
+            }
+
+            /*  BUSY, AND THE TWO KINDS ANSWER DIFFERENTLY - which is §3.9e's
+                whole table: a slot has a failure policy of its own kind.
+
+                A PROCESSOR INPUT WAITS. The claim lands when the holder's run
+                ends and the row says *pending* meanwhile; GO has already
+                returned (§4.1), and a holder that never ends on its own is the
+                operator's to end.
+
+                A RACK CHANNEL DEGRADES. The cue plays dry and says so, because
+                a scene that stops because a reverb was busy is worse than a
+                scene that is dry - and §3.9c's edit-time analysis is what keeps
+                it from happening in the show at all. */
+            if (isInsert)
+            {
+                run->warning = runWarning::noChannel;
+                continue;
+            }
+
+            run->pending.push_back (slotId);
+        }
+    }
+
     void Runner::armMedia (Engine& engine, const juce::ValueTree& cue, const std::string& runId)
     {
         auto* run = runs.find (runId);
 
         if (run == nullptr || run->track >= 0)
             return;
+
+        /*  THE SLOTS FIRST, and above the return below, because a claim is a
+            fact about the document rather than about the audio side: the cue's
+            `Feed` and `Insert` children against the pool the show declared. A
+            replay takes them exactly as a hosted session does, which is what
+            makes the whole lifecycle reproducible without a record of its own
+            (§13.4). */
+        claimSlotsFor (cue, runId);
 
         /*  NO AUDIO SIDE IS A COMPLETE CONFIGURATION, not a failure. A show
             replayed has no Player and must still create the run, advance
@@ -2198,9 +2270,9 @@ namespace wfg::cue
                 inheriting round one's finished runs, since both rounds play the
                 same cues. */
             for (const auto* child : runs.childrenOf (job.run))
-                if (inPhase (child->cue) && ! job.hasClaimed (child->id))
+                if (inPhase (child->cue) && ! job.hasTaken (child->id))
                 {
-                    job.claimed.push_back (child->id);
+                    job.taken.push_back (child->id);
                     job.phaseRuns.push_back (child->id);
                 }
 
@@ -2419,7 +2491,7 @@ namespace wfg::cue
             std::any_of (childRuns.begin(), childRuns.end(),
                          [&job, &cues, first] (const Run* child)
                          {
-                             return child->cue == cues[first] && ! job.hasClaimed (child->id);
+                             return child->cue == cues[first] && ! job.hasTaken (child->id);
                          });
 
         if (unclaimed)
@@ -2673,6 +2745,24 @@ namespace wfg::cue
                 placed before the disk has answered plays silence for as long as
                 the disk takes, with the run reporting itself as playing
                 throughout - the worst shape a failure can have. */
+            /*  A PENDING CLAIM HOLDS THE WHOLE CUE, and not the part of it
+                that wants the slot.
+
+                A media cue with a `Feed` to a busy processor input and a
+                `Route` to foldback launches neither until the claim lands. Half
+                a cue is not a cue; sending it into a slot somebody else holds
+                is the fighting §3.9b exists to prevent; and the foldback
+                arriving alone would be an operator hearing the cue and finding
+                it is not the one they fired.
+
+                GO has already returned (§4.1), the row says *pending* (§3.9e),
+                and a holder that never ends on its own - an infinite loop - is
+                the operator's to end. `run.late` reports the shortfall when it
+                does land, with no new arithmetic: the intended launch tick is
+                the tick GO was applied on. */
+            if (! run->pending.empty())
+                continue;
+
             if (! run->armConfirmed || run->track < 0)
                 continue;
 

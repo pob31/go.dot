@@ -1804,6 +1804,15 @@ rows the engine computed, which is what `/godot/cue/<id>` already does with `nam
 | `/godot/slot/<id>/usage` | `s` | ro | none | the live ranges §13.5 computes, as `<first> <last>` cue pairs — the data behind §3.9c's usage-over-show-time plot, which Phase 5 draws |
 | `/godot/slot/<id>/overlaps` | `s` | ro | none | the cue pairs whose live ranges intersect on this slot |
 
+**A slot is published out of both halves of the tree, and it has to be.** Its stored rows and its
+derived `kind` come from the document half, which is a cache rebuilt when the show changes. `holder`
+and `pending` cannot: they change several times a second while nothing about the show does, so
+published from the cached half they would freeze at whatever they were when somebody last edited a
+cue — which for a show that is running and not being edited means for ever. It is the same reason
+`/godot/audio/status` is not published beside `/godot/audio/tracks`. The document half leaves the
+roster of declared slots behind and the runtime half reads it, which costs one vector and no second
+walk.
+
 **Voices appear in neither table, and both absences are deliberate.**
 
 They are not in the *namespace* because a track is not an object anybody declared: nobody wrote it
@@ -1966,6 +1975,14 @@ a replay runs no hooks. A claim takes no decisions:
   revoked waiter is never found at a head;
 - and it is **granted** in whichever of those handlers released it, to the head of the slot's
   pending queue, which is a fact about the queue rather than a choice about the show.
+
+**Built as drawn in PR 4.3, and one thing fell out of building it that is worth keeping.** The
+claims live on the RUN rather than in a table of their own — a vector of slot identifiers held and
+another of ones waited for — so who holds a slot is a scan of the run table, exactly as
+`isTrackBusy` already answers who holds a track. That was not the plan's shape and it is better
+than the plan's shape: a second record of who holds what is a second thing to keep in step, and the
+one that is wrong is always the copy. It also means the whole of §13.2's slot table needed no new
+object at all, and that a replay reconstructs every claim from the records it already had.
 
 One guard the implementer will not see coming: `run.ended`'s handler returns early on a run that is
 already `failed`, so a release written below that guard is skipped for exactly the runs whose claims

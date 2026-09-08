@@ -190,6 +190,12 @@ namespace wfg::tree
         const MountTable& mounts;
         const MountSender* sender = nullptr;
         const std::map<std::string, double>* durations = nullptr;
+
+        /*  Every declared slot, in document order, as the document half last
+            saw them. The runtime half publishes `holder` and `pending` against
+            this rather than walking the show again: those two change with every
+            run and the document half is a cache. */
+        std::vector<std::string> declaredSlots;
         const cue::RunTable& runs;
 
         std::shared_ptr<const std::vector<Node>> documentPart;
