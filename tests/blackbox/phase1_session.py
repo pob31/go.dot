@@ -277,11 +277,17 @@ def run(locale: "str | None") -> int:
                 common.send_udp(server.osc_port,
                                 common.osc_encode("/godot/cmd/document/save"))
 
-                #  A save is a datagram, a tick and a file write, and the file
-                #  is what step 9 reads - so the file is what is waited for.
+                #  A save is a datagram, a tick, a file write AND a log record,
+                #  and steps 9 and 10 read the file and the log - so both are
+                #  waited for. The record is written after the handler returns,
+                #  which is after the file is on disk: a driver that left on
+                #  seeing the file killed the server inside that gap on the
+                #  Windows runner, twice in one run, and the log had no save in
+                #  it. What a check reads is what its wait has to see.
                 common.wait_until(
                     lambda: "wrote-by-somebody-else"
-                              in (bundle / "show.xml").read_text(encoding="utf-8"))
+                              in (bundle / "show.xml").read_text(encoding="utf-8")
+                            and "document.save" in log.read_text(encoding="utf-8"))
             finally:
                 client.close()
 
