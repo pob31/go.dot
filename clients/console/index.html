@@ -217,6 +217,23 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 .tail .flag { letter-spacing: .05em; text-transform: uppercase; }
 .tail .flag.warn { color: var(--waiting); text-transform: none; letter-spacing: 0; cursor: help; }
 .tail .flag.ready { color: var(--live); text-transform: none; letter-spacing: 0; cursor: help; }
+#aimbar {
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+  border-top: 1px solid var(--rule); background: var(--panel-high); font-size: 11px;
+}
+#aimbar .what { text-transform: uppercase; letter-spacing: .08em; color: var(--ink-faint); }
+#aimbar .at { color: var(--ink); min-width: 90px; }
+#aimbar input[type="range"] { flex: 1; accent-color: var(--picked); }
+#aimbar .landed { color: var(--ink-faint); }
+#aim-plan {
+  max-height: 132px; overflow-y: auto; padding: 0 12px 8px;
+  background: var(--panel-high); font-size: 11px; color: var(--ink-faint);
+}
+#aim-plan .line { padding: 1px 0; }
+#aim-plan .line b { color: var(--ink); font-weight: 500; }
+#aim-plan .confused { color: var(--waiting); }
+#aim-plan .none { color: var(--ink-faint); font-style: italic; }
+
 .tail .flag.preset { color: var(--picked); text-transform: none; letter-spacing: 0; cursor: help; }
 .row.derived .name .text, .row.derived .number { font-style: italic; color: var(--ink-faint); }
 .row.derived .tail .flag { color: var(--picked); }
@@ -346,6 +363,23 @@ button:disabled { color: var(--ink-faint); cursor: default; }
       </header>
       <div class="list-tabs" id="tabs"></div>
       <div class="scroll" id="cues"></div>
+
+      <!--  WHERE THE OPERATOR IS POINTING, AND WHAT WOULD BE TRUE THERE.
+
+            PRD §3.13's two pointers, in the order somebody uses them: pick a
+            row and how far into it, read what the show would be, and then -
+            only if they mean it - make it so. The aim changes nothing; the
+            button is the one that does, and it says which. -->
+      <div id="aimbar">
+        <span class="what">aim</span>
+        <span class="at" id="aim-at">—</span>
+        <input type="range" id="aim-offset" min="-1" max="60" step="0.5" value="-1">
+        <span class="num" id="aim-offset-text">before</span>
+        <button id="aim-load" disabled>load to time</button>
+        <span class="landed" id="aim-landed"></span>
+      </div>
+
+      <div id="aim-plan"></div>
     </section>
 
     <section class="pane">
@@ -513,10 +547,14 @@ function oscEncode(address, args) {
 
     if (arg.tag === "s") { parts.push(oscString(String(arg.value))); continue; }
 
-    const buffer = new ArrayBuffer(4);
+    /*  Eight bytes for a double and four for everything else, which is the
+        whole of OSC 1.0's difference between them. */
+    const wide = arg.tag === "d";
+    const buffer = new ArrayBuffer(wide ? 8 : 4);
     const view = new DataView(buffer);
 
-    if (arg.tag === "i") view.setInt32(0, Number(arg.value) | 0, false);
+    if (wide) view.setFloat64(0, Number(arg.value), false);
+    else if (arg.tag === "i") view.setInt32(0, Number(arg.value) | 0, false);
     else view.setFloat32(0, Number(arg.value), false);
 
     parts.push(new Uint8Array(buffer));
@@ -588,6 +626,12 @@ function send(address, args) {
 
 const str = (value) => ({ tag: "s", value: String(value) });
 const int = (value) => ({ tag: "i", value: Number(value) });
+
+/*  A DOUBLE, because `list.aim` asks for one. An offset in seconds through a
+    float32 would round - 1.1 seconds is not 1.1 in 32 bits - and the aim is
+    compared with what the engine spells back, so the two have to agree exactly
+    or the slider would drift under its own readout. */
+const dbl = (value) => ({ tag: "d", value: Number(value) });
 
 /** A named command (§4.11): `standby.set` is published at /godot/cmd/standby/set. */
 function command(name, args) {
@@ -1166,6 +1210,108 @@ function refreshFields(pane) {
   }
 }
 
+/*  THE AIM, AND THE ANSWER TO IT.
+
+    Two nodes and a button. `list/aim` is where the finger is; `list/solve` is
+    what the show would be there, which the engine recomputes when the question
+    changes; `list.loadToTime` is the one that makes it true. Reading and doing
+    are separate on purpose - §3.13's whole point is that an operator can look
+    before they leap, and a slider that jumped the show as it moved would be a
+    slider nobody dared touch.
+
+    The picked row is what the aim points at, because that is the row the
+    operator is already looking at. */
+function renderAim() {
+  const lists = tree.ids("/godot/list/order");
+  const focus = tree.get("/godot/list/focus", "") || lists[0] || "";
+
+  const bar = el("aimbar");
+  const plan = el("aim-plan");
+
+  if (!focus) { bar.hidden = true; plan.hidden = true; return; }
+
+  bar.hidden = false;
+  plan.hidden = false;
+
+  const aim = String(tree.get("/godot/list/" + focus + "/aim", ""));
+  const space = aim.lastIndexOf(" ");
+  const atCue = space > 0 ? aim.slice(0, space) : "";
+  const atOffset = space > 0 ? Number(aim.slice(space + 1)) : -1;
+
+  el("aim-at").textContent = atCue ? cueName(atCue) : "— pick a row —";
+  el("aim-load").disabled = !atCue;
+
+  /*  Not while somebody is dragging it: writing the slider's own value back
+      under a finger is how a control fights the person using it. */
+  const slider = el("aim-offset");
+
+  if (document.activeElement !== slider) slider.value = String(atOffset);
+
+  el("aim-offset-text").textContent = Number(slider.value) < 0
+    ? "before" : Number(slider.value).toFixed(1) + " s";
+
+  const landed = String(tree.get("/godot/list/" + focus + "/statePosition", ""));
+  el("aim-landed").textContent = landed && landed !== aim
+    ? "landed at " + landed.replace(/ /, " + ") + " s"
+    : "";
+
+  /*  AND WHAT IT WOULD BE. A solve is one node holding a document, so this is
+      the only place on the page that parses JSON - and it is why: a subtree of
+      nodes appearing and vanishing under a dragged finger would be a namespace
+      no client could subscribe to. */
+  const text = String(tree.get("/godot/list/" + focus + "/solve", ""));
+
+  if (!text) {
+    plan.innerHTML = '<div class="none">nothing aimed at yet</div>';
+    return;
+  }
+
+  let solved = null;
+
+  try { solved = JSON.parse(text); } catch (e) { solved = null; }
+
+  if (!solved || !solved.ok) {
+    plan.innerHTML = '<div class="none">the aim names nothing this list holds</div>';
+    return;
+  }
+
+  const lines = [];
+
+  for (const run of solved.runs || []) {
+    const where = run.when === "sounding"
+      ? Number(run.offset).toFixed(1) + " s in"
+      : run.when === "due"
+        ? "in " + Number(run.startsIn).toFixed(1) + " s"
+        : "over";
+
+    lines.push('<div class="line"><b>' + esc(cueName(run.cue)) + "</b> — " +
+               esc(run.when) + ", " + esc(where) + "</div>");
+  }
+
+  for (const value of solved.values || [])
+    lines.push('<div class="line">' + esc(value.address) + " = " + esc(value.value) +
+               " <span style=\"opacity:.6\">from " + esc(cueName(value.from)) +
+               "</span></div>");
+
+  for (const trim of solved.trims || [])
+    lines.push('<div class="line"><b>' + esc(cueName(trim.cue)) + "</b> trimmed " +
+               esc(String(trim.dB)) + " dB</div>");
+
+  /*  THE CONFUSED LIST IS THE FEATURE (§3.24), so it is not tucked away: a
+      solver that says what it could not know is more useful than one that
+      guesses, and an operator about to jump is exactly who needs to read it. */
+  for (const why of solved.confused || [])
+    lines.push('<div class="line confused">could not know: ' + esc(why.why) + " for " +
+               esc(cueName(why.cue)) + " — took " + esc(why.took) + "</div>");
+
+  if (solved.standby)
+    lines.push('<div class="line">the pointer would land on <b>' +
+               esc(cueName(solved.standby)) + "</b></div>");
+
+  plan.innerHTML = lines.length ? lines.join("")
+                                : '<div class="none">nothing would be running there</div>';
+}
+
 function renderStrip() {
   const show = tree.get("/godot/document/name", "");
   el("s-show").textContent = show || "—";
@@ -1234,6 +1380,7 @@ function render() {
 
   renderStrip();
   renderLists();
+  renderAim();
   renderRuns();
   renderInspector();
 }
@@ -1318,6 +1465,18 @@ document.addEventListener("click", (event) => {
 
   if (data && data.focus) { command("list.focus", [str(data.focus)]); return; }
 
+  /*  THE ONE THAT MAKES IT TRUE, and it is a button rather than the slider for
+      exactly that reason: §3.13 lets an operator look before they leap, and a
+      slider that jumped the show as it moved would be a slider nobody dared
+      touch. */
+  if (event.target && event.target.id === "aim-load") {
+    const list = aimedList();
+
+    if (list) command("list.loadToTime", [str(list)]);
+
+    return;
+  }
+
   /*  PARKING IS NOT SELECTING. §3.5: "standby never moves on scroll or select",
       so the pointer has a target of its own - the gutter, where the wedge that
       marks it already lives. */
@@ -1374,6 +1533,17 @@ document.addEventListener("click", (event) => {
   }
 
   const row = event.target.closest && event.target.closest("[data-pick]");
+
+  /*  PICKING A ROW IS ASKING ABOUT IT. The inspector already opens on a click,
+      and §3.13's question is about the row somebody is looking at - so one
+      gesture does both rather than making them aim a second time. */
+  if (row && row.dataset && row.dataset.pick) {
+    const list = aimedList();
+
+    if (list)
+      command("list.aim", [str(list), str(row.dataset.pick),
+                           dbl(Number(el("aim-offset").value))]);
+  }
   if (row) { picked = row.dataset.pick; render(); }
 });
 
@@ -1381,7 +1551,28 @@ document.addEventListener("click", (event) => {
     choosing for a menu - and not on every keystroke. A cue named "Th" on the
     way to "Thunder" would otherwise be a write, a log record and a document
     mutation nobody asked for, five times over. */
+/*  The list the aim belongs to, which is the focused one. */
+function aimedList() {
+  const lists = tree.ids("/godot/list/order");
+  return tree.get("/godot/list/focus", "") || lists[0] || "";
+}
+
+/*  Points the aim at the picked row, keeping whatever offset the slider has.
+    Picking a row and asking about it are one gesture, which is why selection
+    drives this rather than a second control. */
+function aimHere() {
+  const list = aimedList();
+
+  if (!list || !picked) return;
+
+  command("list.aim", [str(list), str(picked), dbl(Number(el("aim-offset").value))]);
+}
+
 document.addEventListener("input", (event) => {
+  /*  The slider re-aims as it moves - asking is free and the answer is what it
+      is for. */
+  if (event.target && event.target.id === "aim-offset") { aimHere(); return; }
+
   const target = event.target;
 
   if (target && target.dataset && target.dataset.set && target.type !== "checkbox") {
