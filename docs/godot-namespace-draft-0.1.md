@@ -2970,6 +2970,28 @@ affordable to publish at all.
 **Nothing here gates.** A wall clock on a shared CI runner is a flaky test that teaches people to
 re-run the suite; the counts are what the design promises and the counts are what is asserted.
 
+#### What the other four answered *(PRs 4.4-4.11, 2026-09-08 and 09)*
+
+All on the Windows box, Debug, and all reporting rather than gating.
+
+| | verdict | the numbers |
+|---|---|---|
+| **M18** | **One mutation, one rebuild** - asserted by counting, which is the only way a cache guarantee can be asserted | A 500-cue, 20-slot synthetic show under a burst of `object.move`: `engine/analysisRebuilds` moves once per applied mutation and not once per read. 208 ms per rebuild, of which `ShowDocument::findById` is 131 ms - a debt named in the close-out rather than a property of the analysis |
+| **M19** | **The block settles one tick after the pointer lands** | A prepared header against the mock target: one read-before-write round trip per anticipatable node, and the settle word arrives on the tick after the last of them |
+| **M20** | **17.7 ms per solve over 500 cues**, in a Debug build with iterator debugging - roughly an order of magnitude above the shipped one | 167 network cues resolving to 40 distinct addresses. The node is capped at 5 Hz and a dragged aim re-solves at the drag's own rate, so what this has to fit inside is a gesture rather than a tick |
+| **M21** | **Per address, by two orders of magnitude** | One subtree GET of the WFS-DIY capture is 1.09 MB and 2 480 nodes and costs **135 ms** to digest - nearly seven ticks, every second. The forty single-value replies a 500-cue show needs cost **0.6 ms**, three per cent of one tick. Break-even is past eight thousand written addresses, which is more than the capture holds |
+
+**M21 decided a shape outright**, which is the strongest thing a measurement can do. §13.10 was
+written with "one subtree GET or one GET per address" as an open question and the sweep built either
+way; the answer is that a show writes forty addresses and a namespace has two and a half thousand
+nodes, so asking about what the show writes is not a compromise but the whole of it. The subtree
+number stays here as the figure that says when to revisit it.
+
+**M20 set a rate cap rather than passing a threshold.** Seventeen milliseconds is most of a tick, and
+a solve behind a dragged finger would have been a tick spent on a question nobody had finished
+asking. So the aim publishes at 5 Hz and the solve is cached on (document revision, aim) - and the
+number to beat, if a bigger show ever needs it, is written down.
+
 ### 13.15 The direction this phase does not build
 
 **Eviction.** §3.9e's second shared rule — *eviction is a close, not a kill* — is Phase 6's, where a

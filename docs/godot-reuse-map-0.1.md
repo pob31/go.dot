@@ -511,6 +511,23 @@ Four things around it, and one that is a gap rather than a reuse:
 | **Per-domain undo** for the document edits Phase 4 adds | `spatcore/control/state/TreeParameterStore` | **still Phase 5's**, listed below and unchanged. Phase 4 adds document elements and no undo of its own |
 | **Time-tagged OSC bundles** to Go.dot's own processors (§3.12) | `spatcore/control/osc/OSCParser.h` | **BLOCKED, and this is the reuse map's own open gap below**: spatcore parses a bundle's time tag and discards it, so WFS-DIY and XOA would apply a tick-N+1 value on arrival rather than at its timetag — which is worse than not sending one. §3.12's second paragraph waits on a spatcore change, and §13.15 records it as not built rather than attempted |
 
+**What Phase 4 actually did with these (2026-09-09, at close-out).**
+
+- **The bulk read-back was not built as a bulk read.** M21 priced both shapes against the WFS-DIY
+  capture and the answer was decisive: one subtree GET is 1.09 MB and 2 480 nodes and costs 135 ms
+  to digest, while the forty single-value replies a 500-cue show actually needs cost 0.6 ms. So the
+  sweep asks per written address, over the same `OscQueryClient` transport Phase 2 adopted, and no
+  many-values-from-one-reply parser was needed after all. `MountProbe::Question` gained a flag
+  saying WHY it is asking, so a sweep and a verified cue's question never share a slot.
+- **The duration was taken from Tracktion, as planned**, and the side table it lives in is keyed by
+  PATH. §3.30's spectral-colour cache is keyed by CONTENT HASH, so Phase 5 grows that table into a
+  per-file record rather than adding a second map beside it. Noted here because this row is where
+  somebody will look.
+- **The allocator was written from the PRD, as expected.** Nothing was lifted. What it did reuse is
+  Go.dot's own: `cue/ShowWalk.h` answers "when is this cue live" once, for both the slot analysis
+  and the solver, so the two cannot come to disagree about a show.
+- **Time-tagged bundles are still blocked** on spatcore, unchanged and unattempted.
+
 ### Phase 5 — desktop UI and undo
 
 | Need | Reuse |

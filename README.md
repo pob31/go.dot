@@ -29,7 +29,7 @@ The specification lives in `docs/`, and it is the spec — not background readin
 
 ---
 
-## Status: Phase 3's criterion is met; Phase 2 complete but for the hardware pass
+## Status: Phase 4's criterion is met; Phase 2 complete but for the hardware pass
 
 Phase 0 — *"a repo that builds on three platforms"* — is complete, and the seven
 Tracktion Engine validation spikes have been run (`docs/spikes/`; all pass).
@@ -180,6 +180,64 @@ through an ordinary bus, and the claim that keeps a second cue out of the
 position and the LFO state behind that input is the same row that carries it
 there. What is not here yet is the claiming — that is the next pull request, and
 the analysis that warns you at edit time is the one after.
+
+**Phase 4 meets its criterion.** That criterion is *load-to-time into the middle of a
+scene lands the right cues at the right offsets with the right slots claimed;
+reordering cues produces the right overlap warnings; a claim on a busy slot waits
+and says so; all headless* — and `tests/blackbox/phase4_prepare.py` is that
+sentence as a program, fifty-two checks against the shipped binary over UDP and
+HTTP, in CI on three platforms under two locales.
+
+What that phrase means in a room: park the pointer on a scene and the scene gets
+itself ready — the disk is paid for, the processor input is claimed, and the value
+the scene wants on the desk is READ, sent and verified before anybody's hand comes
+down. Move the pointer away and the desk goes back to what it held, the voice is
+given back and the claim is released, because anticipation is only as good as its
+revocation. Fire a cue that wants an input another cue is holding and it waits,
+saying *pending* in words rather than fighting for it. Move that cue above the
+scene and the show tells you, at edit time, that the two of them could overlap on
+one input; move it back and the warning goes. Ask what the show would be four
+seconds into the second member of a nested scene, look at the answer, and then
+make it so: the right cues start at the right offsets with the right things
+claimed, and the desk receives only the values that differed from what it was
+last seen to hold.
+
+**Three of those fifty-two checks failed the first time, against real faults.**
+Each was a seam between two things that were separately correct: a scene whose
+header is entirely derived from `preset` marks read *partial* for ever, because
+the word was counted against the written header alone; a plain media cue at the
+pointer held its voice and its processor input after the pointer moved on,
+because the revocation was written for prepared blocks and a lone cue is the
+smallest block there is; and a preset network cue standing second in a scene
+stopped the scene when its own row came round, because the horizon had already
+run it and the member phase was waiting for something to launch. A fourth showed
+up in the replay: a jump is one record whose handler *solves*, and `wfg replay`
+had no media lengths, so it planned a different show — it reads them off the
+log's own `# media` header lines now. None of these was reachable from a unit
+test, and all of them were reachable by driving a whole show.
+
+**What the phase built, in order.** Prepare and commit (§3.12) with a horizon
+that gets a whole block ready and a revocation that is a logged record; presets
+derived into a header, so the line IS the member and there is no second object
+(§13.7); the shared allocator over processor inputs and rack channels, claims
+that wait or degrade by policy, and the edit-time liveness analysis that warns
+about overlaps across lists (§3.9b, §3.9c, §3.9e); the state solver, which is a
+pure function over the document and says what it could not know rather than
+guessing (§3.13, §3.24); `list.loadToTime`, which builds the run tree mid-way and
+hands it to a scheduler that never learns a jump happened; the step history the
+operator does not have to keep, with the world read back at every step; and the
+persistent section, asserted through the solver rather than by a second mechanism
+(§3.29).
+
+Six measurements came with it. Two changed a decision rather than confirming one:
+a second launcher slot does **not** stop the first on a track, which falsified
+the guess §3.25's sampler claim was built on, and the observation sweep is
+cheaper per address than per subtree by two orders of magnitude — 0.6 ms against
+135 ms, which is the difference between three per cent of a tick and seven whole
+ticks, every second. The close-out is
+[`docs/godot-phase4-closeout-0.1.md`](docs/godot-phase4-closeout-0.1.md); the
+handoff to Phase 5 is
+[`docs/handoffs/2026-09-09-phase5-handoff.md`](docs/handoffs/2026-09-09-phase5-handoff.md).
 
 **There is now something to look at, and to work in.** `wfg serve <bundle>
 --ui=clients/console` serves a client from `/ui` on the OSCQuery port; open that
