@@ -619,6 +619,11 @@ namespace wfg::cue
         /** Which word from `preparedness` a settled preparation ended on. */
         const char* settledWord (const GroupJob& job, const juce::ValueTree& group) const;
 
+        /*  The write half of a network cue, which a prepared one reaches only
+            after the read has come back. Fills in what a `verified` wait needs
+            and queues the datagram. */
+        void writeOscNow (OscJob& job);
+
         /*  A prepared group run becoming a live one: the run turns `playing`,
             it is told where the pointer entered, and its job leaves the hold.
 

@@ -450,6 +450,23 @@ namespace wfg::cue
             GO, and is the moment the answer stops being about the future. */
         std::string prepare;
 
+        /*  WHAT THE TARGET HELD BEFORE THIS RUN WROTE TO IT, and where.
+
+            The other half of §13.1's bargain: a value pre-sent ahead of a GO
+            has to be restorable, and this is the thing it is restored TO. Read
+            off the target before the write - `OscJob::reading` - and kept here
+            because the job is gone long before the pointer moves away.
+
+            Spelled as a log ATOM rather than held as a typed value, which is
+            the same grammar the document and the log use: a restore is sent as
+            an ordinary `node.set`, so what a replay reproduces is the write
+            rather than a private field of the engine's.
+
+            Empty for every run that pre-sent nothing, which is nearly all of
+            them. */
+        std::string restoreAddress;
+        std::string restoreAtom;
+
         //======================================================================
         /*  THE WAITS, IN TICKS, COPIED FROM THE CUE WHEN THE RUN IS CREATED.
 
@@ -677,6 +694,14 @@ namespace wfg::cue
             own list, because the two could disagree and only one of them is
             what the runs actually say. */
         std::vector<const Run*> childrenOf (const std::string& parentRun) const;
+
+        /*  Every run under this one, at any depth, outermost first.
+
+            What a REVOCATION walks: a horizon prepares a block whose runs are
+            parented level to level, so putting back what it pre-set means
+            reaching all of them and not only the first rank. Depth first in
+            creation order, so the answer is the same on a replay. */
+        std::vector<const Run*> descendantsOf (const std::string& parentRun) const;
 
         /** Whether every child of this group run has finished. An empty group
             is complete, which is the honest answer and not a special case. */

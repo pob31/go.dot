@@ -1624,6 +1624,50 @@ namespace wfg::doc
         };
 
         References { problems, *this }.visit (showNode);
+
+        /*  AND A MOUNT THAT SAYS ITS NODES MAY BE WRITTEN EARLY BUT CANNOT BE
+            ASKED WHAT THEY HELD.
+
+            §13.1 makes anticipation conditional on being able to take it back,
+            and taking a write back means putting the old value there - which
+            needs the old value, which needs a read. A mount marked
+            `anticipatable` with `readback` of `none` has told Go.dot that an
+            early write is safe and given it no way to undo one, so nothing on
+            it is ever pre-sent and every cue aimed at it runs at entry.
+
+            A WARNING AND NOT A REFUSAL, because the show is complete and
+            correct: what it loses is a saved moment, not a sound. It is worth
+            saying out loud because the two attributes are set in different
+            places and one of them is doing nothing. */
+        const auto mounts = showNode.getChildWithName (juce::Identifier ("Mounts"));
+
+        for (const auto& mount : mounts)
+        {
+            if (mount.getType().toString() != "Mount")
+                continue;
+
+            const auto anticipatable =
+                mount.hasProperty (juce::Identifier ("anticipatable"))
+                  && static_cast<bool> (mount[juce::Identifier ("anticipatable")]);
+
+            if (! anticipatable)
+                continue;
+
+            const auto readback = mount.hasProperty (juce::Identifier ("readback"))
+                                    ? mount[juce::Identifier ("readback")].toString().toStdString()
+                                    : std::string ("none");
+
+            if (readback == "oscquery")
+                continue;
+
+            problems.push_back ("/Show/.../Mount["
+                                  + mount[idProperty].toString().toStdString()
+                                  + "]/@anticipatable: says its nodes may be written ahead of a"
+                                    " GO, but @readback is \"" + readback
+                                  + "\" - so nothing can be read back to restore, and nothing"
+                                    " will be pre-sent");
+        }
+
         return problems;
     }
 }

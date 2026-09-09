@@ -2241,14 +2241,34 @@ everything it issued has *arrived*: an arm armed, a network cue finished. The or
 header's, and a header whose cues write one address still leaves the last one standing, because the
 sender coalesces by address inside a tick.
 
-**A network cue is not pre-sent yet, and that is §13.1 being obeyed rather than a gap.** The
-condition it will be pre-sent under is already decided and already written down — the node
-`anticipatable` **and** its mount able to answer — but the READ is what makes the write revocable,
-and a pre-send without it would be exactly the trade §13.1 forbids: a saved moment paid for with a
-desk left in a state the operator did not choose. So this PR prepares **media only**, where
-everything it does is undone by letting go of it and nothing outside the machine has heard anything.
-`OscJob`'s `reading` state, `mount/@rateCap`, the two `wfg validate` warnings about anticipation
-without read-back, and the `verified` word arrive together in the PR that adds the pre-send.
+**A network cue is pre-sent only where there is something to put back**, which is §13.1 as a
+condition rather than a preference. Both halves are required: the node marked `anticipatable`, which
+is what its owner says about whether an early write is safe, and the mount able to answer, which is
+what makes the restore exist at all.
+
+**And the restore goes back as an ordinary `node.set`.** That is the whole of the mechanism and it
+is deliberately not a private path: `node.set` is how any client writes a mounted node, so a
+revocation is one of those with the value the target held before the horizon touched it. A replay
+then reproduces the restore exactly as it reproduces every other write — the value is in the record,
+the mounted tree comes out the same, and in a replay nothing is sent, because a replay's foreign
+writer has no sender. Somebody running `wfg replay` at three in the morning on the show network does
+not move the rig.
+
+**The read asks ONCE, and the verify asks every tick, and the difference is not tidiness.** A verify
+wants the CURRENT value, so a later answer is a better answer and the probe drops the duplicates. A
+read wants the value from ONE moment — the one before anything was written — and asking again after
+the answer has been submitted but before it has been applied leaves a second question in flight. That
+one lands after the write and satisfies the verify that follows it, and the cue reports `disagreed`
+about a desk that agreed perfectly. It showed up as a test that failed one run in three, which is
+the only reason it was found at all. A read that is never answered times out, nothing is pre-sent,
+and the block says `partial` — the safe direction, because a value that could not be read is a value
+that must not be written early.
+
+**`verified` is now reachable and means the desk agreed**, which is the one word of the six that is a
+statement about the other box rather than about what Go.dot meant to do.
+
+**`mount/@rateCap` is still not honoured.** It is about what leaves the machine and how fast, which
+is a different concern from what may be written early, and it gets its own PR.
 
 **The revocation finishes its runs itself, and ends them `done` rather than emptying `track`.**
 `run.ended` has nowhere to put a reason — `error` is documented as failed-only — and a revocation is
@@ -2287,6 +2307,13 @@ halves of the snapshot — and `find` searches one and then the other, so the an
 it reached first. No test caught it: the case needs a show with a declared slot *and* the whole-tree
 walk that counts addresses, and no fixture had both. Putting every cue in the same position made it
 visible immediately.
+
+**A `Run*` taken before a run is created is a `Run*` into moved memory**, and this cost an hour. The
+run table is a `std::vector<Run>`; `prepareStandby` took a pointer to the group run it had just made,
+then called `beginPreparation`, which creates a child run for every preparable header cue. The media
+case never showed it — a scene whose header holds nothing preparable creates no children at all, so
+the pointer stayed valid and every test passed. It took a header with a network cue in it, which is
+the first thing that function ever creates a run for.
 
 #### What M19 answered, so far *(PR 4.5, 2026-09-09)*
 

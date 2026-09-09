@@ -474,21 +474,34 @@ namespace wfg::cue
         if (element != "Osc")
             return false;
 
-        /*  AN OSC CUE IS NOT PREPARED YET, AND THE REASON IS §13.1's.
+        /*  AN OSC CUE ONLY WHERE THERE IS SOMETHING TO PUT BACK.
 
-            The condition it will be prepared under is already decided - the
-            node marked `anticipatable` AND its mount able to answer - because a
-            value pre-sent to a target that cannot be asked what it held is a
-            value nobody can put back, and anticipating it would trade a saved
-            moment for a desk left in a state the operator did not choose.
+            §13.1, and it is a condition rather than a preference: a value
+            pre-sent to a target that cannot be asked what it held is a value
+            nobody can restore, so anticipating it would trade a saved moment
+            for a desk left in a state the operator did not choose. Both halves
+            are required - the node marked `anticipatable`, which is what its
+            owner says about whether an early write is safe, AND the mount able
+            to answer, which is what makes the restore exist at all.
 
-            What is missing is the READ, and until it exists a pre-send would be
-            exactly the trade that rule forbids: this horizon can revoke
-            everything it does by letting go of it, and nothing outside the
-            machine has heard anything. `OscJob`'s `reading` state - ask the
-            target, keep what it held, then write and verify - is what makes a
-            network cue revocable, and it arrives with it rather than after it. */
-        return false;
+            A node that is one without the other is a `wfg validate` warning
+            rather than a silent decision here: the show still runs, and the cue
+            fires at entry like any other. */
+        if (mounts == nullptr)
+            return false;
+
+        const auto address = textOf (cue, "address");
+
+        if (address.empty())
+            return false;
+
+        const auto* node = mounts->nodeAt (address);
+
+        if (node == nullptr || ! node->anticipatable)
+            return false;
+
+        const auto* declaration = mounts->declarationOf (mounts->mountOf (address));
+        return declaration != nullptr && declaration->canBeAsked();
     }
 
     std::vector<std::string> Runner::preparableIn (const juce::ValueTree& group) const
@@ -555,6 +568,7 @@ namespace wfg::cue
             with a cause outside itself; then a block that could not be got
             ready whole; then the ordinary answer. */
         auto missing = false;
+        auto agreed = false;
 
         for (const auto* child : runs.childrenOf (job.run))
         {
@@ -563,6 +577,15 @@ namespace wfg::cue
 
             if (child->state == runState::failed)
                 missing = true;
+
+            /*  THE DESK AGREED. A network cue whose wait is `verified` and
+                whose run reached `done` was pre-sent, asked about, and answered
+                with the value that was written - which is the one thing in this
+                vocabulary that is a statement about the OTHER box rather than
+                about what Go.dot meant to do. */
+            if (child->kind == "osc" && child->state == runState::done
+                 && textOf (document.findById (child->cue), "wait") == "verified")
+                agreed = true;
         }
 
         /*  A HEADER CUE THIS HORIZON COULD NOT TAKE is the other half of
@@ -573,11 +596,7 @@ namespace wfg::cue
                          != membersOf (group.getChildWithName ("Header")).size())
             return preparedness::partial;
 
-        /*  `verified` is not reachable yet and will be when a network cue can
-            be read before it is written: it means every pre-sent value came
-            back equal, and nothing is pre-sent until there is something to put
-            back (§13.1). */
-        return preparedness::armed;
+        return agreed ? preparedness::verified : preparedness::armed;
     }
 
     bool Runner::preparationSettled (const GroupJob& job) const
@@ -773,22 +792,35 @@ namespace wfg::cue
                 is one memo has nothing to do ahead, and the run still exists so
                 that GO has something to adopt and the pointer moving away has
                 something to revoke. */
-            if (beginPreparation (engine, job, group, nextId, used))
-            {
-                run->prepare = preparedness::preparing;
-            }
-            else
-            {
+            const auto started = beginPreparation (engine, job, group, nextId, used);
+
+            if (! started)
                 job.phase = groupPhase::prepared;
 
-                /*  NOTHING PREPARABLE IS NOT NOTHING PREPARED. The block's
-                    members are still armed below, so a scene whose header is
-                    one memo reads `armed` and not `idle` - and `partial` when
-                    the header had cues this horizon could not take ahead. */
-                run->prepare = membersOf (group.getChildWithName ("Header")).empty()
-                                 ? preparedness::armed
-                                 : preparedness::partial;
-            }
+            /*  ASKED FOR AGAIN, because `beginPreparation` CREATES RUNS and the
+                run table is a vector: every pointer into it taken before that
+                call is a pointer into memory the growth may have moved.
+
+                It cost an hour to find, and the shape of the mistake is worth
+                the sentence: the media case never showed it, because a scene
+                whose header holds nothing preparable creates no children at
+                all - so the pointer stayed valid and every test passed. It took
+                a header with a network cue in it, which is the first thing this
+                function ever creates a run for. */
+            run = runs.find (id);
+
+            if (run == nullptr)
+                continue;
+
+            /*  NOTHING PREPARABLE IS NOT NOTHING PREPARED. The block's members
+                are still armed below, so a scene whose header is one memo reads
+                `armed` and not `idle` - and `partial` when the header had cues
+                this horizon could not take ahead. */
+            run->prepare = started
+                             ? preparedness::preparing
+                             : (membersOf (group.getChildWithName ("Header")).empty()
+                                  ? preparedness::armed
+                                  : preparedness::partial);
 
             scheduled.push_back (job);
             parentRun = id;
@@ -1930,12 +1962,63 @@ namespace wfg::cue
             return;
         }
 
-        const auto written = mounts->write (address, *value);
+        job.address = address;
+        job.pending = *value;
+
+        const auto seconds = numberOf (cue, "timeout");
+        job.ticksAllowed = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
+
+        /*  A PREPARED CUE ASKS BEFORE IT WRITES, and that order is the whole of
+            §13.1 made operational.
+
+            The mark is the run's own `prepare`: a horizon set it, and it means
+            "this is ready for a GO that has not happened". A cue in that
+            position must be undoable, and undoing a write needs the value that
+            was there first - so the target is asked, the answer is kept on the
+            run as the restore value, and only then does the write go out.
+
+            The ordinary path does the OPPOSITE and is right to: it forgets the
+            remembered answer at the moment it writes and asks afterwards,
+            because what it wants to know is whether the device took what it was
+            given. Same two operations, opposite order, different question. */
+        if (selfRun->prepare.empty())
+        {
+            writeOscNow (job);
+            sending.push_back (job);
+            return;
+        }
+
+        job.reading = true;
+        job.mountId = mounts->mountOf (address);
+
+        if (const auto* node = mounts->nodeAt (address))
+            job.typeTag = node->typeTags;
+
+        if (const auto* declaration = mounts->declarationOf (job.mountId))
+        {
+            job.host = declaration->host;
+            job.queryPort = declaration->queryPort;
+        }
+
+        /*  FORGOTTEN BEFORE IT IS ASKED FOR, exactly as the verify does and for
+            the same reason one step earlier: an answer left over from an
+            earlier cue on this node would be taken for what the target holds
+            NOW, and the restore would put back a value from a different moment. */
+        mounts->forgetReadback (address);
+
+        sending.push_back (job);
+    }
+
+    void Runner::writeOscNow (OscJob& job)
+    {
+        if (mounts == nullptr)
+            return;
+
+        const auto written = mounts->write (job.address, job.pending);
 
         if (! written.ok)
         {
             job.failure = written.reason;
-            sending.push_back (job);
             return;
         }
 
@@ -1949,11 +2032,10 @@ namespace wfg::cue
         if (sender_ != nullptr && declaration != nullptr)
             job.ticket = sender_->queue (written.mountId,
                                          { declaration->host, declaration->port },
-                                         address, written.value);
+                                         job.address, written.value);
 
         if (job.wait == OscWait::verified)
         {
-            job.address = address;
             job.mountId = written.mountId;
             job.expected = written.value;
 
@@ -1962,9 +2044,9 @@ namespace wfg::cue
                 answer the target gave to an earlier cue would still be sitting
                 there, would match, and every verified cue on that node would
                 report done without anybody being asked anything. */
-            mounts->forgetReadback (address);
+            mounts->forgetReadback (job.address);
 
-            if (const auto* node = mounts->nodeAt (address))
+            if (const auto* node = mounts->nodeAt (job.address))
                 job.typeTag = node->typeTags;
 
             if (declaration != nullptr)
@@ -1972,13 +2054,7 @@ namespace wfg::cue
                 job.host = declaration->host;
                 job.queryPort = declaration->queryPort;
             }
-
-            const auto seconds = numberOf (cue, "timeout");
-            job.ticksAllowed = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
         }
-
-        sending.push_back (job);
-        return;
     }
 
     void Runner::fireMidi (const juce::ValueTree& cue, const std::string& runId)
@@ -2069,6 +2145,73 @@ namespace wfg::cue
                                { osc::Value::string (job.self),
                                  osc::Value::string (job.failure) });
                 job.finished = true;
+                continue;
+            }
+
+            /*  STILL ASKING WHAT WAS THERE FIRST. §13.1: a pre-send that
+                cannot be put back is not anticipation, it is a change nobody
+                asked for made early - so the read comes before the write and
+                the write waits for it.
+
+                What arrives is a `mount.readback` command applied like any
+                other, which is what makes this replayable: the answer is in the
+                log, and a replay reaches the same restore value on the same
+                tick with no network in the room. */
+            if (job.reading)
+            {
+                ++job.ticksWaited;
+
+                if (const auto* held = mounts != nullptr
+                                         ? mounts->readbackOf (job.address) : nullptr)
+                {
+                    /*  KEPT ON THE RUN, because the job will be gone long
+                        before the pointer moves away and the restore is needed. */
+                    if (auto* run = runs.find (job.self))
+                    {
+                        run->restoreAddress = job.address;
+                        run->restoreAtom = held->toAtom();
+                    }
+
+                    job.reading = false;
+                    job.ticksWaited = 0;
+                    writeOscNow (job);
+
+                    if (! job.failure.empty())
+                        continue;
+
+                    /*  A `none` or `sent` wait now behaves as it always did,
+                        one tick later than an unprepared cue - which is the
+                        price of being able to undo it. */
+                    if (job.wait != OscWait::verified)
+                    {
+                        engine.submit (origin::engine, "run.ended", one (job.self));
+                        job.finished = true;
+                    }
+
+                    continue;
+                }
+
+                /*  THE TARGET NEVER ANSWERED, so there is nothing to restore to
+                    and nothing is written: the cue fails here rather than
+                    pre-sending a value it could not take back. It is left for
+                    entry like any other un-anticipatable cue, and the block
+                    reads `partial`. */
+                if (job.ticksWaited > job.ticksAllowed)
+                {
+                    engine.submit (origin::engine, "run.failed",
+                                   { osc::Value::string (job.self),
+                                     osc::Value::string (oscError::timeout) });
+                    job.finished = true;
+                    continue;
+                }
+
+                if (asker != nullptr && ! job.asked)
+                {
+                    job.asked = true;
+                    asker->ask ({ job.mountId, job.host, job.queryPort,
+                                  job.address, job.typeTag });
+                }
+
                 continue;
             }
 
@@ -3080,10 +3223,10 @@ namespace wfg::cue
                     standing second in a header gets a second run when its turn
                     comes, and the one that was prepared keeps its voice until
                     the show is reloaded. */
-                const auto children = runs.childrenOf (job.run);
+                const auto standing = runs.childrenOf (job.run);
 
                 const auto unclaimed =
-                    std::any_of (children.begin(), children.end(),
+                    std::any_of (standing.begin(), standing.end(),
                                  [&job, &next] (const Run* child)
                                  {
                                      return child->cue == next && ! job.hasTaken (child->id);
@@ -3091,7 +3234,7 @@ namespace wfg::cue
 
                 if (unclaimed)
                 {
-                    for (const auto* child : children)
+                    for (const auto* child : standing)
                         if (child->cue == next && ! job.hasTaken (child->id))
                             askedFor (child->id);
                 }
@@ -3367,10 +3510,41 @@ namespace wfg::cue
         const auto keep = horizonRootFor (list, standby);
 
         for (const auto& snapshot : runs.all())
-            if (snapshot.state == runState::preparing
-                 && snapshot.parent.empty()
-                 && snapshot.cue != keep)
-                engine.submit (origin::engine, "run.revoke", one (snapshot.id));
+        {
+            if (snapshot.state != runState::preparing
+                 || ! snapshot.parent.empty()
+                 || snapshot.cue == keep)
+                continue;
+
+            /*  WHAT WAS PRE-SENT GOES BACK FIRST, and it goes back as an
+                ORDINARY WRITE.
+
+                §13.1: anticipation is only as good as its revocation, and a
+                revocation of a value on somebody else's desk is putting the old
+                one there. `node.set` is how any client writes a mounted node,
+                so this is that command with the value the target held before
+                the horizon touched it - read before the write, kept on the run.
+
+                An ordinary command rather than a private path, because a replay
+                then reproduces the restore exactly as it reproduces every other
+                write: the record is in the log with the value in it, and the
+                mounted tree comes out the same with no network in the room.
+
+                BEFORE the revocation, so that a client watching sees the desk
+                put back and then the runs end, rather than a scene vanishing
+                and a value changing afterwards for no visible reason. */
+            for (const auto* run : runs.descendantsOf (snapshot.id))
+            {
+                if (run->restoreAddress.empty())
+                    continue;
+
+                if (const auto value = osc::Value::fromAtom (run->restoreAtom))
+                    engine.submit (origin::engine, "node.set",
+                                   { osc::Value::string (run->restoreAddress), *value });
+            }
+
+            engine.submit (origin::engine, "run.revoke", one (snapshot.id));
+        }
 
         if (standby.empty())
             return;

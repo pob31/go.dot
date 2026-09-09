@@ -108,6 +108,50 @@ namespace wfg::cue
             reported where reporting is allowed, which is not the same place. */
         std::string failure;
 
+        /*  READ BEFORE WRITE: the state a PREPARED network cue starts in.
+
+            PRD §3.12's anticipation only works if it can be undone, and §13.1
+            makes that the condition rather than a nicety: a value pre-sent to a
+            target nobody can ask what it held is a value nobody can put back,
+            so anticipating it would trade a saved moment for a desk left in a
+            state the operator did not choose.
+
+            So a prepared cue asks FIRST. The target is asked what it holds, the
+            answer is kept on the run as the restore value, and only then is the
+            new value written and verified exactly as an ordinary `verified` cue
+            is. The existing path does the opposite - it forgets the remembered
+            answer at the moment it writes, and asks afterwards - which is right
+            for verification and is precisely wrong for a restore. The ORDER is
+            the whole difference, and this flag is what carries it.
+
+            It is not a fourth `OscWait`: the wait is what the DESIGNER asked
+            for and this is a fact about when the engine got to the cue. A
+            prepared cue with `wait: none` still reads first, because the
+            restore value is not optional. */
+        bool reading = false;
+
+        /*  What is to be written once the read has come back. Empty otherwise:
+            an ordinary cue writes at once and has nothing to remember. */
+        osc::Value pending;
+
+        /*  Whether the read has been asked for. ASKED ONCE, which is the
+            opposite of what the verify does and is the difference between the
+            two questions.
+
+            A verify asks every tick and lets the probe drop the duplicates:
+            what it wants is the CURRENT value, so a later answer is a better
+            answer. A read wants the value from ONE moment - the one before
+            anything was written - and asking again after the answer has been
+            submitted but before it has been applied leaves a second answer in
+            flight, which lands after the write and satisfies the verify that
+            follows it. The cue then reports `disagreed` about a desk that
+            agreed perfectly.
+
+            A read that is never answered times out, nothing is pre-sent, and
+            the block says `partial` - which is the safe direction: a value that
+            could not be read is a value that must not be written early. */
+        bool asked = false;
+
         //  --- verified only ------------------------------------------------
         /** The node being watched, and what it was written with. */
         std::string address;

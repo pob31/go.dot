@@ -36,6 +36,7 @@
 
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
@@ -292,21 +293,41 @@ namespace
         {
             REQUIRE (socket.start (0, [] (osc::Datagram) {}));
 
-            tree::MountDeclaration mount;
-            mount.id = "K3PV7WRB";
-            mount.prefix = "/desk";
-            mount.namespaceFile = "namespaces/desk.json";
-            mount.host = "127.0.0.1";
-            mount.port = socket.boundPort();
-            mount.readback = "oscquery";
-            mount.queryPort = device.port();
+            declaration.id = "K3PV7WRB";
+            declaration.prefix = "/desk";
+            declaration.namespaceFile = "namespaces/desk.json";
+            declaration.host = "127.0.0.1";
+            declaration.port = socket.boundPort();
+            declaration.readback = "oscquery";
+            declaration.queryPort = device.port();
 
-            REQUIRE (mounts.load (mount, deskJson).ok);
+            REQUIRE (mounts.load (declaration, deskJson).ok);
 
             sender.setSocket (socket);
 
             engine.log().openInMemory ({});
-            doc::registerDocumentCommands (engine.commands(), document);
+            /*  A WRITE TO SOMEBODY ELSE'S NODE, wired exactly as `wfg serve`
+                wires it: the value lands in the mount table, which is what a
+                client reads and what a replay reproduces, and it is queued for
+                the end of the tick, which is what the desk hears. Without this
+                the rig could pre-send but never put anything back, because a
+                restore IS one of these writes. */
+            doc::registerDocumentCommands (
+                engine.commands(), document,
+                [this] (const std::string& address, const osc::Value& value)
+                {
+                    const auto written = mounts.write (address, value);
+
+                    if (! written.ok)
+                        return Outcome::rejected (written.reason);
+
+                    if (const auto* declaration = mounts.declarationOf (written.mountId))
+                        sender.queue (written.mountId,
+                                      { declaration->host, declaration->port },
+                                      address, written.value);
+
+                    return Outcome::ok ({ osc::Value::string (address), written.value });
+                });
             cue::registerCueCommands (engine.commands(), document, focus);
             cue::registerRunCommands (engine.commands(), runs);
             cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
@@ -323,6 +344,24 @@ namespace
         {
             probe.stop();
             socket.stop();
+        }
+
+        /*  THE MOUNT SAYS AN EARLY WRITE IS SAFE. PRD §3.3 makes
+            `anticipatable` false for a third party by default - we do not get
+            to decide that somebody else's box does not mind being written to
+            ahead of time - so a test about anticipation has to say so out loud,
+            exactly as a designer would. */
+        void anticipate()
+        {
+            declaration.anticipatable = true;
+            REQUIRE (mounts.load (declaration, deskJson).ok);
+        }
+
+        /** Parks the pointer and lets the horizon see it, as a show does. */
+        void setStandby (const std::string& cueId)
+        {
+            document.setAttribute (cue::standbyAddressOf (listId), cueId);
+            tickOnce();
         }
 
         std::string makeVerified (const std::string& atom, const char* timeout = "5")
@@ -380,6 +419,7 @@ namespace
         FakeDevice device;
         osc::UdpEndpoint socket;
         juce::File nowhere;
+        tree::MountDeclaration declaration;
 
         tree::MountTable mounts;
         tree::MountSender sender;
@@ -657,4 +697,275 @@ TEST_CASE ("verified: a cue nobody gave a timeout waits five seconds rather than
     REQUIRE (run != nullptr);
     CHECK (run->error != std::string ("timeout"));
     CHECK_FALSE (run->isFinished());
+}
+
+//==============================================================================
+/*  ANTICIPATION, AND THE READ THAT MAKES IT REVOCABLE.
+
+    PRD §3.12 wants a value at the desk before the operator's hand comes down.
+    §13.1 makes that conditional on being able to take it back, and §3.3 makes
+    `anticipatable` false for a third party by default - we do not get to decide
+    that somebody else's box does not mind being written to early.
+
+    So the order is: ASK the target what it holds, keep that as the restore
+    value, then write, then verify. The ordinary verified path does the exact
+    opposite - it forgets the remembered answer at the moment it writes and asks
+    afterwards - which is right for verification and precisely wrong for a
+    restore. Same two operations, opposite order, different question.
+*/
+namespace
+{
+    /** A scene whose header holds one network cue on the desk. */
+    struct PreparedScene
+    {
+        PreparedScene (VerifiedRig& rig, const char* atom, const char* wait)
+        {
+            group = rig.document.createCue (rig.listId, rig.index++, "group", "Scene").id;
+
+            const auto header = rig.document.createRole (group, "header");
+            REQUIRE (header.ok);
+
+            cue = rig.document.createCue (header.id, 0, "osc", "Position the source").id;
+
+            const auto base = "/godot/cue/" + cue + "/";
+            rig.document.setAttribute (base + "address", "/desk/fader");
+            rig.document.setAttribute (base + "value", atom);
+            rig.document.setAttribute (base + "wait", wait);
+            rig.document.setAttribute (base + "timeout", "5");
+
+            /*  Somewhere for the pointer to go when it leaves the block. */
+            after = rig.document.createCue (rig.listId, rig.index++, "memo", "After").id;
+        }
+
+        std::string group, cue, after;
+    };
+}
+
+TEST_CASE ("prepare: the value that was there is read before the new one is written")
+{
+    VerifiedRig rig;
+    rig.anticipate();
+
+    /*  What the desk is holding before anybody touches it. */
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+
+    rig.setStandby (scene.group);
+
+    /*  The read crosses a socket and comes back on another thread, so how many
+        ticks it takes is the operating system's business. */
+    for (int n = 0; n < 600; ++n)
+    {
+        const auto* seen = rig.runOf (scene.cue);
+
+        if (seen != nullptr && ! seen->restoreAtom.empty())
+            break;
+
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    /*  ASKED AGAIN AFTER THE LOOP, because a tick can create a run and the run
+        table is a vector: a pointer taken before one is a pointer into memory
+        the next push_back may have moved. */
+    const auto* run = rig.runOf (scene.cue);
+    REQUIRE (run != nullptr);
+
+    /*  IT KEPT WHAT WAS THERE. Not the value it wrote - which is what the
+        verify path remembers - but the one it found. */
+    CHECK (run->restoreAddress == "/desk/fader");
+
+    const auto held = osc::Value::fromAtom (run->restoreAtom);
+    REQUIRE (held.has_value());
+    CHECK (*held == osc::Value::float32 (0.2f));
+
+    /*  AND THEN IT WROTE. The mounted tree is what a client reads and what a
+        replay reproduces; the datagram is what the desk hears. */
+    for (int n = 0; n < 600; ++n)
+    {
+        if (const auto* now = rig.mounts.valueOf ("/desk/fader");
+            now != nullptr && *now == osc::Value::float32 (0.8f))
+            break;
+
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    const auto* written = rig.mounts.valueOf ("/desk/fader");
+    REQUIRE (written != nullptr);
+    CHECK (*written == osc::Value::float32 (0.8f));
+}
+
+TEST_CASE ("prepare: the pointer leaving puts the desk back, as an ordinary write")
+{
+    /*  §13.1's whole bargain, end to end. The restore goes out as `node.set` -
+        the command any client uses to write a mounted node - so a replay
+        reproduces it exactly as it reproduces every other write, with the value
+        in the record and no network in the room. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+
+    rig.setStandby (scene.group);
+
+    for (int n = 0; n < 600; ++n)
+    {
+        if (const auto* now = rig.mounts.valueOf ("/desk/fader");
+            now != nullptr && *now == osc::Value::float32 (0.8f))
+            break;
+
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    REQUIRE (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.8f));
+
+    /*  Away. */
+    rig.setStandby (scene.after);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto* restored = rig.mounts.valueOf ("/desk/fader");
+    REQUIRE (restored != nullptr);
+    CHECK (*restored == osc::Value::float32 (0.2f));
+
+    /*  AND THE RESTORE IS IN THE LOG AS A WRITE, which is what makes a replay
+        of a rehearsal put the desk back too. */
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+
+    const auto set = std::find_if (parsed.records.begin(), parsed.records.end(),
+                                   [] (const auto& record)
+                                   {
+                                       return record.command == "node.set"
+                                               && ! record.args.empty()
+                                               && record.args[0].getString() == "/desk/fader";
+                                   });
+
+    REQUIRE (set != parsed.records.end());
+    REQUIRE (set->args.size() == 2u);
+    CHECK (set->args[1] == osc::Value::float32 (0.2f));
+}
+
+TEST_CASE ("prepare: a block whose pre-sent value came back equal says verified")
+{
+    /*  The one word of §13.6's six that means the DESK AGREES, rather than that
+        Go.dot did what it meant to. */
+    VerifiedRig rig;
+    rig.anticipate();
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+
+    const PreparedScene scene { rig, "f:0.8", "verified" };
+
+    rig.setStandby (scene.group);
+
+    /*  The desk takes the value once it has been read - which is what a desk
+        that is plugged in does, and what this fake one has to be told to do. */
+    for (int n = 0; n < 600; ++n)
+    {
+        const auto* run = rig.runOf (scene.cue);
+
+        if (run != nullptr && ! run->restoreAtom.empty())
+        {
+            rig.device.target.says ({ osc::Value::float32 (0.8f) });
+            break;
+        }
+
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    for (int n = 0; n < 600; ++n)
+    {
+        const auto* seen = rig.runs.preparedRunOf (scene.group);
+
+        if (seen != nullptr && seen->prepare == std::string (cue::preparedness::verified))
+            break;
+
+        rig.tickOnce();
+        std::this_thread::sleep_for (std::chrono::milliseconds (2));
+    }
+
+    const auto* block = rig.runs.preparedRunOf (scene.group);
+    REQUIRE (block != nullptr);
+    CHECK (std::string (block->prepare) == cue::preparedness::verified);
+
+    /*  And the cue does not run again at entry: its preparation WAS its
+        execution, so the header's remainder leaves it out. */
+    const auto* presend = rig.runOf (scene.cue);
+    REQUIRE (presend != nullptr);
+    INFO ("run error: " << presend->error << "; state " << presend->state);
+    CHECK (presend->state == cue::runState::done);
+}
+
+TEST_CASE ("prepare: a mount that cannot be asked is never pre-sent")
+{
+    /*  §13.1 as a refusal rather than a warning. A value sent early to a target
+        nobody can ask what it held is a value nobody can put back, so the cue
+        is left for entry and the block says `partial` - which is §3.6's own
+        word for a block that is not anticipatable all the way through. */
+    VerifiedRig rig;
+
+    rig.declaration.anticipatable = true;
+    rig.declaration.readback = "none";
+    REQUIRE (rig.mounts.load (rig.declaration, deskJson).ok);
+
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+
+    const PreparedScene scene { rig, "f:0.8", "none" };
+
+    rig.setStandby (scene.group);
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    /*  Nothing ran, nothing was written, and nothing is holding a restore. */
+    CHECK (rig.runOf (scene.cue) == nullptr);
+
+    const auto* value = rig.mounts.valueOf ("/desk/fader");
+    CHECK (value == nullptr);
+
+    const auto* block = rig.runs.preparedRunOf (scene.group);
+    REQUIRE (block != nullptr);
+    CHECK (std::string (block->prepare) == cue::preparedness::partial);
+}
+
+TEST_CASE ("prepare: a mount that claims anticipation without read-back is a validate warning")
+{
+    /*  §13.1's condition, said where a designer will read it. The two
+        attributes are set in different places, and a mount with one and not the
+        other has told Go.dot that an early write is safe and given it no way to
+        undo one - so nothing on it is ever pre-sent and every cue aimed at it
+        runs at entry.
+
+        A WARNING AND NOT A REFUSAL: the show is complete and correct, and what
+        it loses is a saved moment rather than a sound. */
+    doc::ShowDocument document;
+
+    const auto mount = document.createMount ("/desk", "namespaces/desk.json");
+    REQUIRE (mount.ok);
+
+    auto node = document.findById (mount.id);
+    node.setProperty (juce::Identifier ("port"), 9000, nullptr);
+    node.setProperty (juce::Identifier ("anticipatable"), true, nullptr);
+
+    const auto said = [&document] (const char* fragment)
+    {
+        for (const auto& problem : document.warnings())
+            if (problem.find (fragment) != std::string::npos)
+                return true;
+
+        return false;
+    };
+
+    CHECK (said ("nothing will be pre-sent"));
+
+    /*  And it goes when the mount can be asked. */
+    node.setProperty (juce::Identifier ("readback"), "oscquery", nullptr);
+    node.setProperty (juce::Identifier ("queryPort"), 9010, nullptr);
+
+    CHECK_FALSE (said ("nothing will be pre-sent"));
 }

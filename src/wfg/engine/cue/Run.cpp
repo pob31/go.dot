@@ -100,6 +100,21 @@ namespace wfg::cue
         return nullptr;
     }
 
+    std::vector<const Run*> RunTable::descendantsOf (const std::string& parentRun) const
+    {
+        std::vector<const Run*> out;
+
+        for (const auto* child : childrenOf (parentRun))
+        {
+            out.push_back (child);
+
+            for (const auto* deeper : descendantsOf (child->id))
+                out.push_back (deeper);
+        }
+
+        return out;
+    }
+
     bool RunTable::hasChildFor (const std::string& parentRun, const std::string& cueId) const
     {
         return std::any_of (runs.begin(), runs.end(),
