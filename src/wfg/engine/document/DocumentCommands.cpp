@@ -264,6 +264,20 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        registry.add ({ "list.persistent",
+                        "Gives a list its persistent section - the cues that should be running"
+                        " at all times, checked after every trigger. Asking twice answers with the"
+                        " one it has.",
+                        { { "list", 's', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto edit = document.createPersistent (args[0].getString(), id);
+                            return fromEdit (edit, withId (args, 1, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "mount.create",
                         "Declares a foreign namespace to be mounted at a prefix.",
                         { { "prefix", 's', false }, { "namespace", 's', false },

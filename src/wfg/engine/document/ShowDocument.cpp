@@ -218,7 +218,8 @@ namespace wfg::doc
             attribute but their identifier, and the cues inside them are
             addressed as cues like any other. Naming an owner for them would be
             promising a `/godot/header/<id>/…` that has nothing in it. */
-        if (element == "Header" || element == "Footer")   return {};
+        if (element == "Header" || element == "Footer" || element == "Persistent")
+            return {};
         if (element == "Route")                     return "route";
         if (element == "Range")                     return "range";
         if (element == "Port")                      return "port";
@@ -812,6 +813,24 @@ namespace wfg::doc
             the top would reorder the members of every group that gained one
             later. */
         return insertObject (group, group.getNumChildren(), element, id, {});
+    }
+
+    EditResult ShowDocument::createPersistent (const std::string& listId, const std::string& id)
+    {
+        auto list = findById (listId);
+
+        if (! list.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (list.getType().toString() != "List")
+            return EditResult::failed (reason::typeMismatch);
+
+        /*  One per list, and the second ask is the first's answer - the same
+            idempotence `createRole` has, for the same replay reason. */
+        if (const auto existing = list.getChildWithName ("Persistent"); existing.isValid())
+            return EditResult::succeeded (existing[idProperty].toString().toStdString());
+
+        return insertObject (list, list.getNumChildren(), "Persistent", id, {});
     }
 
     EditResult ShowDocument::createMount (const std::string& prefix,
@@ -1640,6 +1659,43 @@ namespace wfg::doc
             The `refers` column above has already said whether the identifier
             names a cue at all; this says whether it names one that could ever
             do the preparing. */
+        struct Persistents
+        {
+            std::vector<std::string>& problems;
+
+            void visit (const juce::ValueTree& node)
+            {
+                if (node.getType().toString() == "Persistent")
+                {
+                    /*  MEDIA, OSC AND MIDI ARE WHAT A SECTION CAN ASSERT (§13.11).
+                        A fade asserts nothing, a stop is the thing that
+                        SUSPENDS an assertion, and a group is a lifetime rather
+                        than a state. Each is left where it is and ignored, and
+                        this is where somebody finds out why nothing happens. */
+                    for (const auto& child : node)
+                    {
+                        const auto element = child.getType().toString().toStdString();
+
+                        if (element != "Fade" && element != "Stop" && element != "Group")
+                            continue;
+
+                        problems.push_back (
+                            "/Show/.../Persistent/" + element + "["
+                              + child[idProperty].toString().toStdString()
+                              + "]: a persistent section asserts media, osc and midi cues and"
+                                " nothing else - a fade asserts nothing, a stop is what suspends"
+                                " an assertion, a group is a lifetime rather than a state - so"
+                                " this one is ignored");
+                    }
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        Persistents { problems }.visit (showNode);
+
         struct Presets
         {
             std::vector<std::string>& problems;

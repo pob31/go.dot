@@ -208,7 +208,7 @@ namespace wfg::tree
                         { { "mount", 's', false }, { "address", 's', false },
                           { "value", '*', false }, { "observed", 'T', true } },
                         true,
-                        [&mounts] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&mounts] (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             /*  ONE RECORD, TWO STORES. A cue waiting on this
                                 node consumes a read-back; an observation is
@@ -221,7 +221,8 @@ namespace wfg::tree
                                 written before observations existed replays as
                                 what it was: a verify. */
                             if (args.size() > 3 && args[3].getBool())
-                                mounts.noteObservation (args[1].getString(), args[2]);
+                                mounts.noteObservation (args[1].getString(), args[2],
+                                                        context.tick);
                             else
                                 mounts.noteReadback (args[1].getString(), args[2]);
 

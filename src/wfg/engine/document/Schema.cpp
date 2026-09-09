@@ -125,7 +125,7 @@ namespace wfg::doc
                     about the whole show and not about any bus. */
                 { "Lists",  false, { "List" },             { "lists" } },
                 { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
-                                     "Midi" }, { "list" } },
+                                     "Midi", "Persistent" }, { "list" } },
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
                 { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
                                      "Midi", "Header", "Footer", "Trigger" },
@@ -154,6 +154,16 @@ namespace wfg::doc
                                      "Midi" }, {} },
                 { "Footer", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
                                      "Midi" }, {} },
+
+                /*  THE PERSISTENT SECTION IS A LIST'S, not a group's (§3.29,
+                    decision S): the thing that should be running at all times
+                    and is relaunched if it is not. The same shape as a header -
+                    an identified container of cues, at most one, checked by
+                    validate() - and the same children, so that a fade or a stop
+                    put there is a validate WARNING that the section ignores
+                    rather than a file that refuses to open. */
+                { "Persistent", true, { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
+                                        "Midi" }, {} },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
                     pattern a Group already set. `kind` stays derived from the

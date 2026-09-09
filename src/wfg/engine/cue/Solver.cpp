@@ -467,6 +467,103 @@ namespace wfg::cue
     }
 
     //==============================================================================
+    Plan solvePersistent (const doc::ShowDocument& document,
+                          const std::map<std::string, double>* durations,
+                          const tree::MountTable* mounts,
+                          const std::string& listId,
+                          const std::string& standbyCue)
+    {
+        Plan plan;
+        plan.aim = { listId, standbyCue, -1.0 };
+        plan.standby = standbyCue;
+
+        const Reader read;
+        Walk walk { read, durations };
+
+        const auto lists = document.root().getChildWithName (juce::Identifier ("Lists"));
+        auto list = juce::ValueTree {};
+
+        for (const auto& candidate : lists)
+            if (candidate.getType().toString() == "List"
+                 && candidate[idProperty].toString().toStdString() == listId)
+                list = candidate;
+
+        if (! list.isValid())
+            return plan;
+
+        plan.ok = true;
+
+        const auto section = list.getChildWithName (juce::Identifier ("Persistent"));
+
+        if (! section.isValid())
+            return plan;
+
+        /*  WHERE THE POINTER IS, AS A ROW. Everything before it has happened;
+            a stop there that names a persistent cue is the decision to end it.
+            A pointer on nothing - a list nobody has parked on - is the top of
+            the list, so nothing has happened and nothing is suspended. */
+        walk.visitList (list);
+
+        int standbyRow = -1;
+
+        for (const auto& entry : walk.placed)
+            if (entry.id == standbyCue)
+                standbyRow = entry.row;
+
+        std::vector<std::string> stopped;
+
+        for (const auto& entry : walk.placed)
+            if (entry.row < standbyRow && entry.element == "Stop"
+                 && read.flag (entry.node, "cue", "enabled"))
+                stopped.push_back (read.text (entry.node, "stop", "target"));
+
+        for (const auto& cue : section)
+        {
+            const auto id = cue[idProperty].toString().toStdString();
+            const auto element = cue.getType().toString();
+
+            if (id.empty() || ! read.flag (cue, "cue", "enabled"))
+                continue;
+
+            if (std::find (stopped.begin(), stopped.end(), id) != stopped.end())
+                continue;
+
+            if (element == "Media" || element == "Midi")
+            {
+                PlannedRun run;
+                run.cue = id;
+                run.when = planned::sounding;
+
+                if (element == "Media")
+                    placeInRanges (read, cue, 0.0, run, plan.confused);
+
+                plan.runs.push_back (run);
+            }
+            else if (element == "Osc")
+            {
+                const auto address = read.text (cue, "osc", "address");
+
+                if (address.empty())
+                    continue;
+
+                if (mounts != nullptr)
+                    if (const auto* node = mounts->nodeAt (address);
+                        node != nullptr && node->kind == tree::Kind::event)
+                        continue;
+
+                const auto value = osc::Value::fromAtom (read.text (cue, "osc", "value"));
+
+                if (! value.has_value())
+                    continue;
+
+                plan.values.push_back ({ address, *value, id });
+            }
+        }
+
+        return plan;
+    }
+
+    //==============================================================================
     namespace
     {
         std::string quoted (const std::string& text)

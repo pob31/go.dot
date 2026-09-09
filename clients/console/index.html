@@ -237,6 +237,7 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 #aim-steps .step i { color: var(--ink-faint); font-style: normal; margin-left: 4px; }
 #aim-steps .step.aimed { border-color: var(--picked); color: var(--picked); }
 #aim-steps .none { color: var(--ink-faint); font-style: italic; }
+.run .who .asserted, .row .flag.asserted { color: var(--live); }
 #aim-plan {
   max-height: 132px; overflow-y: auto; padding: 0 12px 8px;
   background: var(--panel-high); font-size: 11px; color: var(--ink-faint);
@@ -882,6 +883,20 @@ function renderLists() {
 
   const out = [];
   cues.forEach((id) => cueRow(id, 0, "member", standby, out));
+
+  /*  THE PERSISTENT SECTION, at the foot of the list and marked as its own
+      thing (§3.29). It is not part of the order the pointer walks: these cues
+      are what should be running at all times, checked after every trigger and
+      put back when they are not, so they sit below the last row rather than
+      among them - and GO never reaches one. */
+  const persistent = tree.ids("/godot/list/" + focus + "/persistentOrder");
+
+  if (persistent.length) {
+    out.push('<div class="band" title="checked after every trigger, and put back' +
+             ' when it is not as declared">persistent</div>');
+    persistent.forEach((id) => cueRow(id, 0, "persistent", standby, out));
+  }
+
   pane.innerHTML = out.join("");
 }
 
@@ -927,6 +942,11 @@ function runRow(id, depth, out) {
   const error = tree.run(id, "error", "");
   if (error) bits.push(error);
 
+  /*  AND WHO STARTED IT. A run the persistent section put back is not one the
+      operator pressed, and an operator looking at a pane full of sound needs to
+      know which is which - especially the one that came back on its own. */
+  const asserted = tree.run(id, "asserted", false);
+
   const finished = state === "done" || state === "failed";
 
   out.push(
@@ -935,6 +955,9 @@ function runRow(id, depth, out) {
       '<div class="who">' +
         '<span class="state" data-s="' + esc(state) + '">' + esc(state) + "</span>" +
         '<span class="text">' + esc(name) + "</span>" +
+        (asserted === true || asserted === "true"
+           ? '<span class="asserted" title="the persistent section put this back">asserted</span>'
+           : "") +
         '<span class="kind">' + esc(kind) + "</span>" +
       "</div>" +
       '<div class="meta">' +

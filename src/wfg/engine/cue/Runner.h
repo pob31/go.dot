@@ -60,6 +60,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -508,6 +509,17 @@ namespace wfg::cue
         /** How many observation questions have been asked. Diagnostics, and M21. */
         std::uint64_t observationsAsked() const noexcept { return asked; }
 
+        /*  Fires a persistent cue the assertion found missing, and marks the run
+            as the machine's rather than anybody's. `run.assert`'s handler. */
+        std::string assertCue (Engine& engine, std::int64_t tick, const std::string& cueId,
+                               const std::string& runId);
+
+        /** Whether a persistent cue is suspended for this session. Tests and the console. */
+        bool isSuspended (const std::string& cueId) const
+        {
+            return suspended.find (cueId) != suspended.end();
+        }
+
         /*  Whether this cue is a group whose members the OPERATOR advances -
             a sequence, set to manual, which is what both attributes default to.
 
@@ -920,6 +932,37 @@ namespace wfg::cue
 
         std::uint64_t stepsSeen = 0, asked = 0;
         std::map<std::string, std::int64_t> observedAt;
+
+        /*  THE PERSISTENT ASSERTION (§3.29, §13.11): after every applied
+            trigger, what the section declares is checked against what is
+            actually happening, and `run.assert` puts back what is not.
+
+            AFTER A TRIGGER AND NOT EVERY TICK, which is the PRD's own reason:
+            "a tick-rate check makes a stop impossible, a trigger-rate check is
+            human-paced". An operator who kills a bed has until their next press
+            to decide something else, and the kill is remembered anyway.
+
+            AND AFTER THE SWEEP HAS ANSWERED, when it can: the same step asks
+            each askable desk what it holds (§13.10), and an assertion that ran
+            before the answers arrived would compare the plan against last
+            second's world. It waits for the observations the step asked for,
+            and gives up waiting after half a second - a desk that has gone
+            quiet must not stop the section asserting. */
+        void assertPersistent (Engine& engine, std::int64_t tick);
+
+        std::uint64_t assertedFor = 0;
+        std::int64_t assertDue = -1;
+
+        /*  Cues the operator killed, which stay killed for the session (decision
+            S). Cleared by a load-to-time, which is a new answer to the same
+            question and is the operator asking again. */
+        std::set<std::string> suspended;
+
+        /*  When the last load-to-time lifted the suspensions. A kill BEFORE it
+            is a kill the operator has already asked to undo; the run table
+            keeps every run for ever, so without this the same killed run would
+            re-suspend the cue on the next step and the lift would do nothing. */
+        std::int64_t liftedAt = -1;
 
         /*  Fades taken over by another fade since the last tick, whose runs
             have still to be ended. A queue rather than a submission at the

@@ -850,6 +850,148 @@ namespace wfg::cue
         juce::ignoreUnused (engine);
     }
 
+    std::string Runner::assertCue (Engine& engine, std::int64_t tick,
+                                   const std::string& cueId, const std::string& runId)
+    {
+        const auto made = fire (engine, tick, cueId, runId);
+
+        if (auto* run = runs.find (made))
+            run->asserted = true;
+
+        return made;
+    }
+
+    void Runner::assertPersistent (Engine& engine, std::int64_t tick)
+    {
+        /*  ONE PASS PER STEP, noticed by counting - the same rule the sweep
+            uses, and for the same reason: a step is written by a handler and
+            the pass is a decision, so a replay runs neither and re-injects the
+            `run.assert` records from the log instead. */
+        if (assertedFor != lists.stepsTaken())
+        {
+            assertedFor = lists.stepsTaken();
+            assertDue = tick;
+        }
+
+        if (assertDue < 0)
+            return;
+
+        const auto lists_ = document.root().getChildWithName (juce::Identifier ("Lists"));
+
+        std::vector<Plan> plans;
+
+        for (const auto& list : lists_)
+        {
+            if (list.getType().toString() != "List")
+                continue;
+
+            const auto listId = list[idProperty].toString().toStdString();
+
+            if (listId.empty() || ! list.getChildWithName ("Persistent").isValid())
+                continue;
+
+            /*  The pointer, read straight off the list: it is one property,
+                and every helper that wraps it lives in a file this one does
+                not include. */
+            const auto standby = list[juce::Identifier ("standby")].toString().toStdString();
+
+            plans.push_back (solvePersistent (document, durations, mounts, listId, standby));
+        }
+
+        if (plans.empty())
+        {
+            assertDue = -1;
+            return;
+        }
+
+        /*  WAITING FOR THE SWEEP, but not for ever. Every value the section
+            asserts on a desk that can be asked was asked about on the step's own
+            tick; comparing before the answers land would be comparing against
+            last second's world, and a desk that has gone quiet must not stop the
+            section asserting at all. Twenty-five ticks is half a second. */
+        if (tick - assertDue < 25 && mounts != nullptr)
+            for (const auto& plan : plans)
+                for (const auto& value : plan.values)
+                {
+                    const auto mountId = mounts->mountOf (value.address);
+                    const auto* declaration = mounts->declarationOf (mountId);
+
+                    if (declaration != nullptr && declaration->canBeAsked()
+                         && mounts->observedAtTick (value.address) < assertDue)
+                        return;
+                }
+
+        assertDue = -1;
+
+        for (const auto& plan : plans)
+        {
+            for (const auto& planned : plan.runs)
+            {
+                if (suspended.find (planned.cue) != suspended.end())
+                    continue;
+
+                const auto cue = document.findById (planned.cue);
+                const auto kind = kindOfCue (cue);
+
+                if (kind == "media")
+                {
+                    if (runs.liveRunOf (planned.cue) != nullptr)
+                        continue;
+
+                    /*  A RUN THE OPERATOR KILLED SUSPENDS THE CUE for the
+                        session (decision S). Read off the run rather than
+                        remembered at the moment of killing, because a kill is a
+                        record and this is a hook: what the handler wrote is
+                        what a replay would have written too. */
+                    auto killed = false;
+
+                    for (const auto& run : runs.all())
+                        if (run.cue == planned.cue && run.killed
+                             && run.endedAtTick >= liftedAt)
+                            killed = true;
+
+                    if (killed)
+                    {
+                        suspended.insert (planned.cue);
+                        continue;
+                    }
+                }
+                else if (kind != "midi")
+                {
+                    continue;
+                }
+
+                engine.submit (origin::engine, "run.assert",
+                               { osc::Value::string (planned.cue) });
+            }
+
+            for (const auto& value : plan.values)
+            {
+                if (suspended.find (value.writer) != suspended.end())
+                    continue;
+
+                /*  WHAT THE DESK HOLDS, in the order §13.10 established: what it
+                    was seen to hold, then what Go.dot wrote, and where neither
+                    is known the value is sent - which is also the answer for a
+                    mount that cannot be asked at all, every step, because
+                    nothing about it is ever known. */
+                if (mounts != nullptr)
+                {
+                    const auto* now = mounts->observedOf (value.address);
+
+                    if (now == nullptr)
+                        now = mounts->valueOf (value.address);
+
+                    if (now != nullptr && *now == value.value)
+                        continue;
+                }
+
+                engine.submit (origin::engine, "run.assert",
+                               { osc::Value::string (value.writer) });
+            }
+        }
+    }
+
     std::string Runner::listOfCue (const std::string& cueId) const
     {
         for (auto node = document.findById (cueId); node.isValid(); node = node.getParent())
@@ -1154,6 +1296,13 @@ namespace wfg::cue
             agrees with the aim; after the next GO it does not, and that
             divergence is what a running view shows. */
         lists.landedAt (listId, { aim.cue, aim.offset });
+
+        /*  AND A KILLED PERSISTENT CUE COMES BACK (decision S). A suspension is
+            run-local and for the session, and a load-to-time is the operator
+            asking the same question again with a new answer - so it is the one
+            gesture that lifts one. */
+        suspended.clear();
+        liftedAt = tick;
 
         return used;
     }
@@ -4194,6 +4343,7 @@ namespace wfg::cue
         applyLevels();
         advanceSends (engine);
         observeAfterStep (engine, tick);
+        assertPersistent (engine, tick);
 
         if (audio == nullptr)
             return;
@@ -4916,6 +5066,39 @@ namespace wfg::cue
 
                             runner.revokePrepared (engine, context.tick, runId);
                             return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  THE PERSISTENT SECTION PUTTING SOMETHING BACK (§3.29, decision S).
+
+            A machine action, and logged as one: the section says a bed should
+            be playing and its file ran out, or says the desk should hold a
+            value and somebody moved it - so the engine fires the cue again,
+            after an applied trigger and never on its own clock.
+
+            IT IS `fire` AND NOT `go`. Standby does not move (§3.5), focus does
+            not move, and the cue is fired by name wherever it sits - which is
+            the whole difference between a section that asserts and a list that
+            runs. The run says `asserted`, so an operator can tell a sound the
+            machine put back from one they started. */
+        registry.add ({ "run.assert",
+                        "The persistent section found a cue not as it declares, and put it back.",
+                        { { "cue", 's', false }, { "run", 's', true } },
+                        true,
+                        [&engine, &runner, &document, withRun]
+                        (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto cueId = args[0].getString();
+
+                            if (! document.findById (cueId).isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            const auto id = args.size() > 1 ? args[1].getString()
+                                                            : std::string {};
+
+                            return Outcome::ok (withRun (args, 1,
+                                                         runner.assertCue (engine, context.tick,
+                                                                           cueId, id)));
                         } });
 
         //----------------------------------------------------------------------

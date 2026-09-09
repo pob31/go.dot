@@ -80,6 +80,7 @@
 #include <wfg/engine/tree/Node.h>
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <string>
 #include <string_view>
@@ -258,9 +259,15 @@ namespace wfg::tree
             since our last write, so a caller that finds one is holding the
             target's own account of a node nobody here has touched since. Where
             there is none, what Go.dot wrote is the best it knows. */
-        void noteObservation (const std::string& address, const osc::Value& value);
+        void noteObservation (const std::string& address, const osc::Value& value,
+                              std::int64_t tick = 0);
         const osc::Value* observedOf (const std::string& address) const;
         void forgetObservation (const std::string& address);
+
+        /*  WHEN the observation was taken, or -1 when there is none - so that a
+            reader waiting for the sweep it just asked for can tell a fresh
+            answer from last second's. */
+        std::int64_t observedAtTick (const std::string& address) const;
 
         /** What a mount declared, or nullptr if it is not loaded. */
         const MountDeclaration* declarationOf (const std::string& mountId) const;
@@ -287,7 +294,8 @@ namespace wfg::tree
             namespace must not carry one across. */
         std::map<std::string, osc::Value> readbacks;
 
-        /** Observations, by address. See `noteObservation`. */
+        /** Observations, by address, and the tick each was taken on. See `noteObservation`. */
         std::map<std::string, osc::Value> observations;
+        std::map<std::string, std::int64_t> observedTicks;
     };
 }

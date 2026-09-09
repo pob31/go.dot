@@ -2740,6 +2740,40 @@ A relaunch is a machine action: logged with its origin, shown on the run, and it
 (§3.5). A stateful data process loses its state on relaunch and restarts at its resting state
 (§4.6); the solver cannot rebuild it, because the stream that fed it is not in the list.
 
+#### What PR 4.10 built, and the one thing it had to add
+
+**The section is a `List`'s child, and the cursor never had to be told.** `Persistent` is an
+identified container beside the members, with the same children a header takes — so `stops()`, which
+walks a container for cue elements, skips it by construction, and `standby.set` refuses its cues with
+`not-manual-path` because `findOnPath` never descends into it. Neither needed a line of new code,
+which is the shape saying it is right: the section is not a place the pointer can be, and nothing had
+to learn that it was not.
+
+**`solvePersistent` is the same walk read for a different question.** It takes the section's cues as
+what should be true, and drops any the rows *before the pointer* stop — the same last-writer reading
+`solve` makes for a jump. Nothing in the assertion knows what a stop cue is, which is what makes this
+a mode of the solver and not a second mechanism; the test that proves it puts a stop before standby
+and watches the bed stay silent without any special case being reached.
+
+**The hook waits for the sweep, and gives up.** §13.10's observation asks each askable desk what it
+holds on the step's own tick, and an assertion that ran before the answers arrived would compare the
+plan against last second's world. So `assertPersistent` holds off until every value it is about to
+assert has an observation from this step — or half a second has passed, because a desk that has gone
+quiet must not stop the section asserting at all. A mount that cannot be asked is re-sent every step,
+which is §3.29's own answer for a target nobody can read.
+
+**A kill needed a field, and the run table's memory needed a date.** `run.kill` writes `killed` on
+the run — `skipFooter` alone cannot say it once Phase 10's double Esc sets that too — and the
+assertion reads it off the run rather than remembering the gesture, so what a replay would have
+written is what it sees. But the run table keeps every run for ever, so the first version re-suspended
+the cue at every step from a kill the operator had already undone: the lift records the tick, and only
+a kill since then counts.
+
+**Not here: the fixture.** `persistent.wfglog` was planned for this PR and is not written; the
+assertion is a hook, so a replay re-injects its `run.assert` records rather than deciding them, and
+what a fixture would add is the record shape rather than the decision. It joins 4.11's list with
+#16 and #17.
+
 ### 13.12 The document layer — plumbing, and the rows in one place
 
 Six new elements mean six entries in each of the places the schema is hand-written, and naming them

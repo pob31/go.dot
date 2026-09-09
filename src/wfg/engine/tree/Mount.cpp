@@ -426,9 +426,17 @@ namespace wfg::tree
         return found == readbacks.end() ? nullptr : &found->second;
     }
 
-    void MountTable::noteObservation (const std::string& address, const osc::Value& value)
+    void MountTable::noteObservation (const std::string& address, const osc::Value& value,
+                                      std::int64_t tick)
     {
         observations.insert_or_assign (address, value);
+        observedTicks.insert_or_assign (address, tick);
+    }
+
+    std::int64_t MountTable::observedAtTick (const std::string& address) const
+    {
+        const auto found = observedTicks.find (address);
+        return found == observedTicks.end() ? -1 : found->second;
     }
 
     const osc::Value* MountTable::observedOf (const std::string& address) const
@@ -440,6 +448,7 @@ namespace wfg::tree
     void MountTable::forgetObservation (const std::string& address)
     {
         observations.erase (address);
+        observedTicks.erase (address);
     }
 
     void MountTable::forgetReadback (const std::string& address)
@@ -522,6 +531,7 @@ namespace wfg::tree
             before it would make a jump believe the desk still holds what it
             held a minute ago. */
         observations.erase (address);
+        observedTicks.erase (address);
 
         /*  IT LANDS HERE AND STOPS HERE, still. What goes on the wire is a
             MountSender's business and the caller's to arrange - this class

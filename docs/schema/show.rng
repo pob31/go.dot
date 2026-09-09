@@ -80,6 +80,7 @@
           <ref name="Stop"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
+          <ref name="Persistent"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -300,6 +301,25 @@
 
   <define name="Footer">
     <element name="Footer">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <zeroOrMore>
+        <choice>
+          <ref name="Cue"/>
+          <ref name="Group"/>
+          <ref name="Media"/>
+          <ref name="Fade"/>
+          <ref name="Stop"/>
+          <ref name="Osc"/>
+          <ref name="Midi"/>
+        </choice>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Persistent">
+    <element name="Persistent">
       <attribute name="id">
         <ref name="identifier"/>
       </attribute>

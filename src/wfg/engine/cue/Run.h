@@ -627,6 +627,19 @@ namespace wfg::cue
             state alone cannot say which was meant, and this is what does. */
         bool skipFooter = false;
 
+        /*  WHETHER `run.kill` ENDED IT, which `skipFooter` alone cannot say
+            once Phase 10's double Esc sets that too. The persistent assertion
+            reads it (§3.29, decision S): a kill on a persistent run suspends
+            the assertion for the session, until a load-to-time re-solves - so
+            the operator never fights the machine over a bed they just stopped.
+            Written by the handler, so a replay has it. */
+        bool killed = false;
+
+        /*  Started by the persistent assertion rather than by anybody. Published
+            as `run/asserted`, so a running pane can tell a sound the operator
+            started from one the machine put back. */
+        bool asserted = false;
+
         /*  Whether the tick thread has already told the audio side to stop this
             run's voice.
 

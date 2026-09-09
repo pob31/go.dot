@@ -197,6 +197,10 @@ namespace wfg::doc
         EditResult createRange (const std::string& cueId, double in, double out,
                                 const std::string& id = {});
 
+        /*  A list's persistent section (§3.29), made once: asking twice answers
+            with the one it has, as `createRole` does for a header. */
+        EditResult createPersistent (const std::string& listId, const std::string& id = {});
+
         EditResult createRole (const std::string& groupId, const std::string& role,
                                const std::string& id = {});
 

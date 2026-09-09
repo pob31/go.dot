@@ -264,7 +264,8 @@ namespace wfg::tree
                 const auto element = child.getType().toString();
 
                 if (only != nullptr ? element != only
-                                    : (element == "Header" || element == "Footer"))
+                                    : (element == "Header" || element == "Footer"
+                                        || element == "Persistent"))
                     continue;
 
                 if (! out.empty())
@@ -859,8 +860,16 @@ namespace wfg::tree
                              || name == "history")
                             continue;
 
-                        const auto text = name == "order" ? orderOf (list)
-                                                          : storedText (attribute, list);
+                        const auto section = list.getChildWithName ("Persistent");
+
+                        const auto text
+                            = name == "order"           ? orderOf (list)
+                            : name == "persistentOrder" ? orderOf (section)
+                            : name == "persistent"      ? (section.isValid()
+                                                             ? section[idProperty].toString()
+                                                                                  .toStdString()
+                                                             : std::string {})
+                                                        : storedText (attribute, list);
 
                         nodes.push_back (makeLeaf (base + "/" + name, *row, text));
                     }
@@ -870,8 +879,28 @@ namespace wfg::tree
                     int index = 0;
 
                     for (const auto& cue : list)
+                    {
+                        /*  THE SECTION IS NOT A CUE, though it carries an
+                            identifier so that `cue.create` can name it as a
+                            parent. Its cues are collected after the members,
+                            with the role that says where they sit. */
+                        if (cue.getType().toString() == "Persistent")
+                            continue;
+
                         if (cue.hasProperty (idProperty))
                             collectCue (cue, id, index++, nodes, durations, cueOrder);
+                    }
+
+                    if (const auto section = list.getChildWithName ("Persistent");
+                        section.isValid())
+                    {
+                        int persistentIndex = 0;
+
+                        for (const auto& cue : section)
+                            if (cue.hasProperty (idProperty))
+                                collectCue (cue, id, persistentIndex++, nodes, durations,
+                                            cueOrder, "persistent");
+                    }
                 }
             }
             else if (containerName == "Mounts")
@@ -1487,6 +1516,7 @@ namespace wfg::tree
                 else if (name == "claims")    text = joinIds (run.claims);
                 else if (name == "pending")   text = joinIds (run.pending);
                 else if (name == "warning")   text = run.warning;
+                else if (name == "asserted")  text = run.asserted ? "true" : "false";
                 else if (name == "error")     text = run.error;
                 else if (name == "iteration")  text = std::to_string (run.iteration);
                 else if (name == "iterations") text = std::to_string (run.iterations);

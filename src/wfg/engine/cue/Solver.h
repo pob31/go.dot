@@ -219,4 +219,26 @@ namespace wfg::cue
                 const std::map<std::string, double>* durations,
                 const tree::MountTable* mounts,
                 const Aim& aim);
+
+    //==============================================================================
+    /*  THE PERSISTENT MODE (§3.29, §13.11): what a list's persistent section
+        says should be true at its standby, as a plan.
+
+        Not a second mechanism. The section's cues are the thing that should be
+        running at all times, so each becomes a planned run (media, midi) or a
+        planned value (osc) - EXCEPT where a stop cue placed before the standby
+        names it, which is the document holding the decision to end it (§4.10)
+        and is exactly what the last-writer walk of `solve` sees for a stop, so
+        it needs no special case here either: the same rows, the same reading.
+
+        A fade, a stop, a group or a memo in the section is not in the plan;
+        `ShowDocument::warnings` says why. A disabled cue is not either. An
+        event-kind node is excluded as it is from every plan. What the Runner
+        does with the plan - relaunch what is not live, re-send what the desk
+        does not hold - is the Runner's half. */
+    Plan solvePersistent (const doc::ShowDocument& document,
+                          const std::map<std::string, double>* durations,
+                          const tree::MountTable* mounts,
+                          const std::string& listId,
+                          const std::string& standbyCue);
 }

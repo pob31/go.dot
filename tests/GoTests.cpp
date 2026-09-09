@@ -41,6 +41,7 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/Solver.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/CanonicalXml.h>
@@ -5125,4 +5126,335 @@ TEST_CASE ("history: a replay reproduces it, with no audio and no hooks")
     CHECK (fresh.spelled (session.listId) == session.spelled());
     CHECK (fresh.runner.listState().stepsTaken()
              == session.runner.listState().stepsTaken());
+}
+
+
+//==============================================================================
+/*  THE PERSISTENT SECTION: checked, not fired (§3.29, decision S).
+
+    A persistent cue is the thing that should be running at all times and is put
+    back if it is not - a room tone, a rain bed, a desk value the show depends
+    on. It lives in a section of its own rather than in a header, because a
+    header fires once and never resets while this re-asserts.
+
+    AFTER AN APPLIED TRIGGER, AND NEVER ON ITS OWN CLOCK, which is the PRD's
+    reason rather than an implementation convenience: "a tick-rate check makes a
+    stop impossible, a trigger-rate check is human-paced". An operator who kills
+    the bed has until their next press to decide something else - and if they do
+    not, the kill is remembered anyway.
+
+    THE ASSERTION IS A MODE OF THE SOLVER, not a second mechanism, and the case
+    that proves it is the stop cue: a stop before the pointer that names the bed
+    suspends it, and nothing in the assertion knows what a stop is. The
+    last-writer walk sees it, exactly as it sees one before a jump.
+*/
+namespace
+{
+    struct PersistentRig : Rig
+    {
+        PersistentRig()
+        {
+            const auto made = document.createPersistent (listId);
+            REQUIRE (made.ok);
+            section = made.id;
+
+            bed = document.createCue (section, 0, "media", "Rain").id;
+            document.setAttribute ("/godot/cue/" + bed + "/file", "rain.wav");
+        }
+
+        /*  A step: a GO on the list, which is what makes the section check.
+
+            PARKED FIRST, because a GO with the pointer off the end of the list
+            fires nothing and is therefore not a step at all - which is correct,
+            and made this rig's steps stop happening after two of them. An
+            operator going back to a cue and pressing again is an ordinary
+            evening; this is that. */
+        void step (const std::string& from = {})
+        {
+            REQUIRE (submitAndTick ("standby.set",
+                                    { osc::Value::string (from.empty() ? memoId : from) })
+                       .applied == 1);
+
+            REQUIRE (submitAndTick ("go").applied >= 1);
+            tickOnce();               // the hook's own tick, after the handler's
+        }
+
+        /*  Ticks until the assertion has had its say. It waits for the
+            observation sweep it asked for, and gives up after half a second -
+            so a rig with no desk at all still has to let that go by. */
+        void settle (int ticks = 30)
+        {
+            for (int n = 0; n < ticks; ++n)
+                tickOnce();
+        }
+
+        const cue::Run* liveBed() const { return runs.liveRunOf (bed); }
+
+        std::string section, bed;
+    };
+}
+
+TEST_CASE ("persistent: the section is published, and its cues say where they sit")
+{
+    PersistentRig rig;
+
+    tree::MountTable mounts;
+    tree::ParameterTree parameters { rig.document, rig.engine.commands(), mounts, rig.runs };
+    parameters.markStale();
+
+    tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    REQUIRE (snapshot != nullptr);
+
+    const auto spelled = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE (node != nullptr);
+        REQUIRE (node->soleValue().has_value());
+        return node->soleValue()->getString();
+    };
+
+    CHECK (spelled ("/godot/list/" + rig.listId + "/persistentOrder") == rig.bed);
+
+    /*  AND NOT AMONG THE MEMBERS. A section in `order` would be a row the
+        pointer walks through and GO fires, which is the one thing it is not. */
+    const auto members = spelled ("/godot/list/" + rig.listId + "/order");
+
+    INFO ("order: " << members);
+    CHECK (members.find (rig.section) == std::string::npos);
+    CHECK (members.find (rig.bed) == std::string::npos);
+
+    /*  The identifier of the section itself, so that `cue.create` can name it
+        as a parent - which is how anything gets INTO it. */
+    CHECK (spelled ("/godot/list/" + rig.listId + "/persistent") == rig.section);
+
+    /*  And the cue's own role, the fourth word §12.5 drew and 4.1 built. */
+    CHECK (spelled ("/godot/cue/" + rig.bed + "/role") == "persistent");
+}
+
+TEST_CASE ("persistent: the pointer skips the section and cannot be parked in it")
+{
+    /*  The cursor skips it as it skips a footer, and `standby.set` refuses -
+        with `not-manual-path` rather than `not-in-list`, because the cue IS in
+        this list and the remedy is somewhere else entirely. */
+    PersistentRig rig;
+
+    rig.setStandby (rig.mediaId);
+
+    for (int n = 0; n < 6; ++n)
+        rig.submitAndTick ("standby.next");
+
+    CHECK (rig.standby() != rig.bed);
+
+    const auto refused = rig.submitAndTick ("standby.set", { osc::Value::string (rig.bed) });
+    CHECK (refused.rejected == 1);
+    CHECK (rig.standby() != rig.bed);
+}
+
+TEST_CASE ("persistent: a bed that ended on its own is put back at the next trigger")
+{
+    /*  THE WHOLE POINT, in one case: the file ran out, nobody noticed, and the
+        next press has the room back. And not before - the check is human-paced
+        by design, so the silence between the end and the press is real. */
+    PersistentRig rig;
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    const auto* first = rig.liveBed();
+    REQUIRE (first != nullptr);
+    CHECK (first->asserted);
+
+    const auto firstRun = first->id;
+
+    /*  It ends the way a file running out ends it. */
+    REQUIRE (rig.engine.submit (origin::engine, "run.ended",
+                                { osc::Value::string (firstRun) }));
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (firstRun)->isFinished());
+    CHECK (rig.liveBed() == nullptr);
+
+    /*  Ticks alone do nothing: this is not a tick-rate check. */
+    rig.settle (60);
+    CHECK (rig.liveBed() == nullptr);
+
+    /*  The next press, and it is back - as a NEW run, marked as the machine's. */
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    const auto* again = rig.liveBed();
+    REQUIRE (again != nullptr);
+    CHECK (again->id != firstRun);
+    CHECK (again->asserted);
+
+    /*  And the record says who did it and why. */
+    const auto log = rig.engine.log().contents();
+    CHECK (log.find ("run.assert") != std::string::npos);
+}
+
+TEST_CASE ("persistent: the assertion moves neither standby nor focus")
+{
+    /*  §3.5: only GO moves the pointer. A machine action that moved it would
+        take the operator's place away while their back was turned. */
+    PersistentRig rig;
+
+    rig.step();
+
+    /*  Where the press left it, before the assertion has had its say. */
+    const auto where = rig.standby();
+
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    REQUIRE (rig.liveBed() != nullptr);          // it did assert something
+    CHECK (rig.standby() == where);
+}
+
+TEST_CASE ("persistent: a kill leaves it silent, and a load-to-time brings it back")
+{
+    /*  DECISION S, both halves. A kill is run-local and for the session: an
+        operator who stops the bed has stopped it, and a machine that put it
+        back at the next press would be a machine they were fighting. A
+        load-to-time is the one thing that lifts it, because it is the same
+        question asked again with a new answer. */
+    PersistentRig rig;
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    const auto* live = rig.liveBed();
+    REQUIRE (live != nullptr);
+
+    REQUIRE (rig.submitAndTick ("run.kill",
+                                { osc::Value::string (live->id) }).applied == 1);
+
+    /*  The audio side reports it stopped, as it does for any kill. */
+    REQUIRE (rig.engine.submit (origin::engine, "run.ended",
+                                { osc::Value::string (rig.runOf (rig.bed)) }));
+    rig.tickOnce();
+
+    CHECK (rig.liveBed() == nullptr);
+
+    rig.step();
+    rig.settle();
+
+    CHECK (rig.liveBed() == nullptr);
+    CHECK (rig.runner.isSuspended (rig.bed));
+
+    /*  And back, because the operator asked the question again. */
+    REQUIRE (rig.engine.submit ("cli", "list.aim",
+                                { osc::Value::string (rig.listId),
+                                  osc::Value::string (rig.memoId),
+                                  osc::Value::float64 (-1.0) }));
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("list.loadToTime",
+                                { osc::Value::string (rig.listId) }).applied >= 1);
+
+    CHECK_FALSE (rig.runner.isSuspended (rig.bed));
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    CHECK (rig.liveBed() != nullptr);
+}
+
+TEST_CASE ("persistent: a stop before the pointer suspends it, and the solver is what sees that")
+{
+    /*  The case that says this is a MODE of the solver rather than a second
+        mechanism: nothing in the assertion knows what a stop cue is. The
+        last-writer walk reads the rows before the pointer, exactly as it does
+        for a jump, and the bed is simply not in the plan. */
+    PersistentRig rig;
+
+    const auto halt = rig.document.createCue (rig.listId, 2, "stop", "Kill the rain").id;
+    rig.document.setAttribute ("/godot/cue/" + halt + "/target", rig.bed);
+
+    const auto after = rig.document.createCue (rig.listId, 3, "memo", "After").id;
+
+    /*  The pointer BEFORE the stop: the stop has not happened, so the bed is
+        asserted. */
+    rig.setStandby (rig.memoId);
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    REQUIRE (rig.liveBed() != nullptr);
+
+    const auto* plan = rig.liveBed();
+    const auto runId = plan->id;
+
+    REQUIRE (rig.engine.submit (origin::engine, "run.ended", { osc::Value::string (runId) }));
+    rig.tickOnce();
+
+    /*  The pointer AFTER the stop, which is what the document says has
+        happened by now. */
+    rig.step (after);
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    CHECK (rig.liveBed() == nullptr);
+}
+
+TEST_CASE ("persistent: a fade in the section warns and is never asserted")
+{
+    /*  A fade asserts nothing, a stop is what suspends an assertion, and a
+        group is a lifetime rather than a state. Each is left where it is,
+        ignored, and `wfg validate` is where somebody finds out why. */
+    PersistentRig rig;
+
+    const auto fade = rig.document.createCue (rig.section, 1, "fade", "Under").id;
+    rig.document.setAttribute ("/godot/cue/" + fade + "/target", rig.mediaId);
+
+    auto said = false;
+
+    for (const auto& problem : rig.document.warnings())
+        if (problem.find ("asserts media, osc and midi cues") != std::string::npos)
+            said = true;
+
+    CHECK (said);
+
+    rig.setStandby (rig.memoId);
+    rig.step();
+    rig.settle();
+
+    CHECK (rig.runOf (fade).empty());
+}
+
+TEST_CASE ("persistent: the plan is what the section declares, and a disabled cue is not in it")
+{
+    /*  The solver's own half, asked directly: what SHOULD be true. */
+    PersistentRig rig;
+
+    const auto desk = rig.document.createCue (rig.section, 1, "osc", "Desk").id;
+    rig.document.setAttribute ("/godot/cue/" + desk + "/address", "/desk/fader");
+    rig.document.setAttribute ("/godot/cue/" + desk + "/value", "f:0.75");
+
+    auto plan = cue::solvePersistent (rig.document, nullptr, nullptr, rig.listId, rig.memoId);
+
+    CHECK (plan.ok);
+    REQUIRE (plan.runs.size() == 1u);
+    CHECK (plan.runs.front().cue == rig.bed);
+    REQUIRE (plan.values.size() == 1u);
+    CHECK (plan.values.front().address == "/desk/fader");
+    CHECK (plan.values.front().writer == desk);
+
+    /*  A cue turned off during tech is still written down and asserts nothing,
+        which is the whole difference between disabling one and deleting it. */
+    rig.document.setAttribute ("/godot/cue/" + rig.bed + "/enabled", "false");
+
+    plan = cue::solvePersistent (rig.document, nullptr, nullptr, rig.listId, rig.memoId);
+    CHECK (plan.runs.empty());
+    CHECK (plan.values.size() == 1u);
 }

@@ -544,6 +544,7 @@ namespace wfg::cue
                                 leaves this alone, so a group it stops still
                                 releases what it was holding. */
                             run->skipFooter = true;
+                            run->killed = true;
                             run->state = runState::stopping;
                             return Outcome::ok (args);
                         } });
