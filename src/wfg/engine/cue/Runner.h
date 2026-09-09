@@ -59,6 +59,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -914,8 +915,8 @@ namespace wfg::cue
         /** The addresses this show writes, by mount, rebuilt when the show changes. */
         const std::map<std::string, std::vector<std::string>>& writtenAddresses() const;
 
-        mutable std::map<std::string, std::vector<std::string>> written;
-        mutable std::uint64_t writtenFor = 0;
+        mutable std::map<std::string, std::vector<std::string>> addressesWritten;
+        mutable std::uint64_t addressesFor = 0;
 
         std::uint64_t stepsSeen = 0, asked = 0;
         std::map<std::string, std::int64_t> observedAt;

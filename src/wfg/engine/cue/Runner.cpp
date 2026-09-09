@@ -762,14 +762,14 @@ namespace wfg::cue
             settled on for the liveness analysis and for the same reason: the
             set changes only when somebody edits the show, and a second thing to
             invalidate by hand is a second thing to forget. */
-        if (writtenFor == document.revision() && ! written.empty())
-            return written;
+        if (addressesFor == document.revision() && ! addressesWritten.empty())
+            return addressesWritten;
 
-        writtenFor = document.revision();
-        written.clear();
+        addressesFor = document.revision();
+        addressesWritten.clear();
 
         if (mounts == nullptr)
-            return written;
+            return addressesWritten;
 
         const std::function<void (const juce::ValueTree&)> visit
             = [&] (const juce::ValueTree& node)
@@ -787,7 +787,7 @@ namespace wfg::cue
                         mounted != nullptr && mounted->kind != tree::Kind::event)
                         if (const auto mountId = mounts->mountOf (address); ! mountId.empty())
                         {
-                            auto& addresses = written[mountId];
+                            auto& addresses = addressesWritten[mountId];
 
                             if (std::find (addresses.begin(), addresses.end(), address)
                                   == addresses.end())
@@ -800,7 +800,7 @@ namespace wfg::cue
         };
 
         visit (document.root());
-        return written;
+        return addressesWritten;
     }
 
     void Runner::observeAfterStep (Engine& engine, std::int64_t tick)
