@@ -86,6 +86,7 @@ add_executable(wfg_tests
     TriggerTests.cpp
     RangeTests.cpp
     AnalysisTests.cpp
+    SolverTests.cpp
     SlotTests.cpp
     MidiTests.cpp
     OscCodecTests.cpp

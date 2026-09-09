@@ -51,6 +51,7 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/GroupJob.h>
+#include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/document/Ids.h>
@@ -448,6 +449,16 @@ namespace wfg::cue
         /** Every group in flight. Diagnostics and tests; the Runner drives them. */
         const std::vector<GroupJob>& groups() const noexcept { return scheduled; }
 
+        /*  WHERE EACH LIST IS BEING POINTED, and where the last jump landed.
+
+            On the Runner because it is the tick thread's own state about cues -
+            PRD §4.10 keeps it out of the document, and a show reopened tomorrow
+            correctly has no aim. The parameter tree reads it to publish
+            `list/aim`, `list/solve` and `list/statePosition`; `list.aim` writes
+            it; and PR 4.8's load-to-time will write the second half. */
+        ListState& listState() noexcept { return lists; }
+        const ListState& listState() const noexcept { return lists; }
+
         /*  Whether this cue is a group whose members the OPERATOR advances -
             a sequence, set to manual, which is what both attributes default to.
 
@@ -808,6 +819,7 @@ namespace wfg::cue
 
         /*  One per group run in flight. A vector like every other job list
             here, and drained by the same `remove_if` on a retired flag. */
+        ListState lists;
         std::vector<GroupJob> scheduled;
 
         /*  The cue the standby was last seen on, so that arming it is asked for

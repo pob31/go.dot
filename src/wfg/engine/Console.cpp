@@ -898,6 +898,7 @@ namespace
                                           : std::string());
 
         parameters.setMediaDurations (&durations);
+        parameters.setListState (&runner.listState());
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;
@@ -1501,6 +1502,7 @@ namespace
                                           : std::string());
 
         parameters.setMediaDurations (&durations);
+        parameters.setListState (&runner.listState());
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;

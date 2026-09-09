@@ -52,6 +52,7 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/SlotAnalysis.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountSender.h>
@@ -167,6 +168,19 @@ namespace wfg::tree
             stale = true;
         }
 
+        /*  WHERE EACH LIST IS BEING POINTED, for `list/aim`, `list/solve` and
+            `list/statePosition`.
+
+            Held by pointer and not owned, like the sender and the durations,
+            and absent for the same kind of reason: `wfg tree` and a replay
+            point at nothing, so every list reads an empty aim - which is the
+            truth about a session in which nobody has asked what the show would
+            be, not a placeholder standing in for one. */
+        void setListState (const cue::ListState* stateToPublish) noexcept
+        {
+            lists = stateToPublish;
+        }
+
         /** The show changed; rebuild before the next publish. */
         /*  The SHOW moved. The mounted half is not touched by this: it has a
             cache of its own, invalidated by the mount table's own revision
@@ -218,12 +232,27 @@ namespace wfg::tree
             client polling a cue would watch its node list change shape. So
             every cue gets one, out of the half that is rebuilt every tick. */
         std::vector<std::string> declaredCues;
+
+        /** Every cue list, in document order. See `declaredCues`. */
+        std::vector<std::string> declaredLists;
         const cue::RunTable& runs;
 
         /*  Which cues can be holding one slot at once, and every dangling
             reference the show has - both functions of the document at one
             revision, so both out of one cache asked by that revision. */
         cue::SlotAnalysis analysis;
+
+        const cue::ListState* lists = nullptr;
+
+        /*  THE LAST SOLVE, AND WHAT IT WAS A SOLVE OF.
+
+            A solve is a walk of a list and it is published at five hertz, so it
+            is computed when the question changes rather than fifty times a
+            second for an answer nobody moved. The question is the aim and the
+            document: the same aim over an edited show is a different answer,
+            which is why the revision is half the key. */
+        mutable std::map<std::string, std::string> solves;
+        mutable std::map<std::string, std::string> solvedFor;
 
         std::shared_ptr<const std::vector<Node>> documentPart;
 

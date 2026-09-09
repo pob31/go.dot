@@ -4391,6 +4391,54 @@ namespace wfg::cue
                         } });
 
         //----------------------------------------------------------------------
+        /*  WHERE SOMEBODY IS POINTING, which is a question and not an act.
+
+            §3.13's state position: a client drags a finger along the list and
+            asks what the show WOULD be there. Nothing moves - no sound, no
+            value, no pointer - and that is the whole difference between this
+            and `list.loadToTime`, which takes the same coordinate and makes it
+            true.
+
+            IT IS STILL A COMMAND AND STILL LOGGED, because §4.11 says every
+            gesture-reachable action is one and because a replay that skipped it
+            would publish a different `solve` than the session did - a readout
+            that disagreed with the log about a show nobody had touched. */
+        registry.add ({ "list.aim",
+                        "Points at a position in a list - a cue and how far into it - and asks"
+                        " what the show would be there. Changes nothing.",
+                        { { "list", 's', false }, { "cue", 's', false },
+                          { "offset", 'd', false } },
+                        true,
+                        [&runner, &document] (CommandContext&,
+                                              const std::vector<osc::Value>& args)
+                        {
+                            const auto listId = args[0].getString();
+                            const auto cueId = args[1].getString();
+
+                            const auto list = document.findById (listId);
+
+                            if (! list.isValid() || list.getType().toString() != "List")
+                                return Outcome::rejected (reason::unknownId);
+
+                            /*  AN EMPTY CUE CLEARS THE AIM, which is a position
+                                too: nobody is pointing at anything, and the
+                                solve says nothing rather than answering about a
+                                cue that was deleted underneath it. */
+                            if (cueId.empty())
+                            {
+                                runner.listState().aimAt (listId, {});
+                                return Outcome::ok (args);
+                            }
+
+                            if (! document.findById (cueId).isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            runner.listState().aimAt (listId,
+                                                      { cueId, args[2].asDouble() });
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "run.revoke",
                         "The pointer moved away before a GO: give back everything the horizon"
                         " was holding for this run, and finish it.",

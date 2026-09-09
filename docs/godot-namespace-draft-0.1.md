@@ -2493,6 +2493,53 @@ and the solver are two answers to one question, and a solver that disagrees with
 wrong by definition. §3.15 made every transition an event precisely so that it could be checked
 afterwards; this is the check.
 
+#### What PR 4.7 built, and the one thing it did to PR 4.4
+
+**The walk is now shared, and that was the first thing the code insisted on.** PR 4.4's slot analysis
+already reasons about when a cue is live by reading the document — rows across manual boundaries,
+seconds inside a timed chain — and that is the same question this section asks. A second
+implementation would have been a second thing to keep correct, with the failure arriving as a slot
+warning that disagreed with a load-to-time about one show. So it moved into `cue/ShowWalk.h` and both
+ask it. The solver's whole treatment of *what else is sounding beside the target* is a comparison
+against numbers that walk already computed.
+
+**Everything before the target is at its end state, and there are exactly two exceptions.** A cue
+that never ends on its own — a bed, a group looping for ever — did not end at an earlier GO, so it is
+still going; and inside a timed chain there was no person between the members, so the document knows
+precisely what is playing alongside the target. Both fall out of the shared walk: the first from
+`endsOnItsOwn`, which PR 4.4 already needed to know where a claim is given back, and the second from
+the seconds it computes for a chain's members.
+
+**The value half stops at nothing**, which is the paragraph above made executable, and there is a
+test whose only job is to fail if somebody later optimises it to stop at a group boundary.
+
+**`aim`, `solve` and `statePosition` live on the Runner, not in the document.** §4.10: an aim is
+where somebody's finger is, and a show reopened tomorrow correctly has none. They are published from
+the runtime half of the tree for the same reason a slot's `holder` is — the cached half would freeze
+them at whatever they were when a cue was last edited — and the solve behind them is computed when
+the QUESTION changes, keyed on the aim and the document's revision together, because the same aim
+over an edited show is a different answer.
+
+**What is not here yet: the equivalence test.** §13.8 names it as the reason to trust any of this —
+the plan at tick *T* against what the session's own log says was live at *T* — and it belongs with
+`list.loadToTime`, where there is a jump to check it against.
+
+#### What M20 answered *(PR 4.7, 2026-09-09)*
+
+Five hundred cues, a third of them network cues over forty distinct addresses, on the Windows box in
+a **Debug** build with iterator debugging on — where every number in this suite is taken, and
+roughly an order of magnitude above the shipped one.
+
+| | |
+|---|---|
+| one solve | **~16 ms** |
+
+**What that has to fit inside is a gesture rather than a tick.** `/godot/list/<id>/solve` is capped
+at five hertz and a dragged aim re-solves at the drag's own rate; nothing on the GO path calls it at
+all. If a drag ever feels slow the answer is in the walk, which builds a `Placed` per cue with a
+string map lookup behind every attribute read — but that is Phase 5's problem, when there is a finger
+to measure rather than a loop.
+
 ### 13.9 `list.loadToTime` — one record, and a run tree adopted mid-way
 
 The handler applies the current plan as a single logged command whose applied arguments carry every

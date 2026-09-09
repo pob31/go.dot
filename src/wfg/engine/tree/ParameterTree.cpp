@@ -16,6 +16,8 @@
 
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <wfg/engine/cue/Solver.h>
+
 #include <cctype>
 
 #include <wfg/engine/document/CanonicalXml.h>
@@ -799,6 +801,10 @@ namespace wfg::tree
             `ParameterTree::declaredCues`. */
         std::vector<std::string> cueOrder;
 
+        /*  And every list, for `aim`, `solve` and `statePosition` - three more
+            answers that are about a session rather than about a show. */
+        std::vector<std::string> listOrder;
+
         for (const auto& container : showNode)
         {
             const auto containerName = container.getType().toString().toStdString();
@@ -839,11 +845,26 @@ namespace wfg::tree
                     {
                         const doc::Attribute attribute { "List", row };
                         const auto name = std::string (row->name);
+
+                        /*  `aim`, `solve` and `statePosition` are NOT emitted
+                            here. None of them is about the show: an aim is
+                            where somebody's finger is, a solve is the answer to
+                            that question, and a state position is where a jump
+                            landed - so all three change while nothing about the
+                            document does, and this half is a cache. The runtime
+                            half emits them, against the roster this walk leaves
+                            behind. Same rule as a cue's `prepare` and a slot's
+                            `holder`. */
+                        if (name == "aim" || name == "solve" || name == "statePosition")
+                            continue;
+
                         const auto text = name == "order" ? orderOf (list)
                                                           : storedText (attribute, list);
 
                         nodes.push_back (makeLeaf (base + "/" + name, *row, text));
                     }
+
+                    listOrder.push_back (id);
 
                     int index = 0;
 
@@ -1038,6 +1059,7 @@ namespace wfg::tree
         }
 
         declaredCues = std::move (cueOrder);
+        declaredLists = std::move (listOrder);
 
         //----------------------------------------------------------------------
         /*  Commands, as write-only method nodes. `node.set` is deliberately
@@ -1286,6 +1308,52 @@ namespace wfg::tree
             runOrder += run.id;
         }
 
+        /*  WHERE EACH LIST IS POINTED, AND WHAT THE SHOW WOULD BE THERE.
+
+            All three out of the runtime half, because none of them is about the
+            show: an aim is where somebody's finger is, a solve is an answer to
+            that question, and a state position is where a jump landed. §4.10
+            keeps every one of them out of the document, and the cached half
+            would freeze all three at whatever they were when a cue was last
+            edited.
+
+            THE SOLVE IS COMPUTED WHEN THE QUESTION CHANGES, not on every
+            publish: it is a walk of a list, its rate cap is five hertz, and the
+            question is the aim plus the document's revision - the same aim over
+            an edited show being a different answer. */
+        for (const auto& listId : declaredLists)
+        {
+            const auto base = std::string (godot) + "/list/" + listId;
+            const auto aim = lists != nullptr ? lists->aimOf (listId) : cue::ListAim {};
+
+            if (const auto* row = rowNamed ("list", "aim"))
+                runtime.push_back (makeLeaf (base + "/aim", *row, cue::spellAim (aim)));
+
+            if (const auto* row = rowNamed ("list", "statePosition"))
+                runtime.push_back (makeLeaf (base + "/statePosition", *row,
+                                             cue::spellAim (lists != nullptr
+                                                              ? lists->positionOf (listId)
+                                                              : cue::ListAim {})));
+
+            if (const auto* row = rowNamed ("list", "solve"))
+            {
+                const auto question = std::to_string (document.revision()) + " "
+                                        + cue::spellAim (aim);
+
+                if (solvedFor[listId] != question)
+                {
+                    solvedFor[listId] = question;
+
+                    solves[listId] = aim.isSet()
+                                       ? cue::solve (document, durations, &mounts,
+                                                     { listId, aim.cue, aim.offset }).toJson()
+                                       : std::string {};
+                }
+
+                runtime.push_back (makeLeaf (base + "/solve", *row, solves[listId]));
+            }
+        }
+
         /*  HOW FAR AHEAD EACH CUE HAS BEEN GOT READY.
 
             One node per cue, every tick, out of the half that is never stale.
@@ -1428,7 +1496,11 @@ namespace wfg::tree
             std::string (godot) + "/document",
             std::string (godot) + "/audio",
             std::string (godot) + "/cue",
+            std::string (godot) + "/list",
             std::string (godot) + "/slot" };
+
+        for (const auto& id : declaredLists)
+            ownedByTheDocument.push_back (std::string (godot) + "/list/" + id);
 
         for (const auto& id : declaredCues)
             ownedByTheDocument.push_back (std::string (godot) + "/cue/" + id);
