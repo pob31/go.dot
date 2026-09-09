@@ -47,6 +47,7 @@
 
 #include <chrono>
 #include <wfg/engine/tree/TreeCommands.h>
+#include <wfg/engine/oscquery/OscQueryClient.h>
 
 #include <juce_core/juce_core.h>
 
@@ -782,4 +783,145 @@ TEST_CASE ("M9: what a mounted processor costs on every applied mutation")
         REQUIRE (node->soleValue().has_value());
         CHECK (node->soleValue()->getFloat32() == doctest::Approx (0.25f));
     }
+}
+
+
+//==============================================================================
+/*  OBSERVATIONS: what the target said when nobody was waiting for it (§13.10).
+*/
+TEST_CASE ("observation: kept apart from a read-back, and ended by a write")
+{
+    /*  Three stores for one address, and each is a different fact. What Go.dot
+        WROTE is the decision; what the target SAID TO A WAITING CUE is that
+        cue's evidence; what the target was SEEN to hold is the freshest thing
+        known about the room. Letting any two share a slot would let one answer
+        stand in for another - a periodic sweep making a verification pass by
+        construction, or a verify's stale answer telling a jump the desk still
+        holds what it held a minute ago. */
+    Rig rig;
+
+    const std::string address = "/wfs/input/1/positionX";
+
+    CHECK (rig.mounts.observedOf (address) == nullptr);
+
+    rig.mounts.noteObservation (address, osc::Value::float32 (0.25f));
+
+    REQUIRE (rig.mounts.observedOf (address) != nullptr);
+    CHECK (*rig.mounts.observedOf (address) == osc::Value::float32 (0.25f));
+
+    /*  Not a read-back: nobody asked on a cue's behalf. */
+    CHECK (rig.mounts.readbackOf (address) == nullptr);
+
+    /*  And a read-back is not an observation either. */
+    rig.mounts.noteReadback (address, osc::Value::float32 (0.5f));
+    CHECK (*rig.mounts.observedOf (address) == osc::Value::float32 (0.25f));
+
+    /*  A WRITE ENDS IT. The next sweep will say what the target holds after
+        this write; until then the written value is the best account there is,
+        and the observation from before it would be a lie about now. */
+    REQUIRE (rig.mounts.write (address, osc::Value::float32 (0.75f)).ok);
+    CHECK (rig.mounts.observedOf (address) == nullptr);
+
+    /*  The read-back survives the write: forgetting THAT is the Runner's job,
+        done at the moment it asks, so a verify cannot be satisfied by an answer
+        to a question it did not put. */
+    CHECK (rig.mounts.readbackOf (address) != nullptr);
+
+    rig.mounts.forgetObservation (address);        // a no-op on nothing
+    CHECK (rig.mounts.observedOf (address) == nullptr);
+}
+
+TEST_CASE ("M21: what an observation sweep costs, in the two shapes it could take")
+{
+    /*  THE QUESTION §13.10 LEFT OPEN: at every step, ask the target about
+        everything the show writes to it - as one GET of the subtree the mount
+        covers, or as one GET per written address?
+
+        The two are measured where they differ, which is what has to be
+        digested afterwards. A subtree reply is the whole capture: WFS-DIY
+        describes itself in about a megabyte, and the parse that turns it into
+        nodes is the one `MountTable::load` does. A per-address reply is a few
+        dozen bytes with one VALUE in it. What the network costs is a round trip
+        either way, times one or times N, and is stated rather than measured -
+        it is the same round trip the verify already pays.
+
+        THE NUMBER THAT DECIDES IT IS N. A 500-cue show writes about forty
+        distinct addresses (M20 counted them), and a capture holds thousands of
+        nodes; a sweep asks about what the show WRITES, not about the namespace.
+        The measurement below says how far apart the two shapes are at that N,
+        and at the N where they would meet. */
+    const auto file = fixtureBundle().getChildFile ("namespaces/wfs-diy.json");
+    const auto text = file.loadFileAsString().toStdString();
+    REQUIRE (! text.empty());
+
+    auto declaration = wfsDeclaration();
+    declaration.readback = "oscquery";
+    declaration.queryPort = 5005;
+
+    constexpr int rounds = 10;
+
+    const auto subtreeStart = std::chrono::steady_clock::now();
+    int nodes = 0;
+
+    for (int n = 0; n < rounds; ++n)
+    {
+        MountTable table;
+        REQUIRE (table.load (declaration, text).ok);
+        nodes = static_cast<int> (table.nodeCount (declaration.id));
+    }
+
+    const auto subtreeMs = std::chrono::duration<double, std::milli> (
+                             std::chrono::steady_clock::now() - subtreeStart).count() / rounds;
+
+    /*  One reply, as a target answers `GET /wfs/input/1/positionX?VALUE`. */
+    constexpr const char* reply
+        = R"({"FULL_PATH":"/wfs/input/1/positionX","TYPE":"f","ACCESS":3,"VALUE":[0.5]})";
+
+    const auto perAddressMs = [&] (int howMany)
+    {
+        const auto start = std::chrono::steady_clock::now();
+
+        for (int round = 0; round < rounds; ++round)
+            for (int n = 0; n < howMany; ++n)
+            {
+                const auto value = oscquery::OscQueryClient::valueFromReply (reply, "f");
+                REQUIRE (value.has_value());
+            }
+
+        return std::chrono::duration<double, std::milli> (
+                 std::chrono::steady_clock::now() - start).count() / rounds;
+    };
+
+    constexpr int written = 40;                     // M20's figure for a 500-cue show
+    const auto fortyMs = perAddressMs (written);
+    const auto everythingMs = perAddressMs (nodes);
+
+    MESSAGE ("M21: the subtree shape - one GET of " << text.size() << " bytes, "
+              << nodes << " nodes - costs " << juce::String (subtreeMs, 3)
+              << " ms to digest, in a DEBUG build");
+
+    MESSAGE ("M21: the per-address shape costs " << juce::String (fortyMs, 3) << " ms for the "
+              << written << " addresses a 500-cue show writes ("
+              << (static_cast<std::size_t> (written) * std::strlen (reply))
+              << " bytes over " << written
+              << " round trips), and " << juce::String (everythingMs, 3)
+              << " ms if it asked about every one of the " << nodes << " nodes");
+
+    MESSAGE ("M21: at one sweep a second per mount, the per-address shape is "
+              << written << " records a second and "
+              << juce::String (100.0 * fortyMs / 20.0, 2) << "% of one tick to digest; "
+              "the subtree shape would be one round trip and "
+              << juce::String (100.0 * subtreeMs / 20.0, 1) << "% of a tick, every second");
+
+    /*  THE SHAPE DECISION, as an assertion: for the addresses a show actually
+        writes, asking about each is cheaper than digesting the whole capture,
+        by an order of magnitude or it is not worth having two probes. */
+    CHECK (fortyMs * 10.0 < subtreeMs);
+
+    /*  And the sweep really is over what the show writes: a show that wrote
+        every node would be better served by the subtree, which is the number
+        that says when to revisit this. */
+    INFO ("break-even at about " << static_cast<int> (subtreeMs / (fortyMs / written))
+           << " written addresses");
+    CHECK (nodes > written * 10);
 }

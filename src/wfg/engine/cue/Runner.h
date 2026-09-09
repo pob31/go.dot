@@ -497,6 +497,16 @@ namespace wfg::cue
         ListState& listState() noexcept { return lists; }
         const ListState& listState() const noexcept { return lists; }
 
+        /*  The list a cue belongs to, by climbing to the top, or empty.
+
+            Asked by the handlers that append a step - a cue fired by name or by
+            a trigger names the cue and not its list - and by the jump, which is
+            scoped to one list. */
+        std::string listOfCue (const std::string& cueId) const;
+
+        /** How many observation questions have been asked. Diagnostics, and M21. */
+        std::uint64_t observationsAsked() const noexcept { return asked; }
+
         /*  Whether this cue is a group whose members the OPERATOR advances -
             a sequence, set to manual, which is what both attributes default to.
 
@@ -883,6 +893,32 @@ namespace wfg::cue
             a tree dump runs, and a verified cue there finishes on its own
             records rather than on an answer nobody went and got. */
         tree::MountProbe* asker = nullptr;
+
+        /*  THE OBSERVATION SWEEP: what the world was, at each step.
+
+            §13.10. A step is a place the show was, and a place is only worth
+            going back to if what was there is known - so at every applied
+            trigger each target that can be asked is asked about every address
+            this show writes to it, once. The answers are `mount.readback`
+            records with the observation flag, so the log carries what the desk
+            held at that step and a replay reads it back out.
+
+            RATE-CAPPED PER MOUNT rather than per step, because steps are the
+            operator's business and can come in threes: one sweep a second is
+            what §13.10 promised and what M21 priced. A step during the cap is
+            not queued for later - the next step gets a fresh sweep, and an
+            observation of a moment that has passed is worth less than the cost
+            of asking for it. */
+        void observeAfterStep (Engine& engine, std::int64_t tick);
+
+        /** The addresses this show writes, by mount, rebuilt when the show changes. */
+        const std::map<std::string, std::vector<std::string>>& writtenAddresses() const;
+
+        mutable std::map<std::string, std::vector<std::string>> written;
+        mutable std::uint64_t writtenFor = 0;
+
+        std::uint64_t stepsSeen = 0, asked = 0;
+        std::map<std::string, std::int64_t> observedAt;
 
         /*  Fades taken over by another fade since the last tick, whose runs
             have still to be ended. A queue rather than a submission at the

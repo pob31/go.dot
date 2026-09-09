@@ -243,6 +243,25 @@ namespace wfg::tree
         const osc::Value* readbackOf (const std::string& address) const;
         void forgetReadback (const std::string& address);
 
+        /*  WHAT THE TARGET SAID WHEN NOBODY WAS WAITING FOR IT - the periodic
+            observation of §13.10, kept in a third place for the same reason the
+            second one exists.
+
+            A verify's read-back is consumed by the cue that asked for it and
+            must not be satisfied by an old answer. An observation is not
+            waited on by anybody: it is the freshest thing known about the
+            target, and what a jump diffs against so that a fader somebody moved
+            by hand is corrected rather than assumed.
+
+            FORGOTTEN WHEN GO.DOT WRITES THE ADDRESS, which is what makes the
+            question it answers exact: an observation that survives is one taken
+            since our last write, so a caller that finds one is holding the
+            target's own account of a node nobody here has touched since. Where
+            there is none, what Go.dot wrote is the best it knows. */
+        void noteObservation (const std::string& address, const osc::Value& value);
+        const osc::Value* observedOf (const std::string& address) const;
+        void forgetObservation (const std::string& address);
+
         /** What a mount declared, or nullptr if it is not loaded. */
         const MountDeclaration* declarationOf (const std::string& mountId) const;
 
@@ -267,5 +286,8 @@ namespace wfg::tree
             different fact about the same thing and because a reload of the
             namespace must not carry one across. */
         std::map<std::string, osc::Value> readbacks;
+
+        /** Observations, by address. See `noteObservation`. */
+        std::map<std::string, osc::Value> observations;
     };
 }

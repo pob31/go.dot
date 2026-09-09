@@ -2667,6 +2667,40 @@ WFS-DIY's own 2 487-node capture before it is relied on.
 This history is also the inventory §4.4 defers **Go Doh!** until: *"Specification deferred until the
 full inventory of in-flight objects exists."* Phase 10 does not have to invent one.
 
+#### What PR 4.9 built, and what it found out about the shape
+
+**Three handlers, one letter.** Every applied `go`, `cue.fire` and `trigger.fire` appends a step in
+its handler — `<tick>:<cue>:<g|f|t>`, newest first at `/godot/list/<id>/history`, sixty-four kept —
+and the letter is the whole reason a hook could not have done it: a hook sees runs appear and cannot
+tell a press from a trigger, and a replay runs no hooks at all. A `cue.fire` climbs to the list that
+holds the cue, three groups down or not, so a step lands on the list whose pointer it did not move.
+A literal replay of a session's log against its own show reproduces the history, tick for tick.
+
+**The sweep is per address, not per subtree, and M21 says by how much.** A subtree GET of WFS-DIY's
+capture is 1.09 MB and 2 480 nodes, and digesting it costs **135 ms** in a debug build — nearly seven
+ticks, every second. A 500-cue show writes about forty addresses (M20 counted them), and forty
+replies of 74 bytes cost **0.6 ms** to digest: two orders of magnitude, and 3 % of one tick. The
+break-even is past eight thousand written addresses — more nodes than the capture holds — so there
+is no number at which the subtree shape wins for a show, and the sweep asks about what the show
+*writes*, one question each, once a second per mount. `MountProbe::Question` carries `observation`, the outstanding
+set is keyed by kind as well as address so a sweep can never swallow the one question a verified cue
+is waiting on, and the answer is the same `mount.readback` record with a trailing `T` — one handler,
+one replay path, and every log written before this replays as what it was.
+
+**Three stores for one address, because they are three facts.** What Go.dot *wrote* is the
+decision; what the target *said to a waiting cue* is that cue's evidence and is consumed by it; what
+the target was *seen to hold* is the freshest thing known about the room. `MountTable::observedOf`
+is the third, and a write to the address ends it — so an observation that survives is one taken since
+the last write, and "no observation" means the written value is the best account there is. That
+ordering is what the jump now diffs against: a fader moved by hand between two GOs is corrected,
+and one that agrees is left alone.
+
+**What is deliberately not here.** No sweep on a `run.assert` yet — PR 4.10's assertion reads the
+same store, which is the point of having one. No observation of nodes the show never writes: the
+sweep is over the written set, and a desk's other five hundred faders are its own business. And a
+step inside the cap is not queued for later — the next step gets a fresh sweep, because an
+observation of a moment that has passed is worth less than the cost of asking for it.
+
 ### 13.11 The persistent section — checked, not fired (decision S)
 
 §3.29: a persistent cue is the thing that should be running at all times and is relaunched if it is

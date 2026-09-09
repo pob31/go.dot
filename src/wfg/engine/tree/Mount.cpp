@@ -426,6 +426,22 @@ namespace wfg::tree
         return found == readbacks.end() ? nullptr : &found->second;
     }
 
+    void MountTable::noteObservation (const std::string& address, const osc::Value& value)
+    {
+        observations.insert_or_assign (address, value);
+    }
+
+    const osc::Value* MountTable::observedOf (const std::string& address) const
+    {
+        const auto found = observations.find (address);
+        return found == observations.end() ? nullptr : &found->second;
+    }
+
+    void MountTable::forgetObservation (const std::string& address)
+    {
+        observations.erase (address);
+    }
+
     void MountTable::forgetReadback (const std::string& address)
     {
         readbacks.erase (address);
@@ -499,6 +515,13 @@ namespace wfg::tree
             both. Phase 2 puts a socket after this line. */
         node->values = { *coerced };
         ++version;
+
+        /*  AND WHAT THE TARGET WAS SEEN TO HOLD IS NOW HISTORY. The next
+            observation will say what it holds after this write; until then the
+            written value is the best account there is, and an observation from
+            before it would make a jump believe the desk still holds what it
+            held a minute ago. */
+        observations.erase (address);
 
         /*  IT LANDS HERE AND STOPS HERE, still. What goes on the wire is a
             MountSender's business and the caller's to arrange - this class

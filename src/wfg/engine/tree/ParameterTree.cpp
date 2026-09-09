@@ -855,7 +855,8 @@ namespace wfg::tree
                             half emits them, against the roster this walk leaves
                             behind. Same rule as a cue's `prepare` and a slot's
                             `holder`. */
-                        if (name == "aim" || name == "solve" || name == "statePosition")
+                        if (name == "aim" || name == "solve" || name == "statePosition"
+                             || name == "history")
                             continue;
 
                         const auto text = name == "order" ? orderOf (list)
@@ -1334,6 +1335,30 @@ namespace wfg::tree
                                              cue::spellAim (lists != nullptr
                                                               ? lists->positionOf (listId)
                                                               : cue::ListAim {})));
+
+            /*  THE STEPS, NEWEST FIRST, because the use is going back a little
+                and the first thing an operator reads should be the last thing
+                that happened. Kept newest-last in the state, where appending is
+                cheap, and turned round here, where it is read. */
+            if (const auto* row = rowNamed ("list", "history"))
+            {
+                std::string text;
+
+                if (lists != nullptr)
+                {
+                    const auto& steps = lists->historyOf (listId);
+
+                    for (auto step = steps.rbegin(); step != steps.rend(); ++step)
+                    {
+                        if (! text.empty())
+                            text += ' ';
+
+                        text += cue::spellStep (*step);
+                    }
+                }
+
+                runtime.push_back (makeLeaf (base + "/history", *row, text));
+            }
 
             if (const auto* row = rowNamed ("list", "solve"))
             {

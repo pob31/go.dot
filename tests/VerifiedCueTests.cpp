@@ -970,3 +970,189 @@ TEST_CASE ("prepare: a mount that claims anticipation without read-back is a val
 
     CHECK_FALSE (said ("nothing will be pre-sent"));
 }
+
+
+//==============================================================================
+/*  THE OBSERVATION SWEEP (§13.10): every applied trigger reads the world back.
+
+    A step is a place the show was, and a place is only worth going back to if
+    what was there is known. So at each step the Runner asks every target that
+    can be asked about every address the show writes to it - once a second per
+    mount, however many steps - and the answers are `mount.readback` records
+    with the observation flag, which is what puts a fader somebody moved by
+    hand into the log at the step that saw it.
+*/
+namespace
+{
+    struct ObservingRig : VerifiedRig
+    {
+        /** An ordinary network cue on the desk's one node. Nothing is verified. */
+        std::string makeSent (const std::string& atom)
+        {
+            const auto id = document.createCue (listId, index++, "osc", "Desk").id;
+            const auto base = "/godot/cue/" + id + "/";
+            document.setAttribute (base + "address", "/desk/fader");
+            document.setAttribute (base + "value", atom);
+            document.setAttribute (base + "wait", "sent");
+            return id;
+        }
+
+        /*  Ticks until an observation of the desk's node has landed, or the
+            patience runs out. The answer crosses a socket on another thread. */
+        bool observed (int atMost = 600)
+        {
+            for (int i = 0; i < atMost; ++i)
+            {
+                if (mounts.observedOf ("/desk/fader") != nullptr)
+                    return true;
+
+                tickOnce();
+                std::this_thread::sleep_for (std::chrono::milliseconds (2));
+            }
+
+            return mounts.observedOf ("/desk/fader") != nullptr;
+        }
+    };
+}
+
+TEST_CASE ("observation: a step asks the desk what it holds, and the answer is not a read-back")
+{
+    ObservingRig rig;
+
+    /*  The cue will write 0.75; the desk, asked afterwards, says 0.2 - a fader
+        somebody moved, or a device that clips. Either way it is what is THERE,
+        and that is what an observation is for. */
+    rig.device.target.says ({ osc::Value::float32 (0.2f) });
+
+    const auto cueId = rig.makeSent ("f:0.75");
+
+    CHECK (rig.runner.observationsAsked() == 0u);
+
+    rig.fire (cueId);                    // the step; the sweep is the next tick's
+    REQUIRE (rig.observed());
+
+    CHECK (rig.runner.observationsAsked() == 1u);
+    CHECK (*rig.mounts.observedOf ("/desk/fader") == osc::Value::float32 (0.2f));
+
+    /*  Not a read-back: no cue was waiting, and a verify that found this lying
+        about would report a device agreeing with something it never said. */
+    CHECK (rig.mounts.readbackOf ("/desk/fader") == nullptr);
+
+    /*  And what Go.dot WROTE is still the write, untouched by what was seen. */
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+
+    /*  The record says which it was, so a replay puts it in the same store. */
+    const auto log = rig.engine.log().contents();
+    CHECK (log.find ("mount.readback") != std::string::npos);
+    CHECK (log.find ("/desk/fader") != std::string::npos);
+}
+
+TEST_CASE ("observation: one sweep a second per mount, however many steps")
+{
+    /*  Steps are the operator's business and can come in threes. What §13.10
+        promised the desk was one sweep a second, and M21 priced exactly that:
+        a second step inside the cap gets nothing, and the next step after the
+        cap gets a fresh sweep rather than a queued old one. */
+    ObservingRig rig;
+    rig.device.target.says ({ osc::Value::float32 (0.5f) });
+
+    const auto first = rig.makeSent ("f:0.1");
+    const auto second = rig.makeSent ("f:0.2");
+    const auto third = rig.makeSent ("f:0.3");
+
+    rig.fire (first);
+
+    /*  And let the first answer land before counting, because the probe's own
+        rule - one outstanding question per address - would otherwise make this
+        case about the network rather than the cap: fifty ticks with no sleep
+        in them pass in microseconds, well inside one round trip. */
+    REQUIRE (rig.observed());
+
+    rig.fire (second);                    // the next tick: inside the cap
+    rig.tickOnce();
+
+    CHECK (rig.runner.observationsAsked() == 1u);
+
+    for (int n = 0; n < 50; ++n)
+        rig.tickOnce();
+
+    rig.fire (third);
+    rig.tickOnce();
+
+    CHECK (rig.runner.observationsAsked() == 2u);
+}
+
+TEST_CASE ("observation: a verify and a sweep on one address are two questions, not one")
+{
+    /*  The probe drops a duplicate question so that a cue asking on every tick
+        does not fill the queue - and an observation of the address a verified
+        cue is waiting on must not be the duplicate that gets dropped, or a
+        sweep of forty addresses could turn a cue into a timeout. Asked of a
+        probe that is not running, so both sit in the queue to be counted. */
+    Engine engine;
+    tree::MountProbe idle { engine };
+
+    tree::MountProbe::Question verify;
+    verify.mountId = "K3PV7WRB";
+    verify.host = "127.0.0.1";
+    verify.queryPort = 5005;
+    verify.address = "/desk/fader";
+    verify.typeTag = "f";
+
+    auto observation = verify;
+    observation.observation = true;
+
+    CHECK (idle.ask (verify));
+    CHECK (idle.ask (observation));
+    CHECK (idle.outstanding() == 2u);
+
+    /*  And each is still one question: the same one twice is dropped. */
+    CHECK_FALSE (idle.ask (verify));
+    CHECK_FALSE (idle.ask (observation));
+    CHECK (idle.outstanding() == 2u);
+}
+
+TEST_CASE ("jump: a value the desk was seen to hold is what the diff is against")
+{
+    /*  §3.13's full sentence, at last. PR 4.8's jump compared the plan with
+        what Go.dot last WROTE, so a fader somebody moved by hand agreed with
+        the tree and was left where it was. With an observation in the table
+        the comparison is against what the desk was SEEN to hold - and where
+        there is none, what was written is still the best account there is. */
+    ObservingRig rig;
+    rig.device.target.says ({ osc::Value::float32 (0.75f) });
+
+    const auto cueId = rig.makeSent ("f:0.75");
+    const auto after = rig.document.createCue (rig.listId, rig.index++, "memo", "After").id;
+    juce::ignoreUnused (after);
+
+    const auto jump = [&rig, &cueId]
+    {
+        REQUIRE (rig.engine.submit ("cli", "list.aim",
+                                    { osc::Value::string (rig.listId),
+                                      osc::Value::string (cueId),
+                                      osc::Value::float64 (0.0) }));
+        rig.tickOnce();
+        REQUIRE (rig.engine.submit ("cli", "list.loadToTime",
+                                    { osc::Value::string (rig.listId) }));
+        rig.tickOnce();
+        rig.tickOnce();             // the write the jump queued lands on the next tick
+    };
+
+    /*  THE DESK AGREES: nothing is sent. Nothing has been written yet, so the
+        only account of the node is the observation, and it matches the plan. */
+    rig.mounts.noteObservation ("/desk/fader", osc::Value::float32 (0.75f));
+    jump();
+    CHECK (rig.mounts.valueOf ("/desk/fader") == nullptr);
+
+    /*  THE DESK DISAGREES: the plan's value is sent, through the ordinary write
+        - which lands it in the table and ends the observation it corrected. */
+    rig.mounts.noteObservation ("/desk/fader", osc::Value::float32 (0.2f));
+    jump();
+
+    INFO ("log: " << rig.engine.log().contents());
+    REQUIRE (rig.mounts.valueOf ("/desk/fader") != nullptr);
+    CHECK (*rig.mounts.valueOf ("/desk/fader") == osc::Value::float32 (0.75f));
+    CHECK (rig.mounts.observedOf ("/desk/fader") == nullptr);
+}

@@ -43,7 +43,9 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
+#include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/log/Replay.h>
 
 #include <set>
 
@@ -4874,4 +4876,253 @@ TEST_CASE ("group: a run says which part of itself it is in")
     CHECK (rig.runs.find (member)->phase.empty());
 
     CHECK (rig.runToCompletion (groupRun) < 400);
+}
+
+
+//==============================================================================
+/*  THE STEP HISTORY: the waypoints nobody had to keep.
+
+    PRD §3.13 wants manual waypoints, and the author's own shape for them
+    (decision R) is that the operator should not have to make any: every applied
+    trigger is already a place the show was, so the engine keeps the last
+    sixty-four of them and offers them back when somebody needs to go there.
+
+    A STEP IS A LOAD-TO-TIME TARGET. `<cue> -1` is "standby on it, nothing of it
+    done", which is exactly where the show was the instant before that press -
+    so going back a step is the jump of PR 4.8 with a target that was written
+    down rather than dragged.
+
+    WRITTEN BY THE HANDLER, WHICH IS WHY A REPLAY HAS IT. The alternative was a
+    hook noticing runs appear, and it would have been wrong twice over: a replay
+    runs no hooks, so a replayed session would have had no history; and a hook
+    cannot tell a GO from a trigger, which is the one thing the origin letter is
+    for. `persist=none`, so the show on disk never carries it: it is what the
+    machine happened to be doing (§4.10), and tomorrow's rehearsal starts blank.
+*/
+namespace
+{
+    struct HistoryRig : Rig
+    {
+        HistoryRig()
+        {
+            second = document.createCue (listId, 2, "memo", "Two").id;
+            third = document.createCue (listId, 3, "memo", "Three").id;
+        }
+
+        /** Parks the pointer through the COMMAND, so a replay is given it too. */
+        void park (const std::string& cueId)
+        {
+            REQUIRE (submitAndTick ("standby.set",
+                                    { osc::Value::string (cueId) }).applied == 1);
+        }
+
+        /*  The steps of a list, oldest first, spelled as the node spells them
+            - one string, which is also what a failure prints. */
+        std::string spelled (const std::string& list = {}) const
+        {
+            std::string out;
+
+            for (const auto& step : runner.listState()
+                                      .historyOf (list.empty() ? listId : list))
+            {
+                if (! out.empty())
+                    out += ' ';
+
+                out += cue::spellStep (step);
+            }
+
+            return out;
+        }
+
+        /** Just the cues, oldest first. */
+        std::vector<std::string> cuesStepped (const std::string& list = {}) const
+        {
+            std::vector<std::string> out;
+
+            for (const auto& step : runner.listState()
+                                      .historyOf (list.empty() ? listId : list))
+                out.push_back (step.cue);
+
+            return out;
+        }
+
+        std::string second, third;
+    };
+}
+
+TEST_CASE ("history: three GOs are three steps, in the order they were pressed")
+{
+    HistoryRig rig;
+    rig.park (rig.memoId);
+
+    /*  Not `applied == 1`: a tick that fires a cue is also the tick a
+        previous one's end is written down on, and how many records that is is
+        the scheduler's business rather than this case's. */
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+
+    /*  THE CUE THAT FIRED, NOT THE CUE THE POINTER LANDED ON. A step is a place
+        the show WAS, so it names what the press did; the pointer had already
+        moved on by the time anybody could read it. */
+    CHECK (rig.cuesStepped()
+             == std::vector<std::string> { rig.memoId, rig.second, rig.third });
+
+    const auto& steps = rig.runner.listState().historyOf (rig.listId);
+    REQUIRE (steps.size() == 3u);
+
+    /*  Each on its own tick, and each says which. A history without ticks could
+        not tell a double press from an act. */
+    CHECK (steps[0].tick < steps[1].tick);
+    CHECK (steps[1].tick < steps[2].tick);
+
+    for (const auto& step : steps)
+        CHECK (step.origin == 'g');
+
+    /*  And the total is across every list, which is what lets a hook notice a
+        step without comparing each list against what it had. */
+    CHECK (rig.runner.listState().stepsTaken() == 3u);
+}
+
+TEST_CASE ("history: a cue fired by name is a step, and says it was not a press")
+{
+    /*  ALL THREE APPLIED TRIGGERS ARE STEPS, because all three are places the
+        show was - and the letter is the difference between them. A history that
+        could not say which steps nobody pressed could not explain a scene that
+        started on its own. */
+    HistoryRig rig;
+
+    CHECK (rig.submitAndTick ("cue.fire",
+                              { osc::Value::string (rig.third) }).applied == 1);
+
+    const auto& steps = rig.runner.listState().historyOf (rig.listId);
+    REQUIRE (steps.size() == 1u);
+    CHECK (steps[0].cue == rig.third);
+    CHECK (steps[0].origin == 'f');
+
+    /*  AND THE POINTER DID NOT MOVE, which is the reason `cue.fire` is not
+        `go` - so this history has a step whose cue nobody was standing on. */
+    CHECK (rig.standby() != rig.third);
+}
+
+TEST_CASE ("history: a trigger's step says a trigger took it")
+{
+    HistoryRig rig;
+
+    const auto trigger = rig.document.createTrigger (rig.third, "osc");
+    REQUIRE (trigger.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/trigger/" + trigger.id + "/address",
+                                        "/desk/go").ok);
+
+    CHECK (rig.submitAndTick ("trigger.fire",
+                              { osc::Value::string (trigger.id) }).applied == 1);
+
+    const auto& steps = rig.runner.listState().historyOf (rig.listId);
+    REQUIRE (steps.size() == 1u);
+    CHECK (steps[0].cue == rig.third);
+    CHECK (steps[0].origin == 't');
+}
+
+TEST_CASE ("history: a step lands on the list that holds the cue, however deep it is")
+{
+    /*  `cue.fire` and `trigger.fire` name a CUE, and a history belongs to a
+        LIST - so the step climbs, exactly as `fireStandby` climbs to find whose
+        pointer to move. A member three groups down is its list's step. */
+    HistoryRig rig;
+
+    const auto scene = rig.document.createCue (rig.listId, 4, "group", "Scene").id;
+    const auto inner = rig.document.createCue (scene, 0, "group", "Inner").id;
+    const auto deep = rig.document.createCue (inner, 0, "memo", "Deep").id;
+
+    /*  A second list, whose history must stay its own. */
+    const auto other = rig.document.createList ("Foyer").id;
+    const auto elsewhere = rig.document.createCue (other, 0, "memo", "Doors").id;
+
+    CHECK (rig.submitAndTick ("cue.fire", { osc::Value::string (deep) }).applied >= 1);
+    CHECK (rig.submitAndTick ("cue.fire",
+                              { osc::Value::string (elsewhere) }).applied >= 1);
+
+    CHECK (rig.cuesStepped() == std::vector<std::string> { deep });
+    CHECK (rig.cuesStepped (other) == std::vector<std::string> { elsewhere });
+}
+
+TEST_CASE ("history: a step is spelled for the node the same way in every locale")
+{
+    /*  The node carries sixty-four of these in one string, so a step is spelled
+        with colons inside and the spaces are left to separate them. Every field
+        is an integer or an identifier - there is no number to format - which is
+        the reason this one readout needs no locale care while `aim` does. */
+    CHECK (cue::spellStep ({ 1234, "MA100000", 'g' }) == "1234:MA100000:g");
+    CHECK (cue::spellStep ({ 0, "SA000001", 't' }) == "0:SA000001:t");
+}
+
+TEST_CASE ("history: it keeps sixty-four steps and forgets the sixty-fifth")
+{
+    /*  BOUNDED BECAUSE THE NODE IS ONE STRING, and because the use is going
+        back a few steps rather than reading an evening: an operator who wants
+        act one again asks the solver for act one, not the history. What has to
+        survive the bound is the NEWEST, which is the end a jump comes from. */
+    cue::ListState state;
+
+    for (int n = 0; n < 100; ++n)
+        state.stepped ("LIST0001", { n, "CUE" + std::to_string (n), 'g' });
+
+    const auto& steps = state.historyOf ("LIST0001");
+
+    CHECK (steps.size() == cue::ListState::kept);
+    CHECK (steps.front().cue == "CUE36");           // 100 - 64
+    CHECK (steps.back().cue == "CUE99");
+
+    /*  The total counts every step ever taken, not what is kept: a hook watches
+        it to notice one, and a counter that stopped at sixty-four would stop
+        telling it anything. */
+    CHECK (state.stepsTaken() == 100u);
+
+    /*  And a list nobody stepped has no history rather than an empty entry with
+        a name, which is what a readout would publish. */
+    CHECK (state.historyOf ("LIST0002").empty());
+}
+
+TEST_CASE ("history: a replay reproduces it, with no audio and no hooks")
+{
+    /*  THE WHOLE ARGUMENT FOR WRITING IT IN THE HANDLER, made executable. A
+        replay applies the same records to the same show and must arrive at the
+        same history - which it can only do if nothing about the history was
+        decided by something a replay does not run.
+
+        The show is handed over as its own canonical XML, which is what
+        `wfg replay --bundle` does; the pointer was parked through a COMMAND, so
+        the log carries it and the replayed session starts where this one did. */
+    HistoryRig session;
+    session.park (session.memoId);
+
+    session.submitAndTick ("go");
+    session.submitAndTick ("cue.fire", { osc::Value::string (session.third) });
+    session.submitAndTick ("go");
+
+    const auto show = doc::CanonicalXml::write (session.document);
+    const auto original = LogFile::parse (session.engine.log().contents());
+    REQUIRE (original.errors.empty());
+
+    HistoryRig fresh;
+    fresh.runner.setPlayer (nullptr);               // no audio side at all
+
+    doc::ReadResult read = doc::CanonicalXml::read (show, fresh.document);
+    REQUIRE (read.ok);
+
+    const auto result = replay (fresh.engine, original);
+
+    for (const auto& mismatch : result.mismatches)
+        INFO (mismatch);
+
+    CHECK (result.ok);
+
+    /*  ASKED BY THE SESSION'S LIST IDENTIFIER, because that is the one the
+        replayed show has: the fresh rig's own constructor drew a list before
+        the XML was read over it, and that list no longer exists. Which is the
+        replay's own shape - a log means nothing except against the show it was
+        recorded on. */
+    CHECK (fresh.spelled (session.listId) == session.spelled());
+    CHECK (fresh.runner.listState().stepsTaken()
+             == session.runner.listState().stepsTaken());
 }

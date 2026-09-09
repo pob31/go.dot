@@ -80,6 +80,23 @@ namespace wfg::tree
             int queryPort = 0;
             std::string address;
             std::string typeTag;
+
+            /*  WHY IT IS BEING ASKED, and the two reasons do not queue together.
+
+                A VERIFY asks about one node a cue is waiting on, and its answer
+                decides whether that cue succeeds. An OBSERVATION asks about
+                every node the show writes to this target, once a step, so that
+                a jump can send only what differs and so that a value somebody
+                moved by hand is in the log at the step that saw it.
+
+                They share a thread and must not share a slot: an observation
+                sweep of forty addresses that swallowed the one address a
+                verified cue was waiting on would turn a cue into a timeout, and
+                a verify that blocked the sweep would leave the desk unobserved
+                for a step. So the flag rides on the question, the outstanding
+                set is keyed by it as well as by the address, and the record the
+                answer becomes says which it was. */
+            bool observation = false;
         };
 
         /*  Starts the thread. Idempotent; false if it was already running. */
@@ -111,7 +128,11 @@ namespace wfg::tree
         mutable std::mutex guard;
         std::condition_variable wake;
         std::deque<Question> queued;
-        std::set<std::string> inFlight;          // by address
+        /*  By KIND and address, so a verify and an observation of one node
+            are two questions rather than one dropped as a duplicate. */
+        std::set<std::string> inFlight;
+
+        static std::string keyOf (const Question&);
 
         std::atomic<bool> running { false };
         std::atomic<bool> stopping { false };

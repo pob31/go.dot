@@ -225,6 +225,18 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 #aimbar .at { color: var(--ink); min-width: 90px; }
 #aimbar input[type="range"] { flex: 1; accent-color: var(--picked); }
 #aimbar .landed { color: var(--ink-faint); }
+#aim-steps {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 12px 6px;
+  background: var(--panel-high); font-size: 11px;
+}
+#aim-steps .what { text-transform: uppercase; letter-spacing: .08em; color: var(--ink-faint); }
+#aim-steps .step {
+  padding: 1px 7px; border: 1px solid var(--rule); border-radius: 9px;
+  color: var(--ink); cursor: pointer; white-space: nowrap;
+}
+#aim-steps .step i { color: var(--ink-faint); font-style: normal; margin-left: 4px; }
+#aim-steps .step.aimed { border-color: var(--picked); color: var(--picked); }
+#aim-steps .none { color: var(--ink-faint); font-style: italic; }
 #aim-plan {
   max-height: 132px; overflow-y: auto; padding: 0 12px 8px;
   background: var(--panel-high); font-size: 11px; color: var(--ink-faint);
@@ -379,6 +391,8 @@ button:disabled { color: var(--ink-faint); cursor: default; }
         <span class="landed" id="aim-landed"></span>
       </div>
 
+      <!-- The steps the list took, newest first: each is a place to go back to. -->
+      <div id="aim-steps"></div>
       <div id="aim-plan"></div>
     </section>
 
@@ -1221,17 +1235,63 @@ function refreshFields(pane) {
 
     The picked row is what the aim points at, because that is the row the
     operator is already looking at. */
+/*  THE STEPS: the waypoints nobody had to keep (§13.10).
+
+    `list/history` is the last sixty-four things the list did, newest first,
+    each `<tick>:<cue>:<g|f|t>`. A step is a load-to-time target - before that
+    cue, offset -1 - so going back is one click on the step rather than typing
+    a time; the click aims, and the button beside it is what makes it so. The
+    letter is shown as a word on hover, because a history that can say which
+    steps nobody pressed is one that can explain a scene starting on its own. */
+function renderSteps(focus, atCue) {
+  const box = el("aim-steps");
+  const text = String(tree.get("/godot/list/" + focus + "/history", ""));
+  const steps = text ? text.split(" ") : [];
+
+  if (!steps.length) {
+    box.innerHTML = '<span class="what">steps</span><span class="none">none taken yet</span>';
+    return;
+  }
+
+  const now = Number(tree.get("/godot/engine/tick", 0));
+  const chips = [];
+
+  for (const step of steps.slice(0, 12)) {
+    const parts = step.split(":");
+    const at = Number(parts[0]);
+    const cue = parts[1] || "";
+    const how = parts[2] === "g" ? "GO" : parts[2] === "f" ? "fired by name" : "a trigger";
+
+    const ago = Number.isFinite(now) && Number.isFinite(at) ? (now - at) / 50 : NaN;
+    const when = !Number.isFinite(ago) ? ""
+      : ago < 60 ? Math.round(ago) + " s ago"
+      : Math.round(ago / 60) + " min ago";
+
+    chips.push('<span class="step' + (cue === atCue ? " aimed" : "") + '" data-step="' +
+               esc(cue) + '" title="' + esc(how + " at tick " + parts[0] +
+               " — click to aim before it") + '">' + esc(cueName(cue)) +
+               "<i>" + esc(when) + "</i></span>");
+  }
+
+  if (steps.length > 12)
+    chips.push('<span class="none">and ' + (steps.length - 12) + " more</span>");
+
+  box.innerHTML = '<span class="what">steps</span>' + chips.join("");
+}
+
 function renderAim() {
   const lists = tree.ids("/godot/list/order");
   const focus = tree.get("/godot/list/focus", "") || lists[0] || "";
 
   const bar = el("aimbar");
   const plan = el("aim-plan");
+  const steps = el("aim-steps");
 
-  if (!focus) { bar.hidden = true; plan.hidden = true; return; }
+  if (!focus) { bar.hidden = true; plan.hidden = true; steps.hidden = true; return; }
 
   bar.hidden = false;
   plan.hidden = false;
+  steps.hidden = false;
 
   const aim = String(tree.get("/godot/list/" + focus + "/aim", ""));
   const space = aim.lastIndexOf(" ");
@@ -1254,6 +1314,8 @@ function renderAim() {
   el("aim-landed").textContent = landed && landed !== aim
     ? "landed at " + landed.replace(/ /, " + ") + " s"
     : "";
+
+  renderSteps(focus, atCue);
 
   /*  AND WHAT IT WOULD BE. A solve is one node holding a document, so this is
       the only place on the page that parses JSON - and it is why: a subtree of
@@ -1529,6 +1591,22 @@ document.addEventListener("click", (event) => {
       picked = null;
     }
 
+    return;
+  }
+
+  /*  A STEP IS A PLACE TO GO BACK TO: clicking one aims BEFORE its cue, which
+      is `<cue> -1` - standby on it, nothing of it done - and picks the row so
+      the inspector and the solve both show where that is. Nothing jumps; the
+      button does that, on purpose, the same as for a dragged aim. */
+  const step = event.target.closest && event.target.closest("[data-step]");
+
+  if (step && step.dataset && step.dataset.step) {
+    const list = aimedList();
+
+    if (list) command("list.aim", [str(list), str(step.dataset.step), dbl(-1)]);
+
+    picked = step.dataset.step;
+    render();
     return;
   }
 

@@ -206,11 +206,25 @@ namespace wfg::tree
         registry.add ({ "mount.readback",
                         "What a mounted target said one of its nodes currently holds.",
                         { { "mount", 's', false }, { "address", 's', false },
-                          { "value", '*', false } },
+                          { "value", '*', false }, { "observed", 'T', true } },
                         true,
                         [&mounts] (CommandContext&, const std::vector<osc::Value>& args)
                         {
-                            mounts.noteReadback (args[1].getString(), args[2]);
+                            /*  ONE RECORD, TWO STORES. A cue waiting on this
+                                node consumes a read-back; an observation is
+                                what the target says when nobody asked on a
+                                cue's behalf, and the two are kept apart so that
+                                a periodic sweep cannot make a verification pass
+                                by construction (Mount.h says it at length).
+
+                                The flag is trailing and optional, so every log
+                                written before observations existed replays as
+                                what it was: a verify. */
+                            if (args.size() > 3 && args[3].getBool())
+                                mounts.noteObservation (args[1].getString(), args[2]);
+                            else
+                                mounts.noteReadback (args[1].getString(), args[2]);
+
                             return Outcome::ok (args);
                         } });
 

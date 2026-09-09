@@ -32,6 +32,14 @@ namespace wfg::cue
         return aim.cue + " " + osc::formatDouble (aim.offset);
     }
 
+    std::string spellStep (const Step& step)
+    {
+        /*  Colons rather than spaces INSIDE a step, because the node separates
+            steps with spaces - the same rule every list-shaped readout here
+            follows - and a tick is an integer, so no formatter is asked. */
+        return std::to_string (step.tick) + ":" + step.cue + ":" + std::string (1, step.origin);
+    }
+
     ListAim readAim (const std::string& text)
     {
         const auto space = text.find (' ');

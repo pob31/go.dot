@@ -756,6 +756,109 @@ namespace wfg::cue
     }
 
     //==============================================================================
+    const std::map<std::string, std::vector<std::string>>& Runner::writtenAddresses() const
+    {
+        /*  A CACHE ASKED BY THE DOCUMENT'S REVISION, which is the shape PR 4.4
+            settled on for the liveness analysis and for the same reason: the
+            set changes only when somebody edits the show, and a second thing to
+            invalidate by hand is a second thing to forget. */
+        if (writtenFor == document.revision() && ! written.empty())
+            return written;
+
+        writtenFor = document.revision();
+        written.clear();
+
+        if (mounts == nullptr)
+            return written;
+
+        const std::function<void (const juce::ValueTree&)> visit
+            = [&] (const juce::ValueTree& node)
+        {
+            if (node.getType().toString() == "Osc")
+            {
+                const auto address = node[juce::Identifier ("address")].toString().toStdString();
+
+                /*  AN EVENT IS NOT A VALUE, the same exclusion the solver makes
+                    (§3.13 step 4) read from the other end: "fire the pyro" has
+                    no state, so there is nothing to observe and asking would be
+                    a question with no answer. */
+                if (! address.empty())
+                    if (const auto* mounted = mounts->nodeAt (address);
+                        mounted != nullptr && mounted->kind != tree::Kind::event)
+                        if (const auto mountId = mounts->mountOf (address); ! mountId.empty())
+                        {
+                            auto& addresses = written[mountId];
+
+                            if (std::find (addresses.begin(), addresses.end(), address)
+                                  == addresses.end())
+                                addresses.push_back (address);
+                        }
+            }
+
+            for (int child = 0; child < node.getNumChildren(); ++child)
+                visit (node.getChild (child));
+        };
+
+        visit (document.root());
+        return written;
+    }
+
+    void Runner::observeAfterStep (Engine& engine, std::int64_t tick)
+    {
+        if (asker == nullptr || mounts == nullptr)
+            return;
+
+        /*  ONE SWEEP PER STEP, noticed by counting rather than by being told.
+            The step is written by a handler and the sweep is a decision, so
+            this is the hook half of the rule the whole engine is built on -
+            and it means a replay, which runs no hooks, re-injects the answers
+            from the log instead of asking a desk that is not there. */
+        if (stepsSeen == lists.stepsTaken())
+            return;
+
+        stepsSeen = lists.stepsTaken();
+
+        for (const auto& [mountId, addresses] : writtenAddresses())
+        {
+            const auto* declaration = mounts->declarationOf (mountId);
+
+            if (declaration == nullptr || ! declaration->canBeAsked())
+                continue;
+
+            /*  ONE A SECOND, PER MOUNT. Fifty ticks, which is the same clock
+                everything else here counts in. */
+            const auto last = observedAt.find (mountId);
+
+            if (last != observedAt.end() && tick - last->second < 50)
+                continue;
+
+            observedAt[mountId] = tick;
+
+            for (const auto& address : addresses)
+            {
+                std::string typeTag;
+
+                if (const auto* node = mounts->nodeAt (address))
+                    typeTag = node->typeTags;
+
+                if (asker->ask ({ mountId, declaration->host, declaration->queryPort,
+                                  address, typeTag, true }))
+                    ++asked;
+            }
+        }
+
+        juce::ignoreUnused (engine);
+    }
+
+    std::string Runner::listOfCue (const std::string& cueId) const
+    {
+        for (auto node = document.findById (cueId); node.isValid(); node = node.getParent())
+            if (node.getType().toString() == "List")
+                return node[idProperty].toString().toStdString();
+
+        return {};
+    }
+
     std::vector<std::string> Runner::loadToTime (Engine& engine, doc::ShowDocument& editable,
                                                  std::int64_t tick, const std::string& listId,
                                                  const std::vector<std::string>& supplied)
@@ -794,15 +897,7 @@ namespace wfg::cue
         /*  WHOSE LIST A RUN BELONGS TO, by climbing its cue to the top. A jump
             is scoped to one list (§13.5's cross-list rule read from the other
             side), so this is what tells the sweep below what it may end. */
-        const auto listOf = [this] (const std::string& cueId)
-        {
-            for (auto node = document.findById (cueId); node.isValid();
-                 node = node.getParent())
-                if (node.getType().toString() == "List")
-                    return node[idProperty].toString().toStdString();
-
-            return std::string {};
-        };
+        const auto listOf = [this] (const std::string& cueId) { return listOfCue (cueId); };
 
         //----------------------------------------------------------------------
         /*  WHAT THE JUMP ABANDONS, ENDED BEFORE ANYTHING IS BUILT.
@@ -1026,21 +1121,30 @@ namespace wfg::cue
         //----------------------------------------------------------------------
         /*  AND THE VALUES: A MINIMAL CORRECTION, NOT A SHOTGUN BLAST (§3.13).
 
-            What is compared here is the mounted TREE - what Go.dot last wrote -
-            rather than what the desk currently holds, and the difference
-            matters: a value somebody moved by hand on the desk is not in this
-            comparison and will not be corrected. Reading the desk first is the
-            bulk read-back, which is the next PR and which this is deliberately
-            not pretending to be.
+            WHAT IS COMPARED IS THE FRESHEST THING KNOWN ABOUT THE TARGET:
+            what it was last OBSERVED to hold, and what Go.dot last WROTE where
+            there is no observation. The order matters and is the whole of what
+            §13.10 added here. A fader somebody moved by hand on the desk is in
+            the observation and not in the write, so before this the jump agreed
+            with a tree that disagreed with the room and sent nothing; now it
+            sends. And an observation is dropped the moment Go.dot writes that
+            address, so "no observation" means "nothing has been seen since we
+            last wrote", where the written value is the best account there is.
 
             Sent through the ordinary write, so a replay reproduces it exactly
             and, having no sender, does not move the rig. */
         for (const auto& value : plan.values)
         {
             if (mounts != nullptr)
-                if (const auto* now = mounts->valueOf (value.address);
-                    now != nullptr && *now == value.value)
+            {
+                const auto* now = mounts->observedOf (value.address);
+
+                if (now == nullptr)
+                    now = mounts->valueOf (value.address);
+
+                if (now != nullptr && *now == value.value)
                     continue;
+            }
 
             engine.submit (origin::engine, "node.set",
                            { osc::Value::string (value.address), value.value });
@@ -4089,6 +4193,7 @@ namespace wfg::cue
         advanceFades (engine, tick);
         applyLevels();
         advanceSends (engine);
+        observeAfterStep (engine, tick);
 
         if (audio == nullptr)
             return;
@@ -4873,6 +4978,15 @@ namespace wfg::cue
                             const auto made = runner.fireStandby (engine, context.tick,
                                                                   list, standby, supplied);
 
+                            /*  A STEP, WRITTEN BY THE HANDLER. §3.13's manual
+                                waypoints, kept for the operator rather than by
+                                them (decision R): every applied GO is a place to
+                                go back to, and it is model state a replay
+                                reproduces precisely because the handler writes
+                                it and no hook has to notice it. */
+                            runner.listState().stepped (listId,
+                                                        { context.tick, standby, 'g' });
+
                             std::vector<osc::Value> applied;
 
                             for (const auto& id : made)
@@ -4915,6 +5029,13 @@ namespace wfg::cue
 
                             const auto id = args.size() > 1 ? args[1].getString()
                                                             : std::string {};
+
+                            /*  A cue fired by name is a step too, on the list
+                                that holds it: going back to "before the shot"
+                                is as much a place as going back to a GO. */
+                            if (const auto listId = runner.listOfCue (cueId); ! listId.empty())
+                                runner.listState().stepped (listId,
+                                                            { context.tick, cueId, 'f' });
 
                             return Outcome::ok (withRun (args, 1,
                                                          runner.fire (engine, context.tick,
@@ -4969,6 +5090,14 @@ namespace wfg::cue
 
                             const auto id = args.size() > 1 ? args[1].getString()
                                                             : std::string {};
+
+                            /*  And a trigger. The letter is the only difference,
+                                and it is worth keeping: a history that said
+                                which steps nobody pressed is a history that can
+                                explain a scene starting on its own. */
+                            if (const auto listId = runner.listOfCue (cueId); ! listId.empty())
+                                runner.listState().stepped (listId,
+                                                            { context.tick, cueId, 't' });
 
                             return Outcome::ok (withRun (args, 1,
                                                          runner.fire (engine, context.tick,

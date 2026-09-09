@@ -19,6 +19,9 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/oscquery/OscQueryClient.h>
 
+#include <utility>
+#include <vector>
+
 namespace wfg::tree
 {
     MountProbe::~MountProbe()
@@ -57,6 +60,11 @@ namespace wfg::tree
     }
 
     //==============================================================================
+    std::string MountProbe::keyOf (const Question& question)
+    {
+        return (question.observation ? "o " : "v ") + question.address;
+    }
+
     bool MountProbe::ask (const Question& question)
     {
         if (question.host.empty() || question.queryPort <= 0 || question.address.empty())
@@ -69,7 +77,7 @@ namespace wfg::tree
                 verified cue is waiting, which is fifty times a second; a queue
                 that accepted all of them would spend the rest of the show
                 answering the first second. */
-            if (! inFlight.insert (question.address).second)
+            if (! inFlight.insert (keyOf (question)).second)
                 return false;
 
             queued.push_back (question);
@@ -115,7 +123,7 @@ namespace wfg::tree
 
             {
                 const std::lock_guard<std::mutex> lock { guard };
-                inFlight.erase (question.address);
+                inFlight.erase (keyOf (question));
             }
 
             /*  NOTHING IS SUBMITTED WHEN NOTHING ANSWERED, and that is
@@ -130,11 +138,24 @@ namespace wfg::tree
             if (! value.has_value())
                 continue;
 
-            if (engine != nullptr)
-                engine->submit ("mount:" + question.mountId, "mount.readback",
-                                { osc::Value::string (question.mountId),
-                                  osc::Value::string (question.address),
-                                  *value });
+            if (engine == nullptr)
+                continue;
+
+            /*  THE SAME RECORD FOR BOTH, WITH A FLAG. An observation is the
+                same fact - "the target says this node holds that" - reached for
+                a different reason, and a second command name would have meant
+                two handlers, two replay paths and two ways for the table to
+                learn the same thing. The trailing argument says which store it
+                lands in, and is absent for a verify so that every log written
+                before this existed still replays. */
+            std::vector<osc::Value> args { osc::Value::string (question.mountId),
+                                           osc::Value::string (question.address),
+                                           *value };
+
+            if (question.observation)
+                args.push_back (osc::Value::boolean (true));
+
+            engine->submit ("mount:" + question.mountId, "mount.readback", std::move (args));
         }
     }
 }
