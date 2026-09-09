@@ -1,0 +1,72 @@
+{
+  "FULL_PATH": "/desk",
+  "DESCRIPTION": "A processor that takes messages and can be asked what it holds. Hand-written, as most are. Its two inputs are what the show's Mount/Slot rows point at, so a Feed has somewhere real to land and `wfg validate` has an address to check.",
+  "CONTENTS": {
+    "fader": {
+      "FULL_PATH": "/desk/fader",
+      "DESCRIPTION": "Grand master, 0 to 1.",
+      "TYPE": "f",
+      "ACCESS": 3,
+      "RANGE": [
+        {
+          "MIN": 0.0,
+          "MAX": 1.0
+        }
+      ]
+    },
+    "scene": {
+      "FULL_PATH": "/desk/scene",
+      "DESCRIPTION": "The scene to recall.",
+      "TYPE": "i",
+      "ACCESS": 3,
+      "RANGE": [
+        {
+          "MIN": 1,
+          "MAX": 999
+        }
+      ]
+    },
+    "meter": {
+      "FULL_PATH": "/desk/meter",
+      "DESCRIPTION": "What the desk reports. Read-only, which is what a meter is.",
+      "TYPE": "f",
+      "ACCESS": 1
+    },
+    "mute": {
+      "FULL_PATH": "/desk/mute",
+      "DESCRIPTION": "Mute the input. What a footer releases.",
+      "TYPE": "T",
+      "ACCESS": 3
+    },
+    "input": {
+      "FULL_PATH": "/desk/input",
+      "DESCRIPTION": "The processor's inputs, which the show declares as slots.",
+      "CONTENTS": {
+        "1": {
+          "FULL_PATH": "/desk/input/1",
+          "DESCRIPTION": "Input 1: level of whatever is fed to it.",
+          "TYPE": "f",
+          "ACCESS": 3,
+          "RANGE": [
+            {
+              "MIN": 0.0,
+              "MAX": 1.0
+            }
+          ]
+        },
+        "2": {
+          "FULL_PATH": "/desk/input/2",
+          "DESCRIPTION": "Input 2: level of whatever is fed to it.",
+          "TYPE": "f",
+          "ACCESS": 3,
+          "RANGE": [
+            {
+              "MIN": 0.0,
+              "MAX": 1.0
+            }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -836,6 +836,27 @@ namespace
             return live != nullptr ? live->id : std::string {};
         }
 
+        /*  A HOLDER THAT IS ACTUALLY SOUNDING, which is what a claim has to
+            wait for and what an arm at standby is not.
+
+            The pointer moving off a media cue now gives its voice and its slots
+            back - a cue nobody fired holding a processor input for the rest of
+            the show was the leak PR 4.11's driver found - so a case that needs
+            a slot HELD while the pointer is somewhere else has to fire the cue
+            rather than park on it and walk away. Which is the honest scenario
+            anyway: what a second cue waits for is a first cue that is playing.
+        */
+        std::string playing (const std::string& cueId)
+        {
+            submitAndTick ("cue.fire", { osc::Value::string (cueId) });
+            audio.completeArms (engine);
+            tickOnce();
+            tickOnce();
+
+            const auto* live = runs.liveRunOf (cueId);
+            return live != nullptr ? live->id : std::string {};
+        }
+
         std::string wide, slotId, secondId;
     };
 }
@@ -872,7 +893,10 @@ TEST_CASE ("claim: a second cue waits, in words, and does not sound meanwhile")
         never colour alone - and GO has already returned." */
     ClaimRig rig;
 
-    const auto first = rig.armAt (rig.mediaId);
+    //  FIRED RATHER THAN PARKED ON: the holder has to be a cue that is going,
+    //  because a cue merely armed at the pointer lets go the moment the pointer
+    //  moves - see `playing` above.
+    const auto first = rig.playing (rig.mediaId);
     REQUIRE_FALSE (first.empty());
 
     rig.setStandby (rig.secondId);
@@ -954,7 +978,7 @@ TEST_CASE ("claim: a rack channel degrades rather than waits")
         REQUIRE (insert.ok);
     }
 
-    const auto first = rig.armAt (rig.mediaId);
+    const auto first = rig.playing (rig.mediaId);
     REQUIRE_FALSE (first.empty());
     CHECK (rig.runs.find (first)->warning.empty());
     REQUIRE (rig.runs.holderOf (channel.id) != nullptr);
@@ -3545,6 +3569,47 @@ TEST_CASE ("preset: the member still runs where it sits, on the run its ancestor
     CHECK (howMany == 1);
 }
 
+TEST_CASE ("preset: a scene whose header is entirely derived is prepared, not partial")
+{
+    /*  FOUND BY THE PHASE 4 DRIVER, which parked on a scene with one preset
+        member and no written header and read `partial` for ever.
+
+        `partial` means "something in this block could not be got ready", and
+        what it was counted against was the WRITTEN header's members - so a
+        block made only of derived lines was one preparable cue against nought
+        written ones, and the two numbers disagreed by construction. Both sides
+        come from `blockCuesIn` now, which is the whole block: derived first,
+        written after, each cue once.
+
+        The shape matters because the preset design encourages it. A designer
+        who marks three members for their scene's header and writes none has a
+        scene whose whole preparation is derived, and that is the ordinary case
+        rather than a corner. */
+    PrepareRig rig;
+
+    //  The written header's memo goes - it is the cue that cannot be prepared
+    //  and the reason this rig's other cases read `partial` correctly. What is
+    //  left is a block made only of the derived line.
+    REQUIRE (rig.submitAndTick ("object.delete",
+                                { osc::Value::string (rig.opening) }).applied == 1);
+
+    rig.setCue (rig.sound, "preset", rig.groupId);
+    rig.setStandby (rig.groupId);
+
+    const auto word = [&rig]
+    {
+        const auto* ready = rig.prepared (rig.groupId);
+        return ready != nullptr ? std::string (ready->prepare) : std::string {};
+    };
+
+    REQUIRE (rig.tickUntil ([&word] { return word() == cue::preparedness::armed
+                                             || word() == cue::preparedness::verified
+                                             || word() == cue::preparedness::partial; }));
+
+    INFO ("prepare says " << word());
+    CHECK (word() != cue::preparedness::partial);
+}
+
 TEST_CASE ("preset: a mark on a group the cue is not inside warns and does nothing")
 {
     /*  A WARNING AND NOT A REFUSAL: the repair is somebody dragging it
@@ -4802,10 +4867,20 @@ TEST_CASE ("kill: a cue armed and never launched gives its voice back")
 
 TEST_CASE ("kill: every voice an operator armed and abandoned comes back")
 {
-    /*  The same thing at the scale it is felt at. A pointer walked down a list
-        of media cues arms each one it lands on; killing them all must leave the
-        rig exactly as it was found, or the show runs out of voices for a reason
-        nobody can see. */
+    /*  The same thing at the scale it is felt at, and the answer changed under
+        it in PR 4.11 - for the better, and this case is where that is said.
+
+        A pointer walked down a list of media cues used to arm each one and hold
+        every voice it touched until something killed it: eight cues, eight
+        voices, on a rig with four. Moving the pointer on now gives the last
+        one's voice back, because a cue nobody fired holding a voice for the
+        rest of the show is a leak rather than a preparation. So the walk leaves
+        exactly ONE armed cue - the one the pointer is on - and the kill this
+        case is named for still has to free that one.
+
+        What was really being tested is unchanged: an armed, never-launched run
+        can be ended, and its voice comes back. There is simply less of it to
+        do, which is the point. */
     Rig rig;
 
     std::vector<std::string> cues;
@@ -4826,7 +4901,19 @@ TEST_CASE ("kill: every voice an operator armed and abandoned comes back")
     }
 
     REQUIRE (rig.runs.all().size() == cues.size());
-    CHECK (rig.runs.lowestFreeTrack (4) == -1);      // every voice held
+
+    /*  THREE OF THE FOUR ARE ALREADY OVER, given back as the pointer left
+        them, and each says why. */
+    auto abandoned = 0;
+
+    for (const auto& run : rig.runs.all())
+        if (run.isFinished() && run.warning == cue::runWarning::revoked)
+            ++abandoned;
+
+    CHECK (abandoned == 3);
+
+    //  And one voice is held: the cue the pointer is standing on.
+    CHECK (rig.runs.lowestFreeTrack (4) == 1);
 
     for (const auto& run : rig.runs.all())
         rig.submitAndTick ("run.kill", { osc::Value::string (run.id) });

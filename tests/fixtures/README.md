@@ -172,6 +172,36 @@ constants, so the value on a channel says which range is sounding as arithmetic.
 three ranges are exactly those three segments, which is what makes "the render says which range
 is playing" true by construction.
 
+## `bundles/phase4/` — the phase's done-when, with no log of its own
+
+The second bundle with no `.wfglog` beside it, and for the reason `phase3/` gives: it is driven
+by `blackbox/phase4_prepare.py`, which makes its own log during the session and then replays it.
+A hand-written log would be a second opinion about what the horizon, the allocator and the solver
+do, and finding that out is the point.
+
+It is the devplan's sentence, arranged: *load-to-time into the middle of a scene lands the right
+cues at the right offsets with the right slots claimed; reordering cues produces the right overlap
+warnings; a claim on a busy slot waits and says so; all headless.*
+
+One list holds a scene group — an **auto sequence** whose first member feeds a declared processor
+input and takes an insert on a rack channel, a network cue marked `preset` for that scene so its
+header is **entirely derived**, a nested **timeline** group of a ramp and a constant beside it, and
+a footer that releases the input — followed by a media cue that feeds the **same** processor input,
+so a claim has somebody to wait for, and a fade. The list carries a `Persistent` section with one
+desk value in it. A second list holds a memo with an OSC trigger. The mount declares two slots
+against the desk's own `/desk/input/1` and `/desk/input/2`, and is `anticipatable` with read-back,
+which is what lets the horizon pre-send and verify.
+
+`state.xml` parks nothing. The driver owns the pointer from the first tick, because half of what it
+checks is what happens when a pointer LANDS on a scene - and a bundle that arrived already parked
+would have prepared the scene before any test could watch it.
+
+**The two media files are written by the driver, and each is a different kind of evidence.**
+`segments.wav` is three two-second constants, so the value on a channel says WHICH cue is sounding.
+`ramp.wav` rises from nought over eight seconds, so a sample IS a position: a cue that starts four
+seconds in starts at 0.45, and no cue that started at the top of the file can. That is what turns
+"the jump landed at four seconds" from a claim about a clock into a reading off the render.
+
 ## `bundles/chain/` and `logs/auto-chain.wfglog`
 
 One press, and a whole scene runs itself: five cues, a nested timeline group and a footer. An

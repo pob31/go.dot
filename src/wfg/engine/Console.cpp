@@ -468,6 +468,28 @@ namespace
             see the note in the bundle branch below. */
         runner.setMounts (&mounts, nullptr);
 
+        /*  HOW LONG EVERY MEDIA FILE WAS, TAKEN FROM THE LOG ITSELF.
+
+            A jump is one record whose handler SOLVES: `list.loadToTime` asks
+            what the show would be at a position and builds the run tree from
+            the answer, and that answer depends on how long each cue's material
+            lasts. A replay with no lengths therefore solves a different show
+            and creates a different set of runs - which is precisely what the
+            Phase 4 driver caught, with five identifiers in the record and three
+            created on the way back.
+
+            FROM THE LOG AND NOT FROM THE FOLDER, and the difference is the
+            whole point of the `# media` lines PR 4.1 started writing. The
+            bundle's media may have been replaced, re-rendered or lost since the
+            session; the log says how long they were THAT NIGHT, which is the
+            only thing a replay is entitled to believe. A bundle-side read would
+            reproduce today's files rather than yesterday's performance.
+
+            Filled below, once the log is parsed. Declared here so it outlives
+            the Runner that borrows it. */
+        std::map<std::string, double> durations;
+        runner.setMediaDurations (&durations);
+
         const auto bundlePath = args.containsOption ("--bundle")
                                   ? args.getValueForOption ("--bundle")
                                   : juce::String();
@@ -545,6 +567,32 @@ namespace
             for (const auto& problem :
                    wfg::tree::loadAllMountsFromBundle (document, mounts, bundle))
                 std::cerr << "    " << problem << std::endl;
+        }
+
+        /*  AND THE LENGTHS THE SESSION SAW, off its own header lines.
+
+            `media <name> <bytes> <seconds>`, written by `serve` for every file
+            the show references. Parsed from the end so a name with spaces in it
+            survives, and taken as authoritative: a file replaced since the
+            session is not the file the session played, and the solver is
+            entitled to the night's own numbers. A log with no `media` lines -
+            every one written before PR 4.1 - leaves the table empty, which is
+            the behaviour every such log already replayed with. */
+        for (const auto& line : logFile->headerLines)
+        {
+            if (line.rfind ("media ", 0) != 0)
+                continue;
+
+            const auto bytesAt = line.rfind (' ', line.rfind (' ') - 1);
+
+            if (bytesAt == std::string::npos || bytesAt <= 6)
+                continue;
+
+            const auto name = line.substr (6, bytesAt - 6);
+            const auto seconds = wfg::osc::parseDouble (line.substr (line.rfind (' ') + 1));
+
+            if (! name.empty() && seconds.has_value())
+                durations[name] = *seconds;
         }
 
         const auto result = wfg::replay (engine, *logFile);

@@ -531,7 +531,7 @@ namespace wfg::cue
         }
     }
 
-    std::vector<std::string> Runner::preparableIn (const juce::ValueTree& group) const
+    std::vector<std::string> Runner::blockCuesIn (const juce::ValueTree& group) const
     {
         std::vector<std::string> out;
 
@@ -542,12 +542,7 @@ namespace wfg::cue
             no natural example. A header is a sequence whatever the group's mode
             says, and §3.12 puts prepare and commit there precisely because
             preparation has an order. */
-        std::vector<std::string> derived;
-        collectPresetsOf (group, group[idProperty].toString().toStdString(), derived);
-
-        for (const auto& cueId : derived)
-            if (const auto cue = document.findById (cueId); isPreparable (cue))
-                out.push_back (cueId);
+        collectPresetsOf (group, group[idProperty].toString().toStdString(), out);
 
         for (const auto& cueId : membersOf (group.getChildWithName ("Header")))
         {
@@ -556,12 +551,20 @@ namespace wfg::cue
                 dragged a header cue onto its own group's header, which is a
                 reasonable thing to do by accident and must not spawn the cue
                 twice. */
-            if (std::find (out.begin(), out.end(), cueId) != out.end())
-                continue;
-
-            if (const auto cue = document.findById (cueId); isPreparable (cue))
+            if (std::find (out.begin(), out.end(), cueId) == out.end())
                 out.push_back (cueId);
         }
+
+        return out;
+    }
+
+    std::vector<std::string> Runner::preparableIn (const juce::ValueTree& group) const
+    {
+        std::vector<std::string> out;
+
+        for (const auto& cueId : blockCuesIn (group))
+            if (const auto cue = document.findById (cueId); isPreparable (cue))
+                out.push_back (cueId);
 
         return out;
     }
@@ -643,8 +646,14 @@ namespace wfg::cue
             `partial`: §3.6's own word for a block that is not anticipatable all
             the way through, and §3.12's reason for deciding preparability per
             parameter rather than per cue. */
-        if (missing || preparableIn (group).size()
-                         != membersOf (group.getChildWithName ("Header")).size())
+        /*  AGAINST THE WHOLE BLOCK, not against the written header. `partial`
+            means "something here could not be got ready", so what it counts
+            against is every cue the block WOULD have prepared - the derived
+            lines and the written ones together. Compared with the written
+            header alone, a scene whose header is entirely derived read
+            `partial` for ever with nothing wrong with it, which is the shape
+            the preset design encourages and what the Phase 4 driver found. */
+        if (missing || preparableIn (group).size() != blockCuesIn (group).size())
             return preparedness::partial;
 
         return agreed ? preparedness::verified : preparedness::armed;
@@ -3845,6 +3854,39 @@ namespace wfg::cue
 
             job.awaiting.clear();
 
+            /*  A MEMBER THE HORIZON ALREADY RAN IS ALREADY OVER, and the phase
+                walks past it rather than waiting for it.
+
+                §13.7 gives the horizon a member's PREPARABLE PART and leaves
+                the rest for its own moment: for a media cue the rest is the
+                launch, and for a network cue that was read, pre-sent and
+                verified there is no rest at all - the value is on the desk and
+                the desk agreed. Its run is finished before the group ever
+                reaches its row.
+
+                Without this the phase stopped there for ever: the advance below
+                marks the standing run as asked-for and waits for something
+                `armed` to launch, and a run that is already `done` will never
+                be either. A scene whose second member was a preset network cue
+                played its first member and then held the show. Found by the
+                Phase 4 driver, which is a scene of exactly that shape. */
+            while (job.nextMember < job.phaseCues.size())
+            {
+                const auto& candidate = job.phaseCues[job.nextMember];
+                const Run* alreadyRan = nullptr;
+
+                for (const auto* child : runs.childrenOf (job.run))
+                    if (child->cue == candidate && ! job.hasTaken (child->id)
+                         && child->isFinished())
+                        alreadyRan = child;
+
+                if (alreadyRan == nullptr)
+                    break;
+
+                askedFor (alreadyRan->id);
+                ++job.nextMember;
+            }
+
             if (job.nextMember < job.phaseCues.size())
             {
                 const auto& next = job.phaseCues[job.nextMember];
@@ -4149,9 +4191,27 @@ namespace wfg::cue
 
         for (const auto& snapshot : runs.all())
         {
-            if (snapshot.state != runState::preparing
+            /*  A PLAIN MEDIA CUE AT STANDBY IS THE SMALLEST HORIZON THERE IS,
+                and it leaked until the Phase 4 driver walked the pointer past
+                one. Arming it reserves a voice and, since PR 4.3, claims its
+                slots; moving the pointer on left all of that held by a run in
+                `armed` that nobody would ever launch, so scrolling a list of
+                media cues emptied the rack one cue at a time.
+
+                WHAT MAKES IT SAFE TO END is the `prepare` mark and nothing
+                else. A run the horizon armed carries it; `askedFor` clears it
+                the moment anybody asks for that cue - a GO, a `cue.fire`, a
+                group adopting it - so a cue somebody fired is never in this
+                set, however recently it was armed. The mark IS the difference
+                between "made ready in case" and "wanted". */
+            const auto abandoned = snapshot.state == runState::armed
+                                     && ! snapshot.prepare.empty()
+                                     && ! snapshot.launchRequested;
+
+            if ((snapshot.state != runState::preparing && ! abandoned)
                  || ! snapshot.parent.empty()
-                 || snapshot.cue == keep)
+                 || snapshot.cue == keep
+                 || snapshot.cue == standby)
                 continue;
 
             /*  WHAT WAS PRE-SENT GOES BACK FIRST, and it goes back as an

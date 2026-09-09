@@ -648,6 +648,35 @@ add_test(NAME blackbox.phase3.fr_FR
 set_tests_properties(blackbox.phase3.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# PHASE 4'S DONE-WHEN, and the devplan states it in one sentence: "load-to-time
+# into the middle of a scene lands the right cues at the right offsets with the
+# right slots claimed; reordering cues produces the right overlap warnings; a
+# claim on a busy slot waits and says so; all headless."
+#
+# Every clause is a check in there, and three of them found engine faults the
+# unit suite could not: a scene whose header is entirely derived read `partial`
+# for ever, a plain media cue at the pointer held its voice and its slots after
+# the pointer moved on, and a preset network cue standing second in a scene
+# stopped the scene when its own row came round. A driver that drives a WHOLE
+# show is what finds those - each is a seam between two things that are
+# individually correct.
+#
+# The longest in the suite: a prepared scene, a revocation, a claim that waits
+# for a bed, an overlap that appears when a cue moves and goes when it moves
+# back, a jump into the middle of a timeline group read off a ramp in the
+# render, a persistent section put back after a hand on the desk, and a replay
+# of all of it. Four hundred seconds is generous on a loaded runner.
+add_test(NAME blackbox.phase4.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase4_prepare.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.phase4.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 400)
+add_test(NAME blackbox.phase4.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase4_prepare.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase4.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 400)
+
 # The wiring the unit suite cannot reach: a real datagram, on a real socket, on
 # a thread that may not read the document, reaching the right cue - and the
 # operator's pointer not moving when it does.

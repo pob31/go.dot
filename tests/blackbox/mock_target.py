@@ -167,6 +167,16 @@ def make_handler(device: Device):
         def do_GET(self):                           # noqa: N802 (http.server's name)
             path, _, query = self.path.partition("?")
 
+            #  HOW MANY DATAGRAMS ARRIVED, which is not OSCQuery and is under a
+            #  path no namespace can collide with. A driver that means "only
+            #  what differed was sent" has to be able to COUNT what arrived;
+            #  reading the values back cannot tell one write from three of the
+            #  same value, and that is exactly the difference a minimal
+            #  correction is supposed to make.
+            if path == "/_mock/received":
+                self.reply(200, {"VALUE": [device.count()]})
+                return
+
             # THE BARE KEY IS THE WHOLE POINT. OSCQuery asks `?VALUE`, not
             # `?VALUE=`, and a client that helpfully re-encoded it would be
             # answered 400 here — which is exactly the mistake juce::URL makes

@@ -669,6 +669,16 @@ namespace wfg::cue
             failure. */
         std::vector<std::string> preparableIn (const juce::ValueTree& group) const;
 
+        /*  EVERY CUE THE BLOCK WOULD PREPARE IF IT COULD - the derived lines
+            first, then the written header's, deduplicated. `preparableIn` is
+            this filtered by `isPreparable`, and `settledWord` compares the two
+            sizes to decide `partial`, so both have to be drawn from one list or
+            the comparison is between different questions. It was: the word was
+            compared with the WRITTEN header alone, and a scene whose header is
+            entirely derived - which is what §13.7's whole shape encourages -
+            read `partial` for ever with nothing wrong with it. */
+        std::vector<std::string> blockCuesIn (const juce::ValueTree& group) const;
+
         /*  The cues under this node whose `preset` names the group, in document
             order - §13.7's derived header lines. A walk of the group's own
             subtree rather than of the show, because a `preset` names an
