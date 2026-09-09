@@ -216,6 +216,7 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 .tail .trig { color: var(--waiting); letter-spacing: 0; }
 .tail .flag { letter-spacing: .05em; text-transform: uppercase; }
 .tail .flag.warn { color: var(--waiting); text-transform: none; letter-spacing: 0; cursor: help; }
+.tail .flag.ready { color: var(--live); text-transform: none; letter-spacing: 0; cursor: help; }
 .tail .standby-word { color: var(--standby); }
 
 .band {
@@ -617,6 +618,17 @@ function seconds(value) {
 
 /*  ONE CUE ROW. `depth` is the indent, `role` is member / header / footer, and
     `standby` is the identifier the pointer is on for this list. */
+/*  What each of §13.6's six words means, said once so the row can be short. */
+function prepareNote(word) {
+  return ({
+    preparing: "the horizon is getting this ready now",
+    pending:   "waiting for a slot another cue is holding - it will land when that run ends",
+    partial:   "part of this could not be got ready ahead and will happen at entry",
+    armed:     "ready: its voice is reserved and its media is made ready",
+    verified:  "ready, and every value sent ahead was read back equal",
+  })[word] || word;
+}
+
 /*  A cue as somebody would say it out loud: its number and its name, falling
     back to the identifier for a cue that has neither yet. Used where one row
     has to talk about another. */
@@ -659,6 +671,19 @@ function cueRow(id, depth, role, standby, out) {
   /*  And a cue the engine cannot promise has its slot to itself. */
   const shares = overlapping.get(id) || [];
 
+  /*  HOW FAR AHEAD THIS ONE HAS BEEN GOT, in the word the engine uses.
+
+      PRD §3.12's horizon reaches a block before anybody presses anything, and
+      what an operator needs from it is on the row rather than in an inspector:
+      whether the next scene is ready, and whether it is only partly ready. In
+      WORDS and never colour alone (§4.8) - `pending` in particular, which is a
+      cue waiting for a slot somebody else holds and is the one an operator has
+      to be able to read at a glance and act on.
+
+      `idle` is the resting state and says nothing, which is most rows most of
+      the time. */
+  const prepare = tree.cue(id, "prepare", "idle");
+
   const twist = isGroup
     ? '<span class="twist" data-fold="' + id + '">' + (open ? "▼" : "▶") + "</span>"
     : '<span class="twist"></span>';
@@ -680,6 +705,10 @@ function cueRow(id, depth, role, standby, out) {
         (triggers.length
            ? '<span class="flag trig" title="' + triggers.length +
              ' trigger(s)">\u26A1' + (triggers.length > 1 ? triggers.length : "") + "</span>"
+           : "") +
+        (prepare && prepare !== "idle"
+           ? '<span class="flag ' + (prepare === "pending" ? "warn" : "ready") +
+             '" title="' + esc(prepareNote(prepare)) + '">' + esc(prepare) + "</span>"
            : "") +
         (shares.length
            ? '<span class="flag warn" title="' +

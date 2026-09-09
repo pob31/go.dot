@@ -435,6 +435,16 @@ namespace wfg::tree
             for a declared slot and `none` for a track, which no row can be.
             Where a voice is held has been readable at `/godot/run/<id>/track`
             since Phase 2. */
+        /** One row of one owner, or nullptr. */
+        const doc::AttributeRow* rowNamed (std::string_view owner, std::string_view name)
+        {
+            for (const auto* row : doc::Schema::rowsForOwner (owner))
+                if (row->name == name)
+                    return row;
+
+            return nullptr;
+        }
+
         void collectSlot (const juce::ValueTree& node, const char* element,
                           const char* extraOwner, const char* kindText,
                           const cue::SlotAnalysis& analysis,
@@ -489,6 +499,7 @@ namespace wfg::tree
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
                          std::vector<Node>& out,
                          const std::map<std::string, double>* durations,
+                         std::vector<std::string>& roster,
                          const char* role = "member")
         {
             const auto element = node.getType().toString().toStdString();
@@ -504,6 +515,10 @@ namespace wfg::tree
                 return;
 
             const auto base = std::string (godot) + "/cue/" + id;
+
+            /*  KEPT FOR THE RUNTIME HALF, which has no document to walk. See
+                `ParameterTree::declaredCues`. */
+            roster.push_back (id);
 
             /*  EVERY KIND IS A CUE FIRST. A media cue has a number, a name and
                 a pre-wait like any other and is addressed at /godot/cue/<id>,
@@ -540,6 +555,15 @@ namespace wfg::tree
             {
                 const doc::Attribute attribute { element, row };
                 const auto name = std::string (row->name);
+
+                /*  `prepare` is NOT emitted here. How far ahead a cue has been
+                    got ready changes as the pointer moves while nothing about
+                    the show does, and this half is a cache - published from
+                    here it would freeze at whatever it was when a cue was last
+                    edited. The runtime half emits it, against the roster this
+                    walk leaves behind. Same rule as a slot's `holder`. */
+                if (name == "prepare")
+                    continue;
 
                 std::string text;
 
@@ -670,12 +694,12 @@ namespace wfg::tree
 
                     for (const auto& roleChild : child)
                         if (roleChild.hasProperty (idProperty))
-                            collectCue (roleChild, id, roleIndex++, out, durations, childRole);
+                            collectCue (roleChild, id, roleIndex++, out, durations, roster, childRole);
 
                     continue;
                 }
 
-                collectCue (child, id, childIndex++, out, durations);
+                collectCue (child, id, childIndex++, out, durations, roster);
             }
         }
     }
@@ -719,6 +743,11 @@ namespace wfg::tree
             section, then the rack's channels. Gathered while the containers are
             walked rather than by a second traversal. */
         std::vector<std::string> slotOrder;
+
+        /*  And every cue, for the same reason and out of the same walk: the
+            runtime half publishes `prepare` against it. See
+            `ParameterTree::declaredCues`. */
+        std::vector<std::string> cueOrder;
 
         for (const auto& container : showNode)
         {
@@ -770,7 +799,7 @@ namespace wfg::tree
 
                     for (const auto& cue : list)
                         if (cue.hasProperty (idProperty))
-                            collectCue (cue, id, index++, nodes, durations);
+                            collectCue (cue, id, index++, nodes, durations, cueOrder);
                 }
             }
             else if (containerName == "Mounts")
@@ -957,6 +986,8 @@ namespace wfg::tree
                 `/godot/audio/status` is not published here either. */
             declaredSlots = slotOrder;
         }
+
+        declaredCues = std::move (cueOrder);
 
         //----------------------------------------------------------------------
         /*  Commands, as write-only method nodes. `node.set` is deliberately
@@ -1205,6 +1236,40 @@ namespace wfg::tree
             runOrder += run.id;
         }
 
+        /*  HOW FAR AHEAD EACH CUE HAS BEEN GOT READY.
+
+            One node per cue, every tick, out of the half that is never stale.
+            Built from a map rather than by asking the run table per cue,
+            because that would be a scan of every run for every row in the show:
+            what carries the answer is `Run::prepare`, and only a run that is
+            preparing something has one.
+
+            §13.6's `idle` is the empty string here and is the resting state
+            rather than a failure - a MIDI cue can never be prepared and reads
+            it for ever. */
+        {
+            std::map<std::string, std::string> preparedness;
+
+            for (const auto& run : runs.all())
+                if (! run.prepare.empty())
+                    preparedness[run.cue] = run.prepare;
+
+            const auto* row = rowNamed ("cue", "prepare");
+
+            if (row != nullptr)
+                for (const auto& cueId : declaredCues)
+                {
+                    const auto found = preparedness.find (cueId);
+
+                    runtime.push_back (makeLeaf (std::string (godot) + "/cue/" + cueId
+                                                   + "/prepare",
+                                                 *row,
+                                                 found != preparedness.end()
+                                                   ? found->second
+                                                   : std::string (row->defaultText)));
+                }
+        }
+
         /*  WHO HOLDS EACH DECLARED SLOT, AND WHO IS WAITING FOR IT.
 
             Read off the run table rather than kept beside it, which is the
@@ -1298,12 +1363,30 @@ namespace wfg::tree
             the runtime half must not carry them too - `find` looks in one and
             then the other, and a duplicate would make the answer depend on
             which it reached first. What is left for this side to add is
-            "/godot/engine". */
-        addContainers (runtime,
-                       { std::string (rootAddress), std::string (godot),
-                         std::string (godot) + "/document",
-                         std::string (godot) + "/audio" },
-                       false);
+            "/godot/engine".
+
+            AND EVERY CUE AND EVERY SLOT, which is new here and closes a hole
+            that was already open: the runtime half has published a slot's
+            `holder` and `pending` since PR 4.3, so `/godot/slot` and
+            `/godot/slot/<id>` were already being carried by both halves. No
+            test caught it because the case needs a show with a declared slot AND
+            the whole-tree walk that counts addresses, and no fixture had both.
+            `prepare` puts every CUE in the same position, which is what made it
+            visible. */
+        std::vector<std::string> ownedByTheDocument {
+            std::string (rootAddress), std::string (godot),
+            std::string (godot) + "/document",
+            std::string (godot) + "/audio",
+            std::string (godot) + "/cue",
+            std::string (godot) + "/slot" };
+
+        for (const auto& id : declaredCues)
+            ownedByTheDocument.push_back (std::string (godot) + "/cue/" + id);
+
+        for (const auto& id : declaredSlots)
+            ownedByTheDocument.push_back (std::string (godot) + "/slot/" + id);
+
+        addContainers (runtime, ownedByTheDocument, false);
         sortByAddress (runtime);
 
         auto result = std::make_shared<const TreeSnapshot> (tick, documentPart, mountPart,

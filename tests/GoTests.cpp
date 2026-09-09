@@ -2915,16 +2915,22 @@ TEST_CASE ("manual group: killing it takes the members with it and skips the foo
     CHECK (rig.runOf (closing) == "");               // no footer: it was killed
 }
 
-TEST_CASE ("manual group: a GO record carries every run it created")
+TEST_CASE ("manual group: every run a press creates is in a record, and the horizon draws them first")
 {
-    /*  One GO can create several runs - the groups between the pointer and the
-        list, then the member - so the record is variadic. The guarantee is the
-        one a single identifier gave, widened: a replay never draws a number of
-        its own, so it needs to be handed all of them, in the order they were
-        made. */
+    /*  ONE PRESS CAN CREATE SEVERAL RUNS - the groups between the pointer and
+        the list, then the member - so the guarantee is not "one identifier per
+        record" but "no identifier a replay has to invent". Both the records
+        that make runs are variadic for that reason.
+
+        AND THE HORIZON DRAWS THEM FIRST, which is PR 4.5's change to this and
+        is why the test says what it says. The pointer landing inside a scene
+        prepares it: both groups are created THEN, by `run.prepare`, which
+        carries their identifiers - and GO, arriving at a block that is already
+        there, adopts rather than creates and carries none. The same runs, the
+        same order, in the earlier record. */
     ManualRig rig;
 
-    // A manual group inside the manual group: two levels to create at once.
+    // A manual group inside the manual group: two levels to prepare at once.
     const auto inner = rig.document.createCue (rig.groupId, 0, "group", "Inner").id;
     const auto deep = rig.document.createCue (inner, 0, "memo", "Deep").id;
 
@@ -2933,18 +2939,33 @@ TEST_CASE ("manual group: a GO record carries every run it created")
 
     const auto parsed = LogFile::parse (rig.engine.log().contents());
 
-    const auto go = std::find_if (parsed.records.begin(), parsed.records.end(),
-                                  [] (const auto& record) { return record.command == "go"; });
+    const auto found = [&parsed] (const char* name)
+    {
+        return std::find_if (parsed.records.begin(), parsed.records.end(),
+                             [name] (const auto& record) { return record.command == name; });
+    };
 
+    const auto prepare = found ("run.prepare");
+    const auto go = found ("go");
+
+    REQUIRE (prepare != parsed.records.end());
     REQUIRE (go != parsed.records.end());
 
-    /*  Two: the outer group's run and the inner group's. The member's own is
-        spawned by the inner group's job after its header, so it carries its
+    /*  The cue the horizon was asked about, then the two group runs it made:
+        the outer one and the inner one, outermost first. The member's own run
+        is spawned by the inner group's job after its header, so it carries its
         identifier in a `run.spawn` record instead. */
-    CHECK (go->args.size() == 2u);
+    REQUIRE (prepare->args.size() == 3u);
+    CHECK (prepare->args[0].getString() == deep);
 
-    for (const auto& arg : go->args)
-        CHECK (rig.runs.find (arg.getString()) != nullptr);
+    for (std::size_t n = 1; n < prepare->args.size(); ++n)
+        CHECK (rig.runs.find (prepare->args[n].getString()) != nullptr);
+
+    CHECK (rig.runs.find (prepare->args[1].getString())->cue == rig.groupId);
+    CHECK (rig.runs.find (prepare->args[2].getString())->cue == inner);
+
+    /*  AND GO CREATED NOTHING, because there was nothing left to create. */
+    CHECK (go->args.empty());
 
     /*  AND THE SIGNATURE ACCEPTS WHAT THE HANDLER ANSWERED WITH, which is the
         half that makes the other half worth anything.
@@ -2958,12 +2979,15 @@ TEST_CASE ("manual group: a GO record carries every run it created")
         Asked of the registry rather than by submitting the record again,
         because submitting it would also RUN it: what is being checked is the
         signature, and the signature is where the rule lives. */
-    const auto* command = rig.engine.commands().find ("go");
-    REQUIRE (command != nullptr);
+    for (const auto* pair : { &*go, &*prepare })
+    {
+        const auto* command = rig.engine.commands().find (pair->command);
+        REQUIRE (command != nullptr);
 
-    const auto check = CommandRegistry::checkArgs (*command, go->args);
-    CHECK (check.ok);
-    CHECK (check.reason == "");
+        const auto check = CommandRegistry::checkArgs (*command, pair->args);
+        CHECK (check.ok);
+        CHECK (check.reason == "");
+    }
 }
 
 TEST_CASE ("manual group: a GO several levels down makes one run per group, and one member")
@@ -3055,6 +3079,376 @@ TEST_CASE ("manual group: a descending GO still runs the outer header first")
     //  Then the member, once the header is done - one GO, nothing skipped.
     REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (deep).empty(); }));
     CHECK (rig.runs.find (rig.runOf (opening))->isFinished());
+}
+
+//==============================================================================
+/*  THE HORIZON: getting a scene ready before anybody presses anything.
+
+    PRD §3.12. The pointer landing on a group, or on a member inside one, is the
+    moment to prepare the whole block - its headers, its slots, its first
+    sounds - rather than the one row the pointer is on. What that buys is the
+    thing arming ahead has always bought, at the scale of a scene: the disk is
+    paid while the operator reads the next line rather than after their hand
+    comes down.
+
+    AND IT IS ONLY AS GOOD AS ITS REVOCATION (§13.1), which is why the two are
+    one PR and one set of cases. A horizon that could not give a scene back
+    would hold voices and processor inputs for every scene the pointer passed
+    over, in a mechanism whose entire subject is that those are scarce.
+
+    A PREPARED RUN IS NOT LIVE, and most of what follows is that sentence tested
+    from a different side each time: the pointer does not wrap into it, a stop
+    does not act on it, GO adopts it rather than starting a second one, and its
+    footer does not run because it has not finished anything.
+*/
+namespace
+{
+    /*  The manual scene, with a media member to hold a voice, a header cue that
+        cannot be prepared, and a footer to prove it does not run. */
+    struct PrepareRig : ManualRig
+    {
+        PrepareRig()
+        {
+            sound = document.createCue (groupId, 0, "media", "Thunder").id;
+            document.setAttribute ("/godot/cue/" + sound + "/file", "thunder.wav");
+
+            const auto header = roleOf (groupId, "header");
+            opening = document.createCue (header, 0, "memo", "House to half").id;
+
+            const auto footer = roleOf (groupId, "footer");
+            closing = document.createCue (footer, 0, "memo", "Release").id;
+        }
+
+        const cue::Run* prepared (const std::string& cueId) const
+        {
+            return runs.preparedRunOf (cueId);
+        }
+
+        std::string sound, opening, closing;
+    };
+}
+
+TEST_CASE ("prepare: the pointer landing in a scene gets it ready, and the scene is not running")
+{
+    /*  §3.12's horizon, and the sentence the rest of these depend on. */
+    PrepareRig rig;
+
+    rig.setStandby (rig.sound);
+    rig.tickOnce();                       // the hook submits; the handler applies
+
+    const auto* ready = rig.prepared (rig.groupId);
+    REQUIRE (ready != nullptr);
+
+    CHECK (ready->state == cue::runState::preparing);
+    CHECK (ready->parent.empty());
+
+    /*  AND NOTHING IS RUNNING. Five callers ask `liveRunOf` whether a cue is
+        going, and every one of them would do the wrong thing if a promise
+        looked like a performance. */
+    CHECK (rig.runs.liveRunOf (rig.groupId) == nullptr);
+
+    /*  THE ROW SAYS HOW FAR AHEAD IT HAS BEEN GOT, and here it says `partial`,
+        which is the honest answer rather than a shortfall. §3.12 decides
+        preparability per PARAMETER and not per cue: this scene's header is a
+        memo, a memo cannot be got ready ahead of anything, and it will run at
+        entry like any other header cue. A block that is partly anticipatable
+        says so instead of pretending - which is §3.6's own word for it. */
+    CHECK (std::string (ready->prepare) == cue::preparedness::partial);
+}
+
+TEST_CASE ("prepare: the horizon arms the first member under the block it prepared")
+{
+    /*  `armablesFor` is the lookahead standby has done since PR 3.13, asked of
+        the pointer's own cue and PARENTED. Under the block, so that a
+        revocation reaches it by following `children` rather than by going
+        looking for it. */
+    PrepareRig rig;
+
+    rig.setStandby (rig.sound);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+
+    const auto* member = rig.runs.find (rig.runOf (rig.sound));
+    REQUIRE (member != nullptr);
+    REQUIRE (rig.prepared (rig.groupId) != nullptr);
+
+    CHECK (member->parent == rig.prepared (rig.groupId)->id);
+    CHECK (member->state == cue::runState::armed);
+    CHECK (member->track >= 0);                 // a voice, held ahead
+    CHECK_FALSE (member->launchRequested);      // and no sound
+}
+
+TEST_CASE ("prepare: a prepared group holds, and runs no footer")
+{
+    /*  THE HOLD PHASE, AND WHY IT IS NOT DECORATION. `finishPhase` moves a
+        group on to the next phase with anything in it and ends the run when
+        none has; there is no branch in it that waits. A prepared job falling
+        through it would run the group's footer and end the scene before
+        anybody pressed GO. */
+    PrepareRig rig;
+
+    rig.setStandby (rig.sound);
+
+    for (int n = 0; n < 60; ++n)
+        rig.tickOnce();
+
+    const auto* ready = rig.prepared (rig.groupId);
+    REQUIRE (ready != nullptr);
+
+    CHECK_FALSE (ready->isFinished());
+    CHECK (rig.runOf (rig.closing) == "");
+    CHECK (rig.runOf (rig.opening) == "");      // the header waits for entry too
+}
+
+TEST_CASE ("prepare: GO adopts the block rather than starting a second one")
+{
+    /*  The failure this prevents is a scene with two schedulers: one run
+        holding the voices and another launching every member beside it, a tick
+        apart, under one press. */
+    PrepareRig rig;
+
+    rig.setStandby (rig.sound);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+
+    const auto preparedId = rig.prepared (rig.groupId)->id;
+    const auto armedId = rig.runOf (rig.sound);
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    const auto runsFor = [&rig] (const std::string& cueId)
+    {
+        return std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                              [&cueId] (const cue::Run& run) { return run.cue == cueId; });
+    };
+
+    CHECK (runsFor (rig.groupId) == 1);
+
+    const auto* live = rig.runs.liveRunOf (rig.groupId);
+    REQUIRE (live != nullptr);
+    CHECK (live->id == preparedId);             // the same run, now playing
+    CHECK (live->state == cue::runState::playing);
+
+    /*  AND THE HEADER STILL RUNS AT ENTRY, because a memo is not anticipatable
+        and its preparation was never its execution. */
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.opening).empty(); }));
+    CHECK (runsFor (rig.opening) == 1);
+
+    /*  Then the member, on the run the horizon armed - not a second one. */
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armedId)->launchRequested; }));
+    CHECK (runsFor (rig.sound) == 1);
+}
+
+TEST_CASE ("prepare: the pointer moving away gives the voices and the slots back")
+{
+    /*  §13.1: anticipation is only as good as its revocation. A scene got ready
+        and then left behind holds a voice for a cue nobody is about to fire,
+        and before this nothing ended an armed, never-launched run at all. */
+    PrepareRig rig;
+
+    rig.setStandby (rig.sound);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+
+    const auto preparedId = rig.prepared (rig.groupId)->id;
+    const auto armedId = rig.runOf (rig.sound);
+    const auto voice = rig.runs.find (armedId)->track;
+
+    REQUIRE (voice >= 0);
+    REQUIRE (rig.runs.isTrackBusy (voice));
+
+    /*  Away, to a cue outside the block. */
+    rig.setStandby (rig.after);
+    rig.tickOnce();
+
+    CHECK (rig.runs.find (preparedId)->isFinished());
+    CHECK (rig.runs.find (preparedId)->warning == cue::runWarning::revoked);
+
+    /*  AND THE MEMBER WITH IT, children before parents. */
+    CHECK (rig.runs.find (armedId)->isFinished());
+    CHECK (rig.runs.find (armedId)->warning == cue::runWarning::revoked);
+
+    /*  THE VOICE IS FREE, which is the whole point: `holdsTrack()` is a track
+        and an UNFINISHED run, so ending it is the whole of letting go. */
+    CHECK_FALSE (rig.runs.isTrackBusy (voice));
+
+    /*  A REVOCATION IS NOT A FAILURE. Nothing went wrong: a scene was got ready
+        and then not wanted, which is what anticipation is allowed to cost. */
+    CHECK (rig.runs.find (preparedId)->error.empty());
+    CHECK (rig.runs.find (preparedId)->state == cue::runState::done);
+}
+
+TEST_CASE ("prepare: moving inside the same block prepares nothing twice and revokes nothing")
+{
+    /*  The pointer walking down a scene's members is inside one block the whole
+        time. A horizon that rebuilt itself on every step would re-arm every
+        voice in the scene each time the operator moved, and one that revoked on
+        every step would give them all back a tick later. */
+    PrepareRig rig;
+
+    rig.setStandby (rig.sound);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+
+    const auto preparedId = rig.prepared (rig.groupId)->id;
+
+    rig.setStandby (rig.first);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    REQUIRE (rig.prepared (rig.groupId) != nullptr);
+    CHECK (rig.prepared (rig.groupId)->id == preparedId);
+    CHECK_FALSE (rig.runs.find (preparedId)->isFinished());
+}
+
+TEST_CASE ("prepare: a stop aimed at a prepared scene does nothing, because it is not running")
+{
+    /*  PRD §3.8 makes a stop aimed at something that is not running a silent
+        no-op, and a prepared run must not turn that into an act. It is one of
+        the five readings `liveRunOf` carries. */
+    PrepareRig rig;
+
+    const auto halt = rig.document.createCue (rig.listId, 4, "stop", "Halt").id;
+    rig.setCue (halt, "target", rig.groupId);
+
+    rig.setStandby (rig.sound);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+
+    const auto preparedId = rig.prepared (rig.groupId)->id;
+
+    CHECK (rig.submitAndTick ("cue.fire", { osc::Value::string (halt) }).applied == 1);
+    rig.tickOnce();
+
+    /*  Still preparing: the stop found nothing running and said nothing. */
+    CHECK (rig.runs.find (preparedId)->state == cue::runState::preparing);
+}
+
+TEST_CASE ("prepare: a media cue at standby says armed on its own row")
+{
+    /*  The smallest horizon there is, and it has been here since PR 2.3 without
+        a word for itself. `armed` is §13.6's vocabulary for a preparation with
+        nothing to verify, and saying it on the row is the difference between an
+        operator seeing that the next cue is ready and having to know that it
+        always is. */
+    Rig rig;
+
+    rig.setStandby (rig.mediaId);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.mediaId).empty(); }));
+
+    CHECK (std::string (rig.runs.find (rig.runOf (rig.mediaId))->prepare)
+             == cue::preparedness::armed);
+
+    /*  And it stops being a preparation when it is fired: `prepare` answers a
+        question about the future, and a cue that is playing has none left. */
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (rig.runOf (rig.mediaId))
+                                              ->launchRequested; }));
+
+    CHECK (rig.runs.find (rig.runOf (rig.mediaId))->prepare.empty());
+}
+
+TEST_CASE ("prepare: a member armed ahead inside a running scene still fires when GO reaches it")
+{
+    /*  THE CASE WHERE ARMING AHEAD AND DECISION N MEET.
+
+        Decision N ignores a GO on a media cue that is already sounding: the
+        press is applied, the pointer has advanced, and the playing instance
+        carries on. `armed` is NOT sounding, and the difference is the whole
+        point of arming ahead - a cue armed at standby is sitting on a reserved
+        voice with its file ready and no sound coming out, and GO is what turns
+        that into a launch.
+
+        `armInternal` has drawn that distinction since PR 3.3, for a cue at the
+        top of a list. This is the same question one level in: the pointer is on
+        member two of a scene that is already running, so the horizon armed it
+        under the group's run, and the GO that reaches it has to launch THAT run
+        rather than ignore it or start a second beside it. */
+    ManualRig rig;
+
+    const auto one = rig.document.createCue (rig.groupId, 0, "media", "First").id;
+    const auto two = rig.document.createCue (rig.groupId, 1, "media", "Second").id;
+
+    for (const auto& id : { one, two })
+        rig.document.setAttribute ("/godot/cue/" + id + "/file", "thunder.wav");
+
+    rig.setStandby (one);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (one).empty()
+                                          && rig.runs.find (rig.runOf (one))
+                                                 ->launchRequested; }));
+
+    //  The pointer moved to member two and the horizon armed it, in the scene.
+    CHECK (rig.standby() == two);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (two).empty(); }));
+
+    const auto armed = rig.runOf (two);
+    CHECK (rig.runs.find (armed)->state == cue::runState::armed);
+    CHECK_FALSE (rig.runs.find (armed)->launchRequested);
+
+    //  And GO launches THAT run, not a second one.
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armed)->launchRequested; }));
+
+    const auto runsFor = std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                                        [&two] (const cue::Run& run) { return run.cue == two; });
+    CHECK (runsFor == 1);
+}
+
+TEST_CASE ("M19: what the horizon costs, in ticks from the pointer landing")
+{
+    /*  MEASUREMENT M19 (§13.14), the half of it this PR can take.
+
+        §13.14 asks for a prepared header of twenty ANTICIPATABLE OSC cues
+        against the mock target, counted from the pointer landing to `verified`.
+        A network cue is not pre-sent yet - §13.1 forbids sending a value to a
+        target nobody can ask what it held, and the read-before-write that fixes
+        that arrives with it - so what is measured here is the arm half: twenty
+        media cues in one scene, from the pointer landing to the block being
+        ready.
+
+        REPORTED AND NOT GATED, like every measurement in this suite. What it is
+        for is that a designer building a scene on the horizon knows what it
+        costs before they rely on it. */
+    PrepareRig rig;
+
+    constexpr int members = 20;
+
+    for (int n = 0; n < members; ++n)
+    {
+        const auto id = rig.document.createCue (rig.groupId, n + 1, "media",
+                                                "Voice " + std::to_string (n)).id;
+        rig.document.setAttribute ("/godot/cue/" + id + "/file", "thunder.wav");
+    }
+
+    /*  THE POINTER IS WRITTEN AND NOT TICKED, because the number wanted is
+        ticks from the pointer LANDING - and `setStandby` ticks once itself, to
+        let the arm settle the way a show does. Counting from after that tick
+        would report one fewer than the truth. */
+    rig.document.setAttribute (cue::standbyAddressOf (rig.listId), rig.sound);
+
+    auto ticks = 0;
+    auto ready = false;
+
+    for (int n = 0; n < 400 && ! ready; ++n)
+    {
+        ready = rig.prepared (rig.groupId) != nullptr && ! rig.runOf (rig.sound).empty();
+
+        if (! ready)
+        {
+            rig.tickOnce();
+            ++ticks;
+        }
+    }
+
+    CHECK (ready);
+
+    const auto* prepared = rig.prepared (rig.groupId);
+    REQUIRE (prepared != nullptr);
+
+    MESSAGE ("M19  a scene of " << members << " media members: the block was prepared "
+             << ticks << " tick(s) after the pointer landed, ending on \""
+             << prepared->prepare << "\" (its header is a memo, which nothing can"
+                " anticipate); a voice was reserved for "
+             << rig.runs.childrenOf (prepared->id).size()
+             << " of them - the ones the scene would launch first - and the rest are"
+                " armed by the scheduler as the scene runs, which is what their"
+                " positions are for");
 }
 
 TEST_CASE ("manual group: firing one by name is refused, because nobody would advance it")

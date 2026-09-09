@@ -81,7 +81,20 @@ namespace wfg::cue
             answering with the oldest would be the wrong answer arrived at
             quietly. */
         for (auto run = runs.rbegin(); run != runs.rend(); ++run)
-            if (run->cue == cueId && ! run->isFinished())
+            if (run->cue == cueId && ! run->isFinished()
+                 && run->state != runState::preparing)
+                return &*run;
+
+        return nullptr;
+    }
+
+    const Run* RunTable::preparedRunOf (const std::string& cueId) const
+    {
+        /*  Newest first, for the reason above: a second prepare of the same cue
+            supersedes the first, and answering with the older one would adopt
+            a run the horizon had already moved past. */
+        for (auto run = runs.rbegin(); run != runs.rend(); ++run)
+            if (run->cue == cueId && run->state == runState::preparing)
                 return &*run;
 
         return nullptr;

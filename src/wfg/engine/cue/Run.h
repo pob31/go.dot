@@ -59,6 +59,24 @@ namespace wfg::cue
     */
     namespace runState
     {
+        /*  THE HORIZON REACHED IT AND NO GO HAS HAPPENED.
+
+            PRD §3.12: preparation begins when the pointer approaches, not when
+            the operator's hand comes down, so a scene's arms, claims and
+            pre-sends are paid while somebody is still reading the next line.
+            The run exists from that moment because everything it does - a
+            voice, a slot, a value written to somebody's desk - has to be
+            revocable, and revoking needs something to name.
+
+            A PREPARING RUN IS NOT LIVE, and that is the whole of what this
+            state means to everything else. `liveRunOf` skips it, so refire, the
+            pointer's wrap test and the scheduler's already-running question all
+            keep the meanings they had; the two places that DO want it ask
+            `preparedRunOf` by name. A prepared run that is never adopted is
+            revoked, and one that is adopted becomes an ordinary run of the GO
+            that took it. */
+        inline constexpr const char* preparing = "preparing";
+
         /*  Its pre-wait is running and nothing has fired yet.
 
             A STATE AND NOT A GAP. A cue with a two-second pre-wait is a cue
@@ -124,6 +142,40 @@ namespace wfg::cue
             GO. Phase 4's revocation (PR 4.5); declared here so the enum does
             not grow under a client that has already read it. */
         inline constexpr const char* revoked = "revoked";
+    }
+
+    /*  How far ahead a cue has been got ready. `/godot/cue/<id>/prepare`.
+
+        ON THE RUN AND PUBLISHED ON THE CUE, which is the one place in this
+        engine where those two differ, and it is what the operator needs: the
+        row is where somebody is looking. The run is where it is KEPT because
+        preparation is something a run is doing - it is not a fact about the
+        show, and PRD §4.10 keeps what the machine happens to be doing out of
+        the document.
+
+        Empty means `idle`, which is the resting state and is not a failure: a
+        MIDI cue can never be prepared and reads idle for ever. */
+    namespace preparedness
+    {
+        /** The horizon is working. */
+        inline constexpr const char* preparing = "preparing";
+
+        /*  Waiting for a slot somebody else holds - §3.9e's word, on the row
+            where the operator is looking, in words rather than colour (§4.8). */
+        inline constexpr const char* pending = "pending";
+
+        /*  Something in the block could not be got ready ahead and will happen
+            at entry. §3.6's own term for a member that is not anticipatable,
+            and also what a cue whose file is missing leaves behind. */
+        inline constexpr const char* partial = "partial";
+
+        /** Everything that could be prepared was, with nothing to verify. */
+        inline constexpr const char* armed = "armed";
+
+        /*  Every pre-sent value read back equal - the only one of these that
+            says the desk AGREES. Nothing reaches it until a network cue can be
+            read before it is written (§13.6). */
+        inline constexpr const char* verified = "verified";
     }
 
     namespace runError
@@ -389,6 +441,15 @@ namespace wfg::cue
             scene or teach an operator to ignore the state that means stopped. */
         std::string warning;
 
+        /*  HOW FAR AHEAD THIS RUN HAS BEEN GOT READY, from `preparedness`, or
+            empty for `idle`.
+
+            Published at `/godot/cue/<cue>/prepare` rather than on the run,
+            because the row is where the operator is looking. Cleared when the
+            run stops being a preparation and becomes a performance - which is
+            GO, and is the moment the answer stops being about the future. */
+        std::string prepare;
+
         //======================================================================
         /*  THE WAITS, IN TICKS, COPIED FROM THE CUE WHEN THE RUN IS CREATED.
 
@@ -635,7 +696,23 @@ namespace wfg::cue
         /** The run currently instantiating `cueId` and not yet finished, or
             null. Decision B of 2026-09-05 is what asks this question: a GO on a
             cue that is already running is applied and does nothing. */
+        /*  The newest UNFINISHED run of this cue, or nothing.
+
+            IT SKIPS A `preparing` RUN, which is not a special case but the
+            definition of the word: a prepared run is a promise about a GO that
+            has not happened. Five callers depend on that reading - the descent
+            that creates a group's ancestors, the pointer's wrap test at the end
+            of a manual group, the standby arm, the adoption in `spawnChild` and
+            the refire path - and every one of them would do the wrong thing if
+            a horizon's work looked like a running scene. */
         const Run* liveRunOf (const std::string& cueId) const;
+
+        /*  The prepared run of this cue, or nothing. The other half of the
+            answer above, asked by name rather than found by accident: the two
+            adopters - a GO that enters a prepared group, and a parent group
+            spawning a child the horizon already made - want exactly the run
+            `liveRunOf` is hiding from everybody else. */
+        const Run* preparedRunOf (const std::string& cueId) const;
 
         /** Whether any unfinished run holds this track. */
         bool isTrackBusy (int track) const;

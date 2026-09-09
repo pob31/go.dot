@@ -205,6 +205,19 @@ namespace wfg::tree
             this rather than walking the show again: those two change with every
             run and the document half is a cache. */
         std::vector<std::string> declaredSlots;
+
+        /*  Every cue the show holds, in document order, as the document half
+            last saw them - the same shape and the same reason as the slot
+            roster above.
+
+            `/godot/cue/<id>/prepare` cannot come from the cached half: how far
+            ahead a cue has been got ready changes as the pointer moves and as
+            a horizon works, while nothing about the show does, so published
+            from there it would freeze at whatever it was when somebody last
+            edited a cue. And it cannot be published for SOME cues only, or a
+            client polling a cue would watch its node list change shape. So
+            every cue gets one, out of the half that is rebuilt every tick. */
+        std::vector<std::string> declaredCues;
         const cue::RunTable& runs;
 
         /*  Which cues can be holding one slot at once, and every dangling

@@ -57,6 +57,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 
 #include <cstdint>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -369,6 +370,57 @@ namespace wfg::cue
         std::string arm (Engine& engine, std::int64_t tick, const std::string& cueId,
                          const std::string& runId);
 
+        /*  THE HORIZON REACHING A BLOCK: what `run.prepare` calls.
+
+            PRD §3.12. The pointer landing on a cue is the moment to get ready,
+            and getting ready is more than an arm when the cue sits inside a
+            scene: every group between the pointer and the list is created,
+            OUTERMOST FIRST and each parented to the level above, its run in
+            state `preparing` and its job in the phase of the same name - which
+            runs whatever of that group's header can be run ahead. Then what the
+            innermost would launch first is armed underneath it.
+
+            OUTERMOST FIRST BECAUSE THAT IS THE ORDER A GO WOULD RUN THEM IN. A
+            chain prepared inside-out would position a source and then have an
+            outer header move it again, and the desk would end up holding the
+            wrong one of two correct values.
+
+            IT DOES NOT REACH THE NEXT SIBLING GROUP. §3.12 extends the horizon
+            "from one row to a block", and two scenes prepared at once would
+            hold two scenes' worth of slots - in a mechanism whose whole subject
+            is that slots are scarce.
+
+            Identifiers supplied or drawn, in that order, exactly as
+            `fireStandby` does and for the same reason: the record carries every
+            one it made and a replay hands them back. */
+        std::vector<std::string> prepareStandby (Engine& engine, std::int64_t tick,
+                                                 const juce::ValueTree& list,
+                                                 const std::string& cueId,
+                                                 const std::vector<std::string>& supplied);
+
+        /*  THE POINTER MOVED AWAY BEFORE ANYBODY PRESSED ANYTHING: what
+            `run.revoke` calls.
+
+            ANTICIPATION IS ONLY AS GOOD AS ITS REVOCATION (§13.1), and this is
+            the second half of the bargain. A horizon reserves voices and claims
+            slots on the strength of where the pointer is; a pointer that has
+            gone somewhere else makes every one of those a resource held for a
+            scene nobody is about to run - and §3.9e's whole subject is that
+            they are scarce.
+
+            THE HANDLER FINISHES THE RUNS ITSELF rather than asking `run.ended`
+            to, and that is deliberate. No existing path ends an armed,
+            never-launched run: `observeEdges` ends one on `sawPlaying &&
+            ! playing`, and a run that never played never saw either. PR 4.1
+            closed that leak for `run.kill`; this is the same finish, reached
+            from the other side. And it carries a REASON - `warning = revoked` -
+            which `run.ended` has nowhere to put, since `error` is documented as
+            failed-only and a revocation is not a failure.
+
+            Depth first, children before parents, so nothing watching ever sees
+            a finished group with live members underneath it. */
+        void revokePrepared (Engine& engine, std::int64_t tick, const std::string& runId);
+
         /*  A run whose pre-wait has elapsed, doing what firing it would have
             done had there been no wait. What the `run.fire` command calls.
 
@@ -513,6 +565,100 @@ namespace wfg::cue
             several things at once and arming one of them would be a scene that
             is gapless in one channel. */
         std::vector<std::string> armablesFor (const juce::ValueTree& cue) const;
+
+        /*  The outermost group of the block the pointer is in, or empty when it
+            is not in one. What a horizon prepares, and therefore what a moving
+            pointer leaves behind. */
+        std::string horizonRootFor (const juce::ValueTree& list, const std::string& cueId) const;
+
+        /*  The groups between a cue and its list, outermost first, with the cue
+            itself last when it is a group. What a GO would create, and
+            therefore what a horizon prepares.
+
+            Shared by `fireStandby` and `prepareStandby` so the two cannot come
+            to disagree about the shape of a descent - which they would, since
+            adoption is the act of one recognising the other's work. */
+        std::vector<juce::ValueTree> descentTo (const juce::ValueTree& list,
+                                                const std::string& cueId) const;
+
+        /*  Whether this cue has anything that can be done before GO, and what.
+
+            PER PARAMETER AND NEVER PER CUE (§3.12): a media cue's arm and
+            claims always; an osc cue only where its node is `anticipatable` AND
+            its mount can be asked, because a value on a mount that cannot
+            answer has nothing to put back; a midi cue never, because MIDI has
+            no read-back at all. A fade, a stop and a memo have nothing to
+            prepare - a fade cannot take over a level before it is time to. */
+        bool isPreparable (const juce::ValueTree& cue) const;
+
+        /*  The cues of a group's header that have a preparation, in header
+            order. Empty for a group with no header, or one whose header is
+            entirely un-anticipatable - which is a `partial` block and not a
+            failure. */
+        std::vector<std::string> preparableIn (const juce::ValueTree& group) const;
+
+        /*  Starts a prepared group's `preparing` phase, or answers false when
+            there is nothing to prepare and the job should go straight to the
+            hold.
+
+            `drawId` HANDS OUT THE IDENTIFIERS, supplied by a replay or drawn
+            fresh, because this is reached from a command HANDLER and a handler
+            never submits (§12.1). It creates the children itself and the
+            `run.prepare` record carries every one of them, exactly as `go`
+            carries the runs a press makes. Submitting `run.spawn` from here
+            instead put those records in the log twice on a replay: once from
+            the log and once from the handler re-running. */
+        bool beginPreparation (Engine& engine, GroupJob& job, const juce::ValueTree& group,
+                               const std::function<std::string()>& drawId,
+                               std::vector<std::string>& used);
+
+        /*  Whether everything a `preparing` phase issued has arrived: a media
+            arm armed, a network cue finished. */
+        bool preparationSettled (const GroupJob& job) const;
+
+        /** Which word from `preparedness` a settled preparation ended on. */
+        const char* settledWord (const GroupJob& job, const juce::ValueTree& group) const;
+
+        /*  A prepared group run becoming a live one: the run turns `playing`,
+            it is told where the pointer entered, and its job leaves the hold.
+
+            ONE FUNCTION FOR THREE DOORS, because GO reaches a prepared group
+            three ways - through `fireStandby`'s descent when the pointer is
+            inside it, through `armInternal` when the pointer is on it, and
+            through `fireKind` when its own parent's job launches it - and three
+            copies of this would be three things to keep in step in the one
+            place where being out of step means a scene created twice.
+
+            `enters` IS THE WHOLE OF THE THIRD DOOR. Only the OUTERMOST group a
+            press touches starts; the rest are told where the pointer entered
+            and left standing, exactly as `fireStandby` has always left the
+            groups it created. An inner group that started here would spawn its
+            member on the next tick while its parent was still running the
+            header that is supposed to come first - the scene beginning from the
+            inside out. */
+        void adoptPrepared (const std::string& runId, const std::string& entersAt,
+                            bool enters);
+
+        /*  Whether `runId` is `ofRun` itself or one of its ancestors, by
+            walking `parent` upwards. What "held under a run in the spawning
+            run's own ancestry" means, written down. */
+        bool inAncestryOf (const std::string& runId, const std::string& ofRun) const;
+
+        /** Whether any group job has taken charge of this run. */
+        bool claimedByAJob (const std::string& runId) const;
+
+        /*  SOMEBODY ASKED FOR THIS RUN: it stops being a promise about a GO
+            that has not happened and becomes a cue that is going to sound.
+
+            It clears `prepare`, and that is not only a readout. A phase takes
+            charge of the children of its own cues and LAUNCHES them, and a run
+            the horizon armed ahead is a child of exactly that shape - so
+            without a mark, a manual group would start the member the pointer
+            was merely sitting on, with nobody having pressed anything. The mark
+            is `prepare` itself, which already means "this is ready for a GO
+            that has not happened", and this is the moment that stops being
+            true. */
+        void askedFor (const std::string& runId);
 
         /*  The kind's own fire path, once every wait is out of the way: a media
             cue asks for a voice, a fade or a stop takes over a level, a network

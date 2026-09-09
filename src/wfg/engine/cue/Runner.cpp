@@ -285,9 +285,33 @@ namespace wfg::cue
                             armed->launchRequested = true;
                             armed->launchRequestedAtTick = tick;
                         }
+
+                        /*  AND IT STOPS BEING A PREPARATION. `prepare` answers
+                            a question about the GO that has not happened, and
+                            this is that GO - whether it goes straight to a
+                            launch or into a pre-wait first. */
+                        armed->prepare.clear();
                     }
 
                 return live->id;
+            }
+
+        /*  AND A GROUP THE HORIZON PREPARED IS ADOPTED, not made a second time.
+
+            This is the other door: `fireStandby`'s descent adopts every group
+            BETWEEN the pointer and the list, and the pointer's own cue arrives
+            here. Without it, GO on a prepared scene would start a second run of
+            it beside the one holding the voices - one scene, two schedulers,
+            every member launched twice.
+
+            No `enterAt`: the pointer was ON the group, so it enters at its
+            first member, which is what an empty one means. */
+        if (fireAtOnce && kind == "group")
+            if (const auto* ready = runs.preparedRunOf (cueId))
+            {
+                const auto adopted = ready->id;
+                adoptPrepared (adopted, {}, true);
+                return adopted;
             }
 
         auto id = runId;
@@ -309,6 +333,13 @@ namespace wfg::cue
 
         if (! fireAtOnce)
         {
+            /*  THE SMALLEST HORIZON THERE IS, and it has been here since PR 2.3
+                without a word for itself: a media cue at standby is armed, and
+                `armed` is exactly what §13.6's vocabulary calls a preparation
+                with nothing to verify. Saying it on the row costs one
+                assignment and is the difference between an operator seeing that
+                the next cue is ready and having to know that it always is. */
+            run->prepare = preparedness::armed;
             armMedia (engine, cue, id);
             return id;
         }
@@ -345,6 +376,488 @@ namespace wfg::cue
                  && textOf (cue, "advance") != "auto";
     }
 
+    std::vector<juce::ValueTree> Runner::descentTo (const juce::ValueTree& list,
+                                                   const std::string& cueId) const
+    {
+        /*  Walking up and then reversing, because the document knows parents
+            and not paths.
+
+            STRICT ANCESTORS, so a group at the pointer is not in its own
+            descent: `fireStandby` fires that one itself, and the horizon adds
+            it deliberately. Two callers, one shape - which matters, because
+            adoption is one of them recognising the other's work, and a descent
+            they disagreed about would be a scene created twice. */
+        std::vector<juce::ValueTree> ancestors;
+
+        for (auto node = document.findById (cueId).getParent();
+             node.isValid() && node != list;
+             node = node.getParent())
+        {
+            if (node.getType().toString() == "Group")
+                ancestors.push_back (node);
+        }
+
+        std::reverse (ancestors.begin(), ancestors.end());
+        return ancestors;
+    }
+
+    std::string Runner::horizonRootFor (const juce::ValueTree& list,
+                                        const std::string& cueId) const
+    {
+        const auto chain = descentTo (list, cueId);
+
+        if (! chain.empty())
+            return chain.front()[idProperty].toString().toStdString();
+
+        const auto cue = document.findById (cueId);
+
+        return cue.isValid() && cue.getType().toString() == "Group" ? cueId : std::string {};
+    }
+
+    void Runner::revokePrepared (Engine& engine, std::int64_t tick, const std::string& runId)
+    {
+        juce::ignoreUnused (engine);
+
+        auto* run = runs.find (runId);
+
+        if (run == nullptr || run->isFinished())
+            return;
+
+        /*  Copied first, because finishing a child can change what the table
+            answers about the parent's children while the walk is inside it. */
+        std::vector<std::string> children;
+
+        for (const auto* child : runs.childrenOf (runId))
+            children.push_back (child->id);
+
+        for (const auto& child : children)
+            revokePrepared (engine, tick, child);
+
+        run = runs.find (runId);
+
+        if (run == nullptr)
+            return;
+
+        /*  DONE AND NOT FAILED. Nothing went wrong: a scene was got ready and
+            then not wanted, which is exactly what anticipation is allowed to
+            cost. `warning` is where the reason goes, beside `no-channel`, and
+            for the same kind of reason - a run that did something smaller than
+            it meant to and is not an error. */
+        run->state = runState::done;
+        run->endedAtTick = tick;
+        run->warning = runWarning::revoked;
+        run->prepare.clear();
+
+        /*  AND THE VOICE AND THE SLOTS COME BACK. `holdsTrack()` is a track and
+            an unfinished run, so the state above is the whole of freeing the
+            voice; the slots go back to the head of each queue, exactly as they
+            do at any other ending (§13.4). */
+        runs.releaseSlotsOf (runId);
+
+        for (auto& job : scheduled)
+            if (job.run == runId)
+                job.retired = true;
+    }
+
+    //==============================================================================
+    bool Runner::isPreparable (const juce::ValueTree& cue) const
+    {
+        /*  PER PARAMETER AND NEVER PER CUE (§3.12). */
+        const auto element = cue.getType().toString();
+
+        /*  A MEDIA CUE ALWAYS, because an arm is revocable by construction:
+            a voice reserved and a file made ready are undone by letting go of
+            them, and nothing outside this machine heard anything. */
+        if (element == "Media")
+            return true;
+
+        if (element != "Osc")
+            return false;
+
+        /*  AN OSC CUE IS NOT PREPARED YET, AND THE REASON IS §13.1's.
+
+            The condition it will be prepared under is already decided - the
+            node marked `anticipatable` AND its mount able to answer - because a
+            value pre-sent to a target that cannot be asked what it held is a
+            value nobody can put back, and anticipating it would trade a saved
+            moment for a desk left in a state the operator did not choose.
+
+            What is missing is the READ, and until it exists a pre-send would be
+            exactly the trade that rule forbids: this horizon can revoke
+            everything it does by letting go of it, and nothing outside the
+            machine has heard anything. `OscJob`'s `reading` state - ask the
+            target, keep what it held, then write and verify - is what makes a
+            network cue revocable, and it arrives with it rather than after it. */
+        return false;
+    }
+
+    std::vector<std::string> Runner::preparableIn (const juce::ValueTree& group) const
+    {
+        std::vector<std::string> out;
+
+        for (const auto& cueId : membersOf (group.getChildWithName ("Header")))
+            if (const auto cue = document.findById (cueId); isPreparable (cue))
+                out.push_back (cueId);
+
+        return out;
+    }
+
+    bool Runner::beginPreparation (Engine& engine, GroupJob& job, const juce::ValueTree& group,
+                                   const std::function<std::string()>& drawId,
+                                   std::vector<std::string>& used)
+    {
+        const auto cues = preparableIn (group);
+
+        if (cues.empty())
+            return false;
+
+        job.phase = groupPhase::preparing;
+        job.phaseCues = cues;
+        job.nextMember = cues.size();
+        job.launched = 0;
+        job.awaiting.clear();
+        job.phaseRuns.clear();
+
+        /*  ISSUED IN HEADER ORDER AND NOT WAITED ON ONE AT A TIME, which is the
+            one place a preparation is not a sequence and could not be.
+
+            A header phase runs its cues one after another because each reports
+            done and the next begins. A PREPARED MEDIA CUE NEVER REPORTS DONE -
+            being armed and not launched is the whole of what preparing it means
+            - so a chain that waited for the first would wait for ever. What the
+            phase waits for instead is that everything it issued has ARRIVED: an
+            arm armed, a network cue finished. The order is still the header's,
+            and a header whose cues write the same address still leaves the last
+            one standing, because the sender coalesces by address inside a tick. */
+        for (const auto& cueId : cues)
+        {
+            const auto made = spawnChild (engine, job.run, cueId, drawId());
+
+            if (made.empty())
+            {
+                used.pop_back();
+                continue;
+            }
+
+            used.back() = made;
+
+            if (auto* child = runs.find (made))
+                child->prepare = preparedness::armed;
+        }
+
+        return true;
+    }
+
+    const char* Runner::settledWord (const GroupJob& job, const juce::ValueTree& group) const
+    {
+        /*  IN THE ORDER AN OPERATOR WOULD WANT TO BE TOLD. A block waiting for
+            a slot somebody else holds says so first, because that is the one
+            with a cause outside itself; then a block that could not be got
+            ready whole; then the ordinary answer. */
+        auto missing = false;
+
+        for (const auto* child : runs.childrenOf (job.run))
+        {
+            if (! child->pending.empty())
+                return preparedness::pending;
+
+            if (child->state == runState::failed)
+                missing = true;
+        }
+
+        /*  A HEADER CUE THIS HORIZON COULD NOT TAKE is the other half of
+            `partial`: §3.6's own word for a block that is not anticipatable all
+            the way through, and §3.12's reason for deciding preparability per
+            parameter rather than per cue. */
+        if (missing || preparableIn (group).size()
+                         != membersOf (group.getChildWithName ("Header")).size())
+            return preparedness::partial;
+
+        /*  `verified` is not reachable yet and will be when a network cue can
+            be read before it is written: it means every pre-sent value came
+            back equal, and nothing is pre-sent until there is something to put
+            back (§13.1). */
+        return preparedness::armed;
+    }
+
+    bool Runner::preparationSettled (const GroupJob& job) const
+    {
+        for (const auto& cueId : job.phaseCues)
+        {
+            const Run* child = nullptr;
+
+            for (const auto* candidate : runs.childrenOf (job.run))
+                if (candidate->cue == cueId)
+                    child = candidate;
+
+            /*  Not spawned yet: the submit is applied on the next tick. */
+            if (child == nullptr)
+                return false;
+
+            if (child->kind == "media")
+            {
+                /*  ARMED IS AS FAR AS A MEDIA PREPARE GOES, and `failed` is as
+                    settled as armed: a cue whose file is missing has finished
+                    being got ready, badly, and holding the whole block for it
+                    would mean one absent sound stopped the scene from ever
+                    being prepared. The row says `partial`. */
+                if (child->track < 0 && ! child->isFinished())
+                    return false;
+
+                continue;
+            }
+
+            if (! child->isFinished())
+                return false;
+        }
+
+        return true;
+    }
+
+    void Runner::adoptPrepared (const std::string& runId, const std::string& entersAt,
+                                bool enters)
+    {
+        if (auto* run = runs.find (runId))
+        {
+            run->enterAt = entersAt;
+
+            if (enters)
+                run->state = runState::playing;
+
+            /*  AND IT STOPS BEING A PREPARATION. `prepare` answers a question
+                about the future - how ready is this for the GO that has not
+                happened - and a scene that is playing has no future left to be
+                ready for. */
+            run->prepare.clear();
+        }
+
+        for (auto& job : scheduled)
+        {
+            if (job.run != runId || job.retired)
+                continue;
+
+            /*  ON BOTH THE RUN AND THE JOB, which is not belt and braces: the
+                job took its own copy of `enterAt` when it was created and
+                `beginPhase` reads that copy, so writing only the run would
+                start the scene at member one wherever the pointer actually was. */
+            job.enterAt = entersAt;
+
+            /*  OUT OF THE HOLD AND INTO WHAT IS LEFT, but only for the group
+                the press actually enters. `entering` is where a group starts,
+                and from it `advanceGroups` tries the header - which now means
+                the header's REMAINDER, because `job.prepared` names what the
+                horizon already ran. */
+            if (enters)
+                job.phase = groupPhase::entering;
+        }
+    }
+
+    bool Runner::inAncestryOf (const std::string& runId, const std::string& ofRun) const
+    {
+        for (auto at = ofRun; ! at.empty();)
+        {
+            if (at == runId)
+                return true;
+
+            const auto* run = runs.find (at);
+
+            if (run == nullptr)
+                return false;
+
+            at = run->parent;
+        }
+
+        return false;
+    }
+
+    void Runner::askedFor (const std::string& runId)
+    {
+        if (auto* run = runs.find (runId))
+            run->prepare.clear();
+    }
+
+    bool Runner::claimedByAJob (const std::string& runId) const
+    {
+        return std::any_of (scheduled.begin(), scheduled.end(),
+                            [&runId] (const GroupJob& job)
+                            {
+                                return ! job.retired && job.hasTaken (runId);
+                            });
+    }
+
+    //==============================================================================
+    std::vector<std::string> Runner::prepareStandby (Engine& engine, std::int64_t tick,
+                                                     const juce::ValueTree& list,
+                                                     const std::string& cueId,
+                                                     const std::vector<std::string>& supplied)
+    {
+        juce::ignoreUnused (tick);
+
+        std::vector<std::string> used;
+        std::size_t taken = 0;
+
+        const auto nextId = [&]
+        {
+            auto id = taken < supplied.size() ? supplied[taken] : std::string {};
+            ++taken;
+
+            if (id.empty())
+                id = ids.generate();
+
+            used.push_back (id);
+            return id;
+        };
+
+        const auto cue = document.findById (cueId);
+
+        if (! cue.isValid())
+            return used;
+
+        auto chain = descentTo (list, cueId);
+
+        /*  THE POINTER'S OWN CUE IS IN THE HORIZON when it is a group, which is
+            the difference between this and a GO's descent: GO fires that group
+            itself, and there is nothing here to fire. */
+        if (cue.getType().toString() == "Group")
+            chain.push_back (cue);
+
+        if (chain.empty())
+            return used;
+
+        std::string parentRun;
+
+        for (const auto& group : chain)
+        {
+            const auto groupId = group[idProperty].toString().toStdString();
+
+            /*  ALREADY RUNNING, or already prepared by an earlier tick: leave
+                it and descend through it. A horizon that rebuilt what it had
+                built a moment ago would re-arm every voice in the block every
+                time the pointer twitched. */
+            if (const auto* live = runs.liveRunOf (groupId))
+            {
+                parentRun = live->id;
+                continue;
+            }
+
+            if (const auto* ready = runs.preparedRunOf (groupId))
+            {
+                parentRun = ready->id;
+                continue;
+            }
+
+            const auto id = nextId();
+
+            runs.create (id, groupId, "group", parentRun);
+
+            auto* run = runs.find (id);
+
+            if (run == nullptr)
+                continue;
+
+            /*  NOT LIVE, AND SAYING SO. Everything that asks whether a cue is
+                running goes through `liveRunOf`, which skips this state - so a
+                stop aimed at a scene nobody has entered is §3.8's silent no-op,
+                and the pointer at the end of a manual group leaves rather than
+                wrapping into a second round of a group nobody started. */
+            run->state = runState::preparing;
+            run->preWaitTicks = ticksFor (numberOf (group, "preWait"));
+            run->postWaitTicks = ticksFor (numberOf (group, "postWait"));
+            run->iterations = static_cast<int> (numberOf (group, "loops"));
+
+            GroupJob job;
+            job.run = id;
+
+            /*  A GROUP WITH NOTHING PREPARABLE GOES STRAIGHT TO THE HOLD, which
+                is a complete answer rather than a failure: a scene whose header
+                is one memo has nothing to do ahead, and the run still exists so
+                that GO has something to adopt and the pointer moving away has
+                something to revoke. */
+            if (beginPreparation (engine, job, group, nextId, used))
+            {
+                run->prepare = preparedness::preparing;
+            }
+            else
+            {
+                job.phase = groupPhase::prepared;
+
+                /*  NOTHING PREPARABLE IS NOT NOTHING PREPARED. The block's
+                    members are still armed below, so a scene whose header is
+                    one memo reads `armed` and not `idle` - and `partial` when
+                    the header had cues this horizon could not take ahead. */
+                run->prepare = membersOf (group.getChildWithName ("Header")).empty()
+                                 ? preparedness::armed
+                                 : preparedness::partial;
+            }
+
+            scheduled.push_back (job);
+            parentRun = id;
+        }
+
+        /*  AND WHAT THE INNERMOST WOULD LAUNCH FIRST, armed underneath it.
+
+            `armablesFor` is the same lookahead standby has done since PR 3.13,
+            asked of the POINTER'S OWN CUE: the first member of a sequence, the
+            offset-nought members of a timeline, recursively. Of the pointer's
+            cue and not of the outermost group, because the pointer sitting on
+            member three is a statement about member three - asking the group
+            would arm member one and hold a voice for a cue nobody is about to
+            fire. What is new is the PARENT. Armed parentless, as it was, a nested member would be
+            adopted by whichever group got to it; armed under the prepared run
+            it is inside the block, so a revocation reaches it by following
+            `children` and never has to go looking. */
+        if (parentRun.empty())
+            return used;
+
+        for (const auto& id : armablesFor (cue))
+        {
+            if (runs.hasChildFor (parentRun, id))
+                continue;
+
+            /*  AN ARM THE POINTER ALREADY MADE IS ADOPTED AND DRAWS NOTHING.
+
+                The pointer moving from a top-level media cue into a scene left
+                a parentless armed run behind; taking it into the block is what
+                PR 3.13 called an arm that buys something. Nothing is CREATED
+                there, so nothing is drawn and the record carries nothing for
+                it - which is exactly right, because a replay reaches the same
+                run by the same road: the `audio.arm` that made it is in the log
+                above this record. */
+            const auto* standing = runs.liveRunOf (id);
+
+            const auto adoptable = standing != nullptr
+                                     && standing->parent.empty()
+                                     && standing->state == runState::armed
+                                     && ! standing->launchRequested
+                                     && ! claimedByAJob (standing->id);
+
+            if (standing != nullptr && ! adoptable)
+                continue;
+
+            const auto made = spawnChild (engine, parentRun, id,
+                                          adoptable ? std::string {} : nextId());
+
+            /*  MARKED AS A PROMISE. A phase takes charge of the children of its
+                own cues and launches them, and this is a child of exactly that
+                shape sitting under a group the pointer is merely passing
+                through - so without the mark a manual scene would start the
+                member the operator was reading about. `askedFor` is what takes
+                it off, at the moment somebody presses something. */
+            if (auto* child = runs.find (made))
+                child->prepare = preparedness::armed;
+
+            if (adoptable)
+                continue;
+
+            if (made.empty())
+                used.pop_back();
+            else
+                used.back() = made;
+        }
+
+        return used;
+    }
+
     std::vector<std::string> Runner::fireStandby (Engine& engine, std::int64_t tick,
                                                   const juce::ValueTree& list,
                                                   const std::string& cueId,
@@ -371,21 +884,8 @@ namespace wfg::cue
         /*  THE GROUPS BETWEEN THE CUE AND THE LIST, outermost first. A member of
             a manual sequence plays as part of its group - §3.6 makes the group
             the thing that organises its members' time, order and lifetime - so
-            every one of them has to be live before the member can be its child.
-
-            Walking up and then reversing, because the document knows parents
-            and not paths. */
-        std::vector<juce::ValueTree> ancestors;
-
-        for (auto node = document.findById (cueId).getParent();
-             node.isValid() && node != list;
-             node = node.getParent())
-        {
-            if (node.getType().toString() == "Group")
-                ancestors.push_back (node);
-        }
-
-        std::reverse (ancestors.begin(), ancestors.end());
+            every one of them has to be live before the member can be its child. */
+        const auto ancestors = descentTo (list, cueId);
 
         std::string parentRun;
 
@@ -405,6 +905,35 @@ namespace wfg::cue
             if (const auto* live = runs.liveRunOf (groupId))
             {
                 parentRun = live->id;
+                continue;
+            }
+
+            /*  THE HORIZON ALREADY MADE IT, AND GO TAKES IT.
+
+                §13.6. The adoption is written here rather than in `spawnChild`
+                because `fireStandby` always generates an identifier and so
+                never reaches that function's parentless-arm branch at all. What
+                adoption is, exactly: the run stops being a promise and becomes
+                a scene - `playing`, like any group that has just been fired -
+                and it is told where the pointer entered.
+
+                ON BOTH THE RUN AND THE JOB, which is not belt and braces: the
+                job took its own copy of `enterAt` when it was created, and
+                `beginPhase` reads that copy. Writing only the run would start
+                the scene at member one, wherever the operator's pointer
+                actually was. */
+            if (const auto* ready = runs.preparedRunOf (groupId))
+            {
+                const auto adopted = ready->id;
+
+                adoptPrepared (adopted,
+                               level + 1 < ancestors.size()
+                                 ? ancestors[level + 1][idProperty].toString().toStdString()
+                                 : cueId,
+                               parentRun.empty());
+
+                parentRun = adopted;
+                createdGroup = true;
                 continue;
             }
 
@@ -484,6 +1013,22 @@ namespace wfg::cue
             job fires the member at the far end of it. */
         if (createdGroup)
             return used;
+
+        /*  THE OPERATOR REACHED A MEMBER THE HORIZON HAD ARMED, and this is
+            what turns the promise into a performance.
+
+            The run is already there, under this group, holding a voice with its
+            file ready - which is the whole point of arming ahead. What it was
+            missing is somebody asking for it, and the press is that. Clearing
+            the mark is the ask; the group's job launches it on the next tick,
+            as it launches every member, so there is still one launcher and not
+            two. */
+        if (const auto* ahead = runs.liveRunOf (cueId))
+            if (ahead->state == runState::armed && ! ahead->prepare.empty())
+            {
+                askedFor (ahead->id);
+                return used;
+            }
 
         /*  Decision N, 2026-09-06: a media cue that is already sounding is
             ignored - the GO is applied and logged, the pointer has advanced, and
@@ -591,14 +1136,32 @@ namespace wfg::cue
                 twice, all under one identifier. That is what a GO into a nested
                 manual group produced, and it is cheap enough to make impossible
                 rather than merely unlikely. */
-            const auto already = std::any_of (scheduled.begin(), scheduled.end(),
-                                              [&runId] (const GroupJob& other)
-                                              {
-                                                  return other.run == runId && ! other.retired;
-                                              });
+            for (auto& other : scheduled)
+            {
+                if (other.run != runId || other.retired)
+                    continue;
 
-            if (already)
+                /*  THE THIRD ADOPTION DOOR. A prepared group nested inside
+                    another is left standing by the press that adopted it and is
+                    launched here, by its parent's job, at the moment §3.6 puts
+                    it. Its job already exists - the horizon made it - so what
+                    this is is the hold being let go of, not a job being
+                    created.
+
+                    A group that is merely already running falls through and
+                    changes nothing, which is what the guard was written for:
+                    a run scheduled twice would have two jobs spawning the same
+                    members, launching them twice and ending them twice under
+                    one identifier. */
+                if (other.phase == groupPhase::preparing
+                     || other.phase == groupPhase::prepared)
+                {
+                    other.enterAt = run->enterAt;
+                    other.phase = groupPhase::entering;
+                }
+
                 return;
+            }
 
             GroupJob job;
             job.run = runId;
@@ -639,6 +1202,7 @@ namespace wfg::cue
 
         run->launchRequested = true;
         run->launchRequestedAtTick = tick;
+        run->prepare.clear();
 
         /*  Armed already if it came through a pre-wait or through standby; this
             is the arm for a cue fired from cold, which is the case that pays
@@ -1905,9 +2469,29 @@ namespace wfg::cue
             So the group takes the one that is there. It is adopted by id, which
             is what keeps it replayable: the record carries the identifier
             either way, and a replay re-supplies it. */
+        /*  AND IT LOST ITS PARENTLESS HALF, because the horizon gives every
+            prepared member a parent.
+
+            The test PR 3.13 wrote was "unfinished, armed, and nobody's child",
+            which was exactly right when the only thing that armed ahead was the
+            standby pointer and everything it armed was parentless. A horizon
+            arms the same runs UNDER the block it is preparing - so the test
+            that stopped an arm buying nothing would have stopped adopting the
+            very runs this phase exists to prepare, and a timeline's members
+            would be spawned a second time, both runs landing in the phase's own
+            list and both being launched: one cue, two voices, a tick apart.
+
+            So an adoptable run is one that is unfinished, still `armed`, not
+            yet asked to launch, taken charge of by no job, and either
+            parentless OR held under a run in the spawning run's own ancestry -
+            which is where a prepared member is, whether its own group armed it
+            or an ancestor's horizon did. */
         if (id.empty())
             if (const auto* armed = runs.liveRunOf (cueId))
-                if (armed->parent.empty() && armed->state == runState::armed)
+                if (armed->state == runState::armed
+                     && ! armed->launchRequested
+                     && ! claimedByAJob (armed->id)
+                     && (armed->parent.empty() || inAncestryOf (armed->parent, parentRun)))
                     id = armed->id;
 
         if (id.empty())
@@ -1918,7 +2502,21 @@ namespace wfg::cue
             /*  ADOPTION, and the parent is the whole of it: the waits and the
                 arm were settled when the run was created, and re-reading them
                 here would be reading the document at a different moment from
-                the one the run was born at. */
+                the one the run was born at.
+
+                THE OLD PARENT LETS GO, which matters now that there is one. A
+                run adopted out of a prepared block that stayed in that block's
+                `children` would be killed twice over by a revocation, counted
+                twice by "have all my children finished", and shown twice by any
+                client drawing the run tree. Until GO it IS under the run that
+                prepared it, which is what makes a revocation before GO reach
+                it; from GO it is under the group that took it. */
+            if (auto* previous = runs.find (existing->parent);
+                previous != nullptr && existing->parent != parentRun)
+                previous->children.erase (std::remove (previous->children.begin(),
+                                                       previous->children.end(), id),
+                                          previous->children.end());
+
             existing->parent = parentRun;
 
             if (auto* parent = runs.find (parentRun))
@@ -2199,6 +2797,69 @@ namespace wfg::cue
                 continue;
             }
 
+            /*  THE HORIZON AT WORK, and then holding.
+
+                Nothing here is scheduled and nothing is waited on one at a
+                time: what the phase issued was issued at once (see
+                `beginPreparation`), and what it waits for is that all of it has
+                arrived. A media child is armed and left alone - being armed and
+                not launched is the whole of what preparing it means - and a
+                network child is LAUNCHED, because for an anticipatable node the
+                pre-send is the cue's execution and there is nothing else it
+                could mean to prepare one. */
+            if (job.phase == groupPhase::preparing)
+            {
+                /*  IT TAKES CHARGE OF NOTHING, and that is deliberate.
+
+                    `taken` is a phase saying "this run is mine", and it is what
+                    stops a later phase adopting a run instead of spawning one.
+                    A preparation must leave its children ADOPTABLE: the header
+                    phase that runs after GO is supposed to find the media cue
+                    this armed and launch that very run, and a prepare that had
+                    claimed it would make the header spawn a second one beside
+                    it - the arm buying nothing, which is the failure PR 3.13
+                    was written about.
+
+                    What it remembers instead is `prepared`, by CUE, which is
+                    both the "have I launched this one" test here and the list
+                    the header's remainder subtracts. */
+                for (const auto* child : runs.childrenOf (job.run))
+                {
+                    /*  A media prepare is an arm and is never launched: being
+                        armed and not sounding is the whole of what preparing a
+                        media cue means. */
+                    if (child->kind == "media")
+                        continue;
+
+                    if (std::find (job.prepared.begin(), job.prepared.end(), child->cue)
+                          != job.prepared.end())
+                        continue;
+
+                    /*  AND A NETWORK CUE'S PREPARE IS ITS EXECUTION: for an
+                        anticipatable node the pre-send is the cue, so it is
+                        launched here and does not run again at entry. */
+                    job.prepared.push_back (child->cue);
+                    engine.submit (origin::engine, "run.launch", one (child->id));
+                }
+
+                if (preparationSettled (job))
+                {
+                    job.phase = groupPhase::prepared;
+                    run->prepare = settledWord (job, group);
+                }
+
+                continue;
+            }
+
+            /*  AND THE HOLD, which does nothing at all and has to be written
+                down as a phase for exactly that reason: `finishPhase` moves a
+                group on to the next phase with anything in it and ends the run
+                when none has, and there is no branch in it that waits. A
+                prepared group falling through would run its own footer and end
+                the scene before anybody pressed GO. */
+            if (job.phase == groupPhase::prepared)
+                continue;
+
             if (job.phase == groupPhase::entering)
             {
                 if (beginPhase (engine, job, group, groupPhase::header))
@@ -2269,8 +2930,20 @@ namespace wfg::cue
                 belongs to when it appeared - which is what keeps round two from
                 inheriting round one's finished runs, since both rounds play the
                 same cues. */
+            /*  AND A RUN NOBODY HAS ASKED FOR IS NOT ONE OF THEM.
+
+                A horizon arms what the scene would launch next UNDER the scene,
+                so that a revocation reaches it - which puts a run in this list
+                that looks exactly like a member the operator called for and is
+                not. A manual group taking it would start the member the pointer
+                was reading about, with nobody having pressed anything, and the
+                whole of §3.6's "the operator is the parent" would be gone.
+
+                `prepare` is the mark, because it already means the thing being
+                asked: this is ready for a GO that has not happened. */
             for (const auto* child : runs.childrenOf (job.run))
-                if (inPhase (child->cue) && ! job.hasTaken (child->id))
+                if (inPhase (child->cue) && ! job.hasTaken (child->id)
+                     && child->prepare.empty())
                 {
                     job.taken.push_back (child->id);
                     job.phaseRuns.push_back (child->id);
@@ -2393,9 +3066,42 @@ namespace wfg::cue
 
             if (job.nextMember < job.phaseCues.size())
             {
-                engine.submit (origin::engine, "run.spawn",
-                               { osc::Value::string (job.run),
-                                 osc::Value::string (job.phaseCues[job.nextMember]) });
+                const auto& next = job.phaseCues[job.nextMember];
+
+                /*  ALREADY THERE, AND UNCLAIMED - the same test `beginPhase`
+                    makes of a phase's FIRST cue, moved onto the path that
+                    advances to the next one.
+
+                    It only ever had to cover one cue before: a GO descending
+                    into a manual group creates the member the pointer is on,
+                    and that member is where the phase starts. A horizon
+                    prepares whatever it can reach, which is not always the
+                    first thing in a list - so without this a prepared cue
+                    standing second in a header gets a second run when its turn
+                    comes, and the one that was prepared keeps its voice until
+                    the show is reloaded. */
+                const auto children = runs.childrenOf (job.run);
+
+                const auto unclaimed =
+                    std::any_of (children.begin(), children.end(),
+                                 [&job, &next] (const Run* child)
+                                 {
+                                     return child->cue == next && ! job.hasTaken (child->id);
+                                 });
+
+                if (unclaimed)
+                {
+                    for (const auto* child : children)
+                        if (child->cue == next && ! job.hasTaken (child->id))
+                            askedFor (child->id);
+                }
+                else
+                {
+                    engine.submit (origin::engine, "run.spawn",
+                                   { osc::Value::string (job.run),
+                                     osc::Value::string (next) });
+                }
+
                 ++job.nextMember;
                 continue;
             }
@@ -2415,10 +3121,23 @@ namespace wfg::cue
             group's members: it may be shuffled, it may be a subset (§3.6's
             "play N of M"), and it may have had a member pruned out of it for
             tonight. A header and a footer are always themselves, in order. */
-        const auto cues = phase == groupPhase::members
-                            ? drawRound (engine, group, job.run)
-                            : membersOf (group.getChildWithName (phase == groupPhase::header
-                                                                   ? "Header" : "Footer"));
+        auto cues = phase == groupPhase::members
+                      ? drawRound (engine, group, job.run)
+                      : membersOf (group.getChildWithName (phase == groupPhase::header
+                                                              ? "Header" : "Footer"));
+
+        /*  THE HEADER'S REMAINDER, when a horizon ran part of it already. Empty
+            in every other case, so this costs a group nobody prepared nothing
+            at all. See `GroupJob::prepared`. */
+        if (phase == groupPhase::header && ! job.prepared.empty())
+            cues.erase (std::remove_if (cues.begin(), cues.end(),
+                                        [&job] (const std::string& cueId)
+                                        {
+                                            return std::find (job.prepared.begin(),
+                                                              job.prepared.end(), cueId)
+                                                     != job.prepared.end();
+                                        }),
+                        cues.end());
 
         /*  AN ABSENT OR EMPTY PHASE IS SKIPPED RATHER THAN ENTERED, and saying
             so with a `false` is what lets the caller fall through to the next
@@ -2436,17 +3155,58 @@ namespace wfg::cue
         const auto timeline = phase == groupPhase::members
                                 && textOf (group, "mode") == "timeline";
 
+        const auto childRuns = runs.childrenOf (job.run);
+
+        /*  ALREADY THERE AND TAKEN CHARGE OF BY NOBODY: adopt it rather than
+            spawn a second beside it.
+
+            Asked of EVERY cue here and not only the first, because a timeline
+            spawns its whole round at once - and the horizon arms the
+            offset-nought members of a timeline ahead, which is exactly this
+            set. Without it one cue gets two runs a tick apart, both in the
+            phase's own list, both launched: two voices playing the same file
+            slightly out of step, which is the failure PR 3.13's parentless test
+            was written to prevent, returning because the parent is no longer
+            empty.
+
+            The `unclaimed` word is what makes it survive a loop: a group's
+            second round plays the same cues as its first, so "is there a child
+            for this cue" answers yes on every round after the first. What is
+            being asked is whether something has appeared that no phase has
+            taken charge of. */
+        const auto unclaimedFor = [&job, &childRuns] (const std::string& cueId)
+        {
+            return std::any_of (childRuns.begin(), childRuns.end(),
+                                [&job, &cueId] (const Run* child)
+                                {
+                                    return child->cue == cueId && ! job.hasTaken (child->id);
+                                });
+        };
+
+        /*  A phase beginning a cue is somebody asking for it: whatever the
+            horizon armed under this group for that cue stops being a promise
+            here. */
+        const auto askForChildOf = [this, &job, &childRuns] (const std::string& cueId)
+        {
+            for (const auto* child : childRuns)
+                if (child->cue == cueId && ! job.hasTaken (child->id))
+                    askedFor (child->id);
+        };
+
         if (timeline)
         {
             for (const auto& cue : cues)
-                engine.submit (origin::engine, "run.spawn",
-                               { osc::Value::string (job.run), osc::Value::string (cue) });
+            {
+                if (unclaimedFor (cue))
+                    askForChildOf (cue);
+                else
+                    engine.submit (origin::engine, "run.spawn",
+                                   { osc::Value::string (job.run), osc::Value::string (cue) });
+            }
 
             job.nextMember = cues.size();
             return true;
         }
-
-        const auto childRuns = runs.childrenOf (job.run);
 
         /*  A MANUAL SEQUENCE STARTS WHERE THE OPERATOR WAS, which is member one
             in every ordinary case - the pointer descends to it and GO there is
@@ -2487,15 +3247,9 @@ namespace wfg::cue
             wait for it to finish again, for ever. What is being asked is
             whether something has appeared that no phase has taken charge of
             yet, and the job records exactly that. */
-        const auto unclaimed =
-            std::any_of (childRuns.begin(), childRuns.end(),
-                         [&job, &cues, first] (const Run* child)
-                         {
-                             return child->cue == cues[first] && ! job.hasTaken (child->id);
-                         });
-
-        if (unclaimed)
+        if (unclaimedFor (cues[first]))
         {
+            askForChildOf (cues[first]);
             job.nextMember = first + 1;
             return true;
         }
@@ -2536,6 +3290,15 @@ namespace wfg::cue
 
     void Runner::finishPhase (Engine& engine, GroupJob& job, const juce::ValueTree& group)
     {
+        /*  A GROUP THE HORIZON IS HOLDING IS NOT A GROUP THAT HAS FINISHED
+            ANYTHING. Nothing routes here from the two prepare phases today -
+            `advanceGroups` returns before it can - and this says so at the door
+            rather than leaving it to a reading of a loop three hundred lines
+            long. What it would otherwise do is run the group's footer and end
+            the scene before anybody pressed GO. */
+        if (job.phase == groupPhase::preparing || job.phase == groupPhase::prepared)
+            return;
+
         /*  Header, then members, then footer, and the group is done when the
             last of them is. The footer BLOCKS (§3.6), which is not a special
             case here: it is a phase like the other two, and the group's
@@ -2579,9 +3342,6 @@ namespace wfg::cue
             that failed to arm is not retried, because a voice that was busy a
             tick ago is busy now and fifty rejections a second is not a report,
             it is a fault of its own. */
-        if (audio == nullptr)
-            return;
-
         const auto list = focus.list (document);
         const auto standby = list.isValid()
                                ? list[juce::Identifier ("standby")].toString().toStdString()
@@ -2592,6 +3352,26 @@ namespace wfg::cue
 
         armedStandby = standby;
 
+        /*  WHAT THE POINTER LEFT BEHIND.
+
+            A horizon prepares ONE block - §3.12 extends anticipation from a row
+            to a block and no further - so anything parentless still in
+            `preparing` that is not the block the pointer is in now is a scene
+            got ready for a GO that is not coming. Its voices and its slots go
+            back.
+
+            Submitted rather than done here, because a hook decides and a
+            handler applies: `wfg replay` runs no hooks, so a revocation that
+            happened only inside one would be missing from every replay - and
+            the replay would then hold voices the session let go of. */
+        const auto keep = horizonRootFor (list, standby);
+
+        for (const auto& snapshot : runs.all())
+            if (snapshot.state == runState::preparing
+                 && snapshot.parent.empty()
+                 && snapshot.cue != keep)
+                engine.submit (origin::engine, "run.revoke", one (snapshot.id));
+
         if (standby.empty())
             return;
 
@@ -2599,6 +3379,30 @@ namespace wfg::cue
 
         if (! cue.isValid())
             return;
+
+        /*  A POINTER INSIDE A SCENE IS A HORIZON, AND IT IS ASKED FOR ABOVE THE
+            NULL-PLAYER GATE.
+
+            PRD §3.12 extends anticipation "from one row to a block": the
+            pointer landing on a group, or on a member inside one, is the moment
+            to get the whole block ready - its headers run outermost first, its
+            slots claimed, its values pre-sent - rather than only the one cue
+            the pointer is on.
+
+            ABOVE THE GATE BELOW because a preparation is a fact about the
+            document: a header of network cues has nothing to do with a sound
+            card, and a `wfg serve` without `--hosted` must prepare exactly as a
+            hosted session does or the log would not reproduce. Same argument as
+            12.1's hooks and as PR 4.3's claims.
+
+            It RETURNS rather than falling through to the arm, because
+            `prepareStandby` does that arm itself - under the block, where a
+            revocation can find it. */
+        if (cue.getType().toString() == "Group" || ! descentTo (list, standby).empty())
+        {
+            engine.submit (origin::engine, "run.prepare", one (standby));
+            return;
+        }
 
         /*  A GROUP AT STANDBY ARMS WHAT IT WOULD LAUNCH FIRST, which is the
             other half of arming ahead and was owed from PR 3.3.
@@ -2608,6 +3412,20 @@ namespace wfg::cue
             arming it meant GO on a group paid the disk with the operator's hand
             already down - the exact cost arming ahead exists to avoid, moved
             one level of nesting away where it was harder to see. */
+        /*  AND HERE IS THE NULL-PLAYER GATE, moved down to where it belongs.
+
+            It used to stand at the head of this function, which meant a session
+            with no audio side noticed nothing at all about where the pointer
+            was. That was harmless while the only thing this did was ask for a
+            voice; it is not harmless now, because a preparation is a fact about
+            the DOCUMENT - a claim on a processor input, a header of network
+            cues - and a `wfg serve` without `--hosted` has to make it exactly as
+            a hosted session does, or the log would not reproduce.
+
+            What genuinely needs a Player is this loop, and only this loop. */
+        if (audio == nullptr)
+            return;
+
         for (const auto& id : armablesFor (cue))
         {
             /*  Already running or already armed: nothing to do. `audio.arm`
@@ -3266,6 +4084,74 @@ namespace wfg::cue
                             return Outcome::ok (withRun (args, 1,
                                                          runner.arm (engine, context.tick,
                                                                      cueId, id)));
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  AND THE HORIZON REACHING A BLOCK, which lives here for the reason
+            `audio.arm` does: it is an ACTION. It reserves voices, claims slots
+            and writes values to somebody else's desk, all before anybody has
+            pressed anything.
+
+            A COMMAND AND NOT SOMETHING THE HOOK DOES, which is the rule every
+            decision in this engine follows: `wfg replay` runs no hooks, so a
+            preparation that happened only inside one would be absent from every
+            replay - and a replay would then diverge from the session it is
+            reproducing at the first GO into a prepared scene, because the run
+            it was supposed to adopt would not exist.
+
+            VARIADIC, like `go`, because how many runs a horizon makes is a
+            property of how deep the pointer is rather than a constant: a member
+            three manual groups down prepares three of them. */
+        registry.add ({ "run.prepare",
+                        "The horizon reached this cue: get its block ready ahead of any GO -"
+                        " headers run, slots claimed, media armed - and hold.",
+                        { { "cue", 's', false }, { "run", 's', true, true } },
+                        true,
+                        [&engine, &runner, &document, &focus]
+                        (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto cueId = args[0].getString();
+
+                            if (! document.findById (cueId).isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            const auto list = focus.list (document);
+
+                            if (! list.isValid())
+                                return Outcome::rejected (reason::notInList);
+
+                            std::vector<std::string> supplied;
+
+                            for (std::size_t n = 1; n < args.size(); ++n)
+                                supplied.push_back (args[n].getString());
+
+                            const auto made = runner.prepareStandby (engine, context.tick,
+                                                                     list, cueId, supplied);
+
+                            std::vector<osc::Value> applied { osc::Value::string (cueId) };
+
+                            for (const auto& id : made)
+                                applied.push_back (osc::Value::string (id));
+
+                            return Outcome::ok (applied);
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "run.revoke",
+                        "The pointer moved away before a GO: give back everything the horizon"
+                        " was holding for this run, and finish it.",
+                        { { "run", 's', false } },
+                        true,
+                        [&engine, &runner] (CommandContext& context,
+                                            const std::vector<osc::Value>& args)
+                        {
+                            const auto runId = args[0].getString();
+
+                            if (! runner.knowsRun (runId))
+                                return Outcome::rejected (reason::unknownId);
+
+                            runner.revokePrepared (engine, context.tick, runId);
+                            return Outcome::ok (args);
                         } });
 
         //----------------------------------------------------------------------

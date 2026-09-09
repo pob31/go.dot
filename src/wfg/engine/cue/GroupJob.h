@@ -54,6 +54,32 @@ namespace wfg::cue
         /** Before anything: the group's own pre-wait. */
         inline constexpr const char* entering = "entering";
 
+        /*  THE HORIZON REACHED THE GROUP AND NOBODY HAS PRESSED GO.
+
+            PRD §3.12's anticipation, as a phase rather than a second mechanism:
+            it runs the PREPARABLE part of the group's header - the arms, the
+            claims, the values a target will let us read before we write - as a
+            sequence, exactly as `header` does, and leaves the rest alone. What
+            is preparable is decided per parameter and not per cue, so a header
+            of eight cues can be half prepared and say so.
+
+            It is a phase and not a state of its own machinery because a header
+            is a cue list and running a cue list in order is what a phase is.
+            Everything `beginPhase` and `finishPhase` already know applies. */
+        inline constexpr const char* preparing = "preparing";
+
+        /*  AND THEN IT WAITS, doing nothing, until a GO adopts it or the
+            pointer moves away and revokes it.
+
+            THE PHASE EXISTS BECAUSE `finishPhase` ENDS A GROUP FROM ANY PHASE
+            IT DOES NOT KNOW. Without it, a prepared group would finish its
+            preparation, fall through to the footer and end itself on the tick
+            its horizon completed - a scene that ran its own exit before anybody
+            asked for it. So the hold is explicit and `finishPhase` routes into
+            it by name. Nothing is scheduled here and nothing is waited on; the
+            job is a placeholder holding what the horizon built. */
+        inline constexpr const char* prepared = "prepared";
+
         /*  Its header: an ordinary cue list that runs before the members, as a
             sequence whatever the group's own mode is.
 
@@ -147,6 +173,23 @@ namespace wfg::cue
             timeline group's members are the one case that launches them all at
             once instead of one at a time. */
         std::vector<std::string> phaseCues;
+
+        /*  THE HEADER CUES WHOSE PREPARATION WAS THEIR EXECUTION, and which the
+            header phase therefore leaves out when the group is entered.
+
+            §13.6: prepared is not run, EXCEPT where the prepare was the whole
+            of it. An anticipatable network cue pre-sent and read back equal has
+            nothing left for GO to do - the value is at the target - so it drops
+            out of the header's list. A media cue's prepare is an ARM, with the
+            sound still to come, so it stays in the list and is launched there,
+            adopting the run its prepare created rather than spawning a second
+            beside it.
+
+            A pre-send that came back `disagreed` is in this list too. It ran,
+            badly, and its run says so in the log; sending it again at entry
+            would be a second attempt nobody asked for, at a moment when the
+            operator's hand is already down. */
+        std::vector<std::string> prepared;
 
         /*  The member the operator asked for when they entered the group, for
             a manual sequence.

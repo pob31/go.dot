@@ -88,6 +88,15 @@
       "UNIT": ["s"],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     },
+    "prepare": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/prepare",
+      "DESCRIPTION": "How far ahead this cue has been got ready, derived from its prepared run. PRD 3.12: preparation is per PARAMETER rather than per cue, so a block that is partly anticipatable says so rather than pretending. Idle is the resting state and means nothing has been prepared, which is not a failure - a MIDI cue can never be prepared and reads idle for ever. Preparing is in progress; pending is waiting for a slot somebody else holds (3.9e, in words rather than colour); partial means something in the block could not be anticipated and will happen at entry; armed means everything that could be prepared was, with nothing to verify; verified means every pre-sent value was read back equal, which is the only one of the six that says the desk agrees.",
+      "TYPE": "s",
+      "ACCESS": 1,
+      "VALUE": ["idle"],
+      "RANGE": [{"VALS": ["idle", "preparing", "pending", "partial", "armed", "verified"]}],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
     "role": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/role",
       "DESCRIPTION": "Where this cue sits in the thing that contains it: an ordinary member, one of the cues in its group's header or footer, or one of the list's persistent cues. Derived from the element that contains it rather than stored, like `kind` and for the same reason - a client that could write it could move a cue between a group's preparation and its members without the group knowing. A cue at the top level of a list is a member. The whole vocabulary is declared here although `persistent` cannot occur until the section exists, because an enum that grows later grows under a client that has already read it.",

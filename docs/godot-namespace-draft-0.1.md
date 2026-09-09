@@ -2230,6 +2230,82 @@ things in this engine that send a burst at one tick, so the sender gains a per-t
 mount with the remainder spilling to the next tick — which is a rate cap in the sense §3.3 means:
 a cap on outbound dispatch, not a cap on what may be asked for.
 
+#### What PR 4.5 built, and the two places it does not match the paragraphs above
+
+**A preparation is issued in header order and is not waited on one cue at a time**, which the table
+at the head of this section calls "as a sequence" and which cannot be quite that. A header phase
+runs its cues one after another because each reports done and the next begins. **A prepared media
+cue never reports done** — being armed and not launched is the whole of what preparing one means —
+so a chain that waited for the first would wait for ever. What the phase waits for instead is that
+everything it issued has *arrived*: an arm armed, a network cue finished. The order is still the
+header's, and a header whose cues write one address still leaves the last one standing, because the
+sender coalesces by address inside a tick.
+
+**A network cue is not pre-sent yet, and that is §13.1 being obeyed rather than a gap.** The
+condition it will be pre-sent under is already decided and already written down — the node
+`anticipatable` **and** its mount able to answer — but the READ is what makes the write revocable,
+and a pre-send without it would be exactly the trade §13.1 forbids: a saved moment paid for with a
+desk left in a state the operator did not choose. So this PR prepares **media only**, where
+everything it does is undone by letting go of it and nothing outside the machine has heard anything.
+`OscJob`'s `reading` state, `mount/@rateCap`, the two `wfg validate` warnings about anticipation
+without read-back, and the `verified` word arrive together in the PR that adds the pre-send.
+
+**The revocation finishes its runs itself, and ends them `done` rather than emptying `track`.**
+`run.ended` has nowhere to put a reason — `error` is documented as failed-only — and a revocation is
+not a failure: a scene was got ready and then not wanted, which is what anticipation is allowed to
+cost. So `run.revoke`'s handler writes `done`, `endedAtTick` and `warning = revoked`, and releases
+the slots. It does **not** write `track = -1`, which the plan asked for and which would throw away
+the record of which voice was held: `holdsTrack()` is a track **and an unfinished run**, so ending
+the run is the whole of letting the voice go.
+
+**Adoption has three doors and not two.** `fireStandby`'s descent takes every group *between* the
+pointer and the list; `armInternal` takes the pointer's own cue when it is a group; and `fireKind`
+takes a nested one when its parent's job launches it. The third exists because **only the outermost
+group a press touches may start**: an inner one that started at adoption would spawn its member on
+the next tick while its parent was still running the header that comes first — the scene beginning
+from the inside out, which is the failure PR 3.4 was written about, returning by another road.
+
+**And parenting the arms had a second cost the section did not see: a promise looks exactly like a
+member.** A phase takes charge of the children of its own cues and launches them, and a horizon
+arming what the scene would launch next puts a child of exactly that shape under a group the pointer
+is merely passing through. A manual sequence took it and started the member the operator was reading
+about — with nobody having pressed anything, and §3.6's *the operator is the parent* gone. The mark
+that tells them apart is `prepare` itself, which already means *ready for a GO that has not
+happened*: a phase skips a child that carries one, and the four places where somebody genuinely asks
+for a cue — a phase beginning its first, a timeline adopting its round, a sequence advancing, and a
+GO reaching a member that was armed ahead — clear it. Clearing it is the ask, which is why it is one
+function called `askedFor` rather than four assignments.
+
+**`/godot/cue/<id>/prepare` is published from the runtime half of the tree**, against a roster of
+every cue the document half leaves behind — the same shape as a slot's `holder`. It cannot come from
+the cached half, which freezes; and it cannot be published for *some* cues only, or a client polling
+a cue would watch its node list change shape.
+
+**And that closed a hole that was already open.** The runtime half has published a slot's `holder`
+and `pending` since PR 4.3, so `/godot/slot` and `/godot/slot/<id>` were being carried by **both**
+halves of the snapshot — and `find` searches one and then the other, so the answer depended on which
+it reached first. No test caught it: the case needs a show with a declared slot *and* the whole-tree
+walk that counts addresses, and no fixture had both. Putting every cue in the same position made it
+visible immediately.
+
+#### What M19 answered, so far *(PR 4.5, 2026-09-09)*
+
+§13.14 asks M19 for a prepared header of twenty anticipatable osc cues, counted from the pointer
+landing to `verified`. That half waits for the pre-send. The arm half, measured on the Windows box
+in a Debug build:
+
+| | the number |
+|---|---|
+| a scene of twenty media members, from the pointer landing to the block being prepared | **1 tick** |
+| what the horizon reserved a voice for | the members the scene would launch first — one, for a manual sequence |
+| the word it ended on | `partial`, because the scene's header is a memo and nothing can anticipate a memo |
+
+**One tick, and the shape is why.** The pointer is a document write; the hook that notices it runs
+at the head of the next tick and submits `run.prepare`; the handler applies inside that same tick.
+The rest of the scene is armed by the scheduler as it runs, which is what a member's position in a
+list is for — a horizon that armed twenty voices for a scene of twenty would hold the whole
+polyphony ceiling for a scene nobody had entered.
+
 ### 13.7 The header as a preset sheet — a mark on the member (decision Q)
 
 The author, looking at the first web client on 2026-09-06: *"since this is something that preloads

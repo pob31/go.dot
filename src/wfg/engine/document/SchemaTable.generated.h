@@ -35,6 +35,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
     inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
+    inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
     inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock" };
     inline constexpr std::string_view enum_trigger_type[] = { "noteOn", "noteOff", "programChange", "controlChange" };
     inline constexpr std::string_view enum_fade_curve[] = { "linear", "sCurve" };
@@ -45,7 +46,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_midi_wait[] = { "none", "sent" };
     inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi" };
     inline constexpr std::string_view enum_run_phase[] = { "entering", "preparing", "prepared", "header", "members", "footer" };
-    inline constexpr std::string_view enum_run_state[] = { "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
+    inline constexpr std::string_view enum_run_state[] = { "preparing", "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
     inline constexpr std::string_view enum_run_warning[] = { "no-channel", "revoked" };
     inline constexpr std::string_view enum_group_mode[] = { "timeline", "sequence" };
     inline constexpr std::string_view enum_group_advance[] = { "auto", "manual" };
@@ -356,6 +357,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "Where this cue sits in the thing that contains it: an ordinary member, one of the cues in its group's header or footer, or one of the list's persistent cues. Derived from the element that contains it rather than stored, like `kind` and for the same reason - a client that could write it could move a cue between a group's preparation and its members without the group knowing. A cue at the top level of a list is a member. The whole vocabulary is declared here although `persistent` cannot occur until the section exists, because an enum that grows later grows under a client that has already read it." },
+        { "cue", "prepare",
+          ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
+          true, "idle",
+          false, 0.0, false, 0.0,
+          enum_cue_prepare, 6,
+          "", 50.0, false, "park",
+          "",
+          "How far ahead this cue has been got ready, derived from its prepared run. PRD 3.12: preparation is per PARAMETER rather than per cue, so a block that is partly anticipatable says so rather than pretending. Idle is the resting state and means nothing has been prepared, which is not a failure - a MIDI cue can never be prepared and reads idle for ever. Preparing is in progress; pending is waiting for a slot somebody else holds (3.9e, in words rather than colour); partial means something in the block could not be anticipated and will happen at entry; armed means everything that could be prepared was, with nothing to verify; verified means every pre-sent value was read back equal, which is the only one of the six that says the desk agrees." },
         { "media", "file",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",
@@ -752,10 +761,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           true, "armed",
           false, 0.0, false, 0.0,
-          enum_run_state, 7,
+          enum_run_state, 8,
           "", 50.0, false, "park",
           "",
-          "Where the run is. Waiting means its pre-wait is running and nothing has fired yet; armed means its track is held and its media is being made ready; playing means the launch has been placed; stopping means a stop was asked for and has not landed; postWait means its own work is over and it is holding before it reports done to whatever is waiting on it; done and failed are both finished, and a failed run says why in error." },
+          "Where the run is. Preparing means the horizon reached it and it is getting ready ahead of any GO - a run in that state is NOT live, and nothing that asks whether a cue is running counts it (PRD 3.12). Waiting means its pre-wait is running and nothing has fired yet; armed means its track is held and its media is being made ready; playing means the launch has been placed; stopping means a stop was asked for and has not landed; postWait means its own work is over and it is holding before it reports done to whatever is waiting on it; done and failed are both finished, and a failed run says why in error." },
         { "run", "track",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
           true, "-1",
