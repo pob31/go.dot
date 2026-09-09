@@ -20,6 +20,7 @@
 #include <wfg/engine/osc/UdpEndpoint.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace wfg::tree
 {
