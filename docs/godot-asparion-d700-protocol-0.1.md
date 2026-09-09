@@ -271,7 +271,10 @@ responsive than an S21's own**.
 
 1. **The CC number for the vendor's MIDI RGB method.** The Configurator's
    Encoder / LED tab lists it. The one item that would complete the MCU-only path
-   to full colour, and a thirty-second read rather than a research task.
+   to full colour, and a thirty-second read rather than a research task. It
+   matters more since PRD §3.30 (2026-09-09): a strip whose colour follows a
+   running clip's timbre needs full-depth colour, and on a machine where
+   something else holds the HID interface this CC is the only route.
 2. **HID element classes `a2`, `b0`, `b2`.** `b6` is the dials. `b0` stalled the
    device and was left alone.
 3. **Whether the D700S OLED module** (§3.16: 2 × 12 chars + 1 × 6, track number,

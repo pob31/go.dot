@@ -762,7 +762,8 @@ three axes plus orientation is what the parameter actually is.
 #### Display as a renderable
 
 The engine produces a **bounded field vocabulary** — cue number, short name,
-owning cue, value, mode, state, group, colour, meter. Each profile renders what
+owning cue, value, mode, state, group, colour, meter, timbre (§3.30). Each
+profile renders what
 it can:
 
 - **text cells** — MCU scribble SysEx, D700S OLED
@@ -1398,6 +1399,14 @@ load and only slot contents change.
   written — a member launching stops whatever its track was playing, which is a
   sampler's choke group for free.
 
+  *Measured, PR 4.1, 2026-09-08 (M16, `docs/godot-namespace-draft-0.1.md`
+  §13.14): it does **not**.* A track keeps both slots playing and they sum, so
+  a member cannot choke another by sharing its track. Two shapes are left, and
+  §13.15 names them: the group **declares its voices** and claims that many
+  tracks, any two members sounding at once needing two; or **a claim per slot**,
+  a bank of eight being eight voices. **The author's to pick before Phase 6**;
+  Phase 4's allocator assumes neither.
+
 *Amended in 0.8 — `docs/spikes/spike04-graph-stability.md`, `spike01-bus-routing.md`.*
 Both halves are now measured rather than assumed.
 
@@ -1796,6 +1805,69 @@ and the same solver as any other cue. A sampler bank, a rack chain and a state
 machine differ only in what starts them. That is what keeps them from being
 panels bolted onto the side of a cue list.
 
+### 3.30 Spectral colour — timbre on the waveform, in Gogo, and on the strip
+
+*Added in 0.8, at the author's direction (2026-09-09).*
+
+Samplitude colours its waveforms by spectrum and not only by level: dark —
+black, purple, deep blue — for low frequencies, rising through red, orange and
+yellow to green. A pure tone comes out saturated; a broadband noise comes out
+grey, because its bins mix. The author has read waveforms that way for years
+and wants it in three places: the **editor's waveform**, the **Gogo progress
+bar** of a running media cue, and the **colour of the strip** a running cue
+sits on — so that a desk of eight sampler faders says at a glance which is the
+bass bed and which is the high effect, and nobody guesses.
+
+**The analysis.** Per window, on a log-frequency axis: the **spectral centroid**
+gives the hue along the ramp, the **spectral flatness** gives the saturation —
+a sine saturated, noise grey — and amplitude stays what the waveform's shape
+already carries. **Lightness is monotonic with frequency**, dark low to bright
+high, which the ramp already nearly is, and that is what makes §4.8 hold on its
+own terms: a colourblind operator still reads low from high by brightness, and
+the hue is the extra. Timbre has no other carrier, and it is an aid to mixing
+rather than a state the show depends on — which is the honest reading of the
+rule.
+
+**It is a cache, not document content.** §4.10: the document holds what
+somebody decided, and an analysis is regenerable from the file. So it lives in
+a **cache beside the media, keyed by content hash**, like a peak file — §3.20's
+derived state, never in the show — built by a **background job at import**,
+off the audio thread (§4.2) and off the GO path (§4.1) the way plugin scanning
+is off the show. Show load never waits for it; a clip whose cache is missing
+draws grey until it arrives. Stored as a **pyramid** — one window per hop at
+the finest level, then halvings — so the editor at any zoom and a forty-pixel
+Gogo bar both read one level and nothing recomputes. PR 4.1's `MediaInfo`
+side table, keyed by path and already holding a file's duration, is where the
+cache is looked up.
+
+**Gogo** draws the bar from the pyramid at the bar's width, per range for a
+ranged cue (§3.24), and the playhead over a coloured bar answers *where in the
+clip* without a number being read.
+
+**The strip is a binding, not a D700 feature.** A run **publishes its timbre**
+— hue and saturation at its current position — as a read-only node beside
+`/godot/run/<id>/position`, updated on the tick thread by a table lookup (§3.4:
+control rate, two values per running clip). The **layout binds it to the
+strip's colour cell**, the cell §3.16's display vocabulary already has, so a
+Stream Deck tile, the tablet row and the Gogo row show the same colour for
+nothing, and the D700's master surround follows the same rule. The profile
+**quantises and rate-limits**: a colour is sent only when it has moved a
+visible step and no faster than about ten times a second — the D700's HID
+route is 8 bits per channel and its protocol note records that back-to-back
+writes fault; the MCU route's eight colours are too coarse for this, and a
+profile says so rather than approximating
+(`docs/godot-asparion-d700-protocol-0.1.md` §4, §6).
+
+*(proposed)*, the author's to take: **authored colour at idle, timbre while
+sounding**, with timbre a layout option that can be off, so a desk that uses
+colour for provenance keeps it.
+
+**A test exists before the UI does.** A 1 kHz sine must come out saturated at
+1 kHz's hue, white noise grey, and a sweep must walk the ramp — a black-box
+check on the cache alone, in the style of the routing spike, and where the work
+starts when it is scheduled: Phase 5 for the cache, the editor and Gogo; Phase 6
+for the strip.
+
 ---
 
 ## 4. Constraints as law
@@ -1847,7 +1919,8 @@ and in-cue loops, built-in video, bindings and DCAs (§3.28), sampler groups
 (§3.27), persistent cues (§3.29), fader linking with fader-start/stop, fades and
 lanes, closed-loop cues, prepare/commit with headers/footers, state solver with
 waypoints, timecode chase+generate, Mackie surface profile, tablet client,
-plugin rack with channels as slots (§3.18), XML document + schema.
+plugin rack with channels as slots (§3.18), spectral waveform colouring (§3.30),
+XML document + schema.
 
 **v1.x** — further surface profiles (HUI, OSC, Icon/Behringer/PreSonus, Stream
 Deck, SpaceMouse), script nodes, engine redundancy, experiment protocol runner,
@@ -2012,6 +2085,9 @@ measure); the bypassed stack in a rack channel (§3.18); a group carrying a
 persistent section, the running-pane kill suspending a persistent assertion, and
 Esc as a pause on persistent media (§3.29).
 
+Added 2026-09-09: authored colour at idle and timbre while sounding, as a
+layout option (§3.30).
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -2020,12 +2096,21 @@ Mackie vs HUI first — first week with the D700.
 
 - **One playing slot per track?** Whether the launcher stops a track's playing
   clip when another slot on the same track is launched. Decides the sampler
-  claim shape (§3.25) and comes before Phase 4's allocator.
+  claim shape (§3.25) and comes before Phase 4's allocator. **Answered** (M16,
+  PR 4.1, 2026-09-08): no — both slots play and sum. The claim shape is now a
+  decision and not a measurement (§3.25).
 - **The bypassed stack at load** (§3.18): instantiation time and memory for a
   realistic stack per channel, in-process and through the proxy.
 - **Pause and resume at an offset** (§3.29): whether a relaunch at a remembered
   position is clean when the offset is set in prepare, and when a playing clip
   is nudged instead — the same question load-to-time asks.
+- **The analysis cost** (§3.30, added 2026-09-09): seconds of work per minute
+  of audio at the chosen window and hop, and the cache's size on disk, on the
+  Windows box and the Mac mini — which decides whether import can afford it
+  silently.
+- **The colour write rate the D700 tolerates** over HID (§3.30): the interval
+  below which back-to-back colour writes fault, so the profile's rate limit is
+  a number and not a guess.
 
 ---
 
@@ -2052,6 +2137,7 @@ notice nothing; the designer should notice everything.
 | **refresh** | GO on a running sampler group: strips lost to eviction are re-claimed (§3.27) |
 | **DCA** | a trim object that cues and groups are assigned to; nestable (§3.28) |
 | **persistent cue** | a cue asserted at every trigger and relaunched if it is not running (§3.29) |
+| **timbre** | a run's spectral colour at its current position — hue from the centroid, saturation from flatness (§3.30) |
 
 ---
 

@@ -234,6 +234,12 @@ designed.
 - **Dark UI mandatory** (PRD §2). Layout presets design/tech/show; show mode
   locks the layout and disables editing.
 - Undo histories per domain, crash-safe autosave.
+- **Spectral colour** (PRD §3.30, 2026-09-09): the analysis cache built at
+  import beside the media, keyed by content hash, stored as a pyramid and
+  looked up through 4.1's `MediaInfo`; the coloured waveform in the editor and
+  the Gogo bar, per range; `/godot/run/<id>/timbre` published from the tick
+  thread. The sine / noise / sweep check on the cache comes before any of it is
+  drawn, and the analysis cost is measured (PRD §6.11).
 
 **Done when:** the author runs a simple show from the desktop build in a
 rehearsal room.
@@ -273,6 +279,10 @@ whatever is needed to exercise the engine and no more.
 - **DCAs as objects** (PRD §3.28): membership as a mark on the member with its
   mapping; nested DCAs; a cycle refused at edit time; composition by parameter
   type.
+- **Timbre on the strip** (PRD §3.30): the layout binds a run's timbre to the
+  strip's colour cell; the D700 profile takes the HID route, quantised and
+  rate-limited to what the surface is measured to tolerate (PRD §6.11), and
+  declares the MCU eight-colour route unfit for it.
 
 **Done when:** a fader-start cue fires from the D700 with the audio already
 armed; a group DCA follows automation on motorised faders; the scribble strips
@@ -284,7 +294,8 @@ groups trims both.
 package; banking policy as it emerges; the OLED field layout he wants; the
 *(proposed)* items of §3.27 and §3.9a — `stop` as a second-press value, the
 dwell for faders without touch, the second-surface rule, release-less triggers
-on a hold clip, members pinning their strips.
+on a hold clip, members pinning their strips; the voices claim shape now that
+M16 has answered (PRD §3.25); the idle-colour policy of §3.30.
 
 ---
 
