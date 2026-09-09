@@ -137,9 +137,11 @@ these**, and it is worth writing before the phase feels finished rather than aft
 
 ## 5. The debts, named
 
-- **The equivalence test** (§13.8): the solver's plan at tick T against what a session's own log
-  says was live at T, over the four deterministic fixtures. Not written. It is the stated reason to
-  trust the solver, and the largest piece of confidence left on the table.
+- **The equivalence test over the committed fixtures.** The test exists and passes — `equivalence:
+  what the solver says is sounding is what the scheduler sounds`, and its sequence twin — but it
+  runs against a rig whose arithmetic is in the test rather than against `chain`, `rounds`,
+  `ambience` and `group-fade`. Extending it to those means reading a log back and naming moments
+  from it, which is a day's work and worth it before the solver is changed.
 - **`ShowDocument::findById` is a depth-first walk per call**, and M18 measured it at 131 ms of a
   208 ms analysis on a 500-cue show. Its own comment asks for a cache invalidated in one place, and
   `revision()` is now that place.

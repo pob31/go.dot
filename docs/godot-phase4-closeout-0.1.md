@@ -94,12 +94,13 @@ and are not built.
   decision re-injected from the log rather than re-decided, so what a fixture would pin is the
   record shape rather than the behaviour; the black-box session replays record for record and covers
   the same ground end to end. They are named here rather than quietly dropped.
-- **The equivalence test** (§13.8's own words: the solver's plan at tick T against what a session's
-  log says was live at T). The solver is checked against the scheduler *indirectly* — the Phase 4
-  driver jumps into a running show and the render agrees with the plan to the sample — but the
-  systematic version over the four deterministic fixtures is not written. It is the single largest
-  piece of confidence left on the table, and it is where Phase 5 should start if it touches the
-  solver at all.
+- **The equivalence test over the committed replay FIXTURES.** The test itself is written and
+  passing — the scheduler is run forward through a scene and the solver is asked what should be
+  sounding at the same moment, on a timeline group and on an automatic sequence, at three moments
+  each — but it runs against a rig rather than against `chain`, `rounds`, `ambience` and
+  `group-fade`. Those four are memo-and-media shows whose logs would have to be read back and whose
+  moments would have to be named from the log; what a rig gives instead is a show whose arithmetic
+  is in the test. The version over the fixtures is worth having and is not written.
 
 ---
 
@@ -116,6 +117,13 @@ numbers are in the commit messages and in namespace draft §13.14.
 | **M19** | a prepared header against the mock target | the block settles **1 tick** after the pointer lands, with one read-before-write round trip per anticipatable node |
 | **M20** | `solve` over a 500-cue show | **17.7 ms** per call in Debug with iterator debugging — roughly an order of magnitude above the shipped build. The node is capped at 5 Hz and a drag re-solves at the drag's own rate, so what it has to fit inside is a gesture rather than a tick. 40 distinct addresses out of 167 network cues |
 | **M21** | the observation sweep, in the two shapes it could take | **per address, by two orders of magnitude.** One subtree GET of WFS-DIY's capture is 1.09 MB and 2 480 nodes and costs **135 ms** to digest — nearly seven ticks, every second. Forty single-value replies cost **0.6 ms**, three per cent of one tick. Break-even is past eight thousand written addresses, more than the capture holds |
+
+**And one thing the phase set out to prove and did.** §13.8's claim — *a solver that disagrees
+with the scheduler is wrong by definition* — is now a test rather than an argument: the scheduler is
+run forward through a scene and the solver is asked, from the show's own arithmetic and not from the
+scheduler's state, what should be sounding at that moment. They agree at six independent moments
+across a timeline group and an automatic sequence, including the two where more than one cue is
+sounding at once.
 
 **What the measurements changed, rather than confirmed.** M16 falsified the guess §3.25's sampler
 claim was built on and is now written into the PRD. M17 made load-to-time's landing exact and

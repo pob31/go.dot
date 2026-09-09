@@ -3717,6 +3717,281 @@ namespace
     };
 }
 
+//==============================================================================
+namespace
+{
+    /*  RUNS THE SCHEDULER FORWARD, PLAYING THE AUDIO SIDE'S OWN PART.
+
+        `FakePlayer` is a script rather than a simulation: it reports a track as
+        playing only when a case says so, because every other case in this file
+        decides for itself when a cue starts and stops - which is right for a
+        case about a stop and useless for a case about a show running by itself.
+
+        So this plays the two halves the audio side would: a launched run's
+        track starts sounding, and a run whose material has run out stops. Both
+        are what the engine LOOKS for - `observeEdges` ends a run on the falling
+        edge of `isPlaying` - so the scheduler learns it the way it always does
+        and no test-only path into the engine is opened.
+
+        THE ERASES COME BEFORE THE INSERTS, in two passes over one tick, because
+        a sequence hands the next member the track the last one just gave back:
+        one pass would silence the new run on the tick it started. */
+    void runOn (JumpRig& rig, std::int64_t until, double material,
+                std::map<std::string, std::int64_t>& since)
+    {
+        const auto ticksOfMaterial = static_cast<std::int64_t> (material * 50.0);
+
+        while (rig.tick < until)
+        {
+            rig.audio.completeArms (rig.engine);
+
+            for (const auto& run : rig.runs.all())
+            {
+                if (run.kind != "media" || run.isFinished() || run.track < 0)
+                    continue;
+
+                const auto found = since.find (run.id);
+
+                if (found != since.end() && rig.tick - found->second >= ticksOfMaterial)
+                    rig.audio.playing.erase (run.track);
+            }
+
+            for (const auto& run : rig.runs.all())
+            {
+                if (run.kind != "media" || run.isFinished() || run.track < 0
+                     || run.state != cue::runState::playing)
+                    continue;
+
+                if (since.find (run.id) == since.end())
+                {
+                    since.emplace (run.id, rig.tick);
+                    rig.audio.playing.insert (run.track);
+                }
+            }
+
+            rig.tickOnce();
+        }
+    }
+}
+
+//==============================================================================
+/*  THE EQUIVALENCE TEST: the solver against the scheduler, on one show.
+
+    §13.8's own sentence, and the stated reason to trust any of this: "a solver
+    that disagrees with the scheduler is wrong by definition". Everything else
+    in this file asks the solver what it thinks; this asks whether what it
+    thinks is what actually happens.
+
+    HOW IT AVOIDS BEING CIRCULAR, which is the whole difficulty. The moment is
+    named by the DOCUMENT's own arithmetic - a timeline group whose members sit
+    at nought, two and ten seconds, each four seconds long, so "three seconds
+    into the scene" is a fact about the show and not about either implementation.
+    Then two independent things are asked about that moment: the SCHEDULER is
+    run forward to it and its live runs read off the run table, and the SOLVER is
+    asked what should be sounding there. Neither is derived from the other.
+
+    WHY A TIMELINE GROUP. Its members overlap, so the answer at three seconds is
+    two cues rather than one - and a solver that simply reported "the cue you
+    aimed at" would pass a sequence and fail this. Two of the three moments below
+    have more than one thing sounding for exactly that reason.
+*/
+TEST_CASE ("equivalence: what the solver says is sounding is what the scheduler sounds")
+{
+    struct Moment
+    {
+        const char* what;
+        double sceneSeconds;      ///< where the show is, in the scene's own time
+        const char* aimAt;        ///< the member to aim at
+        double offset;            ///< how far into that member
+    };
+
+    JumpRig rig;
+
+    /*  The scene is a timeline group: `early` at nought, `middle` at two,
+        `late` at ten, each four seconds of `thunder.wav`. The three moments are
+        chosen a whole second clear of every boundary, so that neither answer
+        depends on which side of a tick a launch landed. */
+    const Moment moments[] {
+        { "one second in: the first member alone",         1.0,  nullptr, 1.0 },
+        { "three seconds in: the first two overlap",       3.0,  nullptr, 1.0 },
+        { "eleven seconds in: only the last is left",     11.0,  nullptr, 1.0 },
+    };
+
+    const std::string members[] { rig.early, rig.middle, rig.late };
+    const double starts[] { 0.0, 2.0, 10.0 };
+    constexpr double material = 4.0;
+
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.submitAndTick ("go").applied >= 1);
+
+    const auto enteredAt = rig.tick;
+
+    /*  HOW LONG EACH RUN HAS BEEN SOUNDING, kept by the CASE and not by one
+        window of it: a run first seen at one and a half seconds is four seconds
+        old at five and a half, and a map that started again each time would
+        have every cue for ever young and nothing would ever end. */
+    std::map<std::string, std::int64_t> playedSince;
+
+    for (const auto& moment : moments)
+    {
+        INFO (moment.what);
+
+        /*  THE SCHEDULER, RUN FORWARD. Arms are completed as the disk would,
+            every tick, because a run that never armed never launches and the
+            question here is about a show that is running rather than about a
+            rig that is stuck. */
+        const auto until = enteredAt
+                             + static_cast<std::int64_t> (moment.sceneSeconds * 50.0);
+
+        runOn (rig, until, material, playedSince);
+
+        std::set<std::string> scheduled;
+
+        for (const auto& run : rig.runs.all())
+            if (run.kind == "media" && ! run.isFinished()
+                 && run.state == cue::runState::playing)
+                scheduled.insert (run.cue);
+
+        /*  THE SOLVER, ASKED ABOUT THE SAME MOMENT. The aim is whichever member
+            the document says is sounding then, and how far into it - arithmetic
+            over the show's own offsets, which is what an operator dragging the
+            aim is doing by hand. */
+        std::string aimCue;
+        auto aimOffset = 0.0;
+
+        for (std::size_t n = 0; n < 3; ++n)
+            if (moment.sceneSeconds >= starts[n]
+                 && moment.sceneSeconds < starts[n] + material)
+            {
+                aimCue = members[n];
+                aimOffset = moment.sceneSeconds - starts[n];
+            }
+
+        REQUIRE_FALSE (aimCue.empty());
+
+        const auto plan = cue::solve (rig.document, &rig.durations, nullptr,
+                                      { rig.listId, aimCue, aimOffset });
+
+        REQUIRE (plan.ok);
+
+        /*  MEDIA AGAINST MEDIA. The plan carries the target's GROUPS as well,
+            outermost first, because a member sounds as part of its scene - so
+            the two sides are made comparable by asking each for the same thing
+            rather than by quietly dropping something from one of them. That the
+            scene is in the plan is checked below, where it means something. */
+        std::set<std::string> solved;
+
+        for (const auto& planned : plan.runs)
+            if (planned.when == cue::planned::sounding
+                 && rig.document.findById (planned.cue).getType().toString() == "Media")
+                solved.insert (planned.cue);
+
+        const auto spell = [] (const std::set<std::string>& set)
+        {
+            std::string out;
+
+            for (const auto& cueId : set)
+                out += (out.empty() ? "" : " ") + cueId;
+
+            return out.empty() ? std::string ("nothing") : out;
+        };
+
+        INFO (moment.what << " | the scheduler sounds " << spell (scheduled)
+               << " | the solver says " << spell (solved));
+
+        CHECK (solved == scheduled);
+
+        /*  AND THE SCENE COMES WITH ITS MEMBER. A jump into a scene has to
+            build the scene, or the scheduler it hands the tree to would spawn
+            a second one over the top. */
+        const auto carriesTheScene =
+            std::any_of (plan.runs.begin(), plan.runs.end(),
+                         [&rig] (const cue::PlannedRun& planned)
+                         { return planned.cue == rig.scene; });
+
+        CHECK (carriesTheScene);
+    }
+}
+
+TEST_CASE ("equivalence: the solver agrees about an automatic sequence too")
+{
+    /*  The other chain kind, and it fails differently: a sequence's members
+        follow one another rather than overlapping, so what has to agree is
+        WHICH one - and getting the arithmetic one member out is the mistake
+        that would not show up in a timeline at all.
+
+        A sequence's member starts when the one before it ENDS, which the
+        document knows: four seconds of material each, so member n starts at
+        4n seconds. Two ticks of scheduler latency sit between a member's end
+        and the next one's launch (§11.5's `sequenceGapTicks`), which is why the
+        moments below are a second clear of every join. */
+    JumpRig rig;
+
+    //  The same three cues, re-made as an automatic SEQUENCE rather than a
+    //  timeline: the pre-waits go, and the mode with them.
+    rig.document.setAttribute ("/godot/cue/" + rig.scene + "/mode", "sequence");
+    rig.document.setAttribute ("/godot/cue/" + rig.scene + "/advance", "auto");
+
+    for (const auto& member : { rig.early, rig.middle, rig.late })
+        rig.document.setAttribute ("/godot/cue/" + member + "/preWait", "0");
+
+    rig.setStandby (rig.scene);
+    REQUIRE (rig.submitAndTick ("go").applied >= 1);
+
+    const auto enteredAt = rig.tick;
+    const std::string members[] { rig.early, rig.middle, rig.late };
+    std::map<std::string, std::int64_t> playedSince;
+
+    for (std::size_t n = 0; n < 3; ++n)
+    {
+        //  A second and a half into member n, which is 4n + 1.5 in scene time.
+        const auto seconds = 4.0 * static_cast<double> (n) + 1.5;
+        const auto until = enteredAt + static_cast<std::int64_t> (seconds * 50.0);
+
+        runOn (rig, until, 4.0, playedSince);
+
+        std::set<std::string> scheduled;
+
+        for (const auto& run : rig.runs.all())
+            if (run.kind == "media" && ! run.isFinished()
+                 && run.state == cue::runState::playing)
+                scheduled.insert (run.cue);
+
+        const auto plan = cue::solve (rig.document, &rig.durations, nullptr,
+                                      { rig.listId, members[n], 1.5 });
+
+        REQUIRE (plan.ok);
+
+        /*  MEDIA AGAINST MEDIA. The plan carries the target's GROUPS as well,
+            outermost first, because a member sounds as part of its scene - so
+            the two sides are made comparable by asking each for the same thing
+            rather than by quietly dropping something from one of them. That the
+            scene is in the plan is checked below, where it means something. */
+        std::set<std::string> solved;
+
+        for (const auto& planned : plan.runs)
+            if (planned.when == cue::planned::sounding
+                 && rig.document.findById (planned.cue).getType().toString() == "Media")
+                solved.insert (planned.cue);
+
+        const auto spell = [] (const std::set<std::string>& set)
+        {
+            std::string out;
+
+            for (const auto& cueId : set)
+                out += (out.empty() ? "" : " ") + cueId;
+
+            return out.empty() ? std::string ("nothing") : out;
+        };
+
+        INFO ("member " << n << ", " << seconds << " s in"
+               << " | the scheduler sounds " << spell (scheduled)
+               << " | the solver says " << spell (solved));
+
+        CHECK (solved == scheduled);
+    }
+}
+
 TEST_CASE ("jump: the scene is rebuilt mid-way, with every member accounted for")
 {
     /*  A member that is missing is a member the group spawns a second time; one
