@@ -197,10 +197,14 @@ def check_on(device: str, locale: "str | None", report: Report) -> bool:
                          "and the clock being counted is the device's")
 
             first = int(value_at(server.http_port, "/godot/engine/tick"))
-            time.sleep(0.5)
 
-            report.check(int(value_at(server.http_port, "/godot/engine/tick")) > first,
-                         "and it keeps ticking")
+            #  Waited for rather than slept for: what is being asked is whether
+            #  the tick moves, and a fixed half-second is a guess about how fast
+            #  a loaded runner publishes.
+            moved = common.wait_until(
+                lambda: int(value_at(server.http_port, "/godot/engine/tick")) > first)
+
+            report.check(bool(moved), "and it keeps ticking")
 
             return True
 

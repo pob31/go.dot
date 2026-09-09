@@ -195,6 +195,37 @@ def http_get(port: int, target: str) -> "tuple[int, str]":
     return status, body.decode("utf-8", "replace")
 
 
+def wait_until(predicate, timeout: float = REPLY_TIMEOUT, interval: float = 0.02):
+    """Polls `predicate` until it returns something truthy, or the deadline.
+
+    Returns the truthy value, or None.
+
+    THE ONE WAY TO WAIT. A datagram crosses a socket, joins a queue, is applied
+    by the tick thread and published in the next snapshot; on a workstation that
+    is a few milliseconds and on a loaded CI runner it is however long the
+    runner takes. A fixed sleep followed by one read is therefore a guess about
+    a machine nobody has measured, and every guess is right until the day it is
+    not - which is what "flaky" means. Polling with a deadline asks for the
+    thing rather than for the time, and only a genuine fault runs the deadline
+    out.
+    """
+    deadline = time.monotonic() + timeout
+
+    while True:
+        try:
+            value = predicate()
+        except (HarnessError, OSError, ValueError, KeyError, IndexError, TypeError):
+            value = None
+
+        if value:
+            return value
+
+        if time.monotonic() >= deadline:
+            return None
+
+        time.sleep(interval)
+
+
 def http_json(port: int, target: str):
     status, body = http_get(port, target)
 

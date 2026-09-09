@@ -235,11 +235,18 @@ def run(locale: "str | None") -> int:
                 # -- 6. a rejection is reportable ----------------------------
                 common.send_udp(server.osc_port,
                                 common.osc_encode("/godot/cmd/no/such/command"))
-                time.sleep(0.5)
 
-                errors = common.http_json(server.http_port,
-                                          "/godot/engine/errorCount?VALUE")
-                report.check(errors.get("VALUE", [0])[0] > 0,
+                #  Polled, not slept. This check failed on the Windows runner
+                #  after a flat half-second: the datagram had been received,
+                #  queued and applied, and the snapshot carrying the count had
+                #  simply not been published yet. The count is the thing being
+                #  waited for, so it is the thing that is waited for.
+                counted = common.wait_until(
+                    lambda: common.http_json(server.http_port,
+                                             "/godot/engine/errorCount?VALUE")
+                                  .get("VALUE", [0])[0] > 0)
+
+                report.check(bool(counted),
                              "an unknown command is counted as an error",
                              "OSC has no reply channel, so errorCount and "
                              "lastError are the only way a client can find out")
@@ -255,7 +262,12 @@ def run(locale: "str | None") -> int:
                 # -- 8. save -------------------------------------------------
                 common.send_udp(server.osc_port,
                                 common.osc_encode("/godot/cmd/document/save"))
-                time.sleep(1.0)
+
+                #  A save is a datagram, a tick and a file write, and the file
+                #  is what step 9 reads - so the file is what is waited for.
+                common.wait_until(
+                    lambda: "wrote-by-somebody-else"
+                              in (bundle / "show.xml").read_text(encoding="utf-8"))
             finally:
                 client.close()
 
