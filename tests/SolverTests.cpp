@@ -494,11 +494,22 @@ TEST_CASE ("solve: inside a timeline group, what else is sounding is arithmetic"
         std::vector<std::string> out;
 
         for (const auto& run : plan.runs)
-            if (! run.ancestors.empty())
+            if (! run.ancestors.empty() && run.when == cue::planned::sounding)
                 out.push_back (run.cue);
 
         std::sort (out.begin(), out.end());
         return out;
+    };
+
+    /*  And the whole chain, whatever each member is doing, because a jump has
+        to build all of it. */
+    const auto planFor = [] (const cue::Plan& plan, const std::string& cueId)
+    {
+        for (const auto& run : plan.runs)
+            if (run.cue == cueId)
+                return run.when;
+
+        return std::string {};
     };
 
     /*  ONE SECOND INTO THE SECOND MEMBER IS THREE INTO THE SCENE: the first is
@@ -519,6 +530,20 @@ TEST_CASE ("solve: inside a timeline group, what else is sounding is arithmetic"
     for (const auto& run : plan.runs)
         if (run.cue == early)
             CHECK (run.offset == doctest::Approx (3.0));
+
+    /*  AND THE WHOLE CHAIN IS IN THE PLAN, not only the noisy part: the third
+        member has not started and the scheduler that takes this tree over will
+        look for it. A member that is missing is a member the group spawns a
+        second time. */
+    CHECK (planFor (plan, late) == cue::planned::due);
+
+    const auto later = rig.solve (middle, 3.0);
+    CHECK (planFor (later, early) == cue::planned::finished);
+    CHECK (planFor (later, late) == cue::planned::due);
+
+    for (const auto& run : later.runs)
+        if (run.cue == late)
+            CHECK (run.startsIn == doctest::Approx (5.0));   // ten seconds in, from five
 }
 
 //==============================================================================

@@ -174,6 +174,20 @@ namespace wfg::cue
         std::string chain;
         double from = 0.0;
         double to = 0.0;
+
+        /*  WHETHER THE STANDBY POINTER MAY STAND HERE.
+
+            §3.5, and PR 3.4 widened it: the pointer may sit at the top of a
+            list or inside a MANUAL SEQUENCE group, because those are the ones
+            whose members start on GO. It may not sit inside a timeline or an
+            automatic group - nobody presses anything there - nor in a header or
+            a footer, which are a group's own preparation and release rather
+            than places an operator steps through.
+
+            The solver needs it to say where a jump leaves the pointer: "the
+            next row" is the wrong answer when the next row is a member of the
+            timeline scene the jump has just landed in. */
+        bool onManualPath = false;
     };
 
     /** The rows a group spans, so that "the group has ended" is a row. */
@@ -240,7 +254,8 @@ namespace wfg::cue
 
         void place (const juce::ValueTree& node,
                     const std::vector<std::string>& ancestors,
-                    const Timing& timing)
+                    const Timing& timing,
+                    bool insideARole = false)
         {
             const auto element = node.getType().toString().toStdString();
             const auto id = node[idProperty].toString().toStdString();
@@ -262,6 +277,20 @@ namespace wfg::cue
                 as empty and prove that nothing ever overlaps it, which is
                 the one direction this analysis is not allowed to be wrong
                 in. So it falls back to rows. */
+            /*  Every ancestor a manual sequence, and not inside a header or a
+                footer. See `Placed::onManualPath`. */
+            entry.onManualPath = ! insideARole;
+
+            for (const auto& groupId : ancestors)
+            {
+                const auto group = findGroup (groupId);
+
+                if (! group.isValid()
+                     || reader.text (group, "group", "mode") == "timeline"
+                     || reader.text (group, "group", "advance") == "auto")
+                    entry.onManualPath = false;
+            }
+
             entry.timed = timing.known && length.has_value();
             entry.chain = entry.timed ? timing.origin : std::string {};
             entry.from = timing.at;
@@ -288,7 +317,7 @@ namespace wfg::cue
             if (header.isValid())
                 for (const auto& child : header)
                     if (isCueElement (child.getType().toString()))
-                        place (child, inner, Timing {});
+                        place (child, inner, Timing {}, true);
 
             double running = memberTiming.known ? memberTiming.at : 0.0;
             bool chainAlive = memberTiming.known;
@@ -309,7 +338,7 @@ namespace wfg::cue
                                 + reader.number (child, "cue", "preWait");
                 }
 
-                place (child, inner, here);
+                place (child, inner, here, insideARole);
 
                 if (chainAlive && ! timeline)
                 {
@@ -336,7 +365,7 @@ namespace wfg::cue
             if (footer.isValid())
                 for (const auto& child : footer)
                     if (isCueElement (child.getType().toString()))
-                        place (child, inner, Timing {});
+                        place (child, inner, Timing {}, true);
 
             Extent extent;
             extent.first = entry.row;
@@ -390,6 +419,17 @@ namespace wfg::cue
             inside.at = entry.timed ? entry.from
                                     : reader.number (group, "cue", "preWait");
             return inside;
+        }
+
+        /*  A group already placed, by identifier. A group is placed before it
+            recurses into its members, so this never looks forward. */
+        juce::ValueTree findGroup (const std::string& groupId) const
+        {
+            for (const auto& entry : placed)
+                if (entry.id == groupId)
+                    return entry.node;
+
+            return {};
         }
 
         static bool hasCuesIn (const juce::ValueTree& group, const char* role)

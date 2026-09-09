@@ -2596,6 +2596,40 @@ so there was no entry point to measure and none to call. Spike 02's shape still 
 is a graph rebuild and belongs in prepare — and a nudge path is a thing to add, and measure, when
 something wants it.
 
+#### What PR 4.8 built, and the sentence it had to correct
+
+**"Positionally after the target" cannot mean the next row.** §3.5 lets the pointer sit at the top of
+a list or inside a **manual sequence** group and nowhere else, because those are the only places a GO
+means anything — so a jump into the middle of a timeline scene must leave the operator **after the
+whole scene**, not on its third member, where nothing they pressed would do anything. The walk now
+answers `onManualPath` for every cue and the solver takes the first row after the target that says
+yes. It is also what the operator wants: the scene is running, and the next press is what comes
+after it.
+
+**The plan describes the whole chain, not only the noisy part.** A `PlannedRun` says whether it is
+`sounding`, `finished` or `due`, because a jump has to build the tree the scheduler is about to take
+over: a member missing from the *due* end is one the group spawns a second time, and one missing from
+the *finished* end is a group that thinks it has not started.
+
+**`Run` gains `startOffset` and `startRange`**, both engine state and never the document (§4.10): the
+show says where a cue starts and `media/startOffset` is that decision; these are where an operator
+jumped to. `launchIfDue` launches slot `startRange` rather than slot nought, which is how a jump
+lands in the right range of a playlist — every run the scheduler makes still has nought, so nothing
+about a GO changed.
+
+**What the values do here is a mount-table diff, not a read-back.** The plan's values are compared
+with what Go.dot last wrote and only the differences are sent. That is a real minimal correction for
+the common case and it is **not** §3.13's full sentence: a value somebody moved by hand on the desk
+is not in that comparison and is not corrected. The bulk read-back — asking a mount for the plan's
+addresses and diffing against what the desk actually holds — is the next PR, and this one does not
+pretend to be it.
+
+**Not here yet: the in-range offset.** A jump into a ranged cue enters the right range at that
+range's start rather than partway into it. The arm-side offset M17 measured applies to the whole-file
+arm, which `validate()` guarantees is the only place it can — a `startOffset` beside a `Range` is
+refused, because a cue with ranges plays its ranges. Landing partway into a range needs `armRangeInto`
+to shorten and shift one slot's clip, which is an audio-side change with a measurement of its own.
+
 ### 13.10 The step history — the waypoints nobody has to keep (decision R)
 
 §3.13 keeps manual waypoints available "as a way to force a divergent world back into agreement",

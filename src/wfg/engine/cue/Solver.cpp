@@ -196,9 +196,17 @@ namespace wfg::cue
         /*  THE POINTER LANDS AFTER THE TARGET, positionally (§3.5): a jump puts
             the operator where the next GO would take the show on, which is what
             "take it back to cue 12" leaves them wanting. */
+        /*  THE NEXT PLACE THE POINTER MAY STAND, which is not always the next
+            row. §3.5 lets it sit at the top of a list or inside a manual
+            sequence group and nowhere else - so a jump into the middle of a
+            timeline scene leaves the pointer after the SCENE, not on the
+            scene's third member, where nobody could press anything. */
         for (const auto& entry : walk.placed)
-            if (entry.row == target->row + 1)
+            if (entry.row > target->row && entry.onManualPath)
+            {
                 plan.standby = entry.id;
+                break;
+            }
 
         /*  Whether the target itself has fired. -1 means the pointer is ON it
             and nothing of it has happened, which is a different position from
@@ -399,12 +407,33 @@ namespace wfg::cue
                          || ! read.flag (entry.node, "cue", "enabled"))
                         continue;
 
-                    if (wasStopped (entry.id) || ! (entry.from <= at && at < entry.to))
+                    if (wasStopped (entry.id))
                         continue;
 
                     PlannedRun beside;
                     beside.cue = entry.id;
                     beside.ancestors = entry.ancestors;
+
+                    /*  THE WHOLE CHAIN AND NOT ONLY THE NOISY PART. A jump has
+                        to build the scene the scheduler is about to take over,
+                        and a member missing from it is one the group will spawn
+                        a second time - or, missing from the finished end, a
+                        group that thinks it has not started. */
+                    if (entry.to <= at)
+                    {
+                        beside.when = planned::finished;
+                        plan.runs.push_back (beside);
+                        continue;
+                    }
+
+                    if (at < entry.from)
+                    {
+                        beside.when = planned::due;
+                        beside.startsIn = entry.from - at;
+                        plan.runs.push_back (beside);
+                        continue;
+                    }
+
                     placeInRanges (read, entry.node, at - entry.from, beside, plan.confused);
                     plan.runs.push_back (beside);
                 }
@@ -480,7 +509,9 @@ namespace wfg::cue
 
             out += n == 0 ? "" : ", ";
             out += "{\"cue\": " + quoted (run.cue)
+                     + ", \"when\": " + quoted (run.when)
                      + ", \"offset\": " + osc::formatDouble (run.offset)
+                     + ", \"startsIn\": " + osc::formatDouble (run.startsIn)
                      + ", \"range\": " + std::to_string (run.range)
                      + ", \"pass\": " + std::to_string (run.pass)
                      + ", \"in\": [";

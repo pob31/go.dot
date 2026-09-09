@@ -899,6 +899,7 @@ namespace
 
         parameters.setMediaDurations (&durations);
         parameters.setListState (&runner.listState());
+        runner.setMediaDurations (&durations);
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;
@@ -1503,6 +1504,7 @@ namespace
 
         parameters.setMediaDurations (&durations);
         parameters.setListState (&runner.listState());
+        runner.setMediaDurations (&durations);
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;

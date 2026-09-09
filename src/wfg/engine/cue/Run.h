@@ -467,6 +467,26 @@ namespace wfg::cue
         std::string restoreAddress;
         std::string restoreAtom;
 
+        /*  WHERE IN THE FILE THIS RUN BEGINS, BECAUSE SOMEBODY JUMPED THERE.
+
+            §3.13's load-to-time: an operator asks for the show as it was two
+            minutes into a scene, and the cue that was playing has to start two
+            minutes in. ENGINE STATE AND NEVER THE DOCUMENT (§4.10) - the show
+            says where a cue starts, and `media/startOffset` is that decision;
+            this is where an operator jumped to, which is a fact about a
+            rehearsal.
+
+            Nought means "wherever the cue says", which is every run that was
+            not made by a jump. */
+        double startOffset = 0.0;
+
+        /*  AND WHICH RANGE IT ENTERS. A cue with ranges is a playlist over one
+            file (§3.24) and each range is armed into its own launcher slot, so
+            landing in the middle of a scene means launching slot `r` rather
+            than slot nought - which is what every launch did before there was
+            anywhere else to jump to. */
+        int startRange = 0;
+
         //======================================================================
         /*  THE WAITS, IN TICKS, COPIED FROM THE CUE WHEN THE RUN IS CREATED.
 

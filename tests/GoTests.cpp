@@ -3578,6 +3578,243 @@ TEST_CASE ("preset: a mark on a group the cue is not inside warns and does nothi
     CHECK_FALSE (said());
 }
 
+//==============================================================================
+/*  THE JUMP: making a position true rather than only describing it.
+
+    PRD §3.13. `list.aim` asks what the show WOULD be somewhere; this makes it
+    so. One record, whose applied arguments carry every run identifier it drew,
+    because a replay never draws one of its own - and everything the jump does
+    happens inside the handler, in one drain, because a jump made of six records
+    would be a jump a replay could interleave differently.
+
+    THE THING TO KEEP HOLD OF while reading these: the scheduler is not told
+    about the jump. It finds a run tree that looks exactly like one it built
+    itself and carries on from the next tick - which is why the fields the tree
+    builder writes by hand are the ones the scheduler RE-READS, and why getting
+    one of them wrong is a group that ends after one round or draws a shuffle
+    from a seed the show never used.
+*/
+namespace
+{
+    /*  A scene worth jumping into: a timeline group whose three members sound
+        at nought, two and ten seconds, so a position picks out a different set
+        of them each time. */
+    struct JumpRig : Rig
+    {
+        JumpRig()
+        {
+            scene = document.createCue (listId, 2, "group", "Scene").id;
+            document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline");
+
+            early = memberOf (0, "One", "0");
+            middle = memberOf (1, "Two", "2");
+            late = memberOf (2, "Three", "10");
+
+            after = document.createCue (listId, 3, "memo", "After").id;
+
+            durations["thunder.wav"] = 4.0;
+            runner.setMediaDurations (&durations);
+        }
+
+        std::string memberOf (int index, const char* name, const char* preWait)
+        {
+            const auto id = document.createCue (scene, index, "media", name).id;
+            document.setAttribute ("/godot/cue/" + id + "/file", "thunder.wav");
+            document.setAttribute ("/godot/cue/" + id + "/preWait", preWait);
+            return id;
+        }
+
+        Engine::TickResult jumpTo (const std::string& cueId, double offset)
+        {
+            REQUIRE (engine.submit ("cli", "list.aim",
+                                    { osc::Value::string (listId),
+                                      osc::Value::string (cueId),
+                                      osc::Value::float64 (offset) }));
+            tickOnce();
+
+            return submitAndTick ("list.loadToTime", { osc::Value::string (listId) });
+        }
+
+        const cue::Run* liveRunOf (const std::string& cueId) const
+        {
+            for (const auto& run : runs.all())
+                if (run.cue == cueId && ! run.isFinished())
+                    return &run;
+
+            return nullptr;
+        }
+
+        std::map<std::string, double> durations;
+        std::string scene, early, middle, late, after;
+    };
+}
+
+TEST_CASE ("jump: the scene is rebuilt mid-way, with every member accounted for")
+{
+    /*  A member that is missing is a member the group spawns a second time; one
+        missing from the FINISHED end is a group that thinks it has not started.
+        So a jump five seconds into the scene has to produce all three. */
+    JumpRig rig;
+
+    CHECK (rig.jumpTo (rig.middle, 3.0).applied == 1);      // five seconds into the scene
+
+    /*  The group is playing, with the round and the loop count the scheduler
+        will re-read every tick. */
+    const auto* group = rig.liveRunOf (rig.scene);
+    REQUIRE (group != nullptr);
+    CHECK (group->state == cue::runState::playing);
+    CHECK (group->iterations == 1);
+    CHECK (group->round.size() == 3u);
+
+    /*  The first member is over, the second is sounding, the third is waiting
+        for the five seconds it has left. */
+    const auto* first = rig.runs.find (rig.runOf (rig.early));
+    REQUIRE (first != nullptr);
+    CHECK (first->isFinished());
+
+    const auto* second = rig.liveRunOf (rig.middle);
+    REQUIRE (second != nullptr);
+    CHECK (second->launchRequested);
+    CHECK (second->startOffset == doctest::Approx (3.0));
+
+    const auto* third = rig.liveRunOf (rig.late);
+    REQUIRE (third != nullptr);
+    CHECK (third->state == cue::runState::waiting);
+
+    /*  Five seconds at fifty ticks a second, from the tick the jump was
+        applied on. */
+    CHECK (third->dueTick > rig.runs.find (rig.runOf (rig.middle))->launchRequestedAtTick);
+
+    /*  And every one of them is inside the scene. */
+    for (const auto* run : { first, second, third })
+        CHECK (run->parent == group->id);
+}
+
+TEST_CASE ("jump: the pointer lands after the target and the state position agrees")
+{
+    /*  §3.5 for the first, §3.13 for the second: after a jump the two pointers
+        agree, and the divergence afterwards is what a running view shows. */
+    JumpRig rig;
+
+    rig.jumpTo (rig.middle, 1.0);
+
+    /*  AFTER THE SCENE, AND NOT ON ITS THIRD MEMBER, which is the interesting
+        half. "Positionally after the target" has to mean the next place the
+        POINTER MAY STAND: §3.5 lets it sit at the top of a list or inside a
+        manual sequence group and nowhere else, because those are the only
+        places a GO means anything. A jump into the middle of a timeline scene
+        therefore leaves the operator after the whole scene - which is also what
+        they want, since the scene is now running and the next press is what
+        comes after it. */
+    CHECK (rig.standby() == rig.after);
+
+    const auto landed = rig.runner.listState().positionOf (rig.listId);
+    CHECK (landed.cue == rig.middle);
+    CHECK (landed.offset == doctest::Approx (1.0));
+}
+
+TEST_CASE ("jump: what it abandons is ended, and its voices come back")
+{
+    /*  A jump that left the old scene running would be two shows at once. Ended
+        the way `run.kill` ends a run - the whole descent - and with NO FOOTER,
+        because a footer is arbitrary and need not be an inverse: running one
+        would be arbitrary work fighting the values the jump is about to send. */
+    JumpRig rig;
+
+    //  Something playing that the jump does not want: the plain media cue at
+    //  the top of the list, fired from cold.
+    rig.setStandby (rig.mediaId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.mediaId).empty(); }));
+
+    const auto abandoned = rig.runOf (rig.mediaId);
+    REQUIRE (! abandoned.empty());
+    REQUIRE_FALSE (rig.runs.find (abandoned)->isFinished());
+
+    rig.jumpTo (rig.middle, 1.0);
+
+    CHECK (rig.runs.find (abandoned)->isFinished());
+
+    /*  AND IT IS NOT HOLDING A VOICE. `holdsTrack()` is a track and an
+        unfinished run, so ending it is the whole of letting go - and the track
+        itself is busy again a moment later, because the jump's own members took
+        it. Asking about the TRACK would therefore be asking the wrong question:
+        what matters is that this run has let go of it. */
+    CHECK_FALSE (rig.runs.find (abandoned)->holdsTrack());
+    CHECK (rig.runs.find (abandoned)->claims.empty());
+}
+
+TEST_CASE ("jump: the record carries every run it drew, and the signature accepts them")
+{
+    /*  The `go` guarantee, widened to a jump: a replay never draws a number of
+        its own, so every identifier the handler produced is in the record - and
+        the record it writes is one the arity check will let back in, or the
+        session could not reproduce itself. */
+    JumpRig rig;
+
+    rig.jumpTo (rig.middle, 1.0);
+
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+
+    const auto jump = std::find_if (parsed.records.begin(), parsed.records.end(),
+                                    [] (const auto& record)
+                                    {
+                                        return record.command == "list.loadToTime";
+                                    });
+
+    REQUIRE (jump != parsed.records.end());
+
+    /*  The list, then the group and its three members. */
+    REQUIRE (jump->args.size() == 5u);
+    CHECK (jump->args[0].getString() == rig.listId);
+
+    for (std::size_t n = 1; n < jump->args.size(); ++n)
+        CHECK (rig.runs.find (jump->args[n].getString()) != nullptr);
+
+    const auto* command = rig.engine.commands().find ("list.loadToTime");
+    REQUIRE (command != nullptr);
+
+    const auto check = CommandRegistry::checkArgs (*command, jump->args);
+    CHECK (check.ok);
+    CHECK (check.reason == "");
+}
+
+TEST_CASE ("jump: the scheduler carries the scene on from where the jump left it")
+{
+    /*  The whole point of building a tree the scheduler recognises. Nothing is
+        told about the jump: the third member's wait expires on its own and the
+        group launches it, because a group job re-reads the round from the run
+        every tick rather than keeping a copy. */
+    JumpRig rig;
+
+    rig.jumpTo (rig.middle, 1.0);           // three seconds into the scene
+
+    const auto third = rig.runOf (rig.late);
+    REQUIRE (! third.empty());
+    REQUIRE (rig.runs.find (third)->state == cue::runState::waiting);
+
+    /*  Seven seconds of ticks, and the member that was still to come has been
+        asked for. */
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (third)->state
+                                          != cue::runState::waiting; }, 500));
+
+    CHECK (rig.runs.find (third)->state != cue::runState::waiting);
+}
+
+TEST_CASE ("jump: with no aim there is nothing to make true")
+{
+    /*  A jump is `list.aim`'s question answered, so without a question it is
+        applied and does nothing - rather than jumping somewhere nobody asked
+        for. */
+    JumpRig rig;
+
+    const auto result = rig.submitAndTick ("list.loadToTime",
+                                           { osc::Value::string (rig.listId) });
+
+    CHECK (result.applied == 1);
+    CHECK (rig.runs.all().empty());
+}
+
 TEST_CASE ("M19: what the horizon costs, in ticks from the pointer landing")
 {
     /*  MEASUREMENT M19 (§13.14), the half of it this PR can take.

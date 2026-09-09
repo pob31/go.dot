@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/Solver.h>
 
 #include <wfg/engine/midi/MidiMessages.h>
 
@@ -755,6 +756,304 @@ namespace wfg::cue
     }
 
     //==============================================================================
+    std::vector<std::string> Runner::loadToTime (Engine& engine, doc::ShowDocument& editable,
+                                                 std::int64_t tick, const std::string& listId,
+                                                 const std::vector<std::string>& supplied)
+    {
+        std::vector<std::string> used;
+        std::size_t taken = 0;
+
+        const auto nextId = [&]
+        {
+            auto id = taken < supplied.size() ? supplied[taken] : std::string {};
+            ++taken;
+
+            if (id.empty())
+                id = ids.generate();
+
+            used.push_back (id);
+            return id;
+        };
+
+        const auto list = document.findById (listId);
+
+        if (! list.isValid())
+            return used;
+
+        const auto aim = lists.aimOf (listId);
+
+        if (! aim.isSet())
+            return used;
+
+        const auto plan = solve (document, durations, mounts,
+                                 { listId, aim.cue, aim.offset });
+
+        if (! plan.ok)
+            return used;
+
+        /*  WHOSE LIST A RUN BELONGS TO, by climbing its cue to the top. A jump
+            is scoped to one list (§13.5's cross-list rule read from the other
+            side), so this is what tells the sweep below what it may end. */
+        const auto listOf = [this] (const std::string& cueId)
+        {
+            for (auto node = document.findById (cueId); node.isValid();
+                 node = node.getParent())
+                if (node.getType().toString() == "List")
+                    return node[idProperty].toString().toStdString();
+
+            return std::string {};
+        };
+
+        //----------------------------------------------------------------------
+        /*  WHAT THE JUMP ABANDONS, ENDED BEFORE ANYTHING IS BUILT.
+
+            Every run of THIS list the plan does not name: the group runs and
+            their jobs, the members under them, the armed run at the old
+            standby. Ended the way `run.kill` ends one - the whole descent, and
+            NO FOOTER, because a footer is arbitrary and need not be an inverse.
+            Running one here would be arbitrary work fighting the values this is
+            about to send, and one that blocks on a fade would make the jump
+            wait for it.
+
+            THE HANDLER DOES IT ITSELF rather than submitting, exactly as a
+            revocation does (§13.6): the jump is one record, and a replay
+            reaches the same state from the identifiers already in it.
+
+            AND THE CLAIMS COME BACK IN THIS SAME DRAIN, which is why the sweep
+            is before the build rather than after: a claim released a tick later
+            would leave the plan's runs queued behind runs the jump had already
+            ended. */
+        std::vector<std::string> wanted;
+
+        for (const auto& wants : plan.runs)
+            wanted.push_back (wants.cue);
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.isFinished() || listOf (snapshot.cue) != listId)
+                continue;
+
+            if (std::find (wanted.begin(), wanted.end(), snapshot.cue) != wanted.end())
+                continue;
+
+            if (auto* run = runs.find (snapshot.id))
+            {
+                run->state = runState::done;
+                run->endedAtTick = tick;
+                run->prepare.clear();
+                runs.releaseSlotsOf (run->id);
+
+                if (run->track >= 0 && audio != nullptr)
+                    audio->stop (run->track);
+            }
+
+            for (auto& job : scheduled)
+                if (job.run == snapshot.id)
+                    job.retired = true;
+        }
+
+        //----------------------------------------------------------------------
+        /*  THE POINTER, positionally after the target (§3.5).
+
+            Through a WRITABLE document handed in by the command, because the
+            Runner reads the show and does not edit it - the same reference the
+            `go` handler uses to move standby, for the same reason: the pointer
+            is a decision somebody made and lives in the file, while everything
+            else this function touches is engine state. */
+        editable.setAttribute (standbyAddressOf (listId), plan.standby);
+
+        //----------------------------------------------------------------------
+        /*  AND THE TREE, OUTERMOST FIRST.
+
+            `RunTable::create` links a run into its parent's children only if
+            the parent already exists, so a group made after its member would
+            have a member it never heard of. The plan lists the target's
+            ancestors outermost first for exactly this reason. */
+        std::map<std::string, std::string> runFor;
+
+        for (const auto& wants : plan.runs)
+        {
+            const auto cue = document.findById (wants.cue);
+
+            if (! cue.isValid() || cue.getType().toString() != "Group")
+                continue;
+
+            const auto id = nextId();
+            const auto parent = wants.ancestors.empty()
+                                  ? std::string {}
+                                  : runFor[wants.ancestors.back()];
+
+            runs.create (id, wants.cue, "group", parent);
+            runFor[wants.cue] = id;
+
+            auto* run = runs.find (id);
+
+            if (run == nullptr)
+                continue;
+
+            run->state = runState::playing;
+            run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
+            run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
+
+            /*  TWO OF THESE HAVE TO BE WRITTEN BY HAND AND IT IS NOT OBVIOUS
+                WHICH. A run made by `create` leaves `iterations` at one and
+                `seed` at nought; `iterations` is otherwise set when a group is
+                FIRED and `seed` and `round` when a round is DRAWN, and a jump
+                does neither. A group adopted without them ends after one round,
+                or draws its next shuffle from a seed the show never used. */
+            run->iterations = static_cast<int> (numberOf (cue, "loops"));
+            run->seed = static_cast<std::uint64_t> (numberOf (cue, "seed"));
+            run->iteration = 0;
+            run->round = membersOf (cue);
+        }
+
+        //----------------------------------------------------------------------
+        /*  THEN THE CUES THAT MAKE A SOUND, each under the group it belongs to. */
+        for (const auto& wants : plan.runs)
+        {
+            const auto cue = document.findById (wants.cue);
+
+            if (! cue.isValid() || cue.getType().toString() == "Group")
+                continue;
+
+            const auto id = nextId();
+            const auto parent = wants.ancestors.empty()
+                                  ? std::string {}
+                                  : runFor[wants.ancestors.back()];
+
+            runs.create (id, wants.cue, kindOfCue (cue), parent);
+            runFor[wants.cue] = id;
+
+            auto* run = runs.find (id);
+
+            if (run == nullptr)
+                continue;
+
+            run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
+            run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
+
+            /*  ALREADY OVER. Its run exists and is `done` so that its group
+                knows it has been played - a member missing from the finished
+                end is a group that thinks it has not started. */
+            if (wants.when == planned::finished)
+            {
+                run->state = runState::done;
+                run->endedAtTick = tick;
+                continue;
+            }
+
+            /*  STILL TO COME, at its remaining offset. A timeline schedules
+                everything at entry, so the members after the aim are waiting
+                with a due tick rather than absent - absent, the group would
+                spawn them a second time. */
+            if (wants.when == planned::due)
+            {
+                run->state = runState::waiting;
+                run->dueTick = tick + ticksFor (wants.startsIn);
+                continue;
+            }
+
+            /*  AND THE ONES MAKING A NOISE. Armed with their launch asked for
+                and their offset on them: the arm applies it as the clip's own
+                offset, which M17 measured landing on the sample. */
+            run->startOffset = wants.offset;
+            run->startRange = std::max (wants.range, 0);
+            run->launchRequested = true;
+            run->launchRequestedAtTick = tick;
+
+            armMedia (engine, cue, id);
+        }
+
+        //----------------------------------------------------------------------
+        /*  AND THE JOBS THAT WILL CARRY IT ON.
+
+            The scheduler continues from here on the next tick, because a group
+            job re-reads the round from the run every tick rather than keeping a
+            copy - PR 3.5's finding, built so a prune could reach the round in
+            progress, and paying again here.
+
+            The job's own list of runs it has taken charge of is filled at this
+            moment too, because the loop that claims a child on sight does not
+            run on a job's first tick. */
+        for (const auto& wants : plan.runs)
+        {
+            const auto found = runFor.find (wants.cue);
+
+            if (found == runFor.end())
+                continue;
+
+            const auto cue = document.findById (wants.cue);
+
+            if (! cue.isValid() || cue.getType().toString() != "Group")
+                continue;
+
+            GroupJob job;
+            job.run = found->second;
+            job.phase = groupPhase::members;
+            job.phaseCues = membersOf (cue);
+            job.nextMember = job.phaseCues.size();
+
+            for (const auto* child : runs.childrenOf (job.run))
+            {
+                job.taken.push_back (child->id);
+                job.phaseRuns.push_back (child->id);
+
+                if (! child->isFinished() && child->state != runState::waiting)
+                    job.awaiting = child->id;
+            }
+
+            job.launched = job.phaseRuns.size();
+
+            /*  A SEQUENCE ADVANCES ON THE MEMBER IT IS WAITING FOR, so
+                `nextMember` is where the plan left off rather than the end of
+                the list - otherwise the chain would stop at the jump. */
+            if (textOf (cue, "mode") != "timeline")
+            {
+                const auto* awaited = runs.find (job.awaiting);
+                const auto at = awaited != nullptr
+                                  ? std::find (job.phaseCues.begin(), job.phaseCues.end(),
+                                               awaited->cue)
+                                  : job.phaseCues.end();
+
+                job.nextMember = at != job.phaseCues.end()
+                                   ? static_cast<std::size_t> (at - job.phaseCues.begin()) + 1
+                                   : job.phaseCues.size();
+            }
+
+            scheduled.push_back (job);
+        }
+
+        //----------------------------------------------------------------------
+        /*  AND THE VALUES: A MINIMAL CORRECTION, NOT A SHOTGUN BLAST (§3.13).
+
+            What is compared here is the mounted TREE - what Go.dot last wrote -
+            rather than what the desk currently holds, and the difference
+            matters: a value somebody moved by hand on the desk is not in this
+            comparison and will not be corrected. Reading the desk first is the
+            bulk read-back, which is the next PR and which this is deliberately
+            not pretending to be.
+
+            Sent through the ordinary write, so a replay reproduces it exactly
+            and, having no sender, does not move the rig. */
+        for (const auto& value : plan.values)
+        {
+            if (mounts != nullptr)
+                if (const auto* now = mounts->valueOf (value.address);
+                    now != nullptr && *now == value.value)
+                    continue;
+
+            engine.submit (origin::engine, "node.set",
+                           { osc::Value::string (value.address), value.value });
+        }
+
+        /*  WHERE IT LANDED, which is §3.13's second pointer. After a jump this
+            agrees with the aim; after the next GO it does not, and that
+            divergence is what a running view shows. */
+        lists.landedAt (listId, { aim.cue, aim.offset });
+
+        return used;
+    }
+
     std::vector<std::string> Runner::prepareStandby (Engine& engine, std::int64_t tick,
                                                      const juce::ValueTree& list,
                                                      const std::string& cueId,
@@ -1458,7 +1757,13 @@ namespace wfg::cue
             nothing has ever read it, so a show that asked to start two seconds
             in has always started at the top. Found by auditing §13's claims
             against the code rather than by anybody hearing it. */
-        request.startOffset = numberOf (cue, "startOffset");
+        /*  WHERE SOMEBODY JUMPED TO WINS OVER WHERE THE CUE SAYS IT STARTS,
+            and only because a jump is the more recent statement about this
+            particular run. The document's `startOffset` is a decision about
+            every performance; the run's is a decision about this rehearsal, and
+            §4.10 keeps them in different places for exactly that reason. */
+        request.startOffset = run->startOffset > 0.0 ? run->startOffset
+                                                     : numberOf (cue, "startOffset");
 
         /*  NO SLOT, and it is a refusal rather than a truncation. The graph is
             built with as many launcher slots as the show's widest cue has
@@ -3857,12 +4162,18 @@ namespace wfg::cue
             if (target - now < 2 * blockSize)
                 continue;
 
-            /*  SLOT NOUGHT UNTIL PR 3.9 KNOWS BETTER. A cue with no ranges
-                plays out of the first slot, which is what Phase 2 did without
-                having to say so; a ranged cue enters its first range, which is
-                the same slot. Which slot a LATER range sounds out of is the
-                range job's to say, and it does not exist yet. */
-            if (audio->launchAtSample (run->track, 0, target))
+            /*  SLOT NOUGHT UNLESS SOMEBODY JUMPED INTO A LATER RANGE.
+
+                A cue with no ranges plays out of the first slot, which is what
+                Phase 2 did without having to say so, and a ranged cue entering
+                its FIRST range is the same slot - so every run the scheduler
+                makes still launches slot nought and nothing about a GO has
+                changed. What is new is that a load-to-time can put a run
+                anywhere in the playlist (§3.24), and which slot it launches is
+                which range that is. */
+            const auto slot = run->startRange;
+
+            if (audio->launchAtSample (run->track, slot, target))
             {
                 run->launchRequested = false;
                 run->launchedAtSample = target;
@@ -3881,15 +4192,18 @@ namespace wfg::cue
                 if (const auto ranges = rangesOf (document.findById (run->cue));
                     ! ranges.empty())
                 {
+                    const auto at = std::min (static_cast<std::size_t> (std::max (slot, 0)),
+                                              ranges.size() - 1);
+
                     run->rangeStartedAtSample = target;
-                    run->passesWanted = ranges.front().loops;
-                    run->passSamples = samplesForRange (ranges.front(),
-                                                        audio->sampleRate());
+                    run->passesWanted = ranges[at].loops;
+                    run->passSamples = samplesForRange (ranges[at], audio->sampleRate());
                     run->boundaryPlacedAt = -1;
                     run->rangesFinished = false;
 
                     engine.submit (origin::engine, "run.range",
-                                   { osc::Value::string (run->id), osc::Value::int32 (0) });
+                                   { osc::Value::string (run->id),
+                                     osc::Value::int32 (static_cast<std::int32_t> (at)) });
                 }
 
                 /*  AND HOW LATE IT WAS, which until now nothing measured.
@@ -4436,6 +4750,49 @@ namespace wfg::cue
                             runner.listState().aimAt (listId,
                                                       { cueId, args[2].asDouble() });
                             return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  AND THE JUMP ITSELF, which is `list.aim`'s question made true.
+
+            ONE RECORD, whose applied arguments carry every run identifier it
+            drew in the order it drew them - the `go` pattern, because a replay
+            never draws one of its own. Everything the jump does is inside the
+            handler: what it abandons is ended, the pointer moves, the tree is
+            built and the values go out, all in one drain. A jump made of six
+            records would be a jump a replay could interleave differently.
+
+            IT TAKES NO POSITION OF ITS OWN and reads the list's aim, which is
+            what a client has been dragging. Two commands and one coordinate:
+            §3.13's two pointers are the question and the answer. */
+        registry.add ({ "list.loadToTime",
+                        "Makes the list's aim true: ends what the jump abandons, moves the"
+                        " pointer, rebuilds the runs mid-way and sends what differs.",
+                        { { "list", 's', false }, { "run", 's', true, true } },
+                        true,
+                        [&engine, &runner, &document]
+                        (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto listId = args[0].getString();
+                            const auto list = document.findById (listId);
+
+                            if (! list.isValid() || list.getType().toString() != "List")
+                                return Outcome::rejected (reason::unknownId);
+
+                            std::vector<std::string> supplied;
+
+                            for (std::size_t n = 1; n < args.size(); ++n)
+                                supplied.push_back (args[n].getString());
+
+                            const auto made = runner.loadToTime (engine, document, context.tick,
+                                                                 listId, supplied);
+
+                            std::vector<osc::Value> applied { osc::Value::string (listId) };
+
+                            for (const auto& id : made)
+                                applied.push_back (osc::Value::string (id));
+
+                            return Outcome::ok (applied);
                         } });
 
         //----------------------------------------------------------------------

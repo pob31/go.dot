@@ -399,6 +399,44 @@ namespace wfg::cue
                                                  const std::string& cueId,
                                                  const std::vector<std::string>& supplied);
 
+        /*  THE JUMP: what `list.loadToTime` calls.
+
+            PRD §3.13. An operator asks for the show as it was, and this makes
+            it so - one record whose applied arguments carry every run
+            identifier it drew, in the order it drew them, because a replay
+            never draws one of its own.
+
+            IT ENDS WHAT THE JUMP ABANDONS BEFORE IT BUILDS ANYTHING, the way
+            `run.kill` ends a run: every descendant, AND NO FOOTER. A footer is
+            arbitrary and need not be an inverse - which is exactly why §3.13
+            recomputes forward rather than unwinding - so running one here would
+            be arbitrary work fighting the values the jump is about to send, and
+            a footer that blocks on a fade would make the jump wait for it. The
+            claims come back in the same drain, so the plan's land rather than
+            queue behind runs this has just ended.
+
+            TWO THINGS IT DOES NOT TOUCH: the runs of OTHER lists, because a
+            jump is scoped to its own list and two lists can be live at once - a
+            slot held by another list is precisely the "something else" a
+            pending claim means - and, when it exists, the persistent section,
+            whose cues are re-asserted rather than restarted.
+
+            Returns every identifier it drew. */
+        std::vector<std::string> loadToTime (Engine& engine, doc::ShowDocument& editable,
+                                             std::int64_t tick, const std::string& listId,
+                                             const std::vector<std::string>& supplied);
+
+        /*  Where the media lengths live, for the solve behind a jump.
+
+            Held by pointer and not owned, exactly as the parameter tree holds
+            it: absent - a replay, a test, a bundle with no media folder - every
+            length is unknown, which the solver reports as a confused entry
+            rather than a guess. */
+        void setMediaDurations (const std::map<std::string, double>* durationsToRead) noexcept
+        {
+            durations = durationsToRead;
+        }
+
         /*  THE POINTER MOVED AWAY BEFORE ANYBODY PRESSED ANYTHING: what
             `run.revoke` calls.
 
@@ -820,6 +858,7 @@ namespace wfg::cue
         /*  One per group run in flight. A vector like every other job list
             here, and drained by the same `remove_if` on a retired flag. */
         ListState lists;
+        const std::map<std::string, double>* durations = nullptr;
         std::vector<GroupJob> scheduled;
 
         /*  The cue the standby was last seen on, so that arming it is asked for

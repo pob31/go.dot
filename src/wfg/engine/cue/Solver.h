@@ -91,7 +91,27 @@ namespace wfg::cue
         double offset = -1.0;
     };
 
-    /** One cue that should be sounding, and where it should have got to. */
+    /*  WHERE A PLANNED RUN IS IN ITS OWN LIFE.
+
+        A jump into the middle of a scene has to build the WHOLE scene, not only
+        the part making a noise: a timeline group whose second member is sounding
+        has a first that is over and a third still to come, and the scheduler
+        that takes the tree over will look for both. A member that is missing is
+        a member the group will spawn a second time, and one that is missing
+        from the FINISHED end is a group that thinks it has not started. */
+    namespace planned
+    {
+        /** Making a noise now, `offset` seconds into its own material. */
+        inline constexpr const char* sounding = "sounding";
+
+        /** Over before the aim. Its run exists, done, so its group knows. */
+        inline constexpr const char* finished = "finished";
+
+        /** Not started yet: `startsIn` seconds from the jump. */
+        inline constexpr const char* due = "due";
+    }
+
+    /** One cue in the plan, and where it should have got to. */
     struct PlannedRun
     {
         std::string cue;
@@ -106,6 +126,12 @@ namespace wfg::cue
             it. -1 and 1 for a cue with no ranges, which plays its file once. */
         int range = -1;
         int pass = 1;
+
+        /** From `planned`. */
+        std::string when = planned::sounding;
+
+        /** Seconds from the jump until it starts. Only for `due`. */
+        double startsIn = 0.0;
     };
 
     /*  One value the desk should be holding, and who put it there.
