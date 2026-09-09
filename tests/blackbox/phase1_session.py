@@ -181,6 +181,20 @@ def run(locale: "str | None") -> int:
                 client.listen(name_address)
                 time.sleep(0.3)         # let the LISTEN land before writing
 
+                #  AND FORGET WHATEVER WAS ALREADY IN FLIGHT. Subscribing joins
+                #  a live stream: the engine publishes a snapshot - which is the
+                #  moment `settle` above could see the new value - and pushes the
+                #  diff for it a moment later, so a client that subscribes
+                #  between those two points is legitimately told about a change
+                #  published just before it landed. On a loaded runner that
+                #  window is wide enough to hit, and it did, twice.
+                #
+                #  What the two checks below mean is "my own write was not
+                #  echoed to me" and "somebody else's was", so this makes them
+                #  say it rather than also asserting that the client subscribed
+                #  fast enough.
+                client.drain()
+
                 client.send_osc(name_address, ["wrote-over-websocket"])
 
                 settle(server, name_address, "wrote-over-websocket", report,

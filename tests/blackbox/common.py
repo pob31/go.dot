@@ -324,6 +324,23 @@ class WSClient:
         with self._lock:
             return [values for addr, values in self.pushes if addr == address]
 
+    def drain(self) -> None:
+        """Forgets every push received so far.
+
+        A subscription joins a LIVE STREAM. The engine publishes a snapshot -
+        which is the moment an HTTP read can see the new value - and pushes the
+        diff for it a moment later, so a client that subscribes between those
+        two points legitimately receives a change that was published just before
+        it landed. That is not a bug in the engine and there is no OSCQuery
+        semantics for "subscribe as of a snapshot".
+
+        So a test that means "my own write was not echoed to me" has to say
+        exactly that: subscribe, let anything already in flight arrive, forget
+        it, and only then write.
+        """
+        with self._lock:
+            self.pushes.clear()
+
     def wait_for_push(self, address: str, timeout: float = REPLY_TIMEOUT):
         deadline = time.monotonic() + timeout
 
