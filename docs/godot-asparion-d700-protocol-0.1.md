@@ -158,13 +158,52 @@ still correct. Useful for bench work only.
 |---|---|
 | **absolute** | 16 motor faders (touch-sensitive) + the volume knob, which reports as a fader |
 | **relative** | 16 encoders — **sign-magnitude** |
-| **gate** | ~76 buttons: 4 per strip, plus the master section |
+| **gate** | ~76 buttons: 4 per strip, plus the master section — but see *double-click* below |
 | **rate** | none |
 
 **The volume knob is an absolute endpoint, not a relative one.** It reports
 14-bit pitch bend on MCU channel 9, and has **no touch sense** — MCU convention
 would place it at note `0x70`, which the device never sends — so it gets no touch
 gating.
+
+**Double-click changes a button's class.** Asparion's firmware can emit a *second* note on a
+double click — on the `*` (magic) button, F1 (`0x36`) single, F2 (`0x37`) double. It is off by
+default and enabled per button by a checkbox in the Configurator. It is **suppressive**: the
+single click is withheld until the gesture resolves, and a double emits F2 *alone*, never F1
+then F2.
+
+That gives three timing regimes, and a profile needs to know which applies:
+
+| Case | What is precise |
+| --- | --- |
+| Double-click **off** | the **down stroke** — real switch timing |
+| Double-click **on**, deliberate press | the **release** — resolves early, real duration |
+| Everything else | cooked by firmware, with latency |
+
+The middle case follows from the firmware being sensible: a double click is two *short* clicks,
+so a press held past the short-click threshold cannot be half of one and resolves immediately.
+Measured holds of 0.9–2.2 s reported their genuine duration; taps reported 0–70 ms. So
+**reported duration = real hold − resolve delay**.
+
+It is **preset-independent** — basic MIDI behaved identically to Mackie — so the processing sits
+below the protocol layer and no host-side choice avoids it. The raw switch is not visible over
+MIDI at all.
+
+Three consequences for §3.16:
+
+1. **The gate class needs a per-button mode.** With double-click on, the same physical button is
+   no longer reliably press-and-release on the down stroke. A device profile should carry it.
+2. **Bind on release** where timing matters. The release is a real event under the operator's
+   control; the down stroke is not, once double-click is on.
+3. **Double-click is for escalation, never alternation.** Panic → Hard Panic works, and maps
+   neatly onto §4.4's Esc / double-Esc. **Go → Undo Go does not**: §4.5 is explicit that undo of a
+   GO is *revert*, and the audio has already escaped — so a double click would fire the cue and
+   then revert it in front of an audience. Any binding editor offering double-click should refuse
+   pairs where the second action reverses the first.
+
+The latency is a design input rather than a disqualifier. A graceful panic that fades can absorb
+0.4 s; a GO cannot (§4.1). Which buttons carry double-click is a layout decision with a cost
+attached.
 
 ---
 
