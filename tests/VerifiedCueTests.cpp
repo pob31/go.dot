@@ -293,15 +293,15 @@ namespace
         {
             REQUIRE (socket.start (0, [] (osc::Datagram) {}));
 
-            declaration.id = "K3PV7WRB";
-            declaration.prefix = "/desk";
-            declaration.namespaceFile = "namespaces/desk.json";
-            declaration.host = "127.0.0.1";
-            declaration.port = socket.boundPort();
-            declaration.readback = "oscquery";
-            declaration.queryPort = device.port();
+            mountDeclaration.id = "K3PV7WRB";
+            mountDeclaration.prefix = "/desk";
+            mountDeclaration.namespaceFile = "namespaces/desk.json";
+            mountDeclaration.host = "127.0.0.1";
+            mountDeclaration.port = socket.boundPort();
+            mountDeclaration.readback = "oscquery";
+            mountDeclaration.queryPort = device.port();
 
-            REQUIRE (mounts.load (declaration, deskJson).ok);
+            REQUIRE (mounts.load (mountDeclaration, deskJson).ok);
 
             sender.setSocket (socket);
 
@@ -323,7 +323,8 @@ namespace
 
                     if (const auto* declaration = mounts.declarationOf (written.mountId))
                         sender.queue (written.mountId,
-                                      { declaration->host, declaration->port },
+                                      { declaration->host, declaration->port,
+                                        declaration->rateCap },
                                       address, written.value);
 
                     return Outcome::ok ({ osc::Value::string (address), written.value });
@@ -353,8 +354,8 @@ namespace
             exactly as a designer would. */
         void anticipate()
         {
-            declaration.anticipatable = true;
-            REQUIRE (mounts.load (declaration, deskJson).ok);
+            mountDeclaration.anticipatable = true;
+            REQUIRE (mounts.load (mountDeclaration, deskJson).ok);
         }
 
         /** Parks the pointer and lets the horizon see it, as a show does. */
@@ -419,7 +420,7 @@ namespace
         FakeDevice device;
         osc::UdpEndpoint socket;
         juce::File nowhere;
-        tree::MountDeclaration declaration;
+        tree::MountDeclaration mountDeclaration;
 
         tree::MountTable mounts;
         tree::MountSender sender;
@@ -909,9 +910,9 @@ TEST_CASE ("prepare: a mount that cannot be asked is never pre-sent")
         word for a block that is not anticipatable all the way through. */
     VerifiedRig rig;
 
-    rig.declaration.anticipatable = true;
-    rig.declaration.readback = "none";
-    REQUIRE (rig.mounts.load (rig.declaration, deskJson).ok);
+    rig.mountDeclaration.anticipatable = true;
+    rig.mountDeclaration.readback = "none";
+    REQUIRE (rig.mounts.load (rig.mountDeclaration, deskJson).ok);
 
     rig.device.target.says ({ osc::Value::float32 (0.2f) });
 

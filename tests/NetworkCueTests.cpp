@@ -376,9 +376,9 @@ namespace
                 if (! written.ok)
                     return Outcome::rejected (written.reason);
 
-                if (const auto* declaration = mounts.declarationOf (written.mountId))
+                if (const auto* declared = mounts.declarationOf (written.mountId))
                     sender.queue (written.mountId,
-                                  { declaration->host, declaration->port },
+                                  { declared->host, declared->port, declared->rateCap },
                                   address, written.value);
 
                 return Outcome::ok ({ osc::Value::string (address), written.value });
@@ -796,4 +796,93 @@ TEST_CASE ("mount: a transport Go.dot cannot speak is refused when the show open
         the last step. */
     CHECK (mounts.nodeCount ("G1JS4VWE") == 0u);
     CHECK_FALSE (mounts.isLoaded ("G1JS4VWE"));
+}
+
+//==============================================================================
+TEST_CASE ("rate cap: a node is not sent faster than its mount allows")
+{
+    /*  `mount/@rateCap` is a ceiling in hertz on ONE NODE, which is what the
+        row says and the only reading that leaves PRD §3.4 intact: a cue that
+        moves twelve parameters is twelve DIFFERENT addresses and they all leave
+        in the same frame, as one gesture. What a cap limits is the same address
+        being sent again - a fade running at fifty a second into a desk that
+        wants ten.
+
+        Fifty is the default and is exactly the tick rate, so the ordinary mount
+        is already capped by the queue's own coalescing and this changes nothing
+        for it. Below fifty the newest value waits, in its place in the order,
+        until enough flushes have passed.
+
+        Tested against the sender directly rather than through a cue, because
+        what is being asserted is how many datagrams left - and that is the
+        sender's own count. */
+    osc::UdpEndpoint socket;
+    REQUIRE (socket.start (0, [] (osc::Datagram) {}));
+
+    Listener listener;
+    tree::MountSender sender { socket };
+
+    const tree::MountSender::Destination slow { "127.0.0.1", listener.port(), 10.0 };
+    const tree::MountSender::Destination free { "127.0.0.1", listener.port(), 50.0 };
+
+    /*  Ten hertz is one send every five flushes. Twenty flushes with a fresh
+        value every time is four sends, not twenty. */
+    for (int n = 0; n < 20; ++n)
+    {
+        sender.queue ("M1", slow, "/ext/console/fader",
+                      osc::Value::float32 (static_cast<float> (n) / 20.0f));
+        sender.flush();
+    }
+
+    CHECK (sender.sentFor ("M1") == 4u);
+
+    /*  AND THE UNCAPPED ONE IS UNTOUCHED, which is what says the cap is doing
+        something rather than the queue simply dropping things. */
+    for (int n = 0; n < 20; ++n)
+    {
+        sender.queue ("M2", free, "/ext/console/level",
+                      osc::Value::float32 (static_cast<float> (n) / 20.0f));
+        sender.flush();
+    }
+
+    CHECK (sender.sentFor ("M2") == 20u);
+}
+
+TEST_CASE ("rate cap: a message that is waiting is not a message that failed")
+{
+    /*  A cue whose wait is `sent` asks the sender what happened to its ticket,
+        and before the cap `pending` meant "the flush never ran", which is a
+        wiring fault. Under a cap it means "queued, in order, holding the newest
+        value, and it will go" - so the cue keeps waiting rather than reporting
+        a failure about a message that is about to leave. */
+    osc::UdpEndpoint socket;
+    REQUIRE (socket.start (0, [] (osc::Datagram) {}));
+
+    Listener listener;
+    tree::MountSender sender { socket };
+
+    const tree::MountSender::Destination slow { "127.0.0.1", listener.port(), 10.0 };
+
+    const auto first = sender.queue ("M1", slow, "/ext/console/fader",
+                                     osc::Value::float32 (0.1f));
+    sender.flush();
+
+    CHECK (sender.outcomeOf (first) == tree::MountSender::Outcome::sent);
+    CHECK_FALSE (sender.stillQueued (first));
+
+    /*  The next one for that address cannot go yet. */
+    const auto held = sender.queue ("M1", slow, "/ext/console/fader",
+                                    osc::Value::float32 (0.2f));
+    sender.flush();
+
+    CHECK (sender.outcomeOf (held) == tree::MountSender::Outcome::pending);
+    CHECK (sender.stillQueued (held));
+
+    /*  And it goes when its turn comes. */
+    for (int n = 0; n < 5; ++n)
+        sender.flush();
+
+    CHECK (sender.outcomeOf (held) == tree::MountSender::Outcome::sent);
+    CHECK_FALSE (sender.stillQueued (held));
+    CHECK (sender.sentFor ("M1") == 2u);
 }

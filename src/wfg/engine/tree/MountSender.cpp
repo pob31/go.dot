@@ -62,10 +62,48 @@ namespace wfg::tree
     }
 
     //==============================================================================
+    namespace
+    {
+        /*  How many flushes must pass between two sends of one address.
+
+            A flush is a tick and a tick is a fiftieth of a second, so a cap of
+            fifty hertz is one flush - which every address already obeys, since
+            the queue holds one message per address. Below fifty it waits; above
+            it, and at nought, it does not. */
+        std::uint64_t intervalFor (double rateCap) noexcept
+        {
+            if (! (rateCap > 0.0) || rateCap >= 50.0)
+                return 1;
+
+            return static_cast<std::uint64_t> (std::llround (50.0 / rateCap));
+        }
+    }
+
     void MountSender::flush()
     {
+        ++flushes;
+
+        /*  WHAT COULD NOT GO YET, kept in its place in the order.
+
+            A capped address holds the newest value it was given and waits; the
+            order it waits in is the order it was first queued in, which is the
+            same rule the coalescing above follows and for the same reason - a
+            cue that sets a mode and then a parameter of that mode has to arrive
+            in that order. */
+        std::vector<Message> waiting;
+
         for (const auto& message : queued)
         {
+            const auto interval = intervalFor (message.destination.rateCap);
+            const auto last = lastSentAt.find (message.address);
+
+            if (interval > 1 && last != lastSentAt.end()
+                 && flushes - last->second < interval)
+            {
+                waiting.push_back (message);
+                continue;
+            }
+
             auto ok = false;
             std::string error;
 
@@ -82,14 +120,27 @@ namespace wfg::tree
             if (ok)
                 ++sent[message.mountId];
 
+            lastSentAt[message.address] = flushes;
             outcomes.emplace_back (message.ticket, ok);
         }
 
-        queued.clear();
+        queued = std::move (waiting);
         queuedAt.clear();
+
+        for (std::size_t index = 0; index < queued.size(); ++index)
+            queuedAt[queued[index].address] = index;
 
         while (outcomes.size() > outcomesKept)
             outcomes.pop_front();
+    }
+
+    bool MountSender::stillQueued (std::uint64_t ticket) const
+    {
+        return std::any_of (queued.begin(), queued.end(),
+                            [ticket] (const Message& message)
+                            {
+                                return message.ticket == ticket;
+                            });
     }
 
     //==============================================================================

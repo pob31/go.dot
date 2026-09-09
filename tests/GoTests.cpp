@@ -3361,23 +3361,24 @@ TEST_CASE ("prepare: a member armed ahead inside a running scene still fires whe
         rather than ignore it or start a second beside it. */
     ManualRig rig;
 
-    const auto one = rig.document.createCue (rig.groupId, 0, "media", "First").id;
-    const auto two = rig.document.createCue (rig.groupId, 1, "media", "Second").id;
+    const auto earlier = rig.document.createCue (rig.groupId, 0, "media", "First").id;
+    const auto later = rig.document.createCue (rig.groupId, 1, "media", "Second").id;
 
-    for (const auto& id : { one, two })
+    for (const auto& id : { earlier, later })
         rig.document.setAttribute ("/godot/cue/" + id + "/file", "thunder.wav");
 
-    rig.setStandby (one);
+    rig.setStandby (earlier);
     CHECK (rig.submitAndTick ("go").applied == 1);
-    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (one).empty()
-                                          && rig.runs.find (rig.runOf (one))
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (earlier).empty()
+                                          && rig.runs.find (rig.runOf (earlier))
                                                  ->launchRequested; }));
 
-    //  The pointer moved to member two and the horizon armed it, in the scene.
-    CHECK (rig.standby() == two);
-    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (two).empty(); }));
+    //  The pointer moved to the second member and the horizon armed it, inside
+    //  the scene.
+    CHECK (rig.standby() == later);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (later).empty(); }));
 
-    const auto armed = rig.runOf (two);
+    const auto armed = rig.runOf (later);
     CHECK (rig.runs.find (armed)->state == cue::runState::armed);
     CHECK_FALSE (rig.runs.find (armed)->launchRequested);
 
@@ -3386,7 +3387,10 @@ TEST_CASE ("prepare: a member armed ahead inside a running scene still fires whe
     REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armed)->launchRequested; }));
 
     const auto runsFor = std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
-                                        [&two] (const cue::Run& run) { return run.cue == two; });
+                                        [&later] (const cue::Run& run)
+                                        {
+                                            return run.cue == later;
+                                        });
     CHECK (runsFor == 1);
 }
 

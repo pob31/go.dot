@@ -37,6 +37,13 @@
     fifty a second and a client dragging a fader at four hundred both come out
     at the tick rate, and neither can flood a console.
 
+    AND A NODE IS NOT SENT FASTER THAN ITS MOUNT ALLOWS. `mount/@rateCap` is a
+    per-node ceiling in hertz, and below fifty it means an address waits: the
+    newest value for it stays queued, in its place in the order, until enough
+    flushes have passed. A message that waits is not a message that failed - its
+    ticket stays pending and a `sent` wait keeps waiting - because what the
+    caller asked for is that the value reach the target, and it will.
+
     THE SYSCALL IS BOUNDED AND IN ONE PLACE. `sendto` blocks; PRD §4.2's
     lipogram is about the audio thread and says nothing about this one, but an
     unbounded loop of syscalls anywhere near the tick is still how a 50 Hz clock
@@ -46,9 +53,7 @@
 
     WHAT IT DOES NOT DO. It does not retry, because UDP has no notion of a
     delivery to retry and a resend of a stale value is worse than a gap. It does
-    not rate-cap: `mount/<id>/rateCap` is declared and Phase 4's prepare/commit
-    is what will read it, and capping before there is anything to cap would be
-    inventing behaviour nobody has measured. It does not bundle: one message per
+    not bundle: one message per
     datagram, because bundle support is uneven in the field and Phase 4's
     timetagged bundles to Go.dot's OWN processors are a different feature with a
     different reason.
@@ -78,6 +83,25 @@ namespace wfg::tree
         {
             std::string host = "127.0.0.1";
             int port = 0;
+
+            /*  HOW OFTEN ONE OF THIS MOUNT'S NODES MAY BE SENT, in hertz, from
+                `mount/@rateCap`. Copied at queue time for the same reason the
+                host and the port are: a reload must not change where a message
+                already in flight goes, or how fast it was allowed to go.
+
+                PER NODE AND NOT PER MOUNT, which is what the row says and is
+                the only reading that leaves §3.4 intact: a cue that moves
+                twelve parameters is twelve DIFFERENT addresses and they all
+                leave in the same frame, as one gesture. What a cap limits is
+                the same address being sent again - a fade running at fifty a
+                second into a desk that wants twenty.
+
+                Nought is no cap, not "never": the range starts at nought and a
+                target that may never be written is a target nobody would mount.
+                Fifty is the default and is exactly the tick rate, so the
+                ordinary mount is capped by the queue's own coalescing and this
+                changes nothing for it. */
+            double rateCap = 0.0;
         };
 
         /*  The socket is a reference and is not owned. In `wfg serve` it is the
@@ -124,6 +148,14 @@ namespace wfg::tree
         /** How many messages have left for a mount since the show opened. */
         std::size_t sentFor (const std::string& mountId) const;
 
+        /*  Whether this ticket is still waiting for a flush that will take it.
+
+            A rate cap makes `pending` a legitimate answer rather than a wiring
+            fault: the message is queued, in order, holding the newest value,
+            and it will go. A cue whose wait is `sent` asks this before deciding
+            it never left. */
+        bool stillQueued (std::uint64_t ticket) const;
+
         /** How many are waiting for the next flush. */
         std::size_t pending() const noexcept { return queued.size(); }
 
@@ -149,6 +181,17 @@ namespace wfg::tree
         std::deque<std::pair<std::uint64_t, bool>> outcomes;
 
         std::uint64_t nextTicket = 1;
+
+        /*  Which flush each address last went out on, and how many flushes
+            there have been. A flush is a tick, so the two are the same clock
+            counted where it is used.
+
+            It grows with the number of distinct addresses a show writes, which
+            is bounded by the show; it is not bounded by anything here, and if
+            that ever matters the fix is to forget an address the queue has not
+            seen for a while rather than to cap the map. */
+        std::map<std::string, std::uint64_t> lastSentAt;
+        std::uint64_t flushes = 0;
 
         static constexpr std::size_t outcomesKept = 512;
     };

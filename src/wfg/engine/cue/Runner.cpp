@@ -2031,7 +2031,8 @@ namespace wfg::cue
 
         if (sender_ != nullptr && declaration != nullptr)
             job.ticket = sender_->queue (written.mountId,
-                                         { declaration->host, declaration->port },
+                                         { declaration->host, declaration->port,
+                                           declaration->rateCap },
                                          job.address, written.value);
 
         if (job.wait == OscWait::verified)
@@ -2290,6 +2291,27 @@ namespace wfg::cue
                 what happened rather than what was asked for, which is the whole
                 difference between this wait and the one above. */
             const auto outcome = sender_->outcomeOf (job.ticket);
+
+            /*  STILL WAITING FOR A FLUSH THAT WILL TAKE IT, which a rate cap
+                makes an ordinary thing rather than a wiring fault: the message
+                is queued, in order, holding the newest value for its address,
+                and it will go. What the cue asked for was that the value reach
+                the target, so it keeps waiting - up to its own timeout, which
+                is the same patience a `verified` cue has. */
+            if (outcome == tree::MountSender::Outcome::pending
+                 && sender_->stillQueued (job.ticket))
+            {
+                ++job.ticksWaited;
+
+                if (job.ticksWaited <= job.ticksAllowed)
+                    continue;
+
+                engine.submit (origin::engine, "run.failed",
+                               { osc::Value::string (job.self),
+                                 osc::Value::string (oscError::timeout) });
+                job.finished = true;
+                continue;
+            }
 
             if (outcome == tree::MountSender::Outcome::sent)
                 engine.submit (origin::engine, "run.ended", one (job.self));

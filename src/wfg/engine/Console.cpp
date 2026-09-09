@@ -1459,7 +1459,8 @@ namespace
 
                 if (const auto* declaration = mounts.declarationOf (written.mountId))
                     sender.queue (written.mountId,
-                                  { declaration->host, declaration->port },
+                                  { declaration->host, declaration->port,
+                                    declaration->rateCap },
                                   address, written.value);
 
                 /*  Logged AS APPLIED, so the record carries the value that
