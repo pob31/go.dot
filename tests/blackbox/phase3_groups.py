@@ -488,8 +488,14 @@ def run(locale: "str | None") -> int:
                                  "done", "and the group is done once its footer is")
 
                 # And a stretch of silence after everything, so "and then digital
-                # silence" has something to look at.
+                # silence" has something to look at - in the ENGINE's time, and
+                # then in the FILE's. The two are different clocks: the render's
+                # header is rewritten once per second of audio and the process
+                # is killed rather than asked to stop, so twenty-five ticks of
+                # engine silence can still leave a file that ends before the
+                # footer did. The tail is waited for where it will be read.
                 wait_ticks(server, 25)
+                first_sound.wait_for_render_tail(render)
 
     # --- which ranges it entered, and in what order ------------------------
         # THE LOG IS THE EVIDENCE, for the reason in `ranges_entered`: a range

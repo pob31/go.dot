@@ -170,6 +170,74 @@ def read_render(path: Path) -> "tuple[int, list[list[float]]]":
     return channels, out
 
 
+def frames_on_disk(path: Path) -> int:
+    """How many frames the render's own header admits to, or 0.
+
+    THE HEADER RATHER THAN THE FILE SIZE, because the header is what
+    `read_render` will believe: a WAV carries its length in its `data` chunk,
+    the writer rewrites that once per second of audio, and bytes past the last
+    rewrite are bytes no reader looks at. Only the first few hundred are read,
+    so this can be asked while the file is still being written.
+    """
+    try:
+        with path.open("rb") as file:
+            head = file.read(4096)
+    except OSError:
+        return 0
+
+    if head[:4] != b"RIFF" or head[8:12] != b"WAVE":
+        return 0
+
+    channels = bits = 0
+    at = 12
+
+    while at + 8 <= len(head):
+        name = head[at:at + 4]
+        size = struct.unpack_from("<I", head, at + 4)[0]
+
+        if name == b"fmt " and at + 24 <= len(head):
+            channels = struct.unpack_from("<H", head, at + 10)[0]
+            bits = struct.unpack_from("<H", head, at + 22)[0]
+        elif name == b"data":
+            frame = channels * bits // 8
+            return size // frame if frame > 0 else 0
+
+        at += 8 + size + (size & 1)
+
+    return 0
+
+
+def wait_for_render_tail(path: Path, ticks: int = 3, timeout: float = 15.0) -> bool:
+    """Waits until the render's header covers a tail past what is sounding now.
+
+    WHY A DRIVER HAS TO WAIT AT ALL. `serve` is stopped with terminate(), which
+    on Windows is TerminateProcess: no handler runs and nothing is flushed, so
+    the file ends at the last header rewrite before the kill. A driver that
+    asserts "and then digital silence" is asking about audio AFTER the last
+    stop, and if the header stopped before it, the last quarter second of the
+    file is the show still playing.
+
+    WHY THIS IS ARITHMETIC AND NOT A SLEEP. The header lags the render by at
+    most one rewrite interval, which is one second of audio. So whatever is
+    sounding at the moment of asking is covered by `now + one second`, and
+    `+ ticks` past that is tail by construction - measured in the file's own
+    frames, which is the clock the assertion will be read against. A flat sleep
+    measures the runner instead: it failed once on Windows with 59 ms of tail,
+    and would fail again whenever the pump ran a little behind the wall clock.
+
+    False if the file could not be read while open - some platforms will not
+    share it - in which case the old guess is slept and the caller carries on.
+    """
+    covered = frames_on_disk(path)
+    wanted = covered + RATE + ticks * (RATE // 50)
+
+    if common.wait_until(lambda: frames_on_disk(path) >= wanted, timeout=timeout):
+        return True
+
+    time.sleep(1.0)
+    return False
+
+
 def first_above(samples: "list[float]", floor: float) -> int:
     for n, value in enumerate(samples):
         if abs(value) > floor:
@@ -457,14 +525,13 @@ def run(locale: "str | None") -> int:
                     report.equal(wait_for_run_state(server, second, "done", 15.0), "done",
                                  "run.kill ended the second cue")
 
-                # A SECOND, AND IT IS THE WRITER'S RATHER THAN THE ENGINE'S.
-                # The render goes to disk through a background thread with a
-                # two-second buffer, so the end of the FILE lags the end of the
-                # SESSION - and `serve` is stopped with TerminateProcess on
-                # Windows, which runs no handler and flushes nothing. Without
-                # this wait the last thing in the WAV is whatever the writer had
-                # got round to, which reads as a cue that never stopped.
-                time.sleep(1.0)
+                # A TAIL, AND IT IS THE WRITER'S RATHER THAN THE ENGINE'S. The
+                # render goes to disk through a background thread and the file
+                # ends where its header says, so what "and then digital silence"
+                # reads depends on the writer having got past the last stop.
+                # Waited for in the file's own frames rather than slept through:
+                # `wait_for_render_tail` says why.
+                wait_for_render_tail(render)
 
                 # --- what the machine says about itself ---------------------
                 report.equal(value_of(server, "/godot/engine/rtViolations"), 0,

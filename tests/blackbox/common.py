@@ -372,13 +372,26 @@ class WSClient:
         with self._lock:
             self.pushes.clear()
 
-    def wait_for_push(self, address: str, timeout: float = REPLY_TIMEOUT):
+    def wait_for_push(self, address: str, timeout: float = REPLY_TIMEOUT, value=None):
+        """The latest push for an address - or, given `value`, that push.
+
+        WITH A VALUE IT WAITS FOR THAT VALUE. A subscription joins a live
+        stream, and a diff published just before the LISTEN landed can arrive
+        after it, so "the next push on this address" and "the push for the
+        change somebody just made" are different questions. A test that means
+        the second has to ask it. None when the deadline passes.
+        """
         deadline = time.monotonic() + timeout
 
         while time.monotonic() < deadline:
             found = self.pushes_for(address)
-            if found:
+
+            if value is None and found:
                 return found[-1]
+
+            if value is not None and value in found:
+                return value
+
             time.sleep(0.02)
 
         return None

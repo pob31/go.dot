@@ -179,20 +179,23 @@ def run(locale: "str | None") -> int:
 
             try:
                 client.listen(name_address)
-                time.sleep(0.3)         # let the LISTEN land before writing
 
+                #  NO PAUSE FOR THE LISTEN TO LAND. It travels on the same
+                #  connection as the write below, and a connection's frames are
+                #  handled in the order they arrive, so the subscription is
+                #  registered before the write is so much as decoded. The flat
+                #  three tenths that used to sit here was a guess about the
+                #  runner, and this file has been bitten twice by those.
+                #
                 #  AND FORGET WHATEVER WAS ALREADY IN FLIGHT. Subscribing joins
                 #  a live stream: the engine publishes a snapshot - which is the
                 #  moment `settle` above could see the new value - and pushes the
                 #  diff for it a moment later, so a client that subscribes
                 #  between those two points is legitimately told about a change
-                #  published just before it landed. On a loaded runner that
-                #  window is wide enough to hit, and it did, twice.
-                #
-                #  What the two checks below mean is "my own write was not
-                #  echoed to me" and "somebody else's was", so this makes them
-                #  say it rather than also asserting that the client subscribed
-                #  fast enough.
+                #  published just before it landed. Forgetting it is tidiness;
+                #  what makes the two checks below safe is that each of them
+                #  names the VALUE it is about, so a late arrival of somebody
+                #  else's push can neither pass nor fail them.
                 client.drain()
 
                 client.send_osc(name_address, ["wrote-over-websocket"])
@@ -200,20 +203,31 @@ def run(locale: "str | None") -> int:
                 settle(server, name_address, "wrote-over-websocket", report,
                        "a WebSocket write reaches the document too")
 
-                # Echo suppression: this client caused it, so it is not told.
-                own = client.pushes_for(name_address)
+                #  Somebody else's change reaches the subscriber, and it is
+                #  waited for BY VALUE: a push carrying the earlier UDP write is
+                #  a true statement arriving late, not the one being waited for.
+                common.send_udp(server.osc_port,
+                                common.osc_encode(name_address, ["wrote-by-somebody-else"]))
+
+                pushed = client.wait_for_push(name_address, timeout=10.0,
+                                              value=["wrote-by-somebody-else"])
+
+                #  ECHO SUPPRESSION, ASKED ONLY NOW. The client's own write was
+                #  published at an earlier tick than the one just waited for,
+                #  and pushes leave in tick order down one connection - so if
+                #  the engine were going to echo a client its own change, the
+                #  echo has arrived by the time that later push has. Asked
+                #  before it, this check could only pass early.
+                own = [push for push in client.pushes_for(name_address)
+                       if push == ["wrote-over-websocket"]]
+
                 report.check(not own,
                              "the client that caused a change is not told about it",
                              f"got {own!r}")
 
-                # But somebody else's change does reach it.
-                common.send_udp(server.osc_port,
-                                common.osc_encode(name_address, ["wrote-by-somebody-else"]))
-
-                pushed = client.wait_for_push(name_address, timeout=10.0)
                 report.check(pushed == ["wrote-by-somebody-else"],
                              "a subscriber is told when somebody else changes a node",
-                             f"got {pushed!r}")
+                             f"got {client.pushes_for(name_address)!r}")
 
                 # -- 5. standby, which is the one piece of engine state ------
                 standby_address = f"/godot/list/{list_ids[0]}/standby"
