@@ -217,6 +217,9 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 .tail .flag { letter-spacing: .05em; text-transform: uppercase; }
 .tail .flag.warn { color: var(--waiting); text-transform: none; letter-spacing: 0; cursor: help; }
 .tail .flag.ready { color: var(--live); text-transform: none; letter-spacing: 0; cursor: help; }
+.tail .flag.preset { color: var(--picked); text-transform: none; letter-spacing: 0; cursor: help; }
+.row.derived .name .text, .row.derived .number { font-style: italic; color: var(--ink-faint); }
+.row.derived .tail .flag { color: var(--picked); }
 .tail .standby-word { color: var(--standby); }
 
 .band {
@@ -671,6 +674,13 @@ function cueRow(id, depth, role, standby, out) {
   /*  And a cue the engine cannot promise has its slot to itself. */
   const shares = overlapping.get(id) || [];
 
+  /*  THE TENDRIL, in the cheapest form this page can draw one: the member's own
+      row says which header gets it ready. The author asked for "some form of
+      tendril showing the header it's in"; a line drawn between two rows in a
+      scrolling list is a thing to maintain, and naming the header is the same
+      fact said in words - which is also what §4.8 wants. */
+  const preparedBy = tree.cue(id, "preset", "");
+
   /*  HOW FAR AHEAD THIS ONE HAS BEEN GOT, in the word the engine uses.
 
       PRD §3.12's horizon reaches a block before anybody presses anything, and
@@ -706,6 +716,11 @@ function cueRow(id, depth, role, standby, out) {
            ? '<span class="flag trig" title="' + triggers.length +
              ' trigger(s)">\u26A1' + (triggers.length > 1 ? triggers.length : "") + "</span>"
            : "") +
+        (preparedBy
+           ? '<span class="flag preset" title="' +
+             esc("got ready by the header of " + cueName(preparedBy)) +
+             '">\u2191 ' + esc(cueName(preparedBy)) + "</span>"
+           : "") +
         (prepare && prepare !== "idle"
            ? '<span class="flag ' + (prepare === "pending" ? "warn" : "ready") +
              '" title="' + esc(prepareNote(prepare)) + '">' + esc(prepare) + "</span>"
@@ -725,10 +740,20 @@ function cueRow(id, depth, role, standby, out) {
 
   const header = tree.ids("/godot/cue/" + id + "/headerOrder");
   const footer = tree.ids("/godot/cue/" + id + "/footerOrder");
+
+  /*  THE LINES NOBODY WROTE. A member marked `preset` for this group is got
+      ready by this header and still runs where it sits - so it appears here in
+      italics, as a reading of the mark rather than as a cue of its own, and
+      double-clicking it opens the member it IS. Derived lines come first,
+      because that is the order the horizon prepares them in: a written header
+      cue may reasonably depend on what the presets set. */
+  const derived = tree.ids("/godot/cue/" + id + "/headerDerived");
   const band = (depth + 1) * 16 + 92;
 
-  if (header.length) {
+  if (header.length || derived.length) {
     out.push('<div class="band" style="padding-left:' + band + 'px">header</div>');
+
+    derived.forEach((child) => presetLine(child, depth + 1, out));
     header.forEach((child) => cueRow(child, depth + 1, "header", standby, out));
   }
 
@@ -739,6 +764,31 @@ function cueRow(id, depth, role, standby, out) {
     out.push('<div class="band" style="padding-left:' + band + 'px">footer</div>');
     footer.forEach((child) => cueRow(child, depth + 1, "footer", standby, out));
   }
+}
+
+/*  A DERIVED HEADER LINE: the member, shown where it is got ready.
+
+    In italics and marked `preset`, because it is not a cue sitting in this
+    header - it is a reading of a mark on a cue that lives somewhere else in the
+    list. It carries the same `data-pick` as the member's own row, so clicking
+    it selects the member and the inspector opens the thing that can actually be
+    edited. There is one object, and this is a second view of it. */
+function presetLine(id, depth, out) {
+  out.push(
+    '<div class="row derived" data-pick="' + id + '"' +
+      ' data-picked="' + (id === picked ? "yes" : "no") + '">' +
+      '<div class="gutter"></div>' +
+      '<div class="number num">' + esc(tree.cue(id, "number", "")) + "</div>" +
+      '<div class="name" style="padding-left:' + (depth * 16) + 'px">' +
+        '<span class="twist"></span>' +
+        '<span class="kind">' + esc(tree.cue(id, "kind", "memo")) + "</span>" +
+        '<span class="text">' + esc(tree.cue(id, "name", "") || "\u2014") + "</span>" +
+      "</div>" +
+      '<div class="tail">' +
+        '<span class="flag" title="got ready by this header; it runs where it sits in the' +
+        ' list">preset</span>' +
+      "</div>" +
+    "</div>");
 }
 
 function renderLists() {

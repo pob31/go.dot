@@ -1625,6 +1625,60 @@ namespace wfg::doc
 
         References { problems, *this }.visit (showNode);
 
+        /*  A PRESET THAT NAMES A GROUP THE CUE IS NOT INSIDE.
+
+            §13.7: `preset` names the ANCESTOR group whose header prepares this
+            cue, and naming an ancestor is what the gesture means - dragging a
+            cue onto the header of one of the groups it is in. A value naming
+            anything else is a mark nothing can act on: the horizon prepares a
+            block by walking its own subtree, so a cue outside that subtree is
+            never reached however early the pointer arrives.
+
+            A WARNING AND NOT A REFUSAL, for the reason every referential
+            mistake in this file is one: the repair is somebody dragging it
+            somewhere sensible, and yesterday's saved show has to open tomorrow.
+            The `refers` column above has already said whether the identifier
+            names a cue at all; this says whether it names one that could ever
+            do the preparing. */
+        struct Presets
+        {
+            std::vector<std::string>& problems;
+            std::vector<std::string> ancestors;
+
+            void visit (const juce::ValueTree& node)
+            {
+                const auto element = node.getType().toString().toStdString();
+                const auto isGroup = element == "Group";
+
+                if (ownerForElement (element) == "cue")
+                {
+                    const auto preset = node[juce::Identifier ("preset")]
+                                            .toString().toStdString();
+
+                    if (! preset.empty()
+                         && std::find (ancestors.begin(), ancestors.end(), preset)
+                              == ancestors.end())
+                        problems.push_back (
+                            "/Show/.../" + element + "["
+                              + node[idProperty].toString().toStdString()
+                              + "]/@preset: names \"" + preset + "\", which is not a group this"
+                                " cue is inside - so no header will prepare it, and it will run"
+                                " at its own moment as if the mark were not there");
+                }
+
+                if (isGroup)
+                    ancestors.push_back (node[idProperty].toString().toStdString());
+
+                for (const auto& child : node)
+                    visit (child);
+
+                if (isGroup)
+                    ancestors.pop_back();
+            }
+        };
+
+        Presets { problems, {} }.visit (showNode);
+
         /*  AND A MOUNT THAT SAYS ITS NODES MAY BE WRITTEN EARLY BUT CANNOT BE
             ASKED WHAT THEY HELD.
 

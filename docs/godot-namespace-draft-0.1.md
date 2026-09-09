@@ -2377,6 +2377,29 @@ the voice reserved early is the voice that sounds. That is the whole difference 
 moving the cue: the header line says *this is got ready here*, and the cue list still says *this
 happens there*.
 
+#### What PR 4.6 built
+
+**`headerDerived` is a walk of the group's own subtree, not of the show**, and that is the mark's
+own rule paying for itself: a `preset` names an ANCESTOR, so every cue that could name this group is
+somewhere underneath it. A value naming a group the cue is not inside is a `wfg validate` warning
+and is ignored, which is what makes the local walk complete rather than merely cheap.
+
+**Adoption had to learn that spawning a run is asking for it.** PR 4.5 marks a run the horizon armed
+ahead with `prepare`, so that a phase does not launch a member nobody called for; a preset member is
+armed under an ancestor's run and then adopted by its own group, and without clearing the mark at
+that moment it would sit armed for ever — adopted by a phase that then refused to start it. So
+`spawnChild`'s adoption branch calls `askedFor`, beside the four callers §13.6 already had.
+
+**A cue that is both a written header cue and marked for that same header is one cue.** It is what
+somebody dragging a header cue onto its own group's header produces, which is a reasonable accident,
+and without the check it would be spawned twice.
+
+**The console draws the line where the author asked for it** — in italics inside the header band,
+carrying the member's own identifier so a click selects the member and the inspector opens the thing
+that can be edited. The *tendril* is the member's row naming the header that gets it ready, in words:
+a line drawn between two rows of a scrolling list is a thing to maintain, and the name is the same
+fact said in the form §4.8 asks for.
+
 ### 13.8 The solver — a pure function, and the coordinate it works in
 
 **The coordinate is a cue and an offset, never a wall time.** A manual list has no time between two

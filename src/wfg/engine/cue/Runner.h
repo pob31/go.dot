@@ -597,6 +597,13 @@ namespace wfg::cue
             failure. */
         std::vector<std::string> preparableIn (const juce::ValueTree& group) const;
 
+        /*  The cues under this node whose `preset` names the group, in document
+            order - §13.7's derived header lines. A walk of the group's own
+            subtree rather than of the show, because a `preset` names an
+            ANCESTOR and anything that could name this group is under it. */
+        void collectPresetsOf (const juce::ValueTree& node, const std::string& groupId,
+                               std::vector<std::string>& out) const;
+
         /*  Starts a prepared group's `preparing` phase, or answers false when
             there is nothing to prepare and the job should go straight to the
             hold.

@@ -32,6 +32,8 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/audio/CueMatrix.h>
@@ -3392,6 +3394,188 @@ TEST_CASE ("prepare: a member armed ahead inside a running scene still fires whe
                                             return run.cue == later;
                                         });
     CHECK (runsFor == 1);
+}
+
+//==============================================================================
+/*  THE HEADER AS A PRESET SHEET: a mark on the member, and a line nobody wrote.
+
+    The author, looking at the first web client: "since this is something that
+    preloads and prepares OSC parameters ahead of time, the parameters of the
+    groups could have a preload/preset tickbox to add them in the header... The
+    preloaded or preset lines would appear in italics showing they are set from
+    a cue from the group." And on where the gesture points: "we could drag a cue
+    to be preloaded to a header from one level or another of the nested groups
+    it's in."
+
+    THE MARK IS THE DECISION AND THE LINE IS A READING OF IT (§4.10). Nothing is
+    copied into the `Header` element, so editing the line is editing the member,
+    deleting the member removes the line with no repair rule to write, and the
+    two can never come to disagree because there is only one of them.
+
+    IT NAMES AN ANCESTOR RATHER THAN BEING A TICKBOX, which is what the drag
+    means: a cue three groups deep can be got ready by its own group, by the
+    act, or by the opening scene, and which one is a decision about HOW EARLY.
+*/
+TEST_CASE ("preset: a member marked for its group's header is prepared with that header")
+{
+    PrepareRig rig;
+
+    /*  The scene's own media member, marked to be got ready by the scene rather
+        than when its turn comes. It is already a member of `groupId`, so the
+        scene IS an ancestor. */
+    rig.setCue (rig.sound, "preset", rig.groupId);
+
+    rig.setStandby (rig.first);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+
+    const auto* ready = rig.prepared (rig.groupId);
+    REQUIRE (ready != nullptr);
+
+    /*  ARMED UNDER THE BLOCK THAT PREPARED IT, which is what makes a revocation
+        reach it - and the voice reserved early is the voice that will sound. */
+    const auto* member = rig.runs.find (rig.runOf (rig.sound));
+    REQUIRE (member != nullptr);
+    CHECK (member->parent == ready->id);
+    CHECK (member->state == cue::runState::armed);
+    CHECK_FALSE (member->launchRequested);
+}
+
+TEST_CASE ("preset: the derived line is a reading of the mark, and goes with the member")
+{
+    /*  §13.7 and open questions §5's first: nothing is written into the Header
+        element, so there is one object and not two. */
+    PrepareRig rig;
+
+    Engine tree;
+    tree::MountTable mounts;
+    tree::ParameterTree parameters { rig.document, tree.commands(), mounts, rig.runs };
+
+    const auto derived = [&]
+    {
+        parameters.markStale();
+
+        tree::EngineState state;
+        state.version = "test";
+
+        const auto snapshot = parameters.publish (0, state);
+        const auto* node = snapshot->find ("/godot/cue/" + rig.groupId + "/headerDerived");
+
+        REQUIRE (node != nullptr);
+        REQUIRE (node->soleValue().has_value());
+        return node->soleValue()->getString();
+    };
+
+    CHECK (derived().empty());
+
+    rig.setCue (rig.sound, "preset", rig.groupId);
+    CHECK (derived() == rig.sound);
+
+    /*  AND THE HEADER ELEMENT IS UNTOUCHED. The line is derived; the written
+        header is what somebody wrote, and the two lists are separate. */
+    const auto header = rig.document.findById (rig.groupId)
+                            .getChildWithName (juce::Identifier ("Header"));
+    REQUIRE (header.isValid());
+    CHECK (header.getNumChildren() == 1);         // the memo, and nothing else
+
+    /*  DELETING THE MEMBER REMOVES THE LINE, with no repair rule to write. */
+    REQUIRE (rig.document.remove (rig.sound).ok);
+    CHECK (derived().empty());
+}
+
+TEST_CASE ("preset: a member marked for its GRANDPARENT is prepared when the grandparent is reached")
+{
+    /*  The author's own picture: a cue is got ready by one level or another of
+        the nested groups it is in, and which one is a decision about how early.
+
+        The horizon reaches the outermost group the pointer is inside, so a mark
+        naming the grandparent is honoured from outside the inner group - which
+        is exactly the point of naming a level rather than ticking a box. */
+    PrepareRig rig;
+
+    const auto inner = rig.document.createCue (rig.groupId, 1, "group", "Inner").id;
+    const auto deep = rig.document.createCue (inner, 0, "media", "Deep").id;
+    rig.document.setAttribute ("/godot/cue/" + deep + "/file", "thunder.wav");
+
+    rig.setCue (deep, "preset", rig.groupId);
+
+    /*  The pointer lands on the outer scene's first member: the horizon
+        prepares the whole block, and the mark says this one comes with it. */
+    rig.setStandby (rig.first);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (deep).empty(); }));
+
+    const auto* ready = rig.prepared (rig.groupId);
+    REQUIRE (ready != nullptr);
+
+    const auto* member = rig.runs.find (rig.runOf (deep));
+    REQUIRE (member != nullptr);
+    CHECK (member->parent == ready->id);
+    CHECK (member->state == cue::runState::armed);
+}
+
+TEST_CASE ("preset: the member still runs where it sits, on the run its ancestor armed")
+{
+    /*  THE WHOLE DIFFERENCE BETWEEN THIS AND MOVING THE CUE. The header line
+        says *this is got ready here*; the cue list still says *this happens
+        there*. So the group the member actually belongs to adopts the arm the
+        ancestor made rather than making a second one beside it - and the voice
+        reserved early is the voice that sounds. */
+    PrepareRig rig;
+
+    rig.setCue (rig.sound, "preset", rig.groupId);
+
+    rig.setStandby (rig.sound);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.sound).empty(); }));
+
+    const auto armed = rig.runOf (rig.sound);
+    REQUIRE (! armed.empty());
+
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    REQUIRE (rig.tickUntil ([&] { return rig.runs.find (armed)->launchRequested; }));
+
+    const auto howMany = std::count_if (rig.runs.all().begin(), rig.runs.all().end(),
+                                        [&rig] (const cue::Run& run)
+                                        {
+                                            return run.cue == rig.sound;
+                                        });
+
+    CHECK (howMany == 1);
+}
+
+TEST_CASE ("preset: a mark on a group the cue is not inside warns and does nothing")
+{
+    /*  A WARNING AND NOT A REFUSAL: the repair is somebody dragging it
+        somewhere sensible, and yesterday's saved show has to open tomorrow.
+        What it must not do is quietly look like it worked. */
+    PrepareRig rig;
+
+    /*  A second scene, which is nobody's ancestor here. */
+    const auto elsewhere = rig.document.createCue (rig.listId, 4, "group", "Elsewhere").id;
+    rig.setCue (rig.sound, "preset", elsewhere);
+
+    const auto said = [&rig]
+    {
+        for (const auto& problem : rig.document.warnings())
+            if (problem.find ("not a group this cue is inside") != std::string::npos)
+                return true;
+
+        return false;
+    };
+
+    CHECK (said());
+
+    /*  And nothing acts on it: the pointer reaching `Elsewhere` prepares a
+        block that does not contain the cue, so the cue is not armed. */
+    rig.setStandby (elsewhere);
+
+    for (int n = 0; n < 20; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (rig.sound) == "");
+
+    /*  Pointed at a group it IS inside, the warning goes. */
+    rig.setCue (rig.sound, "preset", rig.groupId);
+    CHECK_FALSE (said());
 }
 
 TEST_CASE ("M19: what the horizon costs, in ticks from the pointer landing")

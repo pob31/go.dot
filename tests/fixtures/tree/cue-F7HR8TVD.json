@@ -97,6 +97,14 @@
       "RANGE": [{"VALS": ["idle", "preparing", "pending", "partial", "armed", "verified"]}],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     },
+    "preset": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/preset",
+      "DESCRIPTION": "The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.",
+      "TYPE": "s",
+      "ACCESS": 3,
+      "VALUE": [""],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
     "role": {
       "FULL_PATH": "/godot/cue/F7HR8TVD/role",
       "DESCRIPTION": "Where this cue sits in the thing that contains it: an ordinary member, one of the cues in its group's header or footer, or one of the list's persistent cues. Derived from the element that contains it rather than stored, like `kind` and for the same reason - a client that could write it could move a cue between a group's preparation and its members without the group knowing. A cue at the top level of a list is a member. The whole vocabulary is declared here although `persistent` cannot occur until the section exists, because an enum that grows later grows under a client that has already read it.",

@@ -496,6 +496,43 @@ namespace wfg::tree
             }
         }
 
+        /*  THE CUES WHOSE `preset` NAMES THIS GROUP, in document order.
+
+            §13.7's derived header line, and it is a walk of the group's own
+            subtree rather than of the show: a `preset` names an ANCESTOR, so
+            every cue that could name this group is somewhere underneath it.
+            A value naming a group that is not an ancestor is a `wfg validate`
+            warning and is ignored, which is what makes that true here.
+
+            Derived the way `order` and `headerOrder` are - nothing is copied
+            into the `Header` element, so editing the line is editing the member
+            and the two can never come to disagree. */
+        void collectPresets (const juce::ValueTree& node, const std::string& groupId,
+                             std::vector<std::string>& out)
+        {
+            for (const auto& child : node)
+            {
+                if (! child.hasProperty (idProperty))
+                    continue;
+
+                const auto element = child.getType().toString().toStdString();
+
+                if (element == "Header" || element == "Footer")
+                {
+                    collectPresets (child, groupId, out);
+                    continue;
+                }
+
+                if (doc::ShowDocument::ownerForElement (element) != "cue")
+                    continue;
+
+                if (child[juce::Identifier ("preset")].toString().toStdString() == groupId)
+                    out.push_back (child[idProperty].toString().toStdString());
+
+                collectPresets (child, groupId, out);
+            }
+        }
+
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
                          std::vector<Node>& out,
                          const std::map<std::string, double>* durations,
@@ -594,6 +631,19 @@ namespace wfg::tree
                     text = (durations != nullptr && found != durations->end())
                              ? osc::formatDouble (found->second)
                              : osc::formatDouble (0.0);
+                }
+                else if (name == "headerDerived")
+                {
+                    std::vector<std::string> derived;
+                    collectPresets (node, id, derived);
+
+                    for (const auto& derivedId : derived)
+                    {
+                        if (! text.empty())
+                            text += ' ';
+
+                        text += derivedId;
+                    }
                 }
                 else if (name == "order")  text = orderOf (node);
                 else if (name == "headerOrder")

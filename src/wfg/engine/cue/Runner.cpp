@@ -504,13 +504,63 @@ namespace wfg::cue
         return declaration != nullptr && declaration->canBeAsked();
     }
 
+    void Runner::collectPresetsOf (const juce::ValueTree& node, const std::string& groupId,
+                                   std::vector<std::string>& out) const
+    {
+        for (const auto& child : node)
+        {
+            if (! child.hasProperty (idProperty))
+                continue;
+
+            const auto element = child.getType().toString().toStdString();
+
+            if (element == "Header" || element == "Footer")
+            {
+                collectPresetsOf (child, groupId, out);
+                continue;
+            }
+
+            if (doc::ShowDocument::ownerForElement (element) != "cue")
+                continue;
+
+            if (child[juce::Identifier ("preset")].toString().toStdString() == groupId)
+                out.push_back (child[idProperty].toString().toStdString());
+
+            collectPresetsOf (child, groupId, out);
+        }
+    }
+
     std::vector<std::string> Runner::preparableIn (const juce::ValueTree& group) const
     {
         std::vector<std::string> out;
 
-        for (const auto& cueId : membersOf (group.getChildWithName ("Header")))
+        /*  THE DERIVED LINES FIRST, WHICH IS §13.7's ORDER AND HAS A REASON.
+
+            A written header cue may reasonably depend on what the presets set -
+            position the source, then move it - and the reverse dependency has
+            no natural example. A header is a sequence whatever the group's mode
+            says, and §3.12 puts prepare and commit there precisely because
+            preparation has an order. */
+        std::vector<std::string> derived;
+        collectPresetsOf (group, group[idProperty].toString().toStdString(), derived);
+
+        for (const auto& cueId : derived)
             if (const auto cue = document.findById (cueId); isPreparable (cue))
                 out.push_back (cueId);
+
+        for (const auto& cueId : membersOf (group.getChildWithName ("Header")))
+        {
+            /*  A cue that is both a written header cue AND marked for this
+                group's header is one cue, not two. It happens where somebody
+                dragged a header cue onto its own group's header, which is a
+                reasonable thing to do by accident and must not spawn the cue
+                twice. */
+            if (std::find (out.begin(), out.end(), cueId) != out.end())
+                continue;
+
+            if (const auto cue = document.findById (cueId); isPreparable (cue))
+                out.push_back (cueId);
+        }
 
         return out;
     }
@@ -2688,6 +2738,14 @@ namespace wfg::cue
                 if (std::find (parent->children.begin(), parent->children.end(), id)
                       == parent->children.end())
                     parent->children.push_back (id);
+
+            /*  AND SPAWNING IT IS ASKING FOR IT. A run the horizon armed ahead
+                carries `prepare`, which is what stops a phase taking charge of
+                a cue nobody has called for; a group spawning it as its own
+                member IS that call. Without this a preset member - armed by an
+                ancestor's header and adopted here - would sit armed for ever,
+                because the phase that adopted it would refuse to launch it. */
+            askedFor (id);
 
             return id;
         }

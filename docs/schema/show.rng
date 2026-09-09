@@ -139,6 +139,12 @@
           </data>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
       <zeroOrMore>
         <ref name="Trigger"/>
       </zeroOrMore>
@@ -231,6 +237,12 @@
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <optional>
@@ -372,6 +384,12 @@
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <optional>
@@ -626,6 +644,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="target">
           <a:documentation>The cue whose sound this fade moves. It targets the CUE and finds its live run when it fires, because a cue is what somebody wrote down and a run is what happens to be playing - and the show has to say the first without knowing the second.</a:documentation>
           <data type="string"/>
@@ -706,6 +730,12 @@
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <optional>
@@ -790,6 +820,12 @@
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <optional>
@@ -898,6 +934,12 @@
           <data type="double">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <optional>
