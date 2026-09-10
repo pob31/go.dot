@@ -18,7 +18,8 @@ are removed.
 Binary/package name: `wfg`. Repo: `github.com/pob31/go.dot` (private until
 alpha). Licence: **GPL-3.0** (`LICENSE` in place).
 Engine: Tracktion Engine **develop (3.5.0)** with **JUCE 8.0.13**, both pinned as
-submodules. Status: Phase 0 complete; Phase 1 next.
+submodules. Status: the devplan carries it; at 2026-09-10 Phases 0–4 are
+complete and Phase 5 is in progress.
 
 **Reading convention:** *(proposed)* marks a design I put forward that has not
 been explicitly confirmed. Everything unmarked traces to a stated decision.
@@ -170,8 +171,11 @@ view.
 **Identity is two things and they never merge:**
 
 - **Cue number** — human protocol. Mutable, decimal, renumbered during tech.
-- **Cue ID** — machine identity. Assigned at creation, immutable, never reused.
-  Short opaque base32 (8–10 chars), **visible, copyable and searchable**.
+- **Cue ID** — machine identity. Assigned at creation, immutable, unique among
+  the objects that exist. Short opaque base32 (8–10 chars), **visible, copyable
+  and searchable**. A deleted ID is not retired, so reissuing one is possible and
+  vanishingly unlikely *(amended in 0.8, at the author's direction, 2026-09-10 —
+  decision B of 2026-09-05, `docs/godot-namespace-draft-0.1.md` §9)*.
 
 **Group-level editing is a shortcut, not ownership.** In edit mode a group may
 display fields common to its members so they can be edited in one place — a
@@ -278,8 +282,10 @@ Also: `play N of M`.
 - iterations count **rounds**, not playbacks, so pruning members keeps the
   arithmetic predictable
 - an emptied round completes the group rather than spinning
-- in a manual loop, GO past the final iteration completes the group and advances
-  standby to the next sibling on that press (never a GO that does nothing)
+- the pointer leaves a manual group when the last member of its final iteration
+  fires; a GO is never spent on leaving. An infinite manual loop is left with
+  `afterIteration`, `advance` or `run.stop` *(amended in 0.8, at the author's
+  direction, 2026-09-10 — decision M, `docs/godot-namespace-draft-0.1.md` §9)*
 
 #### Round pills (running pane)
 
@@ -496,9 +502,14 @@ Rules:
   *or* two mono slots *(proposed)* — two independently positionable objects is a
   legitimate and often better choice in WFS. Offer both; refuse silent downmix or
   upmix.
-- **The processor declares its own slots** *(proposed)*. WFS-DIY and XOA speak
-  OSCQuery, so Go.dot discovers how many inputs exist and at what width, rather
-  than having the user type a channel count that drifts out of date.
+- **The show declares the processor's inputs as slots** — a name, an address
+  prefix, a width and the bus that feeds each *(amended in 0.8, at the author's
+  direction, 2026-09-10 — decision P of 2026-09-07,
+  `docs/godot-namespace-draft-0.1.md` §9)*. Where a namespace is mounted for the
+  processor, the declaration is checked against it: a slot whose address that
+  namespace lacks is a `wfg validate` warning. Discovering the inputs over
+  OSCQuery is a later authoring gesture that *writes* these rows, never a
+  mechanism that replaces them.
 - **Slots carry user-authored names** ("Voix solo", "Ambiance G/D"). Those names
   appear in the dropdown and on the OLED — channel numbers do not.
 - **No auto-assignment, ever.** The user lays out their channels as the sound
@@ -513,10 +524,15 @@ Lifecycle:
 - **Claim happens in prepare** (§3.12). The header claims the slot and verifies
   the processor accepted it; GO commits only the perceptible part. This is also
   what makes fader-start work on a spatialised cue.
-- **Release is footer-timed, not cue-timed** (§3.6). A slot is not free when the
-  file ends — a fade or tail may still be running in the processor. It frees when
-  the group's footer reports done. This is why footers block, and it is what
-  makes fast scene changes safe.
+- **Release is at run end** *(amended in 0.8, at the author's direction,
+  2026-09-10 — PR 4.3, `docs/godot-namespace-draft-0.1.md` §13.2; this bullet
+  said footer-timed)*. A group is not done until its members are (§3.6), so by
+  the time its footer runs their runs have ended anyway: footer-timing and
+  run-end timing differ only by the footer's own duration. One rule is kept
+  rather than two, because two release rules would one day disagree, and where
+  they disagreed a cue would hold a processor input nothing could take back. A
+  claim that finds the slot still held waits for the release rather than racing
+  it (§3.9e), which is what makes fast scene changes safe.
 
 #### 3.9c The shared allocator
 
@@ -531,9 +547,12 @@ liveness re-analysis on edit.
 - Some ranges are indefinite (loops, manual groups, operator-paced material), so
   the analysis is **conservative**: it can prove possible overlap, never prove
   impossible. **Warn, don't refuse**; allow marking deliberate sharing.
-- Analysis runs **across parallel lists**, since two lists can be live at once.
-  Cross-list sharing is **disallowed by default** with an explicit override
-  *(proposed)*.
+- Analysis runs **across parallel lists**, since two lists can be live at once,
+  and a cross-list overlap is the same warning as any other — warned, never
+  refused. The mark that says a sharing is deliberate, `shared` on either cue's
+  `Feed` or `Insert`, silences the pair across lists as within one *(amended in
+  0.8, at the author's direction, 2026-09-10 — the proposed cross-list refusal
+  withdrawn; Phase 4 close-out, `docs/godot-phase4-closeout-0.1.md` §1)*.
 - Show a **usage-over-show-time plot** per resource kind. Designers already draw
   this by hand for radio mic channels and will read it instantly.
 
@@ -573,7 +592,10 @@ of its own kind**. Four instances:
 | **voice** — a track (§3.25) | `Show/Audio/@tracks` | width | clip end; footer for anything with a tail | fails at entry, visibly (Phase 3); a sampler group's claim **waits** (§3.27) |
 | **strip** — a fader or pad (§3.16) | the layout | role: DCA or sampler | the clip's run ends, however it ends | **waits**, or **evicts** when the arming sampler group says so (§3.27) |
 | **rack channel**, exclusive kind (§3.18) | `Show/Audio/Rack` | in→out width class | footer-timed — a tail may still be running | **degrades**: the cue plays dry and says so; §3.9c's edit-time analysis is what keeps it from happening in the show |
-| **processor input** (§3.9b) | the processor, by OSCQuery *(proposed)* | width | footer-timed | waits for the release rather than racing it (§3.9b) |
+| **processor input** (§3.9b) | the show, as `Slot` rows under the processor's mount (decision P); checked against the mounted namespace | width | **at run end** | waits for the release rather than racing it (§3.9b) |
+
+*The processor-input row amended in 0.8, at the author's direction (2026-09-10)
+— decision P and PR 4.3, `docs/godot-namespace-draft-0.1.md` §9 and §13.2.*
 
 **Buses are not slots** — a summing point is shared by construction. A rack
 channel of the *shared* kind, a reverb or a delay that many cues send into, is
@@ -628,14 +650,21 @@ feature in the product.
 
 ### 3.11 Closed-loop cues
 
-Targets speak OSCQuery, so a cue is an **assertion with read-back**. Per-cue
-wait: `none` / `sent` / `verified` (**default for own processors**). Enables
-relative moves computed from actual state, and failure visible in the list
-rather than discovered by ear.
+*Amended in 0.8, at the author's direction (2026-09-10) — decision K,
+`docs/godot-namespace-draft-0.1.md` §9.* Targets that can be asked describe
+themselves, and a cue aimed at one is an **assertion with read-back**. Most
+third-party targets cannot be asked, and a mount says which it is. Per-cue
+wait: `none` / `sent` / `verified` (**default for own processors**); a
+`verified` cue aimed at a mount that cannot be asked is refused when the show is
+read. Enables relative moves computed from actual state, and failure visible in
+the list rather than discovered by ear.
 
 ### 3.12 Prepare / commit
 
-Anticipation is a property of the **parameter**, not the cue. Standby
+Anticipation is a property of the **parameter**, not the cue. A value is
+pre-sent only where it can be read back first, because a value nobody can
+restore is a value nobody can revoke *(added in 0.8, at the author's direction,
+2026-09-10 — Phase 4 close-out, `docs/godot-phase4-closeout-0.1.md` §1)*. Standby
 auto-prepares; group headers extend the horizon from one row to a block. GO
 carries only the perceptible commit. Jumping away rolls preparation back —
 silently, guaranteed by the revocability rule. Row shows `idle / preparing /
@@ -649,10 +678,16 @@ recover.
 
 ### 3.13 Non-linear rehearsal: the state solver
 
+*Step 1 and the waypoint paragraphs amended in 0.8, at the author's direction
+(2026-09-10) — PR 4.7 and decision R, `docs/godot-namespace-draft-0.1.md` §13.8
+and §9.*
+
 State at time *T* is **computed**, not replayed:
 
-1. Walk back through the list accumulating the last writer of each parameter;
-   evaluate at its end state, or partway if *T* lands inside a fade.
+1. Walk forward through the list in one pass, accumulating the last writer of
+   each parameter; evaluate at its end state, or partway if *T* lands inside a
+   fade. Forward, because a backward walk cannot know it has finished until it
+   has read the whole list; the state it computes is the same.
 2. Reconstruct **what is running**, not only parameter values: run pointers,
    which member of which nested group would be active, and at what offset. A
    jump into the middle of a five-minute auto sequence lands with the right
@@ -662,14 +697,20 @@ State at time *T* is **computed**, not replayed:
    differs. A rehearsal jump is a minimal correction, not a shotgun blast.
 4. Event-kind nodes are excluded (do not re-fire the pyro).
 
-**Waypoints and solver work together, not instead of each other.** A waypoint is
-a known-good full state; the solver bridges from the nearest waypoint to the
-selected time. **Group boundaries are structural waypoints** — the walk can stop
-at one rather than going to the top of the show. Manual waypoints remain
-available as a way to force a divergent world back into agreement.
+**Waypoints and solver work together, not instead of each other.** **Group
+boundaries are structural waypoints**, and a completed group bounds only what it
+started: its blocking footer has ended every run it began, so none of those can
+be sounding at *T*. It bounds nothing about values, because what its cues wrote
+is still there, so the last-writer pass always runs from the top of the list.
+That is cheap: one map and one sweep.
+
+There are no manual waypoints to author (decision R, 2026-09-07). The engine
+keeps the list's own history of steps without being asked (the last sixty-four,
+each a load-to-time target), and forcing a divergent world back into agreement
+means picking a row from it. Structural waypoints live inside the solver.
 
 Because footers are arbitrary and need not be inverses, jumping backwards past a
-group **recomputes forward** from the last waypoint; it does not unwind.
+group **recomputes forward** from the top of the list; it does not unwind.
 
 **Two pointers visible during a jump:** standby position and state position.
 After a jump they agree; after a manual tweak they do not, and that divergence
@@ -858,13 +899,16 @@ Multitouch principles:
 **A web client is the primary surface, and a native companion is an optional
 addition on top of it — not an alternative to it.**
 
-The web client (TypeScript over OSCQuery + WebSocket) is what makes the tablet a
-*genuine* fallback: no install, no store relationship, and it reaches the iPad in
-the house, an Android tablet, and a browser on the booth machine from one
-codebase. It also inherits §3.22: because the engine speaks OSCQuery and OSCQuery
-**describes itself**, the client discovers the namespace rather than shipping a
-copy of it. WFS-DIY's Android remote needs a hand-maintained parameter table on
-both sides; Go.dot's client does not, and cannot drift from the engine.
+*Amended in 0.8, at the author's direction (2026-09-10) — decision V,
+`docs/godot-namespace-draft-0.1.md` §9.* The web client (ES modules over
+OSCQuery + WebSocket, served by the engine and editable while a show runs) is
+what makes the tablet a *genuine* fallback: no install, no store relationship,
+and it reaches the iPad in the house, an Android tablet, and a browser on the
+booth machine from one codebase. It also inherits §3.22: because the engine
+speaks OSCQuery and OSCQuery **describes itself**, the client discovers the
+namespace rather than shipping a copy of it. WFS-DIY's Android remote needs a
+hand-maintained parameter table on both sides; Go.dot's client does not, and
+cannot drift from the engine.
 
 What a native companion buys is **resume latency**, and it is a real operational
 benefit rather than a technical nicety:
@@ -1155,9 +1199,13 @@ Canonicalisation rules:
 - stable IDs on every object
 - one element per line, sparse attributes
 - deterministic attribute ordering
-- **locale-independent number formatting** — force C locale on write, fixed
-  precision, always a dot. `fr_FR` writing `0,5` into a show file is a
-  premiere-night bug.
+- **locale-independent number formatting** — force C locale on write, the
+  shortest text that reads back as the identical value, always a dot. `fr_FR`
+  writing `0,5` into a show file is a premiere-night bug. Fixed precision is not
+  enough: JUCE's writer, which stops at fifteen significant digits, lost 46 % of
+  19 993 random doubles on a round trip, and `std::to_chars` lost none
+  *(amended in 0.8, at the author's direction, 2026-09-10 — measured in Phase 1,
+  `docs/godot-namespace-draft-0.1.md` §9)*.
 - derived/ephemeral state (playhead, window geometry, selection, meters, run
   state) in a **separate file in the bundle**
 - multi-file bundle: cue lists, surface layout, device profiles diff and merge
@@ -1304,11 +1352,11 @@ A cue's content carries a **range list**: ordered regions of the file or curve,
 each with an in-point, an out-point, a **loop count from 1 to infinite**, and a
 name. Playback walks the list.
 
-- **Entry points, out-points and playback rate are user-editable and exposed as
-  nodes** — accessible over OSC like any other parameter.
+- **Entry points and out-points are user-editable and exposed as nodes** —
+  accessible over OSC like any other parameter.
 - Edits made during playback take effect **at the next iteration**, never
-  retroactively *(proposed)*.
-- Ranges need not be contiguous nor in file order *(proposed)* — a media cue is
+  retroactively (decision L, `docs/godot-namespace-draft-0.1.md` §9, 2026-09-06).
+- Ranges need not be contiguous nor in file order (decision L) — a media cue is
   then a playlist over one file, which covers alternate takes and versioned
   sections without duplicating media.
 - **Ranges and loop counts are copyable between cues.** This is the third
@@ -1341,9 +1389,12 @@ cycling until an advance releases it into the next range and on to its endpoint
 varispeed pitches and is the creative one; time-stretch preserves pitch and costs
 CPU and quality. Neither is a global preference.
 
-Rate is a node, so it is automatable, fader-bindable and can carry a lane. Rate
-changes apply to the **whole cue**, driven off the sample clock, so audio and
-video move together (§3.19d).
+*Amended in 0.8, at the author's direction (2026-09-10) — Phase 3 close-out,
+`docs/godot-phase3-closeout-0.1.md` §1.* Rate is a property of the cue, applied
+when it is armed. Live rate change needs a per-clip speed atomic threaded into
+the wave node, which this engine does not have; when it does, rate becomes a
+node like any other. Rate changes apply to the **whole cue**, driven off the
+sample clock, so audio and video move together (§3.19d).
 
 #### Joins
 
@@ -1454,7 +1505,7 @@ Both halves are now measured rather than assumed.
   output device is a structural edit and does rebuild the graph, so destinations
   are assigned at show load along with the track set, not per cue.
 
-#### Ranges map onto follow actions
+#### Ranges are looping clips, and Go.dot places the boundaries
 
 *Amended in 0.8 — `docs/spikes/spike03-join-quality.md`.* Measured, with three
 results and one of them awkward:
@@ -1473,10 +1524,12 @@ results and one of them awkward:
   a 32-frame buffer, **3.5 ms at 256**. It scales with buffer size, so the range
   boundary's audible quality is coupled to the latency budget rather than free.
 
-A range (§3.24) is a launcher clip over a region of the file; "loop N then next"
-is a follow action; `advance` is a programmatic launch of the next clip. The
-uncertain part is join *quality* — sample accuracy and a crossfade at the
-boundary without a custom clip type. A spike, not a blocker (§6.1 #3).
+*Amended in 0.8, at the author's direction (2026-09-10) — the heading and this
+paragraph; M12, `docs/spikes/spike03b-loop-joins.md`.* Each range (§3.24) is a
+clip in a launcher slot of its own, armed looping, and Go.dot places the
+boundary between them. Follow actions are not used. The clip's own wrap
+measured cleaner than a placed boundary in all ten configurations M12 tried,
+and a range that loops for ever has no end for a follow action to fire at.
 
 #### Plugins and the rack are where TE earns its keep
 
@@ -1564,8 +1617,10 @@ was the single largest risk in the TE plan, and it was self-inflicted.
 #### The Edit is generated, never stored
 
 TE's Edit XML is a *rendering* of the show document (§3.20), produced at load.
-The document is authoritative; the Edit is disposable. TE's ValueTree/UndoManager
-still serves the in-engine undo model.
+The document is authoritative; the Edit is disposable. Undo belongs to the
+document (an undo history per domain on the show document's own ValueTree,
+§3.20) and never to the Edit's own UndoManager *(amended in 0.8, at the
+author's direction, 2026-09-10 — `docs/godot-namespace-draft-0.1.md` §14.9)*.
 
 #### Residual risks, stated
 
@@ -1586,9 +1641,13 @@ result.
 What replaces it is a **cost**, not a gap, and it shapes where the work happens:
 `IDs::offset` is in `Edit::TreeWatcher`'s restart list, so **setting an offset
 during playback rebuilds the graph**, once per output device.
-`LaunchHandle::nudge` does not. So load-to-time sets offsets **in prepare**
-(§3.12) and uses nudge for anything already playing — which gives the prepare
-step a second, mechanical reason to exist beyond anticipation.
+`LaunchHandle::nudge` does not, but nothing Go.dot exposes reaches it (M17,
+PR 4.1, 2026-09-08). So load-to-time sets offsets **in prepare** (§3.12) and
+stops and relaunches a cue already playing at the wrong offset (the arm-side
+offset lands on the sample), which gives the prepare step a second, mechanical
+reason to exist beyond anticipation *(amended in 0.8, at the author's direction,
+2026-09-10 — a relaunch rather than a nudge; `docs/godot-namespace-draft-0.1.md`
+§13.9 and §13.14)*.
 
 The JUCE version coupling proved real in the other direction too: Tracktion
 v3.2.0 does not build against JUCE 9, and Tracktion's own development branch was
@@ -1800,18 +1859,21 @@ persistence for nothing. Checking at triggers rather than every tick is
 deliberate: a tick-rate check makes a stop impossible, a trigger-rate check is
 human-paced, and a timecode list firing makes it as frequent as anyone needs.
 
-What suspends the assertion, and what does not:
+What suspends the assertion, and what does not *(the first two amended in 0.8,
+at the author's direction, 2026-09-10 — decision S,
+`docs/godot-namespace-draft-0.1.md` §9)*:
 
-- a **stop cue** in the list does — it is the last writer, and the document
-  holds the decision (§4.10);
-- a **kill from the running pane** does *(proposed)*, run-local like a prune,
-  or the operator fights the machine;
+- a **stop cue** in the list before the standby, aimed at the persistent cue,
+  does: it is the last writer, and the document holds the decision (§4.10);
+- a **kill from the running pane** does, run-local like a prune and for the
+  session, until a load-to-time re-solves the list and lifts it; otherwise the
+  operator fights the machine (decision S, 2026-09-07);
 - a **double Esc** does not: the next GO restoring the declared world is the
   point of declaring it, and it is §4.4's price of an emergency, paid once;
 - **Esc** on a persistent *media* cue is a **pause** *(proposed; the author's
   lean)*: a stop that remembers its position, resumed at that offset by the
   next assertion — load-to-time's operation at load-to-time's cost (§3.25:
-  offset in prepare, nudge when already playing). No footer runs on a pause.
+  offset in prepare, a relaunch when already playing). No footer runs on a pause.
   For a still, an effect chain or a data process there is nothing to remember
   and the resume is a relaunch. If adopted, §4.4 gains one sentence and
   `CLAUDE.md` is re-copied.
@@ -2106,19 +2168,25 @@ re-claims strips lost to eviction and cannot conjure strips the layout lacks.
 ### 6.9 Proposals awaiting a yes or a no
 
 Marked *(proposed)* in the text. The ones worth a decision before they get
-built into something: stereo cue → two mono slots and processor-declared slots
-(§3.9b); tag targeting (§3.8); non-contiguous ranges, edit-at-next-iteration and
-crossfaded joins (§3.24); per-destination latency and machine-level storage
-(§3.19c). The infinite-loop load-to-time case (§3.24) is settled as
+built into something: stereo cue → two mono slots (§3.9b); tag targeting
+(§3.8); crossfaded joins (§3.24); per-destination latency and machine-level
+storage (§3.19c). The infinite-loop load-to-time case (§3.24) is settled as
 solve-in-practice.
+
+*Answered since* (amended in 0.8, at the author's direction, 2026-09-10; the
+decisions are in `docs/godot-namespace-draft-0.1.md` §9): processor-declared
+slots, where the show declares them and they are checked against the mounted
+namespace (decision P); non-contiguous ranges and edit-at-next-iteration, yes
+(decision L); the running-pane kill suspending a persistent assertion, yes
+(decision S).
 
 Added 2026-09-07, with the sections that carry them: a member pinning its strip
 (§3.27); the parked-fader start edge and the dwell for faders without touch
 (§3.9a); `stop` as a second-press value (§3.8); release-less triggers on a hold
-clip and the second-surface rule (§3.27); the voices claim shape (§3.25, to
-measure); the bypassed stack in a rack channel (§3.18); a group carrying a
-persistent section, the running-pane kill suspending a persistent assertion, and
-Esc as a pause on persistent media (§3.29).
+clip and the second-surface rule (§3.27); the voices claim shape (§3.25,
+measured by M16 and now the author's to pick); the bypassed stack in a rack
+channel (§3.18); a group carrying a persistent section and Esc as a pause on
+persistent media (§3.29).
 
 Added 2026-09-09: authored colour at idle and timbre while sounding, as a
 layout option (§3.30).
@@ -2141,7 +2209,10 @@ Mackie vs HUI first — first week with the D700.
   realistic stack per channel, in-process and through the proxy.
 - **Pause and resume at an offset** (§3.29): whether a relaunch at a remembered
   position is clean when the offset is set in prepare, and when a playing clip
-  is nudged instead — the same question load-to-time asks.
+  is nudged instead — the same question load-to-time asks. *Half answered*
+  (M17, PR 4.1, 2026-09-08): an offset set at arm lands exactly on the sample.
+  The nudge half cannot be measured from here, because nothing Go.dot exposes
+  reaches `LaunchHandle::nudge`.
 - **The analysis cost** (§3.30, added 2026-09-09): seconds of work per minute
   of audio at the chosen window and hop, and the cache's size on disk, on the
   Windows box and the Mac mini — which decides whether import can afford it
@@ -2199,6 +2270,10 @@ non-negotiable (§3.16).
 ---
 
 ## 9. Immediate next actions
+
+*Status 2026-09-10:* 2–5 are done; 1 is partly done (the extension bytes were
+answered on the unit, §6.4); 6 is Phase 10's. The current next actions are the
+devplan's.
 
 1. Read `Multi DAW [en].pdf`, `Mackie [en].pdf`; open the CSI `.mst` and the
    Bitwig script for the D700's extension vocabulary. Request the byte-level
