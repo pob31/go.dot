@@ -34,6 +34,7 @@
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/Bundle.h>
+#include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/EphemeralState.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/RelaxNg.h>
@@ -43,6 +44,7 @@
 
 #include <regex>
 #include <string>
+#include <vector>
 
 using namespace wfg;
 using namespace wfg::doc;
@@ -119,6 +121,36 @@ namespace
     }
 
     const std::string standbyAddress = "/godot/list/7K2QM9X4/standby";
+    const std::string houseToHalfName = "/godot/cue/B3N8R5TW/name";
+
+    /*  Every temp a save left in `folder` - `<name>.tmp-<pid>` - files and
+        directories alike, because a directory is what the failing-write case
+        stands in a temp's way. */
+    std::vector<std::string> tempsIn (const juce::File& folder)
+    {
+        std::vector<std::string> names;
+
+        for (const auto& found : folder.findChildFiles (juce::File::findFilesAndDirectories,
+                                                        false, "*.tmp-*"))
+            names.push_back (found.getFileName().toStdString());
+
+        return names;
+    }
+
+    /*  `document.save`, registered against a session and invoked as the engine
+        would invoke it - the handler alone, with no queue around it, which is
+        all a question about what one save did needs. */
+    Outcome invokeSave (ShowDocument& document, DocumentSession& session)
+    {
+        CommandRegistry registry;
+        registerBundleCommands (registry, document, session);
+
+        const auto* saveCommand = registry.find ("document.save");
+        REQUIRE (saveCommand != nullptr);
+
+        CommandContext context;
+        return saveCommand->handler (context, {});
+    }
 }
 
 //==============================================================================
@@ -187,7 +219,83 @@ TEST_CASE ("bundle: every file it writes ends its lines with LF")
     }
 }
 
-TEST_CASE ("document.save: a write that cannot land is refused, and the old bundle is untouched")
+TEST_CASE ("bundle: a save over an existing bundle is byte-identical, and leaves no temp behind")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  THE CASE THE ATOMIC WRITE EXISTS FOR, which the byte-identity case above
+        does not reach. That one saves into an empty folder, and a target that
+        does not exist is handed by `replaceFileIn` to `moveFileTo` - every
+        file there is a first save. This one saves over the files `open` has
+        just read, which is the replace branch: the one that must leave the
+        bytes exactly as they were AND leave nothing of itself beside them.
+
+        TWICE, because the second save finds the first one's files where the
+        first found the fixture's - which is a session's second Ctrl-S, and
+        the save that would trip over a temp the first had failed to take away. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    REQUIRE (Bundle::save (temp.folder, document).ok);
+    REQUIRE (Bundle::save (temp.folder, document).ok);
+
+    for (const auto& name : { "show.xml", "state.xml", "minimal.wfg" })
+    {
+        INFO ("file: " << name);
+        CHECK (readBytes (temp.folder.getChildFile (name))
+                 == readBytes (fixtureBundle().getChildFile (name)));
+    }
+
+    const auto left = tempsIn (temp.folder);
+    CHECK_MESSAGE (left.empty(), "left behind: " << (left.empty() ? std::string() : left.front()));
+}
+
+TEST_CASE ("document.save: a save that lands replaces the show, and puts the dot out")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  `/godot/document/dirty` is `isDirty (document, session)`, published by
+        the serve verb's after-tick; this is the half of it a unit test can
+        reach - the stamp the save handler puts on the session, and the
+        comparison the after-tick makes. The black-box driver asserts the
+        published node. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    CHECK_FALSE (isDirty (document, session));
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Renamed before the save").ok);
+    CHECK (isDirty (document, session));
+
+    const auto outcome = invokeSave (document, session);
+
+    CHECK (outcome.applied);
+    CHECK (session.savedRevision == document.showRevision());
+    CHECK_FALSE (isDirty (document, session));
+
+    /*  REPLACED, and not merely left alone: the byte-identity case above could
+        pass by writing nothing at all, and this one could not. */
+    ShowDocument reopened;
+    REQUIRE (Bundle::open (temp.folder, reopened).ok);
+    CHECK (reopened.getAttribute (houseToHalfName) == std::string ("Renamed before the save"));
+
+    CHECK (tempsIn (temp.folder).empty());
+
+    /*  And the operator's position does not light it again. A standby is
+        state.xml's, and a dot that came back on at the first GO after a save
+        would be the dot nobody reads (plan decision 4). */
+    REQUIRE (document.setAttribute (standbyAddress, "D9FH2JKA").ok);
+    CHECK_FALSE (isDirty (document, session));
+}
+
+TEST_CASE ("document.save: a write that cannot land is refused, the old show.xml is intact, and the dot stays lit")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
 
@@ -198,35 +306,46 @@ TEST_CASE ("document.save: a write that cannot land is refused, and the old bund
         that does not exist is not one either, because `Bundle::save` creates
         its folder and every missing parent with it, and the save would
         succeed. A DIRECTORY standing where a file has to be is refused by
-        CreateFile and by open(2) alike - EISDIR there, access denied here -
-        and arranging it needs no privilege anywhere. */
+        CreateFile and by open(2) alike - EISDIR there, access denied here,
+        whatever the privilege - and arranging it needs none.
+
+        WHERE the directory stands moved in PR 5.2, and the move is the point.
+        A save no longer opens show.xml at all: it opens the temp beside it, so
+        the temp's name is the file that has to be a directory. PR 5.1 put the
+        directory in show.xml's own place, and that stopped being portable the
+        moment the save became a replace - Windows' ReplaceFile and macOS's
+        copy both refuse an empty directory as a target, but on Linux JUCE's
+        fallback after the failed rename deletes the destination first, rmdir
+        succeeds, and the save goes through. */
     TempBundle temp { "minimal" };
     temp.copyFixture();
 
     const auto showXml = temp.folder.getChildFile ("show.xml");
-    REQUIRE (showXml.deleteFile());
-    REQUIRE (showXml.createDirectory().wasOk());
+    const auto before = readBytes (showXml);
 
-    /*  A sentinel in state.xml rather than the fixture's own bytes, because
-        the fixture IS what a successful save writes - finding it unchanged
-        would prove nothing. These bytes are ones no save could produce, and
-        show.xml is written first, so their survival is the whole claim: the
-        save stopped at the file it could not open and wrote nothing else. */
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+
+    /*  An edit, so the refused save had something to write that is not what
+        is already there. The fixture IS what an unedited save writes, and
+        finding it unchanged after a save of the same bytes would prove
+        nothing. */
+    REQUIRE (document.setAttribute (houseToHalfName, "Never reached the disk").ok);
+
+    REQUIRE (Bundle::temporaryFor (showXml).createDirectory().wasOk());
+
+    /*  A sentinel in state.xml, written after the open so the open did not
+        read it. These bytes are ones no save could produce, and show.xml is
+        written first, so their survival says the save stopped at the file it
+        could not write and touched nothing else. */
     const std::string sentinel = "<!-- not a thing save would ever write -->\n";
     const auto stateXml = temp.folder.getChildFile ("state.xml");
     writeBytes (stateXml, sentinel);
 
-    ShowDocument document;
-    REQUIRE (Bundle::open (fixtureBundle(), document).ok);
-
-    CommandRegistry registry;
-    registerBundleCommands (registry, document, temp.folder);
-
-    const auto* saveCommand = registry.find ("document.save");
-    REQUIRE (saveCommand != nullptr);
-
-    CommandContext context;
-    const auto outcome = saveCommand->handler (context, {});
+    const auto stampBefore = session.savedRevision;
+    const auto outcome = invokeSave (document, session);
 
     /*  Refused rather than reported: a save that did not happen must not reach
         the log as applied, or a replay would reproduce a lie. */
@@ -238,7 +357,16 @@ TEST_CASE ("document.save: a write that cannot land is refused, and the old bund
         format change and has to fail here rather than in somebody's parser. */
     CHECK (outcome.reason == "write-failed");
 
+    /*  THE SHOW THAT WAS ON DISK IS STILL THE SHOW ON DISK, byte for byte -
+        the one promise §14.10 makes about a save that fails. */
+    CHECK (readBytes (showXml) == before);
     CHECK (readBytes (stateXml) == sentinel);
+
+    /*  And the dot is still lit: the stamp is put on a save that landed and
+        on no other, so the operator is still told there is work not on disk -
+        because there is. */
+    CHECK (session.savedRevision == stampBefore);
+    CHECK (isDirty (document, session));
 }
 
 //==============================================================================

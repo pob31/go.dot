@@ -30,16 +30,20 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/log/Replay.h>
 
 #include <juce_core/juce_core.h>
 
+#include <cstdint>
 #include <cstring>
 #include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 using namespace wfg;
 using namespace wfg::doc;
@@ -885,4 +889,118 @@ TEST_CASE ("refers: the table is what says which attributes point at things")
     /*  And a value that is not a pointer says so by saying nothing. */
     CHECK (pointsAt ("Cue", "name").empty());
     CHECK (pointsAt ("Media", "file").empty());
+}
+
+//==============================================================================
+TEST_CASE ("show revision: an edit to the show moves it, and a standby does not")
+{
+    /*  Plan decision 4, pinned where it would be broken. `/godot/document/dirty`
+        compares this counter with the last save's, so a standby that moved it
+        would light the dot on every GO - and an operator told there are unsaved
+        changes after every GO has stopped reading the dot by the second act.
+
+        Through the COMMANDS, because the claim is about what a client's gesture
+        does and a GO moves the standby through the same door `standby.set`
+        does. `revision()` is checked alongside, so a standby that moved nothing
+        at all cannot pass for one that moved only the right counter. */
+    auto document = loaded ("canonical.xml");
+
+    Engine engine;
+    cue::Focus focus;
+    registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+
+    std::int64_t nextTick = 0;
+
+    const auto applyOne = [&engine, &nextTick] (const std::string& command,
+                                                std::vector<osc::Value> args)
+    {
+        REQUIRE (engine.submit (origin::cli, command, std::move (args)));
+        return engine.processTick (nextTick++).applied;
+    };
+
+    const auto showAtOpen = document.showRevision();
+    const auto allAtOpen = document.revision();
+
+    // --- a standby is the operator's position, not the show ------------------
+    REQUIRE (applyOne ("standby.set", { osc::Value::string ("B3N8R5TW") }) == 1);
+    CHECK (document.revision() != allAtOpen);
+    CHECK (document.showRevision() == showAtOpen);
+
+    // ...and neither is the next one, which is the move GO itself makes.
+    const auto allBeforeNext = document.revision();
+    REQUIRE (applyOne ("standby.next", {}) == 1);
+    CHECK (document.revision() != allBeforeNext);
+    CHECK (document.showRevision() == showAtOpen);
+
+    // --- a name is what someone decided --------------------------------------
+    REQUIRE (applyOne ("node.set", { osc::Value::string ("/godot/cue/B3N8R5TW/name"),
+                                     osc::Value::string ("Renamed since the file was read") }) == 1);
+
+    const auto afterRename = document.showRevision();
+    CHECK (afterRename != showAtOpen);
+
+    // --- and the structure is the show, whichever door changed it ------------
+    const auto added = document.createCue ("7K2QM9X4", 0, "memo", "Added");
+    REQUIRE (added.ok);
+
+    const auto afterAdd = document.showRevision();
+    CHECK (afterAdd != afterRename);
+
+    REQUIRE (document.move (added.id, "7K2QM9X4", 2).ok);
+    const auto afterMove = document.showRevision();
+    CHECK (afterMove != afterAdd);
+
+    REQUIRE (document.remove (added.id).ok);
+    CHECK (document.showRevision() != afterMove);
+}
+
+TEST_CASE ("show revision: a load is a change, and a value the schema does not know is guessed as one")
+{
+    ShowDocument document;
+    const auto fresh = document.showRevision();
+
+    /*  Never nought, so a session's nought can mean "never saved" without
+        colliding with a document that has simply never been touched. */
+    CHECK (fresh != 0);
+
+    /*  A load replaces the root wholesale through `adopt`, and the verbs stamp
+        their session AFTER it for exactly this reason. */
+    REQUIRE (CanonicalXml::read (fixture ("canonical.xml"), document).ok);
+
+    const auto afterLoad = document.showRevision();
+    CHECK (afterLoad != fresh);
+
+    /*  Nothing but a test can write an attribute the schema has no row for -
+        every door refuses one - and when the counter has to guess which file
+        such a value belongs in, it guesses the show. A false "unsaved" costs
+        somebody a save; a false "saved" costs them a show. */
+    document.root().setProperty ("notInTheTable", 1, nullptr);
+    CHECK (document.showRevision() != afterLoad);
+}
+
+TEST_CASE ("show revision: a moved document keeps its count, and keeps counting")
+{
+    /*  The move is written by hand and moves every member by name, so a
+        counter added to the class and not to the move would restart silently -
+        and a session holding the old number would then disagree with the
+        document about whether there is anything to save. */
+    ShowDocument original;
+    REQUIRE (original.createList ("Main").ok);
+    REQUIRE (original.createList ("Second").ok);
+
+    const auto counted = original.showRevision();
+    REQUIRE (counted != ShowDocument().showRevision());
+
+    ShowDocument moved { std::move (original) };
+    CHECK (moved.showRevision() == counted);
+
+    // It still hears its own tree, which is the other half of a careful move.
+    REQUIRE (moved.createList ("Third").ok);
+    const auto afterEdit = moved.showRevision();
+    CHECK (afterEdit != counted);
+
+    ShowDocument assigned;
+    assigned = std::move (moved);
+    CHECK (assigned.showRevision() == afterEdit);
 }

@@ -273,6 +273,50 @@ namespace wfg::doc
             as "never built". */
         std::uint64_t revision() const noexcept { return changeCount; }
 
+        /*  HOW MANY TIMES THE SHOW HALF HAS CHANGED - what `show.xml` would
+            say, and not where the engine had got to. `/godot/document/dirty` is
+            this compared with the number the last save stamped
+            (DocumentSession.h), so this is the counter that decides whether
+            the operator is told there is something to save.
+
+            THE SAME LISTENER AS `revision()`, ASKING ONE MORE QUESTION, and
+            for the same reason that one is a listener: a door that forgot to
+            bump it would be a dot that stayed out over an unsaved edit. A
+            structural change - a child added, removed or moved, a load - bumps
+            both counters unconditionally, since every one of them is something
+            `show.xml` records. A PROPERTY change looks the attribute's row up in
+            the schema and bumps this one only when that row is `persist ==
+            show`. An attribute the schema does not know bumps it too: nothing
+            but a test can write one, and when this has to guess it guesses
+            dirty, because a false "unsaved" costs a save and a false "saved"
+            costs a show.
+
+            SO A GO DOES NOT LIGHT THE DOT. It writes `list/@standby` - a
+            `persist == state` row - through the same choke point every edit
+            uses, which moves `revision()` and not this. That is plan decision
+            4, taken early so it can be overruled early, and not a law: it
+            follows §3.20's line, which puts the playhead and the focus in
+            state.xml precisely because losing them is not losing work, and it
+            is the difference between a light that means something and one an
+            operator has learned by the second act to ignore. The price is that
+            state.xml can be behind with the dot out, and a standby a crash
+            loses is a standby, not a show.
+
+            TWO THINGS THAT WOULD OTHERWISE ARRIVE AS BUG REPORTS. An object's
+            `id` never reaches the listener at all: `insertObject` writes it on
+            a node that has not yet joined the tree, so the only change heard is
+            the child being added - which counts, so nothing is lost. And the
+            count is MONOTONIC: once undo exists (PR 5.4), undoing an edit will
+            be a second change rather than the first one taken back, so the dot
+            will not go out by undoing. What it means is "the file on disk is
+            not this document's history", not "this document differs from the
+            file", and namespace draft §14.15 records the second question as
+            deliberately not asked.
+
+            Starts at 1, like `revision()`, so that nought is free to mean
+            "never saved". */
+        std::uint64_t showRevision() const noexcept { return showChangeCount; }
+
         //======================================================================
         /*  Checks the whole tree against the schema: unknown elements and
             attributes, values that do not parse, duplicate or malformed
@@ -338,20 +382,25 @@ namespace wfg::doc
 
         void collectIds (const juce::ValueTree& node, std::vector<std::string>& out) const;
 
-        /*  The listener half of `revision()`. Every one of these bumps the
-            counter and does nothing else; `valueTreeRedirected` is included
-            because a redirect replaces the content wholesale, which is the
-            biggest change of all. */
-        void valueTreePropertyChanged (juce::ValueTree&, const juce::Identifier&) override
+        /*  The listener half of `revision()` and `showRevision()`. Every
+            structural callback bumps both counters and does nothing else;
+            `valueTreeRedirected` is included because a redirect replaces the
+            content wholesale, which is the biggest change of all. The property
+            callback is the one that has to ask which half of the document it
+            touched, so it lives in the .cpp beside the schema lookup. */
+        void valueTreePropertyChanged (juce::ValueTree& node, const juce::Identifier& property) override;
+
+        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override    { bumpStructure(); }
+        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { bumpStructure(); }
+        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override     { bumpStructure(); }
+        void valueTreeParentChanged (juce::ValueTree&) override                   { bumpStructure(); }
+        void valueTreeRedirected (juce::ValueTree&) override                      { bumpStructure(); }
+
+        void bumpStructure() noexcept
         {
             ++changeCount;
+            ++showChangeCount;
         }
-
-        void valueTreeChildAdded (juce::ValueTree&, juce::ValueTree&) override    { ++changeCount; }
-        void valueTreeChildRemoved (juce::ValueTree&, juce::ValueTree&, int) override { ++changeCount; }
-        void valueTreeChildOrderChanged (juce::ValueTree&, int, int) override     { ++changeCount; }
-        void valueTreeParentChanged (juce::ValueTree&) override                   { ++changeCount; }
-        void valueTreeRedirected (juce::ValueTree&) override                      { ++changeCount; }
 
         juce::ValueTree showNode;
         IdRegistry registry;
@@ -359,6 +408,10 @@ namespace wfg::doc
         /*  Starts at 1 so that nought means "no cache has ever been built".
             See `revision()`. */
         std::uint64_t changeCount = 1;
+
+        /*  Starts at 1 so that nought means "never saved". See
+            `showRevision()`, and the move below, which has to carry it. */
+        std::uint64_t showChangeCount = 1;
 
     public:
         /*  MOVED WITH CARE AND NEVER COPIED, because the listener behind
@@ -369,6 +422,14 @@ namespace wfg::doc
             revision would stand still while its show changed underneath it,
             which is the one failure a revision counter exists to prevent. So
             the move deregisters there and registers here.
+
+            And it moves every member BY NAME, which is the cost of writing it
+            by hand: a counter added to the class and not to the move is a
+            moved document that silently restarts its count. `showChangeCount`
+            is moved there beside `changeCount`, and a moved document that
+            restarted it would disagree with every session that had stamped the
+            old number: dirty with nothing to save, and then, some edits later,
+            clean with everything to save.
 
             A copy is refused outright. `juce::ValueTree` is a reference type, so
             a copied document would not be a second show but a second handle on

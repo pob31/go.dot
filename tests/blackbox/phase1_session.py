@@ -91,6 +91,19 @@ def settle(server: Server, address: str, expected, report: Report,
     return report.equal(actual, expected, description)
 
 
+def dirty(server: Server):
+    """`/godot/document/dirty` as the engine last published it: True, False,
+    or None when the node could not be read at all.
+
+    Compared with `is True` and `is False` by every caller, never by
+    truthiness, because None is a third answer - "the node is not there" - and
+    a check that let it pass for False would pass on an engine that had
+    stopped publishing the node altogether.
+    """
+    reply = common.http_json(server.http_port, "/godot/document/dirty?VALUE")
+    return reply.get("VALUE", [None])[0]
+
+
 def run(locale: "str | None") -> int:
     report = Report(f"phase1 session ({locale or 'C'})")
 
@@ -133,6 +146,12 @@ def run(locale: "str | None") -> int:
 
             report.check(ticking, "the tick advances without anybody asking it to")
 
+            # A SHOW THAT HAS JUST BEEN OPENED HAS NOTHING TO SAVE. Read once
+            # rather than waited for: the first snapshot is published before
+            # the port opens, and nothing has written the show since.
+            report.equal(dirty(server), False,
+                         "document/dirty is false for a show that has just been opened")
+
             # -- 2. a cue to work with ---------------------------------------
             lists = common.http_json(server.http_port, "/godot/list")
             list_ids = sorted((lists.get("CONTENTS") or {}).keys())
@@ -173,6 +192,16 @@ def run(locale: "str | None") -> int:
 
             settle(server, name_address, "wrote-over-udp", report,
                    "a UDP write reaches the document and is readable over HTTP")
+
+            #  AND THE DOT COMES ON, for the first time since Phase 1 published
+            #  it. Waited for rather than read: the name having settled says
+            #  the name has been published and nothing more, and what a check
+            #  reads is what its wait has to see.
+            lit = common.wait_until(lambda: dirty(server) is True)
+
+            report.check(bool(lit),
+                         "an edit to the show makes document/dirty true",
+                         f"still reads {dirty(server)!r}")
 
             # -- 4. a write over the WebSocket, with a subscription ----------
             client = common.WSClient(server.http_port, "driver")
@@ -288,6 +317,17 @@ def run(locale: "str | None") -> int:
                     lambda: "wrote-by-somebody-else"
                               in (bundle / "show.xml").read_text(encoding="utf-8")
                             and "document.save" in log.read_text(encoding="utf-8"))
+
+                #  AND THE DOT GOES OUT. The save's record reaching the log is
+                #  not the snapshot reaching a client - the after-tick
+                #  publishes it after the tick's commands are logged - so the
+                #  node itself is what is waited for, as the file and the
+                #  record were above.
+                cleared = common.wait_until(lambda: dirty(server) is False)
+
+                report.check(bool(cleared),
+                             "document/dirty is false again once the save has landed",
+                             f"still reads {dirty(server)!r}")
             finally:
                 client.close()
 

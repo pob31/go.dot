@@ -302,6 +302,7 @@ namespace wfg::doc
         showNode = std::move (other.showNode);
         registry = std::move (other.registry);
         changeCount = other.changeCount;
+        showChangeCount = other.showChangeCount;
 
         showNode.addListener (this);
         return *this;
@@ -327,8 +328,31 @@ namespace wfg::doc
 
         showNode.addListener (this);
 
-        /*  A load is the largest change there is. */
+        /*  A load is the largest change there is - to the show half as much as
+            to the whole, which is why a verb that has just opened a bundle
+            stamps its session AFTER the load rather than before it. */
+        bumpStructure();
+    }
+
+    void ShowDocument::valueTreePropertyChanged (juce::ValueTree& node,
+                                                 const juce::Identifier& property)
+    {
         ++changeCount;
+
+        /*  WHICH FILE THIS VALUE LIVES IN, asked of the same column the two
+            writers ask (CanonicalXml.cpp and EphemeralState.cpp both filter on
+            `persist`), so the dot and the files cannot disagree about what a
+            save would write. Looked up by the element the property landed on,
+            which is what makes a Group's inherited Cue rows answer as Cue rows
+            do - Schema applies that rule once, and this reads its result.
+
+            A row the schema does not know counts as show: see `showRevision()`
+            for why guessing dirty is the safe way to be wrong. */
+        const auto* attribute = Schema::instance().attribute (node.getType().toString().toStdString(),
+                                                              property.toString().toStdString());
+
+        if (attribute == nullptr || attribute->persist() == Persist::show)
+            ++showChangeCount;
     }
 
     //==============================================================================

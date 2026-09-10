@@ -25,6 +25,7 @@
 #include <wfg/engine/midi/MidiInputs.h>
 #include <wfg/engine/midi/MidiSender.h>
 #include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/OscQueryJson.h>
@@ -234,13 +235,20 @@ namespace
 
         const auto nowhere = juce::File::getCurrentWorkingDirectory();
 
+        /*  A session only because `document.save` needs somewhere to stamp a
+            revision; nothing here invokes it, so nothing is ever stamped. It is
+            declared beside the document because the handler holds it by
+            reference, and a reference into a block that had closed would be a
+            trap left for the first person who did invoke it. */
+        wfg::doc::DocumentSession session { nowhere, document.showRevision() };
+
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::cue::registerRunCommands (engine.commands(), runs);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
-        wfg::doc::registerBundleCommands (engine.commands(), document, nowhere);
+        wfg::doc::registerBundleCommands (engine.commands(), document, session);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
 
         for (const auto& command : engine.commands().all())
@@ -490,6 +498,19 @@ namespace
         std::map<std::string, double> durations;
         runner.setMediaDurations (&durations);
 
+        /*  WHERE A REPLAYED `document.save` WRITES, and the revision it stamps.
+
+            Declared HERE, in the verb's own scope, and not beside the `--out`
+            that fills it in below: the save handler holds it by reference, and
+            the replay that invokes that handler runs after the bundle block
+            has closed. Declared inside it, every replayed save would stamp a
+            session that no longer existed.
+
+            Nothing in a replay reads the stamp - there is no after-tick and no
+            published `dirty` - so an empty folder and a nought are what it
+            holds until `--out` gives it a folder. */
+        wfg::doc::DocumentSession replayed;
+
         const auto bundlePath = args.containsOption ("--bundle")
                                   ? args.getValueForOption ("--bundle")
                                   : juce::String();
@@ -561,7 +582,10 @@ namespace
                     juce::File::getCurrentWorkingDirectory().getChildFile (outPath) };
 
                 out.createDirectory();
-                wfg::doc::registerBundleCommands (engine.commands(), document, out);
+
+                replayed.folder = out;
+                replayed.savedRevision = document.showRevision();
+                wfg::doc::registerBundleCommands (engine.commands(), document, replayed);
             }
 
             for (const auto& problem :
@@ -889,6 +913,16 @@ namespace
             return 1;
         }
 
+        /*  THE SHOW HALF AS IT WAS READ, taken the instant the load succeeded,
+            which is when `serve` stamps its session. This verb registers no
+            `document.save` and applies nothing, so it has no session to keep -
+            but it does publish `/godot/document/dirty`, and a published value
+            is a claim. Made by the same comparison `serve` makes rather than
+            left at the struct's `false`, so that if anything between here and
+            the publish ever did write the show, the dump would say so instead
+            of repeating what every client was told for four phases. */
+        const auto loadedShowRevision = document.showRevision();
+
         /*  Wired exactly as `serve` will wire it, so what this prints is what a
             client would get rather than an approximation of it. */
         wfg::Engine engine;
@@ -953,6 +987,7 @@ namespace
         state.version = WFG_VERSION;
         state.documentPath = target.getFullPathName().toStdString();
         state.documentName = target.getFileNameWithoutExtension().toStdString();
+        state.documentDirty = document.showRevision() != loadedShowRevision;
 
         const auto snapshot = parameters.publish (0, state);
 
@@ -1450,6 +1485,24 @@ namespace
             return 2;
         }
 
+        /*  THE SESSION: which folder `document.save` writes to, and which
+            revision of the show that folder holds.
+
+            STAMPED NOW, AFTER THE LOAD AND NOT BEFORE IT. `adopt` counts a load
+            as the largest change there is, so a session stamped first would
+            report unsaved changes at the instant the document matched the
+            disk; stamped here, the folder holds exactly this. state.xml's
+            restored standby and focus were applied inside `open` too, and move
+            nothing a stamp compares - they are the operator's position, not
+            the show.
+
+            In the serve scope, beside the document, because two things hold
+            it by reference for the life of the process: the save handler,
+            which stamps it, and the after-tick below, which compares against
+            it. Captured by value, the stamp would land on a copy and the dot
+            would never go out. */
+        wfg::doc::DocumentSession session { target, document.showRevision() };
+
         //  --- the engine and everything it needs --------------------------
         wfg::Engine engine;
         wfg::tree::TouchTable touches;
@@ -1525,7 +1578,7 @@ namespace
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
-        wfg::doc::registerBundleCommands (engine.commands(), document, target);
+        wfg::doc::registerBundleCommands (engine.commands(), document, session);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
 
         runner.setMounts (&mounts, &sender, &probe);
@@ -1558,6 +1611,7 @@ namespace
         state.version = WFG_VERSION;
         state.documentPath = target.getFullPathName().toStdString();
         state.documentName = target.getFileNameWithoutExtension().toStdString();
+        state.documentDirty = wfg::doc::isDirty (document, session);
 
         /*  THE CLOCK IS CHECKED AND THE TREE PUBLISHED BEFORE ANY SOCKET OPENS,
             and the order is load-bearing rather than tidy.
@@ -2209,6 +2263,25 @@ namespace
                                     state.lastError = engine.lastError();
 
                                 state.errorCount = errorCount;
+
+                                /*  WHETHER THERE IS ANYTHING TO SAVE, true for
+                                    the first time since the node was published
+                                    in Phase 1 - every client until now was told
+                                    the show was saved, continuously.
+
+                                    Here and not in the save handler, because an
+                                    edit lights it as surely as a save puts it
+                                    out, and the after-tick is the one place that
+                                    sees both: the handler stamps the session,
+                                    this compares. BEFORE the publish below, for
+                                    the reason `state.tick` is: assigned after
+                                    it, a client would read every edit's dot and
+                                    every save's clearing one tick late. And
+                                    every tick rather than only when something
+                                    was applied, because it is one comparison of
+                                    two integers - cheaper than the test that
+                                    would skip it. */
+                                state.documentDirty = wfg::doc::isDirty (document, session);
 
                                 /*  Published every tick, from the tick thread,
                                     like the lateness beside it. The audio

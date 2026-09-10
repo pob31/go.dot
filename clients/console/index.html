@@ -93,6 +93,12 @@ html, body {
 #strip .stat span { color: var(--ink); }
 #strip .warn span { color: var(--failed); }
 
+/*  UNSAVED WORK, in the standby's amber rather than the failure red: nothing
+    has gone wrong, something is not on disk yet. And the words carry it, not
+    the colour (§4.8) - "unsaved changes" against "saved", so a reader who
+    cannot tell amber from ink still reads the answer. */
+#strip .dirty span { color: var(--standby); }
+
 #link { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 #link .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
 #link.up   .dot { background: var(--live); }
@@ -347,6 +353,7 @@ button:disabled { color: var(--ink-faint); cursor: default; }
   <div id="strip">
     <span class="brand">Go.dot</span>
     <span class="stat"><b>show</b><span id="s-show">—</span></span>
+    <span class="stat" id="s-saved-wrap"><b>file</b><span id="s-saved">—</span></span>
     <span class="stat"><b>tick</b><span class="num" id="s-tick">—</span></span>
     <span class="stat"><b>audio</b><span id="s-audio">—</span></span>
     <span class="stat"><b>rate</b><span class="num" id="s-rate">—</span></span>
@@ -1449,6 +1456,22 @@ function renderAim() {
 function renderStrip() {
   const show = tree.get("/godot/document/name", "");
   el("s-show").textContent = show || "—";
+
+  /*  WHETHER THE FILE IS BEHIND THE SHOW, which the engine has published since
+      Phase 1 and never once said yes to until PR 5.2. It counts the show half
+      only: a GO or a standby move is the operator's position, not the show, so
+      it does not light this - an operator told "unsaved" after every GO would
+      stop reading it by the second act. Three answers, because a node that is
+      not there is not the same as a show that is saved. */
+  const dirty = tree.get("/godot/document/dirty", null);
+  const isDirty = dirty === true || dirty === "true";
+  const isSaved = dirty === false || dirty === "false";
+
+  el("s-saved").textContent = isDirty ? "unsaved changes" : isSaved ? "saved" : "—";
+  el("s-saved-wrap").className = isDirty ? "stat dirty" : "stat";
+  el("s-saved-wrap").title = isDirty ? "the show has changed since show.xml was last written"
+                                     : isSaved ? "show.xml holds this show"
+                                               : "the engine has not said";
 
   el("s-tick").textContent = tree.get("/godot/engine/tick", "—");
   el("s-audio").textContent = tree.get("/godot/audio/status", "—");

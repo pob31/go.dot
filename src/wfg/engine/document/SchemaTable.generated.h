@@ -220,7 +220,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 5.0, false, "park",
           "",
-          "Whether there are unsaved changes." },
+          "Whether there are unsaved changes to show.xml." },
         { "document", "warnings",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

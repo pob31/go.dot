@@ -47,6 +47,7 @@
 
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/command/CommandRegistry.h>
+#include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/ShowDocument.h>
 
 #include <juce_core/juce_core.h>
@@ -60,6 +61,15 @@ namespace wfg::doc
         juce::File showFile (const juce::File& folder);
         juce::File stateFile (const juce::File& folder);
         juce::File namespacesFolder (const juce::File& folder);
+
+        /*  Where a write to `target` puts its bytes before they become
+            `target`: `<name>.tmp-<pid>`, beside it, in the same directory.
+
+            Public because a test has to be able to stand something in its way;
+            nothing else should need it. The suffix goes AFTER the name, so a
+            temp left beside a manifest is `MyShow.wfg.tmp-<pid>` and is never
+            mistaken for a second manifest by `open`'s `*.wfg` search. */
+        juce::File temporaryFor (const juce::File& target);
 
         /*  Reads a bundle into `document`.
 
@@ -80,7 +90,13 @@ namespace wfg::doc
             It does NOT touch `namespaces/`: those files describe other people's
             programs, Go.dot only reads them, and a save that rewrote them would
             be claiming an authorship it does not have. A bundle opened and
-            saved keeps whatever was in that folder, untouched. */
+            saved keeps whatever was in that folder, untouched.
+
+            EACH FILE IS REPLACED, NEVER REWRITTEN IN PLACE (since PR 5.2): the
+            bytes go to a sibling temp and the temp takes the file's place, so
+            a save that fails or is interrupted leaves the file it was replacing
+            whole. What that does and does not promise is argued at
+            `writeBytesAtomically` in Bundle.cpp. */
         ReadResult save (const juce::File& folder, const ShowDocument& document);
 
         //======================================================================
@@ -128,8 +144,16 @@ namespace wfg::doc
         is a file write inside a tick, and that is why this is Phase 1's answer
         rather than Phase 5's - crash-safe autosave (PRD 4.3) is a background
         writer working from a snapshot, and it is a different piece of work.
+
+        IT TAKES THE SESSION, AND BY REFERENCE, since PR 5.2. It used to take
+        the folder by value, which was all a save needed to know; a save that
+        lands now also stamps `session.savedRevision`, which is what puts
+        `/godot/document/dirty` out, and a stamp on a copy would be a stamp
+        nobody reads. So the session must outlive the registry's use of this
+        command - declared in the verb's own scope, beside the document, and
+        never inside a block that closes before the engine stops applying.
     */
     void registerBundleCommands (CommandRegistry& registry,
                                  ShowDocument& document,
-                                 const juce::File& folder);
+                                 DocumentSession& session);
 }
