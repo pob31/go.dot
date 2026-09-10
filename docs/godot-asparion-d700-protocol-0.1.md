@@ -267,6 +267,30 @@ well as a CC scheme, and thirty-two CC-based probes found nothing.
 Note-on on **channel 1** at the same note is the ordinary V-Pot LED state, so
 colour and lit-state are independent.
 
+**The rule generalises: an element's colour note is its own button note.** The
+encoders use `0x20`+n because that is their V-Pot press note; the master dial
+uses `0x38`, its knob-press note. No special cases.
+
+**But only 17 elements have RGB hardware.** Painting the whole note space in
+coloured blocks coloured the rotaries and the master dial only — every other
+button is a **single-colour LED**, driven the ordinary MCU way on channel 1:
+
+| Elements | Count | Colour |
+| --- | --- | --- |
+| Encoders | 16 | full RGB, 128 levels per channel |
+| Master dial | 1 | full RGB |
+| All other buttons | ~59 | on/off, single colour |
+
+**Colour is preset-independent** — identical under Mackie and Universal — which
+matters because the button *map* is not (the `*` button moves between `0x36`
+and `0x5A`). That makes colour the most robust capability on the surface, and
+the one a layout can rely on without pinning a preset.
+
+For §3.16's "colour is never the sole carrier": the constraint is easy to
+honour here, because there are only 17 colour-bearing elements against 16
+strips. Colour can carry channel *type* on the encoder while text carries
+identity, and the ~59 monochrome buttons cannot carry colour meaning at all.
+
 **Prefer this over the HID route.** MIDI addresses **physical positions**, needs
 no provisioning and no read-back, and is vendor-documented, so it should survive
 firmware updates. HID's only advantage is one extra bit per channel, which
