@@ -224,8 +224,34 @@ attached.
 
 ## 4. Display as a renderable (§3.16)
 
-**Two rows of 56 characters per bank**, addressed by offset: `0x00` upper, `0x38`
-lower. Each row is eight strips of seven characters, at offsets `0x00`, `0x07`,
+**The MCU `0x12` path is a compatibility shim.** Asparion's own published
+Bitwig script uses a native display protocol that is roughly twice as large:
+
+```
+rows 0,1:   F0 00 00 66 14 1A <pos> <row+1> <12 chars> F7    pos = strip * 12
+row 2:      F0 00 00 66 14 19 <pos> <8 chars>          F7    pos = strip * 8
+track no:   F0 00 00 66 14 17 00 <8 bytes>             F7
+```
+
+| | MCU `0x12` | native |
+| --- | --- | --- |
+| Rows | 2 | **3** |
+| Characters per strip | 14 | **32** (12 + 12 + 8) |
+| Track number | steals from a row | **its own field** |
+
+For §3.16's "layout chooses which fields go on which line, per strip", that is a
+materially larger budget: an unabbreviated name, a full value with units, and a
+tag row, with the channel number in a dedicated field. The 7-character
+authored-short-name constraint applies only to the MCU path.
+
+**Metering and rings exist too.** VU is standard MCU channel pressure,
+`D0 <(strip<<4)|level>`, 12 levels, `0x0F` resets peak hold. Encoder rings are
+`B<mode> <0x30+n> <0..127>` — the MIDI channel selects the display mode (0 none,
+1 pan-from-centre, 2 fill-from-left) and the value is **0–127**, not MCU's 11
+positions.
+
+The MCU-compatible view of the display remains **two rows of 56 characters per
+bank**, addressed by offset: `0x00` upper, `0x38` lower. Each row is eight strips of seven characters, at offsets `0x00`, `0x07`,
 `0x0E`, `0x15`, `0x1C`, `0x23`, `0x2A`, `0x31`.
 
 Across a 16-fader rack that is **224 characters**, as 16 strips × 7 chars × 2
