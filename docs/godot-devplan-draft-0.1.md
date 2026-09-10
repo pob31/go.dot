@@ -289,12 +289,22 @@ screen; PRD §3.30's *(proposed)* idle-colour policy; and the twelve decisions
 
 - **Surface abstraction** (PRD §3.16): strips, transports, device profile vs
   layout, change-origin tagging, touch gating. Endpoint classes absolute /
-  relative / rate.
+  relative / rate. **Touch alone is not the gate** (PRD §3.16, 2026-09-10): on
+  the D700 an operator reaching past a fader registers a real touch, so a touch
+  counts as adjusting only once the fader has moved, and the value is resent on
+  release *(proposed)*.
 - **Mackie transport first** (vendor recommendation). HUI when and if decided
-  (PRD §6.10).
-- **D700 profile** from vendor-published files only (PRD §6.4). Display as a
-  renderable with the bounded field vocabulary; user-selectable fields per
-  line.
+  (PRD §6.10). The D700 needs nothing beyond it: **its profile is MIDI-only**,
+  and the vendor HID interface is not implemented (PRD §3.16, 2026-09-10).
+- **D700 profile** from the measured protocol
+  (`docs/godot-asparion-d700-protocol-0.1.md`; byte tables in
+  `docs/D700_CONTROL_GUIDE.md`), itself read from vendor-published files only
+  (PRD §6.4): ports matched by name and the bank chosen by port; sign-magnitude
+  encoders; the native three-row display, 12 + 12 + 8 characters and a
+  track-number field, with MCU `0x12` left to generic MCU profiles; rings at
+  0–127; meters; motor moves interpolated, never full travel in one message;
+  the preset it expects named, Mackie. Display as a renderable with the bounded
+  field vocabulary; user-selectable fields per line.
 - **Bindings** with automation modes, cue-scoped lifetimes, DCA trims, pinning,
   explicit update-cue capture.
 - **Fader linking** (PRD §3.9a): start value in prepare, fader-start with
@@ -314,22 +324,26 @@ screen; PRD §3.30's *(proposed)* idle-colour policy; and the twelve decisions
   mapping; nested DCAs; a cycle refused at edit time; composition by parameter
   type.
 - **Timbre on the strip** (PRD §3.30): the layout binds a run's timbre to the
-  strip's colour cell; the D700 profile takes the HID route, quantised and
-  rate-limited to what the surface is measured to tolerate (PRD §6.11), and
-  declares the MCU eight-colour route unfit for it.
+  strip's colour cell. The D700 profile sends it **over MIDI** to the encoder
+  surround above the fader, which is the strip's only RGB element, quantised
+  and rate-limited, and re-asserted against the firmware's idle animation. The
+  write rate and how soon the animation resumes are measured first (PRD
+  §6.11). A generic MCU profile declares SysEx `0x72`'s eight colours unfit for
+  it.
 
 **Done when:** a fader-start cue fires from the D700 with the audio already
-armed; a group DCA follows automation on motorised faders; the scribble strips
+armed; a group DCA follows automation on motorised faders; the strip displays
 show provenance; a sampler group arms onto the D700 and a bank change finishes a
 playing clip before its strip switches; a DCA assigned to two cues in different
 groups trims both.
 
-**Needs from the author:** Asparion extension byte list or the chosen vendor
-package; banking policy as it emerges; the OLED field layout he wants; the
-*(proposed)* items of §3.27 and §3.9a — `stop` as a second-press value, the
-dwell for faders without touch, the second-surface rule, release-less triggers
-on a hold clip, members pinning their strips; the voices claim shape now that
-M16 has answered (PRD §3.25); the idle-colour policy of §3.30.
+**Needs from the author:** banking policy as it emerges; the field layout he
+wants on the D700's three display rows; the touch filter of §3.16
+*(proposed)*; the *(proposed)* items of §3.27 and §3.9a — `stop` as a
+second-press value, the dwell for faders without touch, the second-surface
+rule, release-less triggers on a hold clip, members pinning their strips; the
+voices claim shape now that M16 has answered (PRD §3.25); the idle-colour
+policy of §3.30.
 
 ---
 

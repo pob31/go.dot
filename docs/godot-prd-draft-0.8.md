@@ -709,7 +709,7 @@ path.
 
 Reference hardware: **Asparion D700 Rack** — 16 touch-sensitive 100 mm motor
 faders (12-bit, 4000 steps), 17 RGB encoders with LED rings, 76 buttons,
-optional D700S OLED (2 × 12 chars + 1 × 6, track number, metering).
+optional D700S OLED (2 × 12 chars + 1 × 8, track number, metering).
 
 **Vendor guidance (Patrick, Asparion):** for own development, use **MIDI**. The
 device is Mackie-based with vendor extensions. The DAW scripts published on
@@ -719,6 +719,20 @@ suggested **demo mode** and **multiple-target** features.
 → **Mackie-first is now both the Linux-driven constraint and the vendor's own
 recommendation.** OSC/MQTT run through the Asparion Connector, which does not
 exist on Linux, Android or iOS.
+
+*Amended 2026-09-10 — measured on the unit: `docs/godot-asparion-d700-protocol-0.1.md`,
+with the byte-level recipe book in `docs/D700_CONTROL_GUIDE.md`.* **Everything
+the D700 does is reachable over MIDI**, so its profile is **MIDI-only** and the
+vendor HID interface stays out of it. Colour is note-on on channels 2, 3 and 4
+at the element's own button note, 0–127 per component, by physical position,
+with no provisioning and no pacing; the HID route wins one bit and needs the
+surface provisioned. Only **17 elements carry RGB** — the 16 encoder surrounds
+and the master dial. Faders and every other button are single-colour, so **a
+strip's colour is its encoder's**. The display is **three rows per strip, 12 +
+12 + 8 characters, plus a track-number field**, through Asparion's native
+SysEx; MCU's `0x12` reaches two rows of 7 and is the compatibility path. The
+firmware runs an **idle animation that takes the LEDs back** when nothing
+drives them, so a profile re-asserts colour rather than painting it once.
 
 **Abstraction:** *N* strips, each with optional fader+touch, encoder, buttons,
 display; plus a transport (MCU / HUI / raw MIDI / OSC / HID). Bindings target
@@ -740,6 +754,16 @@ profile, is an open question for the first week with the hardware.
 state gating outbound updates — now general engine concerns, not surface
 concerns, since tablet and desktop also write the same nodes. Standing test
 case: two surfaces on different protocols bound to the same node.
+
+*Amended 2026-09-10.* **Touch is necessary, not sufficient.** On the D700,
+faders beside buttons register real touches when the operator reaches past
+them — 58 of 81 touch events in one capture landed within 150 ms of a nearby
+button press — so gating on touch alone freezes those faders whenever somebody
+reaches for the master section. *(proposed)* A touch counts as a human
+adjusting only once the position has moved past the hysteresis §3.9a already
+needs, and the engine resends its value on release either way. §3.9a's
+fader-stop is unaffected: it keys on the release at −∞, and a touch alone moves
+nothing.
 
 **Strip allocation:** pinning is first-class. Pinned strips never reassign;
 unpinned follow the show; the display always says which.
@@ -766,7 +790,8 @@ owning cue, value, mode, state, group, colour, meter, timbre (§3.30). Each
 profile renders what
 it can:
 
-- **text cells** — MCU scribble SysEx, D700S OLED
+- **text cells** — MCU scribble SysEx, two rows of 7 per strip; the D700's
+  native display, 12 + 12 + 8 and a track number
 - **bitmap tiles** — Stream Deck (std, XL, +, +XL) over HID
 - **vector clients** — tablet, desktop
 
@@ -1850,13 +1875,21 @@ clip* without a number being read.
 control rate, two values per running clip). The **layout binds it to the
 strip's colour cell**, the cell §3.16's display vocabulary already has, so a
 Stream Deck tile, the tablet row and the Gogo row show the same colour for
-nothing, and the D700's master surround follows the same rule. The profile
+nothing, and the D700's master dial follows the same rule. The profile
 **quantises and rate-limits**: a colour is sent only when it has moved a
-visible step and no faster than about ten times a second — the D700's HID
-route is 8 bits per channel and its protocol note records that back-to-back
-writes fault; the MCU route's eight colours are too coarse for this, and a
+visible step and no faster than about ten times a second.
+
+*Corrected 2026-09-10.* On the D700 the colour goes **over MIDI** — note-on at
+the element's own button note, 7 bits per component, by physical position, with
+no provisioning and no pacing. The HID route this paragraph first named is not
+needed. The colour-bearing element of a strip is the **encoder surround above
+the fader**: the fader and its buttons are single-colour, so that is where a
+strip's timbre shows. The firmware's idle animation takes the LEDs back when
+nothing drives them, so the profile re-asserts — a timbre binding does so
+anyway while a clip sounds, and at idle the profile repaints on a timer. MCU
+SysEx `0x72`'s eight colours are too coarse for timbre, and a generic MCU
 profile says so rather than approximating
-(`docs/godot-asparion-d700-protocol-0.1.md` §4, §6).
+(`docs/godot-asparion-d700-protocol-0.1.md` §4).
 
 *(proposed)*, the author's to take: **authored colour at idle, timbre while
 sounding**, with timbre a layout option that can be off, so a desk that uses
@@ -2030,13 +2063,15 @@ None of this bears on the seven spike results, which never opened a device.
 
 ### 6.4 Asparion — remaining asks
 
-- Request the **byte-level list of the Mackie extensions** (OLED lines, encoder
-  RGB). Reverse-engineering from four DAW packages is an afternoon better spent
-  elsewhere; if they'd rather not write one, ask which package implements the
-  extensions most completely.
+- ~~Request the **byte-level list of the Mackie extensions** (OLED lines, encoder
+  RGB).~~ **Answered on the unit, 2026-09-08 to 2026-09-10**
+  (`docs/godot-asparion-d700-protocol-0.1.md`): encoder RGB is note-on on
+  channels 2, 3 and 4, and the display is three native rows. Both came from
+  Asparion's published Bitwig script, read under the source discipline below.
 - Push on **demo mode** — a surface that renders a layout with no engine attached
   is how the profile gets developed on a train and how a user evaluates the app
-  without owning hardware.
+  without owning hardware. A profile can meanwhile be developed without the
+  hardware against the measured maps.
 - **Multi-DAW** may already provide multiple simultaneous MIDI endpoints. Read
   `Multi DAW [en].pdf`.
 
@@ -2088,6 +2123,9 @@ Esc as a pause on persistent media (§3.29).
 Added 2026-09-09: authored colour at idle and timbre while sounding, as a
 layout option (§3.30).
 
+Added 2026-09-10: a touch counting as adjusting only once the fader has moved,
+with the value resent on release (§3.16).
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -2108,9 +2146,15 @@ Mackie vs HUI first — first week with the D700.
   of audio at the chosen window and hop, and the cache's size on disk, on the
   Windows box and the Mac mini — which decides whether import can afford it
   silently.
-- **The colour write rate the D700 tolerates** over HID (§3.30): the interval
-  below which back-to-back colour writes fault, so the profile's rate limit is
-  a number and not a guess.
+- **The colour write rate the D700 tolerates** (§3.30), now over MIDI —
+  *corrected 2026-09-10*; the HID interval no longer matters. Seventeen
+  elements repainted ten times a second is 510 messages a second, and nothing
+  measured says whether that is fine: a full-surface chase needed no
+  throttling, but the hue rotation that confirmed the route did not record its
+  rate.
+- **How soon the D700's idle animation resumes** (§3.16), which sets the
+  interval a profile repaints an idle colour at — unless the switch that
+  disables it is found in the configuration block first.
 
 ---
 

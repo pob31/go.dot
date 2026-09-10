@@ -1,8 +1,16 @@
 # Asparion D700 — measured protocol
 
-**Draft 0.1.** Everything here was measured on hardware between 2026-09-07 and
-2026-09-08: an **Asparion D700 Rack, 16 faders, with display modules**, on
-Windows 11, using MIDI probes, `hidapi` and USBPcap bus captures.
+**Draft 0.1, updated 2026-09-10.** Everything here was measured on hardware
+between 2026-09-07 and 2026-09-10: an **Asparion D700 Rack, 16 faders, with
+display modules**, on Windows 11, using MIDI probes, `hidapi` and USBPcap bus
+captures.
+
+**What changed on 2026-09-10.** Full RGB colour works over MIDI, so **the
+vendor HID interface is no longer needed for anything a Go.dot profile does**.
+The display has three rows per strip, not two, through Asparion's own native
+commands. Metering and 0–127 encoder rings were confirmed. All of it came from
+reading Asparion's published Bitwig control script and confirming it on the
+unit.
 
 This document serves **PRD §3.16** (control surfaces) and closes most of **§6.4**
 (Asparion — remaining asks). §6.4 proposed requesting a byte-level list of the
@@ -14,9 +22,13 @@ assumes.
 
 **Provenance.** The raw session log, with every finding tagged by how it was
 established and four retractions recorded rather than edited away, lives in the
-S21-HiJack repository as `Documentation/D700_FIELD_NOTES.md`. This file is the
-Go.dot-facing summary. Where the two disagree, the field notes are the record of
-evidence and this is the interpretation.
+S21-HiJack repository as `Documentation/D700_FIELD_NOTES.md`. Its distillation,
+the byte-level **recipe book**, is in this repository as
+[`D700_CONTROL_GUIDE.md`](D700_CONTROL_GUIDE.md): setup, addressing, every
+message in and out, and the gotchas ranked by cost. This file is the
+**Go.dot-facing interpretation** — what the measurements mean for PRD §3.16 and
+for a device profile. Where the three disagree, the field notes are the record
+of evidence.
 
 **Reading convention:** *(unverified)* marks something inferred but not measured.
 Everything unmarked was observed directly.
@@ -27,12 +39,13 @@ Everything unmarked was observed directly.
 
 | Question | Answer |
 |---|---|
-| Can Go.dot drive the D700 with no vendor software? | **Yes** — over MCU/MIDI, or over the vendor HID interface |
+| Can Go.dot drive the D700 with no vendor software? | **Yes, over MIDI alone** — faders, touch, encoders, buttons, LEDs, colour, rings, displays and meters |
+| Is the vendor HID interface needed? | **No.** It wins one bit of colour resolution and loses on everything else (§2.2) |
 | Is the Connector needed? | **No.** Only for its OSC bridge, and it holds the HID interface exclusively while running |
-| Does a cross-platform path exist? | **Yes.** MIDI is class-compliant; HID is reachable through `hidapi` on Linux, macOS and Windows |
-| Encoder RGB, byte level (§6.4) | **Two routes, both below** |
-| Display lines, byte level (§6.4) | **Yes** — two rows of 56 characters |
-| Does Mackie-first still hold (§6.10)? | **Yes**, for reasons this document strengthens |
+| Does a cross-platform path exist? | **Yes.** USB-MIDI is class-compliant, and it now carries everything |
+| Encoder RGB, byte level (§6.4) | **Yes, over MIDI** — note-on on channels 2, 3 and 4 at the element's own button note, 0–127 per component, physical addressing, no provisioning (§4) |
+| Display lines, byte level (§6.4) | **Yes** — three rows per strip, 12 + 12 + 8 characters, plus a track-number field, through Asparion's native SysEx (§4). The MCU path's two rows of 56 remain as compatibility |
+| Does Mackie-first still hold (§6.10)? | **Yes**, and the D700 profile is now MIDI-only (§5) |
 
 ---
 
@@ -53,6 +66,15 @@ Each bank identifies itself in the MCU handshake: **bank 1 as device id `0x14`,
 bank 2 as `0x15`** (Mackie Control and Extender).
 
 Over HID both banks arrive on **one endpoint**, distinguished by a port byte.
+
+**Finding the ports.** Match the device by the name substring `D 700`, and take
+the one containing `MIDIIN2`/`MIDIOUT2` as bank 2. Never rely on WinMM port
+numbering, which renumbers when other USB devices come and go. Windows MIDI
+input is exclusive: a DAW or a Max patch holding the ports means Go.dot sees
+nothing, so a failed open is reported as *held by another application* and not
+as a silent surface. The Asparion applications do not hold the MIDI ports, but
+the Configurator has been seen overriding colour writes, so a show machine runs
+without it. See the control guide §1.1 and §1.3.
 
 ---
 
@@ -78,10 +100,11 @@ produced **zero unmapped note numbers**.
 | Bank arrows | notes `0x2E` / `0x2F` |
 | Transport (Rec/Play/Stop) | notes `0x5F` / `0x5E` / `0x5D` |
 | Volume knob | pitch bend channel 9 (MCU master fader) |
-| Encoder ring **position** | CC `0x30`–`0x37`; mode in the high nibble, position in the low |
+| Encoder ring **position** | `B<mode> <0x30+n> <0..127>` — the MIDI channel selects the mode: 0 none, 1 fill from centre, 2 fill from the left. The MCU form, mode in the value's high nibble and 11 positions, also works |
 | Button LEDs | host echoes note-on; the surface has **no local feedback** |
-| Display text | SysEx `F0 00 00 66 <id> 12 <offset> <text> F7` |
-| Colour, coarse | SysEx `F0 00 00 66 <id> 72 <8 bytes> F7` |
+| Display text | native SysEx `0x1A` rows 1–2, `0x19` row 3, `0x17` track numbers (§4); MCU `0x12` as compatibility |
+| **Colour** | note-on on channels 2, 3, 4 at the element's button note, velocity = red, green, blue, 0–127, **blue last** (§4) |
+| Metering | channel pressure `D0 <(strip << 4) \| level>`, 12 levels |
 
 **Encoders are sign-magnitude, not two's complement.** Values 1, 2, 3 clockwise
 and 65, 66, 67 counter-clockwise — 65 means −1. A two's-complement decoder reads
@@ -103,7 +126,21 @@ device -> host   F0 00 00 66 14 03 <serial> F7        accepted
 Nothing requires it — every control works without a host connection — but it
 yields the serial, a stable identifier that survives USB renumbering.
 
-### 2.2 Vendor HID — richer, D700-only
+**MIDI needs no pacing.** A full-surface chase — faders, LEDs, rings and
+displays across both banks — needed no throttling at all (field notes 11). The
+only reason to slow output to this surface is motor end-stop wear (§6), never
+throughput. The byte tables for every message are in the control guide §2–§4.
+
+### 2.2 Vendor HID — the raw surface, and no longer needed
+
+*Superseded for Go.dot on 2026-09-10.* Everything in this section still holds,
+but colour was HID's only reason to be in a Go.dot profile, and colour now works
+over MIDI (§4). Against MIDI, HID wins one bit of colour resolution and both
+banks on one handle. It loses physical addressing, needs the surface
+provisioned, has no read-back, is undocumented, must be paced, and is held
+exclusively by the Connector. It stays documented because it is the raw
+protocol the MIDI interface translates, and the only window onto the
+configuration block (§7).
 
 Framed `<length> 2a <command>` on interrupt endpoints `0x01` (out) / `0x81` (in).
 The leading byte is a HID **report ID**, and it partitions the protocol:
@@ -148,11 +185,7 @@ cannot be assumed to be dial N**. No read-back command is known, so a host
 cannot discover the mapping at runtime; provisioning the surface and recording
 the index order becomes a documented prerequisite of the device profile.
 
-**The firmware also reclaims the LEDs.** The device runs its own idle animation
-— all dial RGB cycling together — which resumes when nothing is driving the
-surface. Colour is therefore a matter of ownership as well as addressing: a
-host must keep asserting it, or disable that animation, and no command for
-disabling it is known.
+**The firmware also reclaims the LEDs**, whichever route painted them — see §4.
 
 Verified by a 40-second hue rotation: 511 steps, 1533 writes, three elements
 chasing, smooth throughout, with the Configurator and Connector both closed.
@@ -180,6 +213,22 @@ still correct. Useful for bench work only.
 14-bit pitch bend on MCU channel 9, and has **no touch sense** — MCU convention
 would place it at note `0x70`, which the device never sends — so it gets no touch
 gating.
+
+**Touch is necessary, not sufficient.** Faders next to buttons register real
+touches when the operator reaches past them: in one capture, 58 of 81 touch
+events landed within 150 ms of a nearby button press (control guide §3.1; the
+capture is not in the field notes). That meets two PRD requirements
+differently:
+
+- **§3.16's touch state gating outbound updates** would freeze those faders
+  every time somebody reaches for the master section — a recall or a fade that
+  leaves the faders beside it where they were. *(proposed)* A touch counts as a
+  human adjusting only once the position has moved past the hysteresis §3.9a
+  already needs, and the engine resends its value on release either way.
+- **§3.9a's fader-stop** is unharmed. It keys on the release at −∞, and a
+  reach-past touch moves nothing; at worst it defers a stop by the length of
+  the reach. Fader-start needs the fader to leave −∞, which a touch alone never
+  does.
 
 **Double-click changes a button's class.** Asparion's firmware can emit a *second* note on a
 double click — on the `*` (magic) button, F1 (`0x36`) single, F2 (`0x37`) double. It is off by
@@ -244,33 +293,41 @@ materially larger budget: an unabbreviated name, a full value with units, and a
 tag row, with the channel number in a dedicated field. The 7-character
 authored-short-name constraint applies only to the MCU path.
 
+PRD §3.16 describes the D700S OLED as *2 × 12 chars + 1 × 6*. The native
+command's third-row field is **eight** characters (`SINGLE_DISPLAY_WIDTH_THIRD
+= 8` in Asparion's script), confirmed on the unit, so §3.16's six should read
+eight when it is next amended. Pad every write to the full field width.
+
 **Metering and rings exist too.** VU is standard MCU channel pressure,
-`D0 <(strip<<4)|level>`, 12 levels, `0x0F` resets peak hold. Encoder rings are
-`B<mode> <0x30+n> <0..127>` — the MIDI channel selects the display mode (0 none,
-1 pan-from-centre, 2 fill-from-left) and the value is **0–127**, not MCU's 11
-positions.
+`D0 <(strip<<4)|level>`, 12 levels, `0x0F` resets peak hold. Asparion's own
+script sends it at 5 fps and only while the transport plays; 18 fps was smooth
+here, and 5 is a sensible default. Encoder rings are `B<mode> <0x30+n> <0..127>`
+— the MIDI channel selects the display mode (0 none, 1 pan-from-centre, 2
+fill-from-left) and the value is **0–127**, not MCU's 11 positions.
 
 The MCU-compatible view of the display remains **two rows of 56 characters per
-bank**, addressed by offset: `0x00` upper, `0x38` lower. Each row is eight strips of seven characters, at offsets `0x00`, `0x07`,
-`0x0E`, `0x15`, `0x1C`, `0x23`, `0x2A`, `0x31`.
+bank**, addressed by offset: `0x00` upper, `0x38` lower. Each row is eight
+strips of seven characters, at offsets `0x00`, `0x07`, `0x0E`, `0x15`, `0x1C`,
+`0x23`, `0x2A`, `0x31`.
 
-Across a 16-fader rack that is **224 characters**, as 16 strips × 7 chars × 2
-rows — which fits §3.16's "layout chooses which fields go on which line, per
-strip" exactly, with two lines to choose between.
+Across a 16-fader rack that is **224 characters** through `0x12`, against
+**512** through the native commands — 16 strips × 32. The MCU view is what a
+generic MCU profile gets, and what the D700 profile should not use.
 
 **The buffer is flat, not per-field.** A write replaces only the bytes sent, so a
 six-character label at offset 0 leaves character 7 holding whatever was there
 before. **Always pad a strip write to seven characters.** Observed directly:
 writing `PORT-1` after `S21 HIJACK` rendered as `PORT-1J`.
 
-**Colour has two resolutions**, which matters for §3.16's "colour is never the
-sole carrier" — it is a rich channel, so the temptation will be real:
+**Colour has three routes, and one of them is right.** It matters for §3.16's
+"colour is never the sole carrier" — it is a rich channel, so the temptation
+will be real:
 
-| Route | Resolution |
-|---|---|
-| MCU SysEx `0x72` | 8 colours; 3-bit RGB (bit 0 red, 1 green, 2 blue) |
-| Vendor extension over MIDI | 7-bit per channel — vendor's own method |
-| Vendor HID `0a b6` | **8-bit per channel** |
+| Route | Resolution | Reaches |
+|---|---|---|
+| MCU SysEx `0x72` | 8 colours; 3-bit RGB (bit 0 red, 1 green, 2 blue) | strips only — never the real colour interface |
+| **Vendor note-on over MIDI** | **7-bit per channel** | **all 17 RGB elements, by physical position** |
+| Vendor HID `0a b6` | 8-bit per channel | only the elements provisioned in the Configurator |
 
 **The MIDI method is the one to use**, and it is documented in Asparion's own
 published Bitwig control script (`Dxxx_encoders.js`):
@@ -283,7 +340,9 @@ published Bitwig control script (`Dxxx_encoders.js`):
 
 `0x20` is `VPOT_CLICK0`, the MCU V-Pot press note; `n` is 0–7 within a bank; and
 the **bank is selected by which MIDI port the message is sent to**. Confirmed on
-hardware across all sixteen encoders.
+hardware across all sixteen encoders. Components are 0–127, so 8-bit colour is
+halved. **Blue must be sent last**: the element refreshes only when blue
+arrives.
 
 It is **note-on, not CC** — the colour component travels as the velocity byte.
 That distinction cost this project two days: Asparion's prose description ("the
@@ -317,6 +376,11 @@ honour here, because there are only 17 colour-bearing elements against 16
 strips. Colour can carry channel *type* on the encoder while text carries
 identity, and the ~59 monochrome buttons cannot carry colour meaning at all.
 
+**A strip's colour is its encoder's.** PRD §3.30 has a strip's colour follow
+the timbre of the clip it carries. On this surface the only RGB element on a
+strip is the encoder surround above the fader, so that is where §3.16's colour
+cell lands. The fader and its four buttons cannot carry it.
+
 **Prefer this over the HID route.** MIDI addresses **physical positions**, needs
 no provisioning and no read-back, and is vendor-documented, so it should survive
 firmware updates. HID's only advantage is one extra bit per channel, which
@@ -325,30 +389,53 @@ against 128 levels is invisible.
 **Encoder rings are monochrome position indicators.** The RGB element is the
 strip / knob surround. Ring position and colour are different things.
 
+**The firmware reclaims the LEDs.** The device runs its own idle animation —
+all dial RGB cycling smoothly together — which resumes when nothing is driving
+the surface, whichever route painted the colour (field notes 35b; control
+guide §4.4). Colour is therefore a matter of **ownership**, not only
+addressing: a host that paints a colour and stops will have it taken back. No
+command disabling the animation is known; it is probably a setting in the
+configuration block (§7). Until one is found, a profile **re-asserts** colour.
+PRD §3.30's timbre binding does so anyway while a clip sounds, and at idle the
+profile repaints the authored colour on a timer.
+
+**What colour costs on the wire.** Three three-byte messages per element, and
+seventeen elements, so repainting all of them ten times a second is 510
+messages a second. Nothing measured says that is too many, since a full-surface
+chase needed no throttling. Nothing measured says it is fine either: the MIDI
+hue rotation that confirmed the route did not record its rate. So PRD §6.11's
+colour write-rate measurement survives, now over MIDI rather than HID.
+
 ---
 
 ## 5. Device profile implications (§3.16)
 
 A D700 profile is **topology + protocol**. The topology is unambiguous: 16
-strips, each with fader + touch + encoder + 4 buttons + 2 display rows + colour;
-plus a master section of ~13 gates and one absolute knob.
+strips, each with a fader and touch, an encoder with an RGB surround and a
+0–127 ring, 4 single-colour buttons, three display rows of 12 + 12 + 8
+characters with a track-number field, and a 12-level meter; plus a master
+section of ~13 gates, one absolute knob, and the RGB master dial.
 
-The **protocol** choice is a real fork, and it belongs in the profile:
+The **protocol** choice was a real fork until 2026-09-10. It no longer is:
 
-| | MCU/MIDI | Vendor HID |
+| | MCU/MIDI with Asparion's extensions | Vendor HID |
 |---|---|---|
-| Documented | yes | no |
+| Documented | **yes** — Asparion's published scripts | no |
 | Vendor-recommended | **yes** | no |
-| Portable to other surfaces | **yes** | no |
-| Both banks on one handle | no — two port pairs | **yes** |
-| Preset-independent | no | **yes** |
-| Colour resolution | 3-bit, or 7-bit via extension | **8-bit** |
+| Portable to other surfaces | **yes**, for everything but the extensions | no |
+| Addressing | **physical position** | colour by configuration slot |
+| Colour | **7-bit, all 17 RGB elements, no provisioning** | 8-bit, provisioned elements only |
+| Display | **three rows and a track number** | not measured |
+| Both banks on one handle | no — two port pairs | yes |
+| Button map preset-independent | no — the `*` button moves | yes |
+| Pacing needed | **none** | ~25 ms between writes |
 | Survives a firmware update | **yes** | unknown |
 
-**Mackie-first stands** (§6.10). It is documented, vendor-recommended, and the
-same profile machinery serves an X-Touch or a FaderPort. HID is a D700-specific
-enhancement, best treated as an optional protocol *within* the D700 profile
-rather than as the primary path.
+**Mackie-first stands** (§6.10), **and the D700 profile is MIDI-only.** It is
+documented, vendor-recommended, and the same profile machinery serves an
+X-Touch or a FaderPort. The D700's extensions — colour, the native display, the
+fine rings — are a layer on top of MCU in the same transport rather than a
+second protocol. HID leaves the profile.
 
 **Preset drift is a real hazard for the MCU path.** Between the Mackie and Reaper
 presets, exactly **one** control moves — the `*` button, note `0x36` under Mackie
@@ -356,7 +443,11 @@ and `0x5A` under Reaper. Everything else is byte-identical. That is precisely th
 shape of a silent failure: a binding learned under one preset keeps working for
 every control except one, with no error. **A profile should name the preset it
 expects**, and the app should say so rather than auto-detect: a surface 97%
-identical across presets cannot be fingerprinted from traffic.
+identical across presets cannot be fingerprinted from traffic. Everything else
+the profile uses — colour, the native display, rings and meters — behaves
+identically under Mackie and Universal, so the button map is the only thing the
+preset pins. The control guide confirms all of it under **Mackie** (preset 2),
+which is the one to name.
 
 ---
 
@@ -365,9 +456,10 @@ identical across presets cannot be fingerprinted from traffic.
 **Do not sweep undocumented SysEx command bytes.** A sweep of `0x10`–`0x7F`,
 already excluding the documented-destructive `0x0A`–`0x0F` and `0x61`–`0x63`, put
 the display modules into a logo-only state and **required a full restart of the
-controller**. The exclusions were not sufficient. Only four commands are
-established as safe: `0x12` (text), `0x72` (colour), `0x00` (device query),
-`0x02` (handshake reply).
+controller**. The exclusions were not sufficient. Seven commands are
+established as safe: `0x12` (MCU text), `0x1A`, `0x19` and `0x17` (the native
+display rows and track numbers, from Asparion's own script), `0x72` (coarse
+colour), `0x00` (device query) and `0x02` (handshake reply).
 
 **Do not command full fader travel.** Driving a fader to either end from the far
 end hits the physical stop at full speed with no deceleration. The bottom of the
@@ -377,8 +469,10 @@ large jumps; roughly 20 steps was smooth. Do **not** clamp short of the
 endpoints: a fader that cannot reach −∞ misrepresents the desk, which is worse
 than the wear.
 
-**Pace HID writes.** Three issued back to back returned `device not functioning`;
-spacing them ~25 ms apart ran 1533 writes without a stall.
+**Pace HID writes** — a concern for bench tools only, now that no Go.dot
+profile uses HID. Three issued back to back returned `device not functioning`;
+spacing them ~25 ms apart ran 1533 writes without a stall. MIDI needs no such
+pacing.
 
 For context on the first: the surface is otherwise fast. A full-surface chase —
 faders, LEDs, rings and displays across both banks — needed no throttling at all,
@@ -390,27 +484,38 @@ responsive than an S21's own**.
 ## 7. What remains unknown
 
 1. ~~The CC number for the vendor's MIDI RGB method.~~ **Resolved** — it is not a
-   CC at all but note-on on channels 2/3/4 at note `0x20`+n, per Asparion's
-   published Bitwig script. See §4. The MCU-only path to full colour is complete. It
-   matters more since PRD §3.30 (2026-09-09): a strip whose colour follows a
-   running clip's timbre needs full-depth colour, and on a machine where
-   something else holds the HID interface this CC is the only route.
+   CC at all but note-on on channels 2/3/4 at the element's button note, per
+   Asparion's published Bitwig script. See §4. The MIDI path to full colour is
+   complete, which settles PRD §3.30's timbre on the strip: it goes over MIDI at
+   7 bits per channel, and nothing in a Go.dot profile needs HID.
 2. **HID element classes `a2`, `b0`, `b2`.** `b6` is the dials. `b0` stalled the
-   device and was left alone.
-3. **Whether the D700S OLED module** (§3.16: 2 × 12 chars + 1 × 6, track number,
-   metering) uses the same scribble path. The unit measured has display modules
-   showing **more than two physical lines**, but only two are reachable through
-   SysEx `0x12` — its buffer caps at 128 characters and two rows of 56 consume
-   112. The extra lines exist and are not addressable by that command.
-4. **Linux behaviour.** Everything here was measured on Windows. The device is a
-   standard composite device and `hidapi` is cross-platform, so both transports
-   *should* carry over *(unverified)*. Linux needs a udev rule for `hidraw`
-   access; there is no Connector to contend with, so the exclusivity problem
-   disappears.
+   device and was left alone. Moot for Go.dot since colour moved to MIDI, and
+   kept for completeness.
+3. ~~Whether the D700S OLED module uses the same scribble path.~~ **Resolved** —
+   it does not need to. The third line was never unreachable: `0x12` addresses
+   two rows of 56 and nothing more, and Asparion's native commands `0x1A`,
+   `0x19` and `0x17` reach all three rows and the track number (§4). The
+   measured third row is eight characters where PRD §3.16 says six.
+4. **Linux and macOS behaviour.** Everything here was measured on Windows. The
+   MIDI interface is class-compliant, so it *should* carry over *(unverified)*,
+   and with HID out of the profile no udev rule for `hidraw` is needed. What is
+   likely to differ is the **port names** the profile matches on (§1), which
+   ALSA and CoreMIDI present in their own ways.
 5. **Whether the config block is safely writable.** The Configurator changes any
-   setting by reading all 86 pages (24 bytes each, 2064 total) and writing all 86
-   back. Whether a single targeted page write is accepted was not tested; the
-   failure mode is a corrupted device configuration.
+   setting by reading all 86 pages and writing all 86 back — 24 bytes each on
+   the wire, the last carrying 8, so the block is **2048 bytes**. Whether a
+   single targeted page write is accepted was not tested; the failure mode is a
+   corrupted device configuration. The block can be **studied without the
+   hardware**: Asparion's published `.aPres` preset files are exactly that
+   2048-byte block in hex (field notes 36a), so a setting can be located by
+   diffing presets offline before anything is written to a unit.
+6. **What disables the idle animation, and how soon it resumes.** The first
+   decides whether a profile must re-assert colour at all; the second sets the
+   interval it re-asserts at (§4). The switch is probably in the configuration
+   block, which makes item 5 the way to find it.
+7. **How to tell a reach-past touch from a grab** (§3). The control guide gives
+   the problem and one capture's statistic; the filter proposed in §3 is
+   untested on the unit.
 
 ---
 
@@ -418,11 +523,14 @@ responsive than an S21's own**.
 
 | §6.4 ask | Status |
 |---|---|
-| Byte-level Mackie extensions — encoder RGB | **Answered** — two routes (§2.2, §4); the MIDI CC number is the only gap |
-| Byte-level — OLED lines | **Answered for the scribble path**: two rows × 56. The D700S module's own lines remain open (§7.3) |
-| Demo mode | Still worth pushing for. Note a **profile can now be developed without hardware** against the maps here |
+| Byte-level Mackie extensions — encoder RGB | **Answered** — MIDI note-on on channels 2/3/4, 7-bit, physical addressing (§4). HID's 8-bit route is documented and not used (§2.2) |
+| Byte-level — OLED lines | **Answered** — three rows of 12 + 12 + 8 per strip and a track-number field through the native commands (§4); `0x12`'s two rows × 56 as compatibility |
+| Demo mode | Still worth pushing for. Note a **profile can now be developed without hardware** against the maps here and in the control guide |
 | Multi-DAW / multiple simultaneous MIDI endpoints | Not investigated. The device already presents **two** MIDI port pairs for its two banks |
 
-The vendor was asked directly about encoder colour and replied with the MIDI
-method quoted in §4. That exchange is the source for that paragraph; everything
-else here is our own measurement.
+The vendor was asked directly about encoder colour and replied in prose — "the
+midi code listed in the configurator", "on midi channel 1 2 3" — that reads
+equally well as a CC scheme, which is why thirty-two CC probes found nothing.
+The bytes in §4, like the native display commands and the ring modes, come from
+Asparion's published Bitwig control script, each confirmed on the unit.
+Everything else here is our own measurement.
