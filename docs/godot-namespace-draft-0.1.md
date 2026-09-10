@@ -810,13 +810,56 @@ back on if nobody feels strongly by then.
   group carrying its own persistent section, and Esc as a pause on persistent media, stay
   *(proposed)*.
 
+- **T — Phase 5 has two halves, and the engine half comes first** (settled 2026-09-09): undo, a
+  save that cannot be half-written, an autosave, the edit lock and the spectral cache are built
+  before the client that draws them, because none of them exists and every client needs all of
+  them. The client half runs beside it in `clients/console` — one view per pull request, each
+  earning a round of the author's feedback — rather than in a new compiled program, because PRD
+  §3.17 says the desktop layout is *deliberately undesigned* and the author's to design, and he
+  designs by looking. A page the engine serves from disk can be edited and refreshed while a show
+  is running; a compiled client cannot, and the layout would be settled by whoever typed it. The
+  JUCE desktop client starts when the layout stops moving; until then it is an outline (§14.16).
+
+- **U — Phase 5's done-when is judged in the room** (settled 2026-09-09): the devplan's criterion
+  stands unchanged — *the author runs a simple show from the desktop build in a rehearsal room* —
+  and whether a browser on the booth machine satisfies it is answered when the page is in front of
+  him rather than now. The alternative, deciding in advance that only a native window counts, would
+  commit the phase to a build whose layout nobody has yet agreed on.
+
+- **V — The console becomes the web client of §3.17** (settled 2026-09-09): it is not a prototype
+  to be thrown away when a desktop client arrives. PRD §3.17 makes a web client the tablet's
+  primary surface and says it *must be complete on its own*, because it is the redundancy path and
+  a redundancy path that requires an installed app is not one. So `clients/console` grows into that
+  client — split into ES modules served from the same directory, still with no build step, still
+  editable while a show runs — and the engineering readouts move behind a *tech* layout preset
+  rather than being deleted. §14.3 draws what it becomes; the README's `clients/tablet` paragraph
+  is superseded by this.
+
+- **W — The edit lock is an engine node, not a client's own restraint** (settled 2026-09-09): show
+  mode locks the layout and disables editing, and the disabling half is a promise the operator
+  relies on in the dark, so it is kept by the thing every client talks to rather than by each
+  client separately. A lock only the desktop honours is not a lock: the tablet in the house, an MCP
+  client and somebody's script are clients of the same surface (§3.2). What it refuses is document
+  mutation. What it must not touch is GO, the standby, every run gesture, the aim and load-to-time,
+  the save itself, and `node.set` on a **mounted** address — because §3.17 has the operator walking
+  the house adjusting parameters while the show runs, and locking that would mean locking the
+  mixing. §14.11 draws the predicate and the doors.
+
 ### Open, with the subphase that forces each
 
 | # | Question | Forced by | Fallback if undecided |
 |---|---|---|---|
-| E | Does the Phase 5 desktop UI run **in-process or as a separate client**? | Phase 5, but it shapes Phase 2's plugin-parameter handover | assume separate, because that is the stricter assumption and the one PRD §3.2 reads most naturally |
+| ~~E~~ | *(still open, and §14.16 says why that is not an accident — see below)* **Does the Phase 5 desktop UI run in-process or as a separate client?** | Phase 5, but it shapes Phase 2's plugin-parameter handover | assume separate, because that is the stricter assumption and the one PRD §3.2 reads most naturally |
 | J | **Should PRD §4.2 record what Tracktion does inside the callback?** Its device callback takes one uncontended `std::shared_lock` per block and its node-player pool uses semaphores; the lipogram can be *enforced* on Go.dot's code and only *measured* on Tracktion's (§11.5). A PRD amendment is the author's to make. | the lipogram test (PR 2.2) | enforce on Go.dot's scopes, report Tracktion's count separately, never hide it |
 | ~~K~~ | *(settled 2026-09-06, in PR 2.6, the way this table recommended — see below)* **How does a mount declare what it can do?** `transport` says how to *send* and nothing says whether the target can be *asked*, so `wait: verified` against a write-only device is a cue that cannot succeed and nothing notices until the show. Chataigne carries two booleans per module, `hasInput` and `hasOutput`, for exactly this. Also: whether the answer names the *mechanism* (`oscquery` \| `poll` \| `subscribe` \| `none`) or only the capability. | `verified` (PR 2.6) | a mount-level `readback` enum defaulting to `none`, and a `verified` cue against `none` refused at load — the strictest reading, and the one that cannot fail silently |
+
+**E — not answered, and deliberately so** (2026-09-09). Decision T builds the engine half of
+Phase 5 first and leaves the desktop client an outline, which means E does not have to be answered
+this phase and would only be answered *by accident* if a compiled client were started now. What has
+arrived instead is evidence: the web client of decision V is a separate client by construction, it
+holds nothing the engine owns (§14.1), and it has driven every gesture Phase 4 built over a socket
+without once needing to be inside the process. That is the fallback this table recorded, earning
+itself rather than being assumed. §14.16 writes the outline against it and says so.
 
 **K — settled 2026-09-06, in PR 2.6, exactly as the fallback drew it.** A mount declares
 `readback` (`none | oscquery`, default `none`) and `queryPort`, and a `verified` cue aimed at a
@@ -3031,3 +3074,2401 @@ mechanisms** (§11.7): a polled get-convention, a subscription, a bespoke sync c
 §3.13's *"walk back"* against the forward pass (§13.8); §3.9b's *"the processor declares its own
 slots"* against decision P; §3.12 gaining the read-before-write sentence that makes revocation
 mean something; and §3.9c's *(proposed)* cross-list refusal, which the `shared` mark replaces.
+
+### 13.16 What Phase 4 built, against what §13 drew
+
+Written 2026-09-09, at the head of Phase 5 rather than at close-out, which is where §13's own
+opening put it: *"where this section and the code come to disagree, §13.16 at close-out says
+which won"* (§13, line 1728). PR 4.11 wrote `docs/godot-phase4-closeout-0.1.md` and
+`docs/handoffs/2026-09-09-phase5-handoff.md` and did not write this, so PR 5.0 pays it, from the
+close-out's own §1, §2 and §3. A retrospective written a phase late is written from the commit
+messages rather than from the week, and the commit messages are better than a memory but they
+are not the week.
+
+**§13 was drawn at 798 lines and is 1 311 today, and almost all of the growth is
+retrospective.** It was written on 2026-09-07 in PR 4.0 (`7109cf8`), before a line of code. A
+six-lens review of it — contradictions, references, completeness against the approved plan,
+could-somebody-build-this, voice, and what-would-this-break, with every finding put to an
+independent reader whose job was to refute it before it could be reported — returned fourteen
+survivors and took the section to **894 lines** (`73482a6`, whose subject line is *"Five things
+section 13 got wrong, found by reading it against the code"*).
+
+**The five the review caught are not in the lists below, which is the whole argument for having
+it.** A claim issued below `armMedia`'s null-`Player` return would not exist on a replay, which
+falsifies §13.4's entire case for having no `claim.land` record. Releasing only in `run.ended`
+leaks a slot for the session, because `run.failed` sends no `run.ended` at all. A prepared media
+cue in a header would never have sounded, because its prepare is an arm and the phase table had
+lost §13.7's own distinction between work and cues. Parenting the prepared arms breaks the
+`spawnChild` test that adopts them, PR 3.13's parentless half. And load-to-time never said what
+it does with what is already playing, which also made the claim bullet unreadable: every jump
+would have landed pending on its own predecessor. Each was a fault in a text, found by reading
+the text against the code, at the cost of an afternoon. One caveat is honest and useful: PR
+4.5's own commit records the adoption test as something *the black-box found rather than a
+reading* — so the reading found the sentence and the driver still had to find the code.
+
+**The five things §13 got wrong once the code read it back.**
+
+- **Durations were drawn coming through Tracktion's `AudioFile`** (§13.8), and PR 4.1 corrected
+  the paragraph in place while building it — the first thing in the section the code argued
+  with. `te::AudioFile` needs a `te::Engine&` and at the moment a show is read there is not one:
+  `wfg tree` and `wfg validate` build no audio at all, and `wfg serve` brings the engine up
+  three hundred lines after the first snapshot publishes. Standing one up would also have set
+  flush-to-zero on the calling thread for the rest of the process. It is
+  `juce::AudioFormatManager` in `audio/MediaInfo.h`, behind a signature naming no JUCE type.
+  Cost: nothing, because the sentence was wrong before anything leaned on it.
+
+- **A processor input's claim was drawn footer-timed** (§13.2's table). PR 4.3 released at run
+  end; the correcting paragraph was committed in PR 4.4 (`37b1c99`) and signs itself *(PR 4.3,
+  2026-09-08)*, with the pull request whose code it corrects rather than the one that typed it,
+  which is the convention worth keeping. A group is not done until its members are, so the two
+  timings differ only by the footer's own duration — and a slot released by one rule and a voice
+  by another is two rules that will one day disagree, in a place where disagreeing means a cue
+  holding a processor input nothing can take back. One rule, in `releaseSlotsOf`, reached from
+  the three handlers that end a run.
+
+- **A prepared header cannot be run "as a sequence"** (§13.6's phase table). A header phase runs
+  its cues one after another because each reports done, and **a prepared media cue never reports
+  done** — being armed and not launched is the whole of what preparing one means — so a chain
+  that waited for the first would wait for ever. What PR 4.5 waits for instead is that
+  everything it issued has *arrived*: an arm armed, a network cue finished, in the header's own
+  order.
+
+- **"Positionally after the target" cannot mean the next row** (§13.9). §3.5 lets the pointer
+  sit at the top of a list or inside a manual sequence group and nowhere else, so a jump into
+  the middle of a timeline scene has to leave the operator *after the whole scene*. PR 4.8's
+  test found it as a standby that would not set at all; the walk now answers `onManualPath` for
+  every cue and the solver takes the first row after the target that says yes.
+
+- **A revocation was drawn emptying `track`** (§13.6: *"state, track, `endedAtTick`, `warning =
+  revoked`"*). It does not. `holdsTrack()` is a track **and** an unfinished run, so ending the
+  run is the whole of letting the voice go, and writing `track = -1` would throw away the record
+  of which voice was held — exactly the readout an operator wants after a scene was got ready
+  and then not wanted.
+
+**Six things §13 drew and the engine turned out to need differently.**
+
+- **An object's ADDRESS and its KIND are two questions** (PR 4.2). §13.12 drew `ownerForElement`
+  gaining one line per element, which is what it costs while one element has one owner; §13.2
+  then chose to publish two declared kinds at one address space. `ownerForElement` has to answer
+  `rackChannel` so `refers` can tell the two apart, and the document's address resolver was
+  asking it — so every *read* of a rack channel worked and every *write* was unresolvable.
+  `addressOwnerFor` is the second function, and one element makes them differ.
+
+- **RELAX NG content is ordered, and no element had ever had both kinds of child** (PR 4.2). The
+  generator emits container children as optional refs and identified ones as a `zeroOrMore`
+  choice, one group after the other, so a container child had to come first. `Show` is all
+  containers; a `List` and a `Group` are all objects; `Audio` with a `Rack` among its buses is
+  the first element with both, and the first place a show could be written in an order its own
+  grammar rejected — which the canonical writer would then produce. It is the same class of miss
+  as §12.15's third finding, one phase later, in the same generator.
+
+- **A promise looks exactly like a member** (PR 4.5). §13.6 drew the horizon arming under the
+  block so that a revocation reaches every arm by following `children`, and did not draw that a
+  phase takes charge of the children of its own cues and launches them. A manual sequence took
+  the arm and started the member the operator was reading about, with nobody having pressed
+  anything and §3.6's *the operator is the parent* gone. The mark that tells them apart is
+  `prepare` itself, and clearing it **is** the ask — one function, `askedFor`, rather than four
+  assignments, and PR 4.6 added the fifth caller because spawning a run is asking for it too.
+
+- **The read asks once and the verify asks every tick** (PR 4.5's second half). §13.6 drew
+  `reading` as a state and drew the order — ask, keep, write, verify. It did not draw that
+  asking twice is a fault: a second question in flight lands *after* the write, satisfies the
+  verify that follows it, and the cue reports `disagreed` about a desk that agreed perfectly. It
+  surfaced as a test that failed one run in three, which is the only reason it was found at all.
+
+- **A rate cap is per node, and a message that is waiting is not a message that failed** (PR
+  4.5's third half). §13.6 drew the budget and not the ticket. `pending` had meant "the flush
+  never ran", which is a wiring fault; under a cap it means queued, in order, holding the newest
+  value, so the cue keeps waiting up to its own timeout. Without that, capping a mount would
+  have turned every `sent` cue on it into a failure.
+
+- **A kill needed a field and the run table's memory needed a date** (PR 4.10). §13.11 drew a
+  kill as suspending a persistent cue until a load-to-time re-solves. `skipFooter` alone cannot
+  say *killed* once Phase 10's double Esc sets it too, so `run.kill` writes the word — and
+  because the run table keeps every run for ever, the first version re-suspended the cue at
+  every step from a kill the operator had already undone. The lift records its tick, and only a
+  kill since then counts.
+
+**What the black-box driver found that no unit test could, which is the part Phase 5 should read
+twice.** `tests/blackbox/phase4_prepare.py` is 757 lines and **fifty-two checks**, driven
+over UDP and HTTP against the shipped binary with `tests/fixtures/bundles/phase4/` and
+`mock_target.py` beside it. Three of the fifty-two failed against real engine faults, and a
+fourth fault turned up between the engine and its own replay. **Each is a seam between two
+things that are separately correct**, which is why the 628 `TEST_CASE`s the unit target carries
+at `2d0504b` could not see any of them:
+
+- a scene whose header is **entirely derived** read `partial` for ever, because `settledWord`
+  counted the block's preparable cues against the *written* header's members — so a scene
+  prepared entirely from `preset` marks, which is the shape §13.7 encourages, compared one
+  against nought. Both counts were right; they were counts of two different things;
+- a **plain media cue at the pointer** held its voice and its slots for ever: PR 4.5 revoked
+  prepared *blocks* when the pointer moved on, and a media cue armed at the pointer is the
+  smallest horizon there is. The sharpest detail is that **three unit tests had encoded the
+  leak** — they made a slot's holder by parking on a cue and walking away, which is exactly the
+  gesture that should give it back. They fire the cue now, which is the honest scenario anyway;
+- a **preset network cue standing second in a scene** stopped the scene: the horizon had already
+  run it, so the member phase marked the finished run asked-for and then waited for something
+  `armed` to launch, which never came. For a cue that was read, pre-sent and verified there is
+  no rest, so the phase walks past it — §13.7's own rule, met from a direction §13.7 did not
+  draw;
+- and the fourth: **a jump did not replay.** `list.loadToTime` is one record whose handler
+  *solves*, the solve needs media lengths, and `wfg replay` had none — so it planned a different
+  show and drew three identifiers where the session drew five. It reads them off the log's own
+  `# media` header lines now, which is what PR 4.1 wrote them for.
+
+**And the rule §12 left behind was broken once more and caught the same way.** PR 4.5's
+`prepareStandby` asked for its children with `run.spawn` — which a live session logs and a
+replay then produces a second time, one cue and two runs a tick apart. The Phase 3 black-box
+replay caught it in the afternoon it was written, exactly as a replay fixture caught the Phase 2
+instance §11.9 records. Twice in three phases, both by a replay, neither by a unit test.
+
+**A seam no fixture could have had.** Since PR 4.3 the runtime half published a slot's `holder`
+and `pending`, so `/godot/slot` and `/godot/slot/<id>` were carried by **both** halves of the
+snapshot, and `find` searches one and then the other — the answer depended on which it reached
+first. Seeing it needs a show with a declared slot *and* the whole-tree walk that counts
+addresses, which no fixture had until PR 4.5 put every cue in the same position. `addContainers`
+must exclude the containers the runtime half owns, and that sentence is in the handoff because
+§13 did not have it.
+
+**The time this phase actually lost was not lost to faults**, which is the fact the closing
+paragraph rests on. Three red CI builds to `-Wshadow`, which MSVC does not say and the strict
+Linux build says with `-Werror` — twice inside PR 4.5, once on PR 4.9 at `47a7b34`, where a
+cache member called `written` met a local that had been there since Phase 3. One whole-file
+repair commit (`4578781`) because a script read `Runner.cpp` keeping its line endings and wrote
+it converting them again: correct exactly once, and after that three multi-line edits reported
+success and changed nothing, **silently**. And four commits after PR 4.9 that do nothing but
+make the drivers wait for the thing rather than for the time (`bcd84ef`, `a9659d5`, `0e6ec2c`,
+`27112f2`) — one of which was not a flake at all, `phase1`'s echo check asserting something the
+protocol does not promise, that a client subscribed fast enough. The handoff's §4 carries all
+three as traps, which is where a builder will look for them.
+
+**What §13 drew that was right, and is worth saying so.**
+
+- **The claim needs no records of its own** (§13.4). Argued before anything existed, proved by
+  PR 4.3: a claim is issued in an arm, released in the handler that ends the run, granted to the
+  head of a queue in that same handler, and creation order *is* the queue, so a replay hands the
+  slot to the same run. The approved plan's fourth engine-origin command, `claim.land`, was
+  removed while §13 was being written and has not been missed once — and the handoff's rule 2
+  still lists it (`:57-61`), which is the one line in that document Phase 5 should not copy:
+  there is no `claim.land` anywhere in `src/` outside the comment in `cue/Run.h` explaining its
+  absence.
+- **A namespace under-determines an implementation, and that is a feature.** §13.2 drew
+  addresses where the approved plan carried a `SlotTable` of `SlotClaim` records wired through
+  four sites. PR 4.3 put the claims on the run — who holds a slot is a scan of the run table,
+  exactly as `isTrackBusy` already answers who holds a track — and contradicted not one line of
+  the drawing.
+- **The revision counter as a listener rather than a line in each write door** (§13.5, PR 4.4).
+  Four doors today, tests that write through `ValueTree::setProperty` directly, and a fifth door
+  in some later phase that would have had to remember. Phase 5 inherits it as the invalidation
+  source three caches already ask.
+- **One walk asked three questions** (§13.1). PR 4.7 found that PR 4.4's liveness walk was the
+  same question the solver asks and moved it into `cue/ShowWalk.h` rather than writing a second
+  — with the failure a second one would have produced named in advance: a slot warning that
+  disagreed with a load-to-time about one show. And **§13.12 named every place the persistent
+  section needed code and every place it did not**: PR 4.10 found `stops()` and `findOnPath`
+  skipping the section by construction, and the list's own child loop, `orderOf`'s exclusion
+  list and `ownerForElement` each needing their line — exactly the three the plumbing list had.
+- **§13.13's four debts, eight claims between them, were all real and were paid first**:
+  `media/startOffset` read by nothing, two voice leaks, `cue/role` and `run/phase` drawn in this
+  very document and emitted by nothing, a log header missing both the `# media` line §11.6
+  specifies and the clock line §11.5 calls the launch tick a pure function of, and decision K's
+  load refusal never built. That is §12.15's own complaint answered: four claims survived §12's
+  review and were paid for later; §13's were audited adversarially and paid in PR 4.1.
+
+**What the measurements did**, since §13.14 already carries the numbers: M16 falsified the guess
+§3.25's sampler claim was built on and is now in the PRD, M17 removed a branch before it was
+written, M20 set a rate cap rather than passing a threshold, and M21 decided a shape outright,
+which is the strongest thing a measurement can do. M18 measured what it was asked and found a
+debt in something else entirely, which is the first item below. And the phase proved the thing
+§13.8 could only assert: *a solver that disagrees with the scheduler is wrong by definition* is
+a test as of `2d0504b`, agreeing at six independent moments across a timeline group and an
+automatic sequence, including the two where more than one cue is sounding at once.
+
+**Five PRD amendments came out of the phase, and every one of them is still waiting on the
+author.** They are close-out §1, proposed and never applied — `CLAUDE.md` is §4 of the PRD
+reproduced byte-for-byte and gated by `scripts/check-claude-md.py`, so a phase that edited the
+PRD would either break that gate or silently rewrite the review criterion for its own pull
+requests. Each is one sentence that building the thing made exact:
+
+- **§3.9b, *"the processor declares its own slots"*.** The show declares them, under the mount,
+  as `Slot` rows carrying a name, an address prefix, a width and the bus that feeds them
+  (decision P). What a processor that *can* be asked adds is a **check**, which is a different
+  verb: `wfg validate` warns when a declared slot's address is absent from the mounted
+  namespace. Most devices run no OSCQuery server at all, and a pool that only existed when a box
+  answered would be a pool that vanished when somebody unplugged it during focus.
+- **§3.13, what a manual waypoint *is*.** Decision R settled that there is no waypoint object:
+  the list's own history of the last sixty-four steps, `<tick>:<cue>:<origin>`, is the thing,
+  and each step is a load-to-time target, so going back is picking a row rather than authoring
+  anything.
+- **§3.12, read before write.** §3.12 says what anticipation is and not what makes it revocable.
+  The condition is exact now: a value is pre-sent only where the node is `anticipatable` **and**
+  its mount can be asked, and the value that was there is read first and kept on the run as the
+  restore — because a value nobody can restore is a value nobody can revoke.
+- **§3.9c, the cross-list override.** The *(proposed)* refusal is withdrawn in favour of
+  `Feed/@shared`, a mark on either cue saying the sharing is deliberate; the section's own rule
+  is *warn, don't refuse*.
+- **§3.29, the persistent section's suspensions.** Two *(proposed)* items were taken as yes
+  (decision S): a kill on a persistent run suspends it until a load-to-time re-solves, and a
+  stop cue before standby aimed at it suspends it because the document says so. A group-level
+  section and Esc-as-pause stay *(proposed)*.
+
+**And one amendment §13.15 promised is not among the five.** §13.15 named §3.13's *"walk back"*
+against the forward pass (§13.8: *"One forward pass, and §3.13 says backward"*), and the
+close-out's §3.13 entry is decision R's waypoint sentence instead — one promised amendment
+quietly became a different one about the same section. It is still owed: the solver walks
+forward, §3.13's step 1 says backward, and §13.8 argues why forward is right, because a backward
+walk cannot know when it is finished until the whole list has been read. Phase 5 carries it as a
+sixth. Beside the six sit close-out §4's questions that are the author's rather than the
+implementer's — the voices claim shape (§3.25, before Phase 6), §3.30's idle-colour policy,
+whether a rack channel's failure policy is *degrade*, and Phase 3's own waiting amendments.
+§3.30's is the one Phase 5 walks straight into, because §14.12 builds the spectral colour that
+raised it.
+
+**The debts carried out of Phase 4.** `ShowDocument::findById` is a depth-first walk per call
+and most of M18's analysis; its own comment asks for a cache invalidated in one place, and PR
+4.4 built that place. The equivalence test wants extending from the rig to the four committed
+replay fixtures — `chain`, `rounds`, `ambience` and `group-fade`, whose moments have to be read
+back out of their own logs. Three replay fixtures, `slots`, `claims` and `persistent`, each of
+which would pin a record shape rather than a decision. The in-range offset, which needs
+`armRangeInto` to shorten and shift one slot's clip and a measurement of its own. And the
+console owes PR 4.2's slot inspector lines and PR 4.3's claims-and-pending on the running pane;
+4.4's warnings, 4.5's prepare word, 4.6's derived lines, 4.8's aim bar, 4.9's steps and 4.10's
+persistent band are in. It is 1 725 lines, and Phase 5 makes it the operator client.
+
+**One thing about the form, for §14 to copy.** PRs 4.1 to 4.4 corrected §13 in place, in the
+register §13.2's own *"this paragraph is a correction"* set; from PR 4.5 to PR 4.10 each pull
+request added a **"What PR 4.N built"** subsection instead — six of them, and PR 4.11 added
+none, which is how this retrospective came to be owed. Both forms are kept on purpose, and the
+rule between them is which reader is being protected: a correction in place is right when the
+drawn sentence is simply wrong and would mislead anybody reading it afterwards, and a subsection
+is right when the drawing was right as far as it went and the building found more, because
+deleting the drawn sentence would delete the evidence that the drawing worked. §14 should do
+both, and say which it is doing.
+
+**The practice is confirmed, and Phase 4 came out closer to its drawing than Phase 3 did.**
+§12.15 records four faults in §12's drawing and four audited claims that were paid for late;
+§13's audit paid its debts in PR 4.1, and the review of the drawing found five more faults that
+were in the text and would otherwise have been in the code. The phase then spent more time on
+carriage returns, `-Wshadow` and driver waits than on anything the drawing got wrong. The
+qualification is that a drawing is only as good as the reading it gets: §13's wrong line
+numbers, its five-that-were-six and one enum atom with no producer all survived the author's own
+re-reading and were caught by a review whose rule was that every finding be put to an
+independent reader — two of whose reviewers were themselves refuted, and whose proposals were
+dropped. Draw §14, then have it refuted.
+
+---
+
+## 14. Phase 5 — undo, crash-safe save, the edit lock, spectral colour: what the tree, the commands and the log gain
+
+Written on 2026-09-09, before any of it exists, as §11, §12 and §13 were: the approved Phase 5
+plan drawn as a text the pull requests 5.0–5.19 can be reviewed against rather than against
+memory. Rows reach `docs/parameters/godot-parameters.csv` with the PR that implements each of
+them, never before. Where this section and the code come to disagree, §14.17 at close-out says
+which won — and §13.16, owed since 2026-09-07 and never written, is written by PR 5.0 out of the
+Phase 4 close-out's own §1–§3 rather than left owed a second time. The hygiene every PR is held
+to — `-Wshadow` checked by hand before a push, every standard-library include written out —
+stays where it is useful, in the Phase 5 handoff's §4 traps, and is not restated here.
+
+Four decisions the author took with the plan shape it, **T**, **U**, **V** and **W** in §9,
+after S:
+
+| | decision | what it shapes |
+|---|---|---|
+| **T** | the engine half is built first; the console grows into the operator client and is the laboratory where the author designs the layout; the JUCE desktop client is an **outline** in §14.16 until the layout has stopped moving | the order of every PR in the phase, and §14.16 |
+| **U** | the devplan's done-when stays as written — *the author runs a simple show from the desktop build in a rehearsal room* — and whether a browser on the booth machine satisfies it is judged in the room, not here | what "finished" means, and nothing else |
+| **V** | the console **becomes** PRD §3.17's web client: ES modules served from the same directory, no build step, editable while a show runs, diagnostics behind a *tech* display preset | §14.2, §14.3, and the whole of Half B |
+| **W** | the edit lock is an **engine node** every client honours, not a per-client hiding of buttons; while set, document-mutating commands refuse, and GO, standby, every run command and `node.set` on a mounted address keep working | §14.1, §14.7, §14.11 |
+
+Twelve further decisions were taken with the plan rather than by the author. They are numbered
+1–12 there and cited here as *plan decision N* — one undo domain, the coalescing window, what
+lights `dirty`, the autosave numbers, the timbre window and ramp, the fade-points shape among
+them — and each is an implementer's call written into this section so that it can be overruled
+early rather than late. Where §9's lettered decisions are law until the author changes them, a
+numbered one is a proposal that has been built on, and every subsection that states one says so
+in place.
+
+Four words, used precisely from here on. *The console* is the page as it stands, one file at
+`clients/console/index.html`; *the web client* is what decision V grows it into; *a client* is
+anything at the far end of §14.2's contract — the console, the JUCE client §14.16 outlines, a
+Max patch, `curl`. And the thing decision W adds is **the edit lock**, one node and one
+predicate (§14.11); *show mode* is what the operator calls the state the lock puts the show in,
+and it is never a mode in a client.
+
+**Phase 5 is the first phase with two halves, and the order between them is a decision rather
+than a convenience.** Half A is the engine: per-domain undo (§3.20, §4.3), atomic save with a
+`dirty` that is true, crash-safe autosave and recovery, the lifecycle commands that do not
+exist, the edit lock, and the spectral-colour cache with `run/timbre` (§3.30). Half B is the
+console — today one file, 1 725 lines of plain HTML with no build step, served by the engine at
+`/ui` — growing into the operator client one view per PR, which is §14.3. *(The Phase 5 handoff
+records 1 400 lines at its `:44`: a figure from the middle of Phase 4, around PR 4.5. The file
+was 1 280 lines when that phase opened and 1 725 when it closed. This paragraph corrects it in
+place, once, rather than leaving two documents disagreeing about a number anybody can count.)*
+
+This section then runs in the order the engine grows. §14.1 and §14.2 come first because every
+row and every command after them is a promise to a client, and §14.3 is Half B. Then the tree:
+the rows `/godot/document` gains (§14.4), the runtime nodes and the media route (§14.5), the two
+new document attributes (§14.6), the operator commands (§14.7) and the one record the engine
+writes to itself (§14.8). Then the four mechanisms — undo (§14.9), save, autosave and recovery
+(§14.10), the lock (§14.11) and spectral colour (§14.12). Then the plumbing with every new row
+in one table (§14.13), the measurements (§14.14), what the phase deliberately does not build
+(§14.15), the desktop outline (§14.16) and the close-out that will answer all of it (§14.17).
+
+Half A first, for four reasons that are all the same reason. PRD §3.17 says the desktop layout
+is **deliberately undesigned** — *"not a QLab copycat"* — and names it the author's to design,
+which means the phase cannot start by implementing it. The PRD never commits the desktop UI to
+JUCE at all; only the devplan does, and §9's open question E — in-process or a separate client —
+is still open, so building the JUCE client now would answer E by accident. **This section does
+not answer E either**, and that is the convention it keeps throughout: E stays in §9's open
+table with the fallback recorded there, *assume separate*, and §14.16's outline is drawn on that
+fallback rather than on a decision nobody has taken. Everything Half B could draw is a node or a
+command the engine does not have yet. And the author designs by looking: a page that reloads
+while a show runs closes the loop in seconds, and a compiled client closes it in a build.
+
+*(The handoff opens on a different sentence — "Phase 5 is the first build a human runs a
+rehearsal with: a JUCE desktop client, as a pure OSCQuery client" — and calls it the most
+important one in the document (`docs/handoffs/2026-09-09-phase5-handoff.md:8-10`). Decisions T
+and V change it, and this paragraph says so rather than quoting around it: the client Phase 5
+builds is the page, held to exactly the constraint the handoff was insisting on — a pure
+OSCQuery client with no privileged access — and the JUCE one starts when the layout has stopped
+moving. The rest of that opening is untouched and is what puts Half A in front: a capability the
+client needs goes into the engine first, with a row in the parameter table and a command by
+name.)*
+
+### 14.1 What a client may hold, and what it may not
+
+**A client holds what is true of the person looking at it, and nothing that is true of the show
+or of the engine.** PRD §3.5 settles the hardest case before anybody asks it, by giving the
+three kinds of pointer three different scopes:
+
+| Pointer | Scope | §3.5's own words |
+|---|---|---|
+| **Standby** | one per list, **engine state** | *"what GO acts on; never moves as a side effect of selection or scrolling"* |
+| **Edit / selection** | **per client** | *"desktop and tablet each have their own; detached from standby"* |
+| **Run** | *n*, one per active group | *"live objects, selectable in the running pane, individually addressable"* |
+
+That table is a general rule wearing a particular hat. A pointer is engine state when the
+machine acts on it, per client when a person merely looks through it, and an object when it is a
+thing the engine made. Everything a Phase 5 view wants to remember sorts into those three, and
+the sorting has a test with three clauses:
+
+- **If a second client should see it, it is a node.** Two surfaces are one console — §3.17 makes
+  the tablet *"a second surface, not a second screen"* — and two surfaces that disagree about
+  what GO will do are not one console.
+- **If a second operator would be confused to find it changed, it is a node.** The confusion is
+  the evidence: it means somebody was relying on it, which means it was a fact about the show
+  rather than about a viewer.
+- **If losing it costs nothing but a moment's re-aiming, it is the client's.** A tab closed at
+  04:12 and reopened is one `GET /godot` and a scroll away from where it was. That is the price
+  of holding it, and it is the right price.
+
+Worked through case by case, because the interesting ones are the ones that look like the other
+kind:
+
+| what | whose | why it falls there |
+|---|---|---|
+| the **standby** | engine, one per list | §3.5 in those words. It is `persist=state`, so a rehearsal reopens where it was left (`docs/parameters/godot-parameters.csv:29`) |
+| which list has **focus** | engine | GO acts on it — see below. `/godot/list/focus`, `rw`, `persist=state` (csv:24) |
+| the **aim** | engine | `/godot/list/<id>/aim` is `rw` and drives `solve` and `statePosition` (§13.8, §13.9). A second client watching a load-to-time must see the same target: §3.17's dual-touch has two fingers setting a jump, and the operator at the desk has to see where the designer in the house is about to take the show *before* it goes |
+| the **lock** | engine (decision W) | one row, `/godot/document/locked`, and every client honours the same one; §14.4 draws the row, §14.11 argues the refusal |
+| a **run** | engine object | `/godot/run/<id>`. Which run is *selected* in the running pane is the client's; the run is not |
+| the **selection** | client | `picked` at `clients/console/index.html:669`, whose comment says what it is by saying what it is not: *"the inspected cue - NOT the standby (§3.5)"* |
+| the **fold state** | client | `folded`, a `Set` of group ids at `index.html:667` |
+| the **display preset** | client, in `localStorage` | `design`, `tech` or `show` is which diagnostics this reader wants on this screen (plan decision 10, §14.3) |
+| **scroll position** | client | and it survives a poll only once 5.9 has stopped replacing a pane's `innerHTML` wholesale, which the page does ten times a second today (§14.3) |
+| the **slider under a finger** | client — but the *gate* is a node | where the finger is is nobody else's business; that this origin holds this node is everybody's, which is why §3.16's `node.touch` and `node.release` are commands and the touch table is the engine's (`tree/TreeCommands.cpp:260, 287`) |
+| the **zoom of a waveform** | client | a view of a file at a magnification one person chose. The pyramid it reads is content-addressed and cacheable (§14.5); the zoom is not worth a byte anywhere but here |
+
+**The *display preset* is named that way here to keep it away from a word the PRD has already
+spent.** §3.16's **layout** is the engine-side binding layer that maps a run's timbre onto a
+strip's colour cell (§14.12), and PRD §3.23 calls a *layout preset* something the show owns and
+show mode locks — split view, script beside cue list. Both are document state and both are Phase
+6's. What §14.3 puts in `localStorage` is a different object with a smaller life: which
+diagnostics one reader wants on one screen, on this machine, until they change it. The engine
+has no opinion about that one and no business keeping one per browser — plan decision 10, here
+to be overruled early rather than late, and the cheapest of the twelve to overrule, since moving
+it into the tree later is one row.
+
+**Which list has focus is nearly the client's and is not, and the reason is one word: GO.** It
+looks like a selection — it is what somebody clicked, it decides what they are looking at, and
+moving it changes nothing in the world. But `go` acts on the focused list's standby, so a focus
+that lived in a browser would mean the same GO did different things depending on which tab sent
+it, which is the fighting §3.5 separates the pointers to prevent. `cue/CueList.cpp:353-358`
+records the day it moved: *"Focus was a string on this object: engine state, unpublished,
+forgotten on every close. Now it is `/godot/list/focus`, so a client can read which list GO acts
+on, a surface can move it, and a show reopens on the list the operator was working in."* The
+selection sits two lines away in the same page and goes the other way for the same reason: GO
+does not act on it.
+
+**A lock that lives in a client is a lock exactly one client honours, which is why decision W
+puts it in the engine** — §14.11 argues the predicate and names the doors. The reason that
+belongs to this subsection is the record: a hidden button leaves none, so on the night an act is
+stopped by an edit nobody admits to, a lock that was drawn rather than enforced has nothing in
+the log, while a refusal is an `R` record carrying a tick, a sequence and an origin — which is
+also where the operator learns whose hand it was.
+
+**PRD §3.20 already keeps the selection out of the show file, and per client is a step further
+than that.** §3.20 puts *"derived/ephemeral state (playhead, window geometry, selection, meters,
+run state)"* in a separate file in the bundle — that file is `state.xml`, and §14.4 shows what
+it will hold. But `state.xml` is one file per bundle and records what the *engine* was doing:
+today exactly two values, `Lists/@focus` and `list/@standby`, with Phase 5's `Show/@locked` the
+third. Two clients cannot both keep their selection there without one overwriting the other, so
+a per-client selection is not merely out of the show — it is out of the bundle, out of the
+engine, and lives in the tab that made it for as long as that tab is open and no longer.
+
+**And that is constraint 9, which a browser tab satisfies more literally than any hardware ever
+will.** *The controller arrives knowing nothing and leaves knowing nothing.* A tab arrives with
+an empty map, one `GET /godot` and a WebSocket; it draws a complete console out of the reply;
+and closing it leaves the engine byte-for-byte where it was. The one thing it remembers between
+visits is the display preset in `localStorage`, which holds nothing about the show, which the
+engine never reads and cannot read, and whose loss costs one menu choice. That is also what
+makes the rule testable rather than pious: **kill any client at any moment of a show, and a
+replacement drawn from `GET /godot` alone is indistinguishable from it**, but for a fold, a
+scroll and a preference. Any state that fails that test has been put in the wrong place, and
+§14.2 is the contract that keeps it out.
+
+### 14.2 The web client's contract
+
+**A client of this engine reads by polling and writes by datagram, and everything it needs to
+draw is in the reply.** What follows is written so that a second client — the JUCE one of
+§14.16, an external script, somebody's Max patch — can be built from this subsection and nothing
+else. `clients/console/index.html` is its reference implementation rather than its
+specification: where the page and this subsection disagree, the page is what 5.9 to 5.18 will
+fix (§14.3).
+
+**PRD §3.17 says the web client is TypeScript, and what decision V builds is not.** The
+parenthesis is exact — *"The web client (TypeScript over OSCQuery + WebSocket) is what makes the
+tablet a genuine fallback"* — and TypeScript is a build step, which decision V forbids for the
+reason §14.3 gives. The difference is a language, and every word of the argument §3.17 makes
+around it — no install, a namespace the client discovers rather than ships, no hand-maintained
+parameter table on two sides — is kept in full by plain modules. So this is not a quarrel with
+the PRD but an amendment to propose against it, and §14.15 carries it with the rest of the
+phase's list rather than settling it here.
+
+**Reading is one `GET /godot` at 10 Hz, flattened to a map of address to *node*.** `POLL_MS =
+100` (`index.html:445`); the OSCQuery reply is a tree of `CONTENTS`, and `flatten` (`:457-467`)
+keys every object carrying a `FULL_PATH` by that path. **The whole node, not its value** — that
+is the load-bearing half. The inspector is built out of what each node says about itself: its
+`TYPE`, its `ACCESS`, its `RANGE` and its `DESCRIPTION`, which is why a row added to
+`docs/parameters/godot-parameters.csv` appears in the client without a line being written in it
+(`index.html:451-456`). That is the self-description PRD §3.22 builds the whole device-template
+argument out of — *"a device that speaks OSCQuery describes itself"* — turned on Go.dot's own
+surface, and it is exactly the property WFS-DIY lacked: a parameter table hand-maintained in the
+client, which had to be edited in step with the one in the engine and therefore was not. A
+client that keeps a second copy of the table has reintroduced that bug; a client that reads
+`RANGE` and `DESCRIPTION` off the node gets its bounds and its tooltips for nothing.
+
+Polling rather than subscribing is a decision with a reason and a known cost. The server does
+push coalesced OSC over the same socket to whoever sends `LISTEN`, and that is the right answer
+for a surface somebody is *operating*; it is not the right answer for a view whose job is still
+to be looked at and argued with, because a poll of the whole tree has no decode step to be
+wrong, and ten a second is imperceptible against a fifty-hertz engine (`index.html:438-444`). It
+is imperceptible to the tick thread too, and for a reason worth stating rather than assuming: a
+poll is answered from the published snapshot, swapped whole under `publishMutex` and copied by
+`snapshot()` under the same one (`tree/ParameterTree.cpp:1572-1594`), so an HTTP thread never
+reads the model and a tenth client costs a `shared_ptr` copy. The measurement that could change
+the polling rate is M24, and what M24 measures is the client's own `render()` rather than the
+network (§14.14).
+
+**Writing is binary OSC on the WebSocket that answers on the same port** (`index.html:618`), and
+the engine's dispatch is three rules long (`oscquery/EngineNamespace.cpp:65-141`):
+
+| the address | what the engine does | where |
+|---|---|---|
+| under `/godot/cmd/` | a **named command**: `standby.set` is `/godot/cmd/standby/set`, dots to slashes, and the packet's arguments are the command's | `:25`, `:81-85` |
+| a trigger address, **over UDP only** | `trigger.fire` for every match, and a match ends it | `:86-122` |
+| anything else | `node.set <address> <value>`, the address as the first argument | `:123-141` |
+
+Two consequences a second client has to know. A WebSocket client **is a client**: it has the
+whole command set and can send `cue.fire`, so triggers are not matched on that road at all — *"a
+trigger fired from one would be a second road to the same place with no advantage and one more
+thing to reason about"* (`:88-95`) — and a browser therefore cannot fire a §3.7 trigger by
+writing its address. And an argument-less message is not a write of nothing: it has no value to
+set, so the engine drops it rather than being asked to store an absence (`:133-137`).
+
+**Values go as text, whatever the node's type is, and that is not a shortcut.** `node.set`
+declares its value argument as `'*'` — whatever the target says — and turns whatever arrives
+into canonical text before the schema parses it against the row the address resolves to
+(`document/DocumentCommands.cpp:362-365`). Text is the road an integer takes anyway, one step
+earlier, so a client that sends text never has to guess a type it could get wrong
+(`index.html:656-664`). The corollary is a refusal worth meeting here rather than at 04:12, and
+it is this subsection's to state once for every subsection that touches a boolean: the parser
+takes exactly two words, `true` and `false` (`document/Schema.cpp:591-602`, *"a document is
+written by this program and read by a person"*), so an OSC `T` or `F` works, the string `"true"`
+works, and an integer `1` comes back `type-mismatch` — which matters most at
+`/godot/document/locked`, where `type-mismatch` and `locked` would send an operator to two
+different places.
+
+**OSC has no reply channel, so `/godot/engine/lastError` is the only answer a refusal gets, and
+a client must show it.** `Namespace::write` returns nothing by design — *"making this return a
+status would invent a synchronous answer that the queue hop means the server cannot actually
+have"* (`oscquery/OscQueryServer.h:91-98`); a rejection is an `R` record in the log and a
+reading in the tree, whose exact spelling and whose origin field are §14.11's. The node is
+refreshed in the after-tick only when the error count has moved, which is a mutex and a string
+copy avoided fifty times a second (`Console.cpp:2206-2211`) — and because every non-applied
+record bumps that count, two identical refusals in a row still both surface. The console states
+the consequence better than a rule would: *"a client that does not show it is a client where
+editing appears to do nothing at all"* (`index.html:133-136`).
+
+**And a client must say when it has stopped hearing.** §3.17 asks it of the tablet — *"wifi loss
+must leave the pane visibly stale, never silently frozen"* — and it is the same requirement here
+for the same reason: a view that quietly freezes is worse than one that has gone, because
+somebody will act on it. Two states of live, not one: the tree is read over HTTP and every edit
+goes out over the socket, so a socket that is down is a page that reads perfectly and changes
+nothing, which is worth saying before a note goes missing (`index.html:1491-1496`), and the two
+ways a poll can fail are told apart in words rather than left to numbers that stopped moving
+(`:1500-1512`).
+
+The contract, then, as five sentences about a client rather than five instructions to one:
+
+1. **A client holds nothing the engine owns** — §14.1's test, and the tree read out fresh every
+   poll for everything that fails it.
+2. **A client moves the standby only by asking for it.** The engine moves it in the four places
+   §12.6 names — the legality check, the write door, the repair when the standby cue is deleted,
+   the clear when it is moved away — and a revert or an undo can therefore leave the pointer
+   somewhere new (§14.9, §14.10). What a client must never do is move it as a side effect of a
+   gesture of its own: not on selection, not on scrolling, and not on a jump-to-cue from
+   Choufleur (§3.23), which moves the *edit* pointer and says so. GO advances it; a standby
+   command sets it; nothing a client draws touches it.
+3. **Every gesture is a named command** (§4.11). A client is an accelerator over a complete
+   command set and never the only route to anything: the same act must be reachable from a
+   datagram, from `wfg` and from a script, which is why a client sends the command rather than
+   reaching into the document. 5.18 will check that mechanically (§14.3).
+4. **A client shows the refusal and shows the staleness**, both in words, and never in colour
+   alone (§4.8).
+5. **A client assumes nothing about the parameter table.** It declines to offer a write on a
+   read-only node rather than sending one that will be rejected, and it renders a node it has
+   never heard of as its type rather than as an error, because a row that arrives before the
+   client knows about it is the normal case here and not a fault.
+
+**What a client may cache is decided by one question: does the thing have a revision?** The
+pyramid may be cached for ever. `/media/<hash>/timbre?level=N` is keyed by the content hash of
+the file, so the answer cannot change without the key changing, and the route will say so with
+`Cache-Control: max-age=31536000, immutable` (§14.5). Anything reached by an address under
+`/godot` may not be cached at all: the document half of the tree is itself a cache the engine
+invalidates with `markStale`, and a name held past one poll is yesterday's name. **The poll is
+the invalidation** — and a client that improves on it by caching a subtree has taken over an
+invalidation problem the engine already solved, and will get it wrong on the one edit that
+mattered.
+
+### 14.3 The console as the operator client
+
+**Decision V stops the console being a diagnostic page and makes it the client the show is run
+from.** PRD §3.17 is unambiguous about what that means and it is not a hedge: *"A web client is
+the primary surface, and a native companion is an optional addition on top of it — not an
+alternative to it"*, and the web client *"remains primary and must be complete on its own. It is
+the redundancy path (§3.5), and a redundancy path that requires an installed app is not one."* A
+page that can do nine of the ten things an operator needs is not a redundancy path; it is a
+diagnostic with good manners. So Half B's whole job is the tenth thing, one view per pull
+request, each sized to earn one round of the author's feedback rather than to be finished.
+
+**The console is already a client and is not yet an operator's client, and the difference is a
+list.** The console today draws standby and selection distinctly, fires GO on Space, steps the
+standby with the arrows, runs a running pane with `run.kill`, italicises the header's derived
+lines, carries the aim bar with its step chips and solve plan, renders the persistent band, and
+builds its whole inspector generically out of `TYPE`, `ACCESS`, `RANGE` and `DESCRIPTION`
+(§14.2). It sends fifteen named commands and the inspector's `node.set`. What it cannot do is
+the operator half: no run pointer on a cue-list row, so a run is visible only in the running
+pane; no `run.advance`, `run.prune`, `run.unprune` or `run.stop` though all four exist; no round
+pills, no range name on the strip; no bulk edit; no header pane; no curve editor; no display
+presets and no show mode; no save gesture at all — `document.save` is never sent — no undo
+gestures, and no colour. Half of that list is waiting on Half A, which is the sequencing
+argument in the preamble making itself felt.
+
+**Two defects come before any new view, because each of them ends a rehearsal on its own.**
+`renderLists` replaces a pane's `innerHTML` wholesale (`clients/console/index.html:900`, and the
+running pane at `:987`) ten times a second, so a long list's scroll snaps to the top between one
+poll and the next and nothing can ever hold the standby in view — the page is unusable at
+exactly the size of a real show, and only at that size, which is why it has survived four
+phases. And the aim `<input type=range>` (`:389`) is caught by the keydown guard's
+`INPUT|SELECT|TEXTAREA` test (`:1699-1703`), which exists for the right reason — somebody typing
+a cue name has every right to a space in it — so once the slider has been touched, Space no
+longer fires GO and the arrows move the slider instead of the standby, silently, with the
+transport gone deaf and nothing on screen saying so. 5.9 will key rows by cue id and runs by run
+id and reconcile a `Map<id, element>` in order, updating attributes and text in place; it will
+narrow the guard to text-like controls, blur the slider on `change`, and give `Escape` a
+meaning; and it will build `triggersOf` (`:491-501`) once per poll as an index instead of
+scanning every address per row per render. **M24** measures `render()` on a 500-cue bundle
+before and after, in the PR (§14.14). A view drawn on top of a page that loses the operator's
+scroll is a view nobody can judge, which is the whole reason these come first.
+
+**Then the module split, and the no-build rule is load-bearing rather than frugal.** 5.10 will
+cut the one file into `plumbing/{osc,link,poll,tree}.js`, `model/{index,selection,layout}.js`,
+`views/{strip,transport,didi,gogo,header,inspector,aim,curve}.js`, `gestures/{keys,clicks}.js`
+and `styles.css`, with `index.html` reduced to a shell carrying one `<script type="module">` —
+plain ES modules, no bundler, no import map, no dependency. The engine already serves them:
+`serveClient` handles subdirectories, `.js` is already `text/javascript`, and every file goes
+out with `Cache-Control: no-store` and the reason beside it in the source — *"the page is being
+edited while the engine is running and a stale copy after a refresh is a minute of somebody
+wondering why their change did nothing"* (`oscquery/OscQueryServer.cpp:236-246`). That is the
+loop the rule exists for: change a file, refresh the tab, look at it — during the show that is
+already running, with the engine untouched and the runs still playing. PRD §3.17 makes the
+layout the author's to design and he designs by looking, so the client that gets designed has to
+be the one that can be edited between two GOs. A build step costs seconds and, worse, costs a
+state of mind; it is the difference between trying a layout and deciding one. `/ui` is a
+reserved prefix a mount may not claim (`tree/Mount.cpp:73-77`), and §14.5 reserves `/media`
+beside it for the same reason.
+
+The views will then land one per PR, and each is written to be argued with:
+
+| PR | the view | what it has to earn |
+|---|---|---|
+| **5.11** | run pointers on Didi, Gogo's gestures | a live marker on the row of any cue with a run (`run/order` × `run.cue`) with its state word and position, so the cue list stops being the pane that cannot see the show; then *stop* (footer) and *advance*, round pills from `run/round` and `run/pruned` clicking to `run.prune`/`run.unprune`, the range index and `rangeIteration` on the strip line, and `warning`/`error` **in words** (§4.8) |
+| **5.12** | group bulk edit | PRD §3.5's mixed-value semantics exactly — the intersection of field names over the selection, the value when every member agrees, *mixed* otherwise, and typing sets all as *N* `node.set` writes — plus §3.5's kind filter, *"all audio, all video, all OSC, all MIDI"*, so a mixed group exposes one kind's fields rather than the thin intersection of everything. No engine change: it is *N* ordinary writes, which is also what makes it one undo transaction's worth of thinking (§14.9) |
+| **5.13** | the header pane | that a member says which of its values it owns and which the header wrote, in type rather than in colour (§4.8): written lines upright and `headerDerived` in italics (§13.7); double-click a derived line to select the member and scroll it into view, which is possible only once rows are keyed; *mark as preset* in the inspector as a `node.set …/preset <ancestorGroup>` over a select of ancestors, so the gesture that makes a preset is the command a script would send |
+| **5.14** | display presets, and show mode | `design`, `tech` or `show` in `localStorage` (§14.1); the `#strip` telemetry and the raw addresses behind *tech* rather than deleted, which is what decision V promised the diagnostics; *show* reads `/godot/document/locked` and hides structure, keeping GO, standby and every run gesture — the client honouring the node, not replacing it (§14.11) |
+| **5.15** | save, recovery and undo gestures | landed line by line as Half A lands each node, then consolidated here into `views/transport.js` and `gestures/keys.js`: Ctrl/Cmd-S, Ctrl/Cmd-Z, the transaction word beside the button, the recovery banner's *recover* and *discard*. The delete confirm goes away, because the page's own comment says why it is there — *"Undo is Phase 5's and does not exist yet"* (`index.html:1609-1611`) — and by then it does |
+| **5.16b** | the curve editor | SVG breakpoints dragged, and a numeric list beside them for the operator who does not want to drag; commits one `node.set …/points`. It reads `values` and never `soleValue`, because a `d*` node's type string grows with its value (§14.6) |
+| **5.17** | the coloured bar on Gogo | one `GET /media/<hash>/timbre?level=k` per hash at the bar's width, cached in the page by hash (§14.2), a canvas coloured per frame with the playhead from `run/position` — and the three numbers stay beside it in words, because colour is never the sole carrier (§4.8, §14.12) |
+
+**What the client is not allowed to become is as much of the design as what it draws.** It holds
+no state the engine owns: §14.1's test applies to every one of these views, and the ones that
+tempt hardest — which run is selected in Gogo, which fields a bulk edit is showing, where a
+breakpoint is mid-drag — are all client state precisely because losing them costs a moment's
+re-aiming. Every gesture is a named command (constraint 11), which means no view may reach into
+the document by building an address a command would have built for it. And the two clients must
+not drift on the names: the gesture-to-command table is **data**,
+`clients/console/gestures/commands.json`, read by the page and — §14.16 — by the JUCE client
+rather than copied into it. **That file does not exist today**; `clients/console/` contains
+exactly one file. 5.10 will land it with the split, 5.11 will be where it starts carrying
+entries a view depends on, and 5.18 will turn it into a check.
+
+**How the page is tested, said honestly, because the answer is *partly*.**
+`tests/blackbox/client_page.py` exists and is registered per locale
+(`tests/CMakeLists.txt:694-704`); it drives `GET /ui`, `GET /ui/index.html`, a missing
+`/ui/nothing.js`, three path-traversal attempts and the `--ui` notice, and then it drives the
+**engine** through seven gestures transcribed into Python by hand. So what is tested is the
+server that serves the page and the commands the page is believed to send — not the page. The
+page and that transcription can drift apart in silence, and 5.18 will close the half of that gap
+which is closable cheaply: `gestures/commands.json` checked from stdlib Python against `wfg
+commands` for names and arity, so a gesture naming a command that does not exist fails a test
+rather than an evening; and `node --test` over the pure modules — the OSC encoder against the
+byte fixtures `tests/OscCodecTests.cpp` already hand-wrote, the keyed reconciler, the bulk
+edit's `intersect`/`agree`, `pointsToText` — registered as ctest `console.unit` only where
+`find_program (WFG_NODE node)` succeeds and printing a STATUS line where it does not. Browser
+automation is refused for the reason §14.15 gives. What that leaves genuinely untested is the
+DOM — that the marker is on the right row, that the pill click hits the right run — and §14.15
+records it as a gap rather than pretending the two cheaper checks close it.
+
+### 14.4 `/godot/document` grows, and one of its rows is written by a client
+
+**The container is already split down the middle, and the split is the `persist` column rather
+than the rhythm of the value.** The document half loops over `rowsForOwner ("document")`, skips
+`persist == none` and reads each value off `document.root()` (`tree/ParameterTree.cpp:782-790`),
+its comment saying what it leaves behind: *"the show format's own version. The rest of that
+container is runtime state and lives on the other side"* (`:780-781`). The runtime half
+publishes the `persist == none` rows out of `EngineState`, through a hand-written chain of `else
+if`s over the row's name (`:1252-1274`). The Phase 5 handoff's rule — *"anything that changes
+while the show does not is in the runtime half"*
+(`docs/handoffs/2026-09-09-phase5-handoff.md:26-30`) — governs the population of that second
+half, which is the rows that persist nowhere. A row that persists is an attribute of an element
+and is published from the document half whatever its rhythm, and `locked` is the case that makes
+the distinction worth stating: show mode changes several times a night while the show itself
+does not, and it is still a document-half row. That is safe only because `markStale` runs on
+every applied command (`Console.cpp:2244-2245`), so a lock written this tick is published this
+tick.
+
+| Node | Type | Access | Persist | Cap | What it says | Half | PR |
+|---|---|---|---|---|---|---|---|
+| `/godot/document/dirty` | `T` | ro | none | 5 | whether the bytes on disk are behind this document's history. The row has existed since Phase 1 and nothing but one test line has ever assigned it, so 5.2 will add no node — it will make an existing promise true, and a reviewer should expect no CSV change beyond the description (§14.10) | runtime | 5.2 |
+| `/godot/document/locked` | `T` | **rw** | **state** | 5 | show mode (decision W) — a lock on the show, not a mode in a client (§14.11). The only row in this container a client writes | document | 5.3 |
+| `/godot/document/canUndo` | `T` | ro | none | 5 | whether the `document` domain has a transaction to unmake (§14.9) | runtime | 5.4 |
+| `/godot/document/canRedo` | `T` | ro | none | 5 | whether it has one to put back | runtime | 5.4 |
+| `/godot/document/undoName` | `s` | ro | none | 5 | `getUndoDescription()` — the name of the transaction `undo` would unmake (§14.9), so a menu item reads *Undo cue.create* rather than *Undo* | runtime | 5.4 |
+| `/godot/document/redoName` | `s` | ro | none | 5 | the same for `redo`; empty when nothing has been undone | runtime | 5.4 |
+| `/godot/document/recovery` | `T` | ro | none | **1** | whether a `recovery/show.xml` was found beside this bundle when it opened, and has not been recovered or discarded since (§14.10) | runtime | 5.5 |
+
+Five of the six new rows take the cap the container's other mutable rows already carry — `dirty`
+and `warnings` are both 5 (`docs/parameters/godot-parameters.csv:21-22`) — and `recovery` takes
+1, with `path`, `name` and `formatVersion` (`csv:18-20`), because it changes at most twice in a
+session: once when the bundle opens and once when the operator answers it. A cap is a
+declaration to the client and never a throttle in the engine (§14.5).
+
+**The address reaches the `Show` root today, and nothing has to be invented to make it.**
+`ShowDocument::resolve` branches on the number of address segments rather than on the owner
+word: three parts after `godot` is a **container address** and four is an object address. Its
+header says so — *"`/godot/<owner>/<id>/<attribute>`, or `/godot/document/<attribute>` for the
+root. Owner words are the parameter table's: document, list, cue, mount"*
+(`ShowDocument.h:231-236`) — and the three-part case reaches `containerElementFor (owner)` at
+`ShowDocument.cpp:396`, over the map `containerSegmentFor` keeps at `:187-205`: `Show` to
+`document`, `Audio` to `audio`, `Lists` to `list`, *"the elements that are addressed without an
+identifier, because there is only one of each"*. The precedent is not hypothetical and it is not
+the lock: `document/formatVersion` is already a `document` row that is an attribute of the root,
+carried as the `{ "document", "formatVersion" }` entry in the generated schema table
+(`SchemaTable.generated.h:208`) and read through `instance().attribute (rootElement,
+"formatVersion")` (`Schema.cpp:363-366`); `tests/DocumentTests.cpp:522` already asserts that
+`/godot/document/formatVersion` resolves. The single reason `node.set
+/godot/document/formatVersion` fails today is the read-only refusal at
+`ShowDocument.cpp:462-463` — `if (target.isDerived || target.attribute->access() ==
+Access::read)`. Change one column to `rw` and the write lands, through the same choke point
+every other written attribute takes (`:452`, `:506-513`). What is genuinely new is smaller than
+the plan allowed for and worth naming for what it is: the first `access=rw` row owner `document`
+has ever carried, and the first `persist=state` attribute on the root. `lists,focus` is its
+nearest relative — a writable `persist=state` attribute on a container addressed without an
+identifier, `/godot/list/focus` (`csv:24`), resolved through the same three-part branch and
+round-tripped through `state.xml` under test at `tests/CueListTests.cpp:869-908`.
+
+***This paragraph is a correction*** *(PR 5.0, traced 2026-09-10)*. The approved plan books
+`EphemeralState` a new entry form for the root — *"`EphemeralState` gains one `<Show
+locked="true"/>` root entry"* — on the belief that `collect` visits identified elements only. It
+visits containers too, and `Show` is one by that same test: `const auto isContainer = !
+ShowDocument::containerSegmentFor (elementName).empty();`, with the element taken when it is
+`identified || isContainer` (`EphemeralState.cpp:81-85`, the comment at `:72-80` saying exactly
+this case out loud). `containerSegmentFor ("Show")` answers `"document"`, and `collect` is
+called on `document.root()`, which is the `Show` node (`EphemeralState.cpp:134`). The read half
+is symmetric: a container entry resolves to `/godot/document/<attr>` at
+`EphemeralState.cpp:187-204` and is restored through `document.setAttribute` at `:243-263`. So
+the lock persists with **no new plumbing at all** — one less piece than PR 5.3 budgeted, and the
+correction is subtractive, which is the direction a plan is happiest to be wrong in. §14.13
+books what a row does cost, and §14.11 argues the lock itself.
+
+**The persistence rule splits the seven cleanly, and it splits them on §4.10 rather than on
+convenience.** The lock persists because show mode is something somebody decided: the operator
+locked the show at 19:20 and a restart at 19:45 must come back locked, or the first thing a
+rebooted engine does is un-protect a running performance (plan decision 6).
+`SchemaTypes.h:63-73` makes §4.10 mechanical — `show` is what someone decided, `state` is where
+the machine happened to be — and a lock is the third member of a set that already has a rule:
+`list/@standby` and `Lists/@focus` are also decisions of the operator's, and also live in
+`state.xml`, because they are the operator's *position* and not the show's content. The undo
+four do not persist, because they are readings of a stack that begins empty at every open and a
+restored `undoName` would name a transaction no `UndoManager` holds. `recovery` does not persist
+because it is a fact about what was found on disk this morning, and `dirty` does not because it
+is a comparison against a number that exists only while the process does. Constraint 10 decides
+all six the same way, and §14.13 books what each of them costs a PR author in C++.
+
+### 14.5 `/godot/run/<id>/timbre`, `/godot/cue/<id>/hash`, and a route that is not an address
+
+**PRD §3.30 asks for two different things and they are not the same kind of thing at all.** A
+run publishes *"its timbre — hue and saturation at its current position — as a read-only node
+beside `/godot/run/<id>/position`, updated on the tick thread by a table lookup (§3.4: control
+rate, two values per running clip)"*. That is a parameter: numbers that are true at this instant
+and false at the next. The pyramid the editor and the Gogo bar read is not: it is kilobytes of
+binary per file, it does not change while the file does not, and it has no value *at a moment*.
+Two shapes, two carriers. **The tree carries what is true now; a route carries what is true
+always.**
+
+| Node | Type | Access | Persist | Cap | What it says | Half | PR |
+|---|---|---|---|---|---|---|---|
+| `/godot/run/<id>/timbre` | `s` | ro | none | 10 | `"<hue 0..360> <sat 0..1> <light 0..1>"` at the run's current position; empty while the pyramid has not arrived, which §3.30 calls grey | runtime | 5.8 |
+| `/godot/cue/<id>/hash` | `s` | ro | none | 1 | the sha256 of this media cue's file, once the analyser has hashed it — the key the route below is addressed by. Empty for every kind but media, and until the hash exists | runtime | 5.8 |
+
+**The node carries three numbers where §3.30 says two, deliberately, and §14.15 carries the
+amendment rather than this row carrying the departure in silence.** Lightness is the frequency
+axis, and it is what makes constraint 8 hold inside a single channel (§14.12); a client asked to
+recover it by inverting the ramp is a client keeping a second copy of the engine's table, which
+is the one thing §14.2 tells a client never to do. Publishing it costs one field of a string
+that is already being formatted, and plan decision 8 draws the value as `"h s l"` throughout.
+
+**The hash is published at `/godot/cue/<id>/hash`, and there is no `/godot/media` address
+space.** *This paragraph is a correction* *(PR 5.0, 2026-09-09)*: the plan drew
+`/godot/media/<id>/hash`, and that address cannot be created by adding a `media` row.
+`collectCue` builds `base = "/godot/cue/" + id` (`ParameterTree.cpp:557`) and appends the
+`media` owner's rows to the cue's own for a `Media` element (`:573-576`), so every `media` row
+already publishes under the cue — the table says so in its own voice, `media,duration` being
+*"On owner `media` and not `cue`, or every memo, group and fade would grow one"* (`csv:50`),
+which clients read as `/godot/cue/<id>/duration`. A hash arrives *after* the analyser has run
+and changes while the show does not, so it belongs in the runtime half; but a `media` row
+emitted from the runtime half would **duplicate** the address the document half already emits,
+and `ParameterTree.cpp:1535-1555` records that hole being closed once already — *a duplicate
+would make the answer depend on which it reached first*. The only pattern that works is
+`cue/prepare`, and it is a **pair** of changes rather than one: the document half skips it by
+name (`if (name == "prepare") continue;`, `:605-606`, argued at `:599-604` — *"this half is a
+cache - published from here it would freeze at whatever it was when a cue was last edited"*) and
+the runtime half emits it over `declaredCues` (`:1423-1442`). 5.8 will draw `hash` as that pair,
+and §14.13 books both halves.
+
+**`timbre` is a table lookup and `position` is the debt underneath it.** `Run::position` is
+declared (`cue/Run.h:264`), published (`ParameterTree.cpp:1510`) and assigned nowhere in `src/`,
+so the number every client reads today is the literal `0` — which is why the console's playhead
+is gated on `position > 0` and draws nothing (`clients/console/index.html:920-921`). 5.1 will
+pay it, and where it is paid matters, because §3.30's *"beside `position`"* is what the timbre
+row inherits: **position needs its own pass over `runs.all()`, not a line inside
+`advanceRanges`.** That loop `continue`s on `run->range < 0` (`Runner.cpp:4592-4593`), and
+`Run::range` is `-1` for *"every kind but media and a media cue with no ranges"*
+(`Run.h:322-323`, the declaration at `:329`) — which is the ordinary media cue, and the only
+case §3.30's bar is drawn for. Two guards go with it: `launchedAtSample` is 0 until the launch
+is placed (`Run.h:608`), so an armed-not-launched run would otherwise publish the whole
+session's elapsed seconds; and `RangeSpec::in` is not on the run at all, being re-read from the
+document per boundary through `Runner::rangesOf` (`Runner.cpp:168-205`).
+
+The lookup needs the file the run is playing, so the run holds its own copy: **`Run::media`,
+placed above `armMedia`'s `if (audio == nullptr) return;`** (`Runner.cpp:1945-1946`), beside
+`claimSlotsFor` at `:1934` and for the reason its comment gives at `:1928-1933` — a media path
+is a fact about the document, not about the audio. The plan said *"copied at arm, as `kind`
+is"*, and `kind` is not copied at arm: it is set in `RunTable::create` (`Run.cpp:23-29`). Copied
+below that early return, the path would be empty on every replay and on every run whose track
+was already reserved, and the copy's whole purpose — that undoing a delete leaves a run playing
+and still able to say what it is playing (§14.9) — would be lost in exactly the case it was
+written for. `Run::cue` and `Run::kind` are strings today (`Run.h:252-253`); 5.6 will add
+`media` beside them.
+
+**`rate_cap 10` is what the node declares, not what the engine does.** The value is copied from
+the schema row into the published `Node` (`ParameterTree.cpp:202`) and emitted as OSCQuery's
+`"RATE_CAP"` (`tree/OscQueryJson.cpp:171`); the only code in the engine that *acts* on a rate
+cap is `MountSender::intervalFor` (`MountSender.cpp:74-79`, applied at `:98`), which throttles
+outbound writes to mounted targets. Nothing throttles a `/godot` node. So `timbre` will be
+recomputed every tick like everything else, and the 10 is an instruction to the surface that
+draws it — §3.30's *"no faster than about ten times a second"*, which is the rate the web client
+polls at anyway (§14.2). Two things follow rather than being discovered: M22's cost is measured
+against fifty lookups a second, not ten; and `run,timbre` at 10 will be the first row in the
+whole table with a cap that is not 1, 5 or 50 — `run,position` and `run,rangeIteration` are both
+50 (`csv:98`, `:102`) — so it is a deliberate new class and not a typo.
+
+**The pyramid is a file, and the route that serves it is not an address.** A level in the tree
+would put kilobytes of base64 into every `GET /godot` a client makes at 10 Hz, for ever, for
+data that has not changed since the file was imported: the description would grow by the size of
+the show's media and the poll would stop being affordable. So 5.8 will add a plain `GET` on the
+same port, content-addressed:
+
+| Request | Answers | Headers | Refuses |
+|---|---|---|---|
+| `GET /media/<hash>/timbre?level=N` | that level's frames, exactly the bytes the `.tpy` holds | `application/octet-stream`; `Cache-Control: max-age=31536000, immutable` | 400 for a hash that is not exactly 64 hex characters, or a level that is not a number; 404 for a hash the snapshot does not hold, or a level the pyramid does not have |
+| `GET /media/<hash>/timbre?INFO` | the header as JSON: `sha256`, `seconds`, `sampleRate`, `window`, `hop`, and a `levels` array of `{ frames, bytes }` | `application/json`; the same immutable header | as above, minus the level |
+
+`?INFO` exists so that a forty-pixel Gogo bar and a full-width editor waveform each ask for the
+level they want in one round trip rather than fetching the finest and throwing most of it away,
+which is the whole reason §3.30 asked for a pyramid instead of a frame array.
+
+**`immutable` is the exact opposite of what `/ui` gets, and both are right.** The client
+directory answers `Cache-Control: no-store` (`OscQueryServer.cpp:246`) because the page is
+edited while the engine runs and a stale module is a bug the author cannot see (decision V,
+§14.3). A pyramid is named by the sha256 of its own source, so a given URL can never answer
+differently; a year is not optimism about the cache, it is a statement about content addressing.
+The same property is what makes the route safe: **the hash is validated as sixty-four hex
+characters and looked up in the snapshot, so no request text ever becomes a filesystem path.**
+`/ui` needs `file.isAChildOf (clientDirectory)` (`:232-238`) precisely because a request there
+*is* a path; this route needs no such check because nothing it receives is one.
+
+Three mechanical facts about where the branch goes, all of which the existing file settles:
+
+- **Beside `/ui`, which is answered first** (`OscQueryServer.cpp:140-142`), above `?HOST_INFO`
+  (`:144`), above the snapshot fetch (`:157`) and above the wildcard refusal (`:173-179`) —
+  whose exemption it inherits, correctly, since a 64-hex hash carries no wildcard character.
+  Below the `target == nullptr` guard at `:118-119`, which returns `false` and falls through to
+  juce_simpleweb's own static handler: a `/media` branch above it would serve pyramids from a
+  server with no namespace.
+- **The route parses its own query.** Simple-Web-Server splits path from query when it parses
+  the request line and `request->query_string` is everything after the `?` (`:33-47`, which
+  records an earlier version searching `path` for a `?` and silently answering the wrong
+  question). The server's only query inspection is `isBareKey`, which **refuses** anything
+  containing `=` or `&` because *an OSCQuery attribute query is a BARE key* (`:49-57`). So
+  `?level=2` will be the first `=`-bearing query this server has ever accepted, and it is
+  accepted only on the one route that is not an address.
+- **It answers from memory, never from disk on the request thread.** There is exactly one HTTP
+  thread and it is shared with the WebSocket — `SimpleWebSocketServerBase` is a single
+  `juce::Thread` named *"Web socket"* whose `run()` ends in `ioService->run()`
+  (`ThirdParty/juce_simpleweb/SimpleWebSocketServer.cpp:16`, `:256-259`), the
+  `config.thread_pool_size = 4` at `:243` being dead configuration since the server assigns its
+  own io_service at `:219` — so a response that blocked on a disk read or on the analyser's
+  mutex would stall the OSCQuery poll and every subscription push for its duration: on the night
+  the disk is busy, a browser asking for a colour bar would silence the tablet's whole tree. The
+  branch therefore copies a `shared_ptr` out of the snapshot under a mutex the analyser never
+  holds while working (§14.12). `response->write` takes a `string_view`
+  (`webserver/server_http.hpp:155`), so arbitrary bytes in a `std::string` are safe.
+
+5.1 will reserve `/media` against mounts exactly as `/ui` is reserved (§14.13). And one
+deliberate consequence: none of it will exist under `wfg replay`, which is correct. A replay has
+no files to hash and no HTTP server, so `timbre` is empty and the bar is grey, which is the same
+answer §3.30 gives for a clip whose cache has not arrived. §14.8 says why the analyser will
+write no record a replay would have to reproduce.
+
+### 14.6 The document grows two attributes
+
+Two, and they are as far apart as two attributes can be: one is a curve somebody drew and lives
+in `show.xml`, the other is a switch somebody threw and lives in `state.xml`. Constraint 10 puts
+each where it goes, and the same rule sends them to different files.
+
+| Element | Attribute | Type, default | `validate()` refuses | What the generator needs | PR |
+|---|---|---|---|---|---|
+| `Fade` | `points` | `d*`, empty | an odd count; a `t` outside `0..1`; a `t` that does not strictly ascend; a first `t` that is not 0 or a last that is not 1; a level outside the fade's own `-120..12` | nothing new — `d*` is already emitted for a `rw` row twice | 5.16a |
+| `Show` | `locked` | `T`, `false` | nothing — a boolean carries two legal words and the parser takes exactly those (§14.2) | nothing — `document` is already in `KNOWN_OWNERS` | 5.3 |
+
+**The curve was promised in the table three phases ago, in the table's own words.**
+`fade,curve`'s description ends *"Two shapes until the curve editor of Phase 5"* (`csv:73`), and
+`linear|sCurve` is what a fade has had since Phase 2. `points` is that sentence coming due: `(t,
+level)` pairs, `t` a fraction of the fade's duration ascending from 0 to 1, level in absolute
+dB, empty meaning `curve` still applies (plan decision 9, open to being overruled early rather
+than late). The empty default is what keeps every existing show working without a migration and
+keeps `curve` meaningful rather than vestigial — a fade nobody has opened the editor on is still
+a linear fade, described by one word instead of four numbers.
+
+**A curve is document content because a curve is a decision.** §4.10 divides on who chose the
+value, not on how the value looks: `media/level` is *"the level the cue plays at, as decided"*
+and `run/level` is what a fade is doing to it right now (`csv:48`, `:99`), and the same cut puts
+a breakpoint list in `show.xml` and the fade's instantaneous output on the run. Somebody sat
+down and drew that shape; it is the thing that gets diffed, reviewed at a production meeting and
+carried to the next venue. The alternative — a shape derived from a preset name — is what
+`curve` already is, and the reason for `points` is precisely that two shapes are not enough for
+somebody who has a particular one in mind.
+
+**What a fade with points does when it runs is one function's worth of change, and this is the
+sentence that says so.** A fade's level now is `FadeJob::currentDb()` (`cue/FadeJob.h:137-145`),
+which turns `ticksDone / ticksTotal` into a level through the free `fadeLevelDb`
+(`cue/FadeJob.cpp:33`), and the only caller on the tick side is `Runner::advanceFades`
+(`Runner.cpp:2948`, reading `job.currentDb()` at `:3056`). 5.16a will hand `fadeLevelDb` the
+breakpoints and have it interpolate **piecewise-linearly in dB** between the two that bracket
+`t` — in dB because that is the domain `fade,curve` already claims for `linear`, *"Linear in the
+dB domain, which is what a fader feels like"* (`csv:73`), and a curve editor whose straight line
+between two points meant something other than the word `linear` would be two definitions of one
+shape. Where points exist, `curve` is **ignored rather than combined**: two shapes multiplied
+together are a third shape nobody drew, and the operator who placed four points asked for those
+four points. The replay fixture `fade-curve.wfglog` pins it, as `undo.wfglog` pins §14.9.
+
+**But no list-typed attribute is writable over OSC today, and 5.16a is where that is discovered
+unless this section says it first.** `ShowDocument::setAttribute` has no `isList()` branch: it
+calls `Schema::parseValue (*target.attribute, text, value)` on the whole text
+(`ShowDocument.cpp:466`), and `parseValue` for a `d*` row parses one double and rejects `"0 -60
+1 0"` with *expected a number* (`Schema.cpp:575-590`). `CanonicalXml` has the branch
+(`:330-345`), `RelaxNg` has it (`:106`) and `ParameterTree` has it (`:140`) — the **write door
+does not**, and read-back is broken the same way, since `toText` for a `number` attribute calls
+`osc::formatDouble` on a `String` var (`ShowDocument.cpp:141-142`). The two `d*` rows that exist
+are proof by absence rather than precedent: `route,gains` (`csv:52`) has been unreachable
+through `node.set` since Phase 2 and `feed,gains` (`csv:157`) since it arrived in Phase 4
+(§13.3), both being read only by the canonical reader and the tree, both `persist=show`, and
+neither ever written by a client. So 5.16a is a change to the write choke point and to `toText`,
+in the same function 5.4 will rebuild around an `UndoManager`, which is why the plan orders it
+after 5.4 and why this section says so rather than letting the ordering look accidental. One
+consequence the curve editor sits on: a list node's OSCQuery type string grows with its value —
+`ddd` for three gains — so `Node::soleValue()` returns nothing for a list and every client must
+read `values` (`tree/Node.h:112-125`).
+
+**`Show/@locked` is a CSV line and no plumbing**, for the mechanism §14.4 settles and with the
+refusals already in place: the reader and the writer both test `persist() != Persist::show` and
+refuse a `state` attribute in `show.xml`, and the message the generic test produces for this row
+names it — *"`locked` is engine state; it belongs in state.xml, not in show.xml"*
+(`CanonicalXml.cpp:317-322`, the writer skipping it at `:172-182`) — so the split is enforced in
+both directions with no Phase 5 code at all. What 5.3 owes that nobody has written yet is a
+fixture, which §14.13 books.
+
+**The stop cue's fade half gets no breakpoints, and the reason is not tidiness.** `Stop` carries
+`verb`, `duration` and `curve` (`csv:75-77`), and its `curve` keeps the two words it has. A stop
+is how a sound is *got out of* — hard, or a fade to silence, or one of the three graceful
+boundaries — and its shape is a property of the exit, not a drawing somebody is working on. Give
+it a breakpoint list and it becomes a fade cue wearing a stop's name, with two elements that
+both accept a `points` attribute, both parse it, both interpolate it, and both have to keep
+meaning the same thing for ever. That is the duplication §13.12's shared `slot` owner exists to
+prevent, taken from the opposite direction: there, one owner word served two elements so neither
+could drift; here, the second element does not get the attribute at all. An operator who wants a
+shaped exit writes a fade with the shape and a stop after it, which is two cues that say what
+they are.
+
+### 14.7 Operator commands
+
+Six new commands and one gesture that is not a command. Every one of them is reachable from the
+console, which is §4.11's requirement rather than a convenience: *every gesture-reachable action
+exists as a named command*, so Ctrl-Z is a datagram carrying `undo` and the lock toggle is a
+datagram carrying `node.set`. For scale: `registerDocumentCommands` registers exactly fifteen
+document commands today (`DocumentCommands.cpp:88, 102, 122, 140, 163, 181, 196, 214, 232, 249,
+267, 281, 301, 311, 345`), and `document.save` is not among them — it is registered by
+`registerBundleCommands` in another file (`Bundle.cpp:290`), and that split is what lets saving
+survive the lock.
+
+| Command | Args | What it decides | Refuses with | Undoable | Moves the standby as a side effect |
+|---|---|---|---|---|---|
+| `undo` | `[s domain]` | which transaction comes off the named domain's stack; `document` when the argument is absent | `nothing-to-undo`; `locked`; `bad-value` for a domain word the enum does not carry | no — it is the mechanism | **no** |
+| `redo` | `[s domain]` | which transaction goes back on | `nothing-to-redo`; `locked`; `bad-value` | no | **no** |
+| `document.revert` | — | that the bundle on disk wins: `Bundle::open` into the same object through `adopt`, history cleared, `markStale` | `locked`; `bad-address` when the folder the session names is no longer a readable bundle | no — and it clears the history, so nothing before it is either | **no**. The pointer does change, to whatever `state.xml` says, because loading a document is the whole of what this command does rather than a side effect of something else |
+| `document.recover` | — | that `recovery/show.xml` wins: the same `adopt`, history cleared, and the document left **dirty** on purpose (§14.10) | `no-recovery` when there is nothing there; `locked` | no, as above | **no**, as above |
+| `document.discardRecovery` | — | that the recovery folder is stale and goes | `no-recovery`; `write-failed` if the folder will not delete | not a document change at all | **no** |
+| `document.saveAs` | `s` path | that these bytes are also written somewhere else; the session keeps pointing at the folder it opened (plan decision 7, here to be overruled early rather than late). §14.10 says why the copy is save-plus-a-copy rather than one act | `write-failed` | not a document change | **no** |
+| *the lock* — `node.set` | `s /godot/document/locked`, `T` | show mode on or off (decision W) | `type-mismatch` for anything but `T`/`F`/`"true"`/`"false"` (§14.2); never `locked`, since the row is `persist=state` | no — plan decision 3, here to be overruled early rather than late, keeps state rows off the stack | **no** |
+
+**The lock is not a command, and that is the design rather than an omission.**
+`/godot/document/locked true` arriving as a datagram becomes `node.set` in
+`oscquery/EngineNamespace.cpp:123-141` with no help from anybody, so a `document.lock` command
+would be a second door onto one attribute, and the second door is always the one that forgets a
+rule. The lock is therefore written by the mechanism every other `rw` node is written by, which
+is the one thing §14.2 asks a client author to believe about writing.
+
+**`undo` and `redo` are registered by `registerDocumentCommands`, and this subsection owns the
+rule about what `wfg replay` will and will not register.** Replay has two gates, not one.
+`registerDocumentCommands` at `Console.cpp:534` sits inside the `if (bundlePath.isNotEmpty())`
+block opened at `:497` and closed at `:570`, so a replay with no `--bundle` registers no
+document commands at all. `registerBundleCommands` sits deeper still, behind `--out` as well
+(`:550-565`), for the reason its comment gives — *"Absent, `document.save` is not registered at
+all and replays as a rejection, which is loud, and better than a replay that wrote over the show
+it was checking"*. So `undo` and `redo` registered in the first file replay wherever a bundle
+was supplied; registered beside `document.save` they would replay as `unknown-command` on every
+log opened without `--out`, produce an `R` line and exit 1 (`log/Replay.cpp:94-108`). Neither
+file is unconditional, and the honest form of the rule is that **a log carrying an `undo` needs
+`--bundle`, and a log carrying a `document.autosave` needs `--out` as well** — which is why both
+flags belong in the driver's replay step by name (§14.8, §14.10).
+
+**The five new reason codes**, spelled as the log spells them, in `namespace reason` in
+`command/Command.h`, whose own rule is at `:107-109`: *"Reason codes are part of the log format
+and therefore a contract; keep them here, in one place, spelled exactly as the log spells
+them."*
+
+| Identifier | Text | Said when | PR |
+|---|---|---|---|
+| `writeFailed` | `write-failed` | bytes did not reach the disk: a full volume, a folder that went away, a replace the platform refused. It replaces the `reason::badAddress` `document.save` uses today (`Bundle.cpp:307`), which is the wrong word for a full disk | 5.1 |
+| `locked` | `locked` | show mode is on and the command would have changed the show half of the document | 5.3 |
+| `nothingToUndo` | `nothing-to-undo` | the domain's stack is empty | 5.4 |
+| `nothingToRedo` | `nothing-to-redo` | nothing has been undone, or an edit since has cleared the redo half | 5.4 |
+| `noRecovery` | `no-recovery` | `document.recover` or `document.discardRecovery` on a bundle with no `recovery/` | 5.5 |
+
+`write-failed` will land in **5.1**, with the debt it fixes, rather than in 5.2 with the atomic
+write that becomes its second writer (§14.10): 5.1 is where `document.save`'s wrong word is
+corrected, and a reason code that waits one PR for its second writer is a smaller oddity than a
+PR that fixes a word without being allowed to name it. Two facts about the list itself. It goes
+in the **first** of the engine's three reason vocabularies: `wfg::reason` is the log's
+(`Command.h:109-163`), `wfg::osc::refusal` is a dropped packet's (`osc/OscCodec.h:138-150`) and
+`wfg::cue::runError` is a readout on the run and never a log reason (`cue/Run.h:184-242`). And
+the first already carries two codes nothing writes — no `reason::retiredId` or
+`reason::malformedPacket` appears anywhere in `src/`, the drop path writing `osc::refusal::*`
+instead — so Phase 5 adds five clauses to a contract that has two dead ones, and a contract with
+dead clauses invites a sixth.
+
+**Decision W, as a list, because a reader will look for it here.** §14.11 argues the predicate,
+names the doors and gives the refusal its text; this table is the command-by-command answer, and
+it is the one a driver author copies.
+
+| Under lock | Commands | Why |
+|---|---|---|
+| **refuses** `locked` | the ten creates — `list.create`, `cue.create`, `route.create`, `range.create`, `slot.create`, `channel.create`, `feed.create`, `insert.create`, `trigger.create`, `mount.create` — plus `object.delete` and `object.move` | they reach `insertObject`, `remove` or `move`, three of the document's four doors |
+| **refuses** `locked` | `node.set` on a `/godot` address whose row is `persist == show` | the fourth door, refused beside the read-only check at `ShowDocument.cpp:462-463` and above the parse at `:466`, so a locked show answers `locked` and not `type-mismatch` |
+| **refuses** `locked` | `undo`, `redo`, `document.revert`, `document.recover` | they knock at no door — undo writes through JUCE's own actions, and `revert` and `recover` through `adopt`, which replaces the root and the lock with it (§14.11) |
+| **refuses only when it would insert** | `group.role`, `list.persistent` | idempotent: on a group that already has a footer they return the existing child before any door and are logged **applied** (`ShowDocument.cpp:808-809`, `:830-831`); on one that has none they reach `insertObject` and refuse |
+| **keeps working** | `go`, `standby.set`, `.clear`, `.next`, `.previous` (`cue/CueCommands.cpp:54, 128, 144, 167`), `list.focus`, `list.aim`, `list.loadToTime`, and every `run.*` | they write `list/@standby` and `Lists/@focus`, which are `persist == state` rows, or they write nothing in the document at all |
+| **keeps working** | `node.set` on a mounted address | it never reaches the document: `DocumentCommands.cpp:359-360` returns before `setAttribute`. PRD §3.17 has an operator adjusting levels from the house during a show, and this is the line that lets them |
+| **keeps working** | `mount.load`, `mount.readback`, `node.touch`, `node.release`, `node.releaseAll` | not because they were exempted but because none of them knocks: `mount.load` takes the document as `const doc::ShowDocument&` (`tree/TreeCommands.cpp:118`) and the rest write only the mount and touch tables |
+| **keeps working** | `document.save`, `document.autosave`, `document.saveAs`, `document.discardRecovery` | they write bytes, not the document. Saving during a locked show is the point of locking it |
+
+One consequence the table cannot hold, and it is the one a driver gets wrong: **a command that
+changes nothing is not refused for changing nothing**, so a driver asserting *every edit command
+refuses under lock* will find `group.role` and `list.persistent` and be red. The sentence it
+should assert instead is *every edit that would change the document refuses*. `channel.create`
+is the other trap — it mutates before it reaches its door — and §14.11 places the check that
+catches it.
+
+**One column in that table is a rule the driver already enforces.** §3.5: *only GO moves the
+standby* — a pointer the scheduler also moved would be two things moving one pointer, which is
+what `reason::notManualPath`'s comment says at `Command.h:117-127`. The Phase 4 black-box driver
+reads a second list's standby before a command and asserts it unchanged after
+(`tests/blackbox/phase4_prepare.py:673-678`), and `phase5_document.py` will inherit the check
+verbatim. It is a rule about side effects rather than about a pointer that cannot move: §12.6's
+four engine-side movers stand, and `document.revert` loads a pointer along with the document it
+is in (§14.10).
+
+### 14.8 What the engine reports to itself, and the two things that report nothing
+
+One engine-origin command, registered as §11.4's, §12.3's and §13.4's were, handler
+replay-idempotent, origin `engine`:
+
+| Command | Args | When |
+|---|---|---|
+| `document.autosave` | — | the document is dirty and has been quiet for two seconds (`tick - lastChangeTick >= 100`), or thirty seconds have passed since the last autosave while it stayed dirty (`tick - lastAutosaveTick >= 1500`) — the arithmetic is §14.10's, and it is plan decision 5, taken early so it can be overruled early. The handler writes `recovery/show.xml` and `recovery/state.xml` atomically, and never the authored `show.xml` |
+
+**One decision, one record, and it is the hook that takes it.** Phase 3's rule holds here
+exactly as it held for the horizon: the hook decides, the handler applies. The arithmetic over
+`DocumentSession` is a decision — *now, rather than in a second's time* — taken by something
+watching the clock, and a replay runs no hooks, so a replay that re-derived it would be a second
+implementation of one judgement, drifting from the first the moment either changed. Instead the
+record carries the tick and the replay re-injects it, which is what makes a replayed session
+write the same files at the same ticks as the session it replays. Adding a decision to a handler
+is how §12.5's third finding happened, where a round had to be filtered in the hook *and* in the
+handler because either alone was wrong.
+
+**It goes in the BEFORE hook, and *this paragraph is a correction*** *(PR 5.0, 2026-09-09)*. The
+approved plan puts the autosave decision in the after-tick beside `dirty`, and
+`clock/TickThread.h:152-161` already writes the rule and the reason: the before hook runs
+*"immediately BEFORE each processTick, so anything it submits is drained by that same tick. The
+distinction is not fussiness… submitting it from the AFTER hook would put it in the queue that
+the NEXT tick drains, so the log would say it happened one tick after it did."* Every
+engine-origin submit from a tick-thread hook in this repository obeys it: `runner.beforeTick` at
+`Console.cpp:2139`, whose eight steps are listed at `Runner.cpp:4399-4406` and seven of them
+submit, and the clock crossing at `Console.cpp:2150-2151`. The after hook (`:2156-2270`) submits
+nothing at all — it flushes, reads state, marks stale and publishes. So the two halves split by
+what they are: the **before** hook reads `session.lastChangeTick` and submits
+`document.autosave`; the **after** hook assigns `dirty`, `canUndo`, `canRedo`, `undoName`,
+`redoName` and `recovery` into `state` before `parameters.publish` at `:2263`. Writing it the
+plan's way would not have been visibly wrong — a tick of slippage in an autosave is unobservable
+to anyone — and that is precisely why it is corrected here rather than allowed to pass: a rule
+that is followed except where nobody would notice is a rule that has stopped meaning anything.
+§14.10, which owns the arithmetic, cites this paragraph rather than making the correction a
+second time.
+
+The submit takes the form the serve wiring already uses, `engine.submit ({ "engine",
+"document.autosave", {} })` — `origin::engine` is the literal `"engine"` (`command/Event.h:56`)
+— and it inherits its justification from `audio.editBuilt`, whose comment at
+`Console.cpp:2059-2066` is the sentence to keep: *"THE GRAPH EXISTS, AND THAT IS AN EVENT, not a
+variable being set."* A save that happened is an event. The bytes it wrote are not.
+
+**And the rule cannot be stated as *a handler never submits*, because there is a shipped
+counterexample.** `list.loadToTime`'s handler calls `runner.loadToTime` (`Runner.cpp:5102`),
+which submits engine-origin `node.set` at `:1288-1302` — deliberately, per its own comment at
+`:1284-1286`: *"Sent through the ordinary write, so a replay reproduces it exactly and, having
+no sender, does not move the rig."* The accurate form is that **a handler submits only what a
+replay must re-derive identically**, which is a narrower licence than it sounds: everything else
+a handler learns is a fact about the world, and a replay has no world. Phase 5 adds exactly one
+engine-origin record and the analyser thread adds none.
+
+**Two facts about the record a driver author has to know before writing one.** The record needs
+`--out` on a replay (§14.7), and that replay *creates* `<out>/recovery/` as a side effect of
+reproducing the session, which is a fact about the destination and not a fault. And the record
+survives a kill but not a power cut: `EventLog::writeLine` does `*file << line << '\n';
+file->flush();` (`log/EventLog.cpp:241-250`) — a stream flush to the OS, not `fsync`, which is
+exactly what `EventLog.h:74-76` claims and no more. That is why the 5.5 driver can kill the
+engine and read `document.autosave` back out of the log, and why the kill must be a real one
+(§14.10).
+
+**Now the two mechanisms that will produce no record at all, and both are conclusions rather
+than omissions.**
+
+**The media analyser takes no decisions.** It will be handed the file names the show declares at
+load, and any name a `media/file` edit introduces; it hashes; it finds the pyramid in
+`media/.timbre/<sha256>.tpy` or builds one; it publishes an immutable snapshot. Every step is a
+derivation from bytes: the same file gives the same hash gives the same pyramid, on this machine
+and on the Mac mini and next year. A record would be a record of nothing. That is §13.4's
+`claim.land` argument word for word — *"adding a `claim.land` record would be adding a second
+way for the model to reach a state it can already reach, and the two would eventually disagree"*
+— and it applies here more cleanly than it did there, because a claim at least depends on what
+else was holding a slot and a spectrum depends on nothing but the file. `wfg analyse` will be a
+verb rather than a command for the same reason (plan decision 12, §14.12).
+
+**And the readouts it feeds are not logged either, which is a rule the table wrote down before
+this phase existed.** `run/position` is *"a READOUT and never a model input… not written to the
+log, because a log of every position would be a log of the clock rather than of anything anybody
+decided"* (`csv:98`), and `run/rangeIteration` says the same at `csv:102` — *"a bed looping for
+four hours would otherwise write a record every few seconds for something nobody decided."*
+`run/timbre` is computed at publish from `position` and a table (§14.5), so it joins them by the
+same rule and the same sentence, and `cue/hash` joins them by being a fact about a file. Four
+readouts, no records, one argument.
+
+**Undo is emphatically not in that category**, and the reason is what `wfg replay` cannot see:
+it compares records and never the document or the undo stack, so an undo the engine was not told
+about would leave the replayed document one edit ahead of the live one for ever while the replay
+passed green. §14.9 owns that argument, the applied arguments that turn a divergent stack into a
+record mismatch, and where inside `applyEvent` the transaction hook fires.
+
+### 14.9 Undo — one transaction per applied command, and the three things it does not undo
+
+PRD §3.20 promises that the *"per-domain undo histories from WFS-DIY port directly"*, and §4.3
+puts undo first among the three things that are *"why anyone trusts show software"*. Both hold
+with the qualification the reuse map carries (`docs/godot-reuse-map-0.1.md:531-537`): the
+**mechanisms** port from `spatcore/control/state/TreeParameterStore` — an `UndoManager` per
+domain, a `ScopedUndoSuppression` so a cue-driven recall cannot bury an operator's edit, a write
+interceptor, a post-write hook — and the API does not, being `(paramId, channelIndex)` shaped
+and belonging to a renderer with channels. Go.dot's write is an address and a schema row.
+
+**The two reasons there has been no `UndoManager` are both measured, and both are answered
+before one is attached.** `ShowDocument.h:40-46` states them, and they are not the same kind of
+hazard:
+
+| the hazard | what it is, exactly | what becomes of it |
+|---|---|---|
+| `var::equals` | With `nullptr`, `SharedObject::setProperty` calls `properties.set` (`juce_ValueTree.cpp:141-145`) and `NamedValueSet::set` compares `equalsWithSameType` — type-strict (`juce_NamedValueSet.cpp:154-167`). With a manager attached the guard becomes `if (*existingValue != newValue)` (`juce_ValueTree.cpp:150-151`), which is `var::equals` and type-loose (`juce_Variant.cpp:671-674, :701`), so a typed `1` written over a stored `"1"` would be dropped with no refusal and no log record | **Cannot fire through the write door — but by coincidence today, not by construction, so 5.4 pins it with a test rather than a comment** |
+| the clock in `ActionSet` | `ActionSet` carries `Time time { Time::getCurrentTime() };` (`juce_UndoManager.cpp:73`), a default member initialiser evaluated at `new ActionSet (newTransactionName)` inside `UndoManager::perform` (`:151`) — inside the apply path | **Real, kept, and named as the one sanctioned wall-clock read in this engine** |
+
+**The first hazard is answered by construction only if `toVar` is the only place a typed value
+becomes a `juce::var`, and it is not.** The header claims one place; the reader is a second.
+`CanonicalXml.cpp:352-372` writes properties through a hand-duplicated copy of `toVar`'s switch,
+`:341` stores a canonicalised list as a `String` var, and `insertObject` writes `idProperty` as
+a raw `juce::String` (`ShowDocument.cpp:580`). The switches agree today, so no fixture holds a
+var of a type `toVar` would not produce — but nothing enforces the agreement, and the day one
+row's reader type drifts from its writer type is the day an `UndoManager` silently drops the
+first write to that attribute: the exact WFS-DIY defect `ShowDocument.h:27-32` was written to
+prevent, reintroduced by the phase that attaches the manager. So 5.4 will pin the two switches
+against each other in `UndoTests`. It is the one hazard here no reviewer can see in a diff.
+
+**The clock read is real, is on the apply path, and is the one exception this engine grants.**
+The rule it breaks: nothing inside the apply path reads the wall clock, because a replay must
+produce the same records from the same inputs however long after the show it runs, and the
+engine's own notion of time is the tick index (`TickThread.h:32-36`). Three facts grant the
+exception. It happens **once per non-empty transaction** — `beginNewTransaction` sets a flag and
+a name and reads nothing (`juce_UndoManager.cpp:223-227`), and an `ActionSet` is allocated only
+when an action is performed (`:151`). The stamp is **stored and never observed**:
+`LogRecord::toLine()` (`EventLog.cpp:110-142`) has no field for it, and JUCE's two readers,
+`getTimeOfUndoTransaction()` (`juce_UndoManager.cpp:334-341`) and `getTimeOfRedoTransaction()`
+(`:342-350`), are called by nothing here and must stay that way. And the alternative is
+re-implementing `SetPropertyAction`, `AddOrRemoveChildAction`, `MoveChildAction` and their
+coalescing — four pieces of arithmetic whose bugs would be this engine's, in the subsystem §4.3
+says trust rests on. `UndoTests` will hold the other end: no published node and no log field
+carries a wall-clock time.
+
+**And the seam the plan reported is not cut — this paragraph is a correction** *(PR 5.0,
+2026-09-09)*. The plan reads *"the seam is pre-cut and nothing is behind it"*, echoing
+`ShowDocument.h:45-46`: *"The write choke point takes an `UndoManager*` from the start and is
+handed `nullptr` until that phase arrives."* The header is stale. `setAttribute` takes no
+manager (`ShowDocument.h:224`, `ShowDocument.cpp:452`), and neither does `insertObject`
+(`ShowDocument.h:334-337`), `remove` (`:211`) or `move` (`:216`); the `nullptr` at
+`ShowDocument.cpp:510` is a literal handed to `juce::ValueTree::setProperty`, not a parameter
+threaded in; and nothing on the public surface can open, name, commit or query a transaction. PR
+5.4 is a new member on a class with a hand-written move, plus a new hook, plus four call sites,
+and should be reviewed at that size. The header sentence is corrected in the same PR.
+
+**The manager cannot be an array of managers, and the reason is in the class it would live in.**
+`juce::UndoManager` is `JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR`
+(`juce_UndoManager.h:270`), which user-declares the copy members and so suppresses the implicit
+move members: it is neither copyable nor movable, while `ShowDocument` has a hand-written move
+constructor and move assignment (`ShowDocument.h:381-382`, `ShowDocument.cpp:288-308`) because
+the listener behind `revision()` is registered *by address* (`ShowDocument.h:364-377`). So the
+plan's *"an array so Phase 6's parameter domain is one line"* is the first line that would fail
+to build. The member will be an `std::array<std::unique_ptr<juce::UndoManager>, domainCount>`,
+and **the move will reconstruct the histories empty rather than carrying them**: the only place
+a `ShowDocument` is moved is a test helper returning a freshly read document
+(`tests/DocumentTests.cpp:75-85`), and a move that silently carried actions holding `Ptr`
+handles into a tree, across the one seam this class hand-writes, is the same class of bug as the
+listener registration that seam exists to fix. It adds no dependency: `ShowDocument.h:56`
+already includes `<juce_data_structures/…>`.
+
+**Nothing will attach a `ChangeListener` to a document `UndoManager`, and that is a rule rather
+than an accident.** `UndoManager` is a `ChangeBroadcaster` whose `perform`, `undo`, `redo` and
+`clearUndoHistory` all `sendChangeMessage()` (`juce_UndoManager.cpp:92, :162, :266, :285`),
+inert only while nobody has called `addChangeListener` (`juce_ChangeBroadcaster.cpp:77-81`). The
+day a JUCE desktop client (§14.16) attaches one to grey out an **Undo** menu item, the tick
+thread posts to the message manager once per applied edit. So `canUndo`, `canRedo`, `undoName`
+and `redoName` are read in the after-tick like every other readout (§14.4), and no client
+subscribes.
+
+**One domain today, and the second is reserved so that its arrival is a row rather than a
+redesign.** `enum class UndoDomain { document }`, with Phase 6's parameter and binding writes
+taking the second entry. That there is one and not two is plan decision 1, here to be overruled
+early rather than late.
+
+| domain | holds | why it is separate |
+|---|---|---|
+| `document` | everything a `persist == show` row or a structural door writes: names, kinds, order, routes, ranges, fades, mounts | it is what someone decided (§4.10) |
+| *(reserved, Phase 6)* | parameter and binding writes — the mounted half | **an operator riding a level during a show must not be able to take back a cue rename by pressing Undo, and must not have to** |
+
+That second row is the argument for the first. A fader ridden through an act emits hundreds of
+writes; folded into one history they would bury the three edits somebody actually made, and an
+operator reaching for Undo after a mistyped cue name at 04:12 would get their level back instead
+— a fader jumping during a show, from a keystroke whose whole purpose was to undo a piece of
+typing. Phase 5 builds neither the second stack nor undo of mounted writes (§14.15); it builds
+the enum, so the day the second arrives nothing has to be untangled.
+
+**One transaction per applied command, opened in one place, and the place is inside
+`applyEvent`.** `Engine` gains `setBeforeApply (std::function<void (const Command&, const
+Event&, std::int64_t tick)>)` beside `setLogging` — vendor-free, as `Engine.h:36-39` requires,
+mirroring `TickThread::setBeforeTick` (`TickThread.h:162-168`) — and serve and replay both
+install `document.beginTransaction (command.name, tick, origin, args)` (§14.13). Where it fires
+is load-bearing and the plan does not say it: **between `Engine.cpp:117` and `:119`, after
+`check.ok`, on `check.args`.** Above `checkArgs` (`:105`), a datagram about to be rejected for
+arity would still set `newTransaction` and split a coalescing run the operator experienced as
+one drag — and would do so *identically* on replay, since a rejected record is a rejected
+record, so the divergence would be between the live stack and nothing, invisible to the one
+check built to catch it. And `event.args` are the submitted arguments while `check.args` are the
+coerced ones (`Command.h:25-26`, `CommandRegistry.h:81`), so a hook reading `event.args[0]`
+would key coalescing on a value the handler never saw.
+
+**The transaction is named after the command, and the name is what the operator reads.**
+`undoName` publishes `getUndoDescription()` — the name of the transaction `undo` **would
+unmake**, which is the last one that actually performed an action and not the one the hook has
+just opened, because `beginNewTransaction` allocates nothing. So it says `node.set`,
+`cue.create`, `object.delete`: the words §4.11 makes every gesture-reachable action carry, and
+"Undo *object.delete*" is a sentence a client writes without a lookup table.
+
+**The coalescing rule: same address, same origin, within twenty-five ticks.** Consecutive
+`node.set` matching all three join the open transaction; everything else opens a new one named
+by its command. Twenty-five ticks is half a second at 50 Hz — plan decision 2, and the only
+figure in this subsection that a week of using the page can settle better than an argument can.
+The rule matters because of what a client emits: a number field dragged in the inspector sends
+one `node.set` per change event, a slider under a finger one per frame, and an undo that took
+back one of those is a keystroke that has to be held down — which is how an operator overshoots
+into the edit before the one they meant. Keyed also on the **origin** (§14.11), so two people
+editing one address from two tablets get two steps, which is honest when two hands were
+involved; and replay preserves the origin (`Replay.cpp:44`), so coalescing keyed on it
+reproduces exactly.
+
+| does not join the open transaction | why |
+|---|---|
+| a different address | one drag is one step; two fields are two edits |
+| a different origin | two operators are two decisions, however close together |
+| more than twenty-five ticks later | a pause is where a person stopped and looked |
+| anything that is not `node.set` | every create, delete and move is a structural act somebody meant, and each gets its own step named after itself |
+| the first write after an `undo` or a `redo` | `undo()` and `redo()` call `beginNewTransaction()` themselves before returning (`juce_UndoManager.cpp:265, :284`), so the window closes on its own — and a test that undoes, then writes the same address twice expecting a merge back into the pre-undo transaction fails for that reason and not for a bug |
+
+**What JUCE merges natively is one action less than the plan claims, and the difference shows on
+the first drag.** `createCoalescedAction` returns `nullptr` outright when `isAddingNewProperty
+|| isDeletingProperty` (`juce_ValueTree.cpp:457-468`, the guard at `:459`), and this document
+omits defaults: an absent attribute **is** its default (`ShowDocument.h:226-230`). So the first
+write to an attribute a cue does not yet carry produces an *adding* action (`:156-157`) that
+never merges with the next, and ten `node.set` on one fresh address are **one transaction of two
+actions** — in a fresh show, every attribute nobody has touched. The design is unharmed, because
+the undo *step* is the `ActionSet` and not the action; what would be harmed is a test written to
+the parenthetical, so `UndoTests` will assert undo steps and never count actions.
+
+**All three structural doors take the manager, or none of them do.**
+`AddOrRemoveChildAction::undo` for an add removes the child **by index**, with a `jassert` that
+the index is still in range (`juce_ValueTree.cpp:503-518`, the assertion at `:513`); it is
+correct only while every structural change to that parent is itself undoable. The doors are
+`insertObject`'s `parent.addChild` (`ShowDocument.cpp:604`), `remove`'s `parent.removeChild`
+(`:954`) and `move`'s `moveChild` or `removeChild` plus `addChild` (`:1027`, `:1031-1032`). One
+left on `nullptr` makes undo remove the wrong cue — silently, and only in shows where somebody
+used both doors, which is every show. Two details a reviewer needs with the file open. **The
+argument position is not uniform**, and a reader who learns "third" will get one of them wrong:
+`setProperty`, `addChild` and `moveChild` take the `UndoManager*` third (`juce_ValueTree.h:251,
+:336, :375`), while the `removeChild (const ValueTree&, UndoManager*)` overload used at `:954`
+and `:1031` takes it **second** (`:348`). And the attribute writes inside `insertObject`
+(`ShowDocument.cpp:600-601`) stay on `nullptr` deliberately: a child is built completely before
+it is added (`ShowDocument.h:37-39`), so the node is not in the tree when they run and the one
+action at `:604` carries the whole finished object, identifier and all. A cross-parent `move` is
+then two actions in one transaction, undone in reverse (`juce_UndoManager.cpp:52-59`); a
+within-parent move is one `MoveChildAction`, which coalesces consecutive moves of the same
+parent on its own (`juce_ValueTree.cpp:558-565`), so the rule above is what keeps two ▲ presses
+on the console's own gesture from collapsing into one step — noticed on the first day by whoever
+pressed ▲ twice and got both back.
+
+**Undo is a logged command, and the alternative is a replay that diverges in silence.** `undo [s
+domain]` and `redo [s domain]` — defaulting to `document` — will be ordinary commands, `mutates
+= true`, applied on the tick thread inside `applyEvent`, with the two new reasons §14.7 spells
+and registered where §14.7 argues they belong. The rejected alternative is rewinding the tree
+from a client gesture with no record, and it fails for the reason every hook in this engine is a
+submitted command (§13.4): a replay runs no gestures, only records, so a log of `cue.create`,
+`node.set`, `node.set` would replay into a document that still had the edits while the live
+session's did not — same inputs, different show, and `wfg replay` exiting 0 because the records
+were identical. What stops it is the applied arguments. Replay compares `toLine()` against
+`toLine()` record by record (`EventLog.cpp:110-142`, `Replay.cpp:94-108`) and never compares the
+document or the stack, so `appliedArgs = [domain, transactionName]`, and an `undo` that pops a
+differently named transaction than the recorded session popped writes a different line and fails
+on that record with both names on screen. It is the `go` pattern (§12.6) applied to a stack: log
+what was *applied*, not what was asked.
+
+**The identifier registry has to be rebuilt after an undo or a redo, and the reason is not the
+one the plan gives.** Undo touches `IdRegistry` not at all: after undoing a delete the `id`
+properties are back, because `removeChild` with a manager builds one action holding a
+ref-counted `Ptr` to the child and its `undo()` re-adds that same `SharedObject`
+(`juce_ValueTree.cpp:503-518`). But `remove` released every identifier under the node on the way
+out (`ShowDocument.cpp:956-957`, `Ids.cpp:163-166`), so `findById` answers and `isTaken` says
+no. The failure is therefore not the plan's *"a redo of a create that hands out a different
+identifier"* — a redo returns the **same** identifier, always, the id being a property of the
+re-added object (`:580`) and an applied argument in the record (`Engine.cpp:129-134`). The
+document is self-consistent under undo; the registry is what has to be told, and the failure is
+the **next** create: `generate()` draws from 2^40 and inserts whatever it finds free
+(`Ids.cpp:126-142`), so an identifier the registry has forgotten is free and a cue created after
+an undone delete can be handed the one a restored cue is already using — two objects with one
+identity, every `refers` row pointing at a coin toss, failing not at the gesture but at the next
+save or the next GO. The rebuild is `registry.clear()` plus one `reserve` per identifier from
+the existing `collectIds` walk (`ShowDocument.cpp:847`) — **not** a fresh `IdRegistry`, because
+`clear()` empties `taken` and keeps the splitmix64 `state` (`Ids.cpp:172-176`) while a new
+registry would re-seed from the system entropy source, making a second entropy consumer inside
+the class whose comment says there is exactly one (`Ids.h:88-92`) — the property that lets the
+log carry every drawn identifier and a replay re-supply it.
+
+**Three things undo does not touch, and each absence is a decision.**
+
+| not undone | why | the consequence to expect |
+|---|---|---|
+| **state rows** — `list/@standby`, `Lists/@focus` | the operator's position is not an edit, and a GO writes only standby (`Runner.cpp:5204`), so undoing after a GO would take back the GO's pointer move and fill the stack with presses nobody would call edits (plan decision 3) | a delete's standby repair and a move's standby clearing **stay where they went** |
+| **mounted writes** | `node.set` on an address outside `/godot` forks to the mount table before the document is reached (`DocumentCommands.cpp:359-360`); §3.1's load-bearing wall says the rig has state and Go.dot has content | Undo never moves a fader, and the fader it would have moved belongs to a processor that may be on another machine (§14.15) |
+| **runs** | a run is not a decision, it is a thing that happened; §4.5's *"honest that the audio already escaped"* | undoing the delete of a cue does not stop, start or rewind anything that is playing |
+
+The first row is the one that will be reported as a bug. `remove` repairs the containing list's
+standby **after** the removal — the reasoning at `ShowDocument.cpp:874-895`, the arithmetic at
+`:929-952`, the removal at `:954`, the write at `:959-960` — and `move` clears the vacated
+list's pointer when the cue lands off the manual path (`:1038-1040`), both through
+`setAttribute` on a state row and therefore both handed `nullptr`. So deleting the cue GO was
+pointing at moves the pointer, and undoing the delete brings the cue back and leaves the pointer
+where it went. That is honest rather than broken: undo restores what someone *decided*, and
+where the operator is standing is not among those things. A pointer that jumped backwards on
+Ctrl-Z would be the machine moving standby, which §3.5 forbids for the same reason it forbids a
+trigger doing it. The cue comes back; the operator decides where to stand.
+
+**`ScopedUndoSuppression` earns its place around `adopt` and, today, nowhere else.** `adopt`
+swaps `showNode` wholesale (`ShowDocument.cpp:315-332`) and the stack's actions hold `Ptr
+target` into the old `SharedObject` graph, so an uncleared stack would keep the previous show
+alive in memory and undo into a tree nobody can see. `EphemeralState::read` needs no suppression
+on its own account — it restores only `persist == state` rows and refuses anything else
+(`EphemeralState.cpp:243-249`), and those are handed `nullptr` regardless. The counted shape is
+right for Phase 6, where a cue-driven recall will write parameter rows in a domain that does
+have a history; in Phase 5 it guards one call site, said plainly so that a reviewer finding it
+used once does not think something is missing.
+
+**The transaction machinery will allocate on the tick thread, and that is legal here.**
+`UndoManager::perform` takes ownership of an action the caller newed (`juce_ValueTree.cpp:154`,
+`:156`), news an `ActionSet` on a new transaction (`juce_UndoManager.cpp:151`) and does
+`OwnedArray::add` (`:157`). §4.2's lipogram is the **audio** thread; the tick thread already
+allocates a `std::string` per log record (`EventLog.cpp:112-113`). It is named here because *"no
+allocation"* is the sentence a reviewer carries into a PR.
+
+**Nothing falls out of this subsection towards §4.5's revert.** `go` writes precisely one thing
+into the document — the list's `standby`, a state row handed `nullptr` (`Runner.cpp:5204`) — and
+then spawns runs, which are not in the document at all, so the stack after a GO contains nothing
+to pop and restoring the pointer would produce a revert that lies. §14.15 defers it and says
+what it waits on. The lock refuses `undo` and `redo` outright, in their handlers rather than at
+the doors, for the reason §14.11 gives.
+
+**What the black-box driver checks, and the one seam a unit test cannot see.**
+`phase5_document.py` (5.3 → 5.5 → 5.19) will do the undo half against a shipped binary over UDP
+and HTTP — `undoName` after a rename, ten drags returning one press, an `undo` refused with
+`lastError` ending `locked undo`, and, as the only assertion that proves the registry rebuild, a
+group with children deleted, undone, and the same identifiers read back out of
+`/godot/list/<id>/order`, where a colliding identifier shows up as a duplicate and nowhere else;
+§14.10 carries the save-and-recovery half of the same script. The replay fixture `undo.wfglog`
+will make the reproduction a ctest, with `diff -r` against the saved bundle at zero. The seam no
+unit test reaches is **deleting a cue whose run is playing, and undoing it**: it needs a live
+run holding a voice, a document edit removing the cue the run points at, and a publish
+afterwards, in one process at one moment — a test that assembled a runner, a run table, a tick
+loop and a document would be this driver with the transport taken off. The design's answer is
+that the run table holds its own copies (`Run::cue`, `Run::kind`, and `Run::media` from 5.6 —
+§14.5), none of them tree handles, so the delete cannot stop the sound and the undo cannot
+restart it; the driver asserts exactly that.
+
+### 14.10 A save that cannot be half-written, and an autosave nobody asks for
+
+**A save must never destroy the file it is replacing, and today's does, on purpose and first.**
+`writeBytes` (`Bundle.cpp:51-71`) opens a `juce::FileOutputStream` on the real `show.xml`
+(`:53`), seeks to zero (`:61`), calls `truncate()` (`:62`) and only then writes the show
+(`:64`). The order is not incidental: `truncate` flushes before it shortens the file —
+`FlushFileBuffers` then `SetEndOfFile` on Windows (`juce_Files_windows.cpp:475-483`), `fsync`
+then `ftruncate` on POSIX (`juce_SharedCode_posix.h:541-555`) — so the empty file is committed
+to the platter, and the payload that follows is never explicitly flushed at all. Phase 1's save
+is durable about the deletion and casual about the content, and the window between those two
+facts is where a laptop's battery goes, a disk fills or somebody closes a lid. What is left is
+not yesterday's show: it is a zero-length `show.xml` where the good one was. §4.3 names
+crash-safe autosave as one of the three reasons anyone trusts show software, and a save that can
+subtract the show is the wrong foundation to build the other two on.
+
+**The bytes stay Go.dot's, and the fix is a sibling rather than a reversal.** The obvious cure —
+`juce::File::replaceWithText` — is the one `Bundle.cpp:44-50` already refused, and the refusal
+holds: it writes through a `TextOutputStream`, which turns every `\n` into `\r\n` on Windows,
+and every file in a bundle is specified LF on all three platforms so that a show written on
+Windows and one written on a Mac mini are the same bytes — what makes §3.20's *canonical,
+editable, diffable* checkable at all, and what `tests/BundleTests.cpp:141-167` asserts file for
+file. So `writeBytesAtomically` will keep the raw write and move the target: a sibling
+`<name>.tmp-<pid>` **in the same directory**, written, flushed, closed, then `replaceFileIn`.
+
+**Same directory is the load-bearing word, and JUCE is the reason.** `replaceFileIn`
+(`juce_File.cpp:323-336`) has three branches and only one is atomic. Same path returns `true`
+having written nothing. A target that does not exist delegates to `moveFileTo` (`:329`) — so the
+first save into a folder with no `show.xml` is a move, and this section claims no atomicity for
+it. A target that does exist reaches `replaceInternal` (`:331`): `ReplaceFile` on Windows
+(`juce_Files_windows.cpp:372-379`), and on POSIX `moveInternal`
+(`juce_SharedCode_posix.h:428-431`), which is `rename(2)` and atomic **within one filesystem**.
+Across a volume boundary the rename fails, and JUCE's fallback is not a clean failure: it falls
+through to `copyInternal` then `deleteFile` (`juce_SharedCode_posix.h:409-426`), and on Linux
+`copyInternal` deletes the destination first and streams the bytes afterwards
+(`juce_CommonFile_linux.cpp:38-58`) — the very hazard this paragraph exists to remove,
+reintroduced by the call meant to remove it. The temp is a sibling because a copy is not a
+replace, not because siblings are tidy.
+
+**What is left when the replace itself fails is the right failure.** `replaceFileIn` returns
+before the `deleteFile()` at `juce_File.cpp:334`, so the temp survives: **the old file, whole,
+and a temp file beside it.** The show that was on disk at 18:00 is still the show on disk, and
+nothing an operator trusted has become shorter. The three writes keep their order and their
+reason (`Bundle.cpp:273-278`), and each becomes atomic on its own:
+
+| write | what a crash between this write and the next costs |
+|---|---|
+| `show.xml` (`CanonicalXml::write`) | nothing — either the new show is committed or the old one is |
+| `state.xml` (`EphemeralState::write`) | a standby position and a focus one tick old, which §3.20 puts in a separate file precisely because losing it is not losing work |
+| the manifest | **nothing at all, for a bundle that had one.** `manifestText()` is a pure function of `Schema::formatVersion()` (`Bundle.cpp:38-42`), so the third write is byte-for-byte what was there, and `contentHash` never reads it (`:209-220`). The one casualty is a save into a folder that never had a manifest, where the next `Bundle::open` refuses with *has no `<name>.wfg`* (`:118-121`) |
+
+The dangerous windows were always **inside** writes one and two, never between them, and
+temp-and-replace closes exactly those.
+
+**The retry is blind, because the API will not say what went wrong.** `replaceFileIn` returns
+`bool` and swallows `GetLastError`, so "retry on a sharing violation" is a distinction no code
+here can make; 5.2 will write one blind retry after a short pause. And the file at risk is the
+**target**, not the temp: `FileOutputStream::openHandle` takes `GENERIC_WRITE, FILE_SHARE_READ`
+(`juce_Files_windows.cpp:429-433`) and the temp is closed before the replace, whereas
+`ReplaceFile` fails while another process holds `show.xml` open without `FILE_SHARE_DELETE` — an
+editor, an indexer, a sync client. One retry, because the failure JUCE will not name is almost
+always transient and held on the far side.
+
+**The reason gets its word in 5.1 and does not get its sentence.** `reason::writeFailed`
+replaces `document.save`'s `reason::badAddress` (`Bundle.cpp:307`) with the debt rather than
+with 5.2's atomic write, for the reason §14.7's table gives. What that does **not** fix is the
+silence: `Bundle::save` builds a `ReadResult::failed (error)` carrying the full path (`:57`,
+`:66`, `:279`) and the handler throws it away (`:306-307`), so an operator whose disk is full
+reads `write-failed document.save` and learns that much and no more. This subsection claims the
+word and not the diagnosis; §14.15 says why the free-text half is not opened here.
+
+**`dirty` has been published since Phase 1 and has never once been true.**
+`EngineState::documentDirty` is declared at `ParameterTree.h:123` and published at
+`ParameterTree.cpp:1262`, and the only assignment anywhere in the repository is
+`tests/TreeTests.cpp:450`. Every client that has ever read `/godot/document/dirty` — the console
+among them — has been told the show was saved, continuously, since the node existed. Phase 5
+makes it true, and the definition is `document.showRevision() != session.savedRevision`.
+
+**The dot counts the show half only, because the operator's position is not an unsaved change**
+— plan decision 4, here to be overruled early rather than late. `revision()` counts *changes*
+and is bumped by the `juce::ValueTree` listener rather than by the doors
+(`ShowDocument.h:345-354`), which is what makes it impossible to miss a writer; `showRevision()`
+is the same listener asking one more question — structural changes bump unconditionally, a
+property change looks the row up (`Schema.cpp:389-395`, `persist()` at `Schema.h:67`) and bumps
+only for `persist == show`. A GO writes `list/@standby` through the same choke point every edit
+uses (`Runner.cpp:5204`, `CueCommands.cpp:43`, `CueList.cpp:360, 365`), so it moves `revision()`
+and not `showRevision()` — §3.20's line, drawn where it puts the playhead and the selection in a
+separate file, and the difference between a light that means something and a light that means
+nothing: an operator told there are unsaved changes after every GO stops reading the dot by the
+second act, and then on the night it is right, it is still not read. In words beside the colour
+(§4.8). Two facts that would otherwise arrive as bug reports: `id` never fires the listener,
+because `insertObject` writes it at `ShowDocument.cpp:580` before the node joins the tree at
+`:604`; and **the dot does not go out by undoing**, `showRevision` being monotonic while an undo
+writes through `setProperty (…, nullptr)` (`juce_ValueTree.cpp:447`), which the listener counts
+as readily as the edit. The dot means *the file on disk is not this document's history*, not
+*this document differs from the file* — and §14.15 records the second question as deliberately
+not asked.
+
+**Autosave is a decision the engine takes on its own, so a hook takes it and a handler applies
+it.** A `juce::Timer` is refused on the grounds `TickThread.h:23-36` refuses it for the clock —
+Spike 05 measured a 20 ms timer on an *idle* message thread at 0.76 ms median and 2.60 ms
+lateness at the 99th percentile — and, more decisively, the message thread is not the document's
+thread: `ShowDocument.h:48-50` says *"THREADING: none of its own. The engine's tick thread owns
+this object and is its only writer and only direct reader"*, which is what makes it safe to
+serialise the model at all. So the **before** hook will compute `autosaveDue (session, tick)` —
+a pure function in `document/DocumentSession.h`, testable at its edges without a disk — and
+submit engine-origin `document.autosave`; the handler writes the bytes; the log records an `A`;
+`wfg replay` re-applies it. That the arithmetic is in the before hook and not, as the plan drew
+it, the after hook is §14.8's correction, made once there. The after hook keeps what belongs to
+it: `session.lastChangeTick` is stamped there when `showRevision()` has moved, and
+`state.documentDirty` is assigned before `parameters.publish` at `Console.cpp:2263` together
+with `canUndo`, `canRedo`, `undoName`, `redoName` and `recovery` — or all six publish one tick
+stale, the bug the comment at `:2170-2175` describes about `state.tick`.
+
+| condition | ticks | in seconds | why this one |
+|---|---|---|---|
+| not dirty | — | — | nothing to write, and a quiet show writes nothing at all |
+| `tick - lastChangeTick >= 100` | 100 | 2 s of quiet | a designer who has stopped typing has finished a thought; writing mid-drag would fire on every intermediate value |
+| `tick - lastAutosaveTick >= 1500` | 1500 | 30 s ceiling | a designer who has *not* stopped — a long drag, a bulk edit over forty cues — still gets a floor under what a crash can cost |
+
+The two numbers are plan decision 5 and are here to be overruled early rather than late; a
+fortnight of tech will settle them better than this paragraph can.
+
+**And this is the one place Phase 5 comes near §4.1, so the constraint gets an answer rather
+than a measurement.** Constraint 1 is *the GO path is small, boring and merciless; GO never
+blocks*, and this phase proposes an unrequested disk write on the thread that applies GO,
+decided by the engine rather than by a person. The write is one canonical serialisation of the
+show plus one `replaceFileIn`, on a document nothing else is touching, at most once every two
+seconds of quiet and once every thirty otherwise. What it can cost **a GO** is narrower, and
+that is the part that answers the constraint: GO is not what autosave contends with. A GO
+already submitted is applied first, because the queue is FIFO and the before hook's submit joins
+it behind every datagram already there; a GO arriving during the write waits the remainder of
+one tick, exactly as it waits behind any other applied command. There is no lock, no allocation
+the tick thread does not already make, and no path by which a disk stall can hold GO longer than
+the overrun of the tick it landed in. So the exposure is a single late tick — which is what
+**M23** measures, and §14.14 carries the threshold and the writer-thread fallback above it. The
+record is identical either way and a replay never touches the disk, so the fallback changes no
+fixture and no assertion: drawn here it is a threshold, drawn in review it would have been a
+redesign.
+
+**The bytes go to `<bundle>/recovery/`, never to the authored file, and that is not a matter of
+taste.** `recovery/show.xml` and `recovery/state.xml`, written by the same
+`writeBytesAtomically` that writes the real pair. A designer who spent an afternoon of tech
+moving cues and then decides the afternoon was wrong must be able to throw it away by not
+saving, and an autosave that wrote into `show.xml` would take that gesture away — silently, and
+from the person who most wanted it. §4.10 says the document holds what someone decided; nobody
+decided to save. The folder sits inside the bundle so that a bundle carried to another machine
+carries its own unfinished work, and `Bundle::contentHash` covers `show.xml`, `state.xml` and
+the non-recursive contents of `namespaces/` and nothing else (`Bundle.cpp:209-220`), so
+`recovery/` does not disturb the log header. One asymmetry is worth deciding here rather than
+discovering unattended: `Bundle::save` calls `folder.createDirectory()` (`:267`), parents and
+all, so a `document.save` against a bundle somebody moved mid-session silently makes a new one
+at the old path holding three files and no media. That stays true of `document.save`, because
+somebody asked for it. It will not be true of autosave, which is rejected with `write-failed`
+when the folder has gone — an unattended writer that invents a folder is how a bundle acquires a
+twin.
+
+**A log with an autosave in it needs both of replay's flags** (§14.7): `--bundle` for
+`registerDocumentCommands` and `--out` on top of it for `registerBundleCommands`, where
+`document.autosave` is registered because it writes bytes. Every session from 5.5 onward writes
+such a log, and `phase1_session.py:310-312` already passes `--out={workspace}/replayed` for
+exactly this reason with `document.save`.
+
+**Recovery will be a client's decision, because the engine is headless and has nobody to ask.**
+On open, `wfg serve` will look for `recovery/show.xml`; finding it, it will print `wfg: recovery
+available`, publish `/godot/document/recovery = true`, and do nothing else. Adopting it silently
+would be wrong three times over. It would make the show on screen differ from the file the
+operator opened with no gesture in between. It would decide on their behalf that the abandoned
+afternoon was worth keeping, which is the one decision autosave exists to leave open. And
+`adopt` replaces the root wholesale (`ShowDocument.cpp:315-332`), lock included, so a silent
+adopt would also change `Show/@locked` — a show that came back unlocked because a file on disk
+said so, during a performance, is §14.11's nightmare arriving through this subsection's door.
+
+| command / flag | what it does | notes |
+|---|---|---|
+| `document.recover` | adopts `recovery/show.xml` and `recovery/state.xml`, clears the undo history, `markStale` | leaves the document **dirty**, deliberately: the recovered work is not on disk as the show, and the dot is telling the truth. `reason::noRecovery` when there is nothing to adopt |
+| `document.discardRecovery` | deletes the folder | `no-recovery` likewise; refusing an empty gesture is cheaper than pretending it worked |
+| `wfg serve --recover` | applies the recovery before the first publish | for scripts and for the black-box driver, which has no person to click. It goes in the **usage string** as well as the parser (`Console.cpp:2421-2423`): `--device` and `--device-type` are parsed at `:1891-1923` and appear in no usage line, an omission already one phase old, and the usage string is what an operator reads at 04:12 |
+
+A successful `document.save` deletes `recovery/`, because the work has become the show. A clean
+exit deletes it **only when the document is not dirty** (`Console.cpp:2315-2329`, after
+`ticks.stop()` has joined the only writer) — a tidy shutdown with unsaved work is the case the
+folder exists for. And of the four verbs that open a bundle through `Bundle::open` — serve at
+`Console.cpp:1440`, `wfg tree` at `:871`, `wfg validate` at `:1010`, `wfg replay --bundle` at
+`:509` — only `validate` will say the word: one line noting that `recovery/` is present and was
+not validated, because `validate` is what somebody runs on a bundle they suspect. A tree dump
+and a replay are not asking about unfinished work.
+
+**The lifecycle, and the one command that is not built.**
+
+| command | what it does | what it deliberately does not |
+|---|---|---|
+| `document.revert` | `Bundle::open (folder, document)` back into the same object through `adopt`, undo history cleared, `markStale`, and `savedRevision` **re-stamped** from `showRevision()` | it does not leave the dot lit. `adopt` ends `++changeCount` — *"A load is the largest change there is"* (`ShowDocument.cpp:329-331`) — and `EphemeralState::read` bumps it again per restored value (`:258`), so a revert that did not re-stamp would report unsaved changes at the instant the document matched the disk. `document.recover` re-stamps nothing, for the same reason read the other way |
+| `document.saveAs <s path>` | `Bundle::save` into the named folder, **plus** a directory copy of `namespaces/` | it does not re-point the session, and it is save-plus-a-copy rather than one act. `Bundle::save` writes exactly three files (`Bundle.cpp:276-278`) and refuses `namespaces/` as a principle (`Bundle.h:80-83`), so `saveCopy` copies them and does not pretend the copy is a save. The manifest name comes free: `manifestFile` is `<folder name>.wfg` (`Bundle.cpp:75-78`) |
+| `document.load` | **not built** — a process restart, and §14.15 says why | |
+
+`saveAs` not re-pointing the session is the half most likely to be argued about. A *save a copy
+for the archive* gesture that silently makes the archive the live document is a trap with a
+delay fuse: the operator's next Ctrl-S goes somewhere they did not name, and they find out at
+the next load. A client that wants to work in the copy opens it, and opening is a restart.
+
+One plumbing note, because it is the whole difference between a session record that works and
+one that quietly does not: `doc::DocumentSession { juce::File folder; std::uint64_t
+savedRevision, autosavedRevision; std::int64_t lastChangeTick, lastAutosaveTick; }` lives in the
+serve scope and is captured **by reference**. The existing lambda captures `folder` by value
+(`Bundle.cpp:294`); the pattern for a mutable per-session record is one call earlier, where
+`registerDocumentCommands` is handed a lambda capturing `[&mounts, &sender]` from the serve
+scope (`Console.cpp:1494`). Captured by value, `savedRevision` would stay at its initial value
+for the life of the process and the dot would never go out.
+
+**And the driver ends the way nothing else can end it.** `phase5_document.py` will copy a bundle
+(`common.copy_bundle`, `common.py:602-608`), serve it, rename a cue and wait for `dirty`; wait
+for the `document.autosave` record **and** for `recovery/show.xml` to exist, which are two
+different claims — one that the engine decided, one that the disk agrees; kill the process and
+start a new one on the same folder, which must print `wfg: recovery available` into the notices
+`Server` already collects (`common.py:451-528`) and publish `recovery == true`; then
+`document.recover`, and the renamed cue is back, dirty; then `document.save`, and both flags go
+false; then an edit and `document.revert`, and the old name is back with the dot out. The kill
+has to be `process.kill()` and not the harness's default `Server.stop()`, which calls
+`process.terminate()` (`common.py:536-543`) — on POSIX a `SIGTERM` that `wfg serve` handles into
+a clean shutdown (`Console.cpp:1156`, `:1162-1175`, `:2315-2329`) and only on Windows a
+`TerminateProcess` no handler sees, so a driver using it would test shutdown on two platforms
+and crash recovery on one. That last step is the check no unit test can make: `BundleTests` can
+prove the recovery bytes round-trip in one process, and should; what it cannot do is die.
+
+### 14.11 The edit lock — one predicate, four doors and a hatch
+
+**A lock that only one client honours is not a lock.** §3.2 makes desktop UI, tablet, surface
+bridge, MCP and external scripts *clients of the same surface*, and the law under it — *nothing
+the UI can do that the API cannot* — means a client that hides its own buttons has locked
+exactly one of them. The tablet in the house, the MCP client answering a designer's question and
+the script somebody wrote to renumber a scene all reach `node.set` and `object.delete` through
+the same socket, and none consults another client's `localStorage`. The failure the lock exists
+for is §3.17's, undressed: *"Accidental contact is real (a forearm on a screen in the dark)."* A
+promise the operator relies on has to be kept by the thing they are all talking to. That is
+decision **W**, and it is why `locked` is an engine node (§14.4) and the console's show-mode
+preset (§14.3, PR 5.14) is a *presentation* of it — buttons hidden because the engine will
+refuse them, never instead of the engine refusing them.
+
+**And it is one predicate, in exactly the places the document can change.** The alternative — a
+flag on `Command`, consulted per command — is a lock with a hole in it the day a command is
+added, and Phase 5 adds seven: §14.7's six operator commands and §14.8's one engine-origin
+record, which writes bytes and knocks at no door. The document has four doors and every write in
+the engine goes through one: `setAttribute` (`ShowDocument.cpp:452`), `insertObject`
+(`:540-606`), `remove` (`:856`) and `move` (`:965`). All twelve insertions funnel through
+`insertObject` (`:611, 634, 652, 672, 695, 711, 727, 755, 779, 815, 833, 842`) — the ten creates
+plus `group.role` at `:815` and `list.persistent` at `:833`, which is why the idempotent pair
+below reaches a door at all; nothing outside `ShowDocument.cpp` calls `setProperty`, `addChild`,
+`removeChild` or `moveChild` on the live tree. A predicate at the doors cannot be got past by
+forgetting to ask. Two things complicate that, and both belong in the diff before somebody
+reviews one against it.
+
+**`createRackChannel` mutates the document before it reaches its door.** It makes the `<Rack/>`
+container on demand — `rack = juce::ValueTree ("Rack"); audio.addChild (rack, -1, nullptr);` at
+`ShowDocument.cpp:691-692` — and only then calls `insertObject` at `:695`. A check written
+inside `insertObject` therefore lets a locked show gain an empty `<Rack/>`, bump `revision()`
+through `valueTreeChildAdded` (`ShowDocument.h:350`), light the dirty dot, and *then* refuse the
+command: a document mutated by a refusal, in the phase whose whole subject is trusting the save.
+It is the only create with a mutation ahead of the door — `createRole` (`:808-809`) and
+`createPersistent` (`:830-831`) return the existing child before inserting anything, and every
+other create only reads. So the predicate will be a private `refuseIfLocked()` called at the top
+of `createRackChannel` as well as inside the four doors, and 5.3 is reviewed with that line in
+the diff or it is not finished.
+
+**And there is a fifth writer, which is not a door but a hatch.** `ShowDocument::adopt`
+(`:315-332`) removes the listener, moves in a new root and a new registry, re-attaches and bumps
+the counter; it goes through none of the four and it is the mechanism behind `Bundle::open`,
+`document.revert` and `document.recover`. Two consequences. The lock check for `revert` and
+`recover` lives in *those handlers*, because `adopt` has no door to put it in. And because
+`locked` is a property of the root, `adopt` replaces the lock with whatever the loaded
+`state.xml` says — a revert of an unlocked bundle would silently unlock a locked session, which
+is why the commands that open the hatch must refuse rather than the hatch being guarded. Four
+doors for the edits, one hatch that does not edit the show but replaces it, lock included.
+
+**`undo` and `redo` refuse in their handlers for a sharper reason still**: they do not use the
+doors at all. `SetPropertyAction::undo` writes through `target->setProperty (name, oldValue,
+nullptr)` (`juce_ValueTree.cpp:447`) and `AddOrRemoveChildAction::undo` through `addChild` and
+`removeChild` on the SharedObject directly (`:507`, `:514`). JUCE's actions hold the tree, not
+the document, so a lock at `ShowDocument`'s doors would see none of it. Refusing the command is
+the only place the refusal can go, and the only place it *should* go: half a transaction undone
+is worse than none.
+
+**`persist == show` only, and the state half is exempt — as a rule, not as a property of
+`locked`.** Stated as a property of the lock row — *the lock is exempt from the lock it sets* —
+that is true and invisible, and the next `state` row would inherit the exemption without anybody
+deciding to grant it. Stated as a rule it is the better sentence: **the lock is a lock on the
+show half; the state half is where the operator is standing, and a lock has no business freezing
+that.** It is §4.10's split applied to a gesture (`SchemaTypes.h:63-73`). The load-bearing
+reason is the one that would otherwise be found by a fixture: `EphemeralState::read` restores
+every saved state value through `document.setAttribute` (`EphemeralState.cpp:252-259`), whose
+comment says why — *"Through ShowDocument's one write path, so a value restored from a file is
+checked exactly as a value written over OSC would be."* A lock that refused state writes would
+make a locked bundle refuse to load its own `locked="true"`.
+
+**The predicate is `persist == show` and nothing else — not `!= state`, which would freeze the
+aim.** The table has a hundred and sixty-one rows, and exactly three are writable and not
+`persist=show`: `lists,focus` (row 24) and `list,standby` (row 29), the only two `persist=state`
+rows in it, and `list,aim` (row 30), the only `rw` row whose persist is `none`.
+`document,locked` will be the third state row and the fourth the predicate lets through, and the
+four are three different reasons rather than one — the operator's position, a lock that cannot
+refuse its own release, and a question about where somebody is pointing that is not in the
+document at all. Said as *three state rows and no more*, a reviewer implementing `if (persist !=
+state) refuse` passes the stated test and refuses `node.set /godot/list/<id>/aim` on a locked
+show. Nothing breaks today if they do — the `list.aim` command never reaches the door, writing
+`runner.listState()` instead (`Runner.cpp:5035-5060`) — which is exactly why the mistake would
+survive review and be found by a client.
+
+**What keeps working is §14.7's table, and not one entry of it is an exemption**: every command
+in those rows is untouched *by construction*, writing a state row through the one door or
+knocking at no door at all, which is what makes the lock cheap to reason about a year from now.
+The mounted write is the one that would have been easy to get wrong: §3.17's third role for the
+tablet is *"parameter adjustment while walking the house"* — an operator in row H riding a level
+on a processor because that is where the show sounds wrong. Locking the document while the show
+runs is the point of show mode; locking that would be locking the mixing, which is the opposite
+of the point.
+
+**Why `mutates` could not be the predicate.** `Command::mutates` (`Command.h:103`) is the
+obvious candidate and it fails three ways, of which the third settles it. It is too coarse: `go`
+(`Runner.cpp:5165`), `run.kill` (`RunCommands.cpp:515`) and `node.set`
+(`DocumentCommands.cpp:345`) all declare `mutates = true` (`:5170`, `:519`, `:348`), so a lock
+keyed on it would refuse GO. It is wrong about itself: `list.aim`'s own description reads
+*"Points at a position in a list … Changes nothing"* and it is registered `mutates = true`
+(`Runner.cpp:5035-5040`), while `document.save` — the command a locked show most needs —
+declares `true` at `Bundle.cpp:293` and would refuse itself. And it is **unread**: nothing in
+`src/` consults the field. The only reader in the repository is one assertion
+(`tests/EngineTests.cpp:83`), and the ten commands that set it `false` are `noop` plus nine
+engine-origin *reports* (`Engine.cpp:31`; `AudioCommands.cpp:24`; `RunCommands.cpp:27, 61, 82,
+152, 215, 284, 314, 354`). What it marks is reports against requests, not writes against reads,
+and giving the lock to a member whose correctness nothing has ever checked is how a predicate
+becomes documentation.
+
+**The lock is `persist=state`**, so a show locked at 20:40 whose engine was restarted at 20:44
+comes back locked: §14.4 argues that placement against §4.10 and books the mechanism, and
+nothing here is new plumbing.
+
+**A lock that silently drops a gesture is worse than one that refuses.** OSC has no reply
+channel, so a write the engine will not take comes back only as a reading (§14.2) — and the
+console makes the same argument about a button it declines to hide: a cue the pointer may not
+stand on is *"refused by the engine and the refusal says which, which is a better answer than a
+button that is not offered"* (`clients/console/index.html:1191-1194`). Show mode is that
+argument at document scale, and §4.8 is the other half — a greyed-out button is colour carrying
+the whole of it. So: **`inline constexpr const char* locked = "locked";`**, in `namespace
+reason` in `command/Command.h`, where the header states the rule itself (`:107-108`). It reaches
+`/godot/engine/lastError` as `"<tick> <seq> <origin> <reason> <command>"` (`Engine.cpp:70-74`),
+so an operator reads
+
+```
+4812 17 ws:192.168.1.7:53412 locked cue.create
+```
+
+and knows three things: that the show is locked, which gesture was refused, and — because the
+origin is `udp:<host>:<port>` for a datagram (`UdpEndpoint.cpp:37`) and `ws:<ip>:<port>` for a
+WebSocket write, juce_simpleweb's connection id being already `<ip>:<port>`
+(`OscQueryServer.cpp:371-378`) — *which machine* sent it. The tablet in the house and the booth
+machine are distinguishable in the one line the refusal gets. That origin is also what §14.9
+keys coalescing on.
+
+**The refusal goes beside the read-only check at `ShowDocument.cpp:462-463`, before the parse at
+`:466`, and the position is not a detail.** `:462-463` is `if (target.isDerived ||
+target.attribute->access() == Access::read) return EditResult::failed (reason::readOnly);`, and
+the lock's check goes immediately after it at `:464`. Placed instead at the far end of the
+function, next to the `setProperty` call at `:509-510`, a locked show would answer
+`type-mismatch` for a badly typed value and `locked` only for a well-typed one — sending an
+operator to look at their encoder when the answer was that the show is fixed. The refusal that
+costs the least to understand is the one that arrives first. And the gesture that sets the lock
+is a plain datagram rather than a command (§14.7), with §14.2's answer for the client that sends
+the integer `1` instead of `true`.
+
+### 14.12 Spectral colour — a cache, a pyramid, and a test before anything is drawn
+
+**The colour says what the sound is made of, the brightness says how high it is, and the numbers
+say both again in words.** PRD §3.30 is explicit about which dimension carries which: per
+window, on a log-frequency axis, the **spectral centroid** gives the hue along the ramp, the
+**spectral flatness** gives the saturation — a sine saturated, broadband noise grey — and
+amplitude stays what the waveform's shape already carries. Then the sentence the design turns
+on: **lightness is monotonic with frequency**, dark low to bright high. That is most of what
+makes §4.8 hold *on its own terms* rather than by an exception: a colourblind operator reading a
+desk of eight sampler faders separates the bass bed from the high effect by brightness alone,
+because brightness is the frequency axis. §3.30 then offers an exemption — *timbre has no other
+carrier, and it is an aid to mixing rather than a state the show depends on* — and this phase
+does not take it. **The bar carries the colour and the row carries the numbers.** The timbre
+reading is a string a client prints as readily as it paints (§14.5 owns the node and the route
+the bar reads its frames from), and printing it beside the bar keeps §4.8 true by construction
+rather than by argument. A surface that shows the bar and not the numbers is relying on the
+exemption; one that shows both does not need it, and 5.17 will build the second (§14.3).
+
+**The ramp is a starting point and not a palette.** Six stops — 40 Hz near-black purple, 150 Hz
+deep blue, 500 Hz red, 1.5 kHz orange, 4 kHz yellow, 12 kHz green — with saturation `1 −
+flatness`, lightness climbing 0.15 → 0.85 in the log-centroid, window 2048 and hop 1024. Those
+are plan decision 8 and are here to be overruled early rather than late; the exact colours are
+the author's once the sine/noise/sweep bundle is on screen, which is the whole reason that
+bundle exists before anything is drawn.
+
+**An analysis is regenerable from the file, so it is not something anybody decided.** §4.10 says
+the document holds what someone decided and never what the machine happened to be doing, and
+§3.20 puts derived state in a separate file or outside the authored half entirely. A spectrum is
+further out than any of those: it is not even a decision the *engine* took, it is arithmetic
+over bytes that already exist. So it will live in **a cache beside the media, keyed by content
+hash, like a peak file**: `<bundle>/media/.timbre/<sha256>.tpy`. Keying by content rather than
+name buys two things worth the hash: **the same file under two names is analysed once**, and **a
+renamed file keeps its colours** — which matters because renaming media is a normal
+document-time act (§3.20's batch tools) and re-analysing a gigabyte because somebody fixed a
+typo teaches people not to tidy. The cache is invisible to the duration walk by construction:
+`mediaDurations` visits the document's `Media` elements and never enumerates the folder
+(`MediaInfo.cpp:70-91`), and `Bundle::contentHash` reads three things, none of them in `media/`
+(`Bundle.cpp:209-220`).
+
+**And here is the mismatch §3.30 hands Phase 5 to resolve.** §3.30 says *"PR 4.1's `MediaInfo`
+side table, keyed by path and already holding a file's duration, is where the cache is looked
+up"* — but that table is keyed by **path** and the cache by **content**, and the two are not the
+same key. The answer is not a second parallel map from path to hash, which is a second thing to
+keep in step and, per §13.4's rule, *the one that is wrong is always the copy*. The answer is
+**one record per file**. What exists today is not an object at all: `audio/MediaInfo.h:78-79`
+declares one free function, `mediaDurations`, returning the map **by value** into a `const auto
+durations` local of `runServe` (`Console.cpp:1546`) whose address is then handed to the tree and
+the runner (`:1553`, `:1555`). 5.6 will turn that into a `MediaInfo` object owning a `map<path,
+MediaRecord>` — `struct MediaRecord { double seconds; std::string contentHash;
+std::shared_ptr<const TimbrePyramid> pyramid; }` — keyed by the same bundle-relative path the
+document writes. Path is the key because path is what a cue names; hash and pyramid are *fields*
+of the record, arriving late.
+
+**The durations half must stay frozen after load, and that is law rather than an aside.** The
+code already says so, in a comment nobody is currently obliged to read:
+
+> *"Compared by ADDRESS: the map is filled once when the show is opened and handed over by
+> pointer, so a different pointer is a different show's media and the same pointer is the same
+> numbers."* — `SlotAnalysis.h:202-205`
+
+`SlotAnalysis::ensureBuilt` caches on `builtAt == document.revision() && builtWith == durations
+&& builtAt != 0` (`SlotAnalysis.cpp:38`), and `ParameterTree::publish` calls it first thing,
+**every publish** (`ParameterTree.cpp:1185`). Both halves are sharp edges. If the accessor
+returned by value, or a map reached through a swapped `shared_ptr`, the address comparison would
+fail on every publish and the slot walk — about 77 ms of §13.14's 208 ms Debug-build analysis —
+would rebuild fifty times a second on the tick thread. And if the analyser ever wrote a
+corrected duration back into the same map, the cache would *not* notice — same pointer, changed
+numbers — and every slot overlap would be computed from stale seconds. So
+`MediaInfo::durations()` returns `const std::map<std::string,double>&` into a member whose
+address never moves and whose contents never change after load, and the hash and the pyramid
+live where the pointer-keyed cache never looks. `ParameterTree::setMediaDurations` sets `stale =
+true` (`ParameterTree.h:165-169`), a full document-half rebuild, which is the second reason it
+is called once and never again.
+
+**`wfg replay` is a third owner of that table and it is not a `MediaInfo`.** Replay declares its
+own `std::map<std::string, double> durations;` at `Console.cpp:490`, hands it to the Runner by
+pointer at `:491` *before the log is parsed*, and fills it at `:581-596` from the log's own
+`media` header lines — because the lengths a replay must use are the ones that were true when
+the log was written, not the ones in today's folder. That stays as it is: a replay has no files
+to hash, and a `MediaInfo` in the replay verb would mean `wfg replay` hashing a bundle it was
+explicitly told not to trust.
+
+**One window per hop at the finest level, then halvings, down to 64 frames.** Window 2048, hop
+1024 — 46.9 frames per second at 48 kHz — four bytes per frame (hue, saturation, lightness,
+peak), each level built from its predecessor by circular mean of hue, arithmetic mean of
+saturation and lightness, and max of peak. Format `WFGT` plus version, rate, window, hop and a
+level table, little-endian. The reason is one sentence of §3.30's and it is the whole design:
+*"so the editor at any zoom and a forty-pixel Gogo bar both read one level and nothing
+recomputes."* A Gogo bar forty pixels wide over a six-minute clip is sixteen thousand
+finest-level frames averaged into forty, and doing that per frame per redraw is a decision to
+make the running pane the most expensive thing on screen. With a pyramid the client picks the
+level whose frame count is nearest its pixel count, reads it once, and every subsequent redraw
+is a blit — which is why §3.30 can put the run's reading beside `/godot/run/<id>/position`,
+*"updated on the tick thread by a table lookup"*.
+
+**`media/.timbre/<sha256>.tpy` would be the first thing the engine has ever written inside a
+bundle's `media/` folder**, and that deserves a sentence because the tree is otherwise unanimous
+about not doing it. Every existing interaction with `media/` is a read — `Runner::armMedia`
+resolves and `existsAsFile()`s the named file (`Runner.cpp:1954-1966`), the message thread opens
+it through `AudioHost::setTrackSource` (`AudioHost.cpp:840-859`), `wfg serve` stats each file
+for the log header (`Console.cpp:1626-1638`) — and Tracktion's settings and the placeholder WAV
+go to the per-user cache precisely so that *"a directory that appeared inside it the first time
+somebody pressed play"* does not travel with the bundle (`:2009-2015`). The cache is different
+in kind, derived from the media and belonging with it, which is what makes it like a peak file;
+but no code path today establishes that `media/` is writable, and a show on a read-only mount
+has never needed it to be. So the rule is stated here rather than discovered on tour: **when the
+cache cannot be written, the analyser builds the pyramid in memory, publishes it, and says
+nothing.** The session gets its colours; the next session pays again. A refusal would trade the
+feature for a diagnostic nobody asked for, on the night somebody ran the show off a share. One
+implementation note the nearest precedent gets wrong: `Bundle::contentHash` assembles its whole
+payload in memory (`Bundle.cpp:229-244`) before hashing at `:251`, and copying that shape for
+media would put a gigabyte of WAV in RAM — `juce::SHA256 (const juce::File&)` and `SHA256
+(InputStream&, int64)` (`juce_SHA256.h:88, :82`) stream, and 5.7 will use one of those.
+
+**A background job at import, the way plugin scanning is off the show.** §4.2 puts it off the
+audio thread and §4.1 off the GO path, and neither is close: the analyser will be its own
+`std::thread`, `MountProbe`'s shape exactly — mutex, condition variable, a deque of files, a
+de-duplicating in-flight set, `stop()` that sets the flag, notifies, joins and then clears
+(`MountProbe.h:128-141`, `MountProbe.cpp:32-59`, `:106-121`) — with the slow work done
+**outside** the lock. It will publish by swapping an immutable `shared_ptr<const map<path,
+MediaRecord>>` under a short mutex, the pattern `ParameterTree::publish` and `snapshot()`
+already use (`ParameterTree.cpp:1572-1594`), and that is the mutex §14.5's route copies out of.
+**It will produce no records at all**, which is §14.8's conclusion and §13.4's before it. Show
+load never waits for it either — and this section says which read *is* on the critical path, so
+nobody attributes a slow open to the pyramid: `mediaDurations` reads every distinct file's
+header on the thread that opens the show, before the first publish and before any socket is open
+(`Console.cpp:1537-1551`), and has done since Phase 4. That cost is unchanged; the analyser
+starts after the first publish.
+
+**A clip whose cache is missing draws grey, and grey is the right missing value.** Black is
+wrong because black is *on the ramp* — 40 Hz is near-black purple — so a clip drawn black would
+read as a bass bed, a lie in exactly the dimension the colour exists to carry. A spinner is
+wrong because it is an animation in a pane whose whole job is to be legible at a glance from
+three metres away in the dark, and because it promises a wait the operator has no reason to care
+about. Grey is right because grey is what the analysis itself produces for a sound with no
+centroid worth naming. That raises a collision worth resolving in the design rather than in the
+UI: **white noise is grey too.** So the engine does not publish a grey reading for a missing
+pyramid — it publishes **nothing**, an empty node, and the client draws its own grey for the
+empty case, while noise publishes a real reading with a real lightness and a saturation below
+0.2. A client can always tell *not analysed yet* from *analysed and broadband*, which is the
+difference between a bar that will improve and a bar that will not.
+
+**§3.30 asks for the check by name and this section will not let the phase forget it: a 1 kHz
+sine must come out saturated at 1 kHz's hue, white noise grey, and a sweep must walk the ramp —
+a black-box check on the cache alone, in the style of the routing spike.** A colour ramp is
+exactly the kind of thing that looks right and is wrong: any roughly monotonic mapping from
+*something spectral* to *something on a gradient* produces a picture that reads as correct, and
+a log axis computed from bin index instead of bin centre frequency, an off-by-one in the
+window's centre bin, a flatness on power where it should be on magnitude, or a window that leaks
+and drags every centroid upward would each shift the picture rather than break it — and a
+shifted ramp over unfamiliar material is indistinguishable from a correct one, because nobody
+knows what colour that clip *should* be. Which is why **a test that generates its own signals is
+the only honest check.** A 1 kHz sine has its centroid at 1 kHz because that is what a sine is,
+so the expected hue is a lookup in the ramp table known before the code runs; white noise has a
+flatness near 1 and therefore a saturation below 0.2, by definition and not by inspection; a 100
+Hz → 8 kHz sweep has a hue that increases monotonically frame over frame, and *monotonic* is a
+property a machine can check and an eye cannot. Three signals whose answers are known in
+advance, which is the difference between a test and a screenshot. It is written twice,
+deliberately, and the second is the one that counts:
+
+| where | what it asserts |
+|---|---|
+| `tests/TimbreTests.cpp` (new) | the sine is saturated above 0.8 at the ramp's 1 kHz hue within tolerance; noise is under 0.2; the sweep's hue is monotonic along frames; level *k* equals the pairwise means of level *k−1*; write/read round-trips byte-identical; a second `analyse` reports zero work |
+| `tests/blackbox/timbre_cache.py` | writes the three WAVs with stdlib `wave`, builds a bundle naming them, runs `wfg analyse`, decodes the `.tpy` with its **own** `struct` reader, and asserts the same three facts |
+
+The second reader is not duplication: it is `common.py`'s standing rule — stdlib only, and *a
+separate codec written from the specification so a driver cannot share a mistake with the code
+under test* (`tests/blackbox/common.py:18-33`). A `.tpy` decoded by the code that wrote it
+proves the writer is self-consistent and nothing else. What 5.7 must budget in CMake rather than
+discover is §14.13's.
+
+**`wfg analyse <bundle> [--force]` will be a verb, not a command** — plan decision 12, here to
+be overruled early rather than late — for the same reason `validate` and `replay` are: a cache
+rebuild is not a document action, it takes no decision the show records, and it must be runnable
+on a machine with no audio and no socket. It will run the same code synchronously and print, per
+file, path, hash, seconds, frames, milliseconds of work and bytes — the instrument **M22** reads
+(§14.14), and the handle the black-box driver pulls. The cost is measured before the design is
+judged affordable, not after.
+
+**What Phase 5 must only avoid foreclosing, it does not foreclose.** §3.30 is careful that *"the
+strip is a binding, not a D700 feature"*, and this phase honours that by publishing an ordinary
+read-only node and drawing one bar from it; the strip's colour cell, the D700 route and
+per-channel timbre are §14.15's to defer. §3.30's idle-colour policy — *authored colour at idle,
+timbre while sounding, with timbre a layout option that can be off* — is *(proposed)* and stays
+the author's: the timbre reading is a node a §3.16 layout may read or ignore, the authored
+colour is a separate row, and nothing in the engine decides which of them a surface shows.
+
+### 14.13 The document layer — plumbing, and the rows in one place
+
+Eleven pieces of plumbing, each done once, each of them a thing a later pull request would
+otherwise discover by failing. Naming them together is what stops the eleventh from being found
+by a fixture, and one of them corrects the approved plan rather than transcribing it — which is
+what a section drawn before the code is for.
+
+- **A new row will cost two generators, two commands and three gates, and the plan said one.**
+  `scripts/generate-schema.py` writes one file, `SchemaTable.generated.h` (`:14-18`, `:52-53`),
+  gated by the ctest `schema.generated` (`tests/CMakeLists.txt:419-420`). The RELAX NG grammar
+  is written by the **binary** — `wfg schema --out=docs/schema/show.rng`, which the tool prints
+  as the remedy (`Console.cpp:836`) — and gated twice more, by `wfg.schema.C` and
+  `wfg.schema.fr_FR` (`:436-441`), under both locales because a range facet goes through the
+  number formatter, and then by `schema.fixtures`, which puts the published grammar in front of
+  lxml over every fixture (`:489-490`). So a PR author who regenerates the header, sees
+  `schema.generated` green and pushes goes red on `wfg.schema.C`, once per row-bearing PR and
+  three times in this phase. The order is CSV, generator, binary — and a description carrying a
+  comma must be quoted, the field-count check being a hard failure
+  (`generate-schema.py:174-200`).
+- **`KNOWN_OWNERS` is unchanged, and the asymmetry that decides what a row costs in C++ is the
+  most useful fact in this subsection.** `document`, `run`, `media` and `fade` are already in
+  the twenty-six-word tuple the generator checks the `owner` and `refers` columns against
+  (`generate-schema.py:66-74`), so what differs is `persist`. A `persist != none` row on an
+  owner the **document half** already loops over costs no C++ at all:
+  `ParameterTree.cpp:782-790` is generic over `rowsForOwner ("document")`. A `persist == none`
+  row is published from the **runtime half** and costs a field on `EngineState`
+  (`ParameterTree.h:119-123`) and an `else if` in the hand-written chain at `:1252-1274`. So
+  `locked` is free, and the undo four and `recovery` are five fields and five branches, each
+  assigned in the after-tick **before** `parameters.publish` at `Console.cpp:2263` or published
+  one tick stale. Worth knowing before somebody sizes 5.4 by counting rows.
+- **What the lock's persistence lacks is not code but a fixture.** §14.4 gives the mechanism —
+  the `Show` root is a container element and `EphemeralState` has written and read container
+  entries since Phase 3, so `EphemeralState.cpp` gains no line. Two things follow that a fixture
+  author has to have right. An unset `locked` is simply **absent** from `state.xml`, because
+  `CanonicalXml::attributeText` omits an attribute only when the property is missing and never
+  when it equals its default (`CanonicalXml.cpp:75-81`, the `EphemeralState` loop at `:88-96`),
+  while `ShowDocument::setAttribute` writes the property unconditionally (`:509-510`) — so the
+  first `node.set /godot/document/locked false` after a lock leaves `<Show locked="false"/>` on
+  disk and it round-trips, and a fixture must assert the round trip rather than the absence. And
+  no bundle carries an example: every `state.xml` under `tests/fixtures/bundles/` holds one
+  `<List>` entry and nothing else (`phase4`'s carries only an id), so the container branch
+  stands on one unit assertion (`tests/CueListTests.cpp:891`) and on nothing lxml or `wfg
+  validate` has ever seen. 5.3 will land a fixture bundle carrying `<Show locked="true"/>`,
+  which puts the new `State.Show` define in front of `schema.fixtures` and an outside opinion.
+- **The write choke point cannot write a list, and the fade curve is the first row that needs it
+  to** — so 5.16a is a change to `ShowDocument::setAttribute` and to `toText` rather than a row
+  plus a validate rule, and it lands **after** 5.4, in the function 5.4 has just rebuilt around
+  an `UndoManager`. §14.6 carries the citations and the two existing `d*` rows that are proof by
+  absence.
+- **Five reason codes, into a vocabulary that already carries two nobody writes** (§14.7). What
+  belongs here is where the dead ones survive: `reason::malformedPacket` in three test files and
+  one fixture (`CommandTests.cpp:264`, `EngineTests.cpp:209`, `:267`, `EventLogTests.cpp:79`,
+  `:85`, `tests/fixtures/logs/skeleton.wfglog:10`), and `reason::retiredId` nowhere but its
+  declaration at `Command.h:154`.
+- **Static files are served as text, and the MIME table promises types it mangles.**
+  `serveClient` resolves a subdirectory correctly and refuses anything that is not `isAChildOf
+  (clientDirectory)` on the **resolved** file rather than on the request text
+  (`OscQueryServer.cpp:211-239`) — then serves every byte through
+  `file.loadFileAsString().toStdString()` (`:244`), while `mimeFor` (`:75-88`) already promises
+  `.png` and `.woff2`, so a client shipping either gets it back through a UTF-8 round trip that
+  is not one and nothing says so. 5.1 will swap in `loadFileAsData` and teach `mimeFor` `.mjs`,
+  `text/javascript` as `.js` already is (`:80`). The assertion does not go where the plan put
+  it: `serveClientFrom` has no unit-test coverage at all — its only caller is
+  `Console.cpp:1796`, and `tests/OscQueryTests.cpp` mentions neither `/ui` nor `mimeFor` — but
+  it is driven end to end by `tests/blackbox/client_page.py`, a locale pair at
+  `tests/CMakeLists.txt:694-704`, which is where a one-pixel PNG is served and compared byte for
+  byte. Two harness additions go with it: `OscQueryTests::get` (`:241-293`) throws every header
+  away and must keep them, since `Content-Type` is the half a MIME change breaks and
+  `Cache-Control` is what §14.5's route is asserted on; and `common.py`'s `http_get` decodes to
+  text (`:195`), so a bytes-returning sibling comes before any driver can compare a pyramid.
+- **`/media` is reserved against mounts exactly as `/ui` is.** `Mount::prefixIsUsable` refuses
+  `/ui` and `/ui/…` by name (`tree/Mount.cpp:73-77`), beside its refusal of `/`; `/media` joins
+  that line in 5.1, or a show could mount a namespace over the route that answers with pyramids
+  and the failure would read as a cache miss rather than a collision.
+- **`Engine::setBeforeApply` is installed by the serve verb AND the replay verb, and forgetting
+  the second is the bug that takes a week.** The hook is vendor-free and mirrors
+  `TickThread::setBeforeTick` (`clock/TickThread.h:162-168`), as `Engine.h:36-39`'s ban on JUCE
+  types in that surface requires; where inside `applyEvent` it fires, and why, is §14.9's. The
+  week is this: a replay running no hook reproduces every existing fixture perfectly, because
+  what it compares is records (§14.9), and diverges only where coalescing mattered — thousands
+  of records into a log nobody has recorded yet.
+- **What the replay verb registers, and it is not everything.** *This paragraph is a correction*
+  *(PR 5.0, 2026-09-09)*: the plan reads as though `registerDocumentCommands` were unconditional
+  under `wfg replay`, and it is not — the call at `Console.cpp:534` sits inside `if
+  (bundlePath.isNotEmpty())`, opened at `:497` and closed at `:570`. §14.7 owns the rule that
+  follows, and the consequence for a driver is that a log carrying an `undo` needs `--bundle`
+  exactly as a log carrying a `document.save` needs `--out`, so both flags belong in the replay
+  step by name.
+- **`run/position` is declared, published and assigned by nothing**, so what every client has
+  read for two phases is the literal `0`; 5.1 will pay it before anything is built on it, and
+  §14.5 says why it needs its own pass over `runs.all()`.
+- **Test wiring three pull requests would each discover separately.** `tests/UndoTests.cpp` and
+  `tests/TimbreTests.cpp` do not exist until CMake is told: they join the source list at
+  `tests/CMakeLists.txt:60-95`, which ends `OscQueryTests.cpp)` at `:95`, and neither 5.4's nor
+  5.7's file list in the plan mentions it. `MediaCueTests.cpp` is already in that list (`:83`),
+  so 5.6's two assertions — that the durations map is byte-for-byte what it was before the
+  `MediaInfo` object owned it, and that a snapshot taken from another thread is the one the tick
+  thread published — cost no CMake line at all. 5.2's `dirty` assertion goes into
+  `phase1_session.py` beside the `--out` it already passes for the replay step (`:310-312`),
+  which is the driver that already saves. The new drivers register per locale on the phase4
+  pair's shape at `:669-678` — though not every driver is a pair: `blackbox.device.C` is
+  registered once (`:623-627`) because `device_serve.py` *"SKIPS ITSELF on a machine with no
+  audio device, which is every CI runner, and that is honest rather than convenient"*
+  (`:620-622`), and `timbre_cache.py` is a candidate for that shape if `wfg analyse` wants a
+  format this build's reader lacks and the pair if it does not.
+
+**Everything the parameter table gains.** Every row lands with the pull request that publishes
+it, never before. This table is canonical for the mechanical columns; the argument for each row
+is in the subsection that owns the mechanism, cited beside it. It spells read-only `ro`, as §13
+does; the CSV column itself carries `r`.
+
+| owner | address | type | access | persist | rate cap | PR | notes |
+|---|---|---|---|---|---|---|---|
+| `document` | `locked` | `T` | `rw` | `state` | 5 | 5.3 | §14.4 for the row and its persistence, §14.11 for what it refuses. That it survives a restart is plan decision 6, here to be overruled early rather than late |
+| `document` | `canUndo` | `T` | `ro` | `none` | 5 | 5.4 | `persist == none`, so an `EngineState` field and an `else if` — the expensive half of the asymmetry above |
+| `document` | `canRedo` | `T` | `ro` | `none` | 5 | 5.4 | As above (§14.9) |
+| `document` | `undoName` | `s` | `ro` | `none` | 5 | 5.4 | `getUndoDescription()` (§14.9). Empty when there is nothing to undo, so a client greys its menu item from one node |
+| `document` | `redoName` | `s` | `ro` | `none` | 5 | 5.4 | As above |
+| `document` | `recovery` | `T` | `ro` | `none` | **1** | 5.5 | §14.10 for what it reports, §14.4 for why the cap is 1 and not the 5 of its livelier neighbours |
+| `document` | `dirty` | `T` | `ro` | `none` | 5 | — | **No new row** (`csv:21`). 5.2 will make it true (§14.10) and rewrite its description to say *to `show.xml`*, because after 5.5 there is a second file it could have meant |
+| `media` | `hash` | `s` | `ro` | `none` | 1 | 5.8 | Addressed **`/godot/cue/<id>/hash`** and emitted as the `cue/prepare` pair, both halves of it §14.5's |
+| `run` | `timbre` | `s` | `ro` | `none` | 10 | 5.8 | `"<hue> <saturation> <lightness>"` — one string rather than three nodes, because it is one lookup and a client reads it as one. That shape and that cap are plan decision 8, here to be overruled early rather than late (§14.5, §14.15) |
+| `fade` | `points` | `d*` | `rw` | `show` | 50 | 5.16a | Plan decision 9, open to the same overruling. The third list-typed row and the first anybody can write, which is why it lands after 5.4 (§14.6) |
+
+Commands, engine-origin records and reason codes are drawn in §14.7, §14.8 and §14.11 rather
+than repeated here.
+
+### 14.14 What Phase 5 has to measure, and in which order
+
+Phase 4's numbering ended at M21.
+
+| | what | why it gates |
+|---|---|---|
+| **M22** | seconds of analysis per minute of audio, and bytes of cache on disk per minute, at window 2048 / hop 1024, on the Windows box **and** the Mac mini (PRD §6.11 asks for this one by name) | whether import can afford the analysis silently, which is §3.30's whole claim; taken before 5.7 is judged affordable |
+| **M23** | the canonical write plus atomic replace of the 500-cue show, on the tick thread, in milliseconds, both machines | whether autosave's bytes stay on the tick thread; taken **before 5.5 lands** |
+| **M24** | `performance.now()` around the console's `render()` on a 500-cue show, before and after keyed rows | 5.9's claim that the page can hold a real show — which is decision T's premise, not a detail of it |
+
+**M22 — can a show be imported without anybody being told an analysis is happening?** §3.30 says
+the cache is *"built by a background job at import, off the audio thread and off the GO path the
+way plugin scanning is off the show"*, and *the way plugin scanning is off the show* is a
+promise about a cost nobody has measured. It decides whether the analyser is a thread nobody
+mentions or a thing with progress in front of it, and those are different designs rather than
+different constants. **How:** `wfg analyse <bundle> --force` (§14.12) will run the same code
+synchronously and print per file the hash, the seconds of audio, the frames, the milliseconds of
+work and the bytes written; three runs over a few minutes of real material, both machines,
+Release. **What each answer changes:** if the work is a small fraction of real time, the
+analyser stays one background thread queued at load and the operator is told nothing, which is
+what §3.30 wants; if it is near or above real time on the Mac mini, either the finest level
+coarsens to hop 2048 — halving the work and the bytes, at the cost of a frame every 42.7 ms
+instead of every 21.3 — or import becomes explicit, with the queue's depth published and a
+client drawing it. Either way show load never waits, because the analyser starts after the first
+publish and `timbre` is empty until a pyramid exists. The bytes half decides a location rather
+than a design: four bytes a frame at 46.9 frames a second is about 11 kB per minute at the
+finest level, so an hour of material carries something near a megabyte and a half **inside its
+own bundle** — and an answer an order of magnitude worse reopens that, because a bundle travels
+and `media/.timbre/` would be the first thing this engine has ever written into `media/`.
+
+**M23 — does a 500-cue autosave fit inside a tick?** `document.save` already writes on the tick
+thread, and `Bundle.h:126-130` says out loud why that was allowed and why it is not the end of
+the argument: *"The cost is a file write inside a tick, and that is why this is Phase 1's answer
+rather than Phase 5's — crash-safe autosave (PRD §4.3) is a background writer working from a
+snapshot, and it is a different piece of work."* This phase proposes to keep the bytes on the
+tick thread, which is a change of mind about a sentence already in the tree; it is taken before
+5.5 lands because nobody presses save mid-cue and autosave fires on its own, so what it measures
+is a tick going late during a show. **How:** `CanonicalXml::write` plus `writeBytesAtomically`
+timed around the existing handler on the synthetic 500-cue show M18 already generates, a hundred
+saves, median and 99th percentile, Release, both machines. **What each answer changes:** at or
+under a quarter tick — **5 ms** — the bytes stay where `document.save` already puts them and the
+header's sentence is answered rather than obeyed; above it, 5.5 will take the snapshot on the
+tick thread, which it must do in either shape, and hand the bytes to a writer thread on
+`MountProbe`'s shape (`MountProbe.h:128-141`, the slow work outside the lock at
+`MountProbe.cpp:115-121`), at which point the GO path stops sharing a thread with a disk at all.
+The log record is `document.autosave` either way, so the fallback is a switch and not a
+redesign, which is why §14.10 answers §4.1 without waiting for the number. What M23 does not
+measure is the atomic write itself, which §14.10 argues for independently of any number.
+
+**M24 — can the page hold a real show?** Decision T rests on the console being the operator
+client and the laboratory both, and a page that stutters at five hundred cues is neither. It
+will be answered inside 5.9, because 5.9 is the pull request that claims it. **How:**
+`performance.now()` around `render()` on the 500-cue bundle, ten polls, median and worst, in the
+PR description — and §14.3's two defects measured separately, or the before-and-after says
+nothing about which paid, since keying the rows fixes only the first of them. **What each answer
+changes:** if the after-number fits well inside the 100 ms poll, the page is the operator client
+and decision T's sequencing holds without further argument; if it does not, the strip will
+render a window rather than a list — a real design change to a view the author is still moving —
+or the JUCE client's `ListBox`, which recycles components for exactly this, starts earlier than
+decision T says. That second answer would be the one measurement here that makes the layout stop
+moving for a reason other than the author being satisfied with it.
+
+**The calendar and the importance disagree, and it is worth saying which is which.** M23 comes
+round first, because 5.5 is the first pull request that waits on a number. M22 matters most — it
+is the only one whose answer changes a *shape* rather than a placement, and PRD §6.11 asks for
+it by name — but it cannot be taken before its instrument exists, and `wfg analyse` lands with
+5.7, which the plan's order puts after 5.5. M24 lands whenever 5.9 does, which decision T lets
+the author pull forward to just after 5.3, so it may in practice be taken first of all. None of
+that corrects the plan, which orders each measurement by the pull request that needs it rather
+than against the other two; it says only which comes round first, so that nobody plans a week
+around taking M22 early. And none of them gates a test: a wall clock on a shared CI runner is a
+flaky test that teaches people to re-run the suite — Phase 4's own sentence — so what ctest
+asserts is counts, as M18's rebuild count is, and what is written down here is milliseconds.
+
+### 14.15 The direction this phase does not build
+
+**Undo of a GO.** Constraint 5 makes it *revert*, not undo: restore standby, release bindings,
+re-assert pre-GO state, and be honest that the audio already escaped. Nothing falls out of the
+`UndoManager` for free (§14.9). A revert needs an inventory: which runs this GO created, which
+claims they hold and which they are waiting on, which pre-sent values the prepare before it
+asserted, and what the read-back said they were before. That is the inventory constraint 4's
+**Go Doh!** has its specification deferred until: one inventory, two features, and building
+either against a partial one is how the two come to disagree in the dark. Half the mechanism
+exists and is worth naming so nobody builds it twice — `run.revoke` (§13.4) already puts
+pre-sent values back, which is the anticipation half of *"re-asserts pre-GO state"* and the half
+that makes a double-GO caught inside the window recoverable.
+
+**A load command.** Said honestly rather than deferred: `wfg serve` cannot switch bundles, and
+this phase does not teach it to. `document`, `mounts`, `runner` and `parameters` are all locals
+of `runServe` (`Console.cpp:1429-1560`), `registerBundleCommands` is handed the folder at
+`:1528` and captures it by value and not `mutable` (`Bundle.cpp:294`), and the log's header
+carries the bundle's content hash before the first tick (`:1617`), from a bundle a second would
+not share. Re-pointing all of that is not a command, it is the serve verb turned inside out —
+and a load is a process restart, which is what an operator does between shows anyway.
+`document.revert` and `document.recover` are in the phase because both re-adopt the **same**
+folder through a hatch that already exists (§14.10, §14.11).
+
+**Undo of mounted-parameter writes.** Phase 6's domain, and the enum reserves the slot.
+`node.set` on an address that is not under `/godot` never reaches the document at all — one
+fork, at `DocumentCommands.cpp:359-360` — so nothing here could undo a fader by accident. And
+the fader is why it belongs in a domain of its own: a designer riding a level for twenty minutes
+would fill a shared stack with a thousand transactions and bury the cue rename somebody actually
+wants back.
+
+**Free text on a refusal.** `/godot/engine/lastError` carries tick, sequence, origin, reason and
+command and no more (`csv:16`), which is why an operator whose disk is full gets the word and
+not the diagnosis (§14.10). A free-text field on that node is a second contract about a line the
+log format already fixes — `Command.h:107-109` calls the reason vocabulary a contract for
+exactly this reason — and it should be made once for every reason code rather than opened for
+one command's benefit in the phase that adds five.
+
+**A dirty dot that compares.** `dirty` says the bytes on disk are behind this document's
+history, not that the two differ, and §14.10 argues why. A content comparison against the last
+saved bytes would cost a canonical write per tick to answer a question nobody asks that often,
+and would still be wrong the moment two edits cancelled by coincidence rather than by undo.
+
+**The strip's colour cell and the D700 route.** §3.30's own last sentence assigns them: Phase 5
+for the cache, the editor and Gogo; Phase 6 for the strip. Phase 5 publishes `run/timbre` and
+stops there. The binding to §3.16's colour cell, the profile that quantises and rate-limits, and
+the D700's HID route are Phase 6's, and the measurement they need — §6.11's colour write rate,
+the interval below which back-to-back writes fault — has not been taken.
+
+**Per-channel timbre.** One colour per run, from a mono fold. A multichannel bed whose surrounds
+carry different material reads as their sum, and for a forty-pixel Gogo bar that is the right
+answer rather than a compromise. Per channel is a pyramid per channel, N times the cache, and a
+bar nobody has designed.
+
+**A curve on the stop cue's fade half.** `Fade/@points` lands on `Fade` and `Stop` is untouched
+(§14.6). A stop's fade is a release, and the shapes a release wants are what `curve`'s `linear |
+sCurve` already offers; giving `Stop` breakpoints before anybody has asked would double the
+validate rule and double the editor's target for a gesture nobody has made.
+
+**Browser automation on CI.** No workflow installs a JavaScript runtime today, and Playwright
+means a browser download on three runners, on every job, to assert what the two cheaper checks
+5.18 will add cover between them (§14.3). That is plan decision 11, here to be overruled early
+rather than late. What it leaves untested is the DOM, and the one piece of DOM worth a test is
+5.9's keyed reconciler, written as a pure function over a `Map<id, element>` and tested there
+instead. Playwright when the page has stopped moving, if at all.
+
+**The JUCE desktop client beyond an outline**, per decision T, and the `WebBrowserComponent`
+shell beyond the paragraph §14.16 gives it. What would make it start is written there and is one
+sentence long: the layout stops moving.
+
+**Esc, double Esc and Go Doh!** Phase 10, per constraint 4, whose third level is
+specification-deferred in the law itself. And plainly, because it is better known than
+discovered: **the console has no abort key at all today.** There is no `Escape` handler beyond
+the blur-and-cancel 5.9 will add for dirty fields, and of the run commands the engine registers
+only `run.kill` is offered, though `run.advance`, `run.prune`, `run.unprune` and `run.stop` all
+exist — 5.11 will add those four (§14.3). That is on-plan and it stays on-plan, but a page that
+looks like an operator client and has no panic key is a page somebody will reach for at 04:12
+and not find, so it says nothing about the three levels of stop rather than implying half of
+one.
+
+**Drag-and-drop reordering on the page.** The console's own comment declines it and the reason
+has not changed: *"Dragging is what a desktop UI will do and is not what a first pass should try
+over a poll: a row that moves under the pointer while the tree is being re-fetched is a fight
+nobody wins. Two buttons say the same thing and cannot half-happen"*
+(`clients/console/index.html:1176-1184`). ▲ and ▼ over `object.move` stay the gesture until the
+author asks otherwise — with the one wrinkle undo introduces, that two ▲ presses inside one open
+transaction collapse into one undo step whether anybody wanted that or not (§14.9).
+
+**PRD amendments this phase will propose at close-out**, recorded now so they are not
+rediscovered: §3.30's *"PR 4.1's `MediaInfo` side table… is where the cache is looked up"*
+against a cache that must live **beside** the durations rather than in them, since that map is
+compared by address and has to stay frozen and pointer-stable (§14.12); §3.30's and §7's *two
+values per running clip* against the three the node carries, lightness being the frequency axis
+§4.8 rests on inside one channel (§14.5, §14.12); §3.30's *(proposed)* idle-colour policy, which
+stays the author's until the sine/noise/sweep bundle is on a screen; §3.20's derived-state
+sentence gaining the recovery folder by name, because it says a cache is *"never in the show"*
+without saying where a crash-safe autosave lands; §3.17's *"deliberately undesigned"* gaining
+what decision V settles, the web client being both the tablet's primary surface and the
+laboratory the desktop layout is designed in; §3.17's *"(TypeScript over OSCQuery + WebSocket)"*
+becoming *(ES modules over OSCQuery + WebSocket, served by the engine and editable while a show
+runs)*, since the parenthesis names a language where the sentence's argument is about a contract
+— no install, a self-describing namespace, no hand-maintained parameter table — that the
+plain-module client keeps in full (§14.2); and §4.3's *"crash-safe autosave"* gaining the word
+that says what it is safe **from**: an unclean kill, which the event log survives because every
+record is flushed to the OS as it is written (`EventLog.h:74-76`), and not a power cut, which
+neither the log nor the autosave has ever promised (§14.8).
+
+The five Phase 4 amendments are carried forward unchanged, together with the sixth §13.15
+promised and the close-out did not carry — §3.13's *walk back* against §13.8's forward pass,
+which §13.16 records as still owed — and the Phase 3 ones still waiting. They are sentences,
+delegated per the standing rule, and applied when the author says so.
+
+### 14.16 The desktop client — an outline, and what would make it start
+
+**§9's question E is not answered here, and this outline assumes E's own recorded fallback: a
+separate client.** The question — the desktop UI in process or a client of its own — has been
+open since Phase 2, §9 files it with the fallback *assume separate, because that is the stricter
+assumption*, and nothing in T, U, V or W settles it. What has changed is that evidence has begun
+to arrive, and it points the same way. PRD §3.2 states the law — *"nothing the UI can do that
+the API cannot. The UI is built as a client"* — and an in-process UI is a client with a shortcut
+available to it; the shortcut erodes the law not on the day it is taken but on the day somebody
+takes it because a datagram round trip was inconvenient and the document was right there on the
+same heap. The page is that evidence and not the verdict: it holds selection, fold state and a
+slider under a finger and nothing else (§14.1), and has driven this engine since Phase 3 without
+one hole opened for it. What would settle E is the day a second client needs a hole the first
+did not — and by then the second client exists, which is why decision T defers the question
+rather than this subsection answering it. If the author wants E closed it becomes a lettered
+decision in §9, not a sentence here.
+
+Decision T makes what follows an outline and not a plan: the client starts when the layout has
+stopped moving. Decision U leaves the done-when's own judgement — *the author runs a simple show
+from the desktop build in a rehearsal room* — to the room. They are two judgements and the
+outline should not blur them.
+
+**The CMake target, and what it costs.** `JUCE_MODULES_ONLY` is `ON` globally at
+`cmake/WfgThirdParty.cmake:62-63` and cannot be enabled for one target: it is read before the
+early return that creates the helper targets, so juceaide exists for the whole configuration or
+for none of it. The comment beside it names the flip — *"If Phase 5 wants `juce_add_gui_app`,
+flip this ON->OFF and nothing else in this file changes"* (`:61`). So either a second plain
+`add_executable (wfg-client …)` with `START_JUCE_APPLICATION` and the app defines written by
+hand, which buys no `.app` bundle, no icon and no plist but costs nothing on any CI job; or the
+flip and `juce_add_gui_app` for a real bundle, at roughly sixteen seconds more per configure on
+every job in every matrix. The first for the phase, the second as the one-line change the
+comment already names, taken when the client ships to somebody who is not the author.
+
+**The client layer, and the rule it would set aside in the open.** `wfg::client::EngineClient`
+polls `GET /godot` on a client thread through Go.dot's **own** `oscquery::OscQueryClient`, which
+says in capitals what it is — *"IT BLOCKS, AND IT MUST NEVER RUN ON THE TICK THREAD… MountProbe
+is what owns the thread this runs on; nothing else may call it"* (`OscQueryClient.h:46-51`).
+That second sentence forbids the reuse and has to be answered rather than stepped over: it is a
+rule about the **engine** process, where `MountProbe` owns the one thread allowed to block
+against a device that has gone away. A client process has no tick thread and no deadline of its
+own, so `wfg-client` would be a sanctioned second owner — and the honest form of that is the
+header sentence gaining the words *inside the engine* in the pull request that adds the caller.
+The WebSocket half comes from juce_simpleweb's client side, as WFS-DIY's
+`Plugin/Source/Shared/OscQueryClient.h` already does it; a snapshot model reaches the message
+thread and every write is a datagram. That is §14.2's contract unchanged: two clients, one
+contract, neither with a door the other lacks.
+
+**The component tree, and the reuse named rather than assumed.** `MainWindow` → `Transport` /
+`Didi` (a `juce::ListBox` keyed by cue id, standby and selection drawn as distinctly from each
+other as the page draws them, since constraint 8 makes colour never the sole carrier) / `Gogo` /
+`Inspector` / `Header` / `Curve`. XOA's
+`Source/GUI/{Binding,Layout,Selection,Widgets,XoaLookAndFeel.h,ColorScheme.h}` is a generalised
+kit still under construction, lifted where it fits and forked where it does not; spatcore's
+`ui/EQDisplayComponent.h` is the curve editor's nearest relative, a draggable breakpoint over a
+log axis being one whatever it edits. The reuse map records the rule: the mechanisms port and
+the APIs do not.
+
+**One `ApplicationCommandManager`, which is what would make constraint 11 structural rather than
+aspirational.** *Every gesture-reachable action exists as a named command* is a discipline on
+the page — nothing in a browser stops a click handler from calling a function directly — and a
+property of the framework in JUCE: a component does not bind a key, it invokes a command id, and
+a command id with no `ApplicationCommandInfo` does not exist. Each `perform` emits exactly one
+engine command; a gesture that wants two is either two gestures or one engine command that does
+not exist yet — and that second answer is the useful one, because it turns a UI convenience into
+a question about the command set.
+
+**One gesture-to-command table, read by both clients from one file.** The desktop client would
+read `clients/console/gestures/commands.json` — which 5.10 will land, 5.11 will fill and 5.18
+will check against `wfg commands` (§14.3) — rather than a copy, so neither client can drift and
+the check pays twice, once for the page and once for a client that does not exist yet. The
+keystroke half stays per client: a Mac menu bar's ⌘ and a browser's Ctrl are not the same
+gesture, and pretending they are is how a page swallows a shortcut the browser had first. A
+client-side test then needs no engine: a `FakeLink` capturing bytes, and `ClientTests.cpp`
+asserting that *Space* produces `/godot/cmd/go` and a field commit produces `node.set <address>
+<text>`, against the byte fixtures `OscCodecTests.cpp` already hand-wrote — the `common.py`
+rule, that a client test sharing an encoder with the engine cannot catch a mistake they share.
+
+**The alternative, offered for the author to weigh and not recommended.** A JUCE shell hosting
+the web client through `juce::WebBrowserComponent` — WebView2 on Windows, a resource provider
+serving `clients/console/`, and native functions for the three things a page cannot do: a file
+dialog for `saveAs`, an audio device list, and a global GO hotkey the browser will not
+surrender. It buys one layout maintained in one place and keeps the page as the laboratory
+permanently, which is decision T's premise made durable rather than temporary. Its weakness is
+exactly the native client's strength: a `ListBox` over ten thousand rows that recycles its
+components, and a native menu bar, where a stage manager looks for the command whose key they
+have forgotten. The author weighs that once the layout has stopped moving; this section does
+not.
+
+**What makes the client start: the layout stops moving.** Concretely, so that it is a
+recognisable state rather than a mood — the author stops asking for a view to be moved and
+starts asking for one to be faster; M24's after-number becomes the interesting one; and three
+consecutive Half B pull requests change only what is inside a pane and not which panes there
+are. Until then a compiled client is an argument that takes a rebuild to have and the page is an
+argument that takes a refresh. A client may start before the done-when is met and it may never
+start at all; what it must not do is start while the layout is still being designed.
+
+### 14.17 What Phase 5 built, against what section 14 drew
+
+*Owed at close-out and written by PR 5.19, as §11.9, §12.15 and §13.16 were — a heading here
+rather than an obligation to remember, because §13.16's own closing argument is that a
+retrospective written a phase late is written from the commit messages rather than from the
+week.*

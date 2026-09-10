@@ -657,8 +657,8 @@ CMakePresets.json    every preset here is run by CI
 cmake/               guards, options, third-party wiring
 docs/                the PRD and the development plan — the spec
 scripts/             bootstrap, the Linux package list, the pin gate
-clients/console/     a read-only web client the engine serves at /ui; one HTML
-                     file, no build step, no dependency
+clients/console/     the web client the engine serves at /ui; reads by polling,
+                     writes binary OSC, no build step, no dependency
 src/                 wfg_engine (the library) and wfg (the binary)
 tests/               the doctest suite and every add_test() in the project
 spikes/              throwaway PRD §6.1 validation programs
@@ -668,13 +668,15 @@ ThirdParty/          JUCE, tracktion_engine, juce_simpleweb (+ its nested asio)
 
 Two directories that do **not** exist here, and will not:
 
-- The Phase 7 tablet client goes in `clients/tablet/` with its own toolchain and
-  is never an `add_subdirectory` of this build. It is a client over OSCQuery like
-  any other, and a web toolchain inside a CMake tree helps nobody. The console
-  client in `clients/console/` already follows that rule the easy way: it is one
-  file with no toolchain at all, and the engine serves it from disk rather than
-  compiling it in — which is what lets the page be edited and refreshed while a
-  show is running, the only loop that suits work decided by looking at it.
+- A `clients/tablet/` with its own toolchain. There was going to be one; decision
+  V (2026-09-09) says there is not. The tablet client and the console are one
+  client — `clients/console/` grows into PRD §3.17's web client, which that section
+  requires to be complete on its own because it is the redundancy path. It keeps
+  the rule the plan wanted from `clients/tablet/` and keeps it the easy way: no
+  toolchain at all, served from disk rather than compiled in, which is what lets
+  the page be edited and refreshed while a show is running — the only loop that
+  suits work decided by looking at it. A web toolchain inside a CMake tree still
+  helps nobody.
 - The Phase 11 Rust BLE sidecar lives in the permissively licensed
   [Choufleur](https://github.com/pob31/choufleur_prompt) repo (MIT OR Apache-2.0)
   and is pulled in as a `ThirdParty/` submodule if it is needed at all. There is

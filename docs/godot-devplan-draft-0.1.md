@@ -214,38 +214,72 @@ before the code as §11 and §12 were, is §13 of that draft.
 
 ---
 
-## Phase 5 — Minimal desktop UI (Didi and Gogo) · L
+## Phase 5 — Undo, crash-safe save, and the operator client (Didi and Gogo) · L
 
-**Goal:** the first build a human can run a rehearsal with. Functional, not
-designed.
+**Goal:** the engine gains what every client needs and no client can supply —
+undo, a save that cannot be half-written, an autosave, an edit lock — and the
+web console grows into the client the author designs the layout in.
 
-- JUCE UI as a pure OSCQuery client. If it needs a capability the engine lacks,
-  add it to the engine first.
-- **Cue list** with the sacred conventions (PRD §3.5): decimal numbers, vertical
-  rows, GO on space. Three pointer kinds visibly distinct, colour not the sole
-  carrier. Standby never moves on scroll or select.
-- **Running pane**: run pointers, kill/advance/prune, round pills, range name
-  and iteration on the strip.
-- **Group bulk-edit view** with type filter (PRD §3.5).
-- **Header pane**: written lines upright, lines derived from a member's preset
-  mark in italics, double-click on a derived line opening the member's inspector
-  (open questions §5). Needs Phase 4's mechanism, not just the display.
-- **Curve editor** with breakpoint list and numeric entry.
-- **Dark UI mandatory** (PRD §2). Layout presets design/tech/show; show mode
-  locks the layout and disables editing.
-- Undo histories per domain, crash-safe autosave.
-- **Spectral colour** (PRD §3.30, 2026-09-09): the analysis cache built at
-  import beside the media, keyed by content hash, stored as a pyramid and
-  looked up through 4.1's `MediaInfo`; the coloured waveform in the editor and
-  the Gogo bar, per range; `/godot/run/<id>/timbre` published from the tick
-  thread. The sine / noise / sweep check on the cache comes before any of it is
-  drawn, and the analysis cost is measured (PRD §6.11).
+**Two halves, and the order is decision T** (2026-09-09, namespace draft §9).
+The engine half first, because none of it exists and every client needs all of
+it. The client half beside it, one view per pull request, in `clients/console`
+rather than in a new compiled program — because PRD §3.17 says the desktop
+layout is *deliberately undesigned* and the author's to design, and a page the
+engine serves from disk can be edited and refreshed while a show is running,
+which is the only loop that suits work decided by looking at it. The JUCE
+desktop client starts when the layout stops moving; until then it is an outline
+(namespace draft §14.16). The whole phase is drawn in §14, before the code, as
+§11, §12 and §13 were.
+
+### Half A — the engine
+
+- **Undo**, per domain (PRD §3.20, §4.3): one transaction per applied command,
+  itself a logged command so a replay reproduces it. The `UndoManager` the write
+  choke point has been waiting for since Phase 1 arrives — and the seam turns
+  out to be less pre-cut than `ShowDocument`'s own comment claims.
+- **A save that cannot be half-written**: temp-and-replace in the same
+  directory, `document/dirty` assigned for the first time since it was
+  published, `document.revert` and `document.saveAs`.
+- **Crash-safe autosave** (PRD §4.3) into a recovery folder inside the bundle,
+  never over the authored `show.xml`, decided by a hook and applied by a
+  handler like every other engine-origin record.
+- **The edit lock** show mode needs (decision W): one engine node every client
+  honours, refusing document mutation while GO, the standby, every run gesture
+  and writes to mounted rig parameters keep working.
+- **Spectral colour** (PRD §3.30): the analysis cache built at import beside the
+  media, keyed by content hash, stored as a pyramid and looked up through 4.1's
+  `MediaInfo` grown into a per-file record; the run's timbre published from the
+  tick thread; the pyramid served over HTTP, because it is a file and not a
+  parameter. The sine / noise / sweep check on the cache comes before any of it
+  is drawn, and the analysis cost is measured (PRD §6.11).
+- **Fade breakpoints**, so the curve editor has a curve to edit.
+
+### Half B — the console as the operator client (decision V)
+
+- The **rehearsal blockers** first: rows keyed by identifier, so a long list's
+  scroll survives a poll, and a focus policy, so GO still fires after the aim
+  slider has been touched.
+- A **module split** with no build step, served from the same directory.
+- Then one view per pull request, each earning a round of the author's
+  feedback: **run pointers on the cue list**; the **running pane's** gestures,
+  round pills and range name; **group bulk-edit** with a type filter (PRD
+  §3.5); the **header pane**, written lines upright and lines derived from a
+  member's preset mark in italics, double-click opening the member's inspector;
+  the **curve editor** with breakpoint list and numeric entry; **layout presets**
+  design/tech/show with the diagnostics behind *tech*; **show mode**, which
+  reads the engine's lock and does not invent its own; the save, revert and undo
+  gestures as Half A lands them; and the **coloured waveform** on the running
+  pane once the cache is there.
+- **Dark UI mandatory** (PRD §2), which the page already is.
 
 **Done when:** the author runs a simple show from the desktop build in a
-rehearsal room.
+rehearsal room. Whether a browser on the booth machine satisfies that is
+decision U: judged in the room, not now.
 
-**Needs from the author:** the layout — he designs it; this phase implements
-whatever is needed to exercise the engine and no more.
+**Needs from the author:** the layout — he designs it, and Half B is the surface
+he designs it in; the ramp's colours once the sine / noise / sweep bundle is on
+screen; PRD §3.30's *(proposed)* idle-colour policy; and the twelve decisions
+§14 marks as the implementer's, each taken early so it can be overruled early.
 
 ---
 

@@ -528,13 +528,20 @@ Four things around it, and one that is a gap rather than a reuse:
   and the solver, so the two cannot come to disagree about a show.
 - **Time-tagged bundles are still blocked** on spatcore, unchanged and unattempted.
 
-### Phase 5 — desktop UI and undo
+### Phase 5 — undo, and the client that is not compiled
+
+*Corrected 2026-09-10 by decisions T and V (namespace draft §9). The operator client of this
+phase is `clients/console`, which has no toolchain and lifts nothing; what follows is what the
+ENGINE half reuses, plus what the desktop client of §14.16 will look at when it starts.*
 
 | Need | Reuse |
 |---|---|
 | Per-domain undo | `spatcore/control/state/TreeParameterStore`: `juce::UndoManager` per app-declared domain, `ScopedUndoDomain`, `ScopedUndoSuppression` (cue-driven recalls must not bury the operator's edits), write interceptor, post-write hook. This is the "per-domain undo histories from WFS-DIY port directly" of PRD §3.20 — the **mechanisms** port; the `(paramId, channelIndex)` API is WFS-shaped |
-| Two things to design before porting | undo must itself be a logged command to stay replayable; `UndoManager::ActionSet` reads `Time::getCurrentTime()` (`juce_UndoManager.cpp:73`) and needs an exception in the "no clock reads while applying" rule |
-| Shared widgets | `spatcore/ui/` (EQ display, band toggle, patch matrix) — palette and strings injected by the app |
+| Three things to design before porting | undo must itself be a logged command to stay replayable; `UndoManager::ActionSet` reads `Time::getCurrentTime()` (`juce_UndoManager.cpp:73`) and needs an exception in the "no clock reads while applying" rule; and `juce::UndoManager` is neither copyable nor movable, so it cannot be a plain member of a `ShowDocument` that has a hand-written move — §14.9 says which shape it takes instead |
+| An OSCQuery client | Go.dot's own `src/wfg/engine/oscquery/OscQueryClient.h`, written for Phase 2's mount probe, is what a desktop client reads the tree with. WFS-DIY's `Plugin/Source/Shared/OscQueryClient.{h,cpp}` is where the pattern came from and stays the reference for the `?HOST_INFO` re-encoding trap |
+| A JUCE GUI kit, when §14.16's client starts | XOA's `Source/GUI/` (`Binding/`, `Layout/`, `Selection/`, `Widgets/`, `ColumnFocusTraverser.h`, `ColorScheme.h`, `XoaLookAndFeel.h`) is the most general of the author's kits and the first place to look. XOA is under construction, so it is a place to look rather than a dependency |
+| Shared widgets | `spatcore/ui/` (EQ display, band toggle, patch matrix) — palette and strings injected by the app; the EQ display is the curve editor's nearest relative |
+| The operator client itself | **nothing.** Decision V makes `clients/console` PRD §3.17's web client: one directory, no toolchain, served from disk. There is nothing to lift into a page that has no framework to lift it into |
 
 ### Phase 6 — control surfaces; Phase 11 — Stream Deck, SpaceMouse
 
@@ -548,8 +555,11 @@ Four things around it, and one that is a gap rather than a reuse:
 
 ### Phase 7 — tablet
 
-The web client is Go.dot's own (PRD §3.17). WFS-DIY's Android remote (`WFS_control_2`)
-is the "hand-maintained parameter table on both sides" the PRD contrasts it with.
+The web client is Go.dot's own (PRD §3.17), and since decision V (2026-09-09) it is not a
+second client at all: `clients/console` grows into it, so Phase 7 inherits a surface that has
+been driven through two phases rather than starting one. WFS-DIY's Android remote
+(`WFS_control_2`) is the "hand-maintained parameter table on both sides" the PRD contrasts it
+with, and stays the counter-example rather than a source.
 
 ### MCP — a client the PRD names but no phase schedules
 
