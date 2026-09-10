@@ -31,6 +31,7 @@ namespace wfg::doc
     {
         const juce::Identifier idProperty { "id" };
         const juce::Identifier standbyProperty { "standby" };
+        const juce::Identifier lockedProperty { "locked" };
 
         /*  Whether a value is a legal standby for this list: somewhere on its
             MANUAL PATH, or nothing at all.
@@ -315,6 +316,28 @@ namespace wfg::doc
 
     void ShowDocument::adopt (juce::ValueTree newRoot, IdRegistry newRegistry)
     {
+        /*  A HATCH, NOT A DOOR, and the edit lock is deliberately not asked
+            here.
+
+            This is the fifth writer of the document and it goes through none
+            of the four doors: it is how `Bundle::open` loads a show, and it
+            will be how `document.revert` and `document.recover` replace one.
+            It does not edit the show, it swaps it - and because `locked` is an
+            attribute of the root it swaps THE LOCK too, for whatever the
+            loaded state.xml says. A revert of a bundle saved unlocked would
+            silently unlock a locked session.
+
+            Guarding it here would be wrong twice. The load that opens a
+            locked bundle comes through here with nothing locked yet (the lock
+            arrives a moment later, restored from state.xml through
+            `setAttribute`), so a guard would never fire when it mattered and
+            would refuse the loads that are not edits at all. And a guard that
+            did fire would leave the caller holding a half-opened bundle. So
+            the refusal belongs to the COMMANDS that open this hatch on a live
+            show - revert and recover check `isLocked()` in their handlers,
+            before they read a byte - and the hatch itself stays what it is: a
+            replacement of the show, lock included (namespace draft §14.11). */
+
         /*  The listener follows the document. A listener left on the tree that
             was just replaced would report nothing (nobody writes to it any
             more) and would outlive nothing, but it would also mean the NEW tree
@@ -473,6 +496,30 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    bool ShowDocument::isLocked() const
+    {
+        /*  An absent attribute IS its default, and the row's default is
+            false: a show nobody has locked is not locked.
+
+            Read as the stored var rather than through `getAttribute`, because
+            there is exactly one way a lock reaches the tree - `setAttribute`,
+            from a client's write or from state.xml; the reader refuses a
+            show.xml carrying one as engine state - and that door typed it as
+            a boolean on the way in, never as the text "true". And because
+            this is asked by every door, and need not parse an address to
+            answer. */
+        return static_cast<bool> (showNode[lockedProperty]);
+    }
+
+    std::optional<EditResult> ShowDocument::refuseIfLocked() const
+    {
+        if (! isLocked())
+            return std::nullopt;
+
+        return EditResult::failed (reason::locked);
+    }
+
+    //==============================================================================
     EditResult ShowDocument::setAttribute (const std::string& address, std::string_view text)
     {
         auto target = resolve (address);
@@ -485,6 +532,33 @@ namespace wfg::doc
             a written one and the structure is what would have to change. */
         if (target.isDerived || target.attribute->access() == Access::read)
             return EditResult::failed (reason::readOnly);
+
+        /*  THE EDIT LOCK, for the show half and only the show half.
+
+            `persist == show` AND NOTHING ELSE - not `!= state`. A value that
+            reaches this line is `show` or `state` (a `none` row is derived and
+            was refused above), so today the two spellings agree; they stop
+            agreeing the day a writable `none` row is resolved here, and the
+            question this line asks is "would show.xml record it?", which is
+            the one that stays right. The state half is where the operator is
+            standing: the standby GO moves, the focus, and the lock itself,
+            whose release has to get through or the lock could never be lifted.
+            It is also what EphemeralState restores a bundle through, so a lock
+            that refused it would make a locked bundle refuse its own lock.
+
+            HERE, BESIDE THE READ-ONLY CHECK AND BEFORE THE PARSE, and the
+            position is the point. Asked after the parse, a locked show would
+            answer `type-mismatch` for a badly typed value and `locked` only
+            for a well-typed one, sending an operator to look at their encoder
+            when the answer was that the show is fixed. The address has to be
+            resolved first, because which half a value lives in is a property
+            of its row; everything after that is a question a locked show
+            would refuse anyway. */
+        if (target.attribute->persist() == Persist::show)
+        {
+            if (auto refusal = refuseIfLocked())
+                return *refusal;
+        }
 
         Value value;
         const auto parsed = Schema::parseValue (*target.attribute, text, value);
@@ -566,6 +640,20 @@ namespace wfg::doc
                                            const std::string& id,
                                            const std::vector<std::pair<std::string_view, std::string>>& attributes)
     {
+        /*  THE DOOR EVERY CREATE COMES THROUGH - the ten creates, and the
+            header, footer and persistent section that are made on first ask.
+            Asked before an identifier is drawn or reserved, so a refused
+            create leaves the registry exactly as it found it.
+
+            Two things follow from its being here and not in each create. The
+            creates that answer with an existing child (`createRole`,
+            `createPersistent`) return before they reach this line and are
+            applied under the lock, which is right: they change nothing. And
+            one create that changes the document on its way here has to ask
+            for itself - see `createRackChannel`. */
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
         const auto* element = Schema::instance().element (elementName);
 
         if (element == nullptr || ! parent.isValid())
@@ -700,6 +788,22 @@ namespace wfg::doc
     EditResult ShowDocument::createRackChannel (const std::string& channelClass,
                                                 const std::string& id)
     {
+        /*  ASKED HERE AS WELL AS AT THE DOOR, because this is the one create
+            that changes the document before it reaches `insertObject`: the
+            `<Rack/>` below is made on demand and added to the tree first. A
+            lock asked only at the door would let a locked show gain an empty
+            rack, move `revision()` and `showRevision()` through the listener,
+            light the dirty dot - and THEN refuse. A document changed by a
+            refusal, in the phase whose subject is trusting the save.
+
+            No other create has that shape: `createRole` and
+            `createPersistent` answer with an existing child before they
+            insert anything, and every other create only reads on its way to
+            the door. A create added later that makes a container on demand
+            needs this line too. */
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
         auto audio = showNode.getChildWithName ("Audio");
 
         if (! audio.isValid())
@@ -879,6 +983,13 @@ namespace wfg::doc
 
     EditResult ShowDocument::remove (const std::string& id)
     {
+        /*  First, before the identifier is looked up. A locked show refuses
+            the corrected command as well, so of the two things that could be
+            wrong with a delete on a locked show the lock is the one worth
+            reading first. */
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
         auto node = findById (id);
 
         if (! node.isValid())
@@ -988,6 +1099,13 @@ namespace wfg::doc
 
     EditResult ShowDocument::move (const std::string& id, const std::string& newParentId, int newIndex)
     {
+        /*  First, for the reason `remove` gives. A reorder is an edit to the
+            show like any other - the order of the rows IS the show - so a
+            locked show refuses it, and the standby repair below, which writes
+            a state row, is never reached. */
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
         auto node = findById (id);
 
         if (! node.isValid())

@@ -56,6 +56,7 @@
 #include <juce_data_structures/juce_data_structures.h>
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -236,6 +237,40 @@ namespace wfg::doc
         Resolved resolve (const std::string& address) const;
 
         //======================================================================
+        // The edit lock
+        //======================================================================
+
+        /*  WHETHER THE SHOW IS LOCKED (decision W): `/godot/document/locked`,
+            an attribute of the root written by an ordinary `node.set` like
+            any other writable node.
+
+            A LOCK ON THE SHOW AND NOT A MODE IN A CLIENT. The tablet in the
+            house, an MCP client and somebody's renumbering script all reach
+            `object.delete` through the same socket, and a client that hides
+            its own buttons has locked exactly one of them. So the refusal is
+            here, in the document's four doors - `setAttribute`,
+            `insertObject`, `remove` and `move` - because every edit in the
+            engine goes through one of them, and a predicate at the doors
+            cannot be got past by a command that forgot to ask. (`adopt` is
+            the one writer that is not a door, because it replaces the show
+            rather than editing it; its definition says what that means for
+            the lock.)
+
+            WHAT IT LOCKS IS THE SHOW HALF, as a rule rather than as a
+            property of this one row: a write to a `persist == show` value is
+            refused, and a write to a `persist == state` value is not. The
+            state half is where the operator is standing - the standby a GO
+            moves, the focus, and this lock, whose own release has to get
+            through or nobody could ever lift it. It is also the half a
+            bundle's state.xml is restored through, so a lock that refused
+            state writes would make a locked bundle refuse to load its own
+            `locked="true"`. Namespace draft §14.11 has the whole argument.
+
+            Persisted in state.xml, so a show locked at 20:40 whose engine was
+            restarted at 20:44 comes back locked. */
+        bool isLocked() const;
+
+        //======================================================================
         // Lookup
         //======================================================================
 
@@ -246,7 +281,11 @@ namespace wfg::doc
         const IdRegistry& ids() const noexcept { return registry; }
 
         /** Replaces the whole document, taking over its identifiers. Used by
-            the reader; nothing else should need it. */
+            the reader; nothing else should need it.
+
+            NOT A DOOR, and the edit lock does not guard it: it replaces the
+            show rather than editing it, and the lock with it. See the
+            definition for why the refusal belongs to whoever opens it. */
         void adopt (juce::ValueTree newRoot, IdRegistry newRegistry);
 
         /*  HOW MANY TIMES THE SHOW HAS CHANGED, so that a derived answer can be
@@ -375,6 +414,12 @@ namespace wfg::doc
         juce::ValueTree containerElementFor (std::string_view segment) const;
 
     private:
+        /*  The lock's refusal, or nothing when the show is not locked. Asked
+            by every door that changes the show half, and at the top of
+            `createRackChannel`, which is the one create that changes the
+            document before it reaches its door. */
+        std::optional<EditResult> refuseIfLocked() const;
+
         EditResult insertObject (juce::ValueTree parent, int index,
                                  std::string_view elementName,
                                  const std::string& id,

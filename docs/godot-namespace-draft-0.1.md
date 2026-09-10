@@ -5091,12 +5091,17 @@ what a section drawn before the code is for.
 - **What the lock's persistence lacks is not code but a fixture.** §14.4 gives the mechanism —
   the `Show` root is a container element and `EphemeralState` has written and read container
   entries since Phase 3, so `EphemeralState.cpp` gains no line. Two things follow that a fixture
-  author has to have right. An unset `locked` is simply **absent** from `state.xml`, because
-  `CanonicalXml::attributeText` omits an attribute only when the property is missing and never
-  when it equals its default (`CanonicalXml.cpp:75-81`, the `EphemeralState` loop at `:88-96`),
-  while `ShowDocument::setAttribute` writes the property unconditionally (`:509-510`) — so the
-  first `node.set /godot/document/locked false` after a lock leaves `<Show locked="false"/>` on
-  disk and it round-trips, and a fixture must assert the round trip rather than the absence. And
+  author has to have right. A lock that is not set — never set, or set and then released — is
+  **absent** from `state.xml`, because `CanonicalXml::attributeText` omits an attribute in BOTH
+  cases: when the property is missing (`CanonicalXml.cpp:80-81`) and when its canonical text
+  equals the row's default (`:141-142`), which for `locked` is `false`. So the first
+  `node.set /godot/document/locked false` after a lock leaves no `<Show>` entry at all, and a
+  fixture asserts the absence. *This sentence is a correction (PR 5.3, 2026-09-10):* it said the
+  opposite, that the writer omits only a missing property and so a released lock is written as
+  `locked="false"`. A verifier read the `hasProperty` test at `:80-81`, stopped there, and missed
+  the default comparison sixty lines further down the same function; PR 5.3's own unit test,
+  written to that account, is what caught it. What still round-trips is a `false` somebody *wrote
+  by hand*: `<Show locked="false"/>` in a `state.xml` reads back into an unlocked document. And
   no bundle carries an example: every `state.xml` under `tests/fixtures/bundles/` holds one
   `<List>` entry and nothing else (`phase4`'s carries only an id), so the container branch
   stands on one unit assertion (`tests/CueListTests.cpp:891`) and on nothing lxml or `wfg

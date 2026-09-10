@@ -171,6 +171,25 @@ namespace wfg
             business to say, not this word's. */
         inline constexpr const char* writeFailed     = "write-failed";
 
+        /*  Show mode is on, and the command would have changed the show half
+            of the document: a create, a delete, a move, or a write to a value
+            that persists in show.xml.
+
+            Its own code rather than `read-only`, which says the NODE can never
+            be written and sends somebody to read the table. This one says the
+            node is writable and the SHOW is fixed, which is a fact about
+            tonight rather than about the address - and the remedy is one write
+            to /godot/document/locked, which is the operator's to make.
+
+            Said by the document's four doors, so a command added next year is
+            refused without having to know the lock exists. The commands that
+            change the show without knocking at a door - undo, redo, revert and
+            recover, when they arrive - will have to say it in their own
+            handlers, and namespace draft §14.11 says why. What it never covers
+            is where the operator is standing: GO, the standby, the focus and a
+            mounted write reach no door that says it. */
+        inline constexpr const char* locked          = "locked";
+
         /*  A mount's namespace file could not be read, or is not a usable
             OSCQuery description. Distinct from bad-address on purpose: the
             mount exists and was named correctly, and what failed is the file it

@@ -202,6 +202,31 @@ would have prepared the scene before any test could watch it.
 seconds in starts at 0.45, and no cue that started at the top of the file can. That is what turns
 "the jump landed at four seconds" from a claim about a clock into a reading off the render.
 
+## `bundles/locked/` — a show saved in show mode, with no log of its own
+
+The first bundle whose `state.xml` says something about the `Show` root: `<Show locked="true"/>`,
+the edit lock of decision W (namespace draft §14.11), beside the two lists' standbys. The root is a
+**container** entry — one of it, addressed as `/godot/document`, so no `id` — and that branch of
+`state.xml` had stood on one unit assertion about `<Lists focus>` and on nothing lxml or `wfg
+validate` had ever read. Now `schema.fixtures` puts it in front of lxml, `wfg.validate.locked`
+opens it under both locales, and `DocumentTests` opens it, saves it and requires the same bytes
+back.
+
+The lock being restored at all is the test of the lock's own rule. `EphemeralState` restores every
+saved value through `ShowDocument::setAttribute`, the door every other write takes, so a lock that
+refused state writes as well as show writes would make this bundle refuse to load its own
+`locked="true"` — and `wfg validate` would exit 1 saying so.
+
+The show is small on purpose. Two lists of memos, so that a GO has somewhere to move the pointer
+and the second list has a pointer that must NOT move; and a mount on a desk with one writable
+fader, which `blackbox/phase5_document.py` points at `mock_target.py` to prove that a write to a
+mounted device gets through a locked show. `port="9000"` is the placeholder that driver rewrites to
+the port the mock was given, as every mounted bundle here has one. `Audio tracks="0"`, because a
+show of memos has no audio side and that is a real answer rather than a placeholder.
+
+No `.wfglog` beside it, for the reason `phase3/` gives: the driver records its own session and
+replays it, refusals included.
+
 ## `bundles/chain/` and `logs/auto-chain.wfglog`
 
 One press, and a whole scene runs itself: five cues, a nested timeline group and a footer. An

@@ -462,6 +462,20 @@ add_test(NAME wfg.validate.slots.fr_FR
          COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/slots"
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# And a bundle saved LOCKED: `<Show locked="true"/>` in its state.xml, which is
+# the first entry any fixture has carried for the Show root and the first time
+# the container branch of state.xml has been put in front of lxml or of this
+# verb. It is also the check on the edit lock's own rule, from the outside: the
+# lock is restored through the same door every other write takes, so a lock
+# that refused state writes would make a locked bundle refuse to load its own
+# lock - and this would exit 1 saying so.
+add_test(NAME wfg.validate.locked.C
+         COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/locked"
+                 --wfg-locale=C)
+add_test(NAME wfg.validate.locked.fr_FR
+         COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/locked"
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # The parameter tree, printed by the product binary. Registered under both
 # locales for the same reason as `wfg schema`: this is a serialisation surface,
 # every number in it goes through the project's formatter, and a formatter that
@@ -676,6 +690,25 @@ add_test(NAME blackbox.phase4.fr_FR
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.phase4.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 400)
+
+# PHASE 5'S DOCUMENT HALF, started by PR 5.3 with the edit lock and grown by the
+# pull requests after it. What it asks is what only a shipped binary can answer:
+# that a bundle saved locked opens locked, that the ENGINE refuses an edit from
+# any client with `locked` in lastError - a client that hides its buttons has
+# locked exactly one client - and that GO, a write to a mounted device and the
+# lock's own release all get through. Then the session's log replays, refusals
+# included. No audio side, so it is short; three hundred seconds is the suite's
+# usual allowance for a loaded runner.
+add_test(NAME blackbox.phase5.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase5_document.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.phase5.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase5.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase5_document.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase5.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # The wiring the unit suite cannot reach: a real datagram, on a real socket, on
 # a thread that may not read the document, reaching the right cue - and the

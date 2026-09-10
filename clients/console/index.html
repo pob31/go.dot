@@ -99,6 +99,12 @@ html, body {
     cannot tell amber from ink still reads the answer. */
 #strip .dirty span { color: var(--standby); }
 
+/*  SHOW MODE, in the cool accent rather than either warm one: nothing is wrong
+    and nothing is waiting to be saved, the show is simply fixed. And again the
+    word carries it - "locked" against "open" - so the colour is a second
+    telling and never the only one (§4.8). */
+#strip .locked span { color: var(--waiting); font-weight: 600; }
+
 #link { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 #link .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
 #link.up   .dot { background: var(--live); }
@@ -128,6 +134,11 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 #go:hover { filter: brightness(1.08); }
 
 #transport .hint { color: var(--ink-faint); font-size: 10px; margin-left: auto; }
+
+/*  THE LOCK SITS AT THE FAR END FROM GO, on purpose: it is the one control on
+    this row that a forearm in the dark should not find on the way to GO. Its
+    label says what pressing it will do, and `aria-pressed` says what it is. */
+#lock[aria-pressed="true"] { border-color: var(--waiting); color: var(--waiting); }
 
 /*  SAID AT THE MOMENT OF CONFUSION. A list with no standby is a list where GO
     and both arrows do nothing, on purpose: only an explicit park arms one,
@@ -354,6 +365,7 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     <span class="brand">Go.dot</span>
     <span class="stat"><b>show</b><span id="s-show">—</span></span>
     <span class="stat" id="s-saved-wrap"><b>file</b><span id="s-saved">—</span></span>
+    <span class="stat" id="s-lock-wrap"><b>edits</b><span id="s-lock">—</span></span>
     <span class="stat"><b>tick</b><span class="num" id="s-tick">—</span></span>
     <span class="stat"><b>audio</b><span id="s-audio">—</span></span>
     <span class="stat"><b>rate</b><span class="num" id="s-rate">—</span></span>
@@ -371,6 +383,7 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     <button data-cmd="standby.clear">clear</button>
     <span class="clear-note" id="clear-note" hidden></span>
     <span class="hint">space GO · ↑ ↓ standby · a row to inspect · its LEFT EDGE to park</span>
+    <button id="lock" aria-pressed="false" disabled>lock the show</button>
   </div>
 
   <div id="refusal"></div>
@@ -1473,6 +1486,30 @@ function renderStrip() {
                                      : isSaved ? "show.xml holds this show"
                                                : "the engine has not said";
 
+  /*  SHOW MODE (decision W), which the ENGINE keeps: while it is on, every
+      edit to the show from any client is refused and says `locked`, and GO,
+      the standby, the runs and a write to a mounted device all carry on. This
+      page reads it and writes it and decides nothing about it - no button is
+      hidden here because of it, since the engine refusing is the lock and a
+      page declining to send would only be one client's opinion. Three
+      answers, as the file's readout has, because an engine that does not publish the
+      node is not the same as a show that is open. */
+  const lockValue = tree.get("/godot/document/locked", null);
+  const isLocked = lockValue === true || lockValue === "true";
+  const isOpen = lockValue === false || lockValue === "false";
+
+  el("s-lock").textContent = isLocked ? "locked" : isOpen ? "open" : "—";
+  el("s-lock-wrap").className = isLocked ? "stat locked" : "stat";
+  el("s-lock-wrap").title = isLocked
+    ? "show mode: the engine refuses every edit to the show, from every client; " +
+      "GO, standby, runs and mounted devices carry on"
+    : isOpen ? "the show can be edited" : "the engine has not said";
+
+  const lockButton = el("lock");
+  lockButton.textContent = isLocked ? "unlock the show" : "lock the show";
+  lockButton.setAttribute("aria-pressed", isLocked ? "true" : "false");
+  lockButton.disabled = !isLocked && !isOpen;
+
   el("s-tick").textContent = tree.get("/godot/engine/tick", "—");
   el("s-audio").textContent = tree.get("/godot/audio/status", "—");
 
@@ -1780,6 +1817,19 @@ document.addEventListener("keydown", (event) => {
 });
 
 el("go").addEventListener("click", () => command("go"));
+
+/*  THE LOCK IS A NODE, NOT A COMMAND (namespace draft §14.7): the toggle is a
+    `node.set` on /godot/document/locked like any other write, carrying the
+    boolean it wants rather than a word, and the engine's answer comes back the
+    way every answer does - as the reading the next poll brings. Which way to
+    flip is decided from what the engine last said, not from what this button
+    last did, so two pages in two hands cannot argue it into the wrong state. */
+el("lock").addEventListener("click", () => {
+  const now = tree.get("/godot/document/locked", null);
+  const isLocked = now === true || now === "true";
+
+  send("/godot/document/locked", [{ tag: isLocked ? "F" : "T" }]);
+});
 
 for (const button of document.querySelectorAll("#transport [data-cmd]")) {
   button.addEventListener("click", () => command(button.dataset.cmd));

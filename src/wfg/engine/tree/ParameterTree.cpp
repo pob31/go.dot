@@ -777,8 +777,12 @@ namespace wfg::tree
         const auto showNode = document.root();
 
         //----------------------------------------------------------------------
-        // /godot/document — the show format's own version. The rest of that
-        // container is runtime state and lives on the other side.
+        // /godot/document — the rows that persist, read off the root: the
+        // show format's own version, and the edit lock, which persists in
+        // state.xml rather than show.xml and is published from here all the
+        // same. The split is the persist column and not how often a value
+        // changes. The rows that persist nowhere are runtime state and live on
+        // the other side.
         for (const auto* row : doc::Schema::rowsForOwner ("document"))
         {
             if (row->persist == doc::Persist::none)

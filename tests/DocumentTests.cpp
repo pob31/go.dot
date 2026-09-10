@@ -32,14 +32,18 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/document/EphemeralState.h>
 #include <wfg/engine/log/Replay.h>
 
 #include <juce_core/juce_core.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <set>
 #include <string>
 #include <utility>
@@ -1003,4 +1007,492 @@ TEST_CASE ("show revision: a moved document keeps its count, and keeps counting"
     ShowDocument assigned;
     assigned = std::move (moved);
     CHECK (assigned.showRevision() == afterEdit);
+}
+
+//==============================================================================
+/*  THE EDIT LOCK (decision W, namespace draft §14.11).
+
+    Every case below goes through the COMMANDS where the claim is about what a
+    client's gesture does, because the lock is a promise made to every client
+    at once and the commands are what every client sends. The document's own
+    calls are used where the claim is about the document - that a refusal
+    changed nothing, that a create which makes a container on demand asks
+    before it makes it.
+*/
+namespace
+{
+    const std::string lockAddress { "/godot/document/locked" };
+    const std::string mainList { "7K2QM9X4" };
+    const std::string houseToHalf { "B3N8R5TW" };
+    const std::string preshow { "D9FH2JKA" };
+    const std::string wfsMount { "G1JS4VWE" };
+
+    bool endsWith (const std::string& whole, const std::string& tail)
+    {
+        return whole.size() >= tail.size()
+            && whole.compare (whole.size() - tail.size(), tail.size(), tail) == 0;
+    }
+
+    /*  The hand-authored show, the document's commands, the standby's, and a
+        stand-in for the mounts - a foreign write that counts what reached it
+        rather than sending it anywhere. One command per tick, so each result
+        is that command's and nobody else's. */
+    struct LockRig
+    {
+        LockRig()
+        {
+            registerDocumentCommands (engine.commands(), document,
+                                      [this] (const std::string&, const osc::Value& value)
+                                      {
+                                          ++foreignWrites;
+                                          return Outcome::ok ({ value });
+                                      });
+
+            cue::registerCueCommands (engine.commands(), document, focus);
+            engine.log().openInMemory ({});
+        }
+
+        Engine::TickResult run (const std::string& name, std::vector<osc::Value> args = {})
+        {
+            REQUIRE (engine.submit (origin::cli, name, std::move (args)));
+            return engine.processTick (nextTick++);
+        }
+
+        Engine::TickResult setLocked (bool on)
+        {
+            return run ("node.set", { osc::Value::string (lockAddress), osc::Value::boolean (on) });
+        }
+
+        std::string standby() const
+        {
+            return document.getAttribute ("/godot/list/" + mainList + "/standby")
+                     .value_or (std::string ("<unresolved>"));
+        }
+
+        ShowDocument document = loaded ("canonical.xml");
+        cue::Focus focus;
+        Engine engine;
+        int foreignWrites = 0;
+        std::int64_t nextTick = 0;
+    };
+
+    std::string bytesOf (const juce::File& file)
+    {
+        juce::MemoryBlock block;
+        REQUIRE_MESSAGE (file.loadFileAsData (block), "cannot read " << file.getFullPathName());
+
+        std::string out;
+
+        /*  Without the carriage returns, for the reason `fixture` above gives:
+            a checkout that turned the committed file into CRLF must test the
+            same thing as one that did not. The writer's own endings are pinned
+            elsewhere. */
+        for (const char c : std::string (static_cast<const char*> (block.getData()), block.getSize()))
+            if (c != '\r')
+                out.push_back (c);
+
+        return out;
+    }
+}
+
+TEST_CASE ("edit lock: a locked show refuses every edit to it, and the refusal changes nothing")
+{
+    LockRig rig;
+
+    CHECK_FALSE (rig.document.isLocked());
+    REQUIRE (rig.setLocked (true).applied == 1);
+    REQUIRE (rig.document.isLocked());
+
+    const auto showBefore = CanonicalXml::write (rig.document);
+    const auto revisionBefore = rig.document.revision();
+    const auto showRevisionBefore = rig.document.showRevision();
+
+    struct Attempt
+    {
+        const char* command;
+        std::vector<osc::Value> args;
+    };
+
+    /*  A create, a write to a value show.xml records, a move and a delete:
+        all four of the document's doors. Each with arguments that would be
+        applied on an unlocked show - the end of this case proves it - so the
+        only thing wrong with any of them is the lock. In an order that can be
+        applied again once it is lifted, which is why the cue is renamed and
+        moved before it is deleted. */
+    const std::vector<Attempt> attempts {
+        { "cue.create",    { osc::Value::string (mainList), osc::Value::int32 (0),
+                             osc::Value::string ("memo"), osc::Value::string ("Added under the lock") } },
+        { "node.set",      { osc::Value::string ("/godot/cue/" + houseToHalf + "/name"),
+                             osc::Value::string ("Renamed under the lock") } },
+        { "object.move",   { osc::Value::string (houseToHalf), osc::Value::string (mainList),
+                             osc::Value::int32 (1) } },
+        { "object.delete", { osc::Value::string (houseToHalf) } },
+    };
+
+    for (const auto& attempt : attempts)
+    {
+        INFO ("command: " << attempt.command);
+
+        const auto result = rig.run (attempt.command, attempt.args);
+        CHECK (result.applied == 0);
+        CHECK (result.rejected == 1);
+
+        /*  The line an operator reads at /godot/engine/lastError: which
+            gesture was refused, and that the show being locked is why. */
+        CHECK (endsWith (rig.engine.lastError(), std::string ("locked ") + attempt.command));
+    }
+
+    // --- and the show is exactly what it was --------------------------------
+    CHECK (CanonicalXml::write (rig.document) == showBefore);
+    CHECK (rig.document.revision() == revisionBefore);
+    CHECK (rig.document.showRevision() == showRevisionBefore);
+
+    /*  THE LOG SAYS IT IN THE SAME WORD, because the reason is part of the log
+        format and a replay has to reproduce the refusal as a refusal. */
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+    std::size_t lockedRecords = 0;
+
+    for (const auto& record : parsed.records)
+        if (record.kind == LogRecord::Kind::rejected && record.reason == reason::locked)
+            ++lockedRecords;
+
+    CHECK (lockedRecords == attempts.size());
+
+    // --- lifted, every one of them is applied ------------------------------
+    REQUIRE (rig.setLocked (false).applied == 1);
+
+    for (const auto& attempt : attempts)
+    {
+        INFO ("command, unlocked: " << attempt.command);
+        CHECK (rig.run (attempt.command, attempt.args).applied == 1);
+    }
+}
+
+TEST_CASE ("edit lock: where the operator is standing is not the show, so a locked show still moves it, and still unlocks")
+{
+    /*  The state half: the standby GO moves, the focus, and the lock's own
+        release. A lock that refused these would lock the operator out of GO
+        and out of unlocking, which is the opposite of show mode. */
+    LockRig rig;
+
+    const auto showAtOpen = rig.document.showRevision();
+
+    REQUIRE (rig.setLocked (true).applied == 1);
+
+    /*  THE LOCK ITSELF IS NOT AN EDIT TO THE SHOW, and does not light the
+        dot: an operator told there are unsaved changes because they locked
+        the show would learn to ignore the dot by the interval. */
+    CHECK (rig.document.showRevision() == showAtOpen);
+
+    const auto showBefore = CanonicalXml::write (rig.document);
+
+    CHECK (rig.run ("standby.set", { osc::Value::string (houseToHalf) }).applied == 1);
+    CHECK (rig.standby() == houseToHalf);
+
+    // The move GO itself makes.
+    CHECK (rig.run ("standby.next").applied == 1);
+    CHECK (rig.standby() != houseToHalf);
+
+    // The same position written as a client writes any node.
+    CHECK (rig.run ("node.set", { osc::Value::string ("/godot/list/" + mainList + "/standby"),
+                                  osc::Value::string (houseToHalf) }).applied == 1);
+    CHECK (rig.standby() == houseToHalf);
+
+    CHECK (rig.run ("node.set", { osc::Value::string ("/godot/list/focus"),
+                                  osc::Value::string (mainList) }).applied == 1);
+
+    /*  A MOUNTED WRITE NEVER REACHES THE DOCUMENT, so there is no door on its
+        way to refuse it: somebody in row H riding a level on a processor
+        because that is where the show sounds wrong is mixing, not editing
+        (PRD 3.17). */
+    CHECK (rig.run ("node.set", { osc::Value::string ("/wfs/input/1/gain"),
+                                  osc::Value::float32 (0.5f) }).applied == 1);
+    CHECK (rig.foreignWrites == 1);
+
+    // None of it touched what show.xml records.
+    CHECK (CanonicalXml::write (rig.document) == showBefore);
+    CHECK (rig.document.showRevision() == showAtOpen);
+
+    // --- and the release -----------------------------------------------------
+    REQUIRE (rig.setLocked (false).applied == 1);
+    CHECK_FALSE (rig.document.isLocked());
+
+    CHECK (rig.run ("cue.create", { osc::Value::string (mainList), osc::Value::int32 (0),
+                                    osc::Value::string ("memo"),
+                                    osc::Value::string ("Added once it was lifted") }).applied == 1);
+}
+
+TEST_CASE ("edit lock: the refusal arrives before the value is parsed, and the lock itself is never refused as locked")
+{
+    LockRig rig;
+    REQUIRE (rig.setLocked (true).applied == 1);
+
+    /*  A BADLY TYPED WRITE TO THE SHOW ON A LOCKED SHOW IS `locked`, not
+        `type-mismatch`: the corrected value would be refused as well, so the
+        answer worth reading first is that the show is fixed. Answered the
+        other way round, it would send an operator to look at their encoder. */
+    CHECK (rig.run ("node.set", { osc::Value::string ("/godot/cue/" + houseToHalf + "/enabled"),
+                                  osc::Value::string ("perhaps") }).rejected == 1);
+    CHECK (endsWith (rig.engine.lastError(), "locked node.set"));
+
+    /*  AND THE LOCK'S OWN ROW IS NEVER `locked`, since it is a state row: an
+        integer 1 is a type mismatch whichever way the lock stands (namespace
+        draft §14.2 says why the integer is not a boolean). */
+    CHECK (rig.run ("node.set", { osc::Value::string (lockAddress),
+                                  osc::Value::int32 (1) }).rejected == 1);
+    CHECK (endsWith (rig.engine.lastError(), "type-mismatch node.set"));
+    CHECK (rig.document.isLocked());
+
+    // The text spelling is the same write as the boolean.
+    CHECK (rig.run ("node.set", { osc::Value::string (lockAddress),
+                                  osc::Value::string ("false") }).applied == 1);
+    CHECK_FALSE (rig.document.isLocked());
+
+    // Unlocked, the badly typed write is what it always was.
+    CHECK (rig.run ("node.set", { osc::Value::string ("/godot/cue/" + houseToHalf + "/enabled"),
+                                  osc::Value::string ("perhaps") }).rejected == 1);
+    CHECK (endsWith (rig.engine.lastError(), "type-mismatch node.set"));
+}
+
+TEST_CASE ("edit lock: a locked channel.create leaves no rack behind and does not move the show")
+{
+    /*  The one create that changes the document on its way to the door: it
+        makes the `Rack` container on demand and only then inserts. A lock
+        asked only at the door would leave an empty rack in a locked show,
+        light the dirty dot, and then refuse. */
+    LockRig rig;
+
+    const auto rackOf = [&rig]
+    {
+        return rig.document.root().getChildWithName ("Audio").getChildWithName ("Rack");
+    };
+
+    REQUIRE_FALSE (rackOf().isValid());
+    REQUIRE (rig.setLocked (true).applied == 1);
+
+    const auto revisionBefore = rig.document.revision();
+    const auto showRevisionBefore = rig.document.showRevision();
+
+    CHECK (rig.run ("channel.create", { osc::Value::string ("mono") }).rejected == 1);
+    CHECK (endsWith (rig.engine.lastError(), "locked channel.create"));
+
+    CHECK_FALSE (rackOf().isValid());
+    CHECK (rig.document.revision() == revisionBefore);
+    CHECK (rig.document.showRevision() == showRevisionBefore);
+
+    // The same, asked of the document rather than of the command.
+    const auto edit = rig.document.createRackChannel ("mono");
+    CHECK_FALSE (edit.ok);
+    CHECK (edit.reason == std::string (reason::locked));
+    CHECK_FALSE (rackOf().isValid());
+    CHECK (rig.document.revision() == revisionBefore);
+
+    // Lifted, the identical command makes both the rack and the channel.
+    REQUIRE (rig.setLocked (false).applied == 1);
+    CHECK (rig.run ("channel.create", { osc::Value::string ("mono") }).applied == 1);
+    CHECK (rackOf().isValid());
+    CHECK (rackOf().getNumChildren() == 1);
+}
+
+TEST_CASE ("edit lock: every create is refused under the lock, and each is applied once it is lifted")
+{
+    /*  The ten creates, asked of the document directly with arguments that are
+        good - which the second half proves - so what refuses each one is the
+        lock and nothing else. The objects they need to hang from are made
+        before the lock goes on. */
+    auto document = loaded ("canonical.xml");
+
+    const auto media = document.createCue (mainList, 0, "media", "The bed");
+    REQUIRE (media.ok);
+
+    const auto slot = document.createSlot (wfsMount, "/wfs/input/1");
+    REQUIRE (slot.ok);
+
+    const auto channel = document.createRackChannel ("mono");
+    REQUIRE (channel.ok);
+
+    const std::vector<std::pair<const char*, std::function<EditResult()>>> creates {
+        { "list",    [&document] { return document.createList ("Locked out"); } },
+        { "cue",     [&document] { return document.createCue (mainList, 0, "memo", "Locked out"); } },
+        { "route",   [&document, &media] { return document.createRoute (media.id, "J3MT5XYA"); } },
+        { "range",   [&document, &media] { return document.createRange (media.id, 0.0, 1.0); } },
+        { "slot",    [&document] { return document.createSlot (wfsMount, "/wfs/input/2"); } },
+        { "channel", [&document] { return document.createRackChannel ("stereo"); } },
+        { "feed",    [&document, &media, &slot] { return document.createFeed (media.id, slot.id); } },
+        { "insert",  [&document, &media, &channel] { return document.createInsert (media.id, channel.id); } },
+        { "trigger", [&document, &media] { return document.createTrigger (media.id, "osc"); } },
+        { "mount",   [&document] { return document.createMount ("/ext/locked", "namespaces/locked.json"); } },
+    };
+
+    REQUIRE (document.setAttribute (lockAddress, "true").ok);
+
+    const auto showBefore = CanonicalXml::write (document);
+    const auto revisionBefore = document.revision();
+
+    for (const auto& [what, create] : creates)
+    {
+        INFO ("create: " << what);
+
+        const auto edit = create();
+        CHECK_FALSE (edit.ok);
+        CHECK (edit.reason == std::string (reason::locked));
+    }
+
+    CHECK (CanonicalXml::write (document) == showBefore);
+    CHECK (document.revision() == revisionBefore);
+
+    REQUIRE (document.setAttribute (lockAddress, "false").ok);
+
+    for (const auto& [what, create] : creates)
+    {
+        INFO ("create, unlocked: " << what);
+
+        const auto edit = create();
+        CHECK (edit.ok);
+        CHECK (edit.reason.empty());
+    }
+}
+
+TEST_CASE ("edit lock: an idempotent create that finds what it was asked for is applied, and one that would insert is refused")
+{
+    /*  `group.role` and `list.persistent` answer with the child that already
+        exists before they reach a door, so on a group that has its footer they
+        change nothing and are applied under the lock. That is the rule - an
+        edit that would CHANGE the show is refused - and not an exemption:
+        asserting that every edit command refuses under the lock would find
+        these two and be red. */
+    LockRig rig;
+
+    const auto footer = rig.document.createRole (preshow, "footer");
+    REQUIRE (footer.ok);
+
+    const auto persistent = rig.document.createPersistent (mainList);
+    REQUIRE (persistent.ok);
+
+    REQUIRE (rig.setLocked (true).applied == 1);
+    const auto showBefore = CanonicalXml::write (rig.document);
+
+    CHECK (rig.run ("group.role", { osc::Value::string (preshow),
+                                    osc::Value::string ("footer") }).applied == 1);
+    CHECK (rig.run ("list.persistent", { osc::Value::string (mainList) }).applied == 1);
+
+    const auto again = rig.document.createRole (preshow, "footer");
+    CHECK (again.ok);
+    CHECK (again.id == footer.id);
+
+    // The group has no header, so asking for one would insert: refused.
+    CHECK (rig.run ("group.role", { osc::Value::string (preshow),
+                                    osc::Value::string ("header") }).rejected == 1);
+    CHECK (endsWith (rig.engine.lastError(), "locked group.role"));
+
+    CHECK (CanonicalXml::write (rig.document) == showBefore);
+}
+
+TEST_CASE ("edit lock: the lock is kept in state.xml and never in show.xml, and a released lock leaves nothing there")
+{
+    auto document = loaded ("canonical.xml");
+    REQUIRE (document.setAttribute (lockAddress, "true").ok);
+
+    const auto state = EphemeralState::write (document);
+    const auto show = CanonicalXml::write (document);
+
+    INFO ("state.xml:\n" << state);
+
+    /*  A CONTAINER ENTRY, with no identifier, because the `Show` root is a
+        container - one of it, addressed as `/godot/document` - and that branch
+        of EphemeralState has carried `Lists focus` since Phase 3. */
+    CHECK (state.find ("<Show locked=\"true\"/>") != std::string::npos);
+    CHECK (show.find ("locked") == std::string::npos);
+
+    ShowDocument reopened;
+    REQUIRE (CanonicalXml::read (show, reopened).ok);
+
+    // show.xml alone does not carry it...
+    CHECK_FALSE (reopened.isLocked());
+
+    // ...state.xml does, restored through the one write path.
+    const auto restored = EphemeralState::read (state, reopened);
+    INFO ("problems: " << (restored.problems.empty() ? std::string ("none")
+                                                     : restored.problems.front()));
+    CHECK (restored.ok);
+    CHECK (reopened.isLocked());
+
+    /*  THE RELEASE IS OMITTED, NOT WRITTEN. The state writer goes through
+        CanonicalXml::attributeText, which leaves out an attribute whose text is
+        the row's default, and `locked` defaults to false - so an unlocked show
+        leaves nothing in state.xml, whether or not it was ever locked. For
+        canonical.xml, which has no other state to remember, that is the bare
+        root and not one entry more. */
+    REQUIRE (document.setAttribute (lockAddress, "false").ok);
+
+    const auto released = EphemeralState::write (document);
+    INFO ("released state.xml:\n" << released);
+    CHECK (released.find ("locked") == std::string::npos);
+    CHECK (released == "<State formatVersion=\"1\"/>\n");
+
+    /*  A FALSE IN THE FILE STILL UNLOCKS. The writer never produces one, but
+        the grammar and the reader both accept it, and reading it into a LOCKED
+        document has to unlock it - the state half getting through a lock
+        exactly as a restore needs it to. The string is written by hand because
+        no save of ours would ever write it. */
+    const std::string handWritten = "<State formatVersion=\"1\">\n"
+                                    "  <Show locked=\"false\"/>\n"
+                                    "</State>\n";
+
+    REQUIRE (reopened.isLocked());
+
+    const auto unlocked = EphemeralState::read (handWritten, reopened);
+    INFO ("problems: " << (unlocked.problems.empty() ? std::string ("none")
+                                                     : unlocked.problems.front()));
+    CHECK (unlocked.ok);
+    CHECK_FALSE (reopened.isLocked());
+}
+
+TEST_CASE ("edit lock: the locked fixture bundle opens locked, refuses an edit, and saves and reopens locked")
+{
+    /*  THE SURVIVING-A-RESTART HALF, on a bundle folder rather than on two
+        strings: a show locked at 20:40 whose engine was restarted at 20:44
+        comes back locked, or the first thing a rebooted engine does is
+        un-protect a running performance (plan decision 6). */
+    const juce::File fixtureFolder { juce::String (std::string (WFG_TEST_FIXTURES_DIR))
+                                       + "/bundles/locked" };
+
+    REQUIRE_MESSAGE (fixtureFolder.isDirectory(),
+                     "missing fixture bundle: " << fixtureFolder.getFullPathName());
+
+    ShowDocument document;
+    const auto opened = Bundle::open (fixtureFolder, document);
+
+    INFO ("problems: " << (opened.problems.empty() ? std::string ("none")
+                                                   : opened.problems.front()));
+    REQUIRE (opened.ok);
+    CHECK (opened.problems.empty());
+    CHECK (document.isLocked());
+
+    const auto refused = document.createCue ("K5ACT001", 0, "memo", "Added to a locked bundle");
+    CHECK_FALSE (refused.ok);
+    CHECK (refused.reason == std::string (reason::locked));
+
+    // --- a save is not an edit, and the lock goes to disk with the show -----
+    const auto scratch = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                           .getChildFile ("wfg-tests")
+                           .getChildFile (juce::Uuid().toDashedString());
+
+    struct Cleanup
+    {
+        juce::File folder;
+        ~Cleanup() { folder.deleteRecursively(); }
+    } cleanup { scratch };
+
+    const auto savedFolder = scratch.getChildFile ("locked");
+    REQUIRE (Bundle::save (savedFolder, document).ok);
+
+    /*  THE SAME BYTES THE FIXTURE HOLDS, which is what makes the fixture a
+        canonical one rather than one the engine merely tolerates. */
+    CHECK (bytesOf (Bundle::stateFile (savedFolder)) == bytesOf (Bundle::stateFile (fixtureFolder)));
+    CHECK (bytesOf (Bundle::showFile (savedFolder)) == bytesOf (Bundle::showFile (fixtureFolder)));
+
+    ShowDocument reopened;
+    REQUIRE (Bundle::open (savedFolder, reopened).ok);
+    CHECK (reopened.isLocked());
 }

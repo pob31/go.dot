@@ -1,0 +1,13 @@
+{
+  "FULL_PATH": "/desk",
+  "DESCRIPTION": "A desk somebody can reach from the back of the room while the show is locked. One writable fader, because what the lock must never stop is a level ridden on a device during a performance: that is mixing, not editing.",
+  "CONTENTS": {
+    "fader": {
+      "FULL_PATH": "/desk/fader",
+      "DESCRIPTION": "Grand master, 0 to 1.",
+      "TYPE": "f",
+      "ACCESS": 3,
+      "RANGE": [{"MIN": 0.0, "MAX": 1.0}]
+    }
+  }
+}

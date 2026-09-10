@@ -1,0 +1,16 @@
+<Show>
+  <Lists>
+    <List id="K5ACT001" name="Act One">
+      <Cue id="K5MEM001" name="Beginners" number="1"/>
+      <Cue id="K5MEM002" name="House to half" number="2"/>
+      <Cue id="K5MEM003" name="Curtain up" number="3"/>
+    </List>
+    <List id="K5FYR001" name="Foyer">
+      <Cue id="K5MEM004" name="Doors" number="1"/>
+    </List>
+  </Lists>
+  <Mounts>
+    <Mount id="K5MNT001" namespace="namespaces/desk.json" port="9000" prefix="/desk"/>
+  </Mounts>
+  <Audio tracks="0"/>
+</Show>
