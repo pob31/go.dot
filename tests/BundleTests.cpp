@@ -31,6 +31,8 @@
 
 #include "TestSupport.h"
 
+#include <wfg/engine/command/Command.h>
+#include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/EphemeralState.h>
 #include <wfg/engine/document/Ids.h>
@@ -183,6 +185,60 @@ TEST_CASE ("bundle: every file it writes ends its lines with LF")
         CHECK (! text.empty());
         CHECK (text.back() == '\n');
     }
+}
+
+TEST_CASE ("document.save: a write that cannot land is refused, and the old bundle is untouched")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    /*  Making the write fail is the interesting half of this, and only some
+        ways of doing it are honest on all three platforms. A read-only folder
+        is not one: an elevated Windows process ignores the attribute, so the
+        case would pass on POSIX and quietly save on somebody's box. A parent
+        that does not exist is not one either, because `Bundle::save` creates
+        its folder and every missing parent with it, and the save would
+        succeed. A DIRECTORY standing where a file has to be is refused by
+        CreateFile and by open(2) alike - EISDIR there, access denied here -
+        and arranging it needs no privilege anywhere. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    const auto showXml = temp.folder.getChildFile ("show.xml");
+    REQUIRE (showXml.deleteFile());
+    REQUIRE (showXml.createDirectory().wasOk());
+
+    /*  A sentinel in state.xml rather than the fixture's own bytes, because
+        the fixture IS what a successful save writes - finding it unchanged
+        would prove nothing. These bytes are ones no save could produce, and
+        show.xml is written first, so their survival is the whole claim: the
+        save stopped at the file it could not open and wrote nothing else. */
+    const std::string sentinel = "<!-- not a thing save would ever write -->\n";
+    const auto stateXml = temp.folder.getChildFile ("state.xml");
+    writeBytes (stateXml, sentinel);
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (fixtureBundle(), document).ok);
+
+    CommandRegistry registry;
+    registerBundleCommands (registry, document, temp.folder);
+
+    const auto* saveCommand = registry.find ("document.save");
+    REQUIRE (saveCommand != nullptr);
+
+    CommandContext context;
+    const auto outcome = saveCommand->handler (context, {});
+
+    /*  Refused rather than reported: a save that did not happen must not reach
+        the log as applied, or a replay would reproduce a lie. */
+    CHECK_FALSE (outcome.applied);
+    CHECK (outcome.reason == reason::writeFailed);
+
+    /*  And the word itself, spelled out. The code is part of the log format
+        and therefore a contract, so a rename that changed the text would be a
+        format change and has to fail here rather than in somebody's parser. */
+    CHECK (outcome.reason == "write-failed");
+
+    CHECK (readBytes (stateXml) == sentinel);
 }
 
 //==============================================================================

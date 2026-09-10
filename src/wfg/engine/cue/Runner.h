@@ -613,6 +613,21 @@ namespace wfg::cue
             a readout and §3.15 says readouts do not replay. */
         void advanceRanges (Engine& engine);
 
+        /*  Where the playhead is IN THE FILE, for every run that is sounding,
+            so a client can draw one over a waveform (§3.30).
+
+            A PASS OF ITS OWN, and not a line inside `advanceRanges`: that loop
+            continues on `range < 0`, which is every kind but media and every
+            media cue with NO ranges - the ordinary media cue, and the only run
+            the coloured bar is ever drawn over. Paid there, the debt would have
+            been paid for every case except the one that needed it.
+
+            Tick thread, below the null-player gate, because it is arithmetic on
+            the sample counter and there is no counter without a Player. A
+            replay leaves `position` at nought exactly as it leaves
+            `rangeIteration`, which is §3.15: a readout is not an event. */
+        void updatePositions();
+
         /*  Recomputes every live run's effective level from its own and its
             ancestors', and hands the media ones to the audio side.
 

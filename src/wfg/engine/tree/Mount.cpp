@@ -22,6 +22,8 @@
 #include <wfg/engine/osc/OscValue.h>
 
 #include <algorithm>
+#include <string>
+#include <string_view>
 
 namespace wfg::tree
 {
@@ -52,6 +54,37 @@ namespace wfg::tree
             return {};
         }
 
+        /*  THE ADDRESSES THE ENGINE ANSWERS ITSELF, one list rather than one
+            hand-rolled comparison each.
+
+            Both entries are HTTP routes on the same port as the tree, so a
+            mount at either would be published and unreachable at once - visible
+            in a tree dump, and answering something that is not a namespace to
+            anybody who asked for it over HTTP. `/ui` is where the OSCQuery
+            server serves the client; `/media` is where a timbre pyramid is
+            served, content-addressed by hash, and a collision there would read
+            as a cache miss rather than as the collision it is, which is the
+            worst kind of failure to debug on a show day.
+
+            A list because the second one proved the shape: two copies of the
+            same three lines would have drifted the first time a third route was
+            added, and the third one - whatever it turns out to be - is now a
+            one-line change beside an argument rather than a check somebody has
+            to remember to write. `/media` is reserved BEFORE the route exists,
+            because a reservation is worth more before somebody's show file has
+            already used the prefix than after. */
+        struct Reserved
+        {
+            std::string_view prefix;   ///< the address itself, with no trailing slash
+            std::string_view served;   ///< what answers there, for the operator's message
+        };
+
+        constexpr Reserved reservedPrefixes[] =
+        {
+            { "/ui",    "its client" },
+            { "/media", "the timbre pyramids of the show's media" },
+        };
+
         /*  A prefix has to be an absolute OSC address with no trailing slash
             and no empty segment, because every mounted address is built by
             sticking it in front of one. A prefix of "/" would put somebody
@@ -64,16 +97,27 @@ namespace wfg::tree
                 return false;
             }
 
-            /*  `/ui` is where the OSCQuery server answers with the client
-                rather than with the tree, so a mount there would be published
-                and unreachable at once - visible in a tree dump and answering
-                HTML to anybody who asked for it over HTTP. Refused at load, for
-                the same reason "/" is: the file says something the engine
-                cannot honour. */
-            if (prefix == "/ui" || prefix.rfind ("/ui/", 0) == 0)
+            /*  Refused at load, for the same reason "/" is: the file says
+                something the engine cannot honour, and the show is read long
+                before anybody presses GO. */
+            for (const auto& reservation : reservedPrefixes)
             {
-                why = "\"/ui\" is where the engine serves its client, so nothing "
-                      "can be mounted there";
+                const auto reservedSize = reservation.prefix.size();
+
+                if (prefix.size() < reservedSize
+                      || prefix.compare (0, reservedSize, reservation.prefix) != 0)
+                    continue;
+
+                /*  The reserved address itself, or a segment beneath it, and
+                    nothing else. `/mediaserver` merely begins with the same
+                    letters and is somebody's perfectly ordinary mount: refusing
+                    it would be this check's own boundary bug rather than the
+                    collision it is there to catch. */
+                if (prefix.size() != reservedSize && prefix[reservedSize] != '/')
+                    continue;
+
+                why = "\"" + std::string (reservation.prefix) + "\" is where the engine serves "
+                      + std::string (reservation.served) + ", so nothing can be mounted there";
                 return false;
             }
 

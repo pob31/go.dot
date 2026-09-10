@@ -49,6 +49,10 @@
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/Touches.h>
 
+#include <cmath>
+#include <cstdint>
+#include <set>
+
 using namespace wfg;
 
 namespace
@@ -467,4 +471,305 @@ TEST_CASE ("run: a finished run keeps its address, so what happened can still be
 
     CHECK (snapshot->find (base + "/state")->soleValue()->getString() == "failed");
     CHECK (snapshot->find (base + "/error")->soleValue()->getString() == "media-missing");
+}
+
+//==============================================================================
+/*  THE PLAYHEAD, WHICH IS THE ONE READOUT THIS FILE CANNOT ASSERT WITHOUT A
+    CLOCK.
+
+    Everything above is a model a machine with no sound card reaches the same
+    answers about, and keeping that true is why this file has no audio in it.
+    `position` is the honest exception: it is where the playhead is IN THE FILE,
+    which is an origin plus a count of samples, and the sample counter belongs
+    to the Player. There is no version of the assertion that does without one.
+
+    So these cases BOLT A CLOCK TO THE RIG ABOVE rather than replace it. The
+    document, the commands, the identifiers and the run table are the same ones
+    every case above uses; what is added is a counter the test moves by hand,
+    which is also the only way to write down the number one expects and then
+    check that the engine wrote it.
+*/
+namespace
+{
+    /*  The audio side as a metronome and nothing else: it accepts every arm and
+        every launch, records the instant, and answers the two questions the
+        position pass asks - what the counter says, and what rate it is counting
+        at. It plays nothing, and `isPlaying` staying false is deliberate: a run
+        that never reports sounding is never ended by `observeEdges`, so a case
+        can watch one playhead for as long as it likes. */
+    struct CountingPlayer final : cue::Player
+    {
+        int trackCount() const override              { return 4; }
+        int slotCount() const override               { return 4; }
+        int channelsPerTrack() const override        { return 2; }
+        int blockSize() const override               { return block; }
+        int sampleRate() const override              { return rate; }
+        std::int64_t samplesElapsed() const override { return samples; }
+
+        void requestArm (const cue::ArmRequest& request) override { arms.push_back (request); }
+
+        bool launchAtSample (int, int slot, std::int64_t sample) override
+        {
+            launchedSlots.push_back (slot);
+            launches.push_back (sample);
+            return true;
+        }
+
+        bool stop (int) override                            { return true; }
+        bool stopAtSample (int, int, std::int64_t) override { return true; }
+        void setLevelDb (int, double) override              {}
+        bool isPlaying (int) const override                 { return false; }
+        bool isArmReady (int track) const override          { return ready.count (track) > 0; }
+
+        /** The disk answers, which is what lets the launch be placed. */
+        void completeArms (Engine& engine)
+        {
+            for (const auto& arm : arms)
+            {
+                engine.submit (origin::engine, "audio.armed",
+                               { osc::Value::string (arm.runId),
+                                 osc::Value::int32 (arm.track) });
+                ready.insert (arm.track);
+            }
+
+            arms.clear();
+        }
+
+        /*  48 kHz and 128 samples a block, so that a second is a number a case
+            can write down and a block is the tolerance every assertion here
+            uses. */
+        int rate = 48000;
+        int block = 128;
+        std::int64_t samples = 0;
+
+        std::vector<cue::ArmRequest> arms;
+        std::vector<std::int64_t> launches;
+        std::vector<int> launchedSlots;
+        std::set<int> ready;
+    };
+
+    //==========================================================================
+    struct PlayheadRig
+    {
+        PlayheadRig()
+        {
+            model.runner.setPlayer (&audio);
+            model.runner.setSamplesPerTick (samplesPerTick);
+
+            /*  A name is all the arm needs when no bundle folder is set: the
+                file is resolved against the bundle only when there is one, so a
+                case here names a sound nobody has to have. */
+            model.document.setAttribute ("/godot/cue/" + model.mediaId + "/file", "thunder.wav");
+        }
+
+        /*  ONE TICK OF A CLOCK THAT RUNS: the counter moves FIRST and the tick
+            thread then works on the sample count it will have had. Moved
+            afterwards it would leave every readout one tick - twenty
+            milliseconds, seven blocks - behind the counter it was computed
+            from, and a case that tolerated that could not tell a lag from a
+            bug. */
+        Engine::TickResult tickOnce()
+        {
+            audio.samples += samplesPerTick;
+            model.runner.beforeTick (model.engine, model.tick);
+            return model.engine.processTick (model.tick++);
+        }
+
+        void tickFor (int ticks)
+        {
+            for (int n = 0; n < ticks; ++n)
+                tickOnce();
+        }
+
+        cue::Run* runOf (const std::string& cueId)
+        {
+            for (const auto& run : model.runs.all())
+                if (run.cue == cueId)
+                    return model.runs.find (run.id);
+
+            return nullptr;
+        }
+
+        /** Arms a cue and stops there, which is a cue parked on a standby. */
+        cue::Run* armOnly (const std::string& cueId)
+        {
+            REQUIRE (model.engine.submit ("cli", "audio.arm", { osc::Value::string (cueId) }));
+            tickOnce();
+            audio.completeArms (model.engine);
+            tickOnce();
+
+            return runOf (cueId);
+        }
+
+        /*  Fires it and ticks until the launch has been PLACED, bounded because
+            what a launch that never comes looks like from here is a suite that
+            hangs and says nothing. */
+        cue::Run* fire (const std::string& cueId)
+        {
+            REQUIRE (model.engine.submit ("cli", "cue.fire", { osc::Value::string (cueId) }));
+            tickOnce();
+            audio.completeArms (model.engine);
+
+            for (int n = 0; n < 40; ++n)
+            {
+                tickOnce();
+
+                if (auto* run = runOf (cueId); run != nullptr && run->launchedAtSample > 0)
+                    return run;
+            }
+
+            return nullptr;
+        }
+
+        /** Seconds, from the counter, between an instant and now. */
+        double secondsSince (std::int64_t sample) const
+        {
+            return static_cast<double> (audio.samples - sample)
+                     / static_cast<double> (audio.rate);
+        }
+
+        /** One audio block, in seconds, which is the tolerance throughout. */
+        double oneBlock() const
+        {
+            return static_cast<double> (audio.block) / static_cast<double> (audio.rate);
+        }
+
+        static constexpr int samplesPerTick = 960;      // 48 kHz at 50 Hz
+
+        Rig model;
+        CountingPlayer audio;
+    };
+}
+
+TEST_CASE ("run: the playhead is where in the FILE the sound is, and it advances with the counter")
+{
+    /*  §3.30's coloured bar, and the debt underneath it: `position` was
+        declared, published and assigned by nothing at all, so what every client
+        read for two phases was the literal nought. What it has to be is the
+        start offset plus the time since the launch was placed - a place in the
+        file, and not a stopwatch on the run. */
+    PlayheadRig rig;
+
+    REQUIRE (rig.model.document.setAttribute ("/godot/cue/" + rig.model.mediaId + "/startOffset",
+                                              "2.5").ok);
+
+    auto* run = rig.fire (rig.model.mediaId);
+    REQUIRE (run != nullptr);
+
+    /*  BEFORE THE INSTANT ITSELF. A launch is placed a few ticks into the
+        future, and through that window the playhead sits at the offset the cue
+        asked for rather than somewhere before the beginning of the file. */
+    REQUIRE (rig.audio.samples < run->launchedAtSample);
+    CHECK (std::fabs (run->position - 2.5) < 1.0e-9);
+
+    const auto launched = run->launchedAtSample;
+
+    rig.tickFor (100);                               // two seconds of clock
+
+    REQUIRE (rig.audio.samples > launched);
+
+    const auto expected = 2.5 + rig.secondsSince (launched);
+
+    CHECK (std::fabs (run->position - expected) < rig.oneBlock());
+    CHECK (run->position > 2.5);
+
+    /*  AND IT KEEPS ADVANCING BY THE CLOCK'S OWN AMOUNT rather than by
+        whatever the pass felt like: a second of clock is a second of file. */
+    const auto before = run->position;
+
+    rig.tickFor (50);
+
+    CHECK (std::fabs ((run->position - before) - 1.0) < rig.oneBlock());
+}
+
+TEST_CASE ("run: a cue parked on a standby reads nought, and not the whole session")
+{
+    /*  THE GUARD THAT MAKES THIS A READOUT RATHER THAN A LIE.
+        `launchedAtSample` is nought until the launch has been placed, so a run
+        that is armed and waiting for its GO - which is every cue on a standby,
+        for as long as the operator takes over the next line - would otherwise
+        publish the session's whole elapsed time and be drawn as a sound that
+        has been playing since the show opened. */
+    PlayheadRig rig;
+
+    auto* run = rig.armOnly (rig.model.mediaId);
+    REQUIRE (run != nullptr);
+    REQUIRE (run->launchedAtSample == 0);
+
+    rig.tickFor (500);                               // ten seconds of session
+
+    REQUIRE (rig.audio.samples > 10 * rig.audio.rate);
+    CHECK (std::fabs (run->position) < 1.0e-9);
+
+    /*  AND THE NUMBER A CLIENT ACTUALLY READS, through the tree, because that
+        is the whole of what this debt was about: the address has existed since
+        Phase 2 and what reaches it has to be the run's own. */
+    tree::MountTable mounts;
+    tree::ParameterTree parameters { rig.model.document, rig.model.engine.commands(),
+                                     mounts, rig.model.runs };
+
+    tree::EngineState state;
+    const auto snapshot = parameters.publish (0, state);
+    const auto* node = snapshot->find ("/godot/run/" + run->id + "/position");
+
+    REQUIRE (node != nullptr);
+    REQUIRE (node->soleValue().has_value());
+    CHECK (std::fabs (node->soleValue()->asDouble()) < 1.0e-9);
+}
+
+TEST_CASE ("run: a run playing a range reads a position inside that range, and wraps with it")
+{
+    /*  §3.24: what a ranged cue plays is a region of its file, so the playhead
+        a client draws is a place in the FILE and not a place in the range - the
+        range's `in`, plus how far into the pass it has got. The in-point is the
+        awkward half, because it is not on the run at all: it is re-read from
+        the document at every boundary, so what this pass reads is the copy the
+        scheduler left behind when it entered the range.
+
+        AND IT WRAPS. Go.dot places nothing inside a range - the clip loops
+        itself - so a looping range's playhead goes back to its in-point on
+        every pass and never leaves the region somebody marked. */
+    PlayheadRig rig;
+
+    const auto range = rig.model.document.createRange (rig.model.mediaId, 10.0, 12.0);
+    REQUIRE (range.ok);
+
+    /*  Nought passes is FOR EVER (§3.24), which is what makes the wrap below
+        the clip's own rather than a boundary the scheduler placed. */
+    REQUIRE (rig.model.document.setAttribute ("/godot/range/" + range.id + "/loops", "0").ok);
+
+    auto* run = rig.fire (rig.model.mediaId);
+    REQUIRE (run != nullptr);
+
+    rig.tickFor (5);                                 // past the launch instant
+    REQUIRE (run->range == 0);
+
+    const auto entered = run->rangeStartedAtSample;
+    REQUIRE (entered > 0);
+
+    /*  Into the first pass: a second of a two-second range that begins ten
+        seconds into the file, which is a playhead at eleven and not at one. */
+    rig.tickFor (50);
+
+    CHECK (run->position > 10.0);
+    CHECK (std::fabs (run->position - (10.0 + std::fmod (rig.secondsSince (entered), 2.0)))
+             < rig.oneBlock());
+
+    /*  AND STILL INSIDE IT, three passes later. This is the assertion a
+        client's bar depends on: a position outside the marked region is a
+        playhead drawn off the end of the waveform it was handed. */
+    for (int n = 0; n < 300; ++n)
+    {
+        rig.tickOnce();
+
+        /*  RE-READ RATHER THAN HELD, because the run table is a vector and a
+            vector moves - the same reason every identifier in the engine is a
+            string rather than a pointer. */
+        auto* sounding = rig.runOf (rig.model.mediaId);
+
+        REQUIRE (sounding != nullptr);
+        REQUIRE_FALSE (sounding->isFinished());
+        CHECK (sounding->position >= 10.0);
+        CHECK (sounding->position < 12.0);
+    }
 }

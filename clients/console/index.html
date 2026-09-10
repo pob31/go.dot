@@ -900,6 +900,21 @@ function renderLists() {
   pane.innerHTML = out.join("");
 }
 
+/*  WHETHER A RUN'S LAUNCH HAS BEEN PLACED, asked of the one node that knows.
+
+    `run/state` publishes eight words and three of them are the run before its
+    launch: `preparing` is the horizon getting it ready ahead of any GO,
+    `waiting` is its pre-wait running, and `armed` is its voice held and its
+    media made ready. Nothing has been played in any of the three, so the
+    position of such a run is nought because nothing has moved rather than
+    because the cue is sitting at its top. Every other word - playing,
+    stopping, postWait, done, failed - is a run whose launch was placed, and a
+    finished one keeps the position it stopped at for the five seconds it is
+    retained, which is worth reading: it is how far the cue got. */
+function launched(state) {
+  return state !== "preparing" && state !== "waiting" && state !== "armed";
+}
+
 /*  THE RUNNING PANE, as a tree: a group's run holds its members' runs, which is
     what `parent` and `children` publish. Present tense - a finished run is kept
     for five seconds and then stops being published at all, which is why nothing
@@ -917,8 +932,42 @@ function runRow(id, depth, out) {
   const level = Number(tree.run(id, "level", 0));
   if (kind === "media" && Number.isFinite(level)) bits.push(level.toFixed(1) + " dB");
 
+  /*  WHERE WE ARE IN THIS CUE, in seconds and against the file's length when
+      there is one, so an operator reads the answer off the row instead of doing
+      arithmetic between a start time and a clock.
+
+      The gate here used to be `position > 0`, and that was never a test of
+      anything: `run/position` was declared and published from Phase 3 and
+      assigned by nothing until PR 5.1, so the number this row read was the
+      literal 0 and the comparison was a way of hiding a value nobody had
+      written yet. Now that it means something, nought is a legitimate position
+      - it is the first tick of a cue, and a run caught at its launch is exactly
+      the moment an operator wants the row to say something - so the honest
+      question is whether the run has been launched at all, which `state`
+      answers and `launched` above asks.
+
+      The length comes from the cue and not from the run because it is a fact
+      about the file rather than about this instance, which is why `duration` is
+      published as `/godot/cue/<id>/duration` and never copied onto the run.
+      Nought there is the engine saying it could not read a length - the file is
+      missing, or its format has no reader in this build - so such a cue says
+      its elapsed seconds alone rather than claiming to be somewhere of 0.0s.
+
+      In words either way (PRD 4.8): `at` and `of` carry which number is which,
+      and nothing here is left to the row's colour to say. */
   const position = Number(tree.run(id, "position", 0));
-  if (Number.isFinite(position) && position > 0) bits.push(position.toFixed(1) + "s");
+  const length = Number(tree.cue(cue, "duration", 0));
+
+  /*  MEDIA ONLY, because a launch is only ever PLACED for a media run holding a
+      track (`Runner::launchIfDue`). A group, memo, fade, stop or network run
+      never has one, so its playhead would be a confident 0.0s for as long as it
+      ran - a number that looks like a reading and is the absence of one. */
+  if (kind === "media" && launched(state) && Number.isFinite(position)) {
+    const timed = Number.isFinite(length) && length > 0;
+
+    bits.push("at " + position.toFixed(1) + "s"
+                + (timed ? " of " + length.toFixed(1) + "s" : ""));
+  }
 
   const phase = tree.run(id, "phase", "");
   if (phase) bits.push(phase);

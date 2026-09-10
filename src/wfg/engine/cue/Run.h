@@ -263,6 +263,26 @@ namespace wfg::cue
             values are not. */
         double position = 0.0;
 
+        /*  WHERE IN THE FILE THE THING PLAYING NOW BEGAN, in seconds, which is
+            the origin `position` is measured FROM and the half of it that
+            cannot be counted from the sample clock.
+
+            For an ordinary media run it is the offset the voice was armed with
+            - the run's own, if somebody jumped, and the cue's `startOffset`
+            otherwise - and for a run playing a range it is that range's `in`.
+            A `RangeSpec` is not on the run at all: it is re-read from the
+            document at every boundary (`Runner::rangesOf`), which is decision
+            L's edit-at-next-iteration and is exactly right for the boundary and
+            exactly wrong for a readout. So the number is COPIED here when it
+            changes - at the arm, and at each boundary - rather than looked up
+            per tick: the alternative is a walk of a cue's children and a
+            document read per range, for every run, fifty times a second, on the
+            thread §4.1's GO path shares.
+
+            Scheduler bookkeeping for a readout, like `rangeStartedAtSample`, so
+            nothing publishes it and no replay reproduces it. */
+        double positionOrigin = 0.0;
+
         /*  THE LEVEL IT IS PLAYING AT, in dB, and since PR 3.12 it is a SUM
             rather than a value anybody wrote:
 

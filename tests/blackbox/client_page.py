@@ -24,6 +24,12 @@ anybody who can reach it, so the first assertions here are the refusals: a path
 that climbs out of the directory, a file that is not there, and — the one that
 would be easy to lose — the tree still answering on the same port.
 
+AND WHAT COMES BACK IS THE FILE. A client is not only its page: it ships icons,
+fonts and — once it is split into ES modules — a directory of `.mjs`. None of
+those survive a UTF-8 round trip, so one case here serves a PNG this driver
+builds itself and compares the reply with the bytes on disk, which is the only
+assertion that can tell a served file from a mangled one.
+
 The second half is the other direction. The page reads over HTTP and writes by
 sending binary OSC on the WebSocket that answers on the same port, so an edit in
 its inspector is `node.set` and a new cue is `cue.create` — every one of them a
@@ -46,6 +52,7 @@ import json
 import sys
 import tempfile
 import time
+import zlib
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -120,6 +127,109 @@ def run(locale: "str | None") -> int:
 
             code, _ = common.http_get(server.http_port, "/godot")
             report.equal(code, 200, "and so does the whole tree")
+
+    return report.finish()
+
+
+def one_pixel_png() -> bytes:
+    """A valid one-pixel PNG, built here rather than committed as a blob.
+
+    A dozen lines of stdlib, and the bytes are then visible to whoever reads
+    this test rather than sitting in a file nobody in a review can open.
+    Greyscale, eight bits, one row of one sample behind its
+    zero filter byte; a chunk is a length, a type, its data and the CRC-32 of
+    the last two (PNG 1.2 §5). Sixty-seven bytes, and a decoder accepts it.
+
+    WHY A PNG AND NOT A TEXT FILE, which is the whole point of the assertion
+    below. Its first byte is 0x89, which begins no UTF-8 sequence, and its
+    ninth is a zero because the length field in front of IHDR is 00 00 00 0D.
+    A server that read the file into a string and re-encoded it hands back a
+    replacement character wherever the decoder gave up; one that built a string
+    from a pointer with no length stops at that zero and serves eight bytes.
+    Both answer 200 with the right content type in front of them, so only a
+    driver that compares the bytes can see either.
+    """
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return (len(data).to_bytes(4, "big") + kind + data
+                + (zlib.crc32(kind + data) & 0xFFFFFFFF).to_bytes(4, "big"))
+
+    signature = bytes([137, 80, 78, 71, 13, 10, 26, 10])
+
+    # Width, height, then bit depth, colour type, compression, filter and
+    # interlace — the thirteen bytes of IHDR, in that order.
+    header = (1).to_bytes(4, "big") + (1).to_bytes(4, "big") + bytes([8, 0, 0, 0, 0])
+
+    row = bytes([0, 128])           # the zero filter byte, then the pixel
+
+    return (signature
+            + chunk(b"IHDR", header)
+            + chunk(b"IDAT", zlib.compress(row))
+            + chunk(b"IEND", b""))
+
+
+def serves_files(locale: "str | None") -> int:
+    """A file comes back as the bytes on disk, whatever kind of file it is.
+
+    ITS OWN DIRECTORY, and not `clients/console`: this driver writes the files
+    it asks for, and a test that writes into the repository is a test that
+    leaves somebody's working tree dirty and their next `git status` confusing.
+    The directory is a client as far as the engine is concerned once it holds
+    the one file that makes it one: `wfg serve` refuses a `--ui` with no
+    `index.html` in it, and says so before it opens a port, so a page nobody
+    wrote is not a page anybody can be sent to. Beyond that file nothing says
+    what may live there, which is the property under test.
+    """
+    report = Report(f"the client directory is served as bytes ({locale or 'C'})")
+
+    with tempfile.TemporaryDirectory(prefix="wfg-bytes-") as scratch:
+        bundle = common.copy_bundle(FIXTURE, Path(scratch) / "minimal")
+
+        ui = Path(scratch) / "ui"
+        ui.mkdir()
+
+        (ui / "index.html").write_text("<!doctype html><title>Go.dot</title>\n",
+                                       encoding="utf-8")
+
+        picture = ui / "pixel.png"
+        picture.write_bytes(one_pixel_png())
+
+        module = ui / "panel.mjs"
+        module.write_text("export const nothing = 0;\n", encoding="utf-8")
+
+        with Server(bundle, locale=locale, ui=ui) as server:
+            status, headers, body = common.http_get_bytes(server.http_port,
+                                                          "/ui/pixel.png")
+
+            report.equal(status, 200, "GET /ui/pixel.png answers")
+            report.equal(body, picture.read_bytes(),
+                         "and it is byte for byte the file on disk",
+                         f"{len(body)} bytes back, "
+                         f"{picture.stat().st_size} on disk")
+            report.equal(headers.get("content-type", ""), "image/png",
+                         "and it says what it is")
+
+            """NOT CACHED, which §14.5 will assert of the media route as well:
+            the client directory is edited while the engine runs, and a stale
+            copy after a refresh is a minute of somebody wondering why their
+            change did nothing."""
+            report.equal(headers.get("cache-control", ""), "no-store",
+                         "and tells the browser not to keep it")
+
+            """AN ES MODULE IS `text/javascript`, and a browser refuses to
+            import one served as anything else - it blocks the script before it
+            parses it and says so in a console nobody has open, which reads as
+            a blank page rather than as a MIME table missing a line. The console
+            becomes modules loaded from this directory with no build step, so
+            the extension has to be in that table before it can."""
+            status, headers, body = common.http_get_bytes(server.http_port,
+                                                          "/ui/panel.mjs")
+
+            report.equal(status, 200, "GET /ui/panel.mjs answers")
+            report.check(headers.get("content-type", "").startswith("text/javascript"),
+                         "and .mjs is served as text/javascript, as .js is",
+                         headers.get("content-type", "<no content type>"))
+            report.equal(body, module.read_bytes(),
+                         "and its bytes are the file's too")
 
     return report.finish()
 
@@ -299,7 +409,8 @@ def main() -> int:
             locale = argument.split("=", 1)[1]
 
     try:
-        return max(run(locale), edits(locale), refuses_a_bad_directory())
+        return max(run(locale), serves_files(locale), edits(locale),
+                   refuses_a_bad_directory())
     except HarnessError as problem:
         print(f"client_page: {problem}", file=sys.stderr)
         return 2

@@ -420,6 +420,64 @@ TEST_CASE ("mount: a prefix that would swallow the tree, or is malformed, is ref
     CHECK (readNamespace (good, description).ok);
 }
 
+TEST_CASE ("mount: the addresses the engine serves over HTTP are reserved against mounts")
+{
+    /*  `/ui` answers with the client and `/media` answers with a timbre
+        pyramid, both on the same port as the tree, so a mount at either would
+        be published and unreachable at once. `/media` is reserved before the
+        route that answers there exists, because a reservation is worth more
+        before somebody's show file has used the prefix than after - and because
+        a collision with a content-addressed route would read as a cache miss
+        rather than as a collision. */
+    const std::string description =
+        R"({"FULL_PATH": "/", "CONTENTS": {"x": {"FULL_PATH": "/x", "TYPE": "f", "ACCESS": 3}}})";
+
+    struct Refusal
+    {
+        const char* prefix;     ///< what the file asked for
+        const char* reserved;   ///< the reservation it collides with, which the message names
+    };
+
+    for (const auto& refusal : { Refusal { "/ui",    "/ui" },
+                                 Refusal { "/ui/desk", "/ui" },
+                                 Refusal { "/media", "/media" },
+                                 Refusal { "/media/timbre", "/media" } })
+    {
+        INFO ("prefix: \"" << refusal.prefix << "\"");
+
+        MountDeclaration declaration;
+        declaration.id = "TEST0000";
+        declaration.prefix = refusal.prefix;
+
+        const auto result = readNamespace (declaration, description);
+
+        CHECK_FALSE (result.ok);
+
+        /*  The message names the reserved address rather than only saying no,
+            because an operator reading it at load has a file in front of them
+            and needs to know which line of it to change. */
+        REQUIRE (! result.problems.empty());
+        INFO ("problem: " << result.problems.front());
+        CHECK (result.problems.front().find (refusal.reserved) != std::string::npos);
+    }
+
+    /*  AND NOT A PREFIX THAT MERELY BEGINS WITH THE SAME LETTERS, which is the
+        boundary bug this kind of check has whenever it is written as a
+        starts-with. `/mediaserver` is somebody's perfectly ordinary box and
+        collides with nothing; refusing it would be a bug of ours reported as a
+        fault in their show file. */
+    for (const auto& prefix : { "/mediaserver", "/uiserver", "/media2" })
+    {
+        INFO ("prefix: \"" << prefix << "\"");
+
+        MountDeclaration declaration;
+        declaration.id = "TEST0000";
+        declaration.prefix = prefix;
+
+        CHECK (readNamespace (declaration, description).ok);
+    }
+}
+
 TEST_CASE ("mount: a description that is not JSON, or describes nothing, is refused")
 {
     MountDeclaration declaration;

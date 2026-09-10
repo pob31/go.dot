@@ -302,9 +302,26 @@ namespace wfg::doc
                                 happen - a replay reproducing it as applied
                                 would be reproducing a lie, and an operator
                                 reading a green log would believe their show was
-                                on disk when it was not. */
+                                on disk when it was not.
+
+                                `write-failed` and not `bad-address`, which is
+                                what this said until Phase 5 and which is the
+                                wrong word for a full disk: it sends an operator
+                                to check a path that was never in question. The
+                                new word is true of every path out of
+                                `Bundle::save` - the folder could not be created,
+                                or one of show.xml, state.xml and the manifest
+                                could not be opened or could not be finished -
+                                and all three of those are bytes that did not
+                                reach the disk.
+
+                                What it does not carry is WHICH of them, though
+                                `save` built the sentence and named the file:
+                                the Outcome has room for a code and not for a
+                                diagnosis, so the full-disk operator is told
+                                that much and no more. */
                             if (! written.ok)
-                                return Outcome::rejected (reason::badAddress);
+                                return Outcome::rejected (reason::writeFailed);
 
                             return Outcome::ok (args);
                         } });

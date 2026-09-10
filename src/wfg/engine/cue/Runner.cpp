@@ -2027,6 +2027,16 @@ namespace wfg::cue
         request.startOffset = run->startOffset > 0.0 ? run->startOffset
                                                      : numberOf (cue, "startOffset");
 
+        /*  AND THE PLAYHEAD'S ORIGIN IS THAT SAME NUMBER, copied here because
+            here is where it is decided. What `updatePositions` has to publish
+            is the offset the voice was ACTUALLY armed with; a playhead that
+            re-read the document per tick would draw itself wherever the cue was
+            last edited to, which §4.10 says changes the NEXT run and not this
+            one. A cue with ranges leaves it at nought and the launch overwrites
+            it with the range's `in`, the document refusing an offset beside a
+            range list for exactly that reason. */
+        run->positionOrigin = request.startOffset;
+
         /*  NO SLOT, and it is a refusal rather than a truncation. The graph is
             built with as many launcher slots as the show's widest cue has
             ranges, once, when the show loads (§3.25) - so a range added during
@@ -4410,6 +4420,13 @@ namespace wfg::cue
 
         launchIfDue (engine, tick);
         advanceRanges (engine);
+
+        /*  AFTER THE RANGES AND BEFORE THE EDGES, which is the only place it
+            can go: it reads the range bookkeeping `advanceRanges` has just
+            moved, and a run that `observeEdges` finishes below keeps the
+            playhead it had while it was still sounding rather than a nought
+            written after the sound stopped. */
+        updatePositions();
         enforceStops();
         observeEdges (engine);
     }
@@ -4511,6 +4528,7 @@ namespace wfg::cue
                                               ranges.size() - 1);
 
                     run->rangeStartedAtSample = target;
+                    run->positionOrigin = ranges[at].in;   // and the playhead starts at its in-point
                     run->passesWanted = ranges[at].loops;
                     run->passSamples = samplesForRange (ranges[at], audio->sampleRate());
                     run->boundaryPlacedAt = -1;
@@ -4723,12 +4741,106 @@ namespace wfg::cue
                 is measured from where it will actually begin rather than from
                 the tick that decided it. */
             run->rangeStartedAtSample = placeAt;
+
+            /*  THE PLAYHEAD'S ORIGIN MOVES WITH THAT CLOCK, and both move when
+                the boundary is PLACED rather than when it is crossed. They have
+                to move together or the file position would be measured from one
+                range's in-point against the other range's clock, which is a
+                playhead that jumps somewhere neither range covers. Being early
+                by the placement horizon is the same lateness `rangeIteration`
+                already carries here, and it reads as the playhead waiting at
+                the incoming range's in-point until the sound reaches it. */
+            run->positionOrigin = ranges[static_cast<std::size_t> (next)].in;
             run->passesWanted = ranges[static_cast<std::size_t> (next)].loops;
             run->passSamples = samplesForRange (ranges[static_cast<std::size_t> (next)], rate);
 
             engine.submit (origin::engine, "run.range",
                            { osc::Value::string (run->id),
                              osc::Value::int32 (static_cast<std::int32_t> (next)) });
+        }
+    }
+
+    void Runner::updatePositions()
+    {
+        /*  WHERE THE PLAYHEAD IS IN THE FILE, in seconds, which is what a
+            client draws over a waveform (§3.30) and what has been the literal
+            nought since the row was published in Phase 2: `Run::position` was
+            declared, published and assigned by nothing at all, so the console
+            gates its playhead on `position > 0` and draws none.
+
+            ITS OWN PASS, AND NOT A LINE IN `advanceRanges`. That loop continues
+            on `run->range < 0`, and `range` is -1 for every kind but media and
+            for a media cue with NO ranges - which is the ordinary media cue,
+            and the only run the bar is ever drawn over. Paid there, this would
+            have been paid for every case except the one that needed it.
+
+            The arithmetic is an origin plus a count: where in the file the
+            thing playing now began, plus how long it has been playing. The
+            count is the sample clock's, which is the same reason
+            `rangeIteration` is computed rather than incremented - a counter
+            would be right during a show and nought through every replay. The
+            origin is the run's `positionOrigin`, cached when it changes rather
+            than read here, because reading it here means `rangesOf` - a walk of
+            the cue's children and a document read per range - for every run on
+            every tick, and §4.1's GO path shares this thread.
+
+            Nothing is logged: §3.15 keeps continuous readouts out of the record,
+            and a replay - which has no counter to have counted - leaves this
+            where it leaves `rangeIteration` and `phase`. */
+        const auto rate = static_cast<double> (audio->sampleRate());
+
+        /*  A rate of nought is a graph that has not been prepared yet, and the
+            window between `setPlayer` and the device opening is real. Dividing
+            by it would publish an infinity as a playhead, which a client draws
+            as a bar off the end of the world. */
+        if (! (rate > 0.0))
+            return;
+
+        const auto now = audio->samplesElapsed();
+
+        for (const auto& snapshot : runs.all())
+        {
+            auto* run = runs.find (snapshot.id);
+
+            /*  A RUN THAT HAS ENDED KEEPS THE PLAYHEAD IT STOPPED AT, which is
+                the more useful of the two honest answers: a finished run stays
+                on the tree for its retention (`retentionTicks`) so that what
+                happened can still be read, and where it got to is part of what
+                happened. */
+            if (run == nullptr || run->isFinished())
+                continue;
+
+            /*  THE GUARD THAT MAKES THIS A READOUT RATHER THAN A LIE.
+                `launchedAtSample` is nought until the launch has been PLACED,
+                so a run that is armed and waiting for its GO - which is every
+                run parked on a standby, for as long as the operator takes -
+                would otherwise report the session's whole elapsed time and be
+                drawn as a cue that has been playing since the show opened. */
+            if (run->launchedAtSample <= 0)
+                continue;
+
+            /*  MEASURED FROM THE LAUNCH, and clamped at nought because the
+                launch is PLACED a few ticks into the future: between the
+                placement and the instant itself the difference is negative, and
+                what that window means is a playhead sitting at the start offset
+                waiting for the sound, which is what nought gives. */
+            auto elapsed = std::max<std::int64_t> (0, now - run->launchedAtSample);
+
+            if (run->range >= 0 && run->rangeStartedAtSample > 0)
+            {
+                /*  A RANGE IS MEASURED FROM ITS OWN ENTRY AND WRAPS AT EVERY
+                    PASS. Go.dot places nothing inside a range - M12 measured
+                    the clip's own wrap winning by thousands of times in damage
+                    energy - so a looping range's playhead is back at its
+                    in-point on every pass, and what the file position wants is
+                    the remainder rather than the total. */
+                elapsed = std::max<std::int64_t> (0, now - run->rangeStartedAtSample);
+
+                if (run->passSamples > 0)
+                    elapsed %= run->passSamples;
+            }
+
+            run->position = run->positionOrigin + static_cast<double> (elapsed) / rate;
         }
     }
 

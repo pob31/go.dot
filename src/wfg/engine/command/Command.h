@@ -154,6 +154,23 @@ namespace wfg
         inline constexpr const char* retiredId       = "retired-id";
         inline constexpr const char* malformedPacket = "malformed-packet";
 
+        /*  The bytes did not reach the disk: a full volume, a folder that went
+            away, a replace the platform refused. The command was well formed
+            and everything it named was found; what failed is the writing.
+
+            Its own code rather than `bad-address`, which `document.save` said
+            for this until Phase 5 and which is a lie about a full disk - it
+            sends somebody to check the path they typed, and the path was fine.
+            The distinction a client actually needs is between a refusal it can
+            fix by sending something else and one it cannot, and this is the
+            second kind: nothing about the request will make it succeed until
+            something outside Go.dot changes.
+
+            It does NOT mean the show was left half written and it does not
+            promise the opposite either; what survives on disk is the writer's
+            business to say, not this word's. */
+        inline constexpr const char* writeFailed     = "write-failed";
+
         /*  A mount's namespace file could not be read, or is not a usable
             OSCQuery description. Distinct from bad-address on purpose: the
             mount exists and was named correctly, and what failed is the file it

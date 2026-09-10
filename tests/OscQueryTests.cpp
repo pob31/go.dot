@@ -53,8 +53,10 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cctype>
 #include <cstdlib>
 #include <chrono>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -215,11 +217,40 @@ namespace
     };
 
     //==========================================================================
-    /** One HTTP GET, returning the status and the body. */
+    /*  Field names are case-insensitive (RFC 9110 §5.1), so both the keys of
+        the map below and every lookup into it go through here. A test that
+        asked for "content-type" and a server that wrote "Content-Type" would
+        otherwise disagree about a header they agree about. */
+    std::string lowerCased (std::string text)
+    {
+        std::transform (text.begin(), text.end(), text.begin(),
+                        [] (unsigned char c) { return static_cast<char> (std::tolower (c)); });
+        return text;
+    }
+
+    /** One HTTP GET, returning the status, the headers and the body. */
     struct HttpReply
     {
         int status = 0;
         std::string body;
+
+        /*  THE HEADERS ARE KEPT, and they were not always. This helper used to
+            read the status line and throw the rest of the block away, which was
+            enough while every assertion in this file was about a status code -
+            but `Content-Type` is the half of a reply that a change to the MIME
+            table breaks, and it is entirely invisible to a test that reads only
+            the body. `Cache-Control` is the second: the media route asserts on
+            it, and a route that quietly stopped saying `no-store` would serve a
+            client its own stale copy of a page somebody had just edited. */
+        std::map<std::string, std::string> headers;
+
+        /** The value of one header, empty if the reply carries no such field. */
+        std::string header (const std::string& name) const
+        {
+            const auto found = headers.find (lowerCased (name));
+
+            return found != headers.end() ? found->second : std::string();
+        }
     };
 
     /*  One GET, over a raw socket, reading the status line off the wire.
@@ -288,6 +319,43 @@ namespace
 
         if (bodyStart != std::string::npos)
             reply.body = response.substr (bodyStart + 4);
+
+        /*  The header block is every line between the status line and the blank
+            line that ends it. A field is a name, a colon, and a value whose
+            leading whitespace is not part of it (RFC 9110 §5.5); a line without
+            a colon is not a field and is skipped rather than guessed at.
+
+            `substr` and `emplace` throughout, so a value containing a colon -
+            which `Date` does, three times - keeps all of it. */
+        const auto headerEnd = bodyStart == std::string::npos ? response.size() : bodyStart;
+
+        auto lineStart = response.find ("\r\n");
+
+        if (lineStart != std::string::npos)
+            lineStart += 2;
+
+        while (lineStart != std::string::npos && lineStart < headerEnd)
+        {
+            auto lineEnd = response.find ("\r\n", lineStart);
+
+            if (lineEnd == std::string::npos || lineEnd > headerEnd)
+                lineEnd = headerEnd;
+
+            const auto colon = response.find (':', lineStart);
+
+            if (colon != std::string::npos && colon < lineEnd)
+            {
+                auto value = response.substr (colon + 1, lineEnd - colon - 1);
+
+                while (! value.empty() && (value.front() == ' ' || value.front() == '\t'))
+                    value.erase (value.begin());
+
+                reply.headers.emplace (lowerCased (response.substr (lineStart, colon - lineStart)),
+                                       std::move (value));
+            }
+
+            lineStart = lineEnd + 2;
+        }
 
         return reply;
     }
@@ -379,6 +447,13 @@ TEST_CASE ("oscquery: the server binds an ephemeral port and serves the tree the
     CHECK (fullPath->asString() == "/");
 
     CHECK (parsed.value->find ("CONTENTS") != nullptr);
+
+    /*  AND IT SAYS IT IS JSON, which nothing in this file asserted until the
+        helper above started keeping headers. A browser fetching the tree from
+        the page served on this same port reads `Content-Type` before it reads a
+        byte of the body, and a reply that arrived as `text/plain` would parse
+        in a test and be refused by `fetch`. */
+    CHECK (reply.header ("Content-Type") == "application/json");
 }
 
 TEST_CASE ("oscquery: HOST_INFO says who this is and where to reach it")

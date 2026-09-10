@@ -78,6 +78,17 @@ namespace wfg::oscquery
 
             if (extension == ".html")  return "text/html; charset=utf-8";
             if (extension == ".js")    return "text/javascript; charset=utf-8";
+
+            /*  `.mjs` IS `.js`, and it has to be said out loud because a
+                browser refuses a module served as anything else. The console
+                becomes a set of ES modules loaded from this directory with no
+                build step (§3.17), and an `import` whose reply carries
+                `application/octet-stream` is blocked before it is parsed - a
+                failure that shows up as a blank page and a console line about
+                a MIME type, never as a 404, so the missing extension reads as
+                a bug in the client. */
+            if (extension == ".mjs")   return "text/javascript; charset=utf-8";
+
             if (extension == ".css")   return "text/css; charset=utf-8";
             if (extension == ".json")  return "application/json";
             if (extension == ".svg")   return "image/svg+xml";
@@ -237,11 +248,44 @@ namespace wfg::oscquery
                 return true;
             }
 
+            /*  BYTES, AND NOT TEXT, because `mimeFor` above already promises
+                `.png` and `.woff2`. `loadFileAsString` decodes what it reads as
+                UTF-8 and re-encodes it on the way out, which is the identity
+                only for a file that was valid UTF-8 to begin with; a PNG is
+                not, so every byte the decoder cannot place came back as a
+                replacement character and the image arrived corrupt with a 200
+                and the right content type in front of it. Nothing said so,
+                which is what made it worth paying before a client shipped an
+                icon. */
+            juce::MemoryBlock bytes;
+
+            if (! file.loadFileAsData (bytes))
+            {
+                /*  500 and not 404: `existsAsFile` said it is there a moment
+                    ago, so a failure now is a permission or a device, and
+                    telling a client the file is missing sends it looking for
+                    the wrong thing. */
+                response->write (SimpleWeb::StatusCode::server_error_internal_server_error,
+                                 "could not read: " + relative + "\n",
+                                 { { "Content-Type", textMime } });
+                return true;
+            }
+
+            /*  THE TWO-ARGUMENT CONSTRUCTOR IS HALF THE POINT of this change,
+                and it is the silent half. A `std::string` built from a `const
+                char*` alone stops at the first zero byte, and the ninth byte of
+                every PNG is one - the top of the length in front of IHDR - so
+                the pointer-only form would have served eight bytes of a
+                four-kilobyte image, and served them with a 200. The length
+                comes from the block instead, and `string_view` carries it
+                through `Response::write` as far as `Content-Length`. */
+            const auto* const raw = static_cast<const char*> (bytes.getData());
+            const std::string served (raw != nullptr ? raw : "", bytes.getSize());
+
             /*  NOT CACHED, because the page is being edited while the engine is
                 running and a stale copy after a refresh is a minute of somebody
                 wondering why their change did nothing. */
-            response->write (SimpleWeb::StatusCode::success_ok,
-                             file.loadFileAsString().toStdString(),
+            response->write (SimpleWeb::StatusCode::success_ok, served,
                              { { "Content-Type", mimeFor (file) },
                                { "Cache-Control", "no-store" } });
             return true;

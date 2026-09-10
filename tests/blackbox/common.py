@@ -161,14 +161,25 @@ def send_udp(port: int, packet: bytes) -> None:
 # HTTP, over a raw socket
 # =============================================================================
 
-def http_get(port: int, target: str) -> "tuple[int, str]":
-    """(status, body).
+def http_get_bytes(port: int, target: str) -> "tuple[int, dict, bytes]":
+    """(status, headers, body), with the body exactly as it came off the wire.
 
     A raw socket rather than urllib, for the reason the C++ tests use one:
     OSCQuery's attribute queries are BARE keys — `?VALUE`, not `?VALUE=` — and a
     client library that normalises the query string asks a different question
     from the one intended. urllib also hides a 204's status behind an exception
     path, and 204 is a status this suite asserts.
+
+    BYTES, BECAUSE `/ui` SERVES FILES. `http_get` below decodes to `str` with
+    "replace", which is right for JSON and for a page, and is exactly wrong for
+    a PNG or a font: every byte the decoder cannot place becomes U+FFFD, so a
+    driver comparing what came back with what is on disk would be comparing two
+    mangled copies and finding them equal. Anything asserting that a file was
+    served unchanged has to start here.
+
+    The headers come back with lower-cased names, since RFC 9110 §5.1 makes
+    them case-insensitive and a driver should not have to guess the server's
+    capitalisation. `Content-Type` is the header a MIME table is judged on.
     """
     request = (f"GET {target} HTTP/1.1\r\n"
                f"Host: {HOST}:{port}\r\n"
@@ -185,12 +196,33 @@ def http_get(port: int, target: str) -> "tuple[int, str]":
 
     response = b"".join(chunks)
     head, _, body = response.partition(b"\r\n\r\n")
-    first = head.split(b"\r\n", 1)[0].decode("ascii", "replace")
+    lines = head.split(b"\r\n")
+    first = lines[0].decode("ascii", "replace")
 
     try:
         status = int(first.split(" ")[1])
     except (IndexError, ValueError):
         raise HarnessError(f"unparseable status line: {first!r}")
+
+    headers = {}
+
+    for line in lines[1:]:
+        name, colon, value = line.decode("latin-1").partition(":")
+
+        if colon:                       # a line without one is not a field
+            headers[name.strip().lower()] = value.strip()
+
+    return status, headers, body
+
+
+def http_get(port: int, target: str) -> "tuple[int, str]":
+    """(status, body), the body decoded as UTF-8 — text, JSON and pages.
+
+    The same request as `http_get_bytes`, which does the work; this is the form
+    every existing driver reads, and it stays the obvious one to reach for as
+    long as what is being read is text.
+    """
+    status, _headers, body = http_get_bytes(port, target)
 
     return status, body.decode("utf-8", "replace")
 
