@@ -568,6 +568,25 @@ namespace
             wfg::tree::registerTreeCommands (engine.commands(), touches);
             wfg::tree::registerMountCommands (engine.commands(), document, mounts, bundle);
 
+            /*  AND THE TRANSACTION HOOK, which `serve` also installs and which
+                a replay is the reason to be careful about.
+
+                Inside the bundle block, beside the commands it belongs to: a
+                replay with no --bundle registers no document commands at all,
+                so there is no `undo` to reproduce and no document being edited
+                to transact on. Forgetting it altogether is the bug that takes a
+                week to find, because every existing fixture replays perfectly
+                without it - what a replay compares is records, and coalescing
+                shows up in the records of nothing anybody has recorded yet. */
+            engine.setBeforeApply ([&document] (const wfg::Command& appliedCommand,
+                                                const wfg::Event& submitted,
+                                                const std::vector<wfg::osc::Value>& coerced,
+                                                std::int64_t tickIndex)
+                                   {
+                                       document.beginTransaction (appliedCommand.name, tickIndex,
+                                                                  submitted.origin, coerced);
+                                   });
+
             /*  Saving goes to --out, never to the bundle that was handed in.
                 Absent, document.save is not registered at all and replays as a
                 rejection - which is loud, and better than a replay that wrote
@@ -1581,6 +1600,24 @@ namespace
         wfg::doc::registerBundleCommands (engine.commands(), document, session);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
 
+        /*  ONE APPLIED COMMAND, ONE UNDO TRANSACTION, opened here and nowhere
+            else - so a command added next year is on the stack without knowing
+            the stack exists (namespace draft §14.9).
+
+            THE SAME LINE IS IN THE REPLAY VERB, and it has to be. What a replay
+            compares is records, so a replay running no hook reproduces every
+            fixture there is and diverges only where coalescing mattered: a log
+            of thousands of drags, and a failure nobody would think to look for
+            here. */
+        engine.setBeforeApply ([&document] (const wfg::Command& appliedCommand,
+                                            const wfg::Event& submitted,
+                                            const std::vector<wfg::osc::Value>& coerced,
+                                            std::int64_t tickIndex)
+                               {
+                                   document.beginTransaction (appliedCommand.name, tickIndex,
+                                                              submitted.origin, coerced);
+                               });
+
         runner.setMounts (&mounts, &sender, &probe);
 
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
@@ -2282,6 +2319,27 @@ namespace
                                     two integers - cheaper than the test that
                                     would skip it. */
                                 state.documentDirty = wfg::doc::isDirty (document, session);
+
+                                /*  AND WHAT THE UNDO STACK LOOKS LIKE, read
+                                    here for the reason the dot beside it is
+                                    read here: before the publish below, or a
+                                    client greys its Undo item one tick after
+                                    the edit that ungreyed it.
+
+                                    READ AND NEVER SUBSCRIBED TO. An
+                                    UndoManager is a ChangeBroadcaster, and a
+                                    listener on it would post to the message
+                                    manager from this thread once per applied
+                                    edit; namespace draft §14.9 makes that a
+                                    rule. Four cheap reads a tick is the price
+                                    of not having one. */
+                                const auto& undoHistory =
+                                    document.history (wfg::doc::UndoDomain::document);
+
+                                state.documentCanUndo = undoHistory.canUndo();
+                                state.documentCanRedo = undoHistory.canRedo();
+                                state.documentUndoName = undoHistory.getUndoDescription().toStdString();
+                                state.documentRedoName = undoHistory.getRedoDescription().toStdString();
 
                                 /*  Published every tick, from the tick thread,
                                     like the lateness beside it. The audio

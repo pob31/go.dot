@@ -37,13 +37,32 @@
       * a child is built completely before it is added, so a listener never sees
         a half-made object with no identifier.
 
-    NO UNDO MANAGER, deliberately, until Phase 5. Two reasons, both measured:
-    with one attached, ValueTree::setProperty compares via var::equals, where
-    "1" == 1, which reintroduces the silent-drop above; and UndoManager stamps
-    each transaction with Time::getCurrentTime(), which would put a wall-clock
-    read inside the tick thread's apply path and make a replay depend on when it
-    ran. The write choke point takes an UndoManager* from the start and is
-    handed nullptr until that phase arrives.
+    AN UNDO MANAGER PER DOMAIN since PR 5.4, and the two measured hazards that
+    kept one out until then are answered rather than gone.
+
+    With a manager attached, ValueTree::setProperty compares through var::equals,
+    where "1" == 1, so a typed write over a string-typed property would be
+    dropped with no refusal and no log record - the silent drop above,
+    reintroduced by the phase that attaches the manager. What answers it is that
+    every var in this document is built by `toVar` from a value the schema has
+    already parsed, so the type is the row's and never the text's. That is only
+    true while the READER agrees, and CanonicalXml writes properties through a
+    hand-written copy of the same switch, so UndoTests pins the two against each
+    other: it is the one hazard here that no reviewer can see in a diff.
+
+    And UndoManager stamps each transaction with Time::getCurrentTime(), which
+    is a wall-clock read on the apply path. It is the one this engine sanctions,
+    and it is named rather than hidden: it happens once per non-empty
+    transaction, the stamp is stored and read by nothing here, and the
+    alternative is re-implementing JUCE's three actions and their coalescing
+    arithmetic in the subsystem PRD §4.3 says trust rests on.
+
+    THE WRITE CHOKE POINT DOES NOT TAKE AN UNDO MANAGER, and never did - the
+    sentence that said it did was stale for four phases and is corrected here.
+    `setAttribute`, `insertObject`, `remove` and `move` ASK for the history a
+    write belongs on, which is what lets a row's `persist` column decide whether
+    the write is undoable at all: the show half goes on the stack and the state
+    half does not (namespace draft §14.9).
 
     THREADING: none of its own. The engine's tick thread owns this object and is
     its only writer and only direct reader; server threads read a published
@@ -52,10 +71,14 @@
 
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/Schema.h>
+#include <wfg/engine/osc/OscValue.h>
 
 #include <juce_data_structures/juce_data_structures.h>
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -63,6 +86,35 @@
 
 namespace wfg::doc
 {
+    /*  WHICH HISTORY A WRITE GOES ON (namespace draft §14.9). One today, and
+        the second is reserved so that its arrival is a row rather than a
+        redesign.
+
+        `document` holds everything a `persist == show` row or a structural door
+        writes: names, kinds, order, routes, ranges, fades, mounts - what
+        someone decided (PRD §4.10). Phase 6's parameter and binding writes take
+        the second entry, and the reason they are separate is the reason there
+        is an enum at all: a fader ridden through an act emits hundreds of
+        writes, and folded into one history they would bury the three edits
+        somebody actually made. An operator reaching for Undo after a mistyped
+        cue name would get their level back instead - a fader jumping during a
+        show, from a keystroke whose whole purpose was to undo a piece of
+        typing. */
+    enum class UndoDomain
+    {
+        document
+    };
+
+    /** How many histories a document holds. */
+    inline constexpr std::size_t undoDomainCount = 1;
+
+    /** The word a client spells a domain with, for `undo` and `redo`. */
+    std::string_view undoDomainWord (UndoDomain domain) noexcept;
+
+    /** The domain a word names, or nothing for one the enum does not carry -
+        which is a `bad-value` and never a silent fall back to `document`. */
+    std::optional<UndoDomain> undoDomainForWord (std::string_view word) noexcept;
+
     /*  The outcome of anything that changes the document. `reason` is a code
         from wfg::reason when it failed, so a command can return it unchanged
         and the log records the same word every time. */
@@ -271,6 +323,97 @@ namespace wfg::doc
         bool isLocked() const;
 
         //======================================================================
+        // Undo
+        //======================================================================
+
+        /*  ONE TRANSACTION PER APPLIED COMMAND, opened here, and the caller is
+            `Engine::setBeforeApply` rather than any door - so a command added
+            next year is on the stack without knowing the stack exists.
+
+            `commandName` names the transaction, because the name is what the
+            operator reads: `undoName` publishes it, and "Undo object.delete" is
+            a sentence a client writes without a lookup table (PRD §4.11 makes
+            every gesture-reachable action carry a name already).
+
+            THE COALESCING RULE IS SAME ADDRESS, SAME ORIGIN, WITHIN TWENTY-FIVE
+            TICKS. Consecutive `node.set` matching all three join the transaction
+            that is open; everything else opens a new one. It matters because of
+            what a client emits: a number field dragged in the inspector sends
+            one `node.set` per change event and a slider under a finger one per
+            frame, and an undo that took back one of those is a keystroke that
+            has to be held down - which is how an operator overshoots into the
+            edit before the one they meant. Keyed on the ORIGIN as well, so two
+            people editing one address from two tablets get two steps, which is
+            honest when two hands were involved; a replay preserves the origin,
+            so coalescing keyed on it reproduces exactly.
+
+            `args` are the arguments AS COERCED, never as submitted, because the
+            handler about to run sees the coerced ones and a window keyed on a
+            value nobody applied is a window that splits differently on replay.
+
+            Four things do not join, and each is a decision: a different address
+            (one drag is one step, two fields are two edits); a different origin
+            (two operators are two decisions, however close together); a gap of
+            more than twenty-five ticks (a pause is where a person stopped and
+            looked); and anything that is not `node.set` (every create, delete
+            and move is a structural act somebody meant, and each gets a step
+            named after itself). The first write after an `undo` or a `redo`
+            does not join either, and nothing here has to arrange that: JUCE's
+            `undo()` and `redo()` call `beginNewTransaction()` themselves before
+            returning. */
+        void beginTransaction (const std::string& commandName,
+                               std::int64_t tick,
+                               const std::string& writeOrigin,
+                               const std::vector<osc::Value>& args);
+
+        /** Half a second at 50 Hz. See `beginTransaction`. */
+        static constexpr std::int64_t coalescingWindowTicks = 25;
+
+        /*  Takes back, or puts back, one transaction - and answers with its
+            NAME, which the command logs as an applied argument so that a replay
+            popping a differently named transaction fails on that record with
+            both names on screen rather than diverging in silence.
+
+            Nothing when there was nothing to take back, which the caller turns
+            into `nothing-to-undo`. */
+        std::optional<std::string> undo (UndoDomain domain);
+        std::optional<std::string> redo (UndoDomain domain);
+
+        /*  The named history, for reading only: `canUndo`, `canRedo`,
+            `undoName` and `redoName` are published in the after-tick like every
+            other readout.
+
+            NOTHING MAY ATTACH A ChangeListener TO IT, and that is a rule rather
+            than an accident. `UndoManager` is a `ChangeBroadcaster` whose
+            `perform`, `undo`, `redo` and `clearUndoHistory` all send a change
+            message, inert only while nobody has subscribed. The day a desktop
+            client attaches one to grey out an Undo menu item, the tick thread
+            posts to the message manager once per applied edit. */
+        const juce::UndoManager& history (UndoDomain domain) const noexcept;
+
+        /*  WRITES INSIDE THIS SCOPE GO ON NO HISTORY, counted so that scopes
+            may nest.
+
+            It guards exactly one call site today - `adopt`, which replaces the
+            show wholesale - and is said plainly here so that a reviewer finding
+            it used once does not think something is missing. The counted shape
+            is for Phase 6, where a cue-driven recall will write parameter rows
+            in a domain that does have a history and must not bury an operator's
+            edit under a hundred of them. */
+        class ScopedUndoSuppression
+        {
+        public:
+            explicit ScopedUndoSuppression (ShowDocument& documentToSuppress) noexcept;
+            ~ScopedUndoSuppression();
+
+            ScopedUndoSuppression (const ScopedUndoSuppression&) = delete;
+            ScopedUndoSuppression& operator= (const ScopedUndoSuppression&) = delete;
+
+        private:
+            ShowDocument& target;
+        };
+
+        //======================================================================
         // Lookup
         //======================================================================
 
@@ -427,6 +570,63 @@ namespace wfg::doc
 
         void collectIds (const juce::ValueTree& node, std::vector<std::string>& out) const;
 
+        /*  The histories, built empty. Called by the constructor and by the
+            move, which is why it is a function rather than two loops that could
+            drift apart. */
+        void makeHistories();
+
+        /*  Forgets what the last write was, so that the next one cannot join a
+            transaction the document no longer holds. Said in one place because
+            everything that discards a history has to say it: the move, `adopt`,
+            an undo and a redo. */
+        void forgetCoalescing() noexcept;
+
+        /*  THE HISTORY A STRUCTURAL CHANGE GOES ON, or nullptr while a
+            suppression is in scope.
+
+            All three structural doors take it, or none of them do.
+            `AddOrRemoveChildAction::undo` for an add removes the child BY INDEX
+            with an assertion that the index is still in range, so it is correct
+            only while every structural change to that parent is itself
+            undoable. One door left on nullptr makes undo remove the wrong cue -
+            silently, and only in shows where somebody used both doors, which is
+            every show. */
+        juce::UndoManager* structuralHistory() noexcept;
+
+        /*  And the history a VALUE write goes on, which the row decides.
+
+            `persist == show` and nothing else. The state half - a list's
+            standby, the focus, the lock - is where the operator is standing
+            rather than what they decided (PRD §4.10), and a pointer that jumped
+            backwards on Ctrl-Z would be the machine moving standby, which PRD
+            §3.5 forbids for the same reason it forbids a trigger doing it. So a
+            delete's standby repair and a move's standby clearing stay where they
+            went: the cue comes back, and the operator decides where to stand. */
+        juce::UndoManager* historyFor (const Attribute& attribute) noexcept;
+
+        /*  EVERY IDENTIFIER IN THE TREE, RESERVED AGAIN, after an undo or a
+            redo. Undo touches the registry not at all - `removeChild` with a
+            manager holds a ref-counted handle on the child and its undo re-adds
+            that same object, `id` property and all - but `remove` released every
+            identifier under the node on the way out, so `findById` answers and
+            `isTaken` says no.
+
+            The failure that makes it necessary is therefore not a redo handing
+            out a different identifier (a redo returns the SAME one, always) but
+            the NEXT create: `generate` draws from 2^40 and inserts whatever it
+            finds free, so an identifier the registry has forgotten is free, and
+            a cue created after an undone delete can be handed the one a restored
+            cue is already using - two objects with one identity, failing not at
+            the gesture but at the next save or the next GO.
+
+            `registry.clear()` AND NOT A FRESH IdRegistry: clear empties the
+            taken set and keeps the splitmix64 state, while a new registry would
+            re-seed from the system entropy source and make a second entropy
+            consumer inside the class whose comment says there is exactly one -
+            the property that lets the log carry every drawn identifier and a
+            replay re-supply it. */
+        void rebuildRegistry();
+
         /*  The listener half of `revision()` and `showRevision()`. Every
             structural callback bumps both counters and does nothing else;
             `valueTreeRedirected` is included because a redirect replaces the
@@ -458,6 +658,25 @@ namespace wfg::doc
             `showRevision()`, and the move below, which has to carry it. */
         std::uint64_t showChangeCount = 1;
 
+        /*  ONE PER DOMAIN, HELD BY POINTER, and the indirection is forced
+            rather than chosen: `juce::UndoManager` declares its copy members to
+            delete them, which suppresses the implicit move members too, so it
+            is neither copyable nor movable - and this class has a hand-written
+            move. An array of managers is the first line that would fail to
+            build. */
+        std::array<std::unique_ptr<juce::UndoManager>, undoDomainCount> histories;
+
+        /*  What the last write was, so the next one can be asked whether it
+            belongs to the same gesture. Empty for anything that is not a
+            `node.set`, which is how every create, delete and move breaks a
+            coalescing run without a rule of its own. */
+        std::string lastWriteAddress;
+        std::string lastWriteOrigin;
+        std::int64_t lastWriteTick = 0;
+
+        /** Nought means writes are recorded. See `ScopedUndoSuppression`. */
+        int undoSuppressions = 0;
+
     public:
         /*  MOVED WITH CARE AND NEVER COPIED, because the listener behind
             `revision()` is registered with the tree BY ADDRESS.
@@ -475,6 +694,14 @@ namespace wfg::doc
             restarted it would disagree with every session that had stamped the
             old number: dirty with nothing to save, and then, some edits later,
             clean with everything to save.
+
+            THE HISTORIES ARE THE ONE MEMBER THAT IS REBUILT EMPTY RATHER THAN
+            CARRIED, and that is a decision and not an oversight. The only place
+            a document is moved is a test helper returning one that has just been
+            read, so there is no history worth keeping; and a move that silently
+            carried actions holding ref-counted handles into a tree, across the
+            one seam this class hand-writes, is the same class of bug as the
+            listener registration that seam exists to fix.
 
             A copy is refused outright. `juce::ValueTree` is a reference type, so
             a copied document would not be a second show but a second handle on

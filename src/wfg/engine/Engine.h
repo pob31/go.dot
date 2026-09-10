@@ -45,8 +45,10 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg
@@ -138,6 +140,32 @@ namespace wfg
         void setLogging (bool shouldLog) noexcept { logging = shouldLog; }
         bool isLogging() const noexcept { return logging; }
 
+        //======================================================================
+        /*  Run on the tick thread immediately BEFORE each applied command's
+            handler, and after its arguments have passed the signature check.
+
+            It exists so that one applied command is one undo transaction
+            without every handler having to know there is a stack (namespace
+            draft §14.9). Where it fires is load-bearing twice over. ABOVE the
+            argument check, a datagram about to be rejected for arity would
+            still open a transaction and split a run of edits the operator
+            experienced as one drag - and would do so identically on replay,
+            since a rejected record is a rejected record, so the divergence
+            would be between the live stack and nothing at all: invisible to the
+            one check built to catch it. And the arguments handed over are the
+            COERCED ones, which is what the handler is about to see; a hook
+            keying on the submitted list would key on a value nobody applied.
+
+            Vendor-free, like everything else on this surface, and shaped after
+            TickThread::setBeforeTick for the same reason: a hook is easier to
+            reason about when the two in the same wiring look alike. */
+        using BeforeApply = std::function<void (const Command& command,
+                                                const Event& event,
+                                                const std::vector<osc::Value>& args,
+                                                std::int64_t tick)>;
+
+        void setBeforeApply (BeforeApply hook) { beforeApply = std::move (hook); }
+
     private:
         LogRecord applyEvent (std::int64_t tickIndex, const Event& event);
         void record (const LogRecord& r);
@@ -147,6 +175,7 @@ namespace wfg
         EventLog eventLog;
 
         std::vector<Entry> draining;          // reused; tick thread only
+        BeforeApply beforeApply;
 
         std::atomic<std::int64_t> tick { -1 };
         std::atomic<std::uint64_t> seq { 0 };

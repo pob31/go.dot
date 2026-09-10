@@ -121,6 +121,20 @@ namespace wfg::tree
         std::string documentPath;
         std::string documentName;
         bool documentDirty = false;
+
+        /*  THE UNDO HISTORY, READ IN THE AFTER-TICK like every other readout
+            here, and never subscribed to.
+
+            juce::UndoManager is a ChangeBroadcaster whose every mutation sends a
+            change message, inert only while nobody has added a listener. A
+            desktop client attaching one to grey out its Undo menu item would put
+            a post to the message manager on the tick thread once per applied
+            edit - so these four are read, not pushed, and namespace draft §14.9
+            makes that a rule rather than an accident. */
+        bool documentCanUndo = false;
+        bool documentCanRedo = false;
+        std::string documentUndoName;
+        std::string documentRedoName;
     };
 
     class ParameterTree

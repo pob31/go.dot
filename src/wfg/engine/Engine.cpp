@@ -116,6 +116,15 @@ namespace wfg
         context.tick = tickIndex;
         context.origin = &event.origin;
 
+        /*  HERE, AND NOT ONE LINE HIGHER. The arguments have passed their check,
+            so this command is going to run; above the check, a datagram about to
+            be refused for arity would still be announced as an applied one. The
+            arguments handed over are `check.args` - the coerced list the handler
+            is about to be given - and not `event.args`, which is what was
+            submitted. See Engine.h. */
+        if (beforeApply)
+            beforeApply (*command, event, check.args, tickIndex);
+
         auto outcome = command->handler (context, check.args);
 
         if (! outcome.applied)

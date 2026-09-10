@@ -190,6 +190,28 @@ namespace wfg
             mounted write reach no door that says it. */
         inline constexpr const char* locked          = "locked";
 
+        /*  THE STACK IS EMPTY, and that is not the same fact as the show being
+            unedited: a `document.revert`, a `document.recover` or a bundle load
+            clears the history without clearing the show, and an edit that wrote
+            nothing - a value set to what it already was - never reached it.
+
+            Its own code rather than `bad-value`, because nothing about the
+            request is wrong: `undo document` is the same words it was a moment
+            ago, and what changed is that there is nothing left behind it. A
+            client greys its menu item from `/godot/document/canUndo` and never
+            has to read this; it exists so that the one which does not is told
+            plainly rather than shown a refusal about its arguments. */
+        inline constexpr const char* nothingToUndo   = "nothing-to-undo";
+
+        /*  Nothing has been undone, or an edit since has cleared the redo half.
+
+            Two causes and one word, because the remedy is the same: there is no
+            forward history to walk. The second is the one that surprises people
+            - undoing three edits and then typing anything at all discards the
+            three, which is how every editor behaves and is worth saying here
+            rather than in the client that has to explain it. */
+        inline constexpr const char* nothingToRedo   = "nothing-to-redo";
+
         /*  A mount's namespace file could not be read, or is not a usable
             OSCQuery description. Distinct from bad-address on purpose: the
             mount exists and was named correctly, and what failed is the file it

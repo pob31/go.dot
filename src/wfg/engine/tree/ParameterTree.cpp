@@ -1265,6 +1265,15 @@ namespace wfg::tree
             else if (name == "name")  text = state.documentName;
             else if (name == "dirty") text = state.documentDirty ? "true" : "false";
 
+            /*  The undo history, as four readings and not one: what a client
+                needs to draw a menu is whether each half is available and what
+                each would be called, and a single string carrying all of it
+                would be a format somebody has to parse. */
+            else if (name == "canUndo")  text = state.documentCanUndo ? "true" : "false";
+            else if (name == "canRedo")  text = state.documentCanRedo ? "true" : "false";
+            else if (name == "undoName") text = state.documentUndoName;
+            else if (name == "redoName") text = state.documentRedoName;
+
             /*  FROM THE RUNTIME HALF although it is a reading of the document,
                 because it must never be stale: a client asking what is wrong
                 with the show is asking about the show as it is now, and the

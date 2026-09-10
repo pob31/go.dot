@@ -4339,9 +4339,17 @@ the enum, so the day the second arrives nothing has to be untangled.
 
 **One transaction per applied command, opened in one place, and the place is inside
 `applyEvent`.** `Engine` gains `setBeforeApply (std::function<void (const Command&, const
-Event&, std::int64_t tick)>)` beside `setLogging` — vendor-free, as `Engine.h:36-39` requires,
-mirroring `TickThread::setBeforeTick` (`TickThread.h:162-168`) — and serve and replay both
-install `document.beginTransaction (command.name, tick, origin, args)` (§14.13). Where it fires
+Event&, const std::vector<osc::Value>& args, std::int64_t tick)>)` beside `setLogging` —
+vendor-free, as `Engine.h:36-39` requires, `osc::Value` being Go.dot's own and already in that
+surface through `CommandRegistry.h` — mirroring `TickThread::setBeforeTick`
+(`TickThread.h:162-168`), and serve and replay both install
+`document.beginTransaction (command.name, tick, origin, args)` (§14.13). *The fourth parameter is
+a correction (PR 5.4, 2026-09-10):* this paragraph first drew a three-argument hook and then
+required it to fire on `check.args`, and those two sentences cannot both hold — `Event::args` is
+the SUBMITTED list held by value, so a hook handed only the event can never see the coerced
+arguments. The alternatives were a synthesised `Event` carrying the coerced list, or mutating the
+caller's, and both cost a deep copy per event on the tick thread to hand the Console an event
+that is not the one that arrived. Where it fires
 is load-bearing and the plan does not say it: **between `Engine.cpp:117` and `:119`, after
 `check.ok`, on `check.args`.** Above `checkArgs` (`:105`), a datagram about to be rejected for
 arity would still set `newTransaction` and split a coalescing run the operator experienced as

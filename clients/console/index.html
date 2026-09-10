@@ -135,6 +135,13 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 
 #transport .hint { color: var(--ink-faint); font-size: 10px; margin-left: auto; }
 
+/*  WHAT UNDO WOULD UNMAKE, IN A WORD. The engine names every transaction
+    after the command that opened it, so this line says "undo: object.delete"
+    rather than "undo" - and it is the readout rather than a decoration,
+    because a greyed-out button says that something is unavailable and never
+    says which something it was (§4.8). The greying is the second telling. */
+#transport .undo-note { color: var(--ink-faint); font-size: 10px; }
+
 /*  THE LOCK SITS AT THE FAR END FROM GO, on purpose: it is the one control on
     this row that a forearm in the dark should not find on the way to GO. Its
     label says what pressing it will do, and `aria-pressed` says what it is. */
@@ -382,7 +389,22 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     <button data-cmd="standby.next">▼ standby</button>
     <button data-cmd="standby.clear">clear</button>
     <span class="clear-note" id="clear-note" hidden></span>
-    <span class="hint">space GO · ↑ ↓ standby · a row to inspect · its LEFT EDGE to park</span>
+
+    <!--  UNDO AS A BUTTON AND NOT ONLY AS A KEY. §4.11 makes every gesture a
+          named command, which is what turns Ctrl-Z into an accelerator OVER
+          `undo` rather than the only road to it - and a tablet in the house
+          has no Ctrl to hold down, so the road that is not a keystroke has to
+          exist for the client PRD §3.17 calls the primary one.
+
+          The command name is the button's own `data-cmd`, read by the loop at
+          the foot of this file, so the gesture and the datagram cannot drift
+          apart by being written down twice. -->
+    <button id="undo" data-cmd="undo" disabled>undo</button>
+    <button id="redo" data-cmd="redo" disabled>redo</button>
+    <span class="undo-note" id="undo-note"></span>
+
+    <span class="hint">space GO · ↑ ↓ standby · ctrl/⌘-Z undo · a row to inspect ·
+                       its LEFT EDGE to park</span>
     <button id="lock" aria-pressed="false" disabled>lock the show</button>
   </div>
 
@@ -1510,6 +1532,49 @@ function renderStrip() {
   lockButton.setAttribute("aria-pressed", isLocked ? "true" : "false");
   lockButton.disabled = !isLocked && !isOpen;
 
+  /*  WHAT UNDO WOULD UNMAKE, AND IN WHOSE WORDS.
+
+      The engine names each transaction after the command that opened it and
+      publishes that name, so `undoName` already reads `node.set`,
+      `cue.create` or `object.delete` - the words §4.11 makes every action
+      carry. This page prints the word it is given and holds no table of its
+      own, which is what stops the readout going stale the day a command is
+      added: a lookup table here would have to be edited by somebody who never
+      opened this file.
+
+      SAID, NOT ONLY GREYED (§4.8). A disabled button reports that something is
+      unavailable and never which something, so the sentence beside it carries
+      the meaning - "nothing to undo" against "undo: object.delete" - and the
+      greying is the second telling. Three answers again, as the file's readout
+      and the lock's have, because an engine that has not published the node is
+      not the same thing as a stack with nothing on it. */
+  const canUndo = tree.get("/godot/document/canUndo", null);
+  const canRedo = tree.get("/godot/document/canRedo", null);
+  const undoName = String(tree.get("/godot/document/undoName", "") || "");
+  const redoName = String(tree.get("/godot/document/redoName", "") || "");
+
+  const undoable = canUndo === true || canUndo === "true";
+  const redoable = canRedo === true || canRedo === "true";
+
+  el("undo").disabled = !undoable;
+  el("redo").disabled = !redoable;
+
+  el("undo").title = undoable
+    ? "takes back " + (undoName || "the last edit") + " — ctrl/⌘-Z"
+    : "nothing has been edited that could be taken back";
+  el("redo").title = redoable
+    ? "puts back " + (redoName || "the last undo") + " — ctrl/⌘-shift-Z"
+    : "nothing has been undone";
+
+  const stack = [];
+
+  if (canUndo === null) stack.push("—");
+  else stack.push(undoable ? "undo: " + (undoName || "the last edit") : "nothing to undo");
+
+  if (redoable) stack.push("redo: " + (redoName || "the last undo"));
+
+  el("undo-note").textContent = stack.join(" · ");
+
   el("s-tick").textContent = tree.get("/godot/engine/tick", "—");
   el("s-audio").textContent = tree.get("/godot/audio/status", "—");
 
@@ -1715,14 +1780,18 @@ document.addEventListener("click", (event) => {
   }
 
   if (data && data.delete) {
-    /*  The one gesture here that pressing again does not undo. Undo is Phase
-        5's and does not exist yet, so the question gets asked rather than
-        pretended away. */
-    if (window.confirm("Delete this cue and everything inside it?")) {
-      command("object.delete", [str(data.delete)]);
-      picked = null;
-    }
+    /*  NO LONGER ASKED, and the comment that used to sit here said why it
+        would stop being: "Undo is Phase 5's and does not exist yet". It does
+        now. A delete is one transaction named `object.delete`, the readout
+        beside GO says so in those words before anybody reaches for it, and
+        ctrl/⌘-Z takes it back with its identifiers intact.
 
+        The confirm goes rather than staying as a belt: a dialogue on a gesture
+        that can be taken back teaches an operator to dismiss dialogues, and
+        the next one they dismiss without reading will be the one that
+        mattered. */
+    command("object.delete", [str(data.delete)]);
+    picked = null;
     return;
   }
 
@@ -1804,12 +1873,45 @@ document.addEventListener("change", (event) => {
 /*  GO ON SPACE (§3.5, which calls it a sacred convention). Refused while a
     field has the focus, because somebody typing a cue name has every right to
     a space in it - and that is exactly the accident this guard is here to
-    stop. */
+    stop.
+
+    AND UNDO ON CTRL/⌘-Z, which is the one modified key this page claims. The
+    second line used to return on ANY modifier, which was right while nothing
+    here wanted one and is now the line that would swallow the accelerator, so
+    the modified keys are answered first and every other modified key still
+    leaves by the same door. Two properties survive that unchanged, and both
+    were the reason the blanket return was there. An unmodified Space still
+    reaches GO, because the branch below is entered only when Ctrl or ⌘ is
+    down. And a field with the focus has already returned above, so Ctrl-Z
+    while somebody is typing a cue name is the browser's own undo of the
+    typing - which is what the person pressing it meant, and is not this
+    document's history.
+
+    ON `key` AND NOT `code`, unlike Space and the arrows above. `code` is the
+    physical key, which is exactly right for those two and exactly wrong for a
+    letter: the key engraved Z on an AZERTY keyboard reports `KeyW`, so an
+    operator in Paris pressing the key their hand knows would get nothing at
+    all, silently. `key` is the letter that was typed, whatever the layout, and
+    Shift makes it upper case - hence the fold, and hence Shift being the
+    difference between undo and redo rather than a second key.
+
+    §4.11 is why there is a button as well: the keystroke is an accelerator
+    over `undo`, the named command that button sends, and neither of them is a
+    second vocabulary for "the UI did it". */
 document.addEventListener("keydown", (event) => {
   const tag = document.activeElement ? document.activeElement.tagName : "";
 
   if (/^(INPUT|SELECT|TEXTAREA)$/.test(tag)) return;
-  if (event.metaKey || event.ctrlKey || event.altKey) return;
+
+  if (event.metaKey || event.ctrlKey) {
+    if (event.altKey || String(event.key || "").toLowerCase() !== "z") return;
+
+    event.preventDefault();
+    command(event.shiftKey ? "redo" : "undo");
+    return;
+  }
+
+  if (event.altKey) return;
 
   if (event.code === "Space") { event.preventDefault(); command("go"); }
   else if (event.code === "ArrowDown") { event.preventDefault(); command("standby.next"); }

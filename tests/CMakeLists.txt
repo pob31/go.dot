@@ -92,6 +92,7 @@ add_executable(wfg_tests
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp
+    UndoTests.cpp
     OscQueryTests.cpp)
 
 # Where the hand-authored fixtures live. Passed as a definition rather than

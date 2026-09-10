@@ -280,6 +280,8 @@ namespace wfg::doc
         audio.setProperty ("tracks", 0, nullptr);
         showNode.addChild (audio, -1, nullptr);
 
+        makeHistories();
+
         /*  LAST, so that building the empty containers above does not count as
             three changes to a document nobody has opened yet. A fresh document
             is at revision 1 and stays there until somebody writes something. */
@@ -305,8 +307,31 @@ namespace wfg::doc
         changeCount = other.changeCount;
         showChangeCount = other.showChangeCount;
 
+        /*  REBUILT EMPTY, NOT CARRIED. The header argues it; what it costs here
+            is one line, and what a carried history would have cost is a stack of
+            actions holding ref-counted handles into a tree that has just changed
+            owner. The coalescing key goes with them: a window measured against a
+            write made by the document this one was moved from would be a window
+            about somebody else's gesture. */
+        makeHistories();
+        forgetCoalescing();
+        undoSuppressions = 0;
+
         showNode.addListener (this);
         return *this;
+    }
+
+    void ShowDocument::makeHistories()
+    {
+        for (auto& domain : histories)
+            domain = std::make_unique<juce::UndoManager>();
+    }
+
+    void ShowDocument::forgetCoalescing() noexcept
+    {
+        lastWriteAddress.clear();
+        lastWriteOrigin.clear();
+        lastWriteTick = 0;
     }
 
     ShowDocument::~ShowDocument()
@@ -344,6 +369,23 @@ namespace wfg::doc
             is unwatched - so every edit after a load would be invisible to
             `revision()`, and a cache built before the load would look current
             for ever. */
+        /*  AND THE ONE PLACE A SUPPRESSION EARNS ITS KEEP, today. Nothing under
+            here writes through a door, so what the scope buys is the rule rather
+            than a behaviour: a hatch is not an edit, and anything a later phase
+            adds inside it is not one either. */
+        const ScopedUndoSuppression suppressed { *this };
+
+        /*  THE HISTORY GOES WITH THE SHOW IT IS ABOUT. Every action on the stack
+            holds a ref-counted handle into the graph that is about to be
+            replaced, so an uncleared stack would keep the previous show alive in
+            memory and undo into a tree nobody can see. Cleared BEFORE the swap,
+            so the old show's last handles are dropped while it is still the
+            show. */
+        for (auto& domain : histories)
+            domain->clearUndoHistory();
+
+        forgetCoalescing();
+
         showNode.removeListener (this);
 
         showNode = std::move (newRoot);
@@ -520,6 +562,152 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    std::string_view undoDomainWord (UndoDomain domain) noexcept
+    {
+        /*  Spelled out rather than defaulted, so that adding Phase 6's domain
+            to the enum and forgetting its word is a build failure here rather
+            than an empty string a client cannot address. */
+        switch (domain)
+        {
+            case UndoDomain::document: return "document";
+        }
+
+        return {};
+    }
+
+    std::optional<UndoDomain> undoDomainForWord (std::string_view word) noexcept
+    {
+        if (word == undoDomainWord (UndoDomain::document))
+            return UndoDomain::document;
+
+        return std::nullopt;
+    }
+
+    void ShowDocument::beginTransaction (const std::string& commandName,
+                                         std::int64_t tick,
+                                         const std::string& writeOrigin,
+                                         const std::vector<osc::Value>& args)
+    {
+        /*  ONLY A `node.set` HAS AN ADDRESS TO COALESCE ON, and everything else
+            leaves this empty - which is how a create, a delete, a move and an
+            `undo` each break a run without needing a rule of their own. */
+        const auto address = (commandName == "node.set" && ! args.empty() && args[0].isString())
+                               ? args[0].getString()
+                               : std::string {};
+
+        /*  The address is tested FIRST and the arithmetic is behind it, so the
+            tick difference is only ever computed against a tick a real write
+            stamped. `tick >= lastWriteTick` is there for the caller that hands
+            them out of order: a window measured backwards is not a window. */
+        const auto joinsOpenTransaction = ! address.empty()
+                                            && address == lastWriteAddress
+                                            && writeOrigin == lastWriteOrigin
+                                            && tick >= lastWriteTick
+                                            && tick - lastWriteTick <= coalescingWindowTicks;
+
+        if (! joinsOpenTransaction)
+        {
+            /*  EVERY DOMAIN, because which one a command writes to is the
+                command's business and not this hook's, and naming a transaction
+                on a history the command turns out not to touch costs nothing:
+                `beginNewTransaction` sets a flag and a name and allocates
+                nothing at all. An empty transaction never becomes a step. */
+            for (auto& domain : histories)
+                domain->beginNewTransaction (juce::String (commandName));
+        }
+
+        lastWriteAddress = address;
+        lastWriteOrigin = writeOrigin;
+        lastWriteTick = tick;
+    }
+
+    std::optional<std::string> ShowDocument::undo (UndoDomain domain)
+    {
+        auto& manager = *histories[static_cast<std::size_t> (domain)];
+
+        if (! manager.canUndo())
+            return std::nullopt;
+
+        /*  READ BEFORE IT IS POPPED, because afterwards it names the transaction
+            BEFORE the one that was taken back - and what the record has to carry
+            is the name of the one this command actually unmade. */
+        const auto name = manager.getUndoDescription().toStdString();
+
+        if (! manager.undo())
+            return std::nullopt;
+
+        rebuildRegistry();
+        forgetCoalescing();
+
+        return name;
+    }
+
+    std::optional<std::string> ShowDocument::redo (UndoDomain domain)
+    {
+        auto& manager = *histories[static_cast<std::size_t> (domain)];
+
+        if (! manager.canRedo())
+            return std::nullopt;
+
+        const auto name = manager.getRedoDescription().toStdString();
+
+        if (! manager.redo())
+            return std::nullopt;
+
+        /*  A REDO REBUILDS THE REGISTRY TOO, and for the mirrored reason: redoing
+            a delete takes a subtree out again, and the identifiers under it have
+            to go back to being free or the show slowly runs out of names it is
+            allowed to draw. */
+        rebuildRegistry();
+        forgetCoalescing();
+
+        return name;
+    }
+
+    const juce::UndoManager& ShowDocument::history (UndoDomain domain) const noexcept
+    {
+        return *histories[static_cast<std::size_t> (domain)];
+    }
+
+    juce::UndoManager* ShowDocument::structuralHistory() noexcept
+    {
+        if (undoSuppressions > 0)
+            return nullptr;
+
+        return histories[static_cast<std::size_t> (UndoDomain::document)].get();
+    }
+
+    juce::UndoManager* ShowDocument::historyFor (const Attribute& attribute) noexcept
+    {
+        if (attribute.persist() != Persist::show)
+            return nullptr;
+
+        return structuralHistory();
+    }
+
+    void ShowDocument::rebuildRegistry()
+    {
+        std::vector<std::string> present;
+        collectIds (showNode, present);
+
+        registry.clear();
+
+        for (const auto& id : present)
+            registry.reserve (id);
+    }
+
+    ShowDocument::ScopedUndoSuppression::ScopedUndoSuppression (ShowDocument& documentToSuppress) noexcept
+        : target (documentToSuppress)
+    {
+        ++target.undoSuppressions;
+    }
+
+    ShowDocument::ScopedUndoSuppression::~ScopedUndoSuppression()
+    {
+        --target.undoSuppressions;
+    }
+
+    //==============================================================================
     EditResult ShowDocument::setAttribute (const std::string& address, std::string_view text)
     {
         auto target = resolve (address);
@@ -602,10 +790,15 @@ namespace wfg::doc
                                                  : reason::notManualPath);
         }
 
-        /*  nullptr is the UndoManager, and it stays nullptr until Phase 5 — see
-            the header for the two measured reasons. */
+        /*  THE HISTORY THE ROW BELONGS ON, which is the document's for a
+            `persist == show` value and nothing at all for a state one: undo
+            restores what someone decided, and where the operator is standing is
+            not among those things (PRD §4.10). The manager is the THIRD
+            argument here and the SECOND to the `removeChild` overload `remove`
+            and `move` use, which is the detail a reader who learns "third" gets
+            wrong in exactly one place. */
         target.node.setProperty (juce::Identifier (juce::String (std::string (target.attribute->name()))),
-                                 toVar (value), nullptr);
+                                 toVar (value), historyFor (*target.attribute));
 
         return EditResult::succeeded (target.node[idProperty].toString().toStdString());
     }
@@ -687,7 +880,14 @@ namespace wfg::doc
         /*  Built complete, THEN added. A listener that saw the child appear and
             the identifier arrive afterwards would publish an object with no
             address — which is exactly what the parameter tree does on
-            valueTreeChildAdded in Phase 1.5. */
+            valueTreeChildAdded in Phase 1.5.
+
+            AND THAT IS WHY THE WRITES BELOW STAY ON nullptr while the add
+            further down takes the history. The node is not in the tree when they
+            run, so an action recording them would hold a handle on an object
+            nobody could reach; the one action at the add carries the whole
+            finished object, identifier and all, and undoing it takes the object
+            away entire. */
         juce::ValueTree node { juce::Identifier (juce::String (std::string (elementName))) };
         node.setProperty (idProperty, juce::String (objectId), nullptr);
 
@@ -713,7 +913,7 @@ namespace wfg::doc
                               toVar (value), nullptr);
         }
 
-        parent.addChild (node, std::min (index, parent.getNumChildren()), nullptr);
+        parent.addChild (node, std::min (index, parent.getNumChildren()), structuralHistory());
 
         return EditResult::succeeded (objectId);
     }
@@ -1086,7 +1286,12 @@ namespace wfg::doc
                 repairStandby.clear();
         }
 
-        parent.removeChild (node, nullptr);
+        /*  THE HISTORY IS THE SECOND ARGUMENT TO THIS OVERLOAD, not the third:
+            `removeChild (const ValueTree&, UndoManager*)`. The action it makes
+            holds a ref-counted handle on the whole subtree, which is what lets
+            an undo put the cues back with the identifiers they had - and is why
+            the registry has to be told afterwards rather than the document. */
+        parent.removeChild (node, structuralHistory());
 
         for (const auto& released_id : released)
             registry.release (released_id);
@@ -1162,16 +1367,25 @@ namespace wfg::doc
                                    ? vacated[idProperty].toString().toStdString()
                                    : std::string {};
 
+        /*  BOTH LIMBS TAKE THE HISTORY, or an undo of a cross-parent move would
+            put the cue back without taking it out of where it went.
+
+            A within-parent move is one action, which JUCE coalesces with the
+            next move of the same parent on its own - so it is the transaction
+            rule above, and not this line, that keeps two ▲ presses from
+            collapsing into one step. A cross-parent move is two actions in one
+            transaction, undone in reverse. */
         if (oldParent == newParent)
         {
             const auto from = newParent.indexOf (node);
             const auto to = std::min (newIndex, newParent.getNumChildren() - 1);
-            newParent.moveChild (from, to, nullptr);
+            newParent.moveChild (from, to, structuralHistory());
         }
         else
         {
-            oldParent.removeChild (node, nullptr);
-            newParent.addChild (node, std::min (newIndex, newParent.getNumChildren()), nullptr);
+            oldParent.removeChild (node, structuralHistory());
+            newParent.addChild (node, std::min (newIndex, newParent.getNumChildren()),
+                                structuralHistory());
         }
 
         /*  Asked AFTER the move, because whether the cue is still somewhere the

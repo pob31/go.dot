@@ -366,5 +366,95 @@ namespace wfg::doc
 
                             return fromEdit (document.setAttribute (address, *text), args);
                         } });
+
+        //----------------------------------------------------------------------
+        /*  UNDO IS A LOGGED COMMAND, and the alternative is a replay that
+            diverges in silence.
+
+            The rejected design was rewinding the tree from a client gesture with
+            no record, and it fails for the reason every hook in this engine is a
+            submitted command: a replay runs no gestures, only records, so a log
+            of `cue.create`, `node.set`, `node.set` would replay into a document
+            that still had the edits while the live session's did not - the same
+            inputs, a different show, and `wfg replay` exiting 0 because the
+            records were identical.
+
+            WHAT STOPS THAT IS THE APPLIED ARGUMENTS. Replay compares one line
+            against another and never compares the document or the stack, so the
+            record carries the domain AND the name of the transaction that came
+            off it: an undo that pops a differently named transaction than the
+            recorded session popped writes a different line and fails on that
+            record with both names on screen. It is the `go` pattern applied to
+            a stack - log what was APPLIED, not what was asked.
+
+            Which is also why the transaction name is a declared parameter and
+            not only an output. A command whose own record fails its own arity
+            check is a session that cannot reproduce itself; so the name is
+            optional on the way in, ignored when it is supplied, and always
+            written on the way out.
+
+            THE LOCK IS ASKED IN THE HANDLER and not at a door, because undo
+            knocks at none: it writes through JUCE's own actions, underneath the
+            four predicates. Asked FIRST, before the domain word is read, for the
+            reason `remove` gives about the identifier it has not looked up yet -
+            a locked show refuses the corrected command as well, so of the two
+            things that can be wrong with an `undo` tonight the lock is the one
+            worth reading first. */
+        registry.add ({ "undo",
+                        "Takes back the last transaction on a domain's history.",
+                        { { "domain", 's', true }, { "transaction", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (document.isLocked())
+                                return Outcome::rejected (reason::locked);
+
+                            const auto word = args.empty()
+                                                ? std::string (undoDomainWord (UndoDomain::document))
+                                                : args[0].getString();
+
+                            const auto domain = undoDomainForWord (word);
+
+                            if (! domain.has_value())
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto undone = document.undo (*domain);
+
+                            if (! undone.has_value())
+                                return Outcome::rejected (reason::nothingToUndo);
+
+                            return Outcome::ok (
+                                { osc::Value::string (std::string (undoDomainWord (*domain))),
+                                  osc::Value::string (*undone) });
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "redo",
+                        "Puts back the last transaction taken off a domain's history.",
+                        { { "domain", 's', true }, { "transaction", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            if (document.isLocked())
+                                return Outcome::rejected (reason::locked);
+
+                            const auto word = args.empty()
+                                                ? std::string (undoDomainWord (UndoDomain::document))
+                                                : args[0].getString();
+
+                            const auto domain = undoDomainForWord (word);
+
+                            if (! domain.has_value())
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto redone = document.redo (*domain);
+
+                            if (! redone.has_value())
+                                return Outcome::rejected (reason::nothingToRedo);
+
+                            return Outcome::ok (
+                                { osc::Value::string (std::string (undoDomainWord (*domain))),
+                                  osc::Value::string (*redone) });
+                        } });
     }
 }
