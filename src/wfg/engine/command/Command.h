@@ -182,10 +182,11 @@ namespace wfg
             to /godot/document/locked, which is the operator's to make.
 
             Said by the document's four doors, so a command added next year is
-            refused without having to know the lock exists. The commands that
-            change the show without knocking at a door - undo, redo, revert and
-            recover, when they arrive - will have to say it in their own
-            handlers, and namespace draft §14.11 says why. What it never covers
+            refused without having to know the lock exists. The four commands
+            that change the show without knocking at a door - `undo` and `redo`,
+            which write through JUCE's own actions, and `document.revert` and
+            `document.recover`, which write through `adopt` - say it in their own
+            handlers instead, and namespace draft §14.11 says why. What it never covers
             is where the operator is standing: GO, the standby, the focus and a
             mounted write reach no door that says it. */
         inline constexpr const char* locked          = "locked";
@@ -211,6 +212,23 @@ namespace wfg
             three, which is how every editor behaves and is worth saying here
             rather than in the client that has to explain it. */
         inline constexpr const char* nothingToRedo   = "nothing-to-redo";
+
+        /*  `document.recover` or `document.discardRecovery` on a bundle with no
+            `recovery/` to adopt or to delete.
+
+            Its own code rather than `bad-address`, because the path was right:
+            the bundle is the one this session opened, and what is missing is a
+            folder inside it that only ever exists when a previous session left
+            work behind. A client greys the gesture from
+            `/godot/document/recovery` and never has to read this; it exists so
+            that the one which does not is told plainly, and so that a client
+            asking twice is not told its address is wrong.
+
+            It also covers a `recovery/show.xml` that cannot be read, which is a
+            file the atomic write makes very nearly impossible and which is
+            nothing anybody can adopt when it happens anyway. Refusing an empty
+            gesture is cheaper than pretending it worked. */
+        inline constexpr const char* noRecovery      = "no-recovery";
 
         /*  A mount's namespace file could not be read, or is not a usable
             OSCQuery description. Distinct from bad-address on purpose: the

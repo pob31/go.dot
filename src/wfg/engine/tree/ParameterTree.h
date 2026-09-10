@@ -135,6 +135,21 @@ namespace wfg::tree
         bool documentCanRedo = false;
         std::string documentUndoName;
         std::string documentRedoName;
+
+        /*  WHETHER A PREVIOUS SESSION LEFT WORK BEHIND: a `recovery/show.xml`
+            found when this bundle was opened, and neither adopted nor discarded
+            since (namespace draft §14.10).
+
+            It is a latch carried on the session and never a look at the disk,
+            and the reason is this session's own autosave: `recovery/` appears
+            two seconds after the first edit of any show, so a node that asked
+            the filesystem would offer every unsaved show back to the operator
+            who was in the middle of writing it.
+
+            Read here from `doc::DocumentSession` for the same reason the dot
+            beside it is read here - before the publish, or a client draws the
+            offer one tick after the engine printed it. */
+        bool documentRecovery = false;
     };
 
     class ParameterTree

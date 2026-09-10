@@ -1274,6 +1274,12 @@ namespace wfg::tree
             else if (name == "undoName") text = state.documentUndoName;
             else if (name == "redoName") text = state.documentRedoName;
 
+            /*  Whether a previous session left work in `recovery/`. It changes
+                at most twice in a session - once when the bundle opens and once
+                when the operator answers it - which is why the table caps it at
+                1 rather than at the 5 its livelier neighbours carry. */
+            else if (name == "recovery") text = state.documentRecovery ? "true" : "false";
+
             /*  FROM THE RUNTIME HALF although it is a reading of the document,
                 because it must never be stale: a client asking what is wrong
                 with the show is asking about the show as it is now, and the

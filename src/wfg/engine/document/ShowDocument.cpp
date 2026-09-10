@@ -345,8 +345,9 @@ namespace wfg::doc
             here.
 
             This is the fifth writer of the document and it goes through none
-            of the four doors: it is how `Bundle::open` loads a show, and it
-            will be how `document.revert` and `document.recover` replace one.
+            of the four doors: it is how `Bundle::open` loads a show, and since
+            PR 5.5 it is how `document.revert` and `document.recover` replace one
+            (Bundle.cpp).
             It does not edit the show, it swaps it - and because `locked` is an
             attribute of the root it swaps THE LOCK too, for whatever the
             loaded state.xml says. A revert of a bundle saved unlocked would

@@ -12,7 +12,7 @@
 # (LICENSE, at the repository root) for more details.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
-"""Phase 5's document half, as a program. The edit lock (5.3), then undo (5.4).
+"""Phase 5's document half, as a program. The lock (5.3), undo (5.4), a crash (5.5).
 
 WHAT THE LOCK PROMISES, in the words of decision W: show mode is a lock on the
 SHOW, kept by the engine, and not a mode in a client. The tablet in the house,
@@ -45,10 +45,38 @@ run is live neither disturbs the run nor, on the undo, starts a second one -
 the seam no unit test reaches, because it wants a live run, a document edit and
 a publish in one process at one moment.
 
+AND WHAT AUTOSAVE PROMISES, which is PR 5.5's half and the one PRD §4.3 calls a
+reason anybody trusts show software at all. That the engine decides on its own
+to write, unasked, once the show is dirty and has gone quiet. That what it
+writes goes to `recovery/` and NEVER to the file somebody last saved, because a
+designer who spent an afternoon getting it wrong has to be able to throw the
+afternoon away by not saving, and an autosave into `show.xml` would take that
+gesture away from the person who most wanted it. That a process which dies
+leaves the folder behind, and that the next process to open the bundle SAYS SO
+rather than adopting it - the operator decides whether the afternoon was worth
+keeping, because the engine is headless and has nobody to ask. And that the
+four verbs around it mean exactly what §14.10 says: `document.recover` leaves
+the dot LIT, because the recovered work is not on disk as the show;
+`document.save` puts it out and takes the folder with it; `document.revert`
+puts the disk back and re-stamps what `adopt` would otherwise have left looking
+unsaved; and `document.saveAs` writes somewhere else without quietly making
+somewhere else the live document.
+
+THE PROCESS IS KILLED AND NOT STOPPED, which is the whole of why that half can
+only be asked here. `Server.stop()` calls `terminate()`, and on POSIX that is
+a SIGTERM `wfg serve` catches and turns into the ordinary clean shutdown; only
+on Windows is it an end no handler sees. A driver that used it would be testing
+shutdown on two platforms and crash recovery on one - and the one it tested
+would be the platform the author is sitting at. What `BundleTests` cannot do is
+die, and this is the file that can.
+
 THE BUNDLE is `fixtures/bundles/locked/`, which carries `<Show locked="true"/>`
 in its state.xml. Two lists of memos, so a GO has somewhere to move the pointer
 and a second list has a pointer that must not move; and a mount on a desk with
-one writable fader, pointed by the driver at `mock_target.py`.
+one writable fader, pointed by the driver at `mock_target.py`. COPIED TWICE:
+the crash half wants a folder no earlier session has left unsaved work in, or
+`recovery` reading false on a fresh open would be a claim about the session
+before it rather than about the bundle.
 
 WAITED FOR, NEVER SLEPT. Every check waits for the thing it is about -
 `common.wait_until` - because a datagram crosses a socket, joins a queue and is
@@ -96,13 +124,36 @@ SOUNDING = "K5MED001"
 #  record before it has been written too.
 LAST_WORD = "The last thing this session wrote"
 
+#  WHAT PR 5.5 CALLS ONE CUE, four times over, because each name is a claim
+#  about a different file and a driver that reused one could not tell them
+#  apart. `AUTHORED` is what the fixture holds and what show.xml must still say
+#  while an autosave is on disk; `CRASHED` is the afternoon nobody saved;
+#  `AFTER_SAVE` is the edit a revert throws away; `ARCHIVED` is the one that
+#  proves saveAs wrote the copy and the next save wrote the original.
+AUTHORED = "Curtain up"
+CRASHED = "Curtain up, and the process died"
+AFTER_SAVE = "Curtain up, edited after the save"
+ARCHIVED = "Curtain up, in the archive"
+
 LOCK = "/godot/document/locked"
 DIRTY = "/godot/document/dirty"
+RECOVERY = "/godot/document/recovery"
 CAN_UNDO = "/godot/document/canUndo"
 CAN_REDO = "/godot/document/canRedo"
 UNDO_NAME = "/godot/document/undoName"
 REDO_NAME = "/godot/document/redoName"
 FADER = "/desk/fader"
+
+#  AUTOSAVE IS NOT ASKED FOR, so the wait for it is longer than every other
+#  wait in this file. §14.10 gives it two conditions - a hundred ticks since
+#  the last change, which is two seconds of quiet, or fifteen hundred
+#  regardless, which is thirty seconds - and the driver goes quiet the moment
+#  it stops editing, so the first is the one that should fire. A wait of the
+#  suite's usual fifteen seconds would pass on the quiet rule and be red on the
+#  ceiling for something that is not a fault, so this is the ceiling with a
+#  loaded runner's margin on top. It is a deadline and not a sleep: a working
+#  engine reaches it in about two seconds.
+AUTOSAVE_TIMEOUT = 45.0
 
 
 # =============================================================================
@@ -235,11 +286,331 @@ def desk_value(target, address: str):
 
 
 # =============================================================================
+# The crash, and the process that finds what it left
+# =============================================================================
+
+def crash(server: Server) -> None:
+    """Ends a process the way a power cut ends one, and NOT the way `stop()`
+    does.
+
+    `Server.stop()` calls `terminate()`. On POSIX that is a SIGTERM, which
+    `wfg serve` catches and turns into the ordinary clean shutdown - footers,
+    the tick thread joined, and the tidy-up that deletes `recovery/` when the
+    document is not dirty. Only on Windows is `terminate()` a `TerminateProcess`
+    that no handler sees. So a driver that reached for the harness's own stop
+    here would be testing shutdown on two platforms and crash recovery on one,
+    and would go green on all three without two of them having crashed at all,
+    which is the worst kind of green. `kill()` is SIGKILL and
+    `TerminateProcess`: on every platform the process stops between one
+    instruction and the next, which is the event autosave exists for.
+
+    CALLED INSIDE THE `with`, so that the `stop()` which `__exit__` runs
+    afterwards finds a process that has already gone and does nothing. That
+    keeps the harness untouched: this is the only thing PR 5.5 needed of it that
+    it did not already have, and a helper here is cheaper than a second way to
+    end a server in `common.py` that every other driver would then have to
+    choose between.
+    """
+    server.process.kill()
+    server.process.wait(timeout=10)
+
+
+def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
+    """Two processes on one folder: one that dies with unsaved work, and one
+    that finds it.
+
+    ITS OWN COPY OF THE BUNDLE, and not the one the session above worked in.
+    That session ends dirty and is stopped rather than saved, so whatever
+    `recovery/` it leaves behind is a fact about how far it got before the
+    harness pulled it - and `recovery` reading false on a fresh open has to be
+    asked of a folder nobody has crashed in yet, or it is a claim about the
+    previous test rather than about this one.
+
+    UNDER THE SAME LOCALE AS THE REST, both processes. An autosave is a
+    serialisation nobody asked for, written by a process whose numeric locale
+    is whatever the machine says, and read back by another; a `recovery/`
+    written with decimal commas is precisely the file the fr_FR rule exists to
+    catch, and the one nobody would look at until the night it was needed.
+    """
+    folder = common.copy_bundle(FIXTURE, room / "crashed")
+    archive = room / "archive"
+    log = room / "crashed.wfglog"
+
+    show = folder / "show.xml"
+    autosaved = folder / "recovery" / "show.xml"
+    autosaved_state = folder / "recovery" / "state.xml"
+    cue = f"/godot/cue/{CURTAIN}/name"
+
+    def text_of(path: Path) -> str:
+        """A file's contents, or "" for one that is not there - so a check
+        about what a file holds reads FAIL rather than taking the whole driver
+        down with a traceback when the file the engine should have written is
+        missing. The absence is what the check is about."""
+        return path.read_text(encoding="utf-8") if path.is_file() else ""
+
+    # --- the afternoon nobody saved ----------------------------------------
+    with Server(folder, log=log, locale=locale) as dying:
+        report.check(reads(dying, RECOVERY, False),
+                     "a bundle nobody has crashed in opens with nothing to recover",
+                     f"{RECOVERY} reads {value_of(dying, RECOVERY)!r}")
+
+        write(dying, LOCK, False)
+        report.check(reads(dying, LOCK, False), "the show is opened for editing")
+
+        write(dying, cue, CRASHED)
+
+        report.check(reads(dying, cue, CRASHED), "a cue is renamed",
+                     f"the cue reads {value_of(dying, cue)!r}")
+        report.check(reads(dying, DIRTY, True),
+                     "and the dot comes on: the file on disk is behind this document",
+                     f"{DIRTY} reads {value_of(dying, DIRTY)!r}")
+
+        #  TWO CLAIMS, AND THEY ARE NOT THE SAME CLAIM. The record says the
+        #  engine DECIDED to autosave - unasked, on its own arithmetic, and
+        #  logged as a command like any other so that a replay re-applies it.
+        #  The file says the disk AGREED. An engine that submitted the command
+        #  and wrote nothing would satisfy the first; one that wrote bytes
+        #  without a record would satisfy the second and be unreplayable. Both
+        #  are waited for, in that order, because the record is written after
+        #  the handler returns and the handler is what writes the file - which
+        #  is also why only the first wait gets the autosave's long deadline.
+        #  Once the record is in, the file is already there; if the record never
+        #  came, a second long wait would spend another forty-five seconds of
+        #  ctest's three hundred learning nothing the first did not say.
+        wrote = common.wait_until(
+            lambda: any(line.startswith("A ") and "document.autosave" in line
+                        for line in text_of(log).splitlines()),
+            timeout=AUTOSAVE_TIMEOUT)
+
+        report.check(bool(wrote),
+                     "the engine decides on its own to autosave, and records it as an "
+                     "applied command like any other",
+                     f"no applied document.autosave record after {AUTOSAVE_TIMEOUT:.0f}s")
+
+        landed = common.wait_until(lambda: autosaved.is_file())
+
+        report.check(bool(landed), "and recovery/show.xml is on the disk to prove it",
+                     f"{autosaved} is not a file")
+        report.check(autosaved_state.is_file(),
+                     "with the operator's position beside it in recovery/state.xml",
+                     f"{autosaved_state} is not a file")
+
+        #  AND THE AUTHORED FILE IS EXACTLY AS IT WAS, which is the whole of
+        #  §14.10's argument for the folder: not saving is a gesture, and an
+        #  autosave that wrote show.xml would take it away silently from the
+        #  person who most wanted it.
+        authored = text_of(show)
+
+        report.check(AUTHORED in authored and CRASHED not in authored,
+                     "and show.xml still holds what somebody last SAVED, which is what "
+                     "keeps not saving a gesture somebody can make",
+                     f"show.xml holds the authored name: {AUTHORED in authored}, "
+                     f"and the unsaved one: {CRASHED in authored}")
+        report.check(CRASHED in text_of(autosaved),
+                     "while recovery/show.xml holds the work nobody saved",
+                     f"recovery/show.xml is {len(text_of(autosaved))} bytes")
+
+        crash(dying)
+
+    # --- and the process that finds it -------------------------------------
+    with Server(folder, log=room / "recovered.wfglog", locale=locale) as second:
+        #  READ OFF THE NOTICES `Server` ALREADY COLLECTS, which are the `wfg:`
+        #  lines it reads from stdout WHILE STARTING - it stops reading at the
+        #  second of the two port lines. So this assertion is also a claim about
+        #  where the notice is printed: at the open, with the bundle, and not
+        #  after the sockets are bound. A person running `wfg serve` in a
+        #  terminal is the other reader, and they are reading the same line.
+        told = [line for line in second.notices if "recovery available" in line]
+
+        report.check(bool(told),
+                     "the next process to open that folder says so on stdout, where "
+                     "somebody who started it by hand will read it",
+                     "\n".join(second.notices) or "it printed no notices at all")
+
+        report.check(reads(second, RECOVERY, True),
+                     "and publishes it, because a headless engine has nobody to ask",
+                     f"{RECOVERY} reads {value_of(second, RECOVERY)!r}")
+
+        #  AND HAS ADOPTED NOTHING. Three things would be wrong with a silent
+        #  adopt and §14.10 names them: the show on screen would differ from the
+        #  file the operator opened with no gesture in between; the decision
+        #  autosave exists to leave open would have been taken for them; and
+        #  `adopt` replaces the root, lock included, so a show could come back
+        #  UNLOCKED during a performance because a file on disk said so.
+        report.check(reads(second, cue, AUTHORED),
+                     "and adopts nothing on its own: the show on screen is the show that "
+                     "was opened",
+                     f"the cue reads {value_of(second, cue)!r}")
+        report.equal(value_of(second, DIRTY), False,
+                     "with the dot out, because nothing has been changed since it opened")
+
+        #  §14.7: the lock refuses `recover` as it refuses `undo`, and for the
+        #  same reason read the other way round - `adopt` replaces the root and
+        #  the lock with it, so a recovery on a locked show is the one gesture
+        #  that could unlock it without anybody deciding to.
+        said = refusal_of(second, lambda: command(second, "document.recover"))
+
+        report.check(said.endswith(" locked document.recover"),
+                     "a recovery on a locked show is refused, and says locked",
+                     f"lastError reads {said!r}")
+
+        write(second, LOCK, False)
+        report.check(reads(second, LOCK, False), "the lock lifts")
+
+        command(second, "document.recover")
+
+        report.check(reads(second, cue, CRASHED),
+                     "and then the afternoon comes back",
+                     f"the cue reads {value_of(second, cue)!r}")
+        report.check(reads(second, DIRTY, True),
+                     "with the dot LIT, deliberately: the recovered work is not on disk "
+                     "as the show, and the dot is telling the truth",
+                     f"{DIRTY} reads {value_of(second, DIRTY)!r}")
+        report.check(reads(second, RECOVERY, False),
+                     "and nothing left to recover, because it has been",
+                     f"{RECOVERY} reads {value_of(second, RECOVERY)!r}")
+
+        # --- a save, which is the work becoming the show --------------------
+        command(second, "document.save")
+
+        report.check(reads(second, DIRTY, False), "a save puts the dot out",
+                     f"{DIRTY} reads {value_of(second, DIRTY)!r}")
+
+        gone = common.wait_until(lambda: not (folder / "recovery").exists())
+
+        report.check(bool(gone),
+                     "and takes the recovery folder with it: the work has become the show",
+                     f"{folder / 'recovery'} is still there")
+        report.check(CRASHED in text_of(show),
+                     "which show.xml now holds, on the authored path this time",
+                     "the dot went out before this was read, and the bytes are written "
+                     "before the dot goes out")
+
+        # --- and an empty gesture is refused rather than pretended ----------
+        said = refusal_of(second, lambda: command(second, "document.recover"))
+
+        report.check(said.endswith(" no-recovery document.recover"),
+                     "a recovery with nothing to adopt is refused with no-recovery",
+                     f"lastError reads {said!r}")
+
+        said = refusal_of(second, lambda: command(second, "document.discardRecovery"))
+
+        report.check(said.endswith(" no-recovery document.discardRecovery"),
+                     "and so is a discard with nothing to delete: refusing an empty "
+                     "gesture is cheaper than pretending it worked",
+                     f"lastError reads {said!r}")
+
+        # --- revert, which is the disk winning ------------------------------
+        write(second, cue, AFTER_SAVE)
+
+        report.check(reads(second, cue, AFTER_SAVE), "an edit after the save lands",
+                     f"the cue reads {value_of(second, cue)!r}")
+        report.check(reads(second, DIRTY, True), "and lights the dot again")
+
+        command(second, "document.revert")
+
+        report.check(reads(second, cue, CRASHED),
+                     "document.revert puts the show on disk back",
+                     f"the cue reads {value_of(second, cue)!r}")
+
+        #  AND THE DOT GOES OUT, which a revert has to re-stamp for itself:
+        #  `adopt` ends by counting a load as the largest change there is, and
+        #  the restored positions count again on top, so a revert that did not
+        #  re-stamp `savedRevision` would report unsaved changes at the instant
+        #  the document matched the disk exactly.
+        report.check(reads(second, DIRTY, False),
+                     "with the dot OUT, because this document IS the file now",
+                     f"{DIRTY} reads {value_of(second, DIRTY)!r}")
+
+        # --- saveAs, which writes elsewhere and stays here ------------------
+        write(second, cue, ARCHIVED)
+        report.check(reads(second, cue, ARCHIVED), "one more edit, for the archive")
+
+        command(second, "document.saveAs", [str(archive)])
+
+        #  WAITED FOR ON THE MANIFEST, which is the last file saveAs writes and
+        #  so the one arrival that vouches for all the others: the descriptions
+        #  are copied first, then show.xml, then state.xml, then the manifest
+        #  that makes the folder a bundle. The first build of this driver
+        #  waited on show.xml - the FIRST of the show's files - and then
+        #  checked the manifest, the last, without waiting, and three runs in
+        #  six caught it mid-write as `archive.wfg.tmp-<pid>`. A wait must see
+        #  what its check reads, and here the thing to see is the one whose
+        #  arrival means the copy is finished.
+        common.wait_until(lambda: (archive / "archive.wfg").is_file())
+
+        copied = common.wait_until(lambda: ARCHIVED in text_of(archive / "show.xml"))
+
+        report.check(bool(copied), "document.saveAs writes the show into the named folder",
+                     f"{archive / 'show.xml'} is {len(text_of(archive / 'show.xml'))} bytes")
+        #  THE FILE, NOT THE FOLDER: an empty `namespaces/` would pass a check
+        #  for the directory, and a copy whose mount points at a namespace that
+        #  did not come with it opens with a warning instead of a desk.
+        #
+        #  WAITED FOR ITSELF, and not taken on the strength of show.xml having
+        #  arrived. The engine now copies the descriptions BEFORE it writes the
+        #  show, so show.xml's arrival already implies them - but a check that
+        #  leans on the order of another file's writes is one refactor away
+        #  from reading a description mid-copy, which is exactly what the first
+        #  build of this PR did, at nought bytes. A wait must see what its check
+        #  reads (the Phase 4 handoff's third trap).
+        source_namespace = text_of(folder / "namespaces" / "desk.json")
+        namespace = common.wait_until(
+            lambda: (lambda text: text if text and text == source_namespace else None)(
+                text_of(archive / "namespaces" / "desk.json"))) or ""
+
+        report.check(namespace != "" and namespace == source_namespace,
+                     "with the namespaces beside it, which Bundle::save refuses to write "
+                     "and saveAs copies rather than pretending the copy is a save",
+                     f"archive/namespaces/desk.json is {len(namespace)} bytes")
+
+        listing = sorted(p.name for p in archive.iterdir()) if archive.is_dir() else []
+
+        report.check((archive / "archive.wfg").is_file(),
+                     "and a manifest named after the folder it landed in, which is where "
+                     "a copy stops being a bundle if nobody writes it",
+                     f"{archive} holds {listing}")
+
+        #  THE HALF MOST LIKELY TO BE ARGUED ABOUT (§14.10), asked twice. A
+        #  *save a copy for the archive* that silently made the archive the live
+        #  document is a trap with a delay fuse: the operator's next ctrl-S goes
+        #  somewhere they did not name, and they find out at the next load.
+        report.check(CRASHED in text_of(show),
+                     "and it did not write the bundle this session opened",
+                     f"show.xml holds the archived name: {ARCHIVED in text_of(show)}")
+
+        #  READ ONE PUBLISH LATER, AND NOT THE INSTANT THE COPY APPEARED. The
+        #  handler writes the copy and the after hook assigns `dirty` at the end
+        #  of the same tick, so a reading taken as soon as the file exists could
+        #  be the snapshot from before saveAs was accounted for at all - `true`
+        #  for the old reason, passing for the wrong one. Waiting for the tick
+        #  counter to move is waiting for a snapshot that has to include it.
+        def tick() -> int:
+            value = value_of(second, "/godot/engine/tick")
+            return value if isinstance(value, int) else -1
+
+        copied_at = tick()
+        common.wait_until(lambda: tick() > copied_at + 2)
+
+        report.check(reads(second, DIRTY, True),
+                     "which is why the dot stays lit: those bytes are not this session's "
+                     "file, and this session's file is still behind",
+                     f"{DIRTY} reads {value_of(second, DIRTY)!r}")
+
+        command(second, "document.save")
+
+        report.check(reads(second, DIRTY, False), "the next save puts the dot out")
+        report.check(ARCHIVED in text_of(show),
+                     "and writes the folder the session opened, not the one saveAs was "
+                     "handed: saveAs does not re-point the session")
+
+
+# =============================================================================
 # The session
 # =============================================================================
 
 def run(locale: "str | None") -> int:
-    report = Report(f"phase 5: the document, locked and unlocked ({locale or 'C'})")
+    report = Report(f"phase 5: the document - locked, undone, recovered ({locale or 'C'})")
 
     if not FIXTURE.is_dir():
         raise HarnessError(f"no fixture bundle at {FIXTURE}")
@@ -737,6 +1108,13 @@ def run(locale: "str | None") -> int:
                      "the log holds all three refusals the lock made, each with the reason "
                      "locked: two doors and undo's own handler",
                      "\n".join(refusals))
+
+        # --- and the one thing no unit test can do: die ----------------------
+        #  ITS OWN BUNDLE AND ITS OWN LOGS, so that nothing above reaches it:
+        #  the session that has just ended left this room with a bundle it
+        #  edited and never saved, and the questions below are about a folder
+        #  whose history the driver knows completely.
+        after_a_crash(report, room, locale)
 
     return report.finish()
 

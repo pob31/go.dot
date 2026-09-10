@@ -42,6 +42,9 @@
 
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <cstdint>
 #include <regex>
 #include <string>
 #include <vector>
@@ -150,6 +153,46 @@ namespace
 
         CommandContext context;
         return saveCommand->handler (context, {});
+    }
+
+    /*  Any of the commands that know where the bundle is, invoked the same way:
+        the handler alone, at the tick a test names, with a copies folder only
+        when the test is standing in for `wfg replay`. */
+    Outcome invokeBundleCommand (ShowDocument& document, DocumentSession& session,
+                                 const std::string& name,
+                                 const std::vector<osc::Value>& args = {},
+                                 std::int64_t tick = 0,
+                                 const juce::File& copies = juce::File())
+    {
+        CommandRegistry registry;
+        registerBundleCommands (registry, document, session, copies);
+
+        const auto* command = registry.find (name);
+        REQUIRE_MESSAGE (command != nullptr, "no command " << name);
+
+        CommandContext context;
+        context.tick = tick;
+        return command->handler (context, args);
+    }
+
+    /*  An earlier session's afternoon, left in `recovery/` the way a crash
+        leaves it: opened, edited, autosaved, and never saved or closed. The
+        document and its session go out of scope at the closing brace, which is
+        as close to a pulled plug as one process can come - nothing tidies up. */
+    void abandonAnAfternoon (const juce::File& folder, const std::string& name)
+    {
+        ShowDocument earlier;
+        REQUIRE (Bundle::open (folder, earlier).ok);
+
+        DocumentSession earlierSession { folder, earlier.showRevision() };
+        REQUIRE (earlier.setAttribute (houseToHalfName, name).ok);
+        REQUIRE (invokeBundleCommand (earlier, earlierSession, "document.autosave", {}, 100).applied);
+        REQUIRE (Bundle::hasRecovery (folder));
+    }
+
+    bool canUndoIn (const ShowDocument& document)
+    {
+        return document.history (UndoDomain::document).canUndo();
     }
 }
 
@@ -367,6 +410,816 @@ TEST_CASE ("document.save: a write that cannot land is refused, the old show.xml
         because there is. */
     CHECK (session.savedRevision == stampBefore);
     CHECK (isDirty (document, session));
+}
+
+//==============================================================================
+/*  PR 5.5: AN AUTOSAVE NOBODY ASKS FOR, AND WHAT A PERSON DOES ABOUT IT.
+
+    These cases prove what one process can prove: that the recovery bytes
+    round-trip, that the commands around them do what §14.10's two tables say
+    and deliberately no more, and that the decision to write sits exactly on
+    its boundaries. What they cannot prove is the crash half, because a unit
+    test cannot die - `tests/blackbox/phase5_document.py` kills a real process
+    on a real folder and starts another on it, which is the only honest way to
+    ask whether the work survived. */
+
+TEST_CASE ("autosaveDue: nothing to write, the quiet boundary, and the ceiling boundary")
+{
+    /*  THE DECISION, AT ITS EDGES, WITH NO DISK. A fresh document is at show
+        revision 1 and a session nobody stamped reads 0, so the document below
+        is dirty and has never been autosaved until a case says otherwise. */
+    ShowDocument document;
+    REQUIRE (document.showRevision() > 0);
+
+    /*  THE TWO NUMBERS THEMSELVES, pinned, because they are plan decision 5 and
+        here to be overruled early: when they are overruled it should be this
+        line that changes, on purpose, and not a boundary below that drifts. */
+    CHECK (autosaveQuietTicks == 100);
+    CHECK (autosaveCeilingTicks == 1500);
+
+    //--------------------------------------------------------------------------
+    // Not dirty: nothing to write, at any tick, however long the quiet.
+    {
+        DocumentSession session;
+        session.savedRevision = document.showRevision();
+
+        CHECK_FALSE (autosaveDue (document, session, autosaveQuietTicks));
+        CHECK_FALSE (autosaveDue (document, session, autosaveCeilingTicks));
+        CHECK_FALSE (autosaveDue (document, session, 10 * autosaveCeilingTicks));
+    }
+
+    //--------------------------------------------------------------------------
+    // Two seconds of quiet: 99 ticks is not quiet, 100 is.
+    {
+        DocumentSession session;
+        session.lastChangeTick = 1000;
+
+        CHECK_FALSE (autosaveDue (document, session, 1000 + autosaveQuietTicks - 1));
+        CHECK (autosaveDue (document, session, 1000 + autosaveQuietTicks));
+    }
+
+    //--------------------------------------------------------------------------
+    /*  The thirty-second ceiling, reached by somebody who never stops: the last
+        change is always one tick ago, so the quiet never comes, and the only
+        thing that can write is the ceiling. 1499 ticks since the last attempt
+        is not enough; 1500 is. */
+    {
+        DocumentSession session;
+        session.lastAutosaveTick = 2000;
+
+        session.lastChangeTick = 2000 + autosaveCeilingTicks - 2;
+        CHECK_FALSE (autosaveDue (document, session, 2000 + autosaveCeilingTicks - 1));
+
+        session.lastChangeTick = 2000 + autosaveCeilingTicks - 1;
+        CHECK (autosaveDue (document, session, 2000 + autosaveCeilingTicks));
+    }
+
+    //--------------------------------------------------------------------------
+    /*  Already in `recovery/`: the same bytes are never written twice, which is
+        what stops a dirty, idle show autosaving on every tick after its quiet -
+        at both boundaries at once. */
+    {
+        DocumentSession session;
+        session.autosavedRevision = document.showRevision();
+        session.lastChangeTick = 1000;
+
+        CHECK_FALSE (autosaveDue (document, session, 1000 + autosaveQuietTicks));
+        CHECK_FALSE (autosaveDue (document, session, 1000 + autosaveCeilingTicks));
+    }
+
+    //--------------------------------------------------------------------------
+    /*  A FAILED ATTEMPT WAITS FOR THE CEILING. The edit came before the
+        attempt, so the quiet it ended is spent; without that term a folder that
+        has gone would be tried fifty times a second. */
+    {
+        DocumentSession session;
+        session.lastChangeTick = 1000;
+        session.lastAutosaveTick = 1000 + autosaveQuietTicks;
+
+        CHECK_FALSE (autosaveDue (document, session, 1000 + autosaveQuietTicks + 1));
+        CHECK_FALSE (autosaveDue (document, session,
+                                  1000 + autosaveQuietTicks + autosaveCeilingTicks - 1));
+        CHECK (autosaveDue (document, session, 1000 + autosaveQuietTicks + autosaveCeilingTicks));
+    }
+
+    //--------------------------------------------------------------------------
+    /*  An edit in the SAME tick as an attempt is still owed its own write: the
+        attempt may have serialised the document before that edit was applied,
+        and `>=` rather than `>` is what keeps it from waiting thirty seconds. */
+    {
+        DocumentSession session;
+        session.lastChangeTick = 5000;
+        session.lastAutosaveTick = 5000;
+
+        CHECK (autosaveDue (document, session, 5000 + autosaveQuietTicks));
+    }
+
+    //--------------------------------------------------------------------------
+    /*  And not at all while an earlier session's afternoon waits for an answer,
+        because the only file this could write is the one holding it. */
+    {
+        DocumentSession session;
+        session.recoveryFound = true;
+        session.lastChangeTick = 1000;
+
+        CHECK_FALSE (autosaveDue (document, session, 1000 + autosaveQuietTicks));
+        CHECK_FALSE (autosaveDue (document, session, 1000 + autosaveCeilingTicks));
+    }
+}
+
+TEST_CASE ("recovery: the autosave's bytes round-trip in one process, and never touch the authored pair")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Renamed and never saved").ok);
+    REQUIRE (document.setAttribute (standbyAddress, "D9FH2JKA").ok);
+    REQUIRE (isDirty (document, session));
+
+    const auto outcome = invokeBundleCommand (document, session, "document.autosave", {}, 4321);
+
+    CHECK (outcome.applied);
+    CHECK (outcome.appliedArgs.empty());
+
+    /*  The session's own record of it: WHEN it was attempted, and WHICH show
+        the folder now holds. */
+    CHECK (session.lastAutosaveTick == 4321);
+    CHECK (session.autosavedRevision == document.showRevision());
+
+    /*  AND THE DOT STAYS LIT. What is on disk as the show is still what it
+        was; an autosave is not a save, and a light that went out here would be
+        telling somebody their work was saved when it was not. */
+    CHECK (isDirty (document, session));
+
+    /*  NEVER THE AUTHORED PAIR, byte for byte - which is what keeps not saving
+        a gesture somebody can make (§14.10). */
+    for (const auto& name : { "show.xml", "state.xml", "minimal.wfg" })
+    {
+        INFO ("file: " << name);
+        CHECK (readBytes (temp.folder.getChildFile (name))
+                 == readBytes (fixtureBundle().getChildFile (name)));
+    }
+
+    /*  What `recovery/` holds is exactly what the two writers produce - the
+        same canonical bytes a save would have put in the authored files. */
+    CHECK (readBytes (Bundle::recoveryShowFile (temp.folder)) == CanonicalXml::write (document));
+    CHECK (readBytes (Bundle::recoveryStateFile (temp.folder)) == EphemeralState::write (document));
+
+    /*  No manifest, so nothing walking a disk for shows mistakes the folder for
+        one; and no temp left beside the files it replaced. */
+    CHECK (Bundle::recoveryFolder (temp.folder)
+             .findChildFiles (juce::File::findFiles, false, "*.wfg").isEmpty());
+    CHECK (tempsIn (Bundle::recoveryFolder (temp.folder)).empty());
+
+    /*  And the log header does not see it: a session that autosaved still
+        hashes as the bundle it was recorded against. */
+    CHECK (Bundle::contentHash (temp.folder) == Bundle::contentHash (fixtureBundle()));
+
+    //--------------------------------------------------------------------------
+    /*  THE ROUND TRIP. A fresh document opens the authored show - the morning -
+        and the recovery on top of it brings the afternoon back, the operator's
+        position included, to the byte. */
+    ShowDocument reopened;
+    REQUIRE (Bundle::open (temp.folder, reopened).ok);
+    CHECK (reopened.getAttribute (houseToHalfName) == std::string ("House to half"));
+
+    const auto recovered = Bundle::openRecovery (temp.folder, reopened);
+
+    for (const auto& problem : recovered.problems)
+        INFO ("problem: " << problem);
+
+    CHECK (recovered.ok);
+    CHECK (recovered.problems.empty());
+    CHECK (reopened.getAttribute (houseToHalfName) == std::string ("Renamed and never saved"));
+    CHECK (reopened.getAttribute (standbyAddress) == std::string ("D9FH2JKA"));
+    CHECK (CanonicalXml::write (reopened) == CanonicalXml::write (document));
+    CHECK (EphemeralState::write (reopened) == EphemeralState::write (document));
+}
+
+TEST_CASE ("document.recover: the afternoon comes back dirty, with no history, and the offer is answered")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+    abandonAnAfternoon (temp.folder, "The afternoon nobody saved");
+
+    //--------------------------------------------------------------------------
+    // The next session, which finds it and adopts nothing on its own.
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.recoveryFound = Bundle::hasRecovery (temp.folder);
+
+    REQUIRE (session.recoveryFound);
+    CHECK (document.getAttribute (houseToHalfName) == std::string ("House to half"));
+    CHECK_FALSE (isDirty (document, session));
+
+    /*  Something on the stack, so that "the history is cleared" is a claim
+        about a history that had something in it. */
+    REQUIRE (document.setAttribute (houseToHalfName, "Typed this morning").ok);
+    REQUIRE (canUndoIn (document));
+
+    const auto outcome = invokeBundleCommand (document, session, "document.recover");
+
+    CHECK (outcome.applied);
+    CHECK (document.getAttribute (houseToHalfName) == std::string ("The afternoon nobody saved"));
+
+    /*  LIT, DELIBERATELY: the recovered work is not on disk as the show, and
+        the dot is telling the truth. `recover` re-stamps nothing. */
+    CHECK (isDirty (document, session));
+
+    // The history went with the show it was about.
+    CHECK_FALSE (canUndoIn (document));
+
+    // The offer is answered, and what `recovery/` holds is known to be this.
+    CHECK_FALSE (session.recoveryFound);
+    CHECK (session.autosavedRevision == document.showRevision());
+
+    /*  NOT DELETED by adopting it: only a save or a discard removes the folder,
+        and until then a crash would find the afternoon there again. */
+    CHECK (Bundle::hasRecovery (temp.folder));
+
+    //--------------------------------------------------------------------------
+    /*  A SAVE MAKES THE WORK THE SHOW, puts the dot out, and takes the folder
+        with it - so the next start offers nothing it has already kept. */
+    CHECK (invokeSave (document, session).applied);
+    CHECK_FALSE (isDirty (document, session));
+    CHECK_FALSE (Bundle::recoveryFolder (temp.folder).exists());
+    CHECK (session.autosavedRevision == 0u);
+
+    ShowDocument reopened;
+    REQUIRE (Bundle::open (temp.folder, reopened).ok);
+    CHECK (reopened.getAttribute (houseToHalfName) == std::string ("The afternoon nobody saved"));
+
+    //--------------------------------------------------------------------------
+    // And now there is nothing to recover and nothing to discard.
+    const auto again = invokeBundleCommand (document, session, "document.recover");
+    CHECK_FALSE (again.applied);
+    CHECK (again.reason == reason::noRecovery);
+
+    const auto discard = invokeBundleCommand (document, session, "document.discardRecovery");
+    CHECK_FALSE (discard.applied);
+    CHECK (discard.reason == reason::noRecovery);
+
+    /*  The word, spelled out: a reason code is part of the log format and so a
+        contract, and a rename would be a format change that has to fail here. */
+    CHECK (std::string (reason::noRecovery) == "no-recovery");
+}
+
+TEST_CASE ("document.recover: a torn or absent recovery file is refused, and the document is untouched")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Still on screen").ok);
+    REQUIRE (canUndoIn (document));
+
+    const auto revisionBefore = document.revision();
+    const auto showBefore = CanonicalXml::write (document);
+    const auto stateBefore = EphemeralState::write (document);
+
+    //--------------------------------------------------------------------------
+    // Absent: nothing there to adopt.
+    {
+        const auto outcome = invokeBundleCommand (document, session, "document.recover");
+
+        CHECK_FALSE (outcome.applied);
+        CHECK (outcome.reason == reason::noRecovery);
+    }
+
+    //--------------------------------------------------------------------------
+    /*  TORN: the first half of a show, cut off mid-element - the file the
+        atomic write exists to make impossible, stood there by hand because a
+        power cut on some platform will one day manage it anyway. And the offer
+        is standing, so the refusal is not the latch talking. */
+    writeBytes (Bundle::recoveryShowFile (temp.folder), showBefore.substr (0, showBefore.size() / 2));
+    session.recoveryFound = true;
+
+    {
+        const auto outcome = invokeBundleCommand (document, session, "document.recover");
+
+        CHECK_FALSE (outcome.applied);
+        CHECK (outcome.reason == reason::noRecovery);
+    }
+
+    /*  UNTOUCHED, in every sense a later command could notice: the same
+        revision, the same bytes out of both writers, the same history, and the
+        offer still standing - a refusal answers nothing. */
+    CHECK (document.revision() == revisionBefore);
+    CHECK (CanonicalXml::write (document) == showBefore);
+    CHECK (EphemeralState::write (document) == stateBefore);
+    CHECK (document.getAttribute (houseToHalfName) == std::string ("Still on screen"));
+    CHECK (canUndoIn (document));
+    CHECK (session.recoveryFound);
+
+    // And the reader says which file and why, for anybody asking it directly.
+    const auto direct = Bundle::openRecovery (temp.folder, document);
+    CHECK_FALSE (direct.ok);
+    CHECK (mentions (direct.problems, "recovery/show.xml"));
+    CHECK (CanonicalXml::write (document) == showBefore);
+}
+
+TEST_CASE ("document.revert: the disk wins, the history goes, and the dot goes OUT")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "An afternoon somebody regrets").ok);
+    REQUIRE (document.setAttribute (standbyAddress, "D9FH2JKA").ok);
+    REQUIRE (isDirty (document, session));
+    REQUIRE (canUndoIn (document));
+
+    // This session's own autosave of the afternoon about to be thrown away.
+    REQUIRE (invokeBundleCommand (document, session, "document.autosave", {}, 10).applied);
+    REQUIRE (Bundle::hasRecovery (temp.folder));
+
+    const auto outcome = invokeBundleCommand (document, session, "document.revert");
+
+    CHECK (outcome.applied);
+    CHECK (document.getAttribute (houseToHalfName) == std::string ("House to half"));
+
+    /*  AND ITS COPY GOES WITH IT, on `document.save`'s terms: the document and
+        the folder now hold the same show, and a crash before the next edit
+        must not offer back the very afternoon the operator just threw away. */
+    CHECK_FALSE (Bundle::recoveryFolder (temp.folder).exists());
+    CHECK (session.autosavedRevision == 0u);
+
+    /*  THE DOT GOES OUT, which takes a re-stamp: `adopt` counts a load as the
+        largest change there is and moves the show counter, so a revert that
+        did not re-stamp would report unsaved changes at the instant the
+        document matched the disk. */
+    CHECK_FALSE (isDirty (document, session));
+    CHECK (session.savedRevision == document.showRevision());
+
+    CHECK_FALSE (canUndoIn (document));
+
+    /*  The pointer comes back with the document it is in, to what state.xml
+        says - not as a side effect of the revert but because loading a
+        document is the whole of what it does (§14.7). */
+    CHECK (document.getAttribute (standbyAddress) == std::string ("B3N8R5TW"));
+
+    //--------------------------------------------------------------------------
+    /*  A FOLDER THAT IS NO LONGER A READABLE BUNDLE: `bad-address`, because
+        this is the one refusal here that genuinely sends somebody to look at a
+        path - and the document on screen is left exactly as it was. */
+    REQUIRE (document.setAttribute (houseToHalfName, "Edited again").ok);
+    REQUIRE (temp.folder.getChildFile ("show.xml").deleteFile());
+
+    const auto refused = invokeBundleCommand (document, session, "document.revert");
+
+    CHECK_FALSE (refused.applied);
+    CHECK (refused.reason == reason::badAddress);
+    CHECK (document.getAttribute (houseToHalfName) == std::string ("Edited again"));
+    CHECK (isDirty (document, session));
+}
+
+TEST_CASE ("document.revert leaves an earlier session's unanswered recovery where it is")
+{
+    /*  A revert says the bundle wins. It says nothing about somebody else's
+        afternoon, and throwing that away as a side effect of a different
+        gesture is the decision §14.10 keeps for the operator. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+    abandonAnAfternoon (temp.folder, "Somebody else's afternoon");
+
+    const auto theirs = readBytes (Bundle::recoveryShowFile (temp.folder));
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.recoveryFound = Bundle::hasRecovery (temp.folder);
+    REQUIRE (session.recoveryFound);
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Typed this morning").ok);
+    CHECK (invokeBundleCommand (document, session, "document.revert").applied);
+
+    CHECK_FALSE (isDirty (document, session));
+    CHECK (session.recoveryFound);
+    CHECK (readBytes (Bundle::recoveryShowFile (temp.folder)) == theirs);
+}
+
+TEST_CASE ("the lock refuses revert and recover in their own handlers, and none of the byte writers")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Edited before the lock").ok);
+    REQUIRE (invokeBundleCommand (document, session, "document.autosave", {}, 10).applied);
+
+    REQUIRE (document.setAttribute ("/godot/document/locked", "true").ok);
+    REQUIRE (document.isLocked());
+
+    /*  THE TWO THAT REPLACE THE SHOW. `adopt` is a hatch and not a door, so the
+        four predicates never see them; and it replaces the root, lock included,
+        so either of them could otherwise unlock a locked show because a file
+        on disk said so (§14.11). */
+    const auto revert = invokeBundleCommand (document, session, "document.revert");
+    CHECK_FALSE (revert.applied);
+    CHECK (revert.reason == reason::locked);
+
+    const auto recover = invokeBundleCommand (document, session, "document.recover");
+    CHECK_FALSE (recover.applied);
+    CHECK (recover.reason == reason::locked);
+
+    CHECK (document.isLocked());
+    CHECK (document.getAttribute (houseToHalfName) == std::string ("Edited before the lock"));
+
+    /*  AND THE FOUR THAT WRITE BYTES, which keep working: saving during a
+        locked show is the point of locking it (§14.7). */
+    CHECK (invokeBundleCommand (document, session, "document.autosave", {}, 20).applied);
+    CHECK (invokeBundleCommand (document, session, "document.discardRecovery").applied);
+    CHECK (invokeBundleCommand (document, session, "document.saveAs",
+                                { osc::Value::string (temp.parent.getChildFile ("archive")
+                                                        .getFullPathName().toStdString()) })
+             .applied);
+    CHECK (invokeSave (document, session).applied);
+}
+
+TEST_CASE ("document.saveAs: a bundle open accepts, with namespaces/ and without media/, and the session stays put")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    /*  Media the copy must NOT carry - the heavy half of a bundle, and a copy
+        of it is a decision about a disk rather than about a show. */
+    writeBytes (temp.folder.getChildFile ("media").getChildFile ("tone.wav"), "not really a wav\n");
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Kept for the archive").ok);
+
+    // And a recovery the copy must not carry either: this session's afternoon.
+    REQUIRE (invokeBundleCommand (document, session, "document.autosave", {}, 10).applied);
+
+    const auto archive = temp.parent.getChildFile ("archive");
+    const auto path = archive.getFullPathName().toStdString();
+    const auto folderBefore = session.folder;
+    const auto stampBefore = session.savedRevision;
+
+    const auto outcome = invokeBundleCommand (document, session, "document.saveAs",
+                                              { osc::Value::string (path) });
+
+    CHECK (outcome.applied);
+
+    // The record carries the path as it was asked for.
+    REQUIRE (outcome.appliedArgs.size() == 1u);
+    CHECK (outcome.appliedArgs[0].getString() == path);
+
+    //--------------------------------------------------------------------------
+    /*  A BUNDLE `open` ACCEPTS, with nothing to say about it: the manifest is
+        named after the folder it landed in, which is where a copy stops being a
+        bundle if nobody writes it. */
+    ShowDocument copied;
+    const auto opened = Bundle::open (archive, copied);
+
+    for (const auto& problem : opened.problems)
+        INFO ("problem: " << problem);
+
+    CHECK (opened.ok);
+    CHECK (opened.problems.empty());
+    CHECK (archive.getChildFile ("archive.wfg").existsAsFile());
+    CHECK (copied.getAttribute (houseToHalfName) == std::string ("Kept for the archive"));
+
+    // The descriptions, copied byte for byte: save-plus-a-copy, and it says so.
+    for (const auto& name : { "console.json", "wfs-diy.json" })
+    {
+        INFO ("namespace file: " << name);
+        CHECK (readBytes (Bundle::namespacesFolder (archive).getChildFile (name))
+                 == readBytes (Bundle::namespacesFolder (temp.folder).getChildFile (name)));
+    }
+
+    CHECK_FALSE (archive.getChildFile ("media").exists());
+    CHECK_FALSE (Bundle::recoveryFolder (archive).exists());
+
+    //--------------------------------------------------------------------------
+    /*  IT DOES NOT RE-POINT THE SESSION. The folder it names is the one it
+        opened, the stamp is where it was, the dot is lit - because this
+        session's own file is still behind - and that file is untouched. */
+    CHECK (session.folder == folderBefore);
+    CHECK (session.savedRevision == stampBefore);
+    CHECK (isDirty (document, session));
+    CHECK (readBytes (temp.folder.getChildFile ("show.xml"))
+             == readBytes (fixtureBundle().getChildFile ("show.xml")));
+
+    /*  So the next Ctrl-S goes where the operator last opened, and the archive
+        keeps the moment it was made. */
+    REQUIRE (document.setAttribute (houseToHalfName, "After the archive").ok);
+    CHECK (invokeSave (document, session).applied);
+
+    ShowDocument fromArchive;
+    REQUIRE (Bundle::open (archive, fromArchive).ok);
+    CHECK (fromArchive.getAttribute (houseToHalfName) == std::string ("Kept for the archive"));
+
+    ShowDocument fromSession;
+    REQUIRE (Bundle::open (temp.folder, fromSession).ok);
+    CHECK (fromSession.getAttribute (houseToHalfName) == std::string ("After the archive"));
+}
+
+TEST_CASE ("document.saveAs under a replay lands inside --out, whatever the path it names")
+{
+    /*  A replayed copy must never write where the live one did - that folder is
+        somebody's archive on the machine that recorded the log - and a path
+        recorded on Windows is not even absolute on the Mac mini. So a replay's
+        copies go to `<out>/saveAs/<last component>`, and the record still
+        carries the path as it was asked for, so the replay compares line for
+        line. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    const auto out = temp.parent.getChildFile ("replayed");
+    DocumentSession session { out, document.showRevision() };
+
+    /*  One path spelled with backslashes and one with forward slashes and a
+        trailing one, each of which must reduce to `archive` on every platform.
+        Both are rooted in this test's own scratch folder, so that if the
+        re-rooting ever broke, the stray copy would land somewhere this test
+        cleans up and the count at the end would catch it - rather than in a
+        real folder on whichever machine ran the suite. */
+    const auto root = temp.parent.getFullPathName().toStdString();
+
+    for (const auto& asked : { root + "\\elsewhere\\archive",
+                               root + "/elsewhere/archive/" })
+    {
+        INFO ("path in the record: " << asked);
+
+        const auto outcome = invokeBundleCommand (document, session, "document.saveAs",
+                                                  { osc::Value::string (asked) }, 0, out);
+
+        CHECK (outcome.applied);
+        REQUIRE (outcome.appliedArgs.size() == 1u);
+        CHECK (outcome.appliedArgs[0].getString() == asked);
+
+        ShowDocument copied;
+        CHECK (Bundle::open (out.getChildFile ("saveAs").getChildFile ("archive"), copied).ok);
+    }
+
+    // Nothing was written anywhere but under the folder it was handed.
+    CHECK (temp.parent.findChildFiles (juce::File::findDirectories, false).size() == 2);
+}
+
+TEST_CASE ("document.autosave: a bundle that has gone is refused, and no twin is made where it was")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.lastChangeTick = 600;
+
+    REQUIRE (document.setAttribute (houseToHalfName, "Renamed on a stick").ok);
+
+    // Somebody moves the bundle mid-session - or pulls out the stick it was on.
+    REQUIRE (temp.folder.moveFileTo (temp.parent.getChildFile ("moved")));
+    REQUIRE_FALSE (temp.folder.exists());
+
+    const auto outcome = invokeBundleCommand (document, session, "document.autosave", {}, 777);
+
+    CHECK_FALSE (outcome.applied);
+    CHECK (outcome.reason == reason::writeFailed);
+
+    /*  NO TWIN. An unattended writer that invents a folder is how a bundle
+        acquires one: the real show with its media in one place, and three
+        files at the old path with none, and nothing to say which the operator
+        was working in (§14.10). */
+    CHECK_FALSE (temp.folder.exists());
+
+    /*  THE ATTEMPT IS STAMPED and the revision is not, so the decision waits
+        for the ceiling rather than asking again on the very next tick. */
+    CHECK (session.lastAutosaveTick == 777);
+    CHECK (session.autosavedRevision == 0u);
+    CHECK_FALSE (autosaveDue (document, session, 778));
+    CHECK_FALSE (autosaveDue (document, session, 777 + autosaveCeilingTicks - 1));
+    CHECK (autosaveDue (document, session, 777 + autosaveCeilingTicks));
+
+    /*  And the asymmetry, pinned from the other side: `document.save` DOES make
+        the folder, because somebody asked for it, and a person can see a new
+        folder and undo it. */
+    CHECK (invokeSave (document, session).applied);
+    CHECK (temp.folder.getChildFile ("show.xml").existsAsFile());
+    CHECK_FALSE (Bundle::namespacesFolder (temp.folder).exists());
+}
+
+TEST_CASE ("an unanswered recovery survives this session's autosave and its save, until somebody answers it")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+    abandonAnAfternoon (temp.folder, "Somebody else's afternoon");
+
+    const auto theirs = readBytes (Bundle::recoveryShowFile (temp.folder));
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    DocumentSession session { temp.folder, document.showRevision() };
+    session.recoveryFound = Bundle::hasRecovery (temp.folder);
+    REQUIRE (session.recoveryFound);
+
+    REQUIRE (document.setAttribute (houseToHalfName, "This session's work").ok);
+    session.lastChangeTick = 50;
+
+    /*  THE AUTOSAVE WILL NOT DECIDE FOR THEM: it would write over the one file
+        that holds the question, and answering it by overwriting it is the
+        decision §14.10 says autosave exists to leave open. */
+    CHECK_FALSE (autosaveDue (document, session, 50 + autosaveQuietTicks));
+    CHECK_FALSE (autosaveDue (document, session, 50 + autosaveCeilingTicks));
+
+    /*  NOR WILL A SAVE. It makes THIS session's work the show; it does not make
+        that afternoon anything, so the folder stays and the offer stands. */
+    CHECK (invokeSave (document, session).applied);
+    CHECK_FALSE (isDirty (document, session));
+    CHECK (session.recoveryFound);
+    CHECK (readBytes (Bundle::recoveryShowFile (temp.folder)) == theirs);
+
+    // Until somebody answers - here by throwing it away - after which it is gone.
+    CHECK (invokeBundleCommand (document, session, "document.discardRecovery").applied);
+    CHECK_FALSE (Bundle::recoveryFolder (temp.folder).exists());
+    CHECK_FALSE (session.recoveryFound);
+
+    // And this session's own edits are protected again from the next quiet on.
+    REQUIRE (document.setAttribute (houseToHalfName, "Protected again").ok);
+    session.lastChangeTick = 200;
+    CHECK (autosaveDue (document, session, 200 + autosaveQuietTicks));
+}
+
+TEST_CASE ("M23: an autosave of a 500-cue show, timed around the handler that writes it")
+{
+    /*  MEASUREMENT M23 (§14.14): does a 500-cue autosave fit inside a tick?
+
+        It is taken before 5.5 lands because nobody presses save mid-cue and an
+        autosave fires on its own, so what it measures is a tick going late
+        during a show. AT OR UNDER A QUARTER TICK - 5 ms - the bytes stay on the
+        tick thread, where `document.save` already puts them; above it, the
+        snapshot is still taken there and the bytes go to a writer thread on
+        MountProbe's shape. The record is `document.autosave` either way, which
+        is why nothing here gates on the number.
+
+        ASSERTED IS A COUNT, NEVER A CLOCK: every autosave applied, and the
+        bytes on disk the bytes the writer produced. A wall-clock threshold on
+        a shared CI runner is a flaky test that teaches people to re-run the
+        suite (§14.14, and Phase 4 before it), so the milliseconds are printed
+        for somebody to quote and gate nothing. Quote the Release figure: a
+        Debug build carries iterator debugging and measures the build.
+
+        THE SHOW IS M18's SHAPE - five hundred `Media` cues, each with one
+        `Feed` naming one of twenty slot identifiers - built straight into the
+        tree for M18's reason: every door finds its parent with `findById`, a
+        depth-first walk of the whole show, and five hundred of those would
+        measure the door. The serialiser reads the tree and cannot tell the
+        difference, and it writes a Feed's `slot` without resolving it, so the
+        identifiers need not name slots this fixture declares - the bytes are
+        the bytes of a show that did.
+
+        A HUNDRED AUTOSAVES, as §14.14 asks, because the 99th percentile of
+        fewer is not a 99th percentile. The first is made outside the timing:
+        it finds no `recovery/` and so takes `replaceFileIn`'s move branch,
+        while every one a show would actually make after that is a replace. */
+    TempBundle temp { "minimal" };
+    temp.copyFixture();
+
+    ShowDocument document;
+    REQUIRE (Bundle::open (temp.folder, document).ok);
+
+    auto list = document.findById ("7K2QM9X4");
+    REQUIRE (list.isValid());
+
+    constexpr int cueCount = 500;
+    constexpr int slotCount = 20;
+
+    for (int n = 0; n < cueCount; ++n)
+    {
+        juce::ValueTree media { "Media" };
+        media.setProperty (juce::Identifier ("id"), juce::String ("MA") + juce::String (100000 + n),
+                           nullptr);
+        media.setProperty (juce::Identifier ("name"), juce::String ("Cue ") + juce::String (n),
+                           nullptr);
+        media.setProperty (juce::Identifier ("file"), "tone.wav", nullptr);
+
+        juce::ValueTree feed { "Feed" };
+        feed.setProperty (juce::Identifier ("id"), juce::String ("FA") + juce::String (100000 + n),
+                          nullptr);
+        feed.setProperty (juce::Identifier ("slot"),
+                          juce::String ("SA") + juce::String (100000 + n % slotCount), nullptr);
+        feed.setProperty (juce::Identifier ("gains"), "1", nullptr);
+        media.addChild (feed, -1, nullptr);
+
+        list.addChild (media, -1, nullptr);
+    }
+
+    DocumentSession session;
+    session.folder = temp.folder;
+
+    CommandRegistry registry;
+    registerBundleCommands (registry, document, session);
+
+    const auto* autosave = registry.find ("document.autosave");
+    REQUIRE (autosave != nullptr);
+
+    //--------------------------------------------------------------------------
+    // The serialisation alone, for the breakdown.
+    constexpr int serialisations = 10;
+    std::string written;
+
+    const auto beforeWrites = juce::Time::getMillisecondCounterHiRes();
+
+    for (int n = 0; n < serialisations; ++n)
+        written = CanonicalXml::write (document);
+
+    const auto serialiseCost = (juce::Time::getMillisecondCounterHiRes() - beforeWrites)
+                                 / serialisations;
+
+    //--------------------------------------------------------------------------
+    CommandContext context;
+    context.tick = 1;
+    REQUIRE (autosave->handler (context, {}).applied);
+
+    constexpr std::size_t autosaves = 100;
+    std::vector<double> costs;
+    costs.reserve (autosaves);
+
+    std::size_t applied = 0;
+
+    for (std::size_t n = 0; n < autosaves; ++n)
+    {
+        context.tick = static_cast<std::int64_t> (n) + 2;
+
+        const auto start = juce::Time::getMillisecondCounterHiRes();
+        const auto outcome = autosave->handler (context, {});
+        costs.push_back (juce::Time::getMillisecondCounterHiRes() - start);
+
+        if (outcome.applied)
+            ++applied;
+    }
+
+    CHECK (applied == autosaves);
+    CHECK (readBytes (Bundle::recoveryShowFile (temp.folder)) == written);
+    CHECK (tempsIn (Bundle::recoveryFolder (temp.folder)).empty());
+
+    std::sort (costs.begin(), costs.end());
+
+    /*  The median of an even count is the mean of the middle two; the 99th
+        percentile is the nearest rank, which for a hundred samples is the
+        ninety-ninth smallest - one sample short of the worst. */
+    const auto median = (costs[autosaves / 2 - 1] + costs[autosaves / 2]) / 2.0;
+    const auto percentile99 = costs[autosaves - 2];
+    const auto worst = costs.back();
+
+   #if JUCE_DEBUG
+    const char* const build = "Debug";
+   #else
+    const char* const build = "Release";
+   #endif
+
+    MESSAGE ("M23  " << cueCount << " cues, " << written.size() << " bytes of show.xml, "
+                     << build << " build: CanonicalXml::write alone " << serialiseCost
+                     << " ms; the document.autosave handler (show.xml and state.xml, each"
+                        " written, flushed and replaced) over " << autosaves << " autosaves:"
+                     << " median " << median << " ms, 99th percentile " << percentile99
+                     << " ms, worst " << worst << " ms; the threshold is a quarter tick, 5 ms");
 }
 
 //==============================================================================

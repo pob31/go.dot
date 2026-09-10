@@ -4699,6 +4699,28 @@ folder exists for. And of the four verbs that open a bundle through `Bundle::ope
 not validated, because `validate` is what somebody runs on a bundle they suspect. A tree dump
 and a replay are not asking about unfinished work.
 
+**Three things building it found that this subsection did not draw** *(PR 5.5, 2026-09-11)*.
+
+- **The first autosave would have destroyed somebody else's afternoon.** The paragraphs above
+  cover a recovery the session itself wrote. They say nothing about one found at open and not yet
+  answered — and as drawn, this session's first autosave, two seconds after its first edit,
+  writes `recovery/show.xml` straight over it: the abandoned afternoon gone before anybody read
+  the banner offering it back, which is the one decision this subsection exists to leave to the
+  operator. The first build closes it the conservative way — while a recovery found at open is
+  unanswered, nothing deletes it and **autosave is suspended** — and that trades the old work's
+  safety for the new work's, since this session's edits then have no crash protection until
+  somebody answers. Which way to trade is the author's, and is asked.
+- **`revert` and `recover` read into a scratch document, then adopt.** `CanonicalXml::read`
+  refuses what it cannot parse before touching anything, but its last pass, `validate()`, runs
+  *after* `adopt` — so a revert of a show that failed a whole-document check would come back
+  refused having already replaced the show and cleared its history, with a log line saying nothing
+  happened. The scratch document is handed over only when every step succeeded.
+- **`saveAs` copies `namespaces/` first and writes the manifest last.** Copied after `save`, the
+  descriptions arrived in a folder that was already an openable bundle, so a crash between the two
+  left a bundle whose mounts described nothing. Now the manifest's arrival means everything else
+  has, and a crash part-way leaves a folder `open` refuses rather than half-loads. The black-box
+  driver found it, reading a description at nought bytes.
+
 **The lifecycle, and the one command that is not built.**
 
 | command | what it does | what it deliberately does not |
@@ -5246,6 +5268,27 @@ tick thread, which it must do in either shape, and hand the bytes to a writer th
 The log record is `document.autosave` either way, so the fallback is a switch and not a
 redesign, which is why §14.10 answers §4.1 without waiting for the number. What M23 does not
 measure is the atomic write itself, which §14.10 argues for independently of any number.
+
+**M23 answered, on the Windows box (PR 5.5, 2026-09-11): the bytes leave the tick thread.** A
+Release build, the 500-cue show at 65 616 bytes of `show.xml`, a hundred autosaves, twice:
+
+| part | median | 99th percentile | worst |
+|---|---|---|---|
+| `CanonicalXml::write` alone | 1.37 ms | — | — |
+| the `document.autosave` handler: both files written, flushed and replaced | 20.8–21.3 ms | 24.7–26.4 ms | 26.6 ms |
+| the threshold, a quarter tick | 5 ms | | |
+
+Four times the threshold and a full tick at the median, and the serialisation is not why: 1.4 ms of
+it is Go.dot and the other nineteen are the durability — `FlushFileBuffers` and `ReplaceFile`,
+twice. The size does not explain it either: a stand-in run of the raw write on this box jumped
+between 2 KB and 16 KB, which fits real-time antivirus scanning each replaced file, and Defender is
+on. So the answer is the platform's, which is the one kind of answer a faster Go.dot cannot move,
+and it is the answer this subsection drew the switch for: **5.5's second half takes the snapshot
+on the tick thread — the 1.4 ms — and hands the bytes to a writer thread on `MountProbe`'s
+shape.** The record is `document.autosave` either way, so no fixture and no assertion changes. The
+same measurement says every `document.save` has cost more than a tick on this box since PR 5.2 made
+it durable; that one is a person's gesture rather than the engine's, and whether it follows the
+autosave onto the writer is the author's. The Mac mini's figure is still owed.
 
 **M24 — can the page hold a real show?** Decision T rests on the console being the operator
 client and the laboratory both, and a page that stutters at five hundred cues is neither. It

@@ -54,11 +54,24 @@ html, body {
        font-variant-numeric: tabular-nums; }
 
 /* ---------------------------------------------------------------- layout */
-#app { display: grid; grid-template-rows: auto auto auto 1fr; height: 100%; }
+/*  THE PANES TAKE THE ROW THAT GROWS, BY NUMBER, whatever sits above them. The
+    rows over them are banners that come and go - the recovery offer and the
+    last refusal: either, both or neither - and an element that is `hidden` or
+    `display: none` is not a grid item at all. Placed in order, the panes landed
+    in whichever row the count of visible banners happened to reach. With no
+    refusal on screen that was an `auto` row, which stops where the panes'
+    contents stop; with both banners up it would have been the refusal in the
+    `1fr` row, and on a short show - the kind somebody recovers in a rehearsal
+    room - the refusal would have been stretched down the screen over the space
+    the panes left. So there are two rows for banners, each as tall as what is
+    in it and nothing at all when it is empty, and the panes are always in the
+    fifth, which is the one that grows. */
+#app { display: grid; grid-template-rows: auto auto auto auto 1fr; height: 100%; }
 
 #panes {
   display: grid;
   grid-template-columns: minmax(0, 1.5fr) minmax(210px, 0.85fr) minmax(300px, 1.05fr);
+  grid-row: 5;
   min-height: 0;
 }
 @media (max-width: 1080px) {
@@ -167,6 +180,25 @@ button:disabled { color: var(--ink-faint); cursor: default; }
                          padding: 1px 5px; border-radius: 3px; }
 #refusal.show { display: block; }
 #refusal code { color: var(--ink-dim); }
+
+/*  THE ONE DECISION THE ENGINE WILL NOT TAKE FOR ANYBODY. It opened this bundle
+    beside unsaved work from a session that did not end, and it has adopted
+    none of it (§14.10). In the standby's amber, as unsaved work is on the
+    strip, because it is the same fact - something is not the show yet - and
+    nothing has gone wrong. The sentences carry it and the colour is the second
+    telling (§4.8): a pair of buttons marked "recover" and "discard" is a riddle
+    to somebody who did not know there was anything to recover. Recover is the
+    one drawn in amber because it is the one that throws nothing away on disk -
+    the show file is untouched and revert still reaches it - whereas discard is
+    final. No `display` here, so that `hidden` is left to do the hiding. */
+#recovery { padding: 10px 12px; background: #2a2116; border-bottom: 1px solid var(--standby);
+            color: var(--ink); font-size: 12px; line-height: 1.6; }
+#recovery b { color: var(--standby); font-weight: 600; }
+#recovery code { color: var(--ink); background: var(--panel-high);
+                 padding: 1px 5px; border-radius: 3px; }
+#recovery .choice { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#recovery .choice button { font-size: 12px; padding: 5px 12px; }
+#recovery [data-cmd="document.recover"] { border-color: var(--standby); color: var(--standby); }
 
 /* ------------------------------------------------------------- cue rows */
 .list-tabs { display: flex; gap: 2px; padding: 0 8px; }
@@ -403,9 +435,62 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     <button id="redo" data-cmd="redo" disabled>redo</button>
     <span class="undo-note" id="undo-note"></span>
 
-    <span class="hint">space GO · ↑ ↓ standby · ctrl/⌘-Z undo · a row to inspect ·
-                       its LEFT EDGE to park</span>
+    <!--  SAVE, AS A BUTTON AND AS CTRL/⌘-S, for the reason undo is both: the
+          key is an accelerator over `document.save` and a tablet has no Ctrl
+          to hold. It is never greyed out. A save with nothing new in it
+          rewrites the same bytes, which costs nothing, and a page that
+          declined to send it would be one client's opinion of the document.
+          Nor does it answer the recovery banner: while an earlier session's
+          work is on offer the engine saves the show and leaves that work
+          where it is, because saving this show has not made that afternoon
+          the show. `document.saveAs` is not offered: it needs a folder on
+          the engine's disk, and a browser has no honest way to name one.
+
+          REVERT HAS NO `data-cmd`, on purpose. It is the one button on this
+          row that asks before it sends, so it is wired by hand at the foot of
+          this file, beside the reason. -->
+    <button id="save" data-cmd="document.save"
+            title="writes the show into its bundle — ctrl/⌘-S">save</button>
+    <button id="revert"
+            title="reloads the saved show; every change since is lost">revert</button>
+
+    <span class="hint">space GO · ↑ ↓ standby · ctrl/⌘-Z undo · ctrl/⌘-S save ·
+                       a row to inspect · its LEFT EDGE to park</span>
     <button id="lock" aria-pressed="false" disabled>lock the show</button>
+  </div>
+
+  <!--  UNSAVED WORK FROM A SESSION THAT DID NOT END, offered and not taken.
+
+        While somebody works, the engine writes the show into the bundle's own
+        `recovery/` folder and never into show.xml, so a process that dies
+        leaves the afternoon beside the show rather than in it. The next engine
+        to open the bundle publishes /godot/document/recovery and does nothing
+        else: adopting the work on its own would decide for the operator
+        whether the afternoon was worth keeping, which is the one decision
+        autosave exists to leave open. So this is where they are asked, and
+        the question is written out, because it is the one moment somebody
+        decides that - usually somebody who has just watched a machine fall
+        over and is not reading carefully.
+
+        WRITTEN ONCE, HERE, AND ONLY SHOWN OR HIDDEN BY THE POLL. A banner
+        rebuilt ten times a second is a button that can be swapped for a new
+        one between the press and the release, and a click whose element no
+        longer exists is a click that did nothing - on the one control here
+        that must not do nothing. The two buttons are wired by the same loop
+        as the transport's, by their `data-cmd`. -->
+  <div id="recovery" hidden>
+    <b>Unsaved work was found beside this show.</b>
+    The engine keeps what is being changed in the bundle's <code>recovery/</code> folder,
+    never in the show file, and the last session ended before anybody saved it.
+    <b>Recover</b> replaces what is on screen with that work and leaves it unsaved: the
+    show file is not touched until somebody saves, and revert still goes back to it.
+    <b>Discard</b> deletes the recovered work for good and changes nothing on screen.
+    Until one of them is chosen the work stays where it is, and saving the show in the
+    meantime does not count as an answer.
+    <div class="choice">
+      <button data-cmd="document.recover">recover the unsaved work</button>
+      <button data-cmd="document.discardRecovery">discard it and keep the saved show</button>
+    </div>
   </div>
 
   <div id="refusal"></div>
@@ -1502,11 +1587,32 @@ function renderStrip() {
   const isDirty = dirty === true || dirty === "true";
   const isSaved = dirty === false || dirty === "false";
 
-  el("s-saved").textContent = isDirty ? "unsaved changes" : isSaved ? "saved" : "—";
-  el("s-saved-wrap").className = isDirty ? "stat dirty" : "stat";
-  el("s-saved-wrap").title = isDirty ? "the show has changed since show.xml was last written"
-                                     : isSaved ? "show.xml holds this show"
-                                               : "the engine has not said";
+  /*  AND WHETHER THERE IS WORK THE FILE DOES NOT HOLD, found rather than made.
+      `recovery` is true when the engine opened this bundle beside a
+      `recovery/` folder that nobody has answered yet, and it joins the file's
+      readout rather than taking a stat of its own because it is the same
+      question - is everything worth keeping on disk as the show? - to which
+      "saved" alone would be the wrong answer: true of show.xml, and silent
+      about the afternoon beside it. Amber for either, and the words say which
+      (§4.8). The banner under the transport is where it is answered; this is
+      the second telling, for a tablet that has scrolled past the first. */
+  const recovery = tree.get("/godot/document/recovery", null);
+  const hasRecovery = recovery === true || recovery === "true";
+
+  const file = [isDirty ? "unsaved changes" : isSaved ? "saved" : "—"];
+
+  if (hasRecovery) file.push("recovery waiting");
+
+  el("s-saved").textContent = file.join(" · ");
+  el("s-saved-wrap").className = isDirty || hasRecovery ? "stat dirty" : "stat";
+  el("s-saved-wrap").title =
+    (isDirty ? "the show has changed since show.xml was last written"
+             : isSaved ? "show.xml holds this show"
+                       : "the engine has not said") +
+    (hasRecovery ? "; and unsaved work from a session that did not end is waiting in " +
+                   "recovery/, to be recovered or discarded" : "");
+
+  el("recovery").hidden = !hasRecovery;
 
   /*  SHOW MODE (decision W), which the ENGINE keeps: while it is on, every
       edit to the show from any client is refused and says `locked`, and GO,
@@ -1875,17 +1981,28 @@ document.addEventListener("change", (event) => {
     a space in it - and that is exactly the accident this guard is here to
     stop.
 
-    AND UNDO ON CTRL/⌘-Z, which is the one modified key this page claims. The
-    second line used to return on ANY modifier, which was right while nothing
-    here wanted one and is now the line that would swallow the accelerator, so
-    the modified keys are answered first and every other modified key still
-    leaves by the same door. Two properties survive that unchanged, and both
-    were the reason the blanket return was there. An unmodified Space still
-    reaches GO, because the branch below is entered only when Ctrl or ⌘ is
-    down. And a field with the focus has already returned above, so Ctrl-Z
-    while somebody is typing a cue name is the browser's own undo of the
-    typing - which is what the person pressing it meant, and is not this
-    document's history.
+    AND UNDO ON CTRL/⌘-Z, AND SAVE ON CTRL/⌘-S, which are the two modified keys
+    this page claims. The second line used to return on ANY modifier, which was
+    right while nothing here wanted one and is now the line that would swallow
+    the accelerators, so the modified keys are answered first and every other
+    modified key still leaves by the same door. Two properties survive that
+    unchanged, and both were the reason the blanket return was there. An
+    unmodified Space still reaches GO, because the branch below is entered only
+    when Ctrl or ⌘ is down. And a field with the focus has already returned
+    above, so Ctrl-Z while somebody is typing a cue name is the browser's own
+    undo of the typing - which is what the person pressing it meant, and is not
+    this document's history.
+
+    SAVE TAKES THE BROWSER'S OWN CTRL-S AWAY, which is what `preventDefault` is
+    for there: unanswered, the key offers to save this page as a web page,
+    which is the one file on the machine nobody wanted. Shift is left alone,
+    because ctrl-shift-S is Save As everywhere else and this page has none to
+    give; quietly turning it into a plain save would write to a place the
+    person had not meant to name. And in a field the guard has already
+    returned, so ctrl-S there is the browser's too - which is the lesser of two
+    surprises. A field commits on `change`, when it loses the focus, so a save
+    sent from inside one would write the show WITHOUT the value still being
+    typed: the one save that loses exactly what its author was looking at.
 
     ON `key` AND NOT `code`, unlike Space and the arrows above. `code` is the
     physical key, which is exactly right for those two and exactly wrong for a
@@ -1895,19 +2012,27 @@ document.addEventListener("change", (event) => {
     Shift makes it upper case - hence the fold, and hence Shift being the
     difference between undo and redo rather than a second key.
 
-    §4.11 is why there is a button as well: the keystroke is an accelerator
-    over `undo`, the named command that button sends, and neither of them is a
-    second vocabulary for "the UI did it". */
+    §4.11 is why there are buttons as well: each keystroke is an accelerator
+    over the named command its button sends - `undo`, `redo`, `document.save` -
+    and neither of them is a second vocabulary for "the UI did it". */
 document.addEventListener("keydown", (event) => {
   const tag = document.activeElement ? document.activeElement.tagName : "";
 
   if (/^(INPUT|SELECT|TEXTAREA)$/.test(tag)) return;
 
   if (event.metaKey || event.ctrlKey) {
-    if (event.altKey || String(event.key || "").toLowerCase() !== "z") return;
+    if (event.altKey) return;
 
-    event.preventDefault();
-    command(event.shiftKey ? "redo" : "undo");
+    const letter = String(event.key || "").toLowerCase();
+
+    if (letter === "z") {
+      event.preventDefault();
+      command(event.shiftKey ? "redo" : "undo");
+    } else if (letter === "s" && !event.shiftKey) {
+      event.preventDefault();
+      command("document.save");
+    }
+
     return;
   }
 
@@ -1933,7 +2058,33 @@ el("lock").addEventListener("click", () => {
   send("/godot/document/locked", [{ tag: isLocked ? "F" : "T" }]);
 });
 
-for (const button of document.querySelectorAll("#transport [data-cmd]")) {
+/*  REVERT ASKS FIRST AND THE DELETE DOES NOT, and that is not an inconsistency.
+    PR 5.4 took the confirm off `object.delete` because undo had arrived: a
+    gesture ctrl/⌘-Z takes back does not need a dialogue, and a dialogue on a
+    gesture that can be taken back teaches an operator to dismiss dialogues.
+    Revert is the case that argument does not reach. It reloads the show from
+    disk and CLEARS THE UNDO HISTORY as part of the same command (§14.10), so
+    afterwards there is nothing on the stack to press ctrl-Z on - and what goes
+    is not one edit but everything since the last save, in one press, with
+    nowhere left to fetch it from. Undo is the whole of why the delete stopped
+    asking, and undo is exactly what revert takes away, so this is where the
+    page asks. The question says what will be lost rather than asking whether
+    anybody is sure, because "are you sure?" is a question nobody reads.
+
+    Discard, in the recovery banner, is as final and does not ask twice: the
+    banner it sits in is already the question, written out in full, and a
+    dialogue over a paragraph somebody has just read is that question again. */
+el("revert").addEventListener("click", () => {
+  const show = tree.get("/godot/document/name", "") || "the show";
+
+  if (window.confirm("Revert " + show + " to what was last saved?\n\n" +
+                     "Everything changed since then is thrown away, and undo cannot " +
+                     "bring it back: reverting clears the undo history as well.")) {
+    command("document.revert");
+  }
+});
+
+for (const button of document.querySelectorAll("#transport [data-cmd], #recovery [data-cmd]")) {
   button.addEventListener("click", () => command(button.dataset.cmd));
 }
 

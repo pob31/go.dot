@@ -63,6 +63,7 @@
 
 #include <algorithm>
 #include <clocale>
+#include <cstdint>
 #include <cstring>
 #include <atomic>
 #include <chrono>
@@ -590,7 +591,26 @@ namespace
             /*  Saving goes to --out, never to the bundle that was handed in.
                 Absent, document.save is not registered at all and replays as a
                 rejection - which is loud, and better than a replay that wrote
-                over the show it was checking. */
+                over the show it was checking.
+
+                SINCE PR 5.5 THE SAME CALL REGISTERS EVERY COMMAND THAT KNOWS
+                WHERE A BUNDLE IS: `document.autosave`, whose replay writes
+                `<out>/recovery/` as a side effect of reproducing the session -
+                a fact about the destination and not a fault (§14.8) - and
+                `document.recover`, `.discardRecovery`, `.revert` and `.saveAs`.
+                So a log from any session since then needs both flags, and every
+                driver that replays one passes them by name.
+
+                `--out` STANDS IN FOR THE FOLDER THE SESSION OPENED, so it starts
+                out holding what that folder held: the bundle as loaded, written
+                by `save`, which is byte-identical to the files it read. Without
+                that, a replayed `document.revert` that came before the session's
+                first save would find an empty folder where the live one found a
+                show, answer `bad-address`, and turn a good log into a
+                divergence. And a `document.saveAs` lands inside `--out` rather
+                than at the path it names, because that path is somebody's
+                archive on the machine that recorded the log and a replay must
+                never write outside the folder it was given. */
             const auto outPath = args.containsOption ("--out")
                                    ? args.getValueForOption ("--out")
                                    : juce::String();
@@ -600,11 +620,20 @@ namespace
                 const juce::File out {
                     juce::File::getCurrentWorkingDirectory().getChildFile (outPath) };
 
-                out.createDirectory();
+                if (const auto seeded = wfg::doc::Bundle::save (out, document); ! seeded.ok)
+                {
+                    std::cerr << "wfg replay: cannot write --out at "
+                              << out.getFullPathName() << std::endl;
+
+                    for (const auto& problem : seeded.problems)
+                        std::cerr << "    " << problem << std::endl;
+
+                    return 2;
+                }
 
                 replayed.folder = out;
                 replayed.savedRevision = document.showRevision();
-                wfg::doc::registerBundleCommands (engine.commands(), document, replayed);
+                wfg::doc::registerBundleCommands (engine.commands(), document, replayed, out);
             }
 
             for (const auto& problem :
@@ -1008,6 +1037,15 @@ namespace
         state.documentName = target.getFileNameWithoutExtension().toStdString();
         state.documentDirty = document.showRevision() != loadedShowRevision;
 
+        /*  And `recovery` as `serve` would publish it at open, for the reason
+            `dirty` is: a published value is a claim, and a dump that said
+            "nothing to recover" over a bundle carrying an afternoon somebody
+            never saved would be a false one. This verb PRINTS nothing about it -
+            of the four that open a bundle only `validate` says the word
+            (§14.10) - so the node is the whole of what it says, and it says only
+            what a client connecting to `serve` on this folder would read. */
+        state.documentRecovery = target.isDirectory() && wfg::doc::Bundle::hasRecovery (target);
+
         const auto snapshot = parameters.publish (0, state);
 
         const auto address = args.containsOption ("--address")
@@ -1062,6 +1100,25 @@ namespace
         {
             what = "bundle " + target.getFileName().toStdString();
             result = wfg::doc::Bundle::open (target, document);
+
+            /*  UNSAVED WORK IN THE BUNDLE, SAID ONCE AND NOT CHECKED (§14.10).
+
+                Of the four verbs that open a bundle through `Bundle::open` -
+                `serve`, `tree`, `replay --bundle` and this one - only this one
+                mentions `recovery/`, because this is what somebody runs on a
+                bundle they suspect, and a bundle carrying an afternoon nobody
+                saved is exactly what they would want to be told about. A tree
+                dump and a replay are not asking about unfinished work.
+
+                ONE LINE, FIRST, AND NOT A PROBLEM. It is not a fault in the
+                bundle - it is the autosave doing its job after a session that
+                did not end cleanly - so it changes no exit code; and it was not
+                validated, so it is said up front that nothing below speaks for
+                it. `wfg serve` offers it, and `document.recover` or
+                `document.discardRecovery` answers it. */
+            if (wfg::doc::Bundle::hasRecovery (target))
+                std::cerr << "    recovery/ holds unsaved work from a session that did not end"
+                             " cleanly, and was not validated" << std::endl;
         }
         else if (target.existsAsFile())
         {
@@ -1370,6 +1427,15 @@ namespace
         the imaginary rig is not a flag: it is the furthest channel the show's
         buses reach, because that is where the author said a channel exists.
 
+        `--recover` ADOPTS WHAT A PREVIOUS SESSION LEFT IN `recovery/`, before
+        the first publish. Without it the verb only says the folder is there -
+        `wfg: recovery available`, beside the port lines - and leaves the
+        decision to whoever is using the show, because a headless engine has
+        nobody to ask. The flag is for somebody with nobody to click on their
+        behalf: a restart script, the black-box driver. (The line above this
+        paragraph is the Phase 1 shape; the usage string in `runConsole` is the
+        whole one, and is the one to keep current.)
+
         THE MAIN THREAD RUNS THE JUCE DISPATCH LOOP and nothing else. Phase 2
         needs it there - plugin scanning and device callbacks are message-thread
         work - and standing it up now means Phase 2 does not restructure this
@@ -1522,6 +1588,77 @@ namespace
             would never go out. */
         wfg::doc::DocumentSession session { target, document.showRevision() };
 
+        /*  UNFINISHED WORK FROM A SESSION THAT DID NOT END, announced and not
+            adopted (§14.10).
+
+            A `recovery/show.xml` beside the show means an earlier engine had
+            unsaved work in this bundle and did not get to a clean exit - a
+            crash, a pulled plug, a laptop lid. This engine is headless and has
+            nobody to ask whether that afternoon was worth keeping, so it says
+            the folder is there, publishes `/godot/document/recovery`, and does
+            NOTHING ELSE. Adopting it here would be wrong three times over: the
+            show on screen would differ from the file the operator opened with
+            no gesture in between; it would take the one decision autosave
+            exists to leave open; and `adopt` replaces the root wholesale, lock
+            included, so a show locked at 20:40 could come back unlocked because
+            a file on disk said so.
+
+            ON STDOUT, AS A `wfg:` LINE, AND BEFORE THE PORTS. It is a notice and
+            not a fault, so it goes where the ports and the client address go,
+            and in time for anybody - a person at a terminal, a harness reading
+            the start-up lines until the port lines arrive - to have read it
+            before the engine is reachable.
+
+            `--recover` IS THE GESTURE FOR SOMEBODY WITH NO PERSON TO CLICK: a
+            script, the black-box driver. It is applied HERE, before the mounts
+            are loaded and before the first publish, so the mounts, the media
+            lengths and the first snapshot all describe the show that is actually
+            being served. The session's stamp above is left where it is, taken
+            over the AUTHORED show, so a recovered session opens dirty - which
+            is `document.recover`'s rule, and the truth: the recovered work is
+            not on disk as the show.
+
+            A RECOVERY THAT CANNOT BE READ STOPS THE START, like every other
+            flag this verb cannot honour. The show on disk is fine, but it is
+            not the show that was asked for, and a script that asked for its
+            afternoon back and was quietly handed the morning instead would find
+            out at the worst moment. The same flag on a bundle with nothing to
+            recover is not an error: "start, recovering if there is anything" is
+            the shape a restart script has, and on the ordinary morning there is
+            nothing. */
+        session.recoveryFound = wfg::doc::Bundle::hasRecovery (target);
+
+        if (session.recoveryFound)
+            std::cout << "wfg: recovery available" << std::endl;
+
+        if (args.containsOption ("--recover"))
+        {
+            if (session.recoveryFound)
+            {
+                const auto recovered = wfg::doc::Bundle::openRecovery (target, document);
+
+                for (const auto& problem : recovered.problems)
+                    std::cerr << "    " << problem << std::endl;
+
+                if (! recovered.ok)
+                {
+                    std::cerr << "wfg serve --recover: the recovery in "
+                              << target.getFileName().toStdString()
+                              << " could not be read, and nothing was adopted" << std::endl;
+                    return 2;
+                }
+
+                session.autosavedRevision = document.showRevision();
+                session.recoveryFound = false;
+
+                std::cout << "wfg: recovery adopted" << std::endl;
+            }
+            else
+            {
+                std::cout << "wfg: nothing to recover" << std::endl;
+            }
+        }
+
         //  --- the engine and everything it needs --------------------------
         wfg::Engine engine;
         wfg::tree::TouchTable touches;
@@ -1649,6 +1786,13 @@ namespace
         state.documentPath = target.getFullPathName().toStdString();
         state.documentName = target.getFileNameWithoutExtension().toStdString();
         state.documentDirty = wfg::doc::isDirty (document, session);
+
+        /*  In the FIRST snapshot and not only from the first tick on, because
+            the first snapshot is what a client reads the moment the port
+            opens - and a client that reads "nothing to recover" at connect and
+            "recovery available" twenty milliseconds later has been shown a
+            flicker rather than an answer. */
+        state.documentRecovery = session.recoveryFound;
 
         /*  THE CLOCK IS CHECKED AND THE TREE PUBLISHED BEFORE ANY SOCKET OPENS,
             and the order is load-bearing rather than tidy.
@@ -2242,7 +2386,52 @@ namespace
                                                               { wfg::osc::Value::string (id) } });
 
                                  previousSecond = second;
+
+                                 /*  THE AUTOSAVE, DECIDED HERE AND WRITTEN BY
+                                     ITS HANDLER (§14.8, §14.10).
+
+                                     IN THE BEFORE HOOK AND NOT THE AFTER ONE,
+                                     which is §14.8's correction to the plan:
+                                     what is submitted here is drained by the
+                                     tick it runs in front of, so the record's
+                                     tick is the tick the decision was taken
+                                     at. From the after hook it would join the
+                                     queue the NEXT tick drains, and the log
+                                     would say the save happened one tick after
+                                     it did - unobservable to anyone, which is
+                                     exactly why it is not allowed to pass.
+
+                                     LAST IN THIS HOOK, so it joins the queue
+                                     behind every datagram already waiting and
+                                     behind the runner's and the clock's own
+                                     submits above. A GO already in the queue is
+                                     applied before the bytes are written; a GO
+                                     arriving during the write waits the rest of
+                                     one tick, as it would behind any applied
+                                     command. That is the whole of what this
+                                     costs PRD §4.1, and M23 is what measures
+                                     it: no lock, no allocation the tick thread
+                                     does not already make, and no path by which
+                                     a slow disk holds a GO longer than the
+                                     overrun of the tick it landed in.
+
+                                     Engine origin, and no arguments: a save
+                                     that happened is an event, and the bytes
+                                     it wrote are not. */
+                                 if (wfg::doc::autosaveDue (document, session, tickIndex))
+                                     engine.submit (wfg::origin::engine, "document.autosave");
                              });
+
+        /*  THE SHOW REVISION THE LAST TICK ENDED ON, which is what lets the
+            after-tick say "the show moved during this one" - and so stamp
+            `session.lastChangeTick`, the quiet the autosave waits for.
+
+            Machine state and not the document's, like `previousSecond` above;
+            and a revision rather than "was anything applied", because a GO is
+            applied and moves only the operator's position. A quiet timer that
+            restarted on every GO would never run out during a show, and the
+            one afternoon it was needed would be the one it never wrote. */
+        std::uint64_t showRevisionSeen = document.showRevision();
 
         ticks.setAfterTick ([&] (const wfg::Engine::TickResult& outcome)
                             {
@@ -2319,6 +2508,31 @@ namespace
                                     two integers - cheaper than the test that
                                     would skip it. */
                                 state.documentDirty = wfg::doc::isDirty (document, session);
+
+                                /*  WHEN THE SHOW LAST MOVED, for the autosave's
+                                    two seconds of quiet (§14.10). Stamped here
+                                    because this is the one place that sees the
+                                    show revision on both sides of a tick's
+                                    commands; read by the BEFORE hook, which is
+                                    where the decision is taken. The two halves
+                                    split by what they are: this one observes,
+                                    that one decides and submits. */
+                                if (const auto showRevisionNow = document.showRevision();
+                                    showRevisionNow != showRevisionSeen)
+                                {
+                                    showRevisionSeen = showRevisionNow;
+                                    session.lastChangeTick = outcome.tick;
+                                }
+
+                                /*  And whether an earlier session's afternoon is
+                                    still waiting for an answer - the latch the
+                                    open set, which only the two answers,
+                                    `document.recover` and
+                                    `document.discardRecovery`, clear. Before the
+                                    publish, with the dot, or a client's offer to
+                                    restore lingers one tick after the operator
+                                    took it. */
+                                state.documentRecovery = session.recoveryFound;
 
                                 /*  AND WHAT THE UNDO STACK LOOKS LIKE, read
                                     here for the reason the dot beside it is
@@ -2445,6 +2659,27 @@ namespace
 
         ticks.stop();
 
+        /*  A CLEAN EXIT TIDIES `recovery/` AWAY ONLY WHEN THERE IS NOTHING IN IT
+            ANYBODY COULD WANT (§14.10).
+
+            AFTER `ticks.stop()`, because that has joined the only thread that
+            writes the document or the session, so what is read here is final
+            and nothing can autosave behind this line.
+
+            NOT DIRTY, because a tidy shutdown with unsaved work is precisely
+            the case the folder exists for: an operator who closes the engine
+            without saving and then wishes they had is the same person as one
+            whose laptop died, a few seconds later. And NO OFFER UNANSWERED,
+            because a folder this session found at open and nobody has answered
+            is an earlier session's afternoon, which a clean exit of THIS one
+            has no business deciding about (DocumentSession.h, `recoveryFound`).
+
+            A folder that will not delete is left, silently: the next start
+            offers it, and the offer is the honest description of what is on
+            the disk. */
+        if (! wfg::doc::isDirty (document, session) && ! session.recoveryFound)
+            wfg::doc::Bundle::discardRecovery (target);
+
         if (deviceDriver != nullptr)
             deviceDriver->close();
         else if (driver != nullptr)
@@ -2548,10 +2783,18 @@ int wfg::runConsole (int argc, char** argv)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 
+    /*  THE USAGE STRING IS WHAT AN OPERATOR READS AT 04:12, so every flag the
+        verb parses is in it. `--device` and `--device-type` were parsed for a
+        phase and appeared in no usage line (§14.10 found it); they are here now
+        beside `--hosted`, with the bar saying what the parser already enforces -
+        the two are different block sources and the verb refuses both at once.
+        `--device` alone opens the default device, and `--device-type` takes
+        the heading `wfg devices` prints above each group of names. */
     app.addCommand ({ "serve",
-                      "serve <bundle> --sample-rate=N --buffer=N [--hosted [--render=<wav>]]"
+                      "serve <bundle> --sample-rate=N --buffer=N"
+                      " [--hosted [--render=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
-                      " [--http-port=N] [--osc-port=N] [--log=<file>]",
+                      " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
                       [] (const juce::ArgumentList& args)

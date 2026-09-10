@@ -23,6 +23,7 @@
 
 #include <algorithm>
 #include <string>
+#include <utility>
 #include <vector>
 
 #if defined (_WIN32)
@@ -38,6 +39,7 @@ namespace wfg::doc
         constexpr const char* showFileName  = "show.xml";
         constexpr const char* stateFileName = "state.xml";
         constexpr const char* namespacesDir = "namespaces";
+        constexpr const char* recoveryDir   = "recovery";
         constexpr const char* manifestSuffix = ".wfg";
         constexpr const char* manifestRoot  = "Bundle";
 
@@ -58,6 +60,59 @@ namespace wfg::doc
            #else
             return std::to_string (getpid());
            #endif
+        }
+
+        /*  The last component of a path written on ANY platform, as a name this
+            one can create.
+
+            Both separators, whichever machine this is: a log recorded on the
+            Windows box and replayed on the Mac mini carries `D:\shows\archive`,
+            and `juce::File` on macOS would read that as one long relative name
+            with a colon in it. Trailing separators are dropped first, so
+            `archive/` is `archive` and not nothing; a path that is nothing but
+            separators, or a bare drive, becomes `copy` rather than an empty
+            name that would make the copy's parent the copy. */
+        juce::String lastComponentOf (const std::string& path)
+        {
+            const auto trimmed = juce::String (path).trimCharactersAtEnd ("/\\");
+            const auto cut = juce::jmax (trimmed.lastIndexOfChar ('/'),
+                                         trimmed.lastIndexOfChar ('\\'));
+            const auto name = juce::File::createLegalFileName (trimmed.substring (cut + 1));
+
+            return name.isEmpty() ? juce::String ("copy") : name;
+        }
+
+        /*  THE SHOW IS REPLACED WHOLE OR NOT AT ALL, which `CanonicalXml::read`
+            on its own does not promise.
+
+            It refuses a document it cannot parse or build before touching
+            anything - but its last pass, `validate()`, runs AFTER `adopt`, so a
+            show that builds and then fails a check only the whole document can
+            make comes back `ok == false` having already replaced the one that
+            was open. For a load into an empty document nobody can tell. For
+            `document.revert` and `document.recover`, which replace the show an
+            operator is looking at, it would be a refused command that changed
+            the show anyway - its history cleared, and a log line saying nothing
+            happened.
+
+            So those two read into a scratch document, and the finished tree is
+            handed over only when every step of the read succeeded. It still
+            comes through `adopt`, the one hatch, so the history, the lock and
+            the revision counters behave exactly as they do for any load: the
+            counters bump forward, once, on the live document. A move would have
+            handed it the scratch document's small numbers instead, and every
+            revision-keyed cache in the engine would have read a show that went
+            backwards as a show that had not changed since it was built. */
+        template <typename Reader>
+        ReadResult readThenAdopt (ShowDocument& document, Reader&& readInto)
+        {
+            ShowDocument scratch;
+            auto result = readInto (scratch);
+
+            if (result.ok)
+                document.adopt (scratch.root(), std::move (scratch.ids()));
+
+            return result;
         }
 
         /*  A SAVE THAT CANNOT BE HALF-WRITTEN (PRD §4.3, namespace draft §14.10).
@@ -260,6 +315,32 @@ namespace wfg::doc
     juce::File Bundle::namespacesFolder (const juce::File& folder)
     {
         return folder.getChildFile (namespacesDir);
+    }
+
+    juce::File Bundle::recoveryFolder (const juce::File& folder)
+    {
+        return folder.getChildFile (recoveryDir);
+    }
+
+    juce::File Bundle::recoveryShowFile (const juce::File& folder)
+    {
+        return recoveryFolder (folder).getChildFile (showFileName);
+    }
+
+    juce::File Bundle::recoveryStateFile (const juce::File& folder)
+    {
+        return recoveryFolder (folder).getChildFile (stateFileName);
+    }
+
+    bool Bundle::hasRecovery (const juce::File& folder)
+    {
+        /*  The SHOW is the question, and the state beside it is not asked
+            about. A recovery folder holding only a state.xml describes a
+            standby position for a show nobody wrote down, which is nothing to
+            adopt; the reverse - a show with no state - is a perfectly good
+            recovery whose standby comes back at its default, exactly as a
+            bundle with no state.xml opens. */
+        return recoveryShowFile (folder).existsAsFile();
     }
 
     juce::File Bundle::temporaryFor (const juce::File& target)
@@ -477,9 +558,164 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    ReadResult Bundle::saveRecovery (const juce::File& folder, const ShowDocument& document)
+    {
+        /*  THE BUNDLE IS NOT CREATED, AND THAT IS THE WHOLE DIFFERENCE FROM
+            `save` (§14.10). Nobody asked for this write, so nothing about it may
+            invent a place to put it: a bundle somebody moved, renamed or
+            unplugged mid-session is a `write-failed` here and a new folder full
+            of orphaned files in `save`. The header argues why that asymmetry is
+            the right way round. */
+        if (! folder.isDirectory())
+            return ReadResult::failed (folder.getFullPathName().toStdString()
+                                       + " is no longer a folder; nothing was written");
+
+        const auto destination = recoveryFolder (folder);
+
+        /*  The subfolder, on the other hand, IS created - it is a child of a
+            bundle that demonstrably exists, and creating it is what makes the
+            first autosave of a session work at all. */
+        if (const auto created = destination.createDirectory(); created.failed())
+            return ReadResult::failed ("cannot create " + destination.getFullPathName().toStdString()
+                                       + ": " + created.getErrorMessage().toStdString());
+
+        std::string error;
+
+        /*  The same writer, the same order and the same reasons as `save`: the
+            show first, because it is the file that matters, and each write
+            atomic on its own so that a crash inside one leaves the previous
+            autosave whole rather than a truncated file that reads as a torn
+            show. There is no manifest, so there are two writes rather than
+            three. */
+        if (! writeBytesAtomically (recoveryShowFile (folder), CanonicalXml::write (document), error)
+            || ! writeBytesAtomically (recoveryStateFile (folder), EphemeralState::write (document),
+                                       error))
+            return ReadResult::failed (error);
+
+        ReadResult result;
+        result.ok = true;
+        return result;
+    }
+
+    ReadResult Bundle::openRecovery (const juce::File& folder, ShowDocument& document)
+    {
+        /*  A TORN AUTOSAVE COSTS NOTHING, which is the last promise in a chain
+            of them. The atomic write is what makes a half-written
+            recovery/show.xml very nearly impossible; reading through a scratch
+            document is what makes it harmless when a platform or a power cut
+            manages it anyway - and makes a show that parses but fails
+            validation just as harmless (`readThenAdopt` says why that needs
+            saying). Whatever was open before this call is still open,
+            unchanged, and the operator has lost nothing by asking. */
+        return readThenAdopt (document, [&folder] (ShowDocument& scratch)
+        {
+            ReadResult result;
+
+            const auto show = recoveryShowFile (folder);
+
+            if (! show.existsAsFile())
+                return ReadResult::failed (folder.getFullPathName().toStdString() + " has no "
+                                           + recoveryDir + "/" + showFileName);
+
+            const auto showResult = CanonicalXml::read (show.loadFileAsString().toStdString(),
+                                                        scratch);
+
+            if (! showResult.ok)
+            {
+                for (const auto& problem : showResult.problems)
+                    result.problems.push_back (std::string (recoveryDir) + "/" + showFileName
+                                               + ": " + problem);
+
+                return result;
+            }
+
+            /*  The state beside it is forgiving, as state.xml always is: a
+                standby that points at nothing costs a standby, and is reported
+                rather than allowed to cost somebody their afternoon. */
+            if (const auto state = recoveryStateFile (folder); state.existsAsFile())
+            {
+                const auto stateResult = EphemeralState::read (state.loadFileAsString().toStdString(),
+                                                               scratch);
+
+                for (const auto& problem : stateResult.problems)
+                    result.problems.push_back (problem);
+            }
+
+            result.ok = true;
+            return result;
+        });
+    }
+
+    bool Bundle::discardRecovery (const juce::File& folder)
+    {
+        const auto doomed = recoveryFolder (folder);
+
+        /*  A FOLDER THAT WAS NEVER THERE IS A FOLDER THAT IS GONE. The caller
+            that cares about the difference - `document.discardRecovery`, which
+            refuses an empty gesture rather than pretending it worked - asks
+            `hasRecovery` first; every other caller only wants it gone, and a
+            clean exit that reported a failure for a bundle nobody ever
+            autosaved would be reporting the ordinary case. */
+        if (! doomed.exists())
+            return true;
+
+        return doomed.deleteRecursively();
+    }
+
+    ReadResult Bundle::saveCopy (const juce::File& destination, const ShowDocument& document,
+                                 const juce::File& source)
+    {
+        /*  THE FILES `save` REFUSES, copied rather than written - and copied
+            FIRST. They describe somebody else's programs; Go.dot only reads
+            them, and a save that rewrote them would claim an authorship it does
+            not have. A copy claims nothing, which is why this is
+            save-plus-a-copy and has a name that says so.
+
+            FIRST, BECAUSE THE MANIFEST IS WHAT MAKES A FOLDER A BUNDLE, and
+            `save` writes it last. Copied after the save, the descriptions
+            arrived in a folder that was already an openable bundle, so there was
+            a window in which a reader saw a show whose mounts pointed at files
+            still being written - and a crash in that window left exactly that on
+            disk: a bundle that opens, with mounts that describe nothing. Copied
+            before, the manifest's arrival means everything else has, and a crash
+            part-way leaves a folder with no manifest, which `open` refuses
+            outright rather than half-loads. *This ordering is a correction (PR
+            5.5, 2026-09-11):* the first build copied afterwards, and the
+            black-box driver read a namespace description at nought bytes
+            because of it.
+
+            A SOURCE WITH NO `namespaces/` IS AN ORDINARY CASE and not a
+            failure: a show with no mounts has no descriptions to carry, and a
+            replay's `--out` never has one, because nothing Go.dot writes puts
+            them there.
+
+            A copy that fails is REPORTED AND DOES NOT STOP THE SAVE. The show is
+            what somebody asked to have written, and a refusal that withheld a
+            good show.xml because its companions could not follow would be a
+            worse answer than a copy whose mounts have to be pointed at their
+            descriptions again - so the save still runs, `ok` is the save's, and
+            the problem is in the list, which is the same asymmetry `open` draws
+            between what costs somebody their work and what does not. */
+        std::vector<std::string> copyProblems;
+
+        if (const auto namespaces = namespacesFolder (source); namespaces.isDirectory())
+            if (! namespaces.copyDirectoryTo (namespacesFolder (destination)))
+                copyProblems.push_back ("could not copy " + namespaces.getFullPathName().toStdString()
+                                        + " into " + destination.getFullPathName().toStdString());
+
+        auto result = save (destination, document);
+
+        for (auto& problem : copyProblems)
+            result.problems.push_back (std::move (problem));
+
+        return result;
+    }
+
+    //==============================================================================
     void registerBundleCommands (CommandRegistry& registry,
                                  ShowDocument& document,
-                                 DocumentSession& session)
+                                 DocumentSession& session,
+                                 const juce::File& copiesFolder)
     {
         registry.add ({ "document.save",
                         "Writes the show back to the bundle it was loaded from.",
@@ -517,13 +753,15 @@ namespace wfg::doc
                             if (! written.ok)
                                 return Outcome::rejected (reason::writeFailed);
 
-                            /*  THE DOT GOES OUT HERE, AND ONLY HERE. Stamped
-                                after the write reached the disk and never
-                                before, so a refused save leaves it lit - the
-                                show on screen is still not the show in the
-                                folder, and a light that went out on the attempt
-                                would be telling somebody their work was safe
-                                while it was not.
+                            /*  THE DOT GOES OUT HERE - and, since PR 5.5, in
+                                `document.revert`, which is the other way for
+                                the document and the folder to come to hold the
+                                same show, and nowhere else. Stamped after the
+                                write reached the disk and never before, so a
+                                refused save leaves it lit - the show on screen
+                                is still not the show in the folder, and a light
+                                that went out on the attempt would be telling
+                                somebody their work was safe while it was not.
 
                                 A save that got as far as show.xml and failed on
                                 state.xml does not stamp, although the show half
@@ -535,6 +773,344 @@ namespace wfg::doc
                                 that lands puts out. */
                             session.savedRevision = document.showRevision();
 
+                            /*  AND THE RECOVERY FOLDER GOES, because the work
+                                has become the show (§14.10). What `recovery/`
+                                holds after this line would be an older copy of
+                                a document that is now on disk in full, and the
+                                next `wfg serve` on this bundle would greet the
+                                operator with an offer to restore work they had
+                                already saved - which is the offer that teaches
+                                somebody to dismiss the question without reading
+                                it.
+
+                                EXCEPT WHILE AN EARLIER SESSION'S OFFER IS
+                                UNANSWERED, where the reason does not hold. The
+                                folder then holds somebody else's afternoon -
+                                the autosave has not written over it, for the
+                                same reason (DocumentSession.h, `recoveryFound`)
+                                - and this save has not made THAT work the show.
+                                It stays until somebody recovers or discards it,
+                                and the next start offers it again, which costs
+                                nothing: whatever it would replace is on disk as
+                                the show and `document.revert` brings it back.
+
+                                Its failure is not the save's. The bytes landed,
+                                the dot is out, and a folder that would not
+                                delete is a tidiness problem; refusing the save
+                                over it would report a lie about the show. */
+                            if (! session.recoveryFound)
+                            {
+                                Bundle::discardRecovery (session.folder);
+                                session.autosavedRevision = 0;
+                            }
+
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  `document.autosave` - THE ONE COMMAND IN THIS ENGINE NOBODY ASKS FOR
+            (§14.8, §14.10).
+
+            ORIGIN `engine`, DECIDED BY A HOOK, APPLIED BY THIS HANDLER, and the
+            split is Phase 3's rule rather than a new one: the hook decides, the
+            handler applies. The arithmetic over the session - now, rather than
+            in a second's time - is a decision taken by something watching the
+            clock, and a replay runs no hooks; a replay that re-derived it would
+            be a second implementation of one judgement, drifting from the first
+            the moment either changed. So the record carries the tick and the
+            replay re-injects it, which is what makes a replayed session write
+            the same files at the same ticks as the session it replays.
+
+            REPLAY-IDEMPOTENT, which is what lets it be registered at all: it
+            reads the document and writes two files, so applying it twice from
+            the same document produces the same bytes twice.
+
+            NO ARGUMENTS. What it wrote is not in the record because a record of
+            the bytes would be a record of something nobody decided - the same
+            argument `audio.editBuilt` makes, whose comment is the sentence to
+            keep: the graph exists, and that is an event, not a variable being
+            set. A save that happened is an event. The bytes it wrote are not. */
+        registry.add ({ "document.autosave",
+                        "Writes the show to the bundle's recovery folder. The engine decides this.",
+                        {},
+                        true,
+                        [&document, &session] (CommandContext& context,
+                                               const std::vector<osc::Value>& args)
+                        {
+                            /*  STAMPED FIRST, AND ON BOTH PATHS, because what
+                                this clock measures is the ATTEMPT. A refused
+                                autosave leaves `autosavedRevision` where it
+                                was, so the "is there anything to write" half of
+                                `autosaveDue` stays true; without this stamp the
+                                quiet term would stay true with it and a bundle
+                                on a stick somebody pulled out would write a
+                                refused record fifty times a second, for as long
+                                as the show stayed open. With it, the same
+                                bundle is one refusal every thirty seconds. */
+                            session.lastAutosaveTick = context.tick;
+
+                            const auto written = Bundle::saveRecovery (session.folder, document);
+
+                            /*  Refused and not merely reported, for the reason
+                                `document.save` is: the log's `A` means "this
+                                happened", and an autosave that did not reach
+                                the disk did not happen. It matters more here
+                                than there, because nobody is watching - the
+                                only trace an unattended writer leaves is its
+                                record, and a record that says a crash-safe copy
+                                exists when it does not is worse than no copy. */
+                            if (! written.ok)
+                                return Outcome::rejected (reason::writeFailed);
+
+                            /*  WHAT `recovery/` NOW HOLDS. It is not the dot:
+                                the document is still dirty, and truthfully so,
+                                because what is on disk as the SHOW is still
+                                what it was. This says only that the same bytes
+                                need not be written again until something moves,
+                                which is what keeps a dirty, idle show from
+                                autosaving on every tick after its two seconds
+                                of quiet. */
+                            session.autosavedRevision = document.showRevision();
+
+                            /*  AND THE LATCH IS DELIBERATELY NOT TOUCHED. This
+                                session's own autosave is this session's own
+                                work, already in the document in front of the
+                                operator; `/godot/document/recovery` reports
+                                somebody ELSE's unfinished afternoon. Lit here,
+                                every unsaved show would offer to restore itself
+                                two seconds after the first edit. */
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  `document.recover` - THAT THE ABANDONED AFTERNOON WAS WORTH KEEPING,
+            which is a decision the engine will not take on anybody's behalf.
+
+            The engine is headless and has nobody to ask, so on open it says the
+            folder is there and does nothing else (§14.10). Adopting it silently
+            would be wrong three times over: the show on screen would differ
+            from the file the operator opened with no gesture in between; it
+            would decide for them that the afternoon was worth keeping, which is
+            the one decision autosave exists to leave open; and `adopt` replaces
+            the root wholesale, lock included, so a silent adopt could unlock a
+            locked show because a file on disk said so - during a performance. */
+        registry.add ({ "document.recover",
+                        "Adopts the bundle's recovery folder, replacing the open show.",
+                        {},
+                        true,
+                        [&document, &session] (CommandContext&,
+                                               const std::vector<osc::Value>& args)
+                        {
+                            /*  ASKED IN THE HANDLER, like undo's, because this
+                                knocks at no door: `adopt` is a hatch that
+                                replaces the show and the lock with it, so the
+                                four predicates never see it (§14.11). Asked
+                                FIRST, before a byte is read, so that a locked
+                                show answers `locked` rather than reading a file
+                                it will not use. */
+                            if (document.isLocked())
+                                return Outcome::rejected (reason::locked);
+
+                            /*  THE DISK IS ASKED AND NOT THE LATCH. A client
+                                that has already recovered once this session and
+                                asks again is answered by what is there, not by
+                                what this session remembers - and the two differ
+                                exactly when somebody else has been writing into
+                                the folder, which is a case worth being honest
+                                in rather than clever about. */
+                            const auto recovered = Bundle::openRecovery (session.folder, document);
+
+                            /*  ONE WORD FOR BOTH FAILURES, and it is the word
+                                §14.7's table gives this command. A torn
+                                recovery/show.xml is nothing anybody can adopt,
+                                which is what `no-recovery` says; the vocabulary
+                                for this command has two codes in it and
+                                inventing a third for a file the atomic write
+                                makes very nearly impossible would be adding a
+                                clause to a contract nothing would ever write.
+                                The document is untouched either way. */
+                            if (! recovered.ok)
+                                return Outcome::rejected (reason::noRecovery);
+
+                            /*  THE DOT STAYS LIT, DELIBERATELY. The recovered
+                                work is not on disk as the show, and the dot is
+                                telling the truth: `savedRevision` is not
+                                re-stamped, which is `document.revert`'s rule
+                                read the other way round.
+
+                                The history went with the show it was about -
+                                `adopt` clears it before the swap, because every
+                                action on the stack holds a handle into a tree
+                                that is about to be replaced. */
+                            session.autosavedRevision = document.showRevision();
+                            session.recoveryFound = false;
+
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "document.discardRecovery",
+                        "Deletes the bundle's recovery folder.",
+                        {},
+                        true,
+                        [&session] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            /*  NOT REFUSED BY THE LOCK. It writes bytes - it
+                                deletes them, rather - and touches the document
+                                not at all, so it belongs with the save and the
+                                copy in §14.7's "keeps working" row.
+
+                                An empty gesture is refused rather than reported
+                                as done, because a client that cannot tell "I
+                                deleted it" from "there was nothing there" is a
+                                client that shows the operator a folder it has
+                                just failed to remove.
+
+                                THE FOLDER IS ASKED, NOT THE SHOW FILE IN IT,
+                                which is where this differs from `recover`. A
+                                `recovery/` holding only the temp an interrupted
+                                write left behind has nothing to adopt and is
+                                still something to delete - §14.7 says
+                                `no-recovery` of a bundle with no folder, and
+                                this has one. */
+                            if (! Bundle::recoveryFolder (session.folder).isDirectory())
+                                return Outcome::rejected (reason::noRecovery);
+
+                            if (! Bundle::discardRecovery (session.folder))
+                                return Outcome::rejected (reason::writeFailed);
+
+                            session.autosavedRevision = 0;
+                            session.recoveryFound = false;
+
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  `document.revert` - THAT THE BUNDLE ON DISK WINS.
+
+            The undo of everything, for the session that decides an afternoon
+            was wrong. It clears the history, so nothing before it is undoable
+            either, which is the one property that makes it different in kind
+            from an undo rather than a large one. */
+        registry.add ({ "document.revert",
+                        "Loads the bundle from disk again, discarding every change since the last save.",
+                        {},
+                        true,
+                        [&document, &session] (CommandContext&,
+                                               const std::vector<osc::Value>& args)
+                        {
+                            if (document.isLocked())
+                                return Outcome::rejected (reason::locked);
+
+                            /*  Through a scratch document, so that a refused
+                                revert is a revert that changed nothing - not
+                                one that replaced the show and then reported a
+                                validation failure (`readThenAdopt`). */
+                            const auto reloaded = readThenAdopt (
+                                document,
+                                [&session] (ShowDocument& scratch)
+                                {
+                                    return Bundle::open (session.folder, scratch);
+                                });
+
+                            /*  `bad-address` and not `write-failed`: nothing was
+                                being written, and what failed is that the
+                                folder this session names is no longer a
+                                readable bundle - which IS a fact about a path,
+                                and is the one refusal in this file that
+                                genuinely sends somebody to look at one. */
+                            if (! reloaded.ok)
+                                return Outcome::rejected (reason::badAddress);
+
+                            /*  AND IT DOES NOT LEAVE THE DOT LIT, which takes a
+                                re-stamp rather than nothing at all. `adopt`
+                                ends in "a load is the largest change there is"
+                                and bumps the show counter, so a revert that did
+                                not re-stamp would report unsaved changes at the
+                                instant the document matched the disk.
+                                `document.recover` re-stamps nothing, for the
+                                same reason read the other way: the show on disk
+                                is NOT what the document now holds.
+
+                                AND `recovery/` GOES ON `document.save`'s TERMS,
+                                because after this line the document and the
+                                folder hold the same show, which is the reason
+                                the save gives. What the folder holds is then a
+                                copy of the very work the operator has just
+                                thrown away, and a crash before the next edit
+                                would have the next start offer it back to them.
+                                Not while an earlier session's offer stands,
+                                though: a revert says the bundle wins, and says
+                                nothing about somebody else's afternoon, so the
+                                latch and its folder are left for an answer
+                                (DocumentSession.h, `recoveryFound`). */
+                            session.savedRevision = document.showRevision();
+
+                            if (! session.recoveryFound)
+                            {
+                                Bundle::discardRecovery (session.folder);
+                                session.autosavedRevision = 0;
+                            }
+
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  `document.saveAs <path>` - THAT THESE BYTES ARE ALSO SOMEWHERE ELSE.
+
+            IT DOES NOT RE-POINT THE SESSION, and that is the half most likely
+            to be argued about (plan decision 7, here to be overruled early
+            rather than late). A "save a copy for the archive" gesture that
+            silently makes the archive the live document is a trap with a delay
+            fuse: the operator's next Ctrl-S goes somewhere they did not name,
+            and they find out at the next load. A client that wants to work in
+            the copy opens it, and opening is a restart. */
+        registry.add ({ "document.saveAs",
+                        "Writes the show into another folder, as a copy. The session keeps its own.",
+                        { { "path", 's', false } },
+                        true,
+                        [&document, &session, copiesFolder] (CommandContext&,
+                                                             const std::vector<osc::Value>& args)
+                        {
+                            /*  Indexed without a guard, as every handler with a
+                                required parameter is: the registry has already
+                                refused a call that arrived without one, with
+                                `arity`, before this ran. */
+                            const auto path = args[0].getString();
+
+                            if (path.empty())
+                                return Outcome::rejected (reason::badAddress);
+
+                            /*  RESOLVED AGAINST THE WORKING DIRECTORY, exactly
+                                as every path this binary is handed on a command
+                                line is. `getChildFile` returns an absolute path
+                                unchanged, so a client that knows where it wants
+                                the copy says so in full and a script run beside
+                                its show may say `archive/tuesday`. A bare
+                                juce::File on a relative string is an assertion
+                                in a debug build and an empty path in a release
+                                one, which is the failure this line exists to
+                                not have.
+
+                                Unless there is a copies folder, which only a
+                                replay supplies; the declaration says why. */
+                            const auto destination =
+                                copiesFolder.getFullPathName().isEmpty()
+                                  ? juce::File::getCurrentWorkingDirectory().getChildFile (path)
+                                  : copiesFolder.getChildFile ("saveAs")
+                                                .getChildFile (lastComponentOf (path));
+
+                            const auto written = Bundle::saveCopy (destination, document,
+                                                                   session.folder);
+
+                            if (! written.ok)
+                                return Outcome::rejected (reason::writeFailed);
+
+                            /*  NO STAMP OF ANY KIND. The session still points at
+                                the folder it opened, whose show.xml is still
+                                behind this document, so the dot stays exactly
+                                as it was - which is the truth, and is what
+                                makes this a copy rather than a save. */
                             return Outcome::ok (args);
                         } });
     }
