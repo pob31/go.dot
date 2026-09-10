@@ -246,15 +246,31 @@ sole carrier" — it is a rich channel, so the temptation will be real:
 | Vendor extension over MIDI | 7-bit per channel — vendor's own method |
 | Vendor HID `0a b6` | **8-bit per channel** |
 
-The vendor's MIDI method, in Asparion's words: *"Use the midi code listed in the
-configurator for that encoder. Then send r g b values divided by 2 -> 0-127, on
-midi channel 1 2 3. It will only refresh after you sent the last one, blue. You
-can turn it on/off without changing the colour on the first channel, 0 resp 1."*
+**The MIDI method is the one to use**, and it is documented in Asparion's own
+published Bitwig control script (`Dxxx_encoders.js`):
 
-**The CC number for that method is not yet known** — see §7. Thirty-two
-candidates across `0x10`–`0x17` and `0x30`–`0x37` produced nothing, unsurprising
-since both blocks already carry V-pot input and ring position. The Configurator's
-**Encoder / LED** tab lists it.
+```
+91 <0x20+n> <r>      channel 2, velocity = red   (0..127)
+92 <0x20+n> <g>      channel 3, velocity = green
+93 <0x20+n> <b>      channel 4, velocity = blue, triggers the refresh
+```
+
+`0x20` is `VPOT_CLICK0`, the MCU V-Pot press note; `n` is 0–7 within a bank; and
+the **bank is selected by which MIDI port the message is sent to**. Confirmed on
+hardware across all sixteen encoders.
+
+It is **note-on, not CC** — the colour component travels as the velocity byte.
+That distinction cost this project two days: Asparion's prose description ("the
+midi code listed in the configurator", "on midi channel 1 2 3") reads equally
+well as a CC scheme, and thirty-two CC-based probes found nothing.
+
+Note-on on **channel 1** at the same note is the ordinary V-Pot LED state, so
+colour and lit-state are independent.
+
+**Prefer this over the HID route.** MIDI addresses **physical positions**, needs
+no provisioning and no read-back, and is vendor-documented, so it should survive
+firmware updates. HID's only advantage is one extra bit per channel, which
+against 128 levels is invisible.
 
 **Encoder rings are monochrome position indicators.** The RGB element is the
 strip / knob surround. Ring position and colour are different things.
@@ -323,9 +339,9 @@ responsive than an S21's own**.
 
 ## 7. What remains unknown
 
-1. **The CC number for the vendor's MIDI RGB method.** The Configurator's
-   Encoder / LED tab lists it. The one item that would complete the MCU-only path
-   to full colour, and a thirty-second read rather than a research task. It
+1. ~~The CC number for the vendor's MIDI RGB method.~~ **Resolved** — it is not a
+   CC at all but note-on on channels 2/3/4 at note `0x20`+n, per Asparion's
+   published Bitwig script. See §4. The MCU-only path to full colour is complete. It
    matters more since PRD §3.30 (2026-09-09): a strip whose colour follows a
    running clip's timbre needs full-depth colour, and on a machine where
    something else holds the HID interface this CC is the only route.
