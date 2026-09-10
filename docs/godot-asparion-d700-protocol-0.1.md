@@ -293,10 +293,10 @@ materially larger budget: an unabbreviated name, a full value with units, and a
 tag row, with the channel number in a dedicated field. The 7-character
 authored-short-name constraint applies only to the MCU path.
 
-PRD §3.16 describes the D700S OLED as *2 × 12 chars + 1 × 6*. The native
+PRD §3.16 described the D700S OLED as *2 × 12 chars + 1 × 6*. The native
 command's third-row field is **eight** characters (`SINGLE_DISPLAY_WIDTH_THIRD
-= 8` in Asparion's script), confirmed on the unit, so §3.16's six should read
-eight when it is next amended. Pad every write to the full field width.
+= 8` in Asparion's script), confirmed on the unit, and §3.16 was amended to read
+eight on 2026-09-10. Pad every write to the full field width.
 
 **Metering and rings exist too.** VU is standard MCU channel pressure,
 `D0 <(strip<<4)|level>`, 12 levels, `0x0F` resets peak hold. Asparion's own
@@ -495,7 +495,7 @@ responsive than an S21's own**.
    it does not need to. The third line was never unreachable: `0x12` addresses
    two rows of 56 and nothing more, and Asparion's native commands `0x1A`,
    `0x19` and `0x17` reach all three rows and the track number (§4). The
-   measured third row is eight characters where PRD §3.16 says six.
+   measured third row is eight characters, which PRD §3.16 now says (amended 2026-09-10).
 4. **Linux and macOS behaviour.** Everything here was measured on Windows. The
    MIDI interface is class-compliant, so it *should* carry over *(unverified)*,
    and with HID out of the profile no udev rule for `hidraw` is needed. What is

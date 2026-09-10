@@ -133,7 +133,7 @@ so what could be built is half of what §3.24 promises, and half of it in the
 document would be a row that does not do what the PRD says. It goes to the
 author as an amendment instead.
 
-**Phase 4 has started, and its first pull request pays six debts.** It is the phase that makes a rehearsal
+**Phase 4 opened with a pull request that paid six debts.** It is the phase that makes a rehearsal
 possible rather than a performance: anticipation, so a scene is ready before the
 operator's hand comes down; a shared allocator, so two cues cannot fight over one
 processor input and the show says so at edit time rather than at half past ten at
@@ -178,8 +178,8 @@ bus, and can say which rack channel it goes through. A feed is a routing and a
 claim in one object, which is the point of it: the audio reaches the processor
 through an ordinary bus, and the claim that keeps a second cue out of the
 position and the LFO state behind that input is the same row that carries it
-there. What is not here yet is the claiming — that is the next pull request, and
-the analysis that warns you at edit time is the one after.
+there. The claiming came in the next pull request (4.3), and the analysis that warns
+you at edit time in the one after (4.4).
 
 **Phase 4 meets its criterion.** That criterion is *load-to-time into the middle of a
 scene lands the right cues at the right offsets with the right slots claimed;
@@ -253,12 +253,15 @@ vocabulary for "the UI did it". The inspector is built from the tree rather than
 from a copy of the parameter table, so a row added to the CSV appears in it
 without a line being written.
 
-It arrives ahead of its place in the plan (the desktop UI is Phase 5 and the
-tablet client Phase 7) for a reason the author gave: a headless engine is one
-nobody can form an opinion about, and the layout is his to design. The order it
-displaces is worth stating plainly rather than quietly — PRD §3.2's law is
-intact, because every value on that page was already exposed over OSCQuery and
-already driven by a headless test before the page existed.
+It arrived ahead of its place in the plan for a reason the author gave: a
+headless engine is one nobody can form an opinion about, and the layout is his to
+design. The plan has since moved to meet it rather than the other way round —
+decisions T and V (2026-09-09, namespace draft §9) make this page Phase 5's
+operator client and PRD §3.17's web client, the one the tablet uses too, grown one
+view per pull request with no build step; the JUCE desktop client is an outline
+(namespace draft §14.16) until the layout stops moving. PRD §3.2's law is intact,
+because every value on that page was already exposed over OSCQuery and already
+driven by a headless test before the page existed.
 
 The documents come first, and they are the thing to read before the code:
 
@@ -280,8 +283,9 @@ The documents come first, and they are the thing to read before the code:
   spatcore and juce_simpleweb already provide, per phase, and what stops each piece being
   used as-is.
 - **The close-outs** —
-  [`docs/godot-phase2-closeout-0.1.md`](docs/godot-phase2-closeout-0.1.md) and
-  [`docs/godot-phase3-closeout-0.1.md`](docs/godot-phase3-closeout-0.1.md) — one per
+  [`docs/godot-phase2-closeout-0.1.md`](docs/godot-phase2-closeout-0.1.md),
+  [`docs/godot-phase3-closeout-0.1.md`](docs/godot-phase3-closeout-0.1.md) and
+  [`docs/godot-phase4-closeout-0.1.md`](docs/godot-phase4-closeout-0.1.md) — one per
   finished phase: the PRD amendments it proposes (proposed, never applied — the PRD is
   the author's), what it deliberately left undone, what it measured, and what is still
   needed from the author. A phase that changed its mind about something says so here.
@@ -393,24 +397,25 @@ The documents come first, and they are the thing to read before the code:
   They are throwaway by construction: they may link `wfg::thirdparty` and never
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
-**What does not exist yet.** A group has no runtime: it is an opaque sibling to the standby
-pointer, and descending into one, running its members, its header and its footer is Phase 3 —
-along with parallel lists and the published focus node, triggers other than GO, ranges and in-cue
-loops, and MIDI in either direction. Nothing arms a cue when it becomes standby; a GO on an
-unarmed cue arms and launches in one and pays the disk. A cue's pre-wait and post-wait are stored
-and read by nothing. Finished runs keep their addresses for ever. Everything a tick writes to a
-mounted node leaves together at the end of it, so the twelve messages of one GO are one gesture
-rather than a dribble (§3.4) — that part is Phase 2's and does exist.
+**What does not exist yet.** Undo, crash-safe autosave and recovery, `document.revert` and
+`document.saveAs`, and the spectral-colour cache are Phase 5's, drawn in §14 of the namespace
+draft and landing one pull request at a time; control surfaces and bindings are Phase 6's. What
+this paragraph listed before Phase 3 — a group runtime, arming at standby, pre- and post-waits the
+scheduler reads, and finished runs that kept their addresses for ever — Phase 3 built or fixed: a
+finished run is now published for five seconds and then retires from the tree. Everything a tick
+writes to a mounted node leaves together at the end of it, so the twelve messages of one GO are one
+gesture rather than a dribble (§3.4) — that part is Phase 2's and does exist.
 
 The OSCQuery server does not advertise itself over mDNS — clients are pointed at a host and
 a port, and `juce::NetworkServiceDiscovery` is not mDNS. It speaks no TLS, and
 `deps.no-openssl` asserts on the shipped binary that no OpenSSL came with it. It resolves an
 address to exactly one node: a client sending a pattern is told so, in its own words, rather
 than told the node does not exist. Bundle time tags are carried and preserved but not
-scheduled — Phase 4's state solver is where a time tag starts meaning something, and
-honouring one now would tell a client its timing had been respected when it had not.
+scheduled — Phase 4 built the state solver without them, and honouring one now would
+tell a client its timing had been respected when it had not.
 
-No UI, no third-party plugin hosting, no video. There is an audio graph, exact and measured,
+No compiled UI, no third-party plugin hosting, no video: the one UI is the web console served
+at `/ui`, plugins are Phase 9's and video Phase 8's. There is an audio graph, exact and measured,
 and GO fires a cue into it.
 
 **Open questions, deliberately unanswered anywhere in this tree**
@@ -423,9 +428,14 @@ either of them anywhere in the build:
 1. **Default fixed track count.** Spike #4 — graph stability under sustained
    launching, the devplan's first priority — cannot run without one. It takes it
    as `--tracks=N` on the command line.
+   *Answered 2026-09-05 by decision G (namespace draft §9): the count is
+   `Show/Audio/@tracks`, required in every show and defaulted nowhere — so the build
+   still carries none, now by decision rather than by omission.*
 2. **Target sample rates and buffer sizes.** Same treatment (`--sample-rate=N
    --buffer=N`). PRD §3.4's "96 kHz / 64 frames" is an arithmetic illustration,
    not a specification.
+   *Partly answered 2026-09-04 by PRD §6.2's 0.8 amendment: the rate is observed,
+   never set; the mismatch policy and buffer sizes stay open.*
 
 Three smaller things this scaffold decided and would rather have overruled early
 than late: the SPDX suffix is `GPL-3.0-or-later` (`GPL-3.0-only` is equally
@@ -602,8 +612,8 @@ Build presets append `-debug` / `-release` (`dev-debug`, `ci-linux-release`, …
 
 | Dependency | Version | Commit |
 |---|---|---|
-| JUCE | 8.0.13+7 (on `develop`) | `19edd538429c93d277bf95b55aaa7e3eb545f951` |
-| Tracktion Engine | develop (3.5.0) | `0a5f4e6a5f53d09c89b414a44386a12df7fa1ec6` |
+| JUCE | 8.0.13+7 (on `develop`) | `37c894f83d379179b2070d437ccd0f1cd9af9576` |
+| Tracktion Engine | develop (3.5.0) | `a806e7262ac299ef7dad51d5186872077cf5e750` |
 
 The load-bearing fact: **Tracktion Engine develop (3.5.0)'s own `modules/juce` gitlink is
 byte-for-byte our JUCE pin.** We are not guessing at a compatible JUCE — we are

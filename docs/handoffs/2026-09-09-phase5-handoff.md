@@ -5,6 +5,13 @@ Phase 5 inherits, what it must not break, where the seams are, and the traps tha
 time. The author-facing half — amendments, measurements, decisions still needed — is
 [`../godot-phase4-closeout-0.1.md`](../godot-phase4-closeout-0.1.md).*
 
+*Note, 2026-09-10: decisions T and V (namespace draft §9, 2026-09-09) change the first sentence
+below. The client Phase 5 builds is `clients/console`, grown into PRD §3.17's web client — still a
+pure OSCQuery client, held to exactly the constraint this paragraph insists on — and the JUCE
+desktop client is an outline (namespace draft §14.16) until the layout stops moving. §1's
+"1 400 lines" was a mid-Phase-4 figure; the page was 1 725 lines at Phase 4's close (namespace
+draft §14's preamble).*
+
 Phase 5 is the first build a human runs a rehearsal with: a JUCE desktop client, **as a pure
 OSCQuery client**. That constraint is the most important sentence in this document, and Phase 4
 spent its whole console budget proving it holds — every gesture the page makes is a datagram, and

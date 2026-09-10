@@ -23,9 +23,10 @@ becomes a regression test. Phases will be broken into subphases as they go.
   and each ends with a written pass/fail against the criterion in PRD §6.1.
 - **Small PRs per subphase.** One concern per PR; the replay fixture is part of
   the PR.
-- The author designs the UI layout (PRD §3.17). Phase 5 builds a *minimal
-  functional* UI so the engine can be exercised by a human, not the final
-  design.
+- The author designs the UI layout (PRD §3.17). Phase 5 does not design it: it
+  grows `clients/console` into the surface he designs it in, which is also PRD
+  §3.17's web client (decisions T and V, 2026-09-09), and the JUCE desktop
+  client waits until the layout stops moving.
 
 Sizes are relative: **S** days, **M** weeks, **L** several weeks. No dates.
 
@@ -209,8 +210,16 @@ the list's own step history. S settles the persistent section at list level and
 takes §3.29's *(proposed)* running-pane kill as a **yes**. *Stereo → two mono
 slots* needs no separate answer — two `Feed` rows are what it means — and
 *degrade* is built as §3.9e writes it unless the author says otherwise. **Still
-open: the voices claim shape**, which waits on M16. The phase's own shape, drawn
-before the code as §11 and §12 were, is §13 of that draft.
+open: the voices claim shape**, which M16 has since answered as a measurement
+(PR 4.1, 2026-09-08: a second launcher slot does not stop the first — both play
+and sum) and which is now the author's choice, before Phase 6. The phase's own
+shape, drawn before the code as §11 and §12 were, is §13 of that draft.
+
+**COMPLETE, 2026-09-09.** The done-when above is `tests/blackbox/phase4_prepare.py`,
+fifty-two checks against the shipped binary over UDP and HTTP, in CI on three
+platforms under two locales. `docs/godot-phase4-closeout-0.1.md` is what it amends
+in the PRD, what it left undone, what it measured, and what it still needs from
+the author.
 
 ---
 
@@ -351,8 +360,12 @@ policy of §3.30.
 
 **Goal:** the running pane in the operator's hands.
 
-- Web client (TypeScript) over OSCQuery + WebSocket. Full surface layout
-  rendering, so it is a genuine fallback (PRD §3.17).
+- The web client over OSCQuery + WebSocket is `clients/console`, grown through
+  Phase 5 into PRD §3.17's web client (decision V, 2026-09-09): ES modules served
+  by the engine, no build step. *(PRD §3.17 said TypeScript; the amendment that
+  drops it is carried by namespace draft §14.15 and applied to the PRD
+  separately.)* Full surface layout rendering, so it is a genuine fallback (PRD
+  §3.17).
 - Multitouch: kill, advance, prune, playhead drag; radial and cross-axis
   precision gain, relative from touch-down; dual-touch load-to-time with the
   solve running live.
