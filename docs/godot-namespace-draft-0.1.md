@@ -5304,8 +5304,12 @@ and would still be wrong the moment two edits cancelled by coincidence rather th
 **The strip's colour cell and the D700 route.** §3.30's own last sentence assigns them: Phase 5
 for the cache, the editor and Gogo; Phase 6 for the strip. Phase 5 publishes `run/timbre` and
 stops there. The binding to §3.16's colour cell, the profile that quantises and rate-limits, and
-the D700's HID route are Phase 6's, and the measurement they need — §6.11's colour write rate,
-the interval below which back-to-back writes fault — has not been taken.
+the D700's colour route are Phase 6's, and the measurement they need — §6.11's colour write
+rate, now whether seventeen elements repainted ten times a second over MIDI is tolerated — has
+not been taken. *This sentence is a correction (2026-09-10), following the author's §3.30
+correction of the same day:* the D700 takes colour over MIDI, as note-on at each element's own
+button note, and not over HID, so the interval at which back-to-back HID writes fault — which
+this sentence first named — no longer matters to anything this phase defers.
 
 **Per-channel timbre.** One colour per run, from a mono fold. A multichannel bed whose surrounds
 carry different material reads as their sum, and for a forty-pixel Gogo bar that is the right
