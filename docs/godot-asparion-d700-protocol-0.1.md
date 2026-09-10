@@ -135,9 +135,24 @@ Writing report `0x04` drives **motor faders** (`04 <port> E<n> <lsb> <msb>`) and
 08 2a 0a b6 <index> 00 <R> <G> <B>      set colour — full 8 bits per channel
 ```
 
-Element class `b6` is the dials. `a2`, `b0` and `b2` also appear in the
-Configurator's traffic and address other classes *(unverified: which)*. `b0`
-returned a write stall and was not pursued.
+Element class `b6` is the dials. `b0` returned a write stall and was not pursued.
+
+**But the index is a configuration slot, not a physical position.** Sweeping
+`0x00`–`0x11` under `b6`, with a session properly opened, lit **only the three
+elements that had been provisioned** in the Configurator — the other fourteen
+dials stayed dark at every index. Sweeping the same range under `a2` and `b2`
+lit nothing at all.
+
+So on an unprovisioned unit, most indices address nothing, and **`index N`
+cannot be assumed to be dial N**. No read-back command is known, so a host
+cannot discover the mapping at runtime; provisioning the surface and recording
+the index order becomes a documented prerequisite of the device profile.
+
+**The firmware also reclaims the LEDs.** The device runs its own idle animation
+— all dial RGB cycling together — which resumes when nothing is driving the
+surface. Colour is therefore a matter of ownership as well as addressing: a
+host must keep asserting it, or disable that animation, and no command for
+disabling it is known.
 
 Verified by a 40-second hue rotation: 511 steps, 1533 writes, three elements
 chasing, smooth throughout, with the Configurator and Connector both closed.
