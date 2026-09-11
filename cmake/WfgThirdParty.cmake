@@ -149,20 +149,22 @@ target_include_directories(juce_simpleweb INTERFACE
 # 2c. spatcore — headers only, and no add_subdirectory
 # ---------------------------------------------------------------------------
 # spatcore (GPL-3, pob31/spatcore) is the author's shared control plane. It is
-# consumed at SOURCE level: `#include <spatcore/rt/RtThreadPriority.h>` and
-# nothing more. There is deliberately no add_subdirectory().
+# consumed at SOURCE level: `#include <spatcore/io/DeviceHost.h>` and
+# `#include <spatcore/rt/RtThreadPriority.h>`, and nothing more. There is
+# deliberately no add_subdirectory().
 #
 # Its own CMakeLists builds targets that call juce_add_modules() again, which
 # would compile JUCE a SECOND time in this build tree and break the one-compile
-# rule this whole file exists to hold (section 5). The headers Phase 1 and
-# Phase 2 want - rt/RtThreadPriority.h, later rt/RtSnapshot.h - need no library:
-# the first is JUCE-free, the second is juce_core-only.
+# rule this whole file exists to hold (section 5). The headers used here need
+# no library of their own: RtThreadPriority.h is JUCE-free, and DeviceHost.h
+# needs only juce_audio_devices, which wfg_thirdparty already compiles.
 #
 # So spatcore needs exactly one thing from the build, and it is the ThirdParty
-# include root added in section 3 below. Most of spatcore's control/ tree is
-# JUCE-9-only today (its OSCParser.h constructs juce::OSCArgument(true), which
-# JUCE 8 has no constructor for) and is not reachable from here; Go.dot's own
-# osc/ codec exists for that reason.
+# include root added in section 3 below. spatcore builds against JUCE 9 and
+# this tree against JUCE 8.0.13, so compile a header here before depending on
+# it. Go.dot's own osc/ codec is not a version workaround: spatcore's parser
+# compiles on JUCE 8 (OSCArgument(true) promotes to the int32 overload in both
+# versions) but drops bundle time tags - see docs/godot-reuse-map-0.1.md.
 
 # ---------------------------------------------------------------------------
 # 3. wfg::deps — the compile environment, and nothing that compiles

@@ -19,8 +19,8 @@ CI enforces it, so amendments go into the PRD by the author, citing this map.
 
 | Source | What it is | Licence | State |
 |---|---|---|---|
-| **WFS-DIY** | the shipping wave-field-synthesis app; JUCE 9.0.1, Projucer-built | GPL-3 | production |
-| **spatcore** (`WFS_DIY_v1/spatcore`, pinned at `7e7ed63`) | the shared real-time core extracted from WFS-DIY: `rt/`, `dsp/`, `wfs/`, `reverb/`, `gpu/`, `control/{osc,state,mcp}`, `controllers/`, `ui/`, `io/` | GPL-3 (added 2026-09-04, `7e1a8ad`) | consumed by WFS-DIY at source level; CMake targets exist for XOA / Tight-WFS |
+| **WFS-DIY** | the shipping wave-field-synthesis app; JUCE 9.0.2 (since `87d13b3`, 2026-09-11; 9.0.1 before), Projucer-built | GPL-3 | production |
+| **spatcore** (`WFS_DIY_v1/spatcore`, pinned at `237dc3f`; Go.dot pins `cf7ba9f`, the merge of the same tree) | the shared real-time core extracted from WFS-DIY: `rt/`, `dsp/`, `wfs/`, `reverb/`, `gpu/`, `control/{osc,state,mcp}`, `controllers/`, `ui/`, `io/` | GPL-3 (added 2026-09-04, `7e1a8ad`) | consumed by WFS-DIY at source level; CMake targets exist for XOA / Tight-WFS |
 | **juce_simpleweb** (`pob31/juce_simpleweb`, a fork of `benkuper/juce_simpleweb`) | JUCE module: HTTP + WebSocket server on one port, WebSocket client; Simple-Web-Server (MIT) over standalone asio (BSL-1.0); TLS optional | GPL-3 | **converged 2026-09-05** on `b953ada` = upstream + the TLS-off guard + the Windows fixes; WFS-DIY, XOA and Tight-WFS vendor the same code |
 
 XOA and Tight-WFS were looked at only for conventions; both are under construction and
@@ -28,10 +28,15 @@ nothing here depends on them.
 
 ## Two constraints that decide what can be lifted verbatim
 
-1. **JUCE 8.0.13 versus JUCE 9.0.1.** Go.dot is pinned to JUCE 8.0.13 because that is the
+1. **JUCE 8.0.13 versus JUCE 9.0.2.** Go.dot is pinned to JUCE 8.0.13 because that is the
    SHA Tracktion Engine 3.5.0 was tested against (`scripts/check-pins.py`); WFS-DIY and
-   spatcore are on JUCE 9.0.1. Anything in spatcore that uses a JUCE 9 API does not compile
-   here. **Draft 0.1 named one instance and it was wrong** (see the correction under
+   spatcore are on JUCE 9.0.2 (9.0.1 until 2026-09-11). Anything in spatcore that uses a
+   JUCE 9 API does not compile here. *Re-checked 2026-09-11, when the family moved to 9.0.2:*
+   Tracktion's `develop` (`4536d8a`, 2026-09-07) still pins JUCE 8.0.13 and no Tracktion
+   branch tracks JUCE 9, so Go.dot cannot follow — the build failure recorded in
+   `docs/spikes/README.md` came from APIs JUCE 9 removed, which a patch release does not
+   restore. The spatcore bump itself changed only `examples/minimal-app/CMakeLists.txt`;
+   neither header Go.dot compiles moved. **Draft 0.1 named one instance and it was wrong** (see the correction under
    *Phase 1* below): `control/osc/OSCParser.h`'s `juce::OSCArgument (true)` compiles on
    both. **No confirmed JUCE-9-only usage in spatcore is known today** — which makes this a
    constraint to keep testing against rather than one with a worked example, and the rule
