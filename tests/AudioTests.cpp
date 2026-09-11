@@ -59,6 +59,7 @@
 #include <limits>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 using namespace wfg;
@@ -3684,12 +3685,28 @@ TEST_CASE ("M13: three ranges play in order, and every boundary lands where the 
         buffer with silence for however long the machine took - which on this
         box is a few ticks and on a loaded macOS runner was enough that the
         third range had nowhere left to be written, and the test failed saying
-        the range had not played when it had. */
+        the range had not played when it had.
+
+        AND THE WAIT HAS TO BE WALL CLOCK TOO, which the first version of this
+        loop was not. It gave the disk six hundred ticks - but a tick here is a
+        call, not twenty milliseconds, so six hundred of them ran in a fraction
+        of a second while Tracktion's cache thread was still reading - and a
+        loaded macOS runner failed the same REQUIRE in M13, whose wait is this
+        one's twin, for the very reason this paragraph describes (2026-09-11,
+        CI run 34541784784). Each
+        tick that finds the source not ready now also waits a real tick's worth,
+        so the six hundred are about twelve seconds of wall clock, which is the
+        budget the rest of this file gives `waitForTrackSourceReady`. The tick
+        count is unchanged, so what the test records afterwards is too: a fast
+        machine is ready after a few and never waits at all. */
     for (int i = 0; i < 4; ++i)
         oneTick();
 
     for (int i = 0; i < 600 && ! rig.host.isTrackSourceReady (0); ++i)
+    {
         oneTick();
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
 
     REQUIRE (rig.host.isTrackSourceReady (0));
 
@@ -3892,12 +3909,17 @@ TEST_CASE ("M13: an advance leaves a range that loops for ever, at the end of th
             rig.host.processBlock();
     };
 
-    /*  The disk before the recording, for the reason above. */
+    /*  The disk before the recording, for the reason above - and waited for in
+        wall clock, for the reason above that: this is the loop that failed on
+        the macOS runner. */
     for (int i = 0; i < 4; ++i)
         oneTick();
 
     for (int i = 0; i < 600 && ! rig.host.isTrackSourceReady (0); ++i)
+    {
         oneTick();
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
 
     REQUIRE (rig.host.isTrackSourceReady (0));
 

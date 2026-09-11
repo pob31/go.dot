@@ -101,6 +101,10 @@ html, body {
 }
 #strip .brand { font-weight: 600; color: var(--ink); letter-spacing: .04em; }
 #strip .stat { display: flex; gap: 5px; align-items: baseline; }
+/*  A STAT THAT IS SOMETIMES ABSENT has to be told so: the rule above gives
+    every stat `display: flex`, which outranks the browser's own rule for the
+    `hidden` attribute, so without this line `hidden` on a stat hides nothing. */
+#strip .stat[hidden] { display: none; }
 #strip .stat b { font-weight: 500; color: var(--ink-faint); text-transform: uppercase;
                  letter-spacing: .05em; font-size: 10px; }
 #strip .stat span { color: var(--ink); }
@@ -404,6 +408,7 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     <span class="brand">Go.dot</span>
     <span class="stat"><b>show</b><span id="s-show">—</span></span>
     <span class="stat" id="s-saved-wrap"><b>file</b><span id="s-saved">—</span></span>
+    <span class="stat warn" id="s-write-wrap" hidden><b>write</b><span id="s-write"></span></span>
     <span class="stat" id="s-lock-wrap"><b>edits</b><span id="s-lock">—</span></span>
     <span class="stat"><b>tick</b><span class="num" id="s-tick">—</span></span>
     <span class="stat"><b>audio</b><span id="s-audio">—</span></span>
@@ -472,6 +477,18 @@ button:disabled { color: var(--ink-faint); cursor: default; }
         decides that - usually somebody who has just watched a machine fall
         over and is not reading carefully.
 
+        AND THE QUESTION CAN WAIT, because leaving it unanswered no longer
+        costs this session its crash protection (PR 5.5, the author's decision
+        of 2026-09-11). `recovery/` is always this session's own autosave, so
+        the engine keeps autosaving while the banner is up, and never over the
+        earlier afternoon: if that is still in `recovery/`, the first autosave
+        moves it aside to a numbered `recovery.previous.N/` first, and if an
+        earlier session already moved it there, it is offered from there.
+        Recover and discard act on it wherever it lives. The first build paused
+        autosave instead, which kept the old work safe by leaving the new work
+        unprotected; the banner used to say "the work stays where it is", and
+        now it says what happens to it.
+
         WRITTEN ONCE, HERE, AND ONLY SHOWN OR HIDDEN BY THE POLL. A banner
         rebuilt ten times a second is a button that can be swapped for a new
         one between the press and the release, and a click whose element no
@@ -481,12 +498,15 @@ button:disabled { color: var(--ink-faint); cursor: default; }
   <div id="recovery" hidden>
     <b>Unsaved work was found beside this show.</b>
     The engine keeps what is being changed in the bundle's <code>recovery/</code> folder,
-    never in the show file, and the last session ended before anybody saved it.
-    <b>Recover</b> replaces what is on screen with that work and leaves it unsaved: the
-    show file is not touched until somebody saves, and revert still goes back to it.
-    <b>Discard</b> deletes the recovered work for good and changes nothing on screen.
-    Until one of them is chosen the work stays where it is, and saving the show in the
-    meantime does not count as an answer.
+    never in the show file, and an earlier session ended before anybody saved it.
+    <b>Recover</b> replaces what is on screen with that work, changes made here and not
+    saved included, and leaves it unsaved: the show file is not touched until somebody
+    saves, and revert still goes back to it.
+    <b>Discard</b> deletes that earlier work for good and changes nothing on screen.
+    Until one of them is chosen both are kept: this session's changes are autosaved as
+    usual and never over the earlier work, which the first autosave moves aside into a
+    numbered <code>recovery.previous</code> folder if it is still in <code>recovery/</code>.
+    Saving the show in the meantime does not count as an answer.
     <div class="choice">
       <button data-cmd="document.recover">recover the unsaved work</button>
       <button data-cmd="document.discardRecovery">discard it and keep the saved show</button>
@@ -1588,8 +1608,11 @@ function renderStrip() {
   const isSaved = dirty === false || dirty === "false";
 
   /*  AND WHETHER THERE IS WORK THE FILE DOES NOT HOLD, found rather than made.
-      `recovery` is true when the engine opened this bundle beside a
-      `recovery/` folder that nobody has answered yet, and it joins the file's
+      `recovery` is true when the engine opened this bundle beside unsaved
+      work that nobody has answered yet - a `recovery/` folder, or failing
+      that the newest `recovery.previous.N/` - and it stays true while this
+      session autosaves, since autosave never writes over that work: if it is
+      in `recovery/`, the first autosave moves it aside. It joins the file's
       readout rather than taking a stat of its own because it is the same
       question - is everything worth keeping on disk as the show? - to which
       "saved" alone would be the wrong answer: true of show.xml, and silent
@@ -1610,7 +1633,31 @@ function renderStrip() {
              : isSaved ? "show.xml holds this show"
                        : "the engine has not said") +
     (hasRecovery ? "; and unsaved work from a session that did not end is waiting in " +
-                   "recovery/, to be recovered or discarded" : "");
+                   "the bundle, to be recovered or discarded" : "");
+
+  /*  A WRITE THAT FAILED, said in words. Since PR 5.5's second half a save,
+      an autosave and a saveAs are applied at once and written on the engine's
+      writer thread a tick or two later, so a write that fails there fails
+      AFTER its command was taken: nothing is refused, and `lastError` and the
+      refusal banner rightly say nothing, since those quote refused records and
+      this one was applied. Without this a failed save would leave one sign,
+      the readout above staying at "unsaved changes" - which is also what
+      honest unsaved work looks like - and a failed autosave none at all.
+
+      So `/godot/document/writeError` gets a stat of its own after "file", in
+      the failure red rather than the amber of unsaved work, because this one
+      says something has gone wrong, which amber never does. Hidden while it
+      is empty, since a readout that always says "no problem" is one people
+      stop reading. Cut to fit the strip, with the engine's whole sentence -
+      which command, at which tick, which file - on hover. */
+  const writeError = String(tree.get("/godot/document/writeError", "") || "");
+  const WRITE_ERROR_ROOM = 60;
+
+  el("s-write").textContent = writeError.length > WRITE_ERROR_ROOM
+    ? writeError.slice(0, WRITE_ERROR_ROOM - 1) + "…"
+    : writeError;
+  el("s-write-wrap").title = writeError;
+  el("s-write-wrap").hidden = writeError === "";
 
   el("recovery").hidden = !hasRecovery;
 

@@ -136,11 +136,12 @@ namespace wfg::tree
         std::string documentUndoName;
         std::string documentRedoName;
 
-        /*  WHETHER A PREVIOUS SESSION LEFT WORK BEHIND: a `recovery/show.xml`
-            found when this bundle was opened, and neither adopted nor discarded
-            since (namespace draft §14.10).
+        /*  WHETHER A PREVIOUS SESSION LEFT WORK BEHIND: a `recovery/show.xml`,
+            or failing that a `recovery.previous.N/`, found when this bundle was
+            opened, and neither adopted nor discarded since (namespace draft
+            §14.10).
 
-            It is a latch carried on the session and never a look at the disk,
+            It is a record carried on the session and never a look at the disk,
             and the reason is this session's own autosave: `recovery/` appears
             two seconds after the first edit of any show, so a node that asked
             the filesystem would offer every unsaved show back to the operator
@@ -150,6 +151,13 @@ namespace wfg::tree
             beside it is read here - before the publish, or a client draws the
             offer one tick after the engine printed it. */
         bool documentRecovery = false;
+
+        /*  WHAT THE WRITER THREAD LAST FAILED TO DO, in the writer's own
+            sentence, and empty when nothing is outstanding (PR 5.5, second
+            half). Not `lastError`, which quotes a rejected record: a write
+            that fails on the writer belongs to a command that was applied.
+            `doc::DocumentSession::writeError` says when it goes out. */
+        std::string documentWriteError;
     };
 
     class ParameterTree

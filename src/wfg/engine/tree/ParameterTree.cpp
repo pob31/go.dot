@@ -1280,6 +1280,13 @@ namespace wfg::tree
                 1 rather than at the 5 its livelier neighbours carry. */
             else if (name == "recovery") text = state.documentRecovery ? "true" : "false";
 
+            /*  And why the last write handed to the writer thread did not land,
+                beside it: a sentence, because it is the writer's own - which
+                file, and what became of it - and empty when nothing is
+                outstanding, so a client shows it by showing it when it is not
+                empty. */
+            else if (name == "writeError") text = state.documentWriteError;
+
             /*  FROM THE RUNTIME HALF although it is a reading of the document,
                 because it must never be stale: a client asking what is wrong
                 with the show is asking about the show as it is now, and the

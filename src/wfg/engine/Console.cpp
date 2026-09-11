@@ -26,6 +26,7 @@
 #include <wfg/engine/midi/MidiSender.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/DocumentSession.h>
+#include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/document/RelaxNg.h>
 #include <wfg/engine/tree/MountProbe.h>
 #include <wfg/engine/tree/OscQueryJson.h>
@@ -243,13 +244,18 @@ namespace
             trap left for the first person who did invoke it. */
         wfg::doc::DocumentSession session { nowhere, document.showRevision() };
 
+        /*  And a writer for the same reason, synchronous and never started:
+            there is no clock here to keep a disk away from, and nothing is
+            ever handed to it. */
+        wfg::doc::DocumentWriter writer;
+
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::cue::registerRunCommands (engine.commands(), runs);
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
-        wfg::doc::registerBundleCommands (engine.commands(), document, session);
+        wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
 
         for (const auto& command : engine.commands().all())
@@ -283,9 +289,11 @@ namespace
         require the engine to write the same log again.
 
         Exit 0 when it matches, 1 when it diverges (with the first divergences
-        named), 2 when the log cannot be read at all. The distinction matters:
-        "the log is unreadable" and "the engine is not deterministic" are
-        different failures with different remedies.
+        named), 2 when the log cannot be read at all - or, since PR 5.5, when it
+        records a session that adopted a recovery, whose show is in neither the
+        log nor the bundle and so cannot be replayed past that point. The
+        distinction matters: "the replay could not run" and "the engine is not
+        deterministic" are different failures with different remedies.
     */
     /*  `wfg devices` - what this machine can play through, and what to type.
 
@@ -415,6 +423,36 @@ namespace
             return 2;
         }
 
+        /*  A SESSION THAT ADOPTED A RECOVERY IS REFUSED, AND SAYS SO (§14.10,
+            as the author decided it on 2026-09-11).
+
+            The recovered bytes are in neither the log nor the bundle its header
+            hashes, so from the moment a session adopted them it was running a
+            show this replay does not have - and replayed anyway, it would build
+            a different one and report the difference as divergence, which
+            sends somebody hunting for non-determinism in an engine that has
+            none. `Bundle::replayBoundary` says where that moment is: before the
+            first record for a session started with `--recover`, which its
+            header marks, and at the applied `document.recover` for one that
+            recovered while it ran.
+
+            EXIT 2, "could not run", and not 1. The three codes are distinct so
+            that "the log is unreadable" and "the engine is not deterministic"
+            are never mistaken for each other, because they have different
+            remedies; this is the first kind - what is missing is an input, and
+            the remedy is about the files, never about the engine. A session
+            that recovered part-way is replayed up to the record, so a real
+            divergence before it is still reported as one, with exit 1, and the
+            refusal after it. Refused here, before the bundle is even opened,
+            when not one record could be replayed. */
+        const auto boundary = wfg::doc::Bundle::replayBoundary (*logFile);
+
+        if (! boundary.refusal.empty() && boundary.replayable == 0)
+        {
+            std::cerr << "wfg replay: " << boundary.refusal << std::endl;
+            return 2;
+        }
+
         /*  THE ENGINE NEEDS THE SAME COMMANDS THE SESSION HAD, or every record
             replays as `unknown-command` and the comparison is meaningless.
 
@@ -511,6 +549,18 @@ namespace
             published `dirty` - so an empty folder and a nought are what it
             holds until `--out` gives it a folder. */
         wfg::doc::DocumentSession replayed;
+
+        /*  AND THE WRITER, BESIDE IT AND FOR THE SAME REASON - SYNCHRONOUS, AND
+            NEVER STARTED (§14.14). A replay has no GO path to keep a disk away
+            from, and a thread here would only add nondeterminism: a replayed
+            `document.revert` would then have to drain it to read what a
+            replayed save wrote, and a replay is exactly where the order of
+            events must not depend on a scheduler. Synchronous, every write
+            happens inside the handler that asked, in record order. The records
+            are identical either way, because the `A` of a save means "taken
+            and handed over" whether or not anything was waiting on the other
+            side. */
+        wfg::doc::DocumentWriter writer;
 
         const auto bundlePath = args.containsOption ("--bundle")
                                   ? args.getValueForOption ("--bundle")
@@ -633,7 +683,7 @@ namespace
 
                 replayed.folder = out;
                 replayed.savedRevision = document.showRevision();
-                wfg::doc::registerBundleCommands (engine.commands(), document, replayed, out);
+                wfg::doc::registerBundleCommands (engine.commands(), document, replayed, writer, out);
             }
 
             for (const auto& problem :
@@ -667,7 +717,30 @@ namespace
                 durations[name] = *seconds;
         }
 
-        const auto result = wfg::replay (engine, *logFile);
+        /*  UP TO A RECOVERY AND NO FURTHER: the records before it ran against
+            the bundle the header names, and are held to reproducing exactly
+            like any others. */
+        const auto* toReplay = &*logFile;
+        wfg::LogFile beforeTheRecovery;
+
+        if (! boundary.refusal.empty())
+        {
+            beforeTheRecovery = *logFile;
+            beforeTheRecovery.records.resize (boundary.replayable);
+            toReplay = &beforeTheRecovery;
+        }
+
+        const auto result = wfg::replay (engine, *toReplay);
+
+        /*  WHAT THE WRITER COULD NOT PUT IN --out, said and not counted. The
+            records reproduced - a save's `A` means "handed to the writer", and
+            it was - so this changes no exit code; but a replay whose `--out` is
+            short of a file somebody is about to compare against should not be
+            quiet about it. The session this replays reported the same kind of
+            failure at /godot/document/writeError, and this is where the replay
+            reports its own. */
+        for (const auto& problem : wfg::doc::settle (replayed, writer))
+            std::cerr << "wfg replay: a write into --out did not land - " << problem << std::endl;
 
         if (! result.ok)
         {
@@ -676,7 +749,19 @@ namespace
             for (const auto& m : result.mismatches)
                 std::cerr << "    " << m << std::endl;
 
+            if (! boundary.refusal.empty())
+                std::cerr << "wfg replay: and it could not have gone further: "
+                          << boundary.refusal << std::endl;
+
             return 1;
+        }
+
+        if (! boundary.refusal.empty())
+        {
+            std::cout << "replay: " << result.recordsReplayed
+                      << " record(s) reproduced exactly, and the rest cannot be" << std::endl;
+            std::cerr << "wfg replay: " << boundary.refusal << std::endl;
+            return 2;
         }
 
         std::cout << "replay: ok - " << result.recordsReplayed
@@ -1043,8 +1128,12 @@ namespace
             never saved would be a false one. This verb PRINTS nothing about it -
             of the four that open a bundle only `validate` says the word
             (§14.10) - so the node is the whole of what it says, and it says only
-            what a client connecting to `serve` on this folder would read. */
-        state.documentRecovery = target.isDirectory() && wfg::doc::Bundle::hasRecovery (target);
+            what a client connecting to `serve` on this folder would read - which
+            since PR 5.5's second half includes an afternoon an earlier session
+            moved aside into a `recovery.previous.N/`, because that is what
+            `serve` would offer. */
+        state.documentRecovery = target.isDirectory()
+                              && wfg::doc::Bundle::offeredRecovery (target) != juce::File();
 
         const auto snapshot = parameters.publish (0, state);
 
@@ -1119,6 +1208,20 @@ namespace
             if (wfg::doc::Bundle::hasRecovery (target))
                 std::cerr << "    recovery/ holds unsaved work from a session that did not end"
                              " cleanly, and was not validated" << std::endl;
+
+            /*  AND EVERY AFTERNOON MOVED ASIDE, beside it and in the same voice
+                (§14.10, as the author decided it on 2026-09-11). A session that
+                found an unanswered recovery renames it to a
+                `recovery.previous.N/` before its own first autosave, and
+                nothing but an answer deletes one - a discard at once, a
+                recovery once the work it held has landed somewhere safe - so a
+                bundle can carry several, and somebody validating it is exactly
+                the person who should know they are there. Lowest N first;
+                `serve` offers the highest, when there is no `recovery/`. */
+            for (const auto& aside : wfg::doc::Bundle::previousRecoveries (target))
+                std::cerr << "    " << aside.getFileName()
+                          << "/ holds unsaved work an earlier session moved aside and nobody"
+                             " answered, and was not validated" << std::endl;
         }
         else if (target.existsAsFile())
         {
@@ -1588,6 +1691,19 @@ namespace
             would never go out. */
         wfg::doc::DocumentSession session { target, document.showRevision() };
 
+        /*  AND THE THREAD THAT WRITES, beside the session and for the same
+            reason: every handler that writes a byte holds both by reference for
+            the life of the process (DocumentWriter.h, and §14.14's M23 for why
+            the bytes are not written on the tick thread at all). BACKGROUND,
+            started below with the other workers and before the clock, and
+            stopped - drained - after the clock has been joined.
+
+            Declared before the engine, so it is destroyed after it: the
+            engine's registry holds the handlers that hold this. And before
+            `--recover`, because adopting a recovery at open tells it which
+            folder that consumed. */
+        wfg::doc::DocumentWriter writer { wfg::doc::DocumentWriter::Mode::background };
+
         /*  UNFINISHED WORK FROM A SESSION THAT DID NOT END, announced and not
             adopted (§14.10).
 
@@ -1602,6 +1718,15 @@ namespace
             exists to leave open; and `adopt` replaces the root wholesale, lock
             included, so a show locked at 20:40 could come back unlocked because
             a file on disk said so.
+
+            AND WITH NO `recovery/`, THE NEWEST AFTERNOON MOVED ASIDE (§14.10,
+            as the author decided it on 2026-09-11): a session that found an
+            unanswered recovery renamed it to a `recovery.previous.N/` before
+            its own first autosave, and nothing but an answer deletes one - so
+            an afternoon nobody answered is offered again here, highest N
+            first. The notice says the same words either way, so a reader
+            looking for "recovery available" finds it, and names the folder
+            when it is not `recovery/`.
 
             ON STDOUT, AS A `wfg:` LINE, AND BEFORE THE PORTS. It is a notice and
             not a fault, so it goes where the ports and the client address go,
@@ -1625,17 +1750,40 @@ namespace
             out at the worst moment. The same flag on a bundle with nothing to
             recover is not an error: "start, recovering if there is anything" is
             the shape a restart script has, and on the ordinary morning there is
-            nothing. */
-        session.recoveryFound = wfg::doc::Bundle::hasRecovery (target);
+            nothing.
 
-        if (session.recoveryFound)
-            std::cout << "wfg: recovery available" << std::endl;
+            THE SAME ADOPTION `document.recover` MAKES, through the same
+            function, so the two cannot come to mean different things: from a
+            `recovery.previous.N/` it consumes that folder, which the writer
+            deletes once the first autosave or save has put the work somewhere
+            safe. The writer has not started, so it is idle, as that function
+            requires.
+
+            AND THE LOG IS TOLD (§14.10, as the author decided it on
+            2026-09-11). This adoption happens before the first record, so no
+            record could ever point at it; the header line written below from
+            `adoptedAtOpen` is the only thing that lets `wfg replay` refuse this
+            session in a sentence instead of diverging from tick nought. */
+        session.offeredRecovery = wfg::doc::Bundle::offeredRecovery (target);
+
+        if (wfg::doc::hasRecoveryOffer (session))
+        {
+            if (session.offeredRecovery == wfg::doc::Bundle::recoveryFolder (target))
+                std::cout << "wfg: recovery available" << std::endl;
+            else
+                std::cout << "wfg: recovery available in "
+                          << session.offeredRecovery.getFileName() << "/" << std::endl;
+        }
+
+        juce::File adoptedAtOpen;
 
         if (args.containsOption ("--recover"))
         {
-            if (session.recoveryFound)
+            if (wfg::doc::hasRecoveryOffer (session))
             {
-                const auto recovered = wfg::doc::Bundle::openRecovery (target, document);
+                const auto offered = session.offeredRecovery;
+                const auto recovered = wfg::doc::Bundle::adoptOfferedRecovery (document, session,
+                                                                               writer);
 
                 for (const auto& problem : recovered.problems)
                     std::cerr << "    " << problem << std::endl;
@@ -1643,14 +1791,12 @@ namespace
                 if (! recovered.ok)
                 {
                     std::cerr << "wfg serve --recover: the recovery in "
-                              << target.getFileName().toStdString()
+                              << offered.getFullPathName()
                               << " could not be read, and nothing was adopted" << std::endl;
                     return 2;
                 }
 
-                session.autosavedRevision = document.showRevision();
-                session.recoveryFound = false;
-
+                adoptedAtOpen = offered;
                 std::cout << "wfg: recovery adopted" << std::endl;
             }
             else
@@ -1734,7 +1880,7 @@ namespace
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
-        wfg::doc::registerBundleCommands (engine.commands(), document, session);
+        wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
 
         /*  ONE APPLIED COMMAND, ONE UNDO TRANSACTION, opened here and nowhere
@@ -1792,7 +1938,8 @@ namespace
             opens - and a client that reads "nothing to recover" at connect and
             "recovery available" twenty milliseconds later has been shown a
             flicker rather than an answer. */
-        state.documentRecovery = session.recoveryFound;
+        state.documentRecovery = wfg::doc::hasRecoveryOffer (session);
+        state.documentWriteError = session.writeError;
 
         /*  THE CLOCK IS CHECKED AND THE TREE PUBLISHED BEFORE ANY SOCKET OPENS,
             and the order is load-bearing rather than tidy.
@@ -1850,6 +1997,12 @@ namespace
             is no session; a device may grant a different BLOCK size, and this
             says so rather than pretending. */
         auto headerLines = wfg::doc::Bundle::logHeaderLines (target);
+
+        /*  THE MARK A `--recover` SESSION CARRIES, beside the bundle line it
+            qualifies: the show this session ran is not the one that line
+            hashes, and `wfg replay` refuses it up front on reading this. */
+        if (adoptedAtOpen != juce::File())
+            headerLines.push_back (wfg::doc::Bundle::recoveredLogHeaderLine (target, adoptedAtOpen));
 
         headerLines.push_back ("clock sampleRate=" + std::to_string (sampleRate)
                                  + " blockSize=" + std::to_string (blockSize)
@@ -1987,6 +2140,11 @@ namespace
         sender.setSocket (udp);
         parameters.setSender (&sender);
         probe.start();
+
+        /*  The writer with the other workers, and before the clock: the tick
+            thread is the only thing that hands it work, so from the first tick
+            there is a thread to take it. */
+        writer.start();
 
         if (! udp.start (requestedOsc,
                          [&engine, &nameSpace] (wfg::osc::Datagram datagram)
@@ -2387,8 +2545,9 @@ namespace
 
                                  previousSecond = second;
 
-                                 /*  THE AUTOSAVE, DECIDED HERE AND WRITTEN BY
-                                     ITS HANDLER (§14.8, §14.10).
+                                 /*  THE AUTOSAVE, DECIDED HERE, SNAPSHOTTED BY
+                                     ITS HANDLER, AND WRITTEN BY THE WRITER
+                                     (§14.8, §14.10, §14.14).
 
                                      IN THE BEFORE HOOK AND NOT THE AFTER ONE,
                                      which is §14.8's correction to the plan:
@@ -2405,15 +2564,18 @@ namespace
                                      behind every datagram already waiting and
                                      behind the runner's and the clock's own
                                      submits above. A GO already in the queue is
-                                     applied before the bytes are written; a GO
-                                     arriving during the write waits the rest of
-                                     one tick, as it would behind any applied
-                                     command. That is the whole of what this
-                                     costs PRD §4.1, and M23 is what measures
-                                     it: no lock, no allocation the tick thread
-                                     does not already make, and no path by which
-                                     a slow disk holds a GO longer than the
-                                     overrun of the tick it landed in.
+                                     applied before the snapshot is taken.
+
+                                     AND WHAT IT COSTS PRD §4.1 IS NOW THE
+                                     SNAPSHOT AND NOTHING ELSE. M23 timed the
+                                     handler, bytes and all, at 21 ms at the
+                                     median - a full tick - and 1.4 ms of that
+                                     was serialising; since PR 5.5's second half
+                                     the handler serialises, hands the bytes to
+                                     the writer thread and returns, so a GO
+                                     arriving during an autosave waits for a
+                                     serialisation and a queue push, and never
+                                     for a disk.
 
                                      Engine origin, and no arguments: a save
                                      that happened is an event, and the bytes
@@ -2490,6 +2652,24 @@ namespace
 
                                 state.errorCount = errorCount;
 
+                                /*  WHAT THE WRITER HAS FINISHED, TURNED INTO
+                                    STAMPS, before anything below reads the
+                                    session (PR 5.5, second half). A save that
+                                    landed during this tick stamps
+                                    `savedRevision` here, with the revision its
+                                    snapshot was taken at, so the dot below goes
+                                    out in this tick's snapshot and not the
+                                    next; an autosave that moved an earlier
+                                    session's recovery aside moves the offer
+                                    here; a write that failed sets `writeError`
+                                    here. On this thread and nowhere else, so
+                                    the tick thread stays the only writer of the
+                                    session - the writer thread never touches
+                                    it. When nothing has finished, which is
+                                    almost every tick, this is one relaxed
+                                    atomic read and no lock. */
+                                wfg::doc::settle (session, writer);
+
                                 /*  WHETHER THERE IS ANYTHING TO SAVE, true for
                                     the first time since the node was published
                                     in Phase 1 - every client until now was told
@@ -2498,15 +2678,14 @@ namespace
                                     Here and not in the save handler, because an
                                     edit lights it as surely as a save puts it
                                     out, and the after-tick is the one place that
-                                    sees both: the handler stamps the session,
-                                    this compares. BEFORE the publish below, for
-                                    the reason `state.tick` is: assigned after
-                                    it, a client would read every edit's dot and
-                                    every save's clearing one tick late. And
-                                    every tick rather than only when something
-                                    was applied, because it is one comparison of
-                                    two integers - cheaper than the test that
-                                    would skip it. */
+                                    sees both: `settle` stamps the session, this
+                                    compares. BEFORE the publish below, for the
+                                    reason `state.tick` is: assigned after it, a
+                                    client would read every edit's dot and every
+                                    save's clearing one tick late. And every tick
+                                    rather than only when something was applied,
+                                    because it is one comparison of two integers
+                                    - cheaper than the test that would skip it. */
                                 state.documentDirty = wfg::doc::isDirty (document, session);
 
                                 /*  WHEN THE SHOW LAST MOVED, for the autosave's
@@ -2525,14 +2704,23 @@ namespace
                                 }
 
                                 /*  And whether an earlier session's afternoon is
-                                    still waiting for an answer - the latch the
-                                    open set, which only the two answers,
+                                    still waiting for an answer - the offer the
+                                    open found, which only the two answers,
                                     `document.recover` and
-                                    `document.discardRecovery`, clear. Before the
-                                    publish, with the dot, or a client's offer to
-                                    restore lingers one tick after the operator
-                                    took it. */
-                                state.documentRecovery = session.recoveryFound;
+                                    `document.discardRecovery`, withdraw. Before
+                                    the publish, with the dot, or a client's
+                                    offer to restore lingers one tick after the
+                                    operator took it. */
+                                state.documentRecovery = wfg::doc::hasRecoveryOffer (session);
+
+                                /*  AND WHAT THE WRITER LAST FAILED TO DO, beside
+                                    them and for the same reason. A failure on
+                                    the writer has no record to be quoted at
+                                    `/godot/engine/lastError` - its command was
+                                    applied - so this is where a client that
+                                    pressed save and still sees the dot lit
+                                    finds out why (DocumentSession.h). */
+                                state.documentWriteError = session.writeError;
 
                                 /*  AND WHAT THE UNDO STACK LOOKS LIKE, read
                                     here for the reason the dot beside it is
@@ -2663,22 +2851,30 @@ namespace
             ANYBODY COULD WANT (§14.10).
 
             AFTER `ticks.stop()`, because that has joined the only thread that
-            writes the document or the session, so what is read here is final
-            and nothing can autosave behind this line.
+            writes the document or the session or hands the writer work, so
+            what is read here is final and nothing can autosave behind this
+            line.
+
+            AND AFTER THE WRITER HAS BEEN DRAINED (PR 5.5, second half), which
+            `finishSession` does first: a save queued at Ctrl-C lands, and is
+            settled, before anybody asks whether the document is dirty - asked
+            a moment earlier, the answer would be "yes" about a show that was on
+            its way to the disk. A kill loses what was queued, and that is
+            accepted: every file is either old and whole or new and whole.
 
             NOT DIRTY, because a tidy shutdown with unsaved work is precisely
             the case the folder exists for: an operator who closes the engine
             without saving and then wishes they had is the same person as one
-            whose laptop died, a few seconds later. And NO OFFER UNANSWERED,
-            because a folder this session found at open and nobody has answered
-            is an earlier session's afternoon, which a clean exit of THIS one
-            has no business deciding about (DocumentSession.h, `recoveryFound`).
+            whose laptop died, a few seconds later. And ONLY THIS SESSION'S OWN
+            `recovery/`: while it still holds an earlier session's unanswered
+            offer it is that session's afternoon, which a clean exit of THIS one
+            has no business deciding about, and a `recovery.previous.N/` is
+            never touched here at all - the next start offers it.
 
             A folder that will not delete is left, silently: the next start
             offers it, and the offer is the honest description of what is on
             the disk. */
-        if (! wfg::doc::isDirty (document, session) && ! session.recoveryFound)
-            wfg::doc::Bundle::discardRecovery (target);
+        wfg::doc::finishSession (document, session, writer);
 
         if (deviceDriver != nullptr)
             deviceDriver->close();

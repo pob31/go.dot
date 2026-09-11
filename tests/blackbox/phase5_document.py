@@ -54,13 +54,29 @@ afternoon away by not saving, and an autosave into `show.xml` would take that
 gesture away from the person who most wanted it. That a process which dies
 leaves the folder behind, and that the next process to open the bundle SAYS SO
 rather than adopting it - the operator decides whether the afternoon was worth
-keeping, because the engine is headless and has nobody to ask. And that the
-four verbs around it mean exactly what §14.10 says: `document.recover` leaves
-the dot LIT, because the recovered work is not on disk as the show;
-`document.save` puts it out and takes the folder with it; `document.revert`
-puts the disk back and re-stamps what `adopt` would otherwise have left looking
-unsaved; and `document.saveAs` writes somewhere else without quietly making
-somewhere else the live document.
+keeping, because the engine is headless and has nobody to ask. That the question
+can WAIT without costing either afternoon, which is the author's decision of
+2026-09-11: the next process goes on autosaving while nobody answers, and its
+first autosave moves the earlier afternoon aside to `recovery.previous.1/`
+rather than writing over it - so `document.recover` adopts the OFFER, wherever
+it was moved, and not the work of the session asking. Recovering is an answer,
+so it consumes the offer - once the recovered work is safe elsewhere, at the
+next autosave or save, so that a crash straight after the recover still loses
+nothing - and the process after that, finding nothing, offers nothing. An offer
+nobody answers is kept until a discard, and offered again at the next open.
+And that the four verbs around it mean exactly what §14.10 says:
+`document.recover` leaves the dot LIT, because the recovered work is not on disk
+as the show; `document.save` puts it out and takes this session's own
+`recovery/` with it; `document.revert` puts the disk back and re-stamps what
+`adopt` would otherwise have left looking unsaved; and `document.saveAs` writes
+somewhere else without quietly making somewhere else the live document.
+
+AND THAT A SESSION WHICH ADOPTED A RECOVERY DOES NOT REPLAY, and says so. The
+bytes it adopted are in none of its records and outside the header's hash, so
+a replay that went ahead would build a different show from the one the session
+had and check every later record against it. `wfg replay` reproduces such a log
+up to the recovery and refuses it there, with a sentence saying why; and the
+session before it, which recovered nothing, still reproduces record for record.
 
 THE PROCESS IS KILLED AND NOT STOPPED, which is the whole of why that half can
 only be asked here. `Server.stop()` calls `terminate()`, and on POSIX that is
@@ -82,7 +98,11 @@ WAITED FOR, NEVER SLEPT. Every check waits for the thing it is about -
 `common.wait_until` - because a datagram crosses a socket, joins a queue and is
 applied on the next tick, and how long that takes on a loaded runner is not a
 number anybody has measured. A refusal is waited for as the error COUNT moving,
-which is the one reading that cannot be satisfied by an earlier refusal.
+which is the one reading that cannot be satisfied by an earlier refusal. And a
+file is waited for as ITSELF: the bytes of a save, an autosave and a saveAs land
+on a writer thread a tick or two after the command is applied and recorded, so
+nothing the engine says about them - a record, the dot going out - is a look at
+the disk.
 
 Exit codes as the rest of the suite: 0 everything held, 1 something did not,
 2 the harness could not run.
@@ -124,14 +144,18 @@ SOUNDING = "K5MED001"
 #  record before it has been written too.
 LAST_WORD = "The last thing this session wrote"
 
-#  WHAT PR 5.5 CALLS ONE CUE, four times over, because each name is a claim
+#  WHAT PR 5.5 CALLS ONE CUE, five times over, because each name is a claim
 #  about a different file and a driver that reused one could not tell them
 #  apart. `AUTHORED` is what the fixture holds and what show.xml must still say
 #  while an autosave is on disk; `CRASHED` is the afternoon nobody saved;
-#  `AFTER_SAVE` is the edit a revert throws away; `ARCHIVED` is the one that
-#  proves saveAs wrote the copy and the next save wrote the original.
+#  `MEANWHILE` is what the next process does before anybody has answered for
+#  that afternoon, whose autosave has to move the afternoon aside rather than
+#  over it, and which a recovery must NOT be mistaken for; `AFTER_SAVE` is the
+#  edit a revert throws away; `ARCHIVED` is the one that proves saveAs wrote
+#  the copy and the next save wrote the original.
 AUTHORED = "Curtain up"
 CRASHED = "Curtain up, and the process died"
+MEANWHILE = "Curtain up, edited before anybody answered"
 AFTER_SAVE = "Curtain up, edited after the save"
 ARCHIVED = "Curtain up, in the archive"
 
@@ -316,8 +340,9 @@ def crash(server: Server) -> None:
 
 
 def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
-    """Two processes on one folder: one that dies with unsaved work, and one
-    that finds it.
+    """Three processes on one folder: one that dies with unsaved work, one
+    that finds it and goes on working before anybody answers for it, and one
+    that finds what the second was not allowed to delete.
 
     ITS OWN COPY OF THE BUNDLE, and not the one the session above worked in.
     That session ends dirty and is stopped rather than saved, so whatever
@@ -326,27 +351,71 @@ def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
     asked of a folder nobody has crashed in yet, or it is a claim about the
     previous test rather than about this one.
 
-    UNDER THE SAME LOCALE AS THE REST, both processes. An autosave is a
+    UNDER THE SAME LOCALE AS THE REST, every process. An autosave is a
     serialisation nobody asked for, written by a process whose numeric locale
     is whatever the machine says, and read back by another; a `recovery/`
     written with decimal commas is precisely the file the fr_FR rule exists to
     catch, and the one nobody would look at until the night it was needed.
+
+    EVERY FILE IS WAITED FOR AS ITSELF. Since PR 5.5's second half the bytes
+    of `document.save`, `document.autosave` and `document.saveAs` land on a
+    writer thread a tick or two AFTER the command is applied and recorded, so
+    nothing the engine says is a look at the disk: not the record, and not
+    `dirty` going out - which now waits for the writer to confirm the save, and
+    is therefore a good wait for "the save landed" and still not a reading of
+    the file a check goes on to open. The Phase 4 handoff's third trap is the
+    rule, and this half of the driver broke it twice before the writer thread
+    existed.
     """
     folder = common.copy_bundle(FIXTURE, room / "crashed")
     archive = room / "archive"
     log = room / "crashed.wfglog"
+    second_log = room / "recovered.wfglog"
 
     show = folder / "show.xml"
     autosaved = folder / "recovery" / "show.xml"
     autosaved_state = folder / "recovery" / "state.xml"
     cue = f"/godot/cue/{CURTAIN}/name"
 
+    #  WHERE THE CRASHED AFTERNOON GOES when a later session autosaves before
+    #  anybody has answered for it: the first free `recovery.previous.N/`,
+    #  counted from one - and this folder has never held another.
+    moved_aside = folder / "recovery.previous.1"
+
     def text_of(path: Path) -> str:
         """A file's contents, or "" for one that is not there - so a check
         about what a file holds reads FAIL rather than taking the whole driver
         down with a traceback when the file the engine should have written is
-        missing. The absence is what the check is about."""
-        return path.read_text(encoding="utf-8") if path.is_file() else ""
+        missing. The absence is what the check is about.
+
+        And "" for one that could not be read at the instant of asking, which
+        since the writer thread can be a file being replaced under the reader:
+        a poll should ask again rather than fall over."""
+        try:
+            return path.read_text(encoding="utf-8") if path.is_file() else ""
+        except OSError:
+            return ""
+
+    def holds(path: Path, wanted: str, timeout: float = common.REPLY_TIMEOUT) -> bool:
+        """Waits until a file holds `wanted`, and says whether it came to.
+
+        THE FILE, AND NOTHING THAT VOUCHES FOR IT. A write lands on the writer
+        thread after its command's record and after whatever the engine
+        publishes about it, so the only reading that says what a file holds
+        is a reading of the file."""
+        return common.wait_until(lambda: wanted in text_of(path),
+                                 timeout=timeout) is not None
+
+    def applied(path: Path, name: str) -> int:
+        """How many APPLIED records of the command `name` a log holds.
+
+        Read off the command field - `A <tick> <seq> <origin> <command> ...` -
+        rather than found anywhere in the line, so that a refusal of the same
+        command, which is an `R` with its reason in front of the name, cannot
+        answer for it. A count rather than a yes, so that "one more autosave
+        than before the recovery" can be asked of a log that already has one."""
+        return sum(1 for fields in (line.split() for line in text_of(path).splitlines())
+                   if fields[:1] == ["A"] and fields[4:5] == [name])
 
     # --- the afternoon nobody saved ----------------------------------------
     with Server(folder, log=log, locale=locale) as dying:
@@ -370,17 +439,18 @@ def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
         #  logged as a command like any other so that a replay re-applies it.
         #  The file says the disk AGREED. An engine that submitted the command
         #  and wrote nothing would satisfy the first; one that wrote bytes
-        #  without a record would satisfy the second and be unreplayable. Both
-        #  are waited for, in that order, because the record is written after
-        #  the handler returns and the handler is what writes the file - which
-        #  is also why only the first wait gets the autosave's long deadline.
-        #  Once the record is in, the file is already there; if the record never
-        #  came, a second long wait would spend another forty-five seconds of
-        #  ctest's three hundred learning nothing the first did not say.
-        wrote = common.wait_until(
-            lambda: any(line.startswith("A ") and "document.autosave" in line
-                        for line in text_of(log).splitlines()),
-            timeout=AUTOSAVE_TIMEOUT)
+        #  without a record would satisfy the second and be unreplayable.
+        #
+        #  AND SINCE THE WRITER THREAD THEY ARE NOT EVEN ONE MOMENT. The handler
+        #  takes the snapshot and hands the bytes on; the record is written when
+        #  it returns, and the file lands a tick or two after that. So each is
+        #  waited for, in that order, and only the first gets the autosave's
+        #  long deadline: it is the one waiting on the engine's arithmetic. Once
+        #  the record is in, the bytes are milliseconds away, and if they never
+        #  came, a second forty-five seconds of ctest's three hundred would
+        #  learn nothing the ordinary deadline had not.
+        wrote = common.wait_until(lambda: applied(log, "document.autosave"),
+                                  timeout=AUTOSAVE_TIMEOUT)
 
         report.check(bool(wrote),
                      "the engine decides on its own to autosave, and records it as an "
@@ -391,14 +461,23 @@ def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
 
         report.check(bool(landed), "and recovery/show.xml is on the disk to prove it",
                      f"{autosaved} is not a file")
-        report.check(autosaved_state.is_file(),
+
+        #  WAITED FOR ITSELF, and not taken on the strength of the show beside
+        #  it having arrived: it is a second file and a second replace, and the
+        #  writer puts them down one after the other.
+        placed = common.wait_until(lambda: autosaved_state.is_file())
+
+        report.check(bool(placed),
                      "with the operator's position beside it in recovery/state.xml",
                      f"{autosaved_state} is not a file")
 
         #  AND THE AUTHORED FILE IS EXACTLY AS IT WAS, which is the whole of
         #  §14.10's argument for the folder: not saving is a gesture, and an
         #  autosave that wrote show.xml would take it away silently from the
-        #  person who most wanted it.
+        #  person who most wanted it. Nothing to wait for in a claim that
+        #  something did NOT happen, so it is read once the autosave's own
+        #  files have both landed - the moment by which a writer that got it
+        #  wrong would have had every chance to.
         authored = text_of(show)
 
         report.check(AUTHORED in authored and CRASHED not in authored,
@@ -406,14 +485,22 @@ def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
                      "keeps not saving a gesture somebody can make",
                      f"show.xml holds the authored name: {AUTHORED in authored}, "
                      f"and the unsaved one: {CRASHED in authored}")
-        report.check(CRASHED in text_of(autosaved),
+        report.check(holds(autosaved, CRASHED),
                      "while recovery/show.xml holds the work nobody saved",
                      f"recovery/show.xml is {len(text_of(autosaved))} bytes")
 
         crash(dying)
 
+    #  THE FOLDER AS THE NEXT PROCESS WILL FIND IT, kept for the replay of that
+    #  process's log. The process saves over show.xml and state.xml twice
+    #  before it ends, so a replay handed the folder afterwards would open a
+    #  different show - unlocked, renamed - and diverge at its first record for
+    #  that reason alone, which is not the reason the replay below is asked
+    #  about. Copied between two processes, so nothing is writing it.
+    as_found = common.copy_bundle(folder, room / "as-found")
+
     # --- and the process that finds it -------------------------------------
-    with Server(folder, log=room / "recovered.wfglog", locale=locale) as second:
+    with Server(folder, log=second_log, locale=locale) as second:
         #  READ OFF THE NOTICES `Server` ALREADY COLLECTS, which are the `wfg:`
         #  lines it reads from stdout WHILE STARTING - it stops reading at the
         #  second of the two port lines. So this assertion is also a claim about
@@ -457,18 +544,146 @@ def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
         write(second, LOCK, False)
         report.check(reads(second, LOCK, False), "the lock lifts")
 
+        # --- this session's own work, before anybody has answered ----------
+        #  THE SCENARIO THE AUTHOR'S DECISION OF 2026-09-11 EXISTS FOR. As
+        #  §14.10 drew it, this session's first autosave - two seconds after
+        #  its first edit - wrote recovery/show.xml straight over the afternoon
+        #  the banner was offering back, before anybody had read the banner.
+        #  The first build closed that by suspending autosave until somebody
+        #  answered, which kept the old work safe by leaving the new work with
+        #  no copy at all. The decision is that neither pays: `recovery/` is
+        #  always THIS session's autosave, and the first time it writes while
+        #  the offer still sits there, the offer is moved aside to the first
+        #  free `recovery.previous.N/` - which nothing deletes while it is
+        #  unanswered, and which an answer consumes.
+        #
+        #  ASKED BEFORE THE EDIT, so that what follows is a claim about the
+        #  autosave rather than about the open: a process that has only opened
+        #  the folder, and has nothing dirty to write, has moved nothing.
+        report.check(CRASHED in text_of(autosaved) and not moved_aside.exists(),
+                     "the offer sits in recovery/ where the dead process left it, and "
+                     "opening the folder has moved nothing aside",
+                     f"recovery/show.xml holds the crashed name: "
+                     f"{CRASHED in text_of(autosaved)}; "
+                     f"{moved_aside.name}/ exists: {moved_aside.exists()}")
+
+        write(second, cue, MEANWHILE)
+
+        report.check(reads(second, cue, MEANWHILE),
+                     "this session renames the cue before anybody has answered the offer",
+                     f"the cue reads {value_of(second, cue)!r}")
+        report.check(reads(second, DIRTY, True), "and the dot comes on",
+                     f"{DIRTY} reads {value_of(second, DIRTY)!r}")
+
+        wrote = common.wait_until(lambda: applied(second_log, "document.autosave"),
+                                  timeout=AUTOSAVE_TIMEOUT)
+
+        report.check(bool(wrote),
+                     "and it AUTOSAVES with the offer unanswered, which the first build "
+                     "suspended and the author's decision keeps running",
+                     f"no applied document.autosave record after {AUTOSAVE_TIMEOUT:.0f}s")
+
+        #  THE TWO FOLDERS, EACH WAITED FOR AS ITSELF: the move and the write
+        #  happen after the record, and neither folder says when the other's
+        #  part has happened. The NAME is compared rather than the folder's
+        #  presence, because a folder holding the wrong afternoon would pass a
+        #  check for the directory.
+        report.check(holds(moved_aside / "show.xml", CRASHED),
+                     "the earlier afternoon is MOVED ASIDE to recovery.previous.1/ and not "
+                     "destroyed: its show.xml still holds the crashed process's name",
+                     f"{moved_aside.name}/show.xml is "
+                     f"{len(text_of(moved_aside / 'show.xml'))} bytes")
+        report.check(holds(autosaved, MEANWHILE),
+                     "and recovery/ holds this session's own autosave, which is all that "
+                     "folder is ever for",
+                     f"recovery/show.xml holds this session's name: "
+                     f"{MEANWHILE in text_of(autosaved)}")
+
+        #  AND THE OFFER STILL STANDS. Moving it is not answering it: the
+        #  banner stays up while this session's own work is kept safe beside
+        #  it, which is the whole of what the decision buys.
+        report.check(reads(second, RECOVERY, True),
+                     "and the offer still stands, wherever it was moved to: moving it aside "
+                     "is not answering it",
+                     f"{RECOVERY} reads {value_of(second, RECOVERY)!r}")
+
+        # --- the answer, and it is the offer that comes back ----------------
+        #  WITH BOTH FOLDERS ON THE DISK, which is the one moment the question
+        #  has teeth: `recovery/` holds this session's edit and
+        #  `recovery.previous.1/` the crashed afternoon, and an engine that
+        #  took "the recovery" to mean the folder of that name would adopt the
+        #  work of the very session asking.
+        autosaves_before = applied(second_log, "document.autosave")
+
         command(second, "document.recover")
 
         report.check(reads(second, cue, CRASHED),
-                     "and then the afternoon comes back",
+                     "document.recover adopts the EARLIER afternoon - the offer, from where "
+                     "it was moved - and not this session's own autosave in recovery/",
                      f"the cue reads {value_of(second, cue)!r}")
+
+        #  THE DOT WAS ALREADY LIT, by this session's own edit, so what is
+        #  asked is that the recovery does not put it OUT: `savedRevision` is
+        #  not re-stamped, which is `document.revert`'s rule read the other way
+        #  round. Read after the recovered name has been published, so the
+        #  answer comes from a snapshot that includes the recovery.
         report.check(reads(second, DIRTY, True),
-                     "with the dot LIT, deliberately: the recovered work is not on disk "
-                     "as the show, and the dot is telling the truth",
+                     "with the dot still LIT, deliberately: the recovered work is not on "
+                     "disk as the show, and the dot is telling the truth",
                      f"{DIRTY} reads {value_of(second, DIRTY)!r}")
         report.check(reads(second, RECOVERY, False),
                      "and nothing left to recover, because it has been",
                      f"{RECOVERY} reads {value_of(second, RECOVERY)!r}")
+
+        #  RECOVERING IS AN ANSWER, AND IT CONSUMES THE OFFER - but not at the
+        #  recover. The rule the author's decision comes to (2026-09-11): the
+        #  folder the offer came from is deleted by the first write that puts
+        #  the recovered work somewhere safe, so a crash straight after the
+        #  recover still loses nothing. Whether it is still on the disk at THIS
+        #  instant is therefore a race against the catch-up autosave's two
+        #  seconds of quiet, and is not asked here; `DocumentWriterTests` asks
+        #  it where there is no clock. What is asked below is the end of the
+        #  story, which is not a race: once the catch-up has landed, it is gone.
+
+        #  AND THIS SESSION'S OWN COPY CATCHES UP. `recovery/` still holds the
+        #  edit the recovery has just replaced, and it is this session's crash
+        #  copy of what is on screen - which is now the recovered afternoon,
+        #  dirty. So the next autosave writes that. Were it skipped because the
+        #  recovery "already holds this revision" - true while an offer could
+        #  only ever be read out of `recovery/` itself - a crash here would
+        #  offer back the edit the operator had just chosen to replace.
+        #
+        #  THE RECORD FIRST AND THEN THE FILE, as for the first autosave, and
+        #  for one more reason: the file is about to be REPLACED rather than
+        #  created, and a reader that polled it for the two seconds of quiet
+        #  would hold it open, fifty times a second, across the very replace it
+        #  was waiting for - which on Windows is a sharing violation for the
+        #  engine. After the record, the poll overlaps the replace for
+        #  milliseconds rather than seconds.
+        caught_up = common.wait_until(
+            lambda: applied(second_log, "document.autosave") > autosaves_before,
+            timeout=AUTOSAVE_TIMEOUT)
+
+        report.check(bool(caught_up) and holds(autosaved, CRASHED),
+                     "and this session's next autosave writes the recovered afternoon into "
+                     "recovery/, over the edit the recovery replaced",
+                     f"autosaves since the recovery: "
+                     f"{applied(second_log, 'document.autosave') - autosaves_before}; "
+                     f"recovery/show.xml holds the crashed name: "
+                     f"{CRASHED in text_of(autosaved)}, and this session's earlier one: "
+                     f"{MEANWHILE in text_of(autosaved)}")
+
+        #  AND THAT WRITE CONSUMED THE OFFER. The recovered afternoon is now in
+        #  recovery/ as this session's crash copy, so the folder it was read
+        #  out of has done its job, and the writer deletes it in queue order
+        #  behind the bytes that made it redundant. Waited for, because the
+        #  deletion is the writer's and lands after the record.
+        consumed = common.wait_until(lambda: not moved_aside.exists())
+
+        report.check(bool(consumed),
+                     "and the folder the recovery came from goes with it: recovering was an "
+                     "answer, and once the work is safe elsewhere there is nothing to offer",
+                     f"{moved_aside.name}/ is still on the disk")
 
         # --- a save, which is the work becoming the show --------------------
         command(second, "document.save")
@@ -476,29 +691,26 @@ def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
         report.check(reads(second, DIRTY, False), "a save puts the dot out",
                      f"{DIRTY} reads {value_of(second, DIRTY)!r}")
 
+        #  `dirty` GOING OUT IS THE WRITER'S CONFIRMATION, which makes it a
+        #  good wait for "the save landed" and still not a look at a file - so
+        #  each file below is waited for itself.
         gone = common.wait_until(lambda: not (folder / "recovery").exists())
 
         report.check(bool(gone),
-                     "and takes the recovery folder with it: the work has become the show",
+                     "and takes this session's own recovery/ with it: the work has become "
+                     "the show",
                      f"{folder / 'recovery'} is still there")
-        report.check(CRASHED in text_of(show),
+        report.check(holds(show, CRASHED),
                      "which show.xml now holds, on the authored path this time",
-                     "the dot went out before this was read, and the bytes are written "
-                     "before the dot goes out")
+                     f"show.xml is {len(text_of(show))} bytes")
 
-        # --- and an empty gesture is refused rather than pretended ----------
-        said = refusal_of(second, lambda: command(second, "document.recover"))
-
-        report.check(said.endswith(" no-recovery document.recover"),
-                     "a recovery with nothing to adopt is refused with no-recovery",
-                     f"lastError reads {said!r}")
-
-        said = refusal_of(second, lambda: command(second, "document.discardRecovery"))
-
-        report.check(said.endswith(" no-recovery document.discardRecovery"),
-                     "and so is a discard with nothing to delete: refusing an empty "
-                     "gesture is cheaper than pretending it worked",
-                     f"lastError reads {said!r}")
+        #  AND THE AFTERNOON IT CAME FROM STAYS GONE. Recovered and now saved, it
+        #  is the show; keeping its folder would only mean offering it again at
+        #  every start until somebody discarded work that is already on screen.
+        report.check(not moved_aside.exists(),
+                     "and the recovered afternoon's folder is not kept to be offered again: "
+                     "it is the show now",
+                     f"{moved_aside.name}/ is back on the disk")
 
         # --- revert, which is the disk winning ------------------------------
         write(second, cue, AFTER_SAVE)
@@ -536,7 +748,9 @@ def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
         #  checked the manifest, the last, without waiting, and three runs in
         #  six caught it mid-write as `archive.wfg.tmp-<pid>`. A wait must see
         #  what its check reads, and here the thing to see is the one whose
-        #  arrival means the copy is finished.
+        #  arrival means the copy is finished - all of it the writer's since
+        #  PR 5.5's second half, after the command's record, so there is no
+        #  earlier moment to lean on even in principle.
         common.wait_until(lambda: (archive / "archive.wfg").is_file())
 
         copied = common.wait_until(lambda: ARCHIVED in text_of(archive / "show.xml"))
@@ -579,18 +793,23 @@ def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
                      "and it did not write the bundle this session opened",
                      f"show.xml holds the archived name: {ARCHIVED in text_of(show)}")
 
-        #  READ ONE PUBLISH LATER, AND NOT THE INSTANT THE COPY APPEARED. The
-        #  handler writes the copy and the after hook assigns `dirty` at the end
-        #  of the same tick, so a reading taken as soon as the file exists could
-        #  be the snapshot from before saveAs was accounted for at all - `true`
-        #  for the old reason, passing for the wrong one. Waiting for the tick
-        #  counter to move is waiting for a snapshot that has to include it.
+        #  READ SOME PUBLISHES LATER, AND NOT THE INSTANT THE COPY APPEARED. The
+        #  copy is the writer's, and the engine hears that it landed on a later
+        #  tick than the one that queued it - so a reading taken as soon as the
+        #  file exists could come from a snapshot taken before the writer's
+        #  confirmation was accounted for at all: `true` for the old reason,
+        #  and passing for the wrong one, since a saveAs whose confirmation
+        #  stamped the session would put the dot out a tick afterwards. Waiting
+        #  for the tick counter to move on is waiting for snapshots that have
+        #  to include it - five ticks rather than the two the first build
+        #  waited, because the writer can be descheduled between putting the
+        #  manifest down and saying so.
         def tick() -> int:
             value = value_of(second, "/godot/engine/tick")
             return value if isinstance(value, int) else -1
 
         copied_at = tick()
-        common.wait_until(lambda: tick() > copied_at + 2)
+        common.wait_until(lambda: tick() > copied_at + 5)
 
         report.check(reads(second, DIRTY, True),
                      "which is why the dot stays lit: those bytes are not this session's "
@@ -600,9 +819,121 @@ def after_a_crash(report: Report, room: Path, locale: "str | None") -> None:
         command(second, "document.save")
 
         report.check(reads(second, DIRTY, False), "the next save puts the dot out")
-        report.check(ARCHIVED in text_of(show),
+        report.check(holds(show, ARCHIVED),
                      "and writes the folder the session opened, not the one saveAs was "
-                     "handed: saveAs does not re-point the session")
+                     "handed: saveAs does not re-point the session",
+                     f"show.xml holds the archived name: {ARCHIVED in text_of(show)}")
+
+        #  AND THE FOLDER IS LEFT AS THE NEXT PROCESS WILL FIND IT: none of
+        #  this session's `recovery/` - the save takes it, if an autosave wrote
+        #  one after the revert - and `recovery.previous.1/`, which nothing
+        #  here was allowed to delete. Waited for rather than assumed, because
+        #  what the next open offers depends on exactly which of the two is
+        #  there.
+        report.check(bool(common.wait_until(lambda: not (folder / "recovery").exists())),
+                     "and the last save leaves no recovery/ of this session's behind it",
+                     f"{folder / 'recovery'} is still there")
+
+    # --- and a replay that will not pretend --------------------------------
+    #  §14.10'S KNOWN-NOT-BUILT, answered by the author on 2026-09-11. A
+    #  session that adopted a recovery cannot be replayed, because the bytes it
+    #  adopted are in none of its records and outside the header's hash, which
+    #  covers show.xml, state.xml and namespaces/ and nothing else. A replay
+    #  that went ahead would build a different show from the one the session
+    #  had and check every later record against it - silently, for a session
+    #  started with `--recover`, whose adoption is in no record at all, and as
+    #  a divergence nobody could explain for one like this, which pressed
+    #  `document.recover`. So `wfg replay` refuses the log, with a sentence
+    #  saying why.
+    #
+    #  AT THE RECORD, AND NOT BEFORE IT. Everything the session did up to the
+    #  applied `document.recover` is a session like any other, and replays -
+    #  the refusal refused by the lock among it, since a REJECTED recovery
+    #  adopted nothing. So the replay is handed the folder as this process
+    #  found it (`as_found`, above), with the first session's two flags, and
+    #  what is asked is that it reproduces everything before the recovery and
+    #  then stops and says why.
+    #
+    #  THREE CHECKS, because a divergence is also a non-zero exit, and its
+    #  report quotes `document.recover` in the record it fails on - so "exits
+    #  non-zero and mentions a recovery" is satisfied by the very failure the
+    #  refusal exists to replace. The third asks that nothing diverged: a
+    #  replay's divergence is the only thing that prints "but replay
+    #  produced", and a replay that stopped where it had to has nothing of the
+    #  kind to print.
+    naming = [line for line in text_of(second_log).splitlines() if "document.recover" in line]
+
+    report.check(applied(second_log, "document.recover") > 0,
+                 "the second process's log records the recovery it adopted, as an applied "
+                 "command like any other",
+                 f"the lines naming it: {naming}")
+
+    code, out, err = common.run_wfg("replay", str(second_log), f"--bundle={as_found}",
+                                    f"--out={room / 'recovered-replayed'}",
+                                    *([f"--wfg-locale={locale}"] if locale else []))
+    said = (out + err).strip()
+
+    report.check(code != 0,
+                 "and `wfg replay` refuses that log rather than exiting 0 over a show it "
+                 "could not have rebuilt",
+                 f"exit {code}: {said[:2000]}")
+    report.check("recover" in said.lower(),
+                 "with a sentence that names the recovery as the reason",
+                 said[:2000])
+    report.check("but replay produced" not in said,
+                 "and reports no divergence: what came before the recovery reproduces, "
+                 "and the recovery is where it stops",
+                 said[:2000])
+
+    # --- and the process after that, which has nothing to be offered ------
+    #  THE AFTERNOON THAT WAS RECOVERED AND SAVED IS NOT OFFERED AGAIN, which
+    #  is the whole of why recovering consumes its offer. Had it not, every
+    #  later start would offer back work that is already the show, until
+    #  somebody discarded it - and an offer that is always there is an offer
+    #  people learn to dismiss without reading, which is the day it matters.
+    #  That an UNANSWERED `recovery.previous.N/` survives a save, a revert and
+    #  a clean exit, and is offered again at the next open, is asked where
+    #  there is no clock, in `DocumentWriterTests`; here the folder holds no
+    #  recovery of any kind, and the open must say nothing.
+    with Server(folder, locale=locale) as third:
+        told = [line for line in third.notices if "recovery available" in line]
+
+        report.check(not told,
+                     "the next process to open the folder offers nothing: the recovered "
+                     "afternoon was answered, and saved",
+                     "\n".join(told))
+        report.check(reads(third, RECOVERY, False),
+                     "and publishes that, rather than an offer nobody has left",
+                     f"{RECOVERY} reads {value_of(third, RECOVERY)!r}")
+        report.check(value_of(third, cue) == ARCHIVED and value_of(third, DIRTY) is False,
+                     "and opens on the show last saved, with nothing unsaved",
+                     f"the cue reads {value_of(third, cue)!r}, "
+                     f"{DIRTY} reads {value_of(third, DIRTY)!r}")
+
+        #  UNLOCKED FOR THE REFUSALS BELOW, not because a discard needs it - a
+        #  discard deletes bytes and touches the document not at all (§14.7) -
+        #  but because a locked show answers a RECOVERY `locked` before it
+        #  answers `no-recovery`, and the question here is the second.
+        write(third, LOCK, False)
+        report.check(reads(third, LOCK, False), "the show is open for editing")
+
+        # --- and an empty gesture is refused rather than pretended ----------
+        #  Moved here from the process above, where a folder a discard could
+        #  have been aimed at was still on the disk. Here there is nothing left
+        #  anywhere, so both answers are about an empty gesture and nothing
+        #  else.
+        said = refusal_of(third, lambda: command(third, "document.recover"))
+
+        report.check(said.endswith(" no-recovery document.recover"),
+                     "a recovery with nothing to adopt is refused with no-recovery",
+                     f"lastError reads {said!r}")
+
+        said = refusal_of(third, lambda: command(third, "document.discardRecovery"))
+
+        report.check(said.endswith(" no-recovery document.discardRecovery"),
+                     "and so is a discard with nothing to delete: refusing an empty "
+                     "gesture is cheaper than pretending it worked",
+                     f"lastError reads {said!r}")
 
 
 # =============================================================================

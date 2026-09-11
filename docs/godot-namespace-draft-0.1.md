@@ -4649,7 +4649,11 @@ the overrun of the tick it landed in. So the exposure is a single late tick — 
 **M23** measures, and §14.14 carries the threshold and the writer-thread fallback above it. The
 record is identical either way and a replay never touches the disk, so the fallback changes no
 fixture and no assertion: drawn here it is a threshold, drawn in review it would have been a
-redesign.
+redesign. *Corrected 2026-09-11, at the author's direction:* M23 came back at four times the
+threshold (§14.14), the fallback was taken, and the answer to the constraint is no longer a
+single late tick but no disk at all: the tick thread takes the snapshot — 1.4 ms on the 500-cue
+show — and a writer thread writes the bytes, so what a GO can wait behind during an autosave is a
+serialisation and a queue push. The second half's paragraphs below say how.
 
 **The bytes go to `<bundle>/recovery/`, never to the authored file, and that is not a matter of
 taste.** `recovery/show.xml` and `recovery/state.xml`, written by the same
@@ -4676,7 +4680,10 @@ exactly this reason with `document.save`.
 
 **Recovery will be a client's decision, because the engine is headless and has nobody to ask.**
 On open, `wfg serve` will look for `recovery/show.xml`; finding it, it will print `wfg: recovery
-available`, publish `/godot/document/recovery = true`, and do nothing else. Adopting it silently
+available`, publish `/godot/document/recovery = true`, and do nothing else. *(Corrected
+2026-09-11, at the author's direction: finding none, it looks for the highest-numbered
+`recovery.previous.N/`, an afternoon an earlier session moved aside unanswered, and offers that
+the same way — the second half's paragraphs below.)* Adopting it silently
 would be wrong three times over. It would make the show on screen differ from the file the
 operator opened with no gesture in between. It would decide on their behalf that the abandoned
 afternoon was worth keeping, which is the one decision autosave exists to leave open. And
@@ -4686,18 +4693,22 @@ said so, during a performance, is §14.11's nightmare arriving through this subs
 
 | command / flag | what it does | notes |
 |---|---|---|
-| `document.recover` | adopts `recovery/show.xml` and `recovery/state.xml`, clears the undo history, `markStale` | leaves the document **dirty**, deliberately: the recovered work is not on disk as the show, and the dot is telling the truth. `reason::noRecovery` when there is nothing to adopt |
-| `document.discardRecovery` | deletes the folder | `no-recovery` likewise; refusing an empty gesture is cheaper than pretending it worked |
+| `document.recover` | adopts `recovery/show.xml` and `recovery/state.xml`, clears the undo history, `markStale` — *since 2026-09-11, from wherever the offer now lives, `recovery/` or a `recovery.previous.N/`, after draining the writer* | leaves the document **dirty**, deliberately: the recovered work is not on disk as the show, and the dot is telling the truth. `reason::noRecovery` when there is nothing to adopt — *and since 2026-09-11 when nothing is offered, whatever this session's own `recovery/` holds* |
+| `document.discardRecovery` | deletes the folder — *since 2026-09-11, the offered one, wherever it lives, as a job on the writer* | `no-recovery` likewise; refusing an empty gesture is cheaper than pretending it worked |
 | `wfg serve --recover` | applies the recovery before the first publish | for scripts and for the black-box driver, which has no person to click. It goes in the **usage string** as well as the parser (`Console.cpp:2421-2423`): `--device` and `--device-type` are parsed at `:1891-1923` and appear in no usage line, an omission already one phase old, and the usage string is what an operator reads at 04:12 |
 
 A successful `document.save` deletes `recovery/`, because the work has become the show. A clean
 exit deletes it **only when the document is not dirty** (`Console.cpp:2315-2329`, after
 `ticks.stop()` has joined the only writer) — a tidy shutdown with unsaved work is the case the
-folder exists for. And of the four verbs that open a bundle through `Bundle::open` — serve at
+folder exists for. *(Corrected 2026-09-11: both delete only this session's own `recovery/` — never
+while it still holds an earlier session's unanswered offer, and never a `recovery.previous.N/` — and
+the clean exit drains the writer first, so a save queued at Ctrl-C lands before it asks whether
+the document is dirty.)* And of the four verbs that open a bundle through `Bundle::open` — serve at
 `Console.cpp:1440`, `wfg tree` at `:871`, `wfg validate` at `:1010`, `wfg replay --bundle` at
 `:509` — only `validate` will say the word: one line noting that `recovery/` is present and was
 not validated, because `validate` is what somebody runs on a bundle they suspect. A tree dump
-and a replay are not asking about unfinished work.
+and a replay are not asking about unfinished work. *(Since 2026-09-11 it prints a line in the same
+voice for every `recovery.previous.N/` beside it, lowest N first.)*
 
 **Three things building it found that this subsection did not draw** *(PR 5.5, 2026-09-11)*.
 
@@ -4706,10 +4717,12 @@ and a replay are not asking about unfinished work.
   answered — and as drawn, this session's first autosave, two seconds after its first edit,
   writes `recovery/show.xml` straight over it: the abandoned afternoon gone before anybody read
   the banner offering it back, which is the one decision this subsection exists to leave to the
-  operator. The first build closes it the conservative way — while a recovery found at open is
-  unanswered, nothing deletes it and **autosave is suspended** — and that trades the old work's
-  safety for the new work's, since this session's edits then have no crash protection until
-  somebody answers. Which way to trade is the author's, and is asked.
+  operator. The first build closed it the conservative way — while a recovery found at open was
+  unanswered, nothing deleted it and **autosave was suspended** — which traded the new work's
+  crash protection for the old work's safety. *Decided 2026-09-11, at the author's direction:*
+  neither is traded. The unanswered recovery is **moved aside** to a `recovery.previous.N/` before
+  this session's first autosave lands, and the autosave keeps running; the second half's
+  paragraphs below give the rule.
 - **`revert` and `recover` read into a scratch document, then adopt.** `CanonicalXml::read`
   refuses what it cannot parse before touching anything, but its last pass, `validate()`, runs
   *after* `adopt` — so a revert of a show that failed a whole-document check would come back
@@ -4720,6 +4733,100 @@ and a replay are not asking about unfinished work.
   left a bundle whose mounts described nothing. Now the manifest's arrival means everything else
   has, and a crash part-way leaves a folder `open` refuses rather than half-loads. The black-box
   driver found it, reading a description at nought bytes.
+
+**The second half, as the author decided it on 2026-09-11** *(PR 5.5)*. Three decisions, final,
+and what building them found.
+
+**The bytes leave the tick thread — a save's and a copy's with the autosave's.** M23 answered at
+four times the threshold (§14.14), and the switch this subsection drew is thrown. The tick thread
+takes the snapshot — `Bundle::snapshotOf`: both serialisations and the `showRevision()` they are,
+1.4 ms on the 500-cue show, which it must take because the document's single writer is what makes
+reading it safe — and a `DocumentWriter`, one thread on `MountProbe`'s shape, writes the bytes.
+`document.save` follows the autosave there, at the author's direction: a person's gesture rather
+than the engine's, but the same twenty milliseconds on the thread GO shares, and a Ctrl-S during a
+performance would cost the GO path exactly what an autosave did. `document.saveAs` goes on the same
+writer for the same reason. A writer thread silently breaks four things, and each is answered by
+construction rather than by care:
+
+| what a writer breaks | the answer |
+|---|---|
+| **ordering** | one writer, FIFO. A save and an autosave queued in that order land in that order; a save's deletion of this session's `recovery/` happens on the writer, after the save's own bytes and before anything queued behind it — queued on the tick thread instead, an autosave submitted after the save could land first and then be deleted by it |
+| **the stamp's revision** | the revision travels with the snapshot, to the writer and back. `savedRevision` and `autosavedRevision` are stamped from the revision the snapshot was taken at, when a completion says the bytes landed — never from `showRevision()` at confirmation, which would mark an edit made while the write was in flight as saved. Completions come back through a queue the after-tick drains (`settle`), so the tick thread stays the only writer of `DocumentSession` and of the show |
+| **a read after a queued write** | `document.revert` and `document.recover` read files, so they **drain** the writer first — the one place the tick thread waits for it. The wait is bounded by what is queued, a handful of write-flush-replace jobs; it is acceptable for these two because they are a person's deliberate gestures that replace the whole show, and the lock refuses both during a performance before the wait is reached. GO reads no file and never waits |
+| **what a failure looks like** | the command is applied — its `A` now means *taken, and handed to the writer* — and a failure comes back through the completion: `savedRevision` stays unstamped, so the dot stays lit, which is the truthful signal; and the writer's own sentence, naming the file, is published at **`/godot/document/writeError`**. Not at `lastError`, which quotes a refused record by tick and sequence: this failure has no record, and folding it into `errorCount` would make the count disagree with the log. It goes out when a later write of the same command lands, or when a save lands over an autosave's failure |
+
+The checks that need no write stay on the tick thread and still refuse at once: a `document.saveAs`
+with no path, and an autosave into a bundle that has gone — one `stat`, and the refusal an
+unattended writer most needs to leave in the log. **Replay writes inline**: `wfg replay` hands the
+commands a synchronous writer that is never started, because a replay has no GO path to protect
+and a thread there would only add nondeterminism; the record is identical either way, as §14.14
+promised. **Shutdown drains the writer** before the clean-exit tidy-up asks whether the document
+is dirty (`finishSession`), so a save queued at Ctrl-C lands; a kill loses what was queued, and the
+atomic write leaves every file old and whole or new and whole.
+
+**An earlier session's unanswered recovery is moved aside, and the autosave keeps running.** The
+rule, whole:
+
+- `recovery/` is always this session's own autosave target.
+- The recovery a session **offers** — what `/godot/document/recovery` and the banner are about — is
+  `recovery/` if `recovery/show.xml` exists, because then the last session died; otherwise the
+  highest-numbered `recovery.previous.N/`, if there is one.
+- The first time this session needs to autosave while the offer still sits in `recovery/`, the
+  writer **renames** it to the next `recovery.previous.N/` — in queue order, before the autosave's
+  bytes — remembers where the offer now lives, and autosaves as usual. N is a counter, never a
+  clock: one past the highest in use.
+- `document.recover` and `document.discardRecovery` act on the offer wherever it now lives, and
+  answering clears it for this session.
+- A save deletes only this session's own `recovery/`; a clean exit deletes only this session's
+  `recovery/`, and only when the document is not dirty. **Nothing deletes an unanswered
+  `recovery.previous.N/` but its own discard**, so an afternoon nobody answered is offered again at
+  the next open, newest first.
+- `wfg validate` names every `recovery.previous.N/` present, beside the `recovery/` line.
+
+*Refined 2026-09-11, at the author's direction, once `recover` is also an answer:* a recovery
+adopted from a `recovery.previous.N/` is **consumed** — not deleted by the recovery, because a
+crash straight after it must still lose nothing and the recovered show then exists only in memory
+and in that folder, but deleted on the writer, in queue order, by the first autosave or save that
+lands after it and so puts the recovered work on the disk under a name this session owns. Without
+the refinement, an afternoon recovered and then saved would be offered again at every start until
+somebody discarded work that was already the show. Adopting from `recovery/` itself consumes
+nothing: that folder simply becomes this session's own. And because `recovery/` then holds this
+session's older autosave rather than the recovered show, `autosavedRevision` is zeroed, so the
+catch-up autosave comes at the next quiet. `wfg serve --recover` adopts through the same function
+as `document.recover`, so the two cannot come to mean different things.
+
+**A session that recovered does not replay, and says so.** The recovered bytes are covered by
+neither the log nor the bundle its header hashes, so a replay past the adoption builds a different
+show and reports the difference as divergence — sending somebody hunting for non-determinism in an
+engine that has none. Two ways a session adopts, and both are caught (`Bundle::replayBoundary`): an
+**applied `document.recover` record** stops the replay there, with the records before it still
+replayed and held to reproducing exactly; and a session started with **`wfg serve --recover`**,
+which adopts before its first record and so leaves nothing to point at, carries a header line —
+`# recovered recovery.previous.2/`, the folder relative to the bundle — and is refused up front. The
+exit code is **2**, the replay's *could not run*, and not 1: the three codes exist so that "the
+inputs are not enough" and "the engine is not deterministic" are never mistaken for each other, and
+this is the first. A prefix that diverges before the recovery is still exit 1, with the refusal
+printed after the mismatches.
+
+**What building the second half found** *(2026-09-11)*.
+
+- **`document.discardRecovery` is a job, not a wait.** Drained like `recover`, it would have been
+  the one command the lock lets through during a performance that could hold a GO behind a disk.
+  Queued on the writer instead, it costs the tick thread a push and runs behind any rename already
+  queued — so it deletes the offer where the rename put it, not where it used to be. The offer is
+  withdrawn by the completion that says the folder has gone, a tick or two after the gesture.
+- **An offer whose folder somebody deleted by hand is withdrawn**, by the next autosave that goes
+  to move it or by the next answer. Kept standing, it would have failed every autosave for the rest
+  of the show on a rename of nothing, and left a banner nobody could dismiss.
+- **"The first free N" is read as one past the highest.** Every gap the engine makes is at the top
+  — the offer is always the highest, and a discard deletes the offer — so the two readings agree on
+  every folder the engine leaves, and differ only after somebody deletes a middle one by hand, where
+  the lowest gap would file the newest afternoon under the oldest number.
+- **Known, not built: a session that discarded an earlier session's recovery does not replay.** The
+  replay's `--out` never holds that offer, so the replayed discard is refused `no-recovery` where
+  the live one applied. It predates this half — the first half's discard asked the disk for a folder
+  `--out` never had — and the fix is a design choice rather than a repair: a header line marking the
+  offer found at open, and a placeholder standing in for it in `--out`.
 
 **The lifecycle, and the one command that is not built.**
 
@@ -5285,10 +5392,27 @@ between 2 KB and 16 KB, which fits real-time antivirus scanning each replaced fi
 on. So the answer is the platform's, which is the one kind of answer a faster Go.dot cannot move,
 and it is the answer this subsection drew the switch for: **5.5's second half takes the snapshot
 on the tick thread — the 1.4 ms — and hands the bytes to a writer thread on `MountProbe`'s
-shape.** The record is `document.autosave` either way, so no fixture and no assertion changes. The
+shape.** The record is `document.autosave` either way, so no fixture and no assertion changes.
+
+**And re-taken once the switch was thrown (PR 5.5's second half, 2026-09-11)**, the same show and
+build, the instrument now timing the two threads apart:
+
+| | median | 99th percentile | worst |
+|---|---|---|---|
+| the tick thread: snapshot, the folder's stat, the handoff | 1.79 ms | 2.30–2.44 ms | 2.48 ms |
+| the writer: both files written, flushed and replaced | 19.1–19.5 ms | 23.1–24.7 ms | 24.9 ms |
+
+The GO thread's share went from 21 ms to under 2, and its worst case sits at half the threshold;
+the nineteen milliseconds are still spent, on a thread GO does not share. The
 same measurement says every `document.save` has cost more than a tick on this box since PR 5.2 made
-it durable; that one is a person's gesture rather than the engine's, and whether it follows the
-autosave onto the writer is the author's. The Mac mini's figure is still owed.
+it durable, and the author decided (2026-09-11) that it follows the autosave onto the writer, with
+`document.saveAs` beside it: a habitual Ctrl-S between cues is still a disk on the GO thread,
+whoever chose the moment. The price is that a save's failure arrives a tick or two later, at
+`/godot/document/writeError`, rather than as a refusal — §14.10 says why it is not `lastError`.
+The Mac mini's figure is still owed; the macOS CI runner's, in a **Debug** build, is a 13 ms
+handler of which 11 ms is serialising, so that platform pays about two milliseconds for the
+durability this box pays nineteen for — which is what an antivirus explanation predicts and no
+Go.dot explanation would.
 
 **M24 — can the page hold a real show?** Decision T rests on the console being the operator
 client and the laboratory both, and a page that stutters at five hundred cues is neither. It

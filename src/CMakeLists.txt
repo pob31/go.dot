@@ -141,6 +141,8 @@ add_library(wfg_engine STATIC
     wfg/engine/document/DocumentCommands.cpp
     wfg/engine/document/DocumentCommands.h
     wfg/engine/document/DocumentSession.h
+    wfg/engine/document/DocumentWriter.cpp
+    wfg/engine/document/DocumentWriter.h
     wfg/engine/document/EphemeralState.cpp
     wfg/engine/document/EphemeralState.h
     wfg/engine/document/Ids.cpp

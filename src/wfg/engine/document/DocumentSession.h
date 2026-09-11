@@ -27,27 +27,34 @@
     same bundle hold the same show and different sessions.
 
     OWNED BY THE VERB, CAPTURED BY REFERENCE. `wfg serve` declares one beside
-    its document and hands it to `registerBundleCommands`; the save handler
-    writes `savedRevision` and the verb's after-tick reads it. A handler that
+    its document and hands it to `registerBundleCommands`; the handlers and
+    `settle` write it and the verb's after-tick reads it. A handler that
     captured it by value would stamp its own copy, the after-tick would compare
     against the original for the life of the process, and the dot would never go
     out - which is the whole difference between a session record that works and
     one that quietly does not (namespace draft §14.10).
 
-    SIX FIELDS SINCE PR 5.5, and every one of them is read by something. Two
-    are Phase 1's; three are the autosave's arithmetic (§14.10); the sixth is
-    the latch behind `/godot/document/recovery`, which is a fact about this
-    session's relationship with its disk and therefore this record's business
-    rather than the document's. A field nobody reads is a field somebody will
-    read wrongly, because the only thing it can hold until then is its
-    initialiser, and an initialiser looks exactly like an answer.
+    EIGHT FIELDS SINCE PR 5.5's SECOND HALF, and every one of them is read by
+    something. Two are Phase 1's; three are the autosave's arithmetic (§14.10);
+    one says where an earlier session's unanswered recovery lives, which is
+    `/godot/document/recovery`; and two are what the writer thread last failed
+    to do, which is `/godot/document/writeError`. All of them are facts about
+    this session's relationship with its disk and therefore this record's
+    business rather than the document's. A field nobody reads is a field
+    somebody will read wrongly, because the only thing it can hold until then
+    is its initialiser, and an initialiser looks exactly like an answer.
 
-    THREADING: the tick thread's, like the document beside it. The save handler,
-    the autosave handler, the before-tick and the after-tick all run there,
-    which is why none of them needs a lock. The serve verb also touches it from
-    its own thread, and only where that thread cannot overlap the tick thread:
-    at open, before the clock starts, and at a clean exit, after
-    `ticks.stop()` has joined it.
+    THREADING: the tick thread's, like the document beside it, AND NEVER THE
+    WRITER'S. The handlers, the before-tick and the after-tick all run on the
+    tick thread, which is why none of them needs a lock. The writer thread
+    (DocumentWriter.h) never reads or writes a byte of this record: what it
+    finishes comes back as a completion, and `settle` - called on the tick
+    thread - is what turns a completion into a stamp here. That is the whole of
+    the synchronisation argument for this struct, and it is why the struct has
+    no mutex: it has one thread. The serve verb also touches it from its own
+    thread, and only where that thread cannot overlap the tick thread: at open,
+    before the clock starts, and at a clean exit, after `ticks.stop()` has
+    joined it and the writer has been drained.
 */
 
 #include <wfg/engine/document/ShowDocument.h>
@@ -55,6 +62,7 @@
 #include <juce_core/juce_core.h>
 
 #include <cstdint>
+#include <string>
 
 namespace wfg::doc
 {
@@ -74,6 +82,15 @@ namespace wfg::doc
             by reading the folder back rather than writing it. Never by
             `document.recover`, whose whole point is that the folder does NOT
             hold what the document now does.
+
+            THE REVISION A SAVE STAMPS IS THE ONE ITS SNAPSHOT WAS TAKEN AT, and
+            never `showRevision()` at the moment the writer says it landed (PR
+            5.5, second half). The bytes leave the tick thread, so an edit can
+            land between the snapshot and the confirmation - and a stamp read
+            off the document then would mark that edit saved when the file on
+            disk has never heard of it. The revision rides with the snapshot to
+            the writer and back (`Bundle::Snapshot`), and `settle` stamps what
+            came back.
 
             Nought is "never", which no document ever reports (its count starts
             at 1), so a session nobody stamped reads as dirty rather than as
@@ -95,9 +112,13 @@ namespace wfg::doc
 
             Nought is "the recovery folder holds nothing this session wrote",
             which is what a fresh session leaves, because it has written none,
-            and what a `document.save`, a `document.revert` or a
-            `document.discardRecovery` leaves when it has just deleted the
-            folder. */
+            and what a `document.save` or a `document.revert` leaves when it has
+            just deleted the folder.
+
+            Stamped, like `savedRevision`, from the revision the autosave's
+            snapshot was taken at, when the writer confirms the bytes landed -
+            so between the two it still names the previous autosave, which is
+            the truth about what `recovery/` holds in that interval. */
         std::uint64_t autosavedRevision = 0;
 
         /*  The tick at which the SHOW half last moved, stamped by the serve
@@ -111,57 +132,113 @@ namespace wfg::doc
         std::int64_t lastChangeTick = 0;
 
         /*  The tick at which an autosave was last ATTEMPTED - stamped by the
-            handler whether the bytes landed or not, which is the difference
+            handler, on the tick thread, before the bytes are handed to the
+            writer and whether or not they ever land, which is the difference
             between a retry every thirty seconds and a retry fifty times a
             second.
 
-            A rejected autosave leaves `autosavedRevision` where it was, so the
-            "is there anything to write" test above stays true; what stops the
-            before-tick submitting again on the very next tick is this stamp and
-            the `lastChangeTick >= lastAutosaveTick` term in `autosaveDue`. A
-            bundle on a stick somebody pulled out is then one refused record
-            every thirty seconds rather than fifty a second, which is a log
-            somebody can still read. */
+            A refused or failed autosave leaves `autosavedRevision` where it
+            was, so the "is there anything to write" test above stays true;
+            what stops the before-tick submitting again on the very next tick is
+            this stamp and the `lastChangeTick >= lastAutosaveTick` term in
+            `autosaveDue`. A bundle on a stick somebody pulled out is then one
+            refused record every thirty seconds rather than fifty a second,
+            which is a log somebody can still read. The same term is what keeps
+            an autosave the writer has not yet confirmed from being submitted
+            twice: its stamp is taken at once, and its revision a tick or two
+            later. */
         std::int64_t lastAutosaveTick = 0;
 
-        /*  Whether a `recovery/show.xml` was found when this session opened its
-            bundle, and has been neither adopted nor discarded since:
-            `/godot/document/recovery`, in the one place it is decided.
+        /*  WHERE AN EARLIER SESSION'S UNANSWERED RECOVERY LIVES, and empty when
+            there is none: `/godot/document/recovery`, in the one place it is
+            decided (§14.10, as the author decided it on 2026-09-11).
 
-            A LATCH AND NEVER A LOOK AT THE DISK, and that is the whole of why
-            it is a field. This session's own autosave creates `recovery/` two
+            FOUND AT OPEN AND NEVER LOOKED FOR AGAIN. `Bundle::offeredRecovery`
+            answers it once: `recovery/` when it holds a show.xml - the last
+            session died - and otherwise the highest-numbered
+            `recovery.previous.N/`, an afternoon an earlier session moved aside
+            and nobody answered.
+
+            A RECORD AND NEVER A LOOK AT THE DISK, and that is the whole of why
+            it is a field. This session's own autosave writes `recovery/` two
             seconds after the first edit, so a node that answered by asking the
             filesystem would light up on every unsaved show and tell an operator
             that work from a previous session was waiting - which would be
             false, and would be false most of the time. What the node reports is
             somebody ELSE's unfinished afternoon: found at open, and gone only
-            when this session answers it - by recovering it or discarding it.
+            when this session answers it - `document.recover` adopts it and
+            `document.discardRecovery` deletes it, wherever it then lives.
+            Answering clears it - a recovery at once, a discard when the writer
+            says the folder has gone - and the FOLDER goes when it is safe to.
+            A discard deletes it on the writer. A recovery adopted from a
+            `recovery.previous.N/` is consumed, and deleted by the writer once
+            the first autosave or save after it has landed - not before, so a
+            crash straight after the recovery still loses nothing
+            (`DocumentWriter::setConsumed`; §14.10 as refined at the author's
+            direction on 2026-09-11). Nothing else deletes one: a
+            `recovery.previous.N/` nobody answered is offered again by the next
+            session that opens the bundle without a `recovery/`.
 
-            The refusals do ask the disk, and the asymmetry is deliberate:
-            `document.recover` and `document.discardRecovery` answer
-            `no-recovery` when there is nothing THERE, because refusing a
-            gesture on the strength of a flag while the folder sits in front of
-            the operator is how a client ends up unable to clean up after
-            itself.
+            IT MOVES, AND THIS SESSION'S AUTOSAVE IS WHAT MOVES IT. The first
+            time this session needs `recovery/` while the offer still sits
+            there, the writer renames that folder to the next
+            `recovery.previous.N/` and then autosaves as usual - so this
+            session's edits are protected from the first quiet on, and the
+            earlier afternoon is put where nothing this session does can reach
+            it. The rename is the writer's, in queue order, and its address
+            comes back through `settle`, which is where this field learns it;
+            the writer keeps its own copy of the address, which is the one it
+            acts on (`DocumentWriter::offer`), because only it knows whether
+            its rename worked. In between, this field still names `recovery/`
+            while the folder is being renamed, which is harmless for every
+            reader it has then: the published node says an offer exists, and
+            one does; `document.recover` drains the writer and settles before
+            it reads the address; and `document.discardRecovery` is itself a
+            job, queued behind the rename, deleting the folder wherever the
+            writer's copy says it went.
 
-            WHILE IT IS SET, NOTHING THIS SESSION DOES MAY DESTROY WHAT IT GUARDS.
-            The folder holds an afternoon somebody else abandoned and nobody has
-            yet decided about, and four writers would otherwise decide for
-            them: the autosave, which would overwrite it with this session's
-            work two seconds after the first edit; `document.save` and
-            `document.revert`, which delete the folder because the document and
-            the disk now agree - which says something about THIS session's
-            autosave and nothing about somebody else's; and the clean exit,
-            which deletes it when the document is not dirty. So `autosaveDue`
-            answers no, the save and the revert leave the folder where it is,
-            and the exit leaves it too, until the operator answers the question
-            with `document.recover` or `document.discardRecovery`. The cost is
-            that an unanswered offer leaves this session's own edits without a
-            recovery copy - which is why the node is published, so a client can
-            put the question in front of somebody rather than let it sit. (A
-            decision §14.10 did not take, taken here and reported with the PR.) */
-        bool recoveryFound = false;
+            THE EMPTY BRACES ARE LOAD-BEARING, here and on the two strings
+            below: every verb and test builds this record as `{ folder,
+            revision }`, and a field with no initialiser of its own is one
+            -Wmissing-field-initializers names at every one of those sites. The
+            older fields all carry `= 0`, which is why they never did. */
+        juce::File offeredRecovery {};
+
+        /*  WHAT THE WRITER THREAD LAST FAILED TO DO, in a sentence, and empty
+            once nothing it was handed has failed since a later write of the
+            same kind landed: `/godot/document/writeError`.
+
+            ITS OWN NODE AND NOT `/godot/engine/lastError`, and the difference
+            is the log. `lastError` and `errorCount` quote a rejected RECORD - a
+            refusal a client can find at the tick and sequence it names - and a
+            write that fails on the writer has no such record: the command was
+            applied, and its `A` means "taken and handed to the writer", which
+            it was. Folding the failure in would make `errorCount` disagree with
+            the number of refusals in the log, and make a replay - which writes
+            inline, onto another disk, and usually succeeds - disagree with the
+            session it reproduces.
+
+            Named with the command and the tick it was applied at, so an
+            operator can find the record it belongs to, and carrying the
+            writer's own sentence, which names the file and what became of it -
+            the diagnosis a reason code never had room for. */
+        std::string writeError {};
+
+        /*  Which command `writeError` is about, so that `settle` knows what
+            puts it out: a later write of the same command that lands, or a
+            save that lands over an autosave's failure, because a save takes
+            this session's `recovery/` away and the work is the show. A landed
+            autosave says nothing about a save that did not land, and a landed
+            save says nothing about a copy somewhere else that did not. */
+        std::string writeErrorCommand {};
     };
+
+    /*  Whether an earlier session's recovery is waiting for an answer - the
+        published node, read off the record and never off the disk. */
+    inline bool hasRecoveryOffer (const DocumentSession& session)
+    {
+        return session.offeredRecovery != juce::File();
+    }
 
     /*  Two seconds of quiet at 50 Hz, and a thirty-second ceiling over it.
 
@@ -217,13 +294,19 @@ namespace wfg::doc
         the tick thread, which is exactly what makes it safe to serialise the
         model without a lock.
 
-        THE FIRST TEST IS "MAY IT WRITE AT ALL": not while an earlier session's
-        recovery is waiting for an answer, because the only file it could write
-        is the one that holds that answer's subject (`recoveryFound` says why).
+        AN EARLIER SESSION'S UNANSWERED RECOVERY DOES NOT STOP IT, and did for
+        half a pull request. The first build suspended the autosave while an
+        offer stood, because the only folder it could write was the one holding
+        the offer - which kept the old afternoon safe by leaving the new one
+        with no crash protection until somebody answered. *Corrected
+        2026-09-11, at the author's direction:* the writer moves the offer
+        aside to a `recovery.previous.N/` before this session's first autosave
+        lands in `recovery/` (`offeredRecovery` says how), so both afternoons
+        are kept and this function no longer asks about either.
 
-        THE NEXT TWO ARE "IS THERE ANYTHING TO WRITE" and the last two are "is
-        now the moment". A show nobody has edited writes nothing at all, which
-        is what makes an idle engine an idle engine; a show whose current
+        THE FIRST TWO TESTS ARE "IS THERE ANYTHING TO WRITE" and the last two
+        are "is now the moment". A show nobody has edited writes nothing at all,
+        which is what makes an idle engine an idle engine; a show whose current
         revision is already the one in `recovery/` writes nothing either,
         because the bytes would be the bytes that are already there.
 
@@ -238,9 +321,6 @@ namespace wfg::doc
                              const DocumentSession& session,
                              std::int64_t tick) noexcept
     {
-        if (session.recoveryFound)
-            return false;
-
         if (! isDirty (document, session))
             return false;
 

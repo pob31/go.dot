@@ -25,6 +25,9 @@
           state.xml       where the engine had got to
           namespaces/     the OSCQuery descriptions the mounts read
           recovery/       what nobody decided yet: the autosave (PR 5.5)
+          recovery.previous.N/
+                          an earlier session's recovery, moved aside unanswered
+                          so that this session's autosave could run (PR 5.5)
 
     A FOLDER RATHER THAN AN ARCHIVE, because everything in it is text that
     someone will eventually want to diff, grep, or put under version control -
@@ -50,13 +53,48 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/ShowDocument.h>
+#include <wfg/engine/log/EventLog.h>
 
 #include <juce_core/juce_core.h>
 
+#include <cstddef>
+#include <cstdint>
+#include <string>
+#include <vector>
+
 namespace wfg::doc
 {
+    class DocumentWriter;
+
     namespace Bundle
     {
+        /*  WHAT A WRITE WRITES, taken on the tick thread and handed to another.
+
+            THE BYTES AND THE REVISION THEY ARE, AND NOTHING THAT POINTS BACK
+            INTO THE DOCUMENT. Serialising has to happen on the tick thread,
+            because the document has one writer and that is what makes reading
+            it without a lock safe at all (ShowDocument.h); writing the bytes
+            need not, and since M23 (§14.14) does not. So the handoff is plain
+            values - two strings and an integer - which the writer thread owns
+            outright once it has them: no reference, no handle into a
+            `juce::ValueTree`, nothing whose lifetime or reference count the two
+            threads would then have to share.
+
+            `revision` is `showRevision()` at the instant the bytes were taken,
+            and it travels to the writer and back so that a save which lands is
+            stamped with the show it wrote rather than with whatever the
+            document has become by the time the disk says yes. */
+        struct Snapshot
+        {
+            std::string show;
+            std::string state;
+            std::uint64_t revision = 0;
+        };
+
+        /*  The tick thread's half of every write: one canonical serialisation
+            of each file, which M23 measured at 1.4 ms on the 500-cue show. */
+        Snapshot snapshotOf (const ShowDocument& document);
+
         /** `<folder>/<folder name>.wfg`. */
         juce::File manifestFile (const juce::File& folder);
         juce::File showFile (const juce::File& folder);
@@ -97,8 +135,15 @@ namespace wfg::doc
             bytes go to a sibling temp and the temp takes the file's place, so
             a save that fails or is interrupted leaves the file it was replacing
             whole. What that does and does not promise is argued at
-            `writeBytesAtomically` in Bundle.cpp. */
+            `writeBytesAtomically` in Bundle.cpp.
+
+            TWO SPELLINGS, ONE WRITE. The snapshot one is what the writer thread
+            calls: it reads nothing but its arguments and the disk, so it can
+            run anywhere. The document one is the snapshot one with the snapshot
+            taken first, for the callers that have no clock to protect - `wfg
+            replay` seeding its `--out`, and the tests. */
         ReadResult save (const juce::File& folder, const ShowDocument& document);
+        ReadResult save (const juce::File& folder, const Snapshot& snapshot);
 
         //======================================================================
         /*  `recovery/`, and the two files in it: WHAT NOBODY DECIDED YET.
@@ -122,10 +167,45 @@ namespace wfg::doc
         juce::File recoveryShowFile (const juce::File& folder);
         juce::File recoveryStateFile (const juce::File& folder);
 
-        /** Whether there is anything for `document.recover` to adopt: a
-            `recovery/show.xml`, which is the file the state beside it is
-            meaningless without. */
+        /** Whether `recovery/` holds anything to adopt: a `recovery/show.xml`,
+            which is the file the state beside it is meaningless without. */
         bool hasRecovery (const juce::File& folder);
+
+        /*  THE RECOVERY A SESSION OPENING THIS BUNDLE OFFERS, or an empty File
+            when there is none (§14.10, as the author decided it on
+            2026-09-11).
+
+            `recovery/` when it holds a show.xml, because then the last session
+            died with work in it; otherwise the highest-numbered
+            `recovery.previous.N/`, an afternoon an earlier session moved aside
+            unanswered - newest first, so the one offered is the one most
+            recently abandoned, and the others wait their turn. A
+            `recovery.previous.N/` is offered as a FOLDER, whatever is left in
+            it: `document.discardRecovery` deletes a folder, and one whose show
+            has gone is still something to delete; `document.recover` asks for
+            the show inside and refuses when it is not there. */
+        juce::File offeredRecovery (const juce::File& folder);
+
+        /*  Every `recovery.previous.N/` in the bundle, lowest N first. Folders
+            only: a file that happens to carry the name is nothing anybody
+            moved aside. */
+        std::vector<juce::File> previousRecoveries (const juce::File& folder);
+
+        /*  Where the next move aside goes: `recovery.previous.N/` with N one
+            past the highest in use.
+
+            A COUNTER AND NEVER A CLOCK, because nothing that decides where a
+            show's bytes go may read one (Engine.h). And ONE PAST THE HIGHEST
+            rather than the lowest gap, which is the reading of "the first free
+            N" that keeps "the highest is the newest" true: every gap the engine
+            itself makes is at the top - the offer is always the highest, and a
+            discard deletes the offer - so the two readings agree on every
+            folder this engine leaves, and differ only when somebody has
+            deleted a middle one by hand, where the lowest gap would file the
+            newest afternoon under the oldest number. Files are counted as
+            well as folders, so that the rename can never land on a file
+            somebody put there under that name. */
+        juce::File nextPreviousRecovery (const juce::File& folder);
 
         /*  Writes the show and the state into `recovery/`, atomically, exactly
             as `save` writes the authored pair.
@@ -149,8 +229,13 @@ namespace wfg::doc
 
             The `recovery/` subfolder itself IS created, and that is not the
             same act: it is a child of a bundle that exists, named by this
-            engine, holding files only this engine reads. */
+            engine, holding files only this engine reads.
+
+            It does NOT move an earlier session's offer aside: that is the
+            writer's decision, taken from a fact only the writer holds
+            (DocumentWriter.h), and made before it calls this. */
         ReadResult saveRecovery (const juce::File& folder, const ShowDocument& document);
+        ReadResult saveRecovery (const juce::File& folder, const Snapshot& snapshot);
 
         /*  Reads `recovery/show.xml`, and the state beside it, into `document`.
 
@@ -162,9 +247,48 @@ namespace wfg::doc
             their work. */
         ReadResult openRecovery (const juce::File& folder, ShowDocument& document);
 
+        /*  The same, from a recovery folder named outright - `recovery/` or a
+            `recovery.previous.N/` - which is what `document.recover` adopts
+            since an offer can live in either. The argument is the RECOVERY
+            folder, not the bundle: the two spellings take different folders
+            and are different names so that nobody hands one the other's. */
+        ReadResult openRecoveryAt (const juce::File& recovery, ShowDocument& document);
+
         /** Deletes `recovery/` and everything in it. True when the folder is
             gone afterwards, which includes it never having been there. */
         bool discardRecovery (const juce::File& folder);
+
+        /** The same for a recovery folder named outright, which is how an offer
+            living in a `recovery.previous.N/` is discarded. */
+        bool discardRecoveryAt (const juce::File& recovery);
+
+        /*  ADOPTS THE RECOVERY THIS SESSION OFFERS: `document.recover`'s act and
+            `wfg serve --recover`'s, in one place so that the two cannot come to
+            mean different things.
+
+            It reads the offer wherever it now lives into `document`, through a
+            scratch document, and on success answers it: the offer is cleared on
+            the session and on the writer, and what `recovery/` is from then on
+            follows from where the bytes came from. From `recovery/` itself,
+            that folder already holds exactly this show and becomes the
+            session's own - `autosavedRevision` says so. From a
+            `recovery.previous.N/`, `recovery/` holds nothing of the show now on
+            screen, so `autosavedRevision` goes to nought and the next quiet
+            writes the recovered show there; and the folder it came from is
+            CONSUMED - deleted by the writer once that autosave, or a save, has
+            landed, and not before, so that a crash straight after this loses
+            nothing (§14.10, as refined at the author's direction on
+            2026-09-11).
+
+            Refuses, touching nothing, when there is no offer or its show
+            cannot be read; withdraws the offer when its folder has gone. The
+            dot is left lit either way: `savedRevision` is never touched here.
+
+            THE WRITER MUST BE IDLE - drained, or not yet started - because this
+            reads a folder the writer might otherwise be renaming, and changes
+            two facts the writer acts on. */
+        ReadResult adoptOfferedRecovery (ShowDocument& document, DocumentSession& session,
+                                         DocumentWriter& writer);
 
         /*  `save` into `destination`, PLUS the directory copy `save` refuses to
             make: `source`'s `namespaces/`.
@@ -184,6 +308,8 @@ namespace wfg::doc
             session's unfinished afternoon and would arrive in the copy as work
             somebody had abandoned somewhere else. */
         ReadResult saveCopy (const juce::File& destination, const ShowDocument& document,
+                             const juce::File& source);
+        ReadResult saveCopy (const juce::File& destination, const Snapshot& snapshot,
                              const juce::File& source);
 
         //======================================================================
@@ -210,6 +336,42 @@ namespace wfg::doc
 
         /** The `# ` header lines an event log should carry for this bundle. */
         std::vector<std::string> logHeaderLines (const juce::File& folder);
+
+        /*  The `# ` header line a session that started with `wfg serve
+            --recover` carries: `recovered <folder>/`, the recovery it adopted
+            before its first record, named relative to the bundle.
+
+            A MARK, BECAUSE THERE IS NO RECORD TO POINT AT. `document.recover`
+            is a command and leaves an `A` a replay can stop at; `--recover`
+            adopts before the log has a single record, so without this line a
+            replay of that session diverges from tick nought with nothing in the
+            file to say why - the one kind of divergence that looks exactly
+            like an engine that is not deterministic. */
+        std::string recoveredLogHeaderLine (const juce::File& folder, const juce::File& adopted);
+
+        /*  HOW FAR A LOG CAN BE REPLAYED AGAINST ITS BUNDLE, and why no further
+            (§14.10, as the author decided it on 2026-09-11).
+
+            A session that adopted a recovery ran a show whose bytes are in
+            neither the log nor the bundle the log's header hashes: the
+            recovered show.xml is not part of `contentHash`, and was never
+            meant to be. A replay past that point would build a different show
+            and report the difference as divergence, sending somebody hunting
+            for non-determinism in an engine that has none. So the replay
+            refuses, and says so in a sentence - up front for a `recovered`
+            header line, and at the record for an applied `document.recover`,
+            with everything before it still replayed. A REJECTED
+            `document.recover` adopted nothing, and does not stop it.
+
+            `replayable` is how many records, from the first, can be replayed;
+            `refusal` is empty when that is all of them. */
+        struct ReplayBoundary
+        {
+            std::size_t replayable = 0;
+            std::string refusal;
+        };
+
+        ReplayBoundary replayBoundary (const LogFile& log);
     }
 
     //==============================================================================
@@ -243,31 +405,45 @@ namespace wfg::doc
         for - there is no node whose value is "saved" - so without this a remote
         session could change a show and never commit it.
 
-        Applied on the tick thread like everything else, which is what makes it
-        safe to write the model out at all: nothing else is touching it. The cost
-        is a file write inside a tick.
+        APPLIED ON THE TICK THREAD LIKE EVERYTHING ELSE, which is what makes it
+        safe to read the model at all: nothing else is touching it. What that
+        thread does now is take the snapshot - one canonical serialisation of
+        each file, 1.4 ms on the 500-cue show - and hand it on. THE BYTES ARE
+        WRITTEN SOMEWHERE ELSE.
 
-        *THIS PARAGRAPH IS A CORRECTION (PR 5.5).* It used to end "and that is
-        why this is Phase 1's answer rather than Phase 5's - crash-safe autosave
-        (PRD 4.3) is a background writer working from a snapshot, and it is a
-        different piece of work". Phase 5 changed its mind, deliberately: the
-        autosave writes from the tick thread too, from the document itself,
-        because it is the same canonical serialisation and the same
-        `replaceFileIn` that a save already is - on a document nothing else is
-        touching, at most once every two seconds of quiet and once every thirty
-        otherwise. What that can cost a GO is lateness and never a block (PRD
-        §4.1): the queue is FIFO, so a GO already submitted is applied first,
-        and a GO arriving during the write waits out the tick it landed in,
-        exactly as it waits behind any other applied command. No lock is taken
-        and nothing the tick thread does not already allocate is allocated.
+        *THIS PARAGRAPH IS A CORRECTION, AND THE SECOND (PR 5.5, 2026-09-11,
+        at the author's direction).* Phase 1 wrote a save's bytes inside the
+        tick and said crash-safe autosave would be "a background writer working
+        from a snapshot, and a different piece of work". The first half of PR
+        5.5 changed its mind and kept the autosave's bytes on the tick thread as
+        well, pending M23. M23 answered (§14.14): 21 ms at the median against a
+        5 ms threshold, 1.4 ms of it serialising and the rest FlushFileBuffers
+        and ReplaceFile - the durability, which no faster Go.dot can move. So
+        Phase 1's sentence was right, and it is now what happens: a
+        `document.save`, a `document.autosave` and a `document.saveAs` take the
+        snapshot here and hand the bytes to a `DocumentWriter`, a thread on
+        MountProbe's shape, and the GO path stops sharing a thread with a disk
+        at all. The log record is the same either way.
 
-        HOW LATE is M23's question (§14.14), and its instrument is in
-        tests/BundleTests.cpp. At or under a quarter tick the bytes stay here;
-        above it, the serialisation - the snapshot - stays on the tick thread,
-        which it must in either shape, and the bytes go to a writer thread on
-        `MountProbe`'s shape. The log record is `document.autosave` either way,
-        which is why §14.10 could answer the constraint without waiting for
-        the number.
+        WHAT THEIR `A` MEANS CHANGED WITH IT: "taken, and handed to the
+        writer". A write that fails there cannot reject the command that asked
+        for it - the record is already in the log - so the failure comes back
+        through the writer's completions, leaves `savedRevision` unstamped so
+        that the dirty dot stays lit, which is the truthful signal, and is
+        published at `/godot/document/writeError` with the writer's own
+        sentence (DocumentSession.h says why not at `lastError`). The checks
+        that need no write stay here and still refuse at once: a
+        `document.saveAs` with no path, and a `document.autosave` into a bundle
+        that has gone - one `stat`, and the refusal an unattended writer most
+        needs to leave in the log where somebody will read it.
+
+        `document.revert` and `document.recover` read the disk, so they DRAIN
+        THE WRITER before they look - the one place the tick thread waits for it,
+        and Bundle.cpp says why that wait is acceptable there and would not be
+        on the GO path. `document.discardRecovery` reads nothing and the lock
+        does not refuse it, so it could be asked for during a performance; it
+        waits for nothing, and is a job on the same writer instead - queued
+        behind any rename that is moving the folder it deletes.
 
         IT TAKES THE SESSION, AND BY REFERENCE, since PR 5.2. It used to take
         the folder by value, which was all a save needed to know; a save that
@@ -276,8 +452,19 @@ namespace wfg::doc
         nobody reads. So the session must outlive the registry's use of this
         command - declared in the verb's own scope, beside the document, and
         never inside a block that closes before the engine stops applying. The
-        autosave's three fields and the recovery latch ride on the same record
-        for the same reason, and are read by the serve verb's two tick hooks.
+        autosave's three fields, the offer and the writer's failure ride on the
+        same record for the same reason, and are read by the serve verb's two
+        tick hooks.
+
+        IT TAKES THE WRITER, BY REFERENCE AND FOR THE SAME REASON, and it tells
+        the writer the one thing the two must start out agreeing about: where
+        an earlier session's unanswered recovery lives, which the writer keeps
+        its own copy of from then on (DocumentWriter.h). Registration happens
+        once, before any command runs, so this is the moment they agree; after
+        it, only the writer's own jobs and a recovery adopted on a drained
+        writer change it. `wfg serve` hands in a writer it starts; `wfg replay`
+        hands in a synchronous one, because a replay has no GO path to protect
+        and a thread there would only add nondeterminism.
 
         `copiesFolder` IS WHERE A `document.saveAs` LANDS WHEN IT MUST NOT GO
         WHERE IT WAS TOLD, which is `wfg replay`'s case and nobody else's. Left
@@ -294,5 +481,6 @@ namespace wfg::doc
     void registerBundleCommands (CommandRegistry& registry,
                                  ShowDocument& document,
                                  DocumentSession& session,
+                                 DocumentWriter& writer,
                                  const juce::File& copiesFolder = juce::File());
 }

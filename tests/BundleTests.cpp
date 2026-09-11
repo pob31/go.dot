@@ -35,6 +35,7 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/DocumentSession.h>
+#include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/document/EphemeralState.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/RelaxNg.h>
@@ -140,24 +141,24 @@ namespace
         return names;
     }
 
-    /*  `document.save`, registered against a session and invoked as the engine
-        would invoke it - the handler alone, with no queue around it, which is
-        all a question about what one save did needs. */
-    Outcome invokeSave (ShowDocument& document, DocumentSession& session)
-    {
-        CommandRegistry registry;
-        registerBundleCommands (registry, document, session);
+    /*  Any of the commands that know where the bundle is, invoked as the engine
+        would invoke it - the handler alone, at the tick a test names, with a
+        copies folder only when the test is standing in for `wfg replay` - and
+        then SETTLED, as the serve verb's after-tick settles at the end of the
+        tick the command ran in.
 
-        const auto* saveCommand = registry.find ("document.save");
-        REQUIRE (saveCommand != nullptr);
-
-        CommandContext context;
-        return saveCommand->handler (context, {});
-    }
-
-    /*  Any of the commands that know where the bundle is, invoked the same way:
-        the handler alone, at the tick a test names, with a copies folder only
-        when the test is standing in for `wfg replay`. */
+        A SYNCHRONOUS WRITER PER CALL, which is `wfg replay`'s writer: every
+        job is performed inside the handler, so by the time this returns the
+        bytes are on the disk, and `settle` has turned the completion into the
+        session's stamps - exactly what a question about what one command did
+        needs. A writer per call is enough because what a writer keeps between
+        jobs is where the offer lives, and that goes back to the session through
+        `settle` and on to the next writer through registration. The one thing
+        a fresh writer would forget is a consumed recovery, which only
+        recovering from a `recovery.previous.N/` makes; the cases that do that
+        live in DocumentWriterTests.cpp, on one writer each. What a writer
+        THREAD changes - the order, the stamp's revision, the drain - is asked
+        there too. */
     Outcome invokeBundleCommand (ShowDocument& document, DocumentSession& session,
                                  const std::string& name,
                                  const std::vector<osc::Value>& args = {},
@@ -165,14 +166,24 @@ namespace
                                  const juce::File& copies = juce::File())
     {
         CommandRegistry registry;
-        registerBundleCommands (registry, document, session, copies);
+        DocumentWriter writer;
+        registerBundleCommands (registry, document, session, writer, copies);
 
         const auto* command = registry.find (name);
         REQUIRE_MESSAGE (command != nullptr, "no command " << name);
 
         CommandContext context;
         context.tick = tick;
-        return command->handler (context, args);
+        const auto outcome = command->handler (context, args);
+
+        settle (session, writer);
+        return outcome;
+    }
+
+    /*  `document.save`, the same way. */
+    Outcome invokeSave (ShowDocument& document, DocumentSession& session)
+    {
+        return invokeBundleCommand (document, session, "document.save");
     }
 
     /*  An earlier session's afternoon, left in `recovery/` the way a crash
@@ -338,7 +349,7 @@ TEST_CASE ("document.save: a save that lands replaces the show, and puts the dot
     CHECK_FALSE (isDirty (document, session));
 }
 
-TEST_CASE ("document.save: a write that cannot land is refused, the old show.xml is intact, and the dot stays lit")
+TEST_CASE ("document.save: a write that cannot land leaves the old show.xml intact, keeps the dot lit, and says why")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
 
@@ -390,15 +401,13 @@ TEST_CASE ("document.save: a write that cannot land is refused, the old show.xml
     const auto stampBefore = session.savedRevision;
     const auto outcome = invokeSave (document, session);
 
-    /*  Refused rather than reported: a save that did not happen must not reach
-        the log as applied, or a replay would reproduce a lie. */
-    CHECK_FALSE (outcome.applied);
-    CHECK (outcome.reason == reason::writeFailed);
-
-    /*  And the word itself, spelled out. The code is part of the log format
-        and therefore a contract, so a rename that changed the text would be a
-        format change and has to fail here rather than in somebody's parser. */
-    CHECK (outcome.reason == "write-failed");
+    /*  APPLIED, AND THAT IS A CORRECTION (PR 5.5, second half). Until the bytes
+        left the tick thread this save was refused with `write-failed`, because
+        its `A` meant the bytes had landed. Now the record is written when the
+        snapshot is handed to the writer, which it was; the failure comes back
+        afterwards, through the writer's completion, and cannot un-write a
+        record already in the log. What it does instead is below. */
+    CHECK (outcome.applied);
 
     /*  THE SHOW THAT WAS ON DISK IS STILL THE SHOW ON DISK, byte for byte -
         the one promise §14.10 makes about a save that fails. */
@@ -410,6 +419,14 @@ TEST_CASE ("document.save: a write that cannot land is refused, the old show.xml
         because there is. */
     CHECK (session.savedRevision == stampBefore);
     CHECK (isDirty (document, session));
+
+    /*  AND IT SAYS WHY, where a client can read it: which command, and the
+        writer's own sentence naming the file it could not write - the
+        diagnosis the reason code never had room for. */
+    INFO ("writeError: " << session.writeError);
+    CHECK (session.writeError.rfind ("document.save at tick ", 0) == 0);
+    CHECK (session.writeError.find (Bundle::temporaryFor (showXml).getFileName().toStdString())
+             != std::string::npos);
 }
 
 //==============================================================================
@@ -515,15 +532,23 @@ TEST_CASE ("autosaveDue: nothing to write, the quiet boundary, and the ceiling b
     }
 
     //--------------------------------------------------------------------------
-    /*  And not at all while an earlier session's afternoon waits for an answer,
-        because the only file this could write is the one holding it. */
+    /*  AND AN EARLIER SESSION'S UNANSWERED AFTERNOON DOES NOT STOP IT. The first
+        half of PR 5.5 suspended the autosave while an offer stood, which kept
+        the old afternoon safe by leaving the new one unprotected; at the
+        author's direction (2026-09-11) the writer moves the offer aside first
+        instead, so the decision no longer asks about it at all - at either
+        boundary. */
     {
         DocumentSession session;
-        session.recoveryFound = true;
+        session.offeredRecovery = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                                    .getChildFile ("somebody").getChildFile ("recovery");
         session.lastChangeTick = 1000;
 
-        CHECK_FALSE (autosaveDue (document, session, 1000 + autosaveQuietTicks));
-        CHECK_FALSE (autosaveDue (document, session, 1000 + autosaveCeilingTicks));
+        CHECK (autosaveDue (document, session, 1000 + autosaveQuietTicks));
+
+        session.lastAutosaveTick = 1000;
+        session.lastChangeTick = 1000 + autosaveCeilingTicks - 1;
+        CHECK (autosaveDue (document, session, 1000 + autosaveCeilingTicks));
     }
 }
 
@@ -617,9 +642,9 @@ TEST_CASE ("document.recover: the afternoon comes back dirty, with no history, a
     REQUIRE (Bundle::open (temp.folder, document).ok);
 
     DocumentSession session { temp.folder, document.showRevision() };
-    session.recoveryFound = Bundle::hasRecovery (temp.folder);
+    session.offeredRecovery = Bundle::offeredRecovery (temp.folder);
 
-    REQUIRE (session.recoveryFound);
+    REQUIRE (session.offeredRecovery == Bundle::recoveryFolder (temp.folder));
     CHECK (document.getAttribute (houseToHalfName) == std::string ("House to half"));
     CHECK_FALSE (isDirty (document, session));
 
@@ -640,8 +665,9 @@ TEST_CASE ("document.recover: the afternoon comes back dirty, with no history, a
     // The history went with the show it was about.
     CHECK_FALSE (canUndoIn (document));
 
-    // The offer is answered, and what `recovery/` holds is known to be this.
-    CHECK_FALSE (session.recoveryFound);
+    /*  The offer is answered, and - adopted where it stood - `recovery/` is now
+        this session's own, holding exactly this show. */
+    CHECK_FALSE (hasRecoveryOffer (session));
     CHECK (session.autosavedRevision == document.showRevision());
 
     /*  NOT DELETED by adopting it: only a save or a discard removes the folder,
@@ -695,7 +721,7 @@ TEST_CASE ("document.recover: a torn or absent recovery file is refused, and the
     const auto stateBefore = EphemeralState::write (document);
 
     //--------------------------------------------------------------------------
-    // Absent: nothing there to adopt.
+    // Absent: nothing offered, and nothing there to adopt.
     {
         const auto outcome = invokeBundleCommand (document, session, "document.recover");
 
@@ -707,9 +733,9 @@ TEST_CASE ("document.recover: a torn or absent recovery file is refused, and the
     /*  TORN: the first half of a show, cut off mid-element - the file the
         atomic write exists to make impossible, stood there by hand because a
         power cut on some platform will one day manage it anyway. And the offer
-        is standing, so the refusal is not the latch talking. */
+        is standing, so the refusal is not the absence of an offer talking. */
     writeBytes (Bundle::recoveryShowFile (temp.folder), showBefore.substr (0, showBefore.size() / 2));
-    session.recoveryFound = true;
+    session.offeredRecovery = Bundle::recoveryFolder (temp.folder);
 
     {
         const auto outcome = invokeBundleCommand (document, session, "document.recover");
@@ -726,7 +752,7 @@ TEST_CASE ("document.recover: a torn or absent recovery file is refused, and the
     CHECK (EphemeralState::write (document) == stateBefore);
     CHECK (document.getAttribute (houseToHalfName) == std::string ("Still on screen"));
     CHECK (canUndoIn (document));
-    CHECK (session.recoveryFound);
+    CHECK (session.offeredRecovery == Bundle::recoveryFolder (temp.folder));
 
     // And the reader says which file and why, for anybody asking it directly.
     const auto direct = Bundle::openRecovery (temp.folder, document);
@@ -811,14 +837,14 @@ TEST_CASE ("document.revert leaves an earlier session's unanswered recovery wher
     REQUIRE (Bundle::open (temp.folder, document).ok);
 
     DocumentSession session { temp.folder, document.showRevision() };
-    session.recoveryFound = Bundle::hasRecovery (temp.folder);
-    REQUIRE (session.recoveryFound);
+    session.offeredRecovery = Bundle::offeredRecovery (temp.folder);
+    REQUIRE (session.offeredRecovery == Bundle::recoveryFolder (temp.folder));
 
     REQUIRE (document.setAttribute (houseToHalfName, "Typed this morning").ok);
     CHECK (invokeBundleCommand (document, session, "document.revert").applied);
 
     CHECK_FALSE (isDirty (document, session));
-    CHECK (session.recoveryFound);
+    CHECK (session.offeredRecovery == Bundle::recoveryFolder (temp.folder));
     CHECK (readBytes (Bundle::recoveryShowFile (temp.folder)) == theirs);
 }
 
@@ -829,13 +855,23 @@ TEST_CASE ("the lock refuses revert and recover in their own handlers, and none 
     TempBundle temp { "minimal" };
     temp.copyFixture();
 
+    /*  An earlier session's afternoon, so that `document.discardRecovery` has
+        something to answer: since PR 5.5's second half it acts on an offer, and
+        a session with none is refused `no-recovery` before any lock is asked. */
+    abandonAnAfternoon (temp.folder, "Somebody else's afternoon");
+
     ShowDocument document;
     REQUIRE (Bundle::open (temp.folder, document).ok);
 
     DocumentSession session { temp.folder, document.showRevision() };
+    session.offeredRecovery = Bundle::offeredRecovery (temp.folder);
+    REQUIRE (hasRecoveryOffer (session));
 
+    /*  This session's first autosave moves that afternoon aside - the rule the
+        author chose (§14.10) - and writes this session's own. */
     REQUIRE (document.setAttribute (houseToHalfName, "Edited before the lock").ok);
     REQUIRE (invokeBundleCommand (document, session, "document.autosave", {}, 10).applied);
+    REQUIRE (session.offeredRecovery == temp.folder.getChildFile ("recovery.previous.1"));
 
     REQUIRE (document.setAttribute ("/godot/document/locked", "true").ok);
     REQUIRE (document.isLocked());
@@ -856,14 +892,20 @@ TEST_CASE ("the lock refuses revert and recover in their own handlers, and none 
     CHECK (document.getAttribute (houseToHalfName) == std::string ("Edited before the lock"));
 
     /*  AND THE FOUR THAT WRITE BYTES, which keep working: saving during a
-        locked show is the point of locking it (§14.7). */
+        locked show is the point of locking it (§14.7). The offer is still
+        standing - a refused recover answers nothing - so the discard has
+        something to delete, and deletes it where the autosave moved it. */
+    CHECK (hasRecoveryOffer (session));
     CHECK (invokeBundleCommand (document, session, "document.autosave", {}, 20).applied);
     CHECK (invokeBundleCommand (document, session, "document.discardRecovery").applied);
+    CHECK_FALSE (hasRecoveryOffer (session));
+    CHECK_FALSE (temp.folder.getChildFile ("recovery.previous.1").exists());
     CHECK (invokeBundleCommand (document, session, "document.saveAs",
                                 { osc::Value::string (temp.parent.getChildFile ("archive")
                                                         .getFullPathName().toStdString()) })
              .applied);
     CHECK (invokeSave (document, session).applied);
+    CHECK (session.writeError.empty());
 }
 
 TEST_CASE ("document.saveAs: a bundle open accepts, with namespaces/ and without media/, and the session stays put")
@@ -1017,8 +1059,17 @@ TEST_CASE ("document.autosave: a bundle that has gone is refused, and no twin is
 
     const auto outcome = invokeBundleCommand (document, session, "document.autosave", {}, 777);
 
+    /*  REFUSED AT ONCE, ON THE TICK THREAD, AND STILL IN THE LOG. The bytes
+        moved to a writer thread in PR 5.5's second half; this check did not,
+        because it is one `stat` and the refusal an unattended writer most needs
+        to leave where somebody will read it. */
     CHECK_FALSE (outcome.applied);
     CHECK (outcome.reason == reason::writeFailed);
+
+    /*  And the word itself, spelled out. The code is part of the log format
+        and therefore a contract, so a rename that changed the text would be a
+        format change and has to fail here rather than in somebody's parser. */
+    CHECK (outcome.reason == "write-failed");
 
     /*  NO TWIN. An unattended writer that invents a folder is how a bundle
         acquires one: the real show with its media in one place, and three
@@ -1042,10 +1093,16 @@ TEST_CASE ("document.autosave: a bundle that has gone is refused, and no twin is
     CHECK_FALSE (Bundle::namespacesFolder (temp.folder).exists());
 }
 
-TEST_CASE ("an unanswered recovery survives this session's autosave and its save, until somebody answers it")
+TEST_CASE ("an unanswered recovery still in recovery/ survives this session's save, until somebody answers it")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
 
+    /*  THE ONE CASE WHERE `recovery/` IS NOT THIS SESSION'S TO DELETE. A save
+        takes this session's own recovery away because the work has become the
+        show; an earlier session's afternoon that no autosave has yet moved
+        aside is still sitting in that folder, and a save says nothing about it.
+        What happens when the autosave does move it is DocumentWriterTests.cpp's
+        subject; this is the save that comes first. */
     TempBundle temp { "minimal" };
     temp.copyFixture();
     abandonAnAfternoon (temp.folder, "Somebody else's afternoon");
@@ -1056,54 +1113,59 @@ TEST_CASE ("an unanswered recovery survives this session's autosave and its save
     REQUIRE (Bundle::open (temp.folder, document).ok);
 
     DocumentSession session { temp.folder, document.showRevision() };
-    session.recoveryFound = Bundle::hasRecovery (temp.folder);
-    REQUIRE (session.recoveryFound);
+    session.offeredRecovery = Bundle::offeredRecovery (temp.folder);
+    REQUIRE (session.offeredRecovery == Bundle::recoveryFolder (temp.folder));
 
     REQUIRE (document.setAttribute (houseToHalfName, "This session's work").ok);
     session.lastChangeTick = 50;
 
-    /*  THE AUTOSAVE WILL NOT DECIDE FOR THEM: it would write over the one file
-        that holds the question, and answering it by overwriting it is the
-        decision §14.10 says autosave exists to leave open. */
-    CHECK_FALSE (autosaveDue (document, session, 50 + autosaveQuietTicks));
-    CHECK_FALSE (autosaveDue (document, session, 50 + autosaveCeilingTicks));
+    /*  THE AUTOSAVE IS DUE, OFFER OR NO OFFER - the author's decision
+        (§14.10): this session's edits are protected from the first quiet on,
+        and the writer moves the afternoon aside before it writes. */
+    CHECK (autosaveDue (document, session, 50 + autosaveQuietTicks));
 
-    /*  NOR WILL A SAVE. It makes THIS session's work the show; it does not make
-        that afternoon anything, so the folder stays and the offer stands. */
+    /*  BUT A SAVE THAT COMES FIRST LEAVES THE FOLDER ALONE. It makes THIS
+        session's work the show; it does not make that afternoon anything, so
+        the folder stays, byte for byte, and the offer stands. */
     CHECK (invokeSave (document, session).applied);
     CHECK_FALSE (isDirty (document, session));
-    CHECK (session.recoveryFound);
+    CHECK (session.offeredRecovery == Bundle::recoveryFolder (temp.folder));
     CHECK (readBytes (Bundle::recoveryShowFile (temp.folder)) == theirs);
 
     // Until somebody answers - here by throwing it away - after which it is gone.
     CHECK (invokeBundleCommand (document, session, "document.discardRecovery").applied);
     CHECK_FALSE (Bundle::recoveryFolder (temp.folder).exists());
-    CHECK_FALSE (session.recoveryFound);
-
-    // And this session's own edits are protected again from the next quiet on.
-    REQUIRE (document.setAttribute (houseToHalfName, "Protected again").ok);
-    session.lastChangeTick = 200;
-    CHECK (autosaveDue (document, session, 200 + autosaveQuietTicks));
+    CHECK_FALSE (hasRecoveryOffer (session));
 }
 
-TEST_CASE ("M23: an autosave of a 500-cue show, timed around the handler that writes it")
+TEST_CASE ("M23: an autosave of a 500-cue show - the tick thread's snapshot and the writer's bytes, timed apart")
 {
     /*  MEASUREMENT M23 (§14.14): does a 500-cue autosave fit inside a tick?
 
-        It is taken before 5.5 lands because nobody presses save mid-cue and an
-        autosave fires on its own, so what it measures is a tick going late
-        during a show. AT OR UNDER A QUARTER TICK - 5 ms - the bytes stay on the
-        tick thread, where `document.save` already puts them; above it, the
-        snapshot is still taken there and the bytes go to a writer thread on
-        MountProbe's shape. The record is `document.autosave` either way, which
-        is why nothing here gates on the number.
+        ANSWERED ON THE WINDOWS BOX (PR 5.5, 2026-09-11), and the answer was no:
+        21 ms at the median for the handler that then wrote the bytes, against a
+        threshold of a quarter tick - 5 ms - and 1.4 ms of it serialising. So
+        the snapshot stayed on the tick thread and the bytes moved to a writer
+        thread on MountProbe's shape, and the figure that answers PRD §4.1 is
+        now the TICK THREAD'S: the snapshot and the handoff, which is all a GO
+        can be kept waiting behind. The writer's figure is what the platform
+        charges and nobody on the GO path pays. This instrument keeps the two
+        apart so that each still means what it says.
 
-        ASSERTED IS A COUNT, NEVER A CLOCK: every autosave applied, and the
-        bytes on disk the bytes the writer produced. A wall-clock threshold on
-        a shared CI runner is a flaky test that teaches people to re-run the
-        suite (§14.14, and Phase 4 before it), so the milliseconds are printed
-        for somebody to quote and gate nothing. Quote the Release figure: a
-        Debug build carries iterator debugging and measures the build.
+        APART BY CONSTRUCTION, NOT BY GUESSING AT A THREAD. The writer is a
+        background one that is never started, so the handler queues its job and
+        returns - that return is the tick thread's whole cost, snapshot, `stat`
+        and push - and `drain` then performs the queued job on this thread,
+        which is exactly the writer's work with no wake-up and no scheduler in
+        it. The record is `document.autosave` either way, which is why nothing
+        here gates on either number.
+
+        ASSERTED IS A COUNT, NEVER A CLOCK: every autosave applied, every one
+        landed, and the bytes on disk the bytes the snapshot held. A wall-clock
+        threshold on a shared CI runner is a flaky test that teaches people to
+        re-run the suite (§14.14, and Phase 4 before it), so the milliseconds
+        are printed for somebody to quote and gate nothing. Quote the Release
+        figure: a Debug build carries iterator debugging and measures the build.
 
         THE SHOW IS M18's SHAPE - five hundred `Media` cues, each with one
         `Feed` naming one of twenty slot identifiers - built straight into the
@@ -1154,7 +1216,8 @@ TEST_CASE ("M23: an autosave of a 500-cue show, timed around the handler that wr
     session.folder = temp.folder;
 
     CommandRegistry registry;
-    registerBundleCommands (registry, document, session);
+    DocumentWriter writer { DocumentWriter::Mode::background };
+    registerBundleCommands (registry, document, session, writer);
 
     const auto* autosave = registry.find ("document.autosave");
     REQUIRE (autosave != nullptr);
@@ -1176,10 +1239,14 @@ TEST_CASE ("M23: an autosave of a 500-cue show, timed around the handler that wr
     CommandContext context;
     context.tick = 1;
     REQUIRE (autosave->handler (context, {}).applied);
+    writer.drain();
+    settle (session, writer);
 
     constexpr std::size_t autosaves = 100;
-    std::vector<double> costs;
-    costs.reserve (autosaves);
+    std::vector<double> tickThreadCosts;
+    std::vector<double> writerCosts;
+    tickThreadCosts.reserve (autosaves);
+    writerCosts.reserve (autosaves);
 
     std::size_t applied = 0;
 
@@ -1189,24 +1256,51 @@ TEST_CASE ("M23: an autosave of a 500-cue show, timed around the handler that wr
 
         const auto start = juce::Time::getMillisecondCounterHiRes();
         const auto outcome = autosave->handler (context, {});
-        costs.push_back (juce::Time::getMillisecondCounterHiRes() - start);
+        const auto handedOver = juce::Time::getMillisecondCounterHiRes();
+        writer.drain();
+        const auto onDisk = juce::Time::getMillisecondCounterHiRes();
+
+        tickThreadCosts.push_back (handedOver - start);
+        writerCosts.push_back (onDisk - handedOver);
 
         if (outcome.applied)
             ++applied;
     }
 
+    std::size_t landed = 0;
+
+    for (const auto& done : writer.takeCompletions())
+        if (done.landed && done.problem.empty())
+            ++landed;
+
     CHECK (applied == autosaves);
+    CHECK (landed == autosaves);
     CHECK (readBytes (Bundle::recoveryShowFile (temp.folder)) == written);
     CHECK (tempsIn (Bundle::recoveryFolder (temp.folder)).empty());
-
-    std::sort (costs.begin(), costs.end());
 
     /*  The median of an even count is the mean of the middle two; the 99th
         percentile is the nearest rank, which for a hundred samples is the
         ninety-ninth smallest - one sample short of the worst. */
-    const auto median = (costs[autosaves / 2 - 1] + costs[autosaves / 2]) / 2.0;
-    const auto percentile99 = costs[autosaves - 2];
-    const auto worst = costs.back();
+    struct Spread
+    {
+        double median = 0.0;
+        double percentile99 = 0.0;
+        double worst = 0.0;
+    };
+
+    const auto spreadOf = [] (std::vector<double> samples)
+    {
+        std::sort (samples.begin(), samples.end());
+
+        Spread spread;
+        spread.median = (samples[samples.size() / 2 - 1] + samples[samples.size() / 2]) / 2.0;
+        spread.percentile99 = samples[samples.size() - 2];
+        spread.worst = samples.back();
+        return spread;
+    };
+
+    const auto tickThread = spreadOf (tickThreadCosts);
+    const auto onTheWriter = spreadOf (writerCosts);
 
    #if JUCE_DEBUG
     const char* const build = "Debug";
@@ -1216,10 +1310,14 @@ TEST_CASE ("M23: an autosave of a 500-cue show, timed around the handler that wr
 
     MESSAGE ("M23  " << cueCount << " cues, " << written.size() << " bytes of show.xml, "
                      << build << " build: CanonicalXml::write alone " << serialiseCost
-                     << " ms; the document.autosave handler (show.xml and state.xml, each"
-                        " written, flushed and replaced) over " << autosaves << " autosaves:"
-                     << " median " << median << " ms, 99th percentile " << percentile99
-                     << " ms, worst " << worst << " ms; the threshold is a quarter tick, 5 ms");
+                     << " ms; over " << autosaves << " autosaves, the TICK THREAD (the"
+                        " document.autosave handler: snapshot, stat and handoff) median "
+                     << tickThread.median << " ms, 99th percentile " << tickThread.percentile99
+                     << " ms, worst " << tickThread.worst << " ms; the WRITER (show.xml and"
+                        " state.xml, each written, flushed and replaced) median "
+                     << onTheWriter.median << " ms, 99th percentile " << onTheWriter.percentile99
+                     << " ms, worst " << onTheWriter.worst
+                     << " ms; the threshold for the tick thread is a quarter tick, 5 ms");
 }
 
 //==============================================================================

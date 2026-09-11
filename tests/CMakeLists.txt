@@ -70,6 +70,7 @@ add_executable(wfg_tests
     EngineTests.cpp
     DocumentTests.cpp
     BundleTests.cpp
+    DocumentWriterTests.cpp
     ClockTests.cpp
     DeviceTests.cpp
     TreeTests.cpp
