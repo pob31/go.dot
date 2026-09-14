@@ -679,6 +679,27 @@ TEST_CASE ("media info: the durations are the ones mediaDurations read, byte for
     CHECK (nothing.durations().empty());
 }
 
+TEST_CASE ("media info: the files a show names, in the order it names them, each once")
+{
+    /*  PR 5.7's analyser works through this list front to back, so cue 1's
+        sound has its colours before cue 90's - and the durations walk is
+        built on it, so the two cannot disagree about which files a show has.
+        A file two cues share is one entry, at the first cue; a media cue that
+        names nothing is no entry; a file inside a group is where the group
+        puts it. */
+    MediaShow show;
+    REQUIRE (show.built);
+
+    CHECK (audio::mediaFilesNamedBy (show.document)
+           == std::vector<std::string> { "thunder.wav", "absent.wav", "notes.txt", "sub/rain.wav" });
+
+    /*  And a `file` is resolved in one place: under the media folder, or as
+        given when there is none. */
+    CHECK (audio::resolveMediaPath (show.mediaFolder(), "sub/rain.wav")
+           == show.media.getChildFile ("sub").getChildFile ("rain.wav").getFullPathName().toStdString());
+    CHECK (audio::resolveMediaPath (std::string(), "/somewhere/rain.wav") == "/somewhere/rain.wav");
+}
+
 TEST_CASE ("media info: durations is one address for the object's whole life, and no publish writes to it")
 {
     /*  The durations half is FROZEN (§14.12). A consumer holds its address, so

@@ -36,6 +36,7 @@
 
 #include <wfg/engine/audio/AudioCommands.h>
 #include <wfg/engine/rt/RtCheck.h>
+#include <wfg/engine/audio/MediaAnalyser.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/HostPlayer.h>
 #include <wfg/engine/audio/DeviceLayer.h>
@@ -64,6 +65,8 @@
 
 #include <algorithm>
 #include <clocale>
+#include <cmath>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <atomic>
@@ -1316,6 +1319,145 @@ namespace
         std::cout << what << " is valid" << std::endl;
         return 0;
     }
+
+    /*  WHAT A SHOW'S MEDIA LOOKS LIKE, worked out now and written down (PR 5.7,
+        namespace draft §14.12) - and what it cost, which is M22's instrument.
+
+        A VERB AND NOT A COMMAND, for the reason `validate` and `replay` are
+        verbs (plan decision 12): a cache rebuild is not a document action, it
+        takes no decision the show records, and it must run on a machine with
+        no audio and no socket. It runs the function `wfg serve`'s analyser
+        thread runs, in the same order, synchronously - so what it prints is
+        what a session would have paid, on this machine, for this material.
+
+        ONE LINE PER FILE, its fields apart by spaces and the path LAST,
+        because a path is the one field that may hold a space. The header line
+        names the fields. Then the summary: the two figures M22 asks for -
+        seconds of analysis per minute of audio, and bytes of cache per minute -
+        counted over the files BUILT this time, since a file read from the
+        cache did no analysis to divide. Every number is formatted without the
+        locale: this verb is run under fr_FR by the suite, and a comma where a
+        driver expects a point is a parse failure nobody would look for here.
+
+        EXIT 0 when every file the show names has a cache on disk afterwards;
+        1 when one has none - missing, not audio, or a cache that could not be
+        written - each on its own line; 2 when there was nothing to analyse
+        with: no bundle, or a show that does not open. */
+    int runAnalyse (const juce::ArgumentList& args)
+    {
+        juce::String path;
+
+        for (int i = 1; i < args.arguments.size(); ++i)
+        {
+            if (! args.arguments[i].isOption())
+            {
+                path = args.arguments[i].text;
+                break;
+            }
+        }
+
+        if (path.isEmpty())
+        {
+            std::cerr << "wfg analyse: give me a bundle folder" << std::endl;
+            return 2;
+        }
+
+        const juce::File target { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
+
+        if (! target.isDirectory())
+        {
+            std::cerr << "wfg analyse: " << target.getFullPathName().toStdString()
+                      << " is not a bundle folder, and a cache lives in a bundle's media/"
+                      << std::endl;
+            return 2;
+        }
+
+        wfg::doc::ShowDocument document;
+        const auto opened = wfg::doc::Bundle::open (target, document);
+
+        if (! opened.ok)
+        {
+            std::cerr << "wfg analyse: the show in " << target.getFileName().toStdString()
+                      << " does not open" << std::endl;
+
+            for (const auto& problem : opened.problems)
+                std::cerr << "    " << problem << std::endl;
+
+            return 2;
+        }
+
+        const auto force = args.containsOption ("--force");
+        const auto mediaFolder = target.getChildFile ("media").getFullPathName().toStdString();
+
+        const auto fixed = [] (double value, int decimals)
+        {
+            return juce::String (value, decimals).toStdString();
+        };
+
+        std::cout << "# status hash seconds frames levels hash-ms analysis-ms bytes path" << std::endl;
+
+        std::size_t files = 0;
+        std::size_t built = 0;
+        std::size_t cached = 0;
+        std::size_t withoutCache = 0;
+        double builtSeconds = 0.0;
+        double builtMilliseconds = 0.0;
+        double hashMilliseconds = 0.0;
+        std::int64_t builtBytes = 0;
+
+        for (const auto& named : wfg::audio::mediaFilesNamedBy (document))
+        {
+            const auto analysis = wfg::audio::analyseMediaFile (mediaFolder, named, force);
+
+            ++files;
+            hashMilliseconds += analysis.hashMilliseconds;
+
+            if (analysis.outcome == wfg::audio::MediaAnalysis::Outcome::built)
+            {
+                ++built;
+                builtSeconds += analysis.seconds;
+                builtMilliseconds += analysis.analysisMilliseconds;
+                builtBytes += analysis.bytesOnDisk;
+            }
+            else if (analysis.outcome == wfg::audio::MediaAnalysis::Outcome::cached)
+            {
+                ++cached;
+            }
+
+            if (analysis.bytesOnDisk <= 0)
+                ++withoutCache;
+
+            std::cout << wfg::audio::describe (analysis.outcome)
+                      << ' ' << (analysis.contentHash.empty() ? std::string ("-") : analysis.contentHash)
+                      << ' ' << fixed (analysis.seconds, 3)
+                      << ' ' << std::to_string (analysis.frames)
+                      << ' ' << std::to_string (analysis.levels)
+                      << ' ' << fixed (analysis.hashMilliseconds, 1)
+                      << ' ' << fixed (analysis.analysisMilliseconds, 1)
+                      << ' ' << std::to_string (analysis.bytesOnDisk)
+                      << ' ' << named << std::endl;
+        }
+
+        std::cout << "# " << std::to_string (files) << " files: " << std::to_string (built)
+                  << " built, " << std::to_string (cached) << " cached, "
+                  << std::to_string (withoutCache) << " without a cache on disk; hashing "
+                  << fixed (hashMilliseconds, 1) << " ms" << std::endl;
+
+        if (built > 0 && builtSeconds > 0.0)
+        {
+            const auto minutes = builtSeconds / 60.0;
+
+            std::cout << "# built: " << fixed (builtSeconds, 3) << " s of audio in "
+                      << fixed (builtMilliseconds, 1) << " ms, "
+                      << fixed (builtMilliseconds / 1000.0 / minutes, 3)
+                      << " s per minute of audio; " << std::to_string (builtBytes)
+                      << " bytes of cache, "
+                      << std::to_string (std::llround (static_cast<double> (builtBytes) / minutes))
+                      << " bytes per minute" << std::endl;
+        }
+
+        return withoutCache == 0 ? 0 : 1;
+    }
 }
 
     //==========================================================================
@@ -1916,16 +2058,27 @@ namespace
             It outlives `parameters` because it is declared before it; the tree
             only borrows it.
 
-            A `MediaInfo` since PR 5.6, so that PR 5.7's analyser has somewhere
+            A `MediaInfo` since PR 5.6, so that the analyser below has somewhere
             to put a file's hash and pyramid - but what the tree and the runner
             are handed is `durations()`, one address for this object's whole
             life, into numbers nothing changes after this line. The slot
             analysis decides whether to rebuild, every publish, by comparing
-            that address (`audio/MediaInfo.h`). */
-        const wfg::audio::MediaInfo mediaInfo {
-            document,
-            target.isDirectory() ? target.getChildFile ("media").getFullPathName().toStdString()
-                                 : std::string() };
+            that address (`audio/MediaInfo.h`). Not const since PR 5.7: the
+            analyser publishes into its other half. */
+        const auto mediaFolder = target.isDirectory()
+                                   ? target.getChildFile ("media").getFullPathName().toStdString()
+                                   : std::string();
+
+        wfg::audio::MediaInfo mediaInfo { document, mediaFolder };
+
+        /*  AND WHAT EACH OF THOSE FILES SOUNDS LIKE, worked out on a thread of
+            its own (PR 5.7, namespace draft §14.12). Declared here, after the
+            table it publishes into, so it is destroyed - and stopped - before
+            that table is; started with the other workers, after the first
+            publish, so show load never waits for a hash. It produces no record
+            and no command: a pyramid is arithmetic over bytes that already
+            exist, and nothing a replay could need. */
+        wfg::audio::MediaAnalyser analyser { mediaInfo, mediaFolder };
 
         wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
 
@@ -2151,6 +2304,17 @@ namespace
             thread is the only thing that hands it work, so from the first tick
             there is a thread to take it. */
         writer.start();
+
+        /*  And the analyser, handed every file the show names, in the order
+            the show names them - so cue 1's sound has its colours before cue
+            90's. The first snapshot has been published and nothing waits for
+            this: a record without a pyramid is published as nothing, which is
+            what a client draws grey. The tick thread hands it any file a show
+            edit introduces, below. */
+        analyser.start();
+
+        for (const auto& named : wfg::audio::mediaFilesNamedBy (document))
+            analyser.queue (named);
 
         if (! udp.start (requestedOsc,
                          [&engine, &nameSpace] (wfg::osc::Datagram datagram)
@@ -2707,6 +2871,19 @@ namespace
                                 {
                                     showRevisionSeen = showRevisionNow;
                                     session.lastChangeTick = outcome.tick;
+
+                                    /*  AND ANY FILE THE EDIT INTRODUCED goes
+                                        to the analyser (PR 5.7), so a sound
+                                        imported mid-session has its colours
+                                        now rather than at the next open. A
+                                        walk of the document's names and no
+                                        file opened; every file already asked
+                                        for is dropped inside `queue`, under a
+                                        short lock each. Only on a SHOW edit -
+                                        a GO moves standby, which is a state
+                                        row, and walks nothing. */
+                                    for (const auto& named : wfg::audio::mediaFilesNamedBy (document))
+                                        analyser.queue (named);
                                 }
 
                                 /*  And whether an earlier session's afternoon is
@@ -2891,6 +3068,12 @@ namespace
 
         server.stop();
         probe.stop();
+
+        /*  Between two frames, or a few kilobytes into a hash: a Ctrl-C does
+            not sit through a gigabyte of WAV. What it had not reached is
+            analysed again at the next open, or read from the cache. */
+        analyser.stop();
+
         udp.stop();
         engine.log().close();
 
@@ -2962,6 +3145,16 @@ int wfg::runConsole (int argc, char** argv)
                       [] (const juce::ArgumentList& args)
                       {
                           if (const auto code = runValidate (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
+    app.addCommand ({ "analyse",
+                      "analyse <bundle> [--force]",
+                      "Works out the spectral colour of every media file a bundle names, and caches it beside them",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runAnalyse (args); code != 0)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 

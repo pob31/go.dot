@@ -397,9 +397,11 @@ The documents come first, and they are the thing to read before the code:
   They are throwaway by construction: they may link `wfg::thirdparty` and never
   `wfg::engine`, so there is nothing in them that *could* migrate into `src/`.
 
-**What does not exist yet.** Undo, crash-safe autosave and recovery, `document.revert` and
-`document.saveAs`, and the spectral-colour cache are Phase 5's, drawn in §14 of the namespace
-draft and landing one pull request at a time; control surfaces and bindings are Phase 6's. What
+**What does not exist yet.** Phase 5 is half built, one pull request at a time against §14 of the
+namespace draft: undo, an atomic save with a `dirty` that is true, the edit lock, crash-safe
+autosave and recovery, `document.revert` and `document.saveAs`, and the spectral-colour cache
+with `wfg analyse` have landed. The timbre's node and route, and the console's Phase 5 views,
+have not; control surfaces and bindings are Phase 6's. What
 this paragraph listed before Phase 3 — a group runtime, arming at standby, pre- and post-waits the
 scheduler reads, and finished runs that kept their addresses for ever — Phase 3 built or fixed: a
 finished run is now published for five seconds and then retires from the tree. Everything a tick

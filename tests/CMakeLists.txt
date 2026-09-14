@@ -94,6 +94,7 @@ add_executable(wfg_tests
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp
     UndoTests.cpp
+    TimbreTests.cpp
     OscQueryTests.cpp)
 
 # Where the hand-authored fixtures live. Passed as a definition rather than
@@ -710,6 +711,27 @@ add_test(NAME blackbox.phase5.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase5_document.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.phase5.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# PRD §3.30'S CHECK, BEFORE ANYTHING IS DRAWN (PR 5.7, namespace draft §14.12):
+# a 1 kHz sine saturated at the ramp's 1 kHz hue, white noise grey, a sweep
+# walking the ramp - three WAVs the driver writes with stdlib `wave`, analysed
+# by `wfg analyse`, and decoded by a `.tpy` reader of the driver's own, so it
+# cannot share a mistake with the engine's. A PAIR, because WAV is a format
+# every build reads (§14.13 left the single shape for a format some build
+# lacks) and because the verb prints numbers a comma would break. Then one
+# `wfg serve`, on the dummy clock, for the analyser thread the verb shares its
+# code with: every named file coloured unasked, and a file a mid-session edit
+# introduces coloured without a reopen. No audio side, so it is quick.
+add_test(NAME blackbox.timbre.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/timbre_cache.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.timbre.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.timbre.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/timbre_cache.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.timbre.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # The wiring the unit suite cannot reach: a real datagram, on a real socket, on

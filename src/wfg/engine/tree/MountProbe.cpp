@@ -46,7 +46,19 @@ namespace wfg::tree
         if (! running.load (std::memory_order_relaxed))
             return;
 
-        stopping.store (true, std::memory_order_relaxed);
+        /*  Raised UNDER THE LOCK (PR 5.7, found while copying this shape into
+            `MediaAnalyser`). `run` tests the flag holding the lock and lets go
+            of it only by going to sleep, so a flag raised under the same lock
+            is either seen by that test or raised after the sleep began, when
+            the notify wakes it. Raised without the lock it could land between
+            the test and the sleep, the notify would find nobody waiting, and
+            the join below would wait for ever - a Ctrl-C that never returns,
+            once in a long while. */
+        {
+            const std::lock_guard<std::mutex> lock { guard };
+            stopping.store (true, std::memory_order_relaxed);
+        }
+
         wake.notify_all();
 
         if (thread.joinable())

@@ -62,24 +62,25 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <vector>
 
 namespace wfg::doc { class ShowDocument; }
 
 namespace wfg::audio
 {
-    /*  WHAT A FILE SOUNDS LIKE, at every zoom - and PR 5.7's to define, which is
-        why it is only named here (§14.12: window 2048, hop 1024, then halvings
-        down to 64 frames). A `shared_ptr` to an incomplete type may be declared,
+    /*  WHAT A FILE SOUNDS LIKE, at every zoom - defined in `Timbre.h` by PR 5.7,
+        and only named here (§14.12: window 2048, hop 1024, then halvings down
+        to 64 frames). A `shared_ptr` to an incomplete type may be declared,
         copied, moved and destroyed anywhere, empty or not: its deleter is
         type-erased and captured once, where the pointer is first made from a
-        complete object - which happens in 5.7's analyser, the one place that
-        will include the definition. What needs the complete type is only
-        MAKING one, and dereferencing it. 5.7 plugs in by defining
-        `wfg::audio::TimbrePyramid` as a STRUCT, or by changing the word here: a
-        class/struct mismatch between a declaration and its definition warns on
-        MSVC (C4099) and on Clang (-Wmismatched-tags). GCC, which the strict job
-        runs, leaves that warning off by default, so the build would not catch
-        it - which is why the rule is written here rather than trusted to CI. */
+        complete object - which happens in the analyser, `MediaAnalyser.cpp`,
+        the one place that makes one. What needs the complete type is only
+        MAKING one, and dereferencing it; a reader that does either includes
+        `Timbre.h`. It is a STRUCT there and here: a class/struct mismatch
+        between a declaration and its definition warns on MSVC (C4099) and on
+        Clang (-Wmismatched-tags). GCC, which the strict job runs, leaves that
+        warning off by default, so the build would not catch it - which is why
+        the rule is written here rather than trusted to CI. */
     struct TimbrePyramid;
 
     /*  EVERYTHING GO.DOT KNOWS ABOUT ONE MEDIA FILE, keyed elsewhere by the
@@ -110,6 +111,24 @@ namespace wfg::audio
     /*  Seconds, or 0.0 when the file is absent, unreadable, or in a format this
         build has no reader for. Never throws. */
     double mediaDurationSeconds (const std::string& absolutePath);
+
+    /*  WHERE A `file` THE DOCUMENT NAMES IS, on this machine: relative to the
+        bundle's `media/` folder, or taken as given when there is no folder to
+        be relative to - the way the runner resolves it, so that the duration
+        published, the colours drawn and the file played are one file. The
+        durations walk and the analyser (PR 5.7) both ask this, and nothing
+        else spells it. */
+    std::string resolveMediaPath (const std::string& mediaFolder, const std::string& named);
+
+    /*  EVERY DISTINCT `file` A MEDIA CUE IN THIS SHOW NAMES, in the order the
+        show first names it, and never an empty one. Reads the document and
+        nothing else - no file is opened - so the tick thread may ask it after
+        a show edit, to hand the analyser a file somebody has just imported.
+
+        IN DOCUMENT ORDER rather than sorted, because the analyser works
+        through it front to back: cue 1's sound gets its colours before cue
+        90's, which is the order an operator will reach them in. */
+    std::vector<std::string> mediaFilesNamedBy (const doc::ShowDocument& document);
 
     /*  Every distinct `file` a media cue in this show names, mapped to its
         length in seconds.
@@ -151,8 +170,8 @@ namespace wfg::audio
 
         So the map is a const member, filled once by `mediaDurations` in the
         constructor, and nothing writes to it afterwards - not `publish`, not the
-        analyser PR 5.7 will start, not a corrected length a full read might
-        find. The seconds are what they were when the show was opened, which is
+        analyser PR 5.7 starts, not a corrected length a full read might find.
+        The seconds are what they were when the show was opened, which is
         also what a replay of this session will be told (the log's `media`
         lines are written from this map).
 
@@ -197,7 +216,8 @@ namespace wfg::audio
             hash and a null pyramid. */
         std::shared_ptr<const MediaRecords> snapshot() const;
 
-        /*  PR 5.7's analyser thread calls this; in PR 5.6 only tests do.
+        /*  The analyser thread calls this (`MediaAnalyser`, PR 5.7), once for
+            each file it has a pyramid for; so do tests.
 
             Builds a new map from the current one plus this record, outside the
             reader's lock, and swaps it in under that lock. Publishers are

@@ -5121,7 +5121,10 @@ explicitly told not to trust.
 1024 — 46.9 frames per second at 48 kHz — four bytes per frame (hue, saturation, lightness,
 peak), each level built from its predecessor by circular mean of hue, arithmetic mean of
 saturation and lightness, and max of peak. Format `WFGT` plus version, rate, window, hop and a
-level table, little-endian. The reason is one sentence of §3.30's and it is the whole design:
+level table, little-endian. *(Both refined by PR 5.7, 2026-09-14, and said at the end of this
+section: a silent frame lends a coarser one nothing, the hue is averaged by saturation, and the
+file carries a checksum and the sample count it describes.)* The reason is one sentence of
+§3.30's and it is the whole design:
 *"so the editor at any zoom and a forty-pixel Gogo bar both read one level and nothing
 recomputes."* A Gogo bar forty pixels wide over a six-minute clip is sixteen thousand
 finest-level frames averaged into forty, and doing that per frame per redraw is a decision to
@@ -5191,13 +5194,20 @@ the only honest check.** A 1 kHz sine has its centroid at 1 kHz because that is 
 so the expected hue is a lookup in the ramp table known before the code runs; white noise has a
 flatness near 1 and therefore a saturation below 0.2, by definition and not by inspection; a 100
 Hz → 8 kHz sweep has a hue that increases monotonically frame over frame, and *monotonic* is a
-property a machine can check and an eye cannot. Three signals whose answers are known in
+property a machine can check and an eye cannot. *Corrected by PR 5.7 (2026-09-14): not with
+these stops.* Purple at 40 Hz is 280° and deep blue at 150 Hz is 240°, and from there the ramp
+climbs the other way round the wheel through red, orange and yellow to green — so between 100 and
+150 Hz the sweep's hue falls before it rises, and the test as written would have failed a
+correct build. What is monotonic by construction is the lightness. So the sweep is asserted twice
+over: its lightness never falls, and every frame's hue is the ramp's hue *at the sweep's
+frequency at that instant*, which is a formula — a stronger check than monotonic would have been,
+and still one a machine makes. Three signals whose answers are known in
 advance, which is the difference between a test and a screenshot. It is written twice,
 deliberately, and the second is the one that counts:
 
 | where | what it asserts |
 |---|---|
-| `tests/TimbreTests.cpp` (new) | the sine is saturated above 0.8 at the ramp's 1 kHz hue within tolerance; noise is under 0.2; the sweep's hue is monotonic along frames; level *k* equals the pairwise means of level *k−1*; write/read round-trips byte-identical; a second `analyse` reports zero work |
+| `tests/TimbreTests.cpp` (new) | the sine is saturated above 0.8 at the ramp's 1 kHz hue within tolerance, at 44.1, 48 and 96 kHz; noise is under 0.2; the sweep's lightness never falls and each frame's hue is the ramp's at the sweep's frequency then (*not* "monotonic", PR 5.7's correction above); level *k* is level *k−1* paired by the rule restated in the test; write/read round-trips byte-identical and every damaged file is refused; a second `analyse` reports zero work |
 | `tests/blackbox/timbre_cache.py` | writes the three WAVs with stdlib `wave`, builds a bundle naming them, runs `wfg analyse`, decodes the `.tpy` with its **own** `struct` reader, and asserts the same three facts |
 
 The second reader is not duplication: it is `common.py`'s standing rule — stdlib only, and *a
@@ -5221,6 +5231,70 @@ per-channel timbre are §14.15's to defer. §3.30's idle-colour policy — *auth
 timbre while sounding, with timbre a layout option that can be off* — is *(proposed)* and stays
 the author's: the timbre reading is a node a §3.16 layout may read or ignore, the authored
 colour is a separate row, and nothing in the engine decides which of them a surface shows.
+
+**What PR 5.7 built (2026-09-14), and five things building it changed.** `audio/Timbre.{h,cpp}`
+is the arithmetic and nothing else — samples in, a pyramid out, the pyramid to bytes and back —
+and `audio/MediaAnalyser.{h,cpp}` is the file, the hash, the cache and the thread. `wfg analyse`
+and `wfg serve`'s analyser call one function, `analyseMediaFile`, so what the verb prints is what
+a session pays. A frame describes one hop's stretch of the file, with its 2048-sample window
+*centred* on that stretch, so the colour drawn over a stretch is that stretch's; the channels are
+averaged for the spectrum and the peak is taken over all of them, so a stereo pair in opposite
+phase still has a waveform. The three signals came out where the arithmetic said they would, at
+48 kHz: the sine saturated to the byte in every steady frame, its hue within the byte's own
+precision of the ramp's 18.9°; the noise at a mean saturation of **0.153** — 0.176 in its
+least grey frame, so under 0.2 frame by frame and not only on average — and a lightness of
+0.73, bright, because white noise's power is where the bins are; the sweep within **0.9°** of the
+ramp at its instantaneous frequency and 0.0025 of its lightness, at worst. The five changes:
+
+- **The sweep's check**, corrected in place above: the ramp's hue turns back between purple and
+  deep blue, so what is asserted is the lightness, which never falls, and the hue against the
+  ramp at the sweep's frequency frame by frame. The stops are the author's; a monotonic hue
+  would need the 40 Hz stop on the blue side of 240°.
+- **Silence has no colour, and lends a coarser level none.** A frame whose in-band power is below
+  what a −100 dBFS sine would put there has hue, saturation and lightness all nought — lightness
+  nought is below the ramp's darkest, 0.15, so it cannot be read as the bottom of the ramp. The
+  circular mean this section drew would have averaged it in: silence would have halved the
+  lightness of a frame half-silent — a lie in the one dimension that is the frequency axis — and
+  its hue, nought by convention, is *red*, so every quiet stretch would have tinted red at the
+  coarse levels a Gogo bar reads. So a silent frame paired with a sounding one gives the sounding
+  one's colour, and between two sounding frames the hue moves along the shorter arc by the second
+  frame's share of the two saturations — a grey frame has no hue worth averaging, and a vivid one
+  dragged halfway to it would be a colour neither had. Integer arithmetic throughout, a half
+  rounded up, written out in `Timbre.h` because the test and the driver each restate it.
+- **The flatness is on magnitude, and now it is measured rather than argued.** On power, the
+  geometric-over-arithmetic mean of exponentially distributed bin powers is *e* to the minus
+  Euler's constant, 0.56, whatever the level — noise would read a saturation of 0.44 and could
+  never be grey. On magnitude it is about 0.85, and the noise read 0.153.
+- **The file carries a checksum and the samples it describes**, because it is written *without*
+  being made durable: a show is flushed to the disk before its name moves, a pyramid is arithmetic
+  anybody can repeat, and on the Windows box M23 found two durable replaces cost nineteen
+  milliseconds, nearly all of it flushing and replacing — an import of two hundred files has no
+  show's sake to pay a share of that for. The temp and the replace stay, so no reader ever opens a
+  half-written file. A power cut can leave a file of the right length and the wrong
+  bytes; `timbre::read` checks the FNV-1a of everything after the header, every level's size
+  against the one below it and the level count against the halving rule, and refuses anything
+  else, and the analyser builds it again. `formatVersion` is bumped by any change to the
+  analysis, a moved stop included, because the key is the content alone and the version is the
+  only thing that tells a pyramid computed by an old rule from one computed by this.
+- **`juce::SHA256 (const File&)` is the wrong one of the two spellings.** It hands the digest a
+  bare `FileInputStream`, and JUCE's SHA-256 reads its stream 64 bytes at a time — a read from
+  the operating system each, sixteen million for a gigabyte. The stream spelling is used instead,
+  behind a 64 KB buffer and behind a stream that answers "no more" the moment the analyser is told
+  to stop, so a Ctrl-C does not sit through a gigabyte's hash; a digest of a prefix is thrown
+  away by a caller that looks at the flag before it looks at the hash.
+
+The rest is as drawn. The analyser is queued in the show's order, so cue 1's sound has its
+colours before cue 90's; a path is queued once a session, so the tick thread can re-offer every
+file the show names after any *show* edit — a GO moves standby, a state row, and walks nothing —
+and all but a newly imported file are dropped under one short lock each. A record is published
+only with its pyramid, so none carries a hash the §14.5 route would refuse. `wfg analyse` prints a
+line per file, the path last because it is the one field that may hold a space, formats every
+number without the locale, and exits 0 when every file the show names has a cache on disk
+afterwards, 1 when one does not, 2 when there was no bundle to open. And one thing found while
+copying `MountProbe`'s shape: its `stop()` raised the flag *outside* the lock the thread tests it
+under, so a stop landing between the thread's test and its sleep was a notify nobody heard and a
+join that never returned — a Ctrl-C that hangs, once in a long while. Both now raise it under the
+lock.
 
 ### 14.13 The document layer — plumbing, and the rows in one place
 
@@ -5331,7 +5405,9 @@ what a section drawn before the code is for.
   registered once (`:623-627`) because `device_serve.py` *"SKIPS ITSELF on a machine with no
   audio device, which is every CI runner, and that is honest rather than convenient"*
   (`:620-622`), and `timbre_cache.py` is a candidate for that shape if `wfg analyse` wants a
-  format this build's reader lacks and the pair if it does not.
+  format this build's reader lacks and the pair if it does not. *(PR 5.7, 2026-09-14: the
+  pair, `blackbox.timbre.C` and `.fr_FR` — the driver writes WAV, which every build reads, and
+  the verb prints numbers a comma would break.)*
 
 **Everything the parameter table gains.** Every row lands with the pull request that publishes
 it, never before. This table is canonical for the mechanical columns; the argument for each row
@@ -5383,6 +5459,27 @@ than a design: four bytes a frame at 46.9 frames a second is about 11 kB per min
 finest level, so an hour of material carries something near a megabyte and a half **inside its
 own bundle** — and an answer an order of magnitude worse reopens that, because a bundle travels
 and `media/.timbre/` would be the first thing this engine has ever written into `media/`.
+
+**M22 answered, on the Windows box (PR 5.7, 2026-09-14): the analyser stays a thread nobody
+mentions.** A Release build, five minutes of stereo 24-bit audio at 48 kHz — 86.4 MB of WAV —
+analysed three times with `wfg analyse --force`:
+
+| part | five minutes of audio | per minute of audio |
+|---|---|---|
+| the analysis: decode, 14 063 frames coloured, nine levels built, the cache written | 367–391 ms | **0.073–0.078 s** |
+| the hash, SHA-256 over the file's bytes | 344–356 ms | 0.07 s — about 245 MB/s |
+| the cache on disk, every level | 112 396 bytes | **22.5 kB** |
+
+About eight hundred times faster than real time, with the hash costing as much again: an hour of
+material is under ten seconds of background work at an open, on a thread GO does not share, and
+the operator is told nothing — §3.30's claim, answered rather than obeyed. The bytes are the
+estimate above, doubled by the levels as a pyramid doubles anything: 11 kB a minute at the finest
+level and as much again in the eight above it, about 1.35 MB an hour, so `media/.timbre/` stays
+where it is. What the figure also says is where the time would go at scale: a file already cached
+still pays its hash at every open, because the hash is the key — two hours of stereo 24-bit is
+about eight seconds of hashing per session, off the GO path. A memo of path, size and time
+against hash would remove it, and nothing here needs it yet. **The Mac mini's figure is owed**,
+beside M23's.
 
 **M23 — does a 500-cue autosave fit inside a tick?** `document.save` already writes on the tick
 thread, and `Bundle.h:126-130` says out loud why that was allowed and why it is not the end of

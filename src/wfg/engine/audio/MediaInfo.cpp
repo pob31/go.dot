@@ -22,8 +22,10 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_core/juce_core.h>
@@ -57,18 +59,25 @@ namespace wfg::audio
         return static_cast<double> (reader->lengthInSamples) / reader->sampleRate;
     }
 
-    std::map<std::string, double> mediaDurations (const doc::ShowDocument& document,
-                                                 const std::string& mediaFolder)
+    std::string resolveMediaPath (const std::string& mediaFolder, const std::string& named)
     {
-        std::map<std::string, double> durations;
+        if (mediaFolder.empty())
+            return named;
 
-        const juce::File folder { juce::String (mediaFolder) };
+        return juce::File (juce::String (mediaFolder)).getChildFile (juce::String (named))
+                   .getFullPathName().toStdString();
+    }
 
-        /*  WALKED RATHER THAN STORED, and never written into the document: how
-            long a file is, is a fact about the file rather than something
-            somebody decided (§4.10). The walk is the shape `widestRangeCount`
-            already uses in the console - once, at load, on the thread that
-            opens the show. */
+    std::vector<std::string> mediaFilesNamedBy (const doc::ShowDocument& document)
+    {
+        std::vector<std::string> named;
+        std::set<std::string> seen;
+
+        /*  WALKED RATHER THAN STORED, and never written into the document:
+            which files a show plays is read off the cues that name them. The
+            walk is the shape `widestRangeCount` already uses in the console. A
+            media cue's children are its routes, so visiting them first changes
+            no order that matters. */
         const std::function<void (const juce::ValueTree&)> visit =
             [&] (const juce::ValueTree& node)
         {
@@ -78,24 +87,29 @@ namespace wfg::audio
             if (node.getType().toString() != "Media")
                 return;
 
-            const auto named = node[juce::Identifier ("file")].toString().toStdString();
+            auto file = node[juce::Identifier ("file")].toString().toStdString();
 
-            if (named.empty() || durations.count (named) != 0)
-                return;
-
-            /*  Resolved the way the runner resolves it, so that the duration
-                published and the file played are the same file: relative to the
-                bundle's media folder, or taken as given when there is no folder
-                to be relative to. */
-            const auto path = mediaFolder.empty()
-                                ? named
-                                : folder.getChildFile (juce::String (named))
-                                        .getFullPathName().toStdString();
-
-            durations[named] = mediaDurationSeconds (path);
+            if (! file.empty() && seen.insert (file).second)
+                named.push_back (std::move (file));
         };
 
         visit (document.root());
+
+        return named;
+    }
+
+    std::map<std::string, double> mediaDurations (const doc::ShowDocument& document,
+                                                 const std::string& mediaFolder)
+    {
+        std::map<std::string, double> durations;
+
+        /*  How long a file is, is a fact about the file rather than something
+            somebody decided (§4.10): read here, once, at load, on the thread
+            that opens the show - through the one resolution of a `file` there
+            is, so that the duration published and the file played are the
+            same file. */
+        for (const auto& named : mediaFilesNamedBy (document))
+            durations[named] = mediaDurationSeconds (resolveMediaPath (mediaFolder, named));
 
         return durations;
     }
