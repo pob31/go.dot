@@ -187,6 +187,8 @@ add_library(wfg_engine STATIC
     wfg/engine/oscquery/OscQueryServer.h
     wfg/engine/oscquery/Subscriptions.cpp
     wfg/engine/oscquery/Subscriptions.h
+    wfg/engine/oscquery/TimbreRoute.cpp
+    wfg/engine/oscquery/TimbreRoute.h
     wfg/engine/tree/Mount.cpp
     wfg/engine/tree/MountProbe.h
     wfg/engine/tree/MountProbe.cpp

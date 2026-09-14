@@ -722,17 +722,34 @@ set_tests_properties(blackbox.phase5.fr_FR PROPERTIES
 # lacks) and because the verb prints numbers a comma would break. Then one
 # `wfg serve`, on the dummy clock, for the analyser thread the verb shares its
 # code with: every named file coloured unasked, and a file a mid-session edit
-# introduces coloured without a reopen. No audio side, so it is quick.
+# introduces coloured without a reopen.
+#
+# AND WHAT A SESSION SAYS WITH IT (PR 5.8, §14.5): a second `wfg serve`,
+# --hosted because a playhead needs a track, of a copy routed to a bus and
+# parked on the SWEEP. The cues must name their files' SHA-256 as hashlib
+# computes it, the sine's renamed copy the same one. GO must play the sweep,
+# and at every playhead the driver catches, its run must publish the very frame
+# the driver's reader finds under that playhead - with a point under fr_FR -
+# and the ramp's colour at the sweep's frequency then. The sweep and not the
+# sine, because a steady sine is one frame repeated, and a playhead rounded, a
+# frame out, or read off the level above would all have passed; the driver
+# reads on until it holds a reading only its own frame could have produced.
+# /media/<hash>/timbre must hand back the cache's own bytes and its header as
+# JSON, formatVersion included, marked no-cache - the URL names the audio and
+# not the analysis, and a moved ramp stop rebuilds the pyramid under the same
+# name - and refuse what it does not hold with no-store, since that URL is a
+# 200 the day the file is imported. A real graph with no device under it, run
+# in real time, hence the first-sound driver's allowance.
 add_test(NAME blackbox.timbre.C
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/timbre_cache.py"
                  --wfg-locale=C)
 set_tests_properties(blackbox.timbre.C PROPERTIES
-                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 600)
 add_test(NAME blackbox.timbre.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/timbre_cache.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.timbre.fr_FR PROPERTIES
-                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 600)
 
 # The wiring the unit suite cannot reach: a real datagram, on a real socket, on
 # a thread that may not read the document, reaching the right cue - and the

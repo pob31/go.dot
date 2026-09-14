@@ -23,7 +23,10 @@
 #include <juce_simpleweb/juce_simpleweb.h>
 
 #include <algorithm>
+#include <exception>
 #include <string>
+#include <string_view>
+#include <utility>
 #include <vector>
 
 namespace wfg::oscquery
@@ -69,6 +72,70 @@ namespace wfg::oscquery
             answer it already gives to a prefix of "/". */
         constexpr const char* clientPrefix = "/ui";
 
+        /*  THE PREFIX ITSELF, OR THE PREFIX AND A SLASH - one rule for `/ui`
+            and for every route, so the two cannot come to disagree about where
+            a prefix ends. Comparing the leading letters alone is the version
+            that is easy to write and wrong: a route at `/media` would answer
+            for `/mediaserver`, which is somebody's perfectly ordinary address,
+            and the tree would never hear of it. */
+        bool isAtOrUnder (std::string_view path, std::string_view prefix)
+        {
+            return path.substr (0, prefix.size()) == prefix
+                     && (path.size() == prefix.size() || path[prefix.size()] == '/');
+        }
+
+        /*  A slash first, at least one character after it, and no slash last.
+            An empty prefix would match every path there is, `/` the same, and
+            a trailing slash would make `isAtOrUnder` want two. */
+        bool isRoutePrefix (const std::string& prefix)
+        {
+            return prefix.size() > 1 && prefix.front() == '/' && prefix.back() != '/';
+        }
+
+        /*  The four statuses a route may answer, and 500 for the rest (see
+            `RouteReply`). */
+        SimpleWeb::StatusCode statusCodeFor (int status)
+        {
+            switch (status)
+            {
+                case 200: return SimpleWeb::StatusCode::success_ok;
+                case 400: return SimpleWeb::StatusCode::client_error_bad_request;
+                case 404: return SimpleWeb::StatusCode::client_error_not_found;
+                default:  break;
+            }
+
+            return SimpleWeb::StatusCode::server_error_internal_server_error;
+        }
+
+        /*  The fields the server writes itself, whatever a route puts in its
+            `headers`: the type from `contentType`, and the length - or its
+            absence - from the body. */
+        bool isServersOwnField (const std::string& name)
+        {
+            return SimpleWeb::case_insensitive_equal (name, "Content-Type")
+                     || SimpleWeb::case_insensitive_equal (name, "Content-Length")
+                     || SimpleWeb::case_insensitive_equal (name, "Transfer-Encoding");
+        }
+
+        /*  WHAT A ROUTE THAT THREW IS ANSWERED WITH, whatever it threw: a 500,
+            one line of text, and `no-store` like every refusal a route writes
+            for itself. A failure is the least lasting answer there is - the
+            next request may well succeed - and a browser that kept this one
+            would go on showing it after whatever threw had stopped throwing.
+            The reason is fixed text and never `what()`: a message written for
+            whoever debugs the handler is not one to hand to anybody who can
+            reach the port - and what `answerRoute`'s second catch catches has
+            no `what()` to give. */
+        RouteReply failedRoute()
+        {
+            RouteReply reply;
+            reply.status = 500;
+            reply.contentType = textMime;
+            reply.body = "the route failed while answering\n";
+            reply.headers.emplace_back ("Cache-Control", "no-store");
+            return reply;
+        }
+
         /*  The content type for a file, by extension. Unknown is served as
             bytes rather than guessed at: a browser told the wrong type does
             something confidently wrong. */
@@ -113,6 +180,18 @@ namespace wfg::oscquery
             the engine is being wired and never again. */
         juce::File clientDirectory;
 
+        /*  The same ordering, and this time enforced rather than trusted:
+            `serveRoute` refuses to add one while the server runs, because a
+            vector the HTTP thread is walking must not grow under it. Starting
+            the server thread is what publishes these to it. */
+        struct Route
+        {
+            std::string prefix;
+            RouteHandler handler;
+        };
+
+        std::vector<Route> routes;
+
         Impl() { server.addWebSocketListener (this); }
 
         ~Impl() override
@@ -148,9 +227,17 @@ namespace wfg::oscquery
                 rather than after a failed lookup because "no such node" is a
                 different and misleading thing to tell somebody who asked for a
                 page. */
-            if (path == clientPrefix
-                  || path.rfind (std::string (clientPrefix) + "/", 0) == 0)
+            if (isAtOrUnder (path, clientPrefix))
                 return serveClient (response, path);
+
+            /*  THEN THE ROUTES, still before the tree, and for the reasons
+                `serveRoute` gives: a route is not an address, so it takes its
+                query as it comes - `?HOST_INFO` included, which on a route's
+                path is that route's to refuse - and it is answered without a
+                snapshot and without the pattern refusal below. */
+            for (const auto& route : routes)
+                if (isAtOrUnder (path, route.prefix))
+                    return answerRoute (response, route.handler, path, query);
 
             //  ?HOST_INFO is a question about the SERVER, and takes no path.
             if (query == "HOST_INFO")
@@ -288,6 +375,71 @@ namespace wfg::oscquery
             response->write (SimpleWeb::StatusCode::success_ok, served,
                              { { "Content-Type", mimeFor (file) },
                                { "Cache-Control", "no-store" } });
+            return true;
+        }
+
+        bool answerRoute (std::shared_ptr<HttpServer::Response> response,
+                          const RouteHandler& handler,
+                          const std::string& path,
+                          const std::string& query)
+        {
+            RouteReply reply;
+
+            /*  INSIDE A CATCH, which nothing else in this file needs: the tree
+                and the client directory are this server's own code, and a
+                handler is not. The two arms are not worth the same, and what
+                each is worth is what the layers below would have done without
+                it:
+
+                  * A `std::exception` is caught by juce_simpleweb as well,
+                    round the function it hands every request to, and the
+                    request is then dropped: the client reads its connection
+                    closed and no reply at all. So the first arm buys a 500 and
+                    a reason where there would have been an empty reply to
+                    guess at - and nothing more, because the thread was never
+                    in danger.
+
+                  * Anything else - an int, a string literal, a library's own
+                    type that does not derive from `std::exception` - passes
+                    that catch, passes the one in juce_simpleweb's
+                    `initServer`, which names `std::exception` too, leaves the
+                    io service's `run()`, and is swallowed by `juce::Thread`
+                    with an assertion and nothing else. The thread that ends
+                    quietly is the one that carries every WebSocket: every
+                    surface loses its subscriptions without a close frame,
+                    while the server goes on saying it is connected - and
+                    because it says so, the next `stop()` spins for ever in
+                    juce_simpleweb's `stopInternal`, waiting for a flag only
+                    the dead thread would have cleared. So the second arm is
+                    the one that keeps the port alive and `stop()` returnable:
+                    a colour bar that failed to build must not take every
+                    subscription, and then the engine's shutdown, down with it.
+
+                Either way the reply is the same 500, and the next request is
+                answered as usual. */
+            try
+            {
+                reply = handler (path, query);
+            }
+            catch (const std::exception&)
+            {
+                reply = failedRoute();
+            }
+            catch (...)
+            {
+                reply = failedRoute();
+            }
+
+            SimpleWeb::CaseInsensitiveMultimap fields { { "Content-Type", reply.contentType } };
+
+            for (const auto& [name, value] : reply.headers)
+                if (! isServersOwnField (name))
+                    fields.emplace (name, value);
+
+            /*  The body as a `string_view` of the whole string, so its zero
+                bytes go out with the rest and `Content-Length` counts them -
+                the same care `serveClient` above takes for a PNG. */
+            response->write (statusCodeFor (reply.status), reply.body, fields);
             return true;
         }
 
@@ -438,6 +590,14 @@ namespace wfg::oscquery
     void OscQueryServer::serveClientFrom (const juce::File& directory)
     {
         impl->clientDirectory = directory;
+    }
+
+    void OscQueryServer::serveRoute (std::string prefix, RouteHandler handler)
+    {
+        if (running.load (std::memory_order_relaxed) || ! isRoutePrefix (prefix) || ! handler)
+            return;
+
+        impl->routes.push_back ({ std::move (prefix), std::move (handler) });
     }
 
     bool OscQueryServer::start (int portToBind, Namespace& nameSpace)

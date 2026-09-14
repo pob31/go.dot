@@ -46,6 +46,11 @@
     of their own - and it is also what lets the tests drive it with a two-node
     fake instead of standing up an engine.
 
+    A ROUTE (`serveRoute`, PR 5.8) is the same seam for bytes that are not the
+    tree: the server matches a prefix and hands the request over, and what
+    answers behind it is somebody else's business. Go.dot's timbre pyramids
+    are one (`TimbreRoute`); nothing in this file knows what a pyramid is.
+
     WHAT PHASE 1 DOES NOT DO, so nobody looks for it:
 
       * mDNS/Bonjour advertisement (`_oscjson._tcp`). Clients are pointed at a
@@ -66,8 +71,10 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::oscquery
@@ -125,6 +132,41 @@ namespace wfg::oscquery
     };
 
     //==========================================================================
+    /*  WHAT A ROUTE ANSWERS: an HTTP reply, and nothing the tree knows about.
+
+        A route is a plain GET on this same port answered by a function rather
+        than from the published snapshot - for bytes that a client fetches
+        rather than polls, which have no value AT A MOMENT and would ride on
+        every description a client asked for if they lived in the tree as a
+        node.
+
+          * `status` is 200, 400, 404 or 500. Anything else is sent as 500: an
+            unmapped code is the handler's bug, and the one honest thing the
+            server can say about it is that it failed. The default is 404, so
+            a reply built and never filled in says that nothing is there.
+          * `body` goes out byte for byte, zero bytes included. Its length is
+            the string's, never a terminator's.
+          * `headers` are extra fields. `Content-Type`, `Content-Length` and
+            `Transfer-Encoding` are the server's to write - the type from
+            `contentType`, the framing from the body itself - and a handler's
+            copy of any of them is dropped rather than sent beside the
+            server's: a client believes whichever it reads first, and a wrong
+            length or a framing the body does not have truncates the one thing
+            a route is for. */
+    struct RouteReply
+    {
+        int status = 404;
+        std::string contentType { "text/plain" };
+        std::string body;
+        std::vector<std::pair<std::string, std::string>> headers;
+    };
+
+    /*  One request, as the request line gave it: the path, and the query - all
+        of what followed the `?`, unparsed - beside it. Called on the server's
+        HTTP thread, which is also the WebSocket's; see `serveRoute`. */
+    using RouteHandler = std::function<RouteReply (const std::string& path, const std::string& query)>;
+
+    //==========================================================================
     class OscQueryServer
     {
     public:
@@ -171,6 +213,59 @@ namespace wfg::oscquery
             it. Embedding a default copy so a shipped binary needs no directory
             is a later question. */
         void serveClientFrom (const juce::File& directory);
+
+        /*  Answers every GET for `prefix`, or for anything below it, from
+            `handler` rather than from the tree.
+
+            BEFORE `start()`, as `serveClientFrom` is, and never while the
+            server runs. The routes are read on the HTTP thread without a lock,
+            which is safe only because nothing writes them once a request can
+            arrive - so a call made while the server is running is refused
+            rather than raced, and so is one with no handler to call.
+
+            A REQUEST MATCHES THE PREFIX EXACTLY, OR THE PREFIX AND A SLASH -
+            the rule `/ui` is matched by. A route at `/media` answers `/media`
+            and everything under `/media/`; `/mediaserver`, which merely begins
+            with the same letters, is an address like any other and goes to
+            the tree. A prefix is a path of at least one segment, a slash first
+            and none last: an empty one, or `/` itself, would swallow the whole
+            namespace, and is refused. Two routes that overlap are tried in the
+            order they were added.
+
+            WHERE IT IS ANSWERED is most of the design, and each neighbour is
+            where it is for a reason:
+              * below the check that there is a namespace at all, so a server
+                that has not started, or has stopped, answers nothing from a
+                route either - the request falls through to juce_simpleweb's
+                own handler as every request does then;
+              * below the GET-only refusal, so a POST to a route is a 405 like
+                a POST anywhere else;
+              * after `/ui`, which is answered first and cannot be shadowed by
+                a route that happened to share its prefix;
+              * ABOVE `?HOST_INFO`, the snapshot fetch and the refusal of
+                address patterns, because a route is not an address. It parses
+                its own query - `?level=2` would otherwise be refused as a form
+                submission by the rule that an attribute query is a bare key -
+                and a request for bytes neither waits on a tree nor fails for
+                the want of one.
+
+            ONE THREAD, AND IT IS SHARED. juce_simpleweb answers every HTTP
+            request and every WebSocket frame on a single thread, so a handler
+            that blocked - on a disk, or on another thread's lock - would
+            stall every subscription push and every poll on this port for as
+            long as it waited. A handler answers from memory.
+
+            A HANDLER THAT THROWS is answered with a 500 and `no-store`,
+            whatever it threw, and the two cases are not the same size. For a
+            `std::exception` it is a courtesy: juce_simpleweb catches one
+            itself and drops the request, so the gain is a 500 where the
+            client would have read an empty reply. For anything else it is the
+            difference between one failed request and a dead port: a value of
+            any other type passes every catch juce_simpleweb has and ends the
+            thread that carries the WebSocket - every subscription with it -
+            while the server goes on believing it is connected, so that
+            `stop()` never returns. */
+        void serveRoute (std::string prefix, RouteHandler handler);
 
         void stop();
 

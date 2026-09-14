@@ -63,6 +63,12 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
+
+/*  Named and not included: the tree reads a MediaInfo only through a pointer
+    here, and the .cpp is where it is dereferenced. */
+namespace wfg::audio { class MediaInfo; }
 
 namespace wfg::tree
 {
@@ -205,6 +211,31 @@ namespace wfg::tree
             stale = true;
         }
 
+        /*  WHAT THE ANALYSER HAS LEARNT ABOUT EACH FILE, for
+            `/godot/cue/<id>/hash` and `/godot/run/<id>/timbre` (namespace draft
+            §14.5): the late half of `audio::MediaInfo`, the hash and the
+            pyramid, read through ONE `snapshot()` per publish - a pointer copy
+            under that object's own short lock, however many runs are playing.
+
+            BESIDE `setMediaDurations` AND NOT INSTEAD OF IT: the slot analysis
+            reads the durations by ADDRESS, so they stay a pointer of their own
+            into the frozen half (`audio/MediaInfo.h`). Absent - a tree built
+            without this, as a test builds one - every hash and every timbre
+            reads empty, the answer §3.30 gives for a clip whose colours have
+            not arrived. (`wfg replay` builds no tree at all: its runner is
+            handed the lengths its log recorded, and nothing it does is
+            published.)
+
+            MARKS NOTHING STALE, and that is the difference from the durations
+            above. Both nodes this feeds are published by the runtime half,
+            which is built on every publish, because a hash and a pyramid
+            arrive from the analyser's thread while nothing about the show
+            moves - a cached half would have frozen them empty.
+
+            Held by pointer and not owned; the MediaInfo must outlive the
+            tree's last publish. */
+        void setMediaInfo (const audio::MediaInfo* mediaToRead) noexcept { mediaInfo = mediaToRead; }
+
         /*  WHERE EACH LIST IS BEING POINTED, for `list/aim`, `list/solve` and
             `list/statePosition`.
 
@@ -250,6 +281,7 @@ namespace wfg::tree
         const MountTable& mounts;
         const MountSender* sender = nullptr;
         const std::map<std::string, double>* durations = nullptr;
+        const audio::MediaInfo* mediaInfo = nullptr;
 
         /*  Every declared slot, in document order, as the document half last
             saw them. The runtime half publishes `holder` and `pending` against
@@ -269,6 +301,23 @@ namespace wfg::tree
             client polling a cue would watch its node list change shape. So
             every cue gets one, out of the half that is rebuilt every tick. */
         std::vector<std::string> declaredCues;
+
+        /*  Every MEDIA cue, in document order, with the `file` it named when
+            the document half last walked it: the roster `/godot/cue/<id>/hash`
+            is published against, the `prepare` shape exactly (§14.5).
+
+            The file comes WITH the identifier because the hash is looked up by
+            file - the path the document writes, which is the key MediaInfo
+            files its records under - and the runtime half has no document to
+            read it from. It cannot go stale: an edit to a cue's `file` is an
+            edit to the show, and rebuilds this with everything else.
+
+            And only media cues, which is the one way this differs from the
+            roster above. A memo has no file to hash, so it has no hash node at
+            all, which is `duration`'s rule - and a media cue has one from the
+            moment it exists, empty until the analyser answers, so no client
+            watches a cue's node list change shape. */
+        std::vector<std::pair<std::string, std::string>> declaredMedia;
 
         /** Every cue list, in document order. See `declaredCues`. */
         std::vector<std::string> declaredLists;

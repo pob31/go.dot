@@ -1049,17 +1049,36 @@ function renderLists() {
 
 /*  WHETHER A RUN'S LAUNCH HAS BEEN PLACED, asked of the one node that knows.
 
-    `run/state` publishes eight words and three of them are the run before its
-    launch: `preparing` is the horizon getting it ready ahead of any GO,
-    `waiting` is its pre-wait running, and `armed` is its voice held and its
-    media made ready. Nothing has been played in any of the three, so the
-    position of such a run is nought because nothing has moved rather than
-    because the cue is sitting at its top. Every other word - playing,
-    stopping, postWait, done, failed - is a run whose launch was placed, and a
-    finished one keeps the position it stopped at for the five seconds it is
-    retained, which is worth reading: it is how far the cue got. */
+    `run/state` publishes eight words and four of them are a run whose launch
+    never was. Three are the run before it: `preparing` is the horizon getting
+    it ready ahead of any GO, `waiting` is its pre-wait running, and `armed` is
+    its voice held and its media made ready. The fourth is the run that never
+    got that far. `failed` was once counted with the launched, on the reading
+    that a failure is something that happens to a run in flight, and for a
+    media run it never is: every `run.failed` a media run receives is the arm
+    refusing it - no track, no file, no route, no slot - or the audio side
+    unable to make it ready, and all of those are sent before any launch. The
+    command says so in its own description: the run never played. So nothing
+    has been played in any of the four, and the position of such a run is
+    nought because nothing has moved rather than because the cue is sitting at
+    its top - "at 0.0s" on the row of a cue whose whole news is that it could
+    not sound. Worse beside it, a colour: the engine reads the frame at that
+    nought, which is the file's first, and a failed cue would have worn the
+    colour of a sound it never made - or "not analysed yet" of a file the
+    bundle does not have, which promises an analysis that will never come.
+
+    Every other word - playing, stopping, postWait, done - is a run whose
+    launch was placed, and a finished one keeps the position it stopped at for
+    the five seconds it is retained, which is worth reading: it is how far the
+    cue got.
+
+    MEDIA ROWS ARE THE ONLY ONES THAT ASK, and that is what makes `failed` an
+    honest member of the four: a network or fade run can fail after it has
+    begun - a target that never answered, or answered with something else -
+    but neither has a playhead, so neither ever reaches this question. */
 function launched(state) {
-  return state !== "preparing" && state !== "waiting" && state !== "armed";
+  return state !== "preparing" && state !== "waiting" && state !== "armed"
+      && state !== "failed";
 }
 
 /*  THE RUNNING PANE, as a tree: a group's run holds its members' runs, which is
@@ -1114,6 +1133,39 @@ function runRow(id, depth, out) {
 
     bits.push("at " + position.toFixed(1) + "s"
                 + (timed ? " of " + length.toFixed(1) + "s" : ""));
+  }
+
+  /*  AND WHAT IT SOUNDS LIKE THERE: the engine's reading of the frame under the
+      playhead (PRD §3.30, namespace draft §14.5), published as "<hue> <sat>
+      <light>" - hue in degrees, the other two from nought to one. IN WORDS
+      BEFORE ANY COLOUR: the spectral bar is PR 5.17, and PRD 4.8 says colour
+      never carries anything alone, so the numbers reach the row first and a
+      swatch will join them rather than replace them. Beside the position and
+      behind the same gate, because it is a reading AT the position: a run not
+      yet launched, or refused before it could be, has a playhead that has not
+      moved, and the frame under it is a colour nobody has heard.
+
+      Three answers, and they are not alike. Lightness nought is SILENCE - it
+      sits below the ramp's darkest, 0.15, so it cannot be a low sound - and
+      the row says so in a word rather than in three noughts. An EMPTY reading
+      is the analyser not having reached this file yet, which the bar will draw
+      grey. No node at all is an engine older than this page, and a page that
+      said "not analysed yet" to it would be saying something untrue; so would
+      one that guessed at a reading it cannot parse, which is left out the way
+      a level that is not a number is. */
+  const timbre = tree.run(id, "timbre", null);
+
+  if (kind === "media" && launched(state) && typeof timbre === "string") {
+    const words = timbre.trim().split(/\s+/);
+    const [hue, sat, light] = words.map(Number);
+
+    if (timbre.trim() === "") {
+      bits.push("not analysed yet");
+    } else if (words.length === 3 && [hue, sat, light].every(Number.isFinite)) {
+      bits.push(light === 0 ? "silent"
+                            : "hue " + hue.toFixed(1) + "°, sat " + sat.toFixed(2)
+                                + ", light " + light.toFixed(2));
+    }
   }
 
   const phase = tree.run(id, "phase", "");

@@ -34,6 +34,13 @@
     them into 200-or-404 makes a client guess: 204 means the node is real and
     carries no such attribute, 400 means the attribute is not one the protocol
     has, 404 means nothing lives there. Each is asserted separately.
+
+    AND THE ROUTES BESIDE THE TREE (PR 5.8). A route is a GET the server hands
+    to a function before the tree is consulted. The fake namespace is enough to
+    pin where one is matched and that its bytes go out untouched; the timbre
+    route is then asked directly - it is a pure function over a `MediaInfo` -
+    and once through a running server, so each half is tested where it can
+    fail and the join between them once.
 */
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
@@ -42,7 +49,11 @@
 
 #include <wfg/engine/oscquery/OscQueryServer.h>
 #include <wfg/engine/oscquery/Subscriptions.h>
+#include <wfg/engine/oscquery/TimbreRoute.h>
 
+#include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/audio/Timbre.h>
+#include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/json/JsonValue.h>
 #include <wfg/engine/osc/OscCodec.h>
 #include <wfg/engine/tree/Node.h>
@@ -54,13 +65,18 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <cstddef>
+#include <cstdint>
 #include <cstdlib>
 #include <chrono>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 using namespace wfg;
@@ -239,17 +255,30 @@ namespace
             enough while every assertion in this file was about a status code -
             but `Content-Type` is the half of a reply that a change to the MIME
             table breaks, and it is entirely invisible to a test that reads only
-            the body. `Cache-Control` is the second: the media route asserts on
-            it, and a route that quietly stopped saying `no-store` would serve a
-            client its own stale copy of a page somebody had just edited. */
-        std::map<std::string, std::string> headers;
+            the body. `Cache-Control` is the second: the timbre route asserts on
+            it both ways - `no-cache` on a pyramid, `no-store` on a refusal -
+            and a pyramid marked to be kept for good would show the old colours
+            after the analysis changed, as a refusal that lost its `no-store`
+            would keep a bar grey long after the analyser had coloured it.
+
+            A MULTIMAP, so a field sent twice is seen twice. A route's handler
+            may name a field the server writes itself, and the only way to
+            prove the server dropped the handler's copy is to count. */
+        std::multimap<std::string, std::string> headers;
 
         /** The value of one header, empty if the reply carries no such field. */
         std::string header (const std::string& name) const
         {
-            const auto found = headers.find (lowerCased (name));
+            const auto key = lowerCased (name);
+            const auto found = headers.lower_bound (key);
 
-            return found != headers.end() ? found->second : std::string();
+            return found != headers.end() && found->first == key ? found->second : std::string();
+        }
+
+        /** How many times the reply carries a field. */
+        std::size_t headerCount (const std::string& name) const
+        {
+            return headers.count (lowerCased (name));
         }
     };
 
@@ -268,8 +297,13 @@ namespace
         abandoned juce::URL in its own client.
 
         So: write the request, read the response, parse the first line. It is
-        fifteen lines and it tells the truth. */
-    HttpReply get (int port, const std::string& target)
+        fifteen lines and it tells the truth.
+
+        ANY METHOD, because a route has to be shown to answer a POST with the
+        same 405 as the tree does; `get` below is what nearly every case calls.
+        A request with no body says so, rather than leaving the server to
+        decide what a missing length means. */
+    HttpReply sendRequest (int port, const std::string& method, const std::string& target)
     {
         HttpReply reply;
 
@@ -278,10 +312,11 @@ namespace
         if (! socket.connect ("127.0.0.1", port, 10000))
             return reply;
 
-        const std::string request = "GET " + target + " HTTP/1.1\r\n"
-                                    "Host: 127.0.0.1\r\n"
-                                    "Connection: close\r\n"
-                                    "\r\n";
+        const std::string request = method + " " + target + " HTTP/1.1\r\n"
+                                    + "Host: 127.0.0.1\r\n"
+                                    + (method == "GET" ? "" : "Content-Length: 0\r\n")
+                                    + "Connection: close\r\n"
+                                    + "\r\n";
 
         if (socket.write (request.data(), static_cast<int> (request.size()))
               != static_cast<int> (request.size()))
@@ -360,6 +395,11 @@ namespace
         return reply;
     }
 
+    HttpReply get (int port, const std::string& target)
+    {
+        return sendRequest (port, "GET", target);
+    }
+
     //==========================================================================
     struct Client final : public SimpleWebSocketClient::Listener
     {
@@ -413,6 +453,15 @@ namespace
         OscQueryServer server;
 
         Rig() { started = server.start (0, nameSpace); }
+
+        /*  With something set on the server before it starts - a route, which
+            can be added then and never afterwards. */
+        explicit Rig (const std::function<void (OscQueryServer&)>& configure)
+        {
+            configure (server);
+            started = server.start (0, nameSpace);
+        }
+
         ~Rig() { server.stop(); }
 
         bool started = false;
@@ -929,6 +978,677 @@ TEST_CASE ("oscquery: start is refused twice, and stop is safe to repeat")
     server.stop();
     CHECK_FALSE (server.isRunning());
     CHECK (server.boundPort() == 0);
+}
+
+//==============================================================================
+/*  THE ROUTES, and first the hook on its own, behind a handler that answers
+    whatever the path tells it to. What is pinned here is the server's half of
+    the bargain - where a route is matched, what reaches it, that its reply
+    goes out as it was written - so the handler knows nothing about pyramids,
+    which is also true of the server. */
+namespace
+{
+    /*  What a route's handler was asked: recorded on the HTTP thread, read by
+        the test once the reply is back, and under a lock both times, because
+        a reply arriving on a socket orders nothing in the memory model. */
+    struct Seen
+    {
+        std::mutex mutex;
+        std::vector<std::pair<std::string, std::string>> requests;
+
+        void record (const std::string& path, const std::string& query)
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            requests.emplace_back (path, query);
+        }
+
+        bool saw (const std::string& path, const std::string& query)
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return std::find (requests.begin(), requests.end(), std::make_pair (path, query))
+                     != requests.end();
+        }
+
+        bool sawPath (const std::string& path)
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return std::any_of (requests.begin(), requests.end(),
+                                [&path] (const std::pair<std::string, std::string>& asked)
+                                {
+                                    return asked.first == path;
+                                });
+        }
+    };
+
+    /*  Ten bytes, two of them nought and one of them 0xff: a body that a
+        pointer and a terminator anywhere between the handler and the socket
+        would cut short after four. */
+    std::string awkwardBytes()
+    {
+        return std::string ("zero\0one\0\xff", 10);
+    }
+
+    /*  Answers with the status its last segment spells when that is a number,
+        200 otherwise; throws a `std::runtime_error` when it spells `throw`,
+        and an int - nothing derived from `std::exception` at all - when it
+        spells `throw-int`. Whatever it answers carries a body the server must
+        not cut, a field of its own, and three fields that are the server's to
+        write - so the server must drop them. */
+    RouteReply answerAsTold (const std::string& path, const std::string& query, Seen& seen)
+    {
+        seen.record (path, query);
+
+        const auto last = path.substr (path.rfind ('/') + 1);
+
+        if (last == "throw")
+            throw std::runtime_error ("a handler that fails");
+
+        /*  The throw that only the server's own catch stands in front of:
+            every catch juce_simpleweb has names `std::exception`. */
+        if (last == "throw-int")
+            throw 42;
+
+        RouteReply reply;
+        reply.status = (! last.empty() && std::isdigit (static_cast<unsigned char> (last.front())) != 0)
+                         ? std::atoi (last.c_str())
+                         : 200;
+        reply.contentType = "application/x-go-dot-test";
+        reply.body = awkwardBytes();
+        reply.headers = { { "X-Route", "answered" },
+                          { "Content-Length", "3" },
+                          { "content-type", "text/html" },
+                          { "Transfer-Encoding", "chunked" } };
+        return reply;
+    }
+}
+
+TEST_CASE ("oscquery: a route answers its prefix and below it, byte for byte, and nothing else")
+{
+    auto seen = std::make_shared<Seen>();
+
+    Rig rig ([seen] (OscQueryServer& server)
+    {
+        server.serveRoute ("/media", [seen] (const std::string& path, const std::string& query)
+                                     {
+                                         return answerAsTold (path, query, *seen);
+                                     });
+
+        /*  And one at the client's own prefix, which must never be reached:
+            `/ui` is answered before any route is looked at. */
+        server.serveRoute ("/ui", [seen] (const std::string& path, const std::string& query)
+                                  {
+                                      return answerAsTold (path, query, *seen);
+                                  });
+    });
+
+    REQUIRE (rig.started);
+
+    SUBCASE ("the reply goes out as the handler wrote it")
+    {
+        const auto reply = get (rig.port(), "/media");
+
+        CHECK (reply.status == 200);
+        CHECK (reply.header ("Content-Type") == "application/x-go-dot-test");
+        CHECK (reply.headerCount ("Content-Type") == 1u);
+        CHECK (reply.header ("X-Route") == "answered");
+
+        /*  Every byte, the noughts included, and a length that counts them:
+            the handler's own `Content-Length: 3` was dropped, not believed -
+            and so was its `Transfer-Encoding: chunked`, which would have
+            stopped the server writing a length at all and left a client
+            trying to read ten plain bytes as chunks. */
+        REQUIRE (awkwardBytes().size() == 10u);
+        CHECK (reply.body == awkwardBytes());
+        CHECK (reply.header ("Content-Length") == "10");
+        CHECK (reply.headerCount ("Content-Length") == 1u);
+        CHECK (reply.headerCount ("Transfer-Encoding") == 0u);
+    }
+
+    SUBCASE ("its status, and a 500 for one it may not use or for a handler that throws")
+    {
+        CHECK (get (rig.port(), "/media/400").status == 400);
+        CHECK (get (rig.port(), "/media/404").status == 404);
+        CHECK (get (rig.port(), "/media/500").status == 500);
+        CHECK (get (rig.port(), "/media/418").status == 500);
+
+        /*  A `std::exception` is one juce_simpleweb would have caught by
+            itself, and then dropped the request: what the server's own catch
+            buys here is this 500 where the client would have read an empty
+            reply - and a `no-store` on it, like every refusal a route writes.
+            The thread was never at risk from this throw, and the tree is
+            asked once more only to show that nothing else changed; the throw
+            that would have ended the thread is the next case's. */
+        const auto thrown = get (rig.port(), "/media/throw");
+
+        CHECK (thrown.status == 500);
+        CHECK (thrown.header ("Cache-Control") == "no-store");
+        CHECK (get (rig.port(), "/godot/engine/tick?VALUE").status == 200);
+    }
+
+    SUBCASE ("a throw that is not a std::exception is a 500 too, and the port lives on")
+    {
+        /*  The case the catch is really for. An int passes every catch
+            juce_simpleweb has, and without the server's own it would leave
+            the io service's `run()` and end the thread that carries the tree
+            and every WebSocket, with the server still believing it was
+            connected. Were that catch to go, this case would not merely fail:
+            the tree below would go unanswered, and the rig's `stop()` would
+            then spin for ever waiting on a thread that is gone - a hang, which
+            is the bug, reproduced. */
+        const auto thrown = get (rig.port(), "/media/throw-int");
+
+        CHECK (thrown.status == 500);
+        CHECK (thrown.header ("Content-Type") == "text/plain");
+        CHECK (thrown.header ("Cache-Control") == "no-store");
+        CHECK (seen->sawPath ("/media/throw-int"));
+
+        //  And on the same server, a tree address is answered as ever.
+        CHECK (get (rig.port(), "/godot/engine/tick?VALUE").status == 200);
+    }
+
+    SUBCASE ("the query reaches the route whole, before the tree could refuse it")
+    {
+        /*  A `=` and a `&` - a form submission, to the tree, and refused as
+            one there - handed over untouched. */
+        CHECK (get (rig.port(), "/media/a/b?level=2&x").status == 200);
+        CHECK (seen->saw ("/media/a/b", "level=2&x"));
+
+        //  HOST_INFO asked of a route's path is the route's question.
+        CHECK (get (rig.port(), "/media?HOST_INFO").body == awkwardBytes());
+        CHECK (seen->saw ("/media", "HOST_INFO"));
+
+        /*  And the star of a pattern, which the tree refuses with a 400 of
+            its own, reaches the route as the request spelled it. */
+        CHECK (get (rig.port(), "/media/*/timbre").status == 200);
+        CHECK (seen->saw ("/media/*/timbre", ""));
+    }
+
+    SUBCASE ("a path that only begins with the same letters is the tree's")
+    {
+        const auto reply = get (rig.port(), "/mediaserver");
+
+        INFO (reply.body);
+        CHECK (reply.status == 404);
+        CHECK (reply.body.find ("no such node") != std::string::npos);
+        CHECK_FALSE (seen->sawPath ("/mediaserver"));
+    }
+
+    SUBCASE ("the client is answered first, and a POST is still a 405")
+    {
+        const auto client = get (rig.port(), "/ui");
+
+        INFO (client.body);
+        CHECK (client.status == 404);
+        CHECK (client.body.find ("no client is being served") != std::string::npos);
+        CHECK_FALSE (seen->sawPath ("/ui"));
+
+        CHECK (sendRequest (rig.port(), "POST", "/media").status == 405);
+        CHECK_FALSE (seen->sawPath ("/media"));
+    }
+}
+
+TEST_CASE ("oscquery: a route is added before the server runs, at a real prefix, or not at all")
+{
+    const auto answer = [] (const std::string&, const std::string&)
+    {
+        RouteReply reply;
+        reply.status = 200;
+        reply.body = "route\n";
+        return reply;
+    };
+
+    Rig rig ([&answer] (OscQueryServer& server)
+    {
+        server.serveRoute ("", answer);                 // every path there is
+        server.serveRoute ("/", answer);                // the same
+        server.serveRoute ("/late/", answer);           // a slash it would want twice
+        server.serveRoute ("/slash/", answer);          // the same, and asked for below
+        server.serveRoute ("/nothing", RouteHandler {});
+    });
+
+    REQUIRE (rig.started);
+
+    /*  Too late: the HTTP thread may already be walking the routes, and a
+        vector must not grow under a reader. */
+    rig.server.serveRoute ("/late", answer);
+
+    //  So the tree is still the tree...
+    const auto root = get (rig.port(), "/");
+
+    CHECK (root.status == 200);
+    CHECK (root.body != "route\n");
+    CHECK (get (rig.port(), "/godot/engine/tick?VALUE").status == 200);
+
+    //  ...and none of the refused prefixes answers anything but "no such node".
+    for (const auto* refusedPath : { "/late", "/late/x", "/nothing" })
+    {
+        const auto reply = get (rig.port(), refusedPath);
+
+        INFO (refusedPath);
+        CHECK (reply.status == 404);
+        CHECK (reply.body.find ("no such node") != std::string::npos);
+    }
+
+    /*  A PREFIX WITH A SLASH LAST, asked for at the only paths it could have
+        matched had it been taken: itself, and itself and a slash - which, for
+        a prefix already ending in one, is a doubled slash. None of the paths
+        asked so far is either, so a server that took `/late/` would have
+        passed every check above. Neither reaches the handler. What the tree
+        makes of them is the tree's business and not pinned here - only that
+        the tree answered, and not the route. */
+    for (const auto* slashedPath : { "/slash/", "/slash//x" })
+    {
+        const auto reply = get (rig.port(), slashedPath);
+
+        INFO (slashedPath);
+        INFO (reply.body);
+        CHECK (reply.status != 0);
+        CHECK (reply.body != "route\n");
+    }
+}
+
+//==============================================================================
+/*  THE TIMBRE ROUTE, asked directly. It is a pure function over a
+    `MediaInfo`, so these cases build one from an empty show and no media
+    folder - nothing is read from a disk - and publish its records by hand,
+    the way the analyser does: one file with a hash and a pyramid, and one
+    with a hash and none, which the analyser never publishes and the route must
+    refuse all the same. */
+namespace
+{
+    namespace timbre = audio::timbre;
+
+    /*  The sha256 of "test", of nothing, and of "hello": real digests, so the
+        route is fed the shape it will meet. Only the first is analysed. */
+    constexpr const char* analysedHash = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08";
+    constexpr const char* hashWithoutPyramid = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+    constexpr const char* unknownHash = "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824";
+
+    /*  3.5 seconds at 44.1 kHz: 151 frames of a hop each, and so three
+        levels - 151, 76 and 38 - and a length with a fraction in it, which a
+        French locale would write with a comma if anything let it. */
+    constexpr std::uint32_t chosenRate = 44100;
+    constexpr std::uint64_t chosenSamples = 154350;
+    constexpr std::size_t chosenFrameCount = 151;
+
+    /*  Frames whose bytes the test chose, so it knows every one. Each tenth
+        is silent - hue, saturation and lightness nought, and the first one's
+        peak as well, so the body opens on four zero bytes it must carry
+        rather than stop at - and the rest spread across the byte range, 0xff
+        included. */
+    std::vector<timbre::Frame> chosenFrames (std::size_t count)
+    {
+        std::vector<timbre::Frame> frames (count);
+
+        for (std::size_t i = 0; i < count; ++i)
+        {
+            auto& frame = frames[i];
+            frame.peak = static_cast<std::uint8_t> ((i * 11) % 256);
+
+            if (i % 10 == 0)
+                continue;
+
+            frame.hue = static_cast<std::uint8_t> ((i * 37) % 256);
+            frame.saturation = static_cast<std::uint8_t> (255 - i % 256);
+            frame.lightness = static_cast<std::uint8_t> ((40 + i) % 256);
+        }
+
+        return frames;
+    }
+
+    struct AnalysedMedia
+    {
+        doc::ShowDocument document;
+        audio::MediaInfo media { document, std::string() };
+
+        std::shared_ptr<const audio::TimbrePyramid> pyramid =
+            std::make_shared<audio::TimbrePyramid> (
+                timbre::pyramidOf (chosenFrames (chosenFrameCount), chosenRate, chosenSamples));
+
+        AnalysedMedia()
+        {
+            audio::MediaRecord sounding;
+            sounding.seconds = 3.5;
+            sounding.contentHash = analysedHash;
+            sounding.pyramid = pyramid;
+            media.publish ("thunder.wav", std::move (sounding));
+
+            audio::MediaRecord hashedOnly;
+            hashedOnly.contentHash = hashWithoutPyramid;
+            media.publish ("rain.wav", std::move (hashedOnly));
+        }
+    };
+
+    std::string timbrePath (const std::string& hash)
+    {
+        return std::string (mediaRoutePrefix) + "/" + hash + "/timbre";
+    }
+
+    /*  A field of a reply the route built, by a name compared without case,
+        as the server will send it. */
+    std::string fieldOf (const RouteReply& reply, const std::string& name)
+    {
+        for (const auto& [field, value] : reply.headers)
+            if (lowerCased (field) == lowerCased (name))
+                return value;
+
+        return {};
+    }
+
+    std::size_t littleEndianAt (const std::vector<std::uint8_t>& bytes, std::size_t at,
+                                std::size_t width)
+    {
+        std::size_t value = 0;
+
+        for (std::size_t i = width; i > 0; --i)
+            value = (value << 8) | static_cast<std::size_t> (bytes[at + i - 1]);
+
+        return value;
+    }
+
+    /*  THE BYTES THE `.tpy` HOLDS FOR ONE LEVEL, found through the file's own
+        table of levels - a frame count and an offset, four bytes each, from
+        byte 32 (Timbre.h) - rather than by working out where they ought to be.
+        Empty when the table points outside the file. */
+    std::string levelBytesInFile (const std::vector<std::uint8_t>& file, std::size_t level)
+    {
+        constexpr std::size_t tableStart = 32;
+        constexpr std::size_t entrySize = 8;
+
+        if (file.size() < tableStart + entrySize * (level + 1))
+            return {};
+
+        const auto frameCount = littleEndianAt (file, tableStart + entrySize * level, 4);
+        const auto offset = littleEndianAt (file, tableStart + entrySize * level + 4, 4);
+
+        if (offset + 4 * frameCount > file.size())
+            return {};
+
+        return std::string (reinterpret_cast<const char*> (file.data() + offset), 4 * frameCount);
+    }
+
+    /*  EVERY REFUSAL LOOKS THE SAME: its status, one line of plain text, and
+        a `no-store` and nothing else - a 404 for a hash that is not analysed
+        yet is a 200 a minute later, and a cached one would keep a bar grey. */
+    void checkRefusal (const RouteReply& reply, int status, const std::string& asked)
+    {
+        INFO ("asked: " << asked);
+        INFO ("answered: " << reply.body);
+
+        CHECK (reply.status == status);
+        CHECK (reply.contentType == "text/plain");
+        CHECK (fieldOf (reply, "Cache-Control") == "no-store");
+        CHECK (reply.headers.size() == 1u);
+
+        REQUIRE_FALSE (reply.body.empty());
+        CHECK (reply.body.back() == '\n');
+        CHECK (std::count (reply.body.begin(), reply.body.end(), '\n') == 1);
+    }
+
+    /*  EVERY 200 LOOKS THE SAME TOO: kept, but asked for again before it is
+        reused. Not a year and `immutable`, which is what this said first: the
+        URL names the audio and not the analysis, a bumped
+        `timbre::formatVersion` rebuilds the `.tpy` under the same name, and a
+        copy kept for good would show the colours from before the change. */
+    constexpr const char* askedAgain = "no-cache";
+}
+
+TEST_CASE ("timbre route: a level is the file's own bytes, and INFO is its header")
+{
+    AnalysedMedia analysed;
+    const auto& pyramid = *analysed.pyramid;
+
+    /*  The fixture, pinned: the frame count follows from the samples, and the
+        levels from halving down to 64 or fewer. */
+    REQUIRE (pyramid.frames() == chosenFrameCount);
+    REQUIRE (pyramid.levels.size() == 3u);
+
+    const auto file = timbre::write (pyramid);
+    const auto path = timbrePath (analysedHash);
+
+    for (std::size_t level = 0; level < pyramid.levels.size(); ++level)
+    {
+        INFO ("level " << level);
+
+        const auto reply = answerTimbreRoute (analysed.media, path, "level=" + std::to_string (level));
+
+        CHECK (reply.status == 200);
+        CHECK (reply.contentType == "application/octet-stream");
+        CHECK (fieldOf (reply, "Cache-Control") == askedAgain);
+
+        /*  Four bytes a frame, hue, saturation, lightness, peak, spelled out
+            from the frames here - and then the same bytes the file writer puts
+            in the `.tpy`, which is the claim the route makes. */
+        std::string expected;
+
+        for (const auto& frame : pyramid.levels[level])
+            for (const auto part : { frame.hue, frame.saturation, frame.lightness, frame.peak })
+                expected.push_back (static_cast<char> (part));
+
+        CHECK (reply.body.size() == 4 * pyramid.levels[level].size());
+        CHECK (reply.body == expected);
+
+        const auto inFile = levelBytesInFile (file, level);
+
+        REQUIRE_FALSE (inFile.empty());
+        CHECK (reply.body == inFile);
+    }
+
+    //  The first frame is silent with no peak: the body opens on four noughts.
+    CHECK (answerTimbreRoute (analysed.media, path, "level=0").body.substr (0, 4)
+           == std::string (4, '\0'));
+
+    const auto info = answerTimbreRoute (analysed.media, path, "INFO");
+
+    CHECK (info.status == 200);
+    CHECK (info.contentType == "application/json");
+    CHECK (fieldOf (info, "Cache-Control") == askedAgain);
+
+    /*  The exact text first - the keys in the documented order, no spaces, and
+        3.5 with a point under either locale this suite runs in. The version is
+        spelled from the constant rather than as a digit: it is bumped with
+        every change to the analysis, and this test is about where it goes, not
+        which it is... */
+    CHECK (info.body == std::string ("{\"sha256\":\"") + analysedHash + "\","
+                        "\"formatVersion\":" + std::to_string (timbre::formatVersion) + ","
+                        "\"seconds\":3.5,\"sampleRate\":44100,\"window\":2048,\"hop\":1024,"
+                        "\"levels\":[{\"frames\":151,\"bytes\":604},"
+                                    "{\"frames\":76,\"bytes\":304},"
+                                    "{\"frames\":38,\"bytes\":152}]}");
+
+    //  ...then parsed, as a client would read it.
+    const auto parsed = json::parse (info.body);
+
+    INFO (parsed.error);
+    REQUIRE (parsed.ok());
+    REQUIRE (parsed.value->isObject());
+
+    const auto* sha256 = parsed.value->find ("sha256");
+    const auto* analysisVersion = parsed.value->find ("formatVersion");
+    const auto* seconds = parsed.value->find ("seconds");
+    const auto* sampleRate = parsed.value->find ("sampleRate");
+    const auto* window = parsed.value->find ("window");
+    const auto* hop = parsed.value->find ("hop");
+    const auto* levels = parsed.value->find ("levels");
+
+    REQUIRE (sha256 != nullptr);
+    CHECK (sha256->asString() == analysedHash);
+
+    /*  The half of what the bytes depend on that the URL does not name. */
+    REQUIRE (analysisVersion != nullptr);
+    CHECK (analysisVersion->asInt() == static_cast<int> (timbre::formatVersion));
+
+    REQUIRE (seconds != nullptr);
+    CHECK (seconds->asNumber() == doctest::Approx (3.5));
+
+    REQUIRE (sampleRate != nullptr);
+    CHECK (sampleRate->asInt() == 44100);
+
+    REQUIRE (window != nullptr);
+    CHECK (window->asInt() == timbre::windowSize);
+
+    REQUIRE (hop != nullptr);
+    CHECK (hop->asInt() == timbre::hopSize);
+
+    REQUIRE (levels != nullptr);
+    REQUIRE (levels->isArray());
+    REQUIRE (levels->size() == pyramid.levels.size());
+
+    for (std::size_t level = 0; level < pyramid.levels.size(); ++level)
+    {
+        INFO ("level " << level);
+
+        const auto* entry = levels->at (level);
+        REQUIRE (entry != nullptr);
+
+        const auto* frameCount = entry->find ("frames");
+        const auto* byteCount = entry->find ("bytes");
+
+        REQUIRE (frameCount != nullptr);
+        REQUIRE (byteCount != nullptr);
+
+        CHECK (static_cast<std::size_t> (frameCount->asInt()) == pyramid.levels[level].size());
+        CHECK (static_cast<std::size_t> (byteCount->asInt()) == 4 * pyramid.levels[level].size());
+
+        //  And a level asked for is exactly as many bytes as INFO promised.
+        CHECK (answerTimbreRoute (analysed.media, path, "level=" + std::to_string (level)).body.size()
+               == static_cast<std::size_t> (byteCount->asInt()));
+    }
+}
+
+TEST_CASE ("timbre route: the shape, then the hash, then the question, then the records")
+{
+    AnalysedMedia analysed;
+    const auto& media = analysed.media;
+    const std::string known { analysedHash };
+    const auto path = timbrePath (known);
+
+    SUBCASE ("404 - a path this route does not have")
+    {
+        /*  Including one whose segment is not a hash at all: the shape is
+            checked first, so a path that is wrong twice is told the first. */
+        for (const auto& asked : std::vector<std::string> {
+                 "/media", "/media/", "/media/" + known, "/media/" + known + "/",
+                 "/media/" + known + "/timbre/", "/media/" + known + "/timbre/extra",
+                 "/media/" + known + "/other", "/media//timbre", "/media/timbre",
+                 "/media/a/" + known + "/timbre", "/media/nothex/other" })
+            checkRefusal (answerTimbreRoute (media, asked, "INFO"), 404, asked);
+    }
+
+    SUBCASE ("400 - a segment that is not a content hash")
+    {
+        auto upperCase = known;
+        upperCase[1] = 'F';                     // it was 'f'
+
+        auto notHex = known;
+        notHex[1] = 'g';
+
+        for (const auto& hash : std::vector<std::string> {
+                 known.substr (0, 63), known + "0", upperCase, notHex, "timbre" })
+            checkRefusal (answerTimbreRoute (media, timbrePath (hash), "INFO"), 400, hash);
+    }
+
+    SUBCASE ("400 - a question this route does not answer")
+    {
+        for (const auto& query : std::vector<std::string> {
+                 "", "level=", "level=-1", "level=x", "level=1&x=2", "VALUE", "HOST_INFO",
+                 "info", "INFO=", "levels=1", "level=+1", "level= 1", "level=1 ",
+                 "level=1234567890" })
+            checkRefusal (answerTimbreRoute (media, path, query), 400, "?" + query);
+
+        /*  And before the records are looked at: a hash nobody has analysed,
+            asked for badly, is told that it asked badly. */
+        checkRefusal (answerTimbreRoute (media, timbrePath (unknownHash), "level=x"), 400,
+                      "an unknown hash, asked badly");
+    }
+
+    SUBCASE ("404 - asked well, and not here")
+    {
+        checkRefusal (answerTimbreRoute (media, timbrePath (unknownHash), "INFO"), 404,
+                      "the header of a hash nobody has analysed");
+        checkRefusal (answerTimbreRoute (media, timbrePath (unknownHash), "level=0"), 404,
+                      "a level of a hash nobody has analysed");
+
+        checkRefusal (answerTimbreRoute (media, timbrePath (hashWithoutPyramid), "INFO"), 404,
+                      "the header of a hash with no pyramid");
+        checkRefusal (answerTimbreRoute (media, timbrePath (hashWithoutPyramid), "level=0"), 404,
+                      "a level of a hash with no pyramid");
+
+        /*  The level count is one past the last level, and nine nines is the
+            most a level can be spelled with. The last real level is a 200, so
+            the line is drawn where it should be. */
+        const auto levelCount = analysed.pyramid->levels.size();
+
+        checkRefusal (answerTimbreRoute (media, path, "level=" + std::to_string (levelCount)), 404,
+                      "the level count");
+        checkRefusal (answerTimbreRoute (media, path, "level=999999999"), 404, "nine nines");
+
+        CHECK (answerTimbreRoute (media, path, "level=" + std::to_string (levelCount - 1)).status
+               == 200);
+    }
+
+    SUBCASE ("a 404 becomes a 200 once the analyser has been by, which is why none is kept")
+    {
+        checkRefusal (answerTimbreRoute (media, timbrePath (unknownHash), "INFO"), 404, "before");
+
+        audio::MediaRecord late;
+        late.contentHash = unknownHash;
+        late.pyramid = analysed.pyramid;
+        analysed.media.publish ("imported.wav", std::move (late));
+
+        const auto after = answerTimbreRoute (media, timbrePath (unknownHash), "INFO");
+
+        CHECK (after.status == 200);
+        CHECK (fieldOf (after, "Cache-Control") == askedAgain);
+        CHECK (after.body.find (unknownHash) != std::string::npos);
+    }
+}
+
+TEST_CASE ("timbre route: through the server, a level is the file's bytes and says to ask again before reuse")
+{
+    /*  Declared before the rig, so it outlives the server that reads it. */
+    AnalysedMedia analysed;
+
+    Rig rig ([&analysed] (OscQueryServer& server)
+    {
+        server.serveRoute (mediaRoutePrefix,
+                           [&analysed] (const std::string& path, const std::string& query)
+                           {
+                               return answerTimbreRoute (analysed.media, path, query);
+                           });
+    });
+
+    REQUIRE (rig.started);
+
+    const auto file = timbre::write (*analysed.pyramid);
+    const auto level = get (rig.port(), timbrePath (analysedHash) + "?level=0");
+
+    CHECK (level.status == 200);
+    CHECK (level.header ("Content-Type") == "application/octet-stream");
+    CHECK (level.header ("Cache-Control") == askedAgain);
+    CHECK (level.header ("Content-Length") == std::to_string (4 * analysed.pyramid->frames()));
+
+    const auto inFile = levelBytesInFile (file, 0);
+
+    REQUIRE_FALSE (inFile.empty());
+    CHECK (level.body == inFile);
+    CHECK (level.body.substr (0, 4) == std::string (4, '\0'));
+
+    /*  A refusal says so on the wire as well: `no-store`, and the route's own
+        reason - `level=1&x=2` reached it, rather than the tree's rule that an
+        attribute query is a bare key. */
+    const auto badly = get (rig.port(), timbrePath (analysedHash) + "?level=1&x=2");
+
+    INFO (badly.body);
+    CHECK (badly.status == 400);
+    CHECK (badly.header ("Content-Type") == "text/plain");
+    CHECK (badly.header ("Cache-Control") == "no-store");
+    CHECK (badly.body.find ("?INFO or ?level=") != std::string::npos);
+
+    const auto missing = get (rig.port(), timbrePath (unknownHash) + "?INFO");
+
+    CHECK (missing.status == 404);
+    CHECK (missing.header ("Cache-Control") == "no-store");
 }
 
 //==============================================================================

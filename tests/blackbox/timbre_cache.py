@@ -47,19 +47,53 @@ once, a second run does no work, `--force` writes the same bytes again, a file
 the show names and the bundle lacks fails the run, and a `.timbre` that cannot
 be a folder costs the cache and not the colours.
 
-AND THE THREAD A SESSION RUNS IT ON: last, one `wfg serve` of a fresh copy,
-which must colour every file the show names without being asked, and colour a
-file a `node.set` introduces mid-session without being reopened - the serve
-wiring, which no unit case reaches.
+AND THE THREAD A SESSION RUNS IT ON: one `wfg serve` of a fresh copy, which
+must colour every file the show names without being asked, and colour a file a
+`node.set` introduces mid-session without being reopened - the serve wiring,
+which no unit case reaches.
+
+AND WHAT A SESSION SAYS WITH IT (PR 5.8, namespace draft §14.5): last, a second
+`wfg serve`, hosted, of a copy routed to a bus and parked on the sweep. The tree
+carries what is true now and a route what is true always, and both are read
+from outside. The sweep's cue and the sine's must each name its file's SHA-256 -
+as hashlib computes it, not as the engine reports it - once the analyser has
+reached it, and the sine's copy under another name the same one. GO must play
+the sweep, and at every playhead this driver catches, its run must publish the
+very frame this driver's reader finds in the cache under that playhead - and
+the ramp's colour at the sweep's frequency then.
+
+THE SWEEP AND NOT THE SINE, which is what this check was first written with and
+could not fail. Every steady frame of a 1 kHz sine is the same four bytes, so a
+playhead rounded where §14.5 floors it, placed one frame late, or read off the
+level above would each have published a colour the check took for the right
+one. A sweep's neighbouring frames differ, and the driver goes on reading until
+it holds, for each of those three, a reading of a frame unlike both its
+neighbours placed where that mistake would have picked another: a reading that
+could only have come from under its own playhead.
+
+Then the route beside the tree must hand back the cache's own bytes, level by
+level, and its header as JSON with the format version the `.tpy` carries, every
+answer marked `no-cache` - a browser may keep a copy, and must ask again before
+it reuses one. NOT IMMUTABLE, though the URL is a content hash, because the
+content it names is the AUDIO and not the analysis: a moved ramp stop bumps the
+format version and rebuilds the pyramid under the same name (§14.12), and the
+author will move stops while looking at the bar. A year of `immutable` would
+have gone on showing the old colours, as though the move had done nothing.
+And it must refuse what it does not hold with `no-store`, since a hash nothing
+has analysed yet is a 200 on the day somebody imports it.
 
 No audio device anywhere: `wfg analyse` is a verb and runs where `wfg validate`
-runs, and the server is the dummy clock's. Exit codes: 0 everything held, 1
-something did not, 2 the harness could not run.
+runs, the first server is the dummy clock's, and the second is `--hosted` - a
+real playback graph with no interface under it. It has to be: a launch is only
+ever placed for a media run holding a track, so on the dummy clock a run's
+playhead never moves and there is no frame under it to read. Exit codes: 0
+everything held, 1 something did not, 2 the harness could not run.
 """
 
 from __future__ import annotations
 
 import hashlib
+import json
 import math
 import random
 import shutil
@@ -168,6 +202,10 @@ class Pyramid:
         if fnv1a(data[32:]) != checksum:
             raise ValueError("checksum does not match the bytes")
 
+        # Kept, though the check above has just made it FORMAT_VERSION: the
+        # route's ?INFO is compared with what the .tpy's own header says, and
+        # not with what this file expects it to say.
+        self.version = version
         self.rate = rate
         self.samples = samples
         self.levels: "list[list[tuple]]" = []
@@ -265,20 +303,53 @@ MANIFEST = '<Bundle formatVersion="1"/>\n'
 
 FILES = ["sine.wav", "noise.wav", "sweep.wav", "renamed/sine.wav"]
 IDS = ["B3N8R5TW", "E4GP6QSC", "F7HR8TVD", "D9FH2JKA", "G1JS4VWE"]
+LIST = "7K2QM9X4"
+
+# The cues that play `sine.wav`, its copy under another name, and the sweep.
+SINE_CUE = IDS[FILES.index("sine.wav")]
+RENAMED_CUE = IDS[FILES.index("renamed/sine.wav")]
+SWEEP_CUE = IDS[FILES.index("sweep.wav")]
+
+# What a routed copy adds: one bus two wide, and one route per media cue onto
+# it. Every file is mono, so a route is one row of two coefficients.
+BUS = "J3MT5XYA"
+ROUTES = ["R2TB7KXM", "R4VC8NYP", "R6WD9PZQ", "R8XE2QAS", "R9YF3RBT"]
 
 
-def show_xml(files: "list[str]") -> str:
-    cues = "".join(
-        f'      <Media id="{IDS[n]}" file="{name}" name="Take {n + 1}" number="{n + 1}"/>\n'
-        for n, name in enumerate(files))
-    return ("<Show>\n  <Lists>\n    <List id=\"7K2QM9X4\" name=\"Timbre\">\n"
-            + cues + "    </List>\n  </Lists>\n</Show>\n")
+def show_xml(files: "list[str]", routed: bool = False) -> str:
+    """The show. `routed` gives it what a GO needs before a media cue can
+    sound - an Audio section with tracks and a bus, and a route from every cue
+    to that bus - which neither the verb nor the dummy clock ever asked for."""
+    cues = ""
+
+    for n, name in enumerate(files):
+        opening = f'      <Media id="{IDS[n]}" file="{name}" name="Take {n + 1}" number="{n + 1}"'
+        if routed:
+            cues += (opening + ">\n"
+                     + f'        <Route id="{ROUTES[n]}" bus="{BUS}" gains="1 1"/>\n'
+                     + "      </Media>\n")
+        else:
+            cues += opening + "/>\n"
+
+    audio = (f'  <Audio tracks="4">\n    <Bus id="{BUS}" name="Main L/R" width="2"/>\n'
+             "  </Audio>\n") if routed else ""
+
+    return (f'<Show>\n  <Lists>\n    <List id="{LIST}" name="Timbre">\n'
+            + cues + "    </List>\n  </Lists>\n" + audio + "</Show>\n")
 
 
-def make_bundle(folder: Path, files: "list[str]") -> Path:
+def make_bundle(folder: Path, files: "list[str]", routed: bool = False,
+                standby: "str | None" = None) -> Path:
     folder.mkdir(parents=True)
     (folder / f"{folder.name}.wfg").write_text(MANIFEST, newline="\n")
-    (folder / "show.xml").write_text(show_xml(files), newline="\n")
+    (folder / "show.xml").write_text(show_xml(files, routed), newline="\n")
+
+    # The operator's pointer, which is state and not show: parked on a media
+    # cue, it arms that cue before any GO.
+    if standby is not None:
+        (folder / "state.xml").write_text(
+            f'<State formatVersion="1">\n  <List id="{LIST}" standby="{standby}"/>\n</State>\n',
+            newline="\n")
 
     media = folder / "media"
     write_wav(media / "sine.wav", sine())
@@ -489,6 +560,524 @@ def serves(report: Report, room: Path, locale: "str | None") -> None:
                 report.check(False, "and its cache is whole", str(problem))
 
 
+# =============================================================================
+# What a session says with it - PR 5.8, namespace draft §14.5
+# =============================================================================
+
+# How far a published number may sit from its byte: the tree rounds a hue to a
+# tenth of a degree and the other two to a thousandth, so half of that and no
+# more. A byte is 1.4 degrees of hue and 0.004 of the unit range, so this tells
+# one byte from the next - and a hue scaled by 255 where the wheel has 256
+# steps, nearly a degree out at the sweep's blues, from the right one.
+HUE_ROUNDING = 0.05
+UNIT_ROUNDING = 0.0005
+SLACK = 1e-9
+
+# The stretch of the sweep a playing run is read over, in seconds into the
+# file: clear of the edge frames at both ends and of the nought a launch
+# placed a few ticks ahead is clamped to, and a second short of the end, so
+# that every reading is of a clip still playing and none is of one held at its
+# last frame.
+READ_FROM, READ_TO = 0.8, 7.0
+
+# How long a playing run is read for at the most, in real time from the GO.
+# The sweep is eight seconds and the reading stops as soon as it has what it
+# needs, so this is only ever reached by a clock that does not move.
+LISTENING = 20.0
+
+
+def value_at(port: int, address: str):
+    """The value at one address, or None when there is none to read."""
+    status, body = common.http_get(port, address + "?VALUE")
+
+    if status != 200:
+        return None
+
+    return json.loads(body)["VALUE"][0]
+
+
+def runs_of(port: int, cue: str) -> "list[str]":
+    """Every published run of one cue, found through `/godot/run/order` - the
+    node whose job is to list the runs - rather than the container's keys,
+    which hold that roster node too."""
+    order = value_at(port, "/godot/run/order") or ""
+    return [each for each in order.split() if value_at(port, f"/godot/run/{each}/cue") == cue]
+
+
+def reading_of(port: int, run_id: str) -> "dict | None":
+    """A run's state, playhead and timbre, from ONE request. A `GET` of the
+    run's own container is answered whole out of one snapshot, so the playhead
+    and the reading taken at it come from the same tick. Three `?VALUE`s are
+    three snapshots, and a check comparing them would compare two moments."""
+    status, body = common.http_get(port, f"/godot/run/{run_id}")
+
+    if status != 200:
+        return None
+
+    contents = json.loads(body).get("CONTENTS") or {}
+
+    def value(name: str):
+        values = (contents.get(name) or {}).get("VALUE") or [None]
+        return values[0]
+
+    return {"state": value("state"), "position": value("position"),
+            "timbre": value("timbre")}
+
+
+def first_reading(read, accept, timeout: float):
+    """(what `read` returned when `accept` first held of it, or None; and the
+    last thing it returned that was there at all). `common.wait_until`
+    underneath, so the wait is on the thing and bounded in real time; the
+    second half is so that a check which fails can say what it saw rather than
+    only that it waited - and it is the last thing THERE because a run is
+    published for five seconds after it ends and then answers nothing, which
+    would otherwise be the whole of what a failed wait on it reports."""
+    seen = [None]
+
+    def attempt():
+        value = read()
+        if value is not None:
+            seen[0] = value
+        return value if accept(value) else None
+
+    return common.wait_until(attempt, timeout=timeout), seen[0]
+
+
+def three_numbers(text: str) -> "tuple | None":
+    """`"<hue> <saturation> <lightness>"`, one space apart, as three floats -
+    or None. A comma where a point belongs is a ValueError here, which is what
+    the fr_FR run is for."""
+    parts = text.split(" ")
+
+    if len(parts) != 3:
+        return None
+
+    try:
+        numbers = tuple(float(part) for part in parts)
+    except ValueError:
+        return None
+
+    return numbers if all(math.isfinite(number) for number in numbers) else None
+
+
+def media_type(headers: dict) -> str:
+    return headers.get("content-type", "").split(";")[0].strip()
+
+
+def directives(headers: dict) -> "list[str]":
+    """A `Cache-Control` header's directives, each on its own and lower-cased,
+    so a check asks for a directive rather than for a spelling of the line."""
+    return [part.strip().lower()
+            for part in headers.get("cache-control", "").split(",") if part.strip()]
+
+
+def asked_again(headers: dict) -> bool:
+    """`no-cache`, and nothing that would let a browser skip the asking: no
+    `immutable`, and no `max-age` of any length. A browser may keep what it
+    fetched; it may not reuse it without checking that the answer has not
+    moved - which it will, under the same URL, the day a ramp stop does."""
+    said = directives(headers)
+    return ("no-cache" in said and "immutable" not in said
+            and not any(each.startswith("max-age") for each in said))
+
+
+def placed(position: float, pyramid: Pyramid) -> "tuple[int, float]":
+    """(the finest frame under a playhead, and how far into that frame it
+    sits, from nought to one), placed as §14.5 and `frameAt` place it: the
+    seconds times the rate, over the hop, ROUNDED DOWN, and held at the first
+    frame before the file and at the last one after it. Multiplied and then
+    divided, in the engine's order, so that the two floors agree to the last
+    bit of a position the tree printed round-trip."""
+    along = position * pyramid.rate / HOP
+    index = min(max(math.floor(along), 0), len(pyramid.finest) - 1)
+    return index, along - index
+
+
+def discriminating(frames: "list[tuple]", index: int) -> bool:
+    """Whether a reading of this frame could only be this frame. Its colour -
+    hue, saturation and lightness, the three the tree publishes, and never the
+    peak, which it does not - differs from both neighbours', and a byte apart
+    is more than twice the rounding either way, so a playhead placed a frame
+    early or a frame late would have published a colour that fails the match.
+    A frame with no neighbour on one side is never counted: half a proof."""
+    if index <= 0 or index >= len(frames) - 1:
+        return False
+
+    colour = frames[index][:3]
+    return colour != frames[index - 1][:3] and colour != frames[index + 1][:3]
+
+
+def matches(numbers: tuple, frame: tuple) -> bool:
+    """Whether three published numbers are this frame, within the rounding the
+    tree publishes with and not a hair more."""
+    hue, saturation, lightness = numbers
+    return (hue_apart(hue, hue_of(frame)) <= HUE_ROUNDING + SLACK
+            and abs(saturation - unit(frame[1])) <= UNIT_ROUNDING + SLACK
+            and abs(lightness - unit(frame[2])) <= UNIT_ROUNDING + SLACK)
+
+
+def listen(port: int, run_id: str, pyramid: Pyramid) -> "tuple[list[dict], dict | None]":
+    """(every reading of the playing sweep caught between READ_FROM and
+    READ_TO, each placed on its frame; and the last thing the run's container
+    said at all, for a check that fails to show).
+
+    ONE GET PER READING, of the run's own container, so the playhead a reading
+    is placed by and the colour it is checked for come out of one snapshot -
+    see `reading_of`.
+
+    READ UNTIL EVERY WRONG WAY TO PLACE A PLAYHEAD HAS BEEN GIVEN ITS CHANCE TO
+    SHOW, over at least three frames. Each is refuted by a reading
+    DISCRIMINATING enough that only its own frame could have produced it, and
+    each needs a different one. A frame early or a frame late: any of them.
+    Rounding where §14.5 floors: one in the later half of its frame, where the
+    two pick different frames. Reading the level above: one at an EVEN frame,
+    because a frame of that level is an even frame and the odd one after it,
+    paired, and - the sweep climbing in hue and lightness through the whole
+    stretch, and a pair rounding its half up - it never comes out as the even
+    one. Or until the stretch is behind the playhead, or the run has ended, or
+    LISTENING has passed in real time: `common.wait_until` underneath, so the
+    wait is on the thing and bounded.
+
+    The later half and the even frame are waited FOR and never asserted. A
+    clock whose every playhead fell on a frame's edge would make rounding and
+    flooring the same function, and one whose block was two frames long could
+    land on odd frames alone; a run read to the end of the stretch without
+    them has shown everything that clock can show."""
+    heard: "list[dict]" = []
+    last: "list[dict | None]" = [None]
+
+    def enough() -> bool:
+        telling = [each for each in heard if discriminating(pyramid.finest, each["index"])]
+        return (len({each["index"] for each in heard}) >= 3
+                and any(each["index"] % 2 == 0 for each in telling)
+                and any(each["into"] >= 0.5 for each in telling))
+
+    def attempt() -> bool:
+        now = reading_of(port, run_id)
+
+        # Published no longer: the run ended and its five seconds ran out.
+        if now is None:
+            return last[0] is not None
+
+        last[0] = now
+        position = now["position"]
+
+        if not isinstance(position, (int, float)):
+            return False
+
+        if READ_FROM <= position <= READ_TO:
+            index, into = placed(float(position), pyramid)
+            heard.append({"position": float(position), "index": index, "into": into,
+                          "timbre": now["timbre"]})
+
+        return enough() or position > READ_TO or now["state"] in ("done", "failed")
+
+    common.wait_until(attempt, timeout=LISTENING)
+    return heard, last[0]
+
+
+def check_readings(report: Report, heard: "list[dict]", last: "dict | None",
+                   pyramid: Pyramid) -> None:
+    """The sweep's colour at every playhead caught: the cache's own frame under
+    that playhead, to the byte - and a claim that could fail, because at least
+    one of those frames is unlike both its neighbours - and the ramp's colour
+    at the sweep's frequency then, as the verb's checks assert it of the bytes."""
+    if not report.check(bool(heard),
+                        f"GO plays the sweep, and between {READ_FROM} s and {READ_TO} s into "
+                        "the file its run publishes where it is and what it sounds like there",
+                        f"the last read was {last}"):
+        return
+
+    frames = pyramid.finest
+    unread = []
+    misplaced = []
+    telling = []
+    grey = []
+    off_hue = []
+    off_light = []
+
+    for each in heard:
+        position, index, text = each["position"], each["index"], each["timbre"]
+        numbers = three_numbers(text) if isinstance(text, str) else None
+
+        if numbers is None:
+            unread.append((round(position, 4), text))
+            continue
+
+        frame = frames[index]
+        hue, saturation, lightness = numbers
+        hertz = sweep_hertz(frame_seconds(index))
+
+        if not matches(numbers, frame):
+            misplaced.append((round(position, 4), index, text, frame))
+
+        if discriminating(frames, index):
+            telling.append(each)
+
+        if saturation <= 0.8:
+            grey.append((round(position, 4), saturation))
+
+        # The ramp's tolerances, and the tree's rounding on top: the verb's
+        # check holds the byte within 6 degrees and 0.02, and a number printed
+        # from that byte may sit half a rounding further off.
+        if hue_apart(hue, ramp_hue(hertz)) > 6.0 + HUE_ROUNDING + SLACK:
+            off_hue.append((round(position, 4), round(hertz), hue, round(ramp_hue(hertz), 1)))
+
+        if abs(lightness - ramp_lightness(hertz)) > 0.02 + UNIT_ROUNDING + SLACK:
+            off_light.append((round(position, 4), round(hertz), lightness,
+                              round(ramp_lightness(hertz), 3)))
+
+    # Each playhead once, with the frame it is placed on: what every failure
+    # below prints, so it says where it looked and not only that it looked.
+    where = list(dict.fromkeys((round(each["position"], 4), each["index"]) for each in heard))
+    shown = f"(seconds, frame): {where[:12]}" + (f" and {len(where) - 12} more"
+                                                   if len(where) > 12 else "")
+    spanned = sorted({index for _, index in where})
+    even = sum(1 for each in telling if each["index"] % 2 == 0)
+    later = sum(1 for each in telling if each["into"] >= 0.5)
+    proofs = [(round(each["position"], 4), each["index"], round(each["into"], 3))
+              for each in telling[:6]]
+
+    report.check(not unread,
+                 "every reading is three numbers one space apart - hue, saturation, "
+                 "lightness - each written with a point under every locale, and none is "
+                 "the empty of a file not analysed yet after its hash was on the tree",
+                 f"{len(unread)} are not; (seconds, reading): {unread[:4]}")
+    report.check(not misplaced,
+                 f"every reading is the cache's own frame under its playhead, to the byte - "
+                 f"floor(seconds times rate over hop) - over {len(heard)} readings, frames "
+                 f"{spanned[0]} to {spanned[-1]}",
+                 f"{len(misplaced)} are not; (seconds, frame, tree, bytes): {misplaced[:4]}; "
+                 + shown)
+    report.check(len(spanned) >= 3 and bool(telling),
+                 f"and that was a claim that could fail: {len(spanned)} frames, and "
+                 f"{len(telling)} readings of a frame unlike both its neighbours - {even} at "
+                 f"an even frame, which the level above never reads the same, and {later} in "
+                 "the later half of one, where rounding and flooring disagree",
+                 f"discriminating (seconds, frame, how far into it): {proofs}; " + shown)
+    report.check(not grey,
+                 "the sweep's run reads saturated at every playhead, above 0.8",
+                 f"{len(grey)} do not; (seconds, saturation): {grey[:4]}")
+    report.check(not off_hue,
+                 "at the ramp's hue for the sweep's frequency then, within 6 degrees",
+                 f"{len(off_hue)} are not; (seconds, Hz, read, ramp): {off_hue[:4]}")
+    report.check(not off_light,
+                 "and at the ramp's lightness for it, within 0.02",
+                 f"{len(off_light)} are not; (seconds, Hz, read, ramp): {off_light[:4]}")
+
+
+def check_route(report: Report, port: int, digest: str, pyramid: "Pyramid | None") -> None:
+    """`GET /media/<hash>/timbre`, on the tree's port and never inside the
+    tree: kilobytes a file, unchanged for as long as the file and the analysis
+    are, and with no value at a moment - so not a node, and not in the poll
+    every client makes ten times a second. Every body is checked against this
+    driver's own decoding of the `.tpy`, never against another answer from the
+    engine.
+
+    Asked of the SWEEP, the pyramid already decoded for the run, and the harder
+    of the two to match by accident: its frames change along its whole length,
+    where a steady sine's are one frame repeated, so a body a frame out of step
+    differs from the cache almost everywhere rather than only at its ends."""
+    route = f"/media/{digest}/timbre"
+
+    status, headers, body = common.http_get_bytes(port, route + "?INFO")
+    report.check(status == 200 and media_type(headers) == "application/json"
+                 and asked_again(headers),
+                 "?INFO answers 200 in JSON, marked no-cache, with no max-age and never "
+                 "immutable: the URL is named by the audio and not by the analysis, and a "
+                 "moved ramp stop rebuilds the pyramid under the same name",
+                 f"{status}, {media_type(headers)!r}, Cache-Control "
+                 f"{headers.get('cache-control', '')!r}: {body[:160]!r}")
+
+    try:
+        info = json.loads(body.decode("utf-8"))
+    except ValueError:
+        info = None
+
+    # Without a decoded cache there is nothing of the driver's own to compare
+    # a body with, and that has already been reported as the failure it is.
+    if pyramid is not None:
+        text = body.decode("utf-8", "replace")
+
+        if not isinstance(info, dict):
+            report.check(False, "its body is a JSON object", text[:160])
+        else:
+            report.check(list(info) == ["sha256", "formatVersion", "seconds", "sampleRate",
+                                        "window", "hop", "levels"]
+                         and " " not in text,
+                         "its keys are §14.5's, in that order with formatVersion second, and "
+                         "no space anywhere", text)
+
+            # THE ONE NUMBER THAT SAYS WHICH ANALYSIS THE BYTES ARE, and the
+            # reason a client cannot cache by the hash alone. Compared with the
+            # version this driver's reader decoded from the .tpy's own header,
+            # never with a constant: the route must say what the file says.
+            version = info.get("formatVersion")
+            report.check(type(version) is int and version == pyramid.version,
+                         f"and its formatVersion is the .tpy's own, {pyramid.version}, as this "
+                         "driver's reader decodes it from the header",
+                         f"?INFO says {version!r}: {text}")
+
+            seconds = info.get("seconds")
+            report.check(info.get("sha256") == digest
+                         and isinstance(seconds, (int, float))
+                         and abs(seconds - pyramid.samples / pyramid.rate) < 1e-9
+                         and (info.get("sampleRate"), info.get("window"), info.get("hop"))
+                         == (pyramid.rate, WINDOW, HOP),
+                         "and its header is the cache's: the hash it was asked by, the "
+                         "file's seconds and rate, window 2048, hop 1024", text)
+
+            report.equal(info.get("levels"),
+                         [{"frames": len(level), "bytes": 4 * len(level)}
+                          for level in pyramid.levels],
+                         "and its levels are the ones this driver's reader finds in the "
+                         ".tpy, frames and bytes alike")
+
+        status, headers, body = common.http_get_bytes(port, route + "?level=0")
+        finest = bytes(byte for frame in pyramid.finest for byte in frame)
+
+        report.check(status == 200 and media_type(headers) == "application/octet-stream"
+                     and asked_again(headers),
+                     "?level=0 answers 200 in raw bytes, application/octet-stream, and is "
+                     "marked no-cache too",
+                     f"{status}, {media_type(headers)!r}, Cache-Control "
+                     f"{headers.get('cache-control', '')!r}")
+        report.check(body == finest,
+                     "and its body is the finest level byte for byte as the .tpy holds it: "
+                     "hue, saturation, lightness and peak, four a frame",
+                     f"{len(body)} bytes against {len(finest)}")
+
+        beyond = len(pyramid.levels)
+        status, headers, body = common.http_get_bytes(port, f"{route}?level={beyond}")
+        report.check(status == 404 and "no-store" in directives(headers),
+                     f"?level={beyond}, one past the coarsest, is 404, marked no-store: a "
+                     "level this pyramid does not have",
+                     f"{status}, Cache-Control {headers.get('cache-control', '')!r}: "
+                     f"{body[:160]!r}")
+
+    # The refusals, which need no cache to check.
+    status, headers, body = common.http_get_bytes(port, f"/media/{'0' * 64}/timbre?level=0")
+    said = directives(headers)
+    report.check(status == 404 and "no-store" in said and "immutable" not in said,
+                 "a hash nothing has analysed is 404, marked no-store and never immutable: "
+                 "the same URL is a 200 on the day that file is imported",
+                 f"{status}, Cache-Control {headers.get('cache-control', '')!r}: "
+                 f"{body[:160]!r}")
+
+    status, headers, body = common.http_get_bytes(port, "/media/NOTHEX/timbre?level=0")
+    report.check(status == 400 and "no-store" in directives(headers),
+                 "a hash that is not sixty-four hex characters is a bad request, marked "
+                 "no-store and refused before anything is looked up - no request text ever "
+                 "becomes a path",
+                 f"{status}, Cache-Control {headers.get('cache-control', '')!r}: "
+                 f"{body[:160]!r}")
+
+
+def plays(report: Report, room: Path, locale: "str | None") -> None:
+    """WHAT A SESSION SAYS WITH THE CACHE, read from outside: the hash on the
+    cue, the colour on the run, and the pyramid on a route that is not an
+    address.
+
+    HOSTED, because a playhead needs a track; parked on the sweep, so the one
+    GO plays it and nothing has to be addressed by name. THE SWEEP, because
+    its neighbouring frames differ, and that is what lets a reading be checked
+    against the frame under ITS playhead rather than against a frame like it -
+    see `listen`. Every wait is on the node its check then reads, bounded in
+    real time - the hash on the hash, the colour on the run's own container -
+    and the GO waits for the sweep's hash, because the analyser publishes a
+    record only with its pyramid: a hash a client can read is a pyramid the
+    run's colour is read from and the route holds, and a GO before it would
+    spend the stretch being read on the empty of a file not analysed yet."""
+    bundle = make_bundle(room / "played", FILES, routed=True, standby=SWEEP_CUE)
+    locale_argument = [f"--wfg-locale={locale}"] if locale is not None else []
+
+    code, out, err = common.run_wfg("validate", str(bundle), *locale_argument)
+
+    if not report.check(code == 0 and "is valid" in out,
+                        "the routed copy is a show wfg validate accepts: tracks, a bus two "
+                        "wide, a route on every media cue, the standby on the sweep",
+                        (out + err).strip()):
+        return
+
+    sweep_digest = hashlib.sha256((bundle / "media" / "sweep.wav").read_bytes()).hexdigest()
+    sine_digest = hashlib.sha256((bundle / "media" / "sine.wav").read_bytes()).hexdigest()
+    cache = cache_file(bundle, sweep_digest)
+
+    with common.Server(bundle, locale=locale, sample_rate=RATE, hosted=True) as server:
+        port = server.http_port
+
+        report.check(common.wait_until(
+                         lambda: value_at(port, "/godot/audio/status") == "running",
+                         timeout=20.0) is not None,
+                     "under --hosted the audio side comes up running, unasked")
+
+        # --- the hash, on the cue ------------------------------------------
+        published, seen = first_reading(
+            lambda: value_at(port, f"/godot/cue/{SWEEP_CUE}/hash"),
+            lambda value: value == sweep_digest, timeout=60.0)
+        report.check(published is not None,
+                     "the sweep's cue publishes its file's SHA-256, as hashlib computes it, "
+                     "once the analyser has reached it",
+                     f"it still read {seen!r} after 60 s; hashlib says {sweep_digest}")
+
+        # The cache that hash names, decoded by this driver's own reader: what
+        # the run's colour and the route's bytes are both checked against.
+        # Waited on as a file, which appears whole or not at all (trap 3).
+        pyramid = None
+        problem = "no cache file appeared within 60 s"
+
+        if common.wait_until(cache.is_file, timeout=60.0):
+            try:
+                pyramid = Pyramid(cache.read_bytes())
+            except (OSError, ValueError, struct.error) as refused:
+                problem = str(refused)
+
+        report.check(pyramid is not None,
+                     "and the cache it names decodes with this driver's own reader", problem)
+
+        # --- the colour, on the run ----------------------------------------
+        # ASKED FOR BY CUE, AND BEFORE THE GO: the standby arms its cue ahead,
+        # so the run a GO launches exists before the GO does, and "the run that
+        # appeared" would find nothing. The session is fresh, so no earlier run
+        # of this cue is still published to answer in its place (trap 5).
+        def standby_run():
+            found = runs_of(port, SWEEP_CUE)
+            return found[0] if len(found) == 1 else None
+
+        sweep_run = common.wait_until(standby_run, timeout=20.0)
+        armed = report.check(bool(sweep_run),
+                             "the standby armed the sweep ahead: its run is there before any GO")
+
+        # Without a decoded cache there is nothing to place a reading on, and
+        # that has already been reported as the failure it is.
+        if armed and pyramid is not None:
+            common.send_udp(server.osc_port, common.osc_encode("/godot/cmd/go"))
+
+            heard, last = listen(port, sweep_run, pyramid)
+            check_readings(report, heard, last, pyramid)
+
+        # --- the pyramid, on a route that is not an address ----------------
+        check_route(report, port, sweep_digest, pyramid)
+
+        # --- the sine's hash, and the same bytes under another name ---------
+        # About the hash and not the reading: both cues must name the one
+        # SHA-256 hashlib finds, whichever the analyser happened to reach first.
+        published, seen = first_reading(
+            lambda: value_at(port, f"/godot/cue/{SINE_CUE}/hash"),
+            lambda value: value == sine_digest, timeout=60.0)
+        report.check(published is not None,
+                     "the sine's cue publishes its file's SHA-256 too, as hashlib computes it",
+                     f"it still read {seen!r} after 60 s; hashlib says {sine_digest}")
+
+        renamed, seen = first_reading(
+            lambda: value_at(port, f"/godot/cue/{RENAMED_CUE}/hash"),
+            lambda value: value == sine_digest, timeout=60.0)
+        report.check(renamed is not None,
+                     "the copy under another name publishes the same hash: the key is the "
+                     "bytes and not the path, so both cues are drawn from one pyramid",
+                     f"it still read {seen!r} after 60 s")
+
+
 def run(locale: "str | None") -> int:
     report = Report(f"timbre: the cache, before anything is drawn ({locale or 'C'})")
 
@@ -576,6 +1165,9 @@ def run(locale: "str | None") -> int:
 
         # --- and the thread a session runs it on -------------------------------
         serves(report, room, locale)
+
+        # --- and what a session says with it -----------------------------------
+        plays(report, room, locale)
 
     return report.finish()
 

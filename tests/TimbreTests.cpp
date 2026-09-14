@@ -52,6 +52,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string>
 #include <thread>
@@ -599,6 +600,96 @@ TEST_CASE ("timbre: a pyramid written and read back is the same, byte for byte, 
     audio::TimbrePyramid empty;
     REQUIRE (timbre::read (emptyBytes.data(), emptyBytes.size(), empty));
     CHECK (empty.frames() == 0);
+}
+
+TEST_CASE ("timbre: the frame at a moment is the finest one whose stretch holds it, held at both ends")
+{
+    /*  What `/godot/run/<id>/timbre` reads on every tick (PR 5.8). Answered
+        as an INDEX into the finest level, found by walking that level for
+        the pointer - so a wrong frame fails with the number it was rather
+        than with two addresses, and a frame from a coarser level, which
+        this must never return, fails as -2. */
+    const auto indexAt = [] (const audio::TimbrePyramid& pyramid, double seconds) -> long long
+    {
+        const auto* frame = timbre::frameAt (pyramid, seconds);
+
+        if (frame == nullptr)
+            return -1;
+
+        const auto& finest = pyramid.levels.front();
+
+        for (std::size_t k = 0; k < finest.size(); ++k)
+            if (&finest[k] == frame)
+                return static_cast<long long> (k);
+
+        return -2;
+    };
+
+    /*  Frames alike on purpose: which one came back is told by where it is,
+        not by what it holds. */
+    const auto steady = [] (std::size_t count, std::uint32_t rate)
+    {
+        return timbre::pyramidOf (std::vector<timbre::Frame> (count, timbre::Frame { 30, 200, 120, 90 }),
+                                  rate,
+                                  static_cast<std::uint64_t> (count) * static_cast<std::uint64_t> (timbre::hopSize));
+    };
+
+    /*  NO ANSWER TO GIVE: nothing analysed, a file of no samples, a pyramid
+        that does not know its rate, and a position that is not a number. */
+    CHECK (timbre::frameAt (audio::TimbrePyramid {}, 0.0) == nullptr);
+    CHECK (timbre::frameAt (steady (0u, 48000u), 0.0) == nullptr);
+    CHECK (timbre::frameAt (steady (10u, 0u), 0.0) == nullptr);
+
+    const auto at48 = steady (400u, 48000u);
+    const auto at44 = steady (11100u, 44100u);
+
+    REQUIRE (at48.levels.size() > 1);       // coarser levels exist, and are never what is read
+
+    CHECK (timbre::frameAt (at48, std::numeric_limits<double>::quiet_NaN()) == nullptr);
+    CHECK (timbre::frameAt (at48, std::numeric_limits<double>::infinity()) == nullptr);
+    CHECK (timbre::frameAt (at48, -std::numeric_limits<double>::infinity()) == nullptr);
+
+    /*  THE START, AND BEFORE IT: a negative position is the first frame,
+        however far before the start it is. */
+    CHECK (indexAt (at48, 0.0) == 0);
+    CHECK (indexAt (at48, -1.0e-9) == 0);
+    CHECK (indexAt (at48, -3.0) == 0);
+    CHECK (indexAt (at48, -1.0e300) == 0);
+
+    /*  THE RULE, where the answer is not a whole number of hops - and at two
+        rates, because a lookup that forgot the rate would be right at one of
+        them at most. */
+    CHECK (indexAt (at48, 0.5) == 23);      // 24 000 samples: 23.44 hops
+    CHECK (indexAt (at48, 1.0) == 46);      // 48 000: 46.88
+    CHECK (indexAt (at44, 0.5) == 21);      // 22 050: 21.53
+    CHECK (indexAt (at44, 1.0) == 43);      // 44 100: 43.07
+
+    /*  ON A BOUNDARY, where rounding the wrong way is a frame early or late.
+        Eight seconds at 48 kHz is 384 000 samples, exactly 375 hops, and 256
+        seconds at 44.1 kHz is 11 289 600, exactly 11 025: at each rate the
+        first positions that are a whole number of hops AND exact in binary,
+        so the product carries no rounding and the boundary is really one.
+        A sample earlier is still the frame before it. */
+    CHECK (indexAt (at48, 8.0) == 375);
+    CHECK (indexAt (at48, 8.0 - 1.0 / 48000.0) == 374);
+    CHECK (indexAt (at44, 256.0) == 11025);
+    CHECK (indexAt (at44, 256.0 - 1.0 / 44100.0) == 11024);
+
+    /*  THE END. Four hundred frames at 48 kHz run to 8.533 seconds: the last
+        two stretches by the rule, then everything after them held on the
+        last - a finished run keeps its last playhead. */
+    CHECK (indexAt (at48, 8.5) == 398);     // 398.44 hops
+    CHECK (indexAt (at48, 8.52) == 399);    // 399.38: the last frame's own stretch
+    CHECK (indexAt (at48, 400.0 * static_cast<double> (timbre::hopSize) / 48000.0) == 399);
+    CHECK (indexAt (at48, 9.0) == 399);
+    CHECK (indexAt (at48, 1.0e300) == 399);
+    CHECK (indexAt (at44, 300.0) == 11099);
+
+    /*  And a clip one frame long is that frame, wherever it is asked. */
+    const auto single = steady (1u, 48000u);
+    CHECK (indexAt (single, -1.0) == 0);
+    CHECK (indexAt (single, 0.0) == 0);
+    CHECK (indexAt (single, 60.0) == 0);
 }
 
 //==============================================================================

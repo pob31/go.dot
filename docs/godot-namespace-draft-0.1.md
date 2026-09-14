@@ -3643,7 +3643,11 @@ The contract, then, as five sentences about a client rather than five instructio
 **What a client may cache is decided by one question: does the thing have a revision?** The
 pyramid may be cached for ever. `/media/<hash>/timbre?level=N` is keyed by the content hash of
 the file, so the answer cannot change without the key changing, and the route will say so with
-`Cache-Control: max-age=31536000, immutable` (§14.5). Anything reached by an address under
+`Cache-Control: max-age=31536000, immutable` (§14.5). *Corrected by PR 5.8 (2026-09-14): the key
+is the audio, and the answer also depends on the analysis — a moved ramp stop bumps
+`timbre::formatVersion` and rebuilds the pyramid under the same name — so the route says
+`no-cache`, and a page keeps what it fetched in memory for its own life instead (§14.5's note).*
+Anything reached by an address under
 `/godot` may not be cached at all: the document half of the tree is itself a cache the engine
 invalidates with `markStale`, and a name held past one poll is yesterday's name. **The poll is
 the invalidation** — and a client that improves on it by caching a subtree has taken over an
@@ -3849,7 +3853,7 @@ always.**
 | Node | Type | Access | Persist | Cap | What it says | Half | PR |
 |---|---|---|---|---|---|---|---|
 | `/godot/run/<id>/timbre` | `s` | ro | none | 10 | `"<hue 0..360> <sat 0..1> <light 0..1>"` at the run's current position; empty while the pyramid has not arrived, which §3.30 calls grey | runtime | 5.8 |
-| `/godot/cue/<id>/hash` | `s` | ro | none | 1 | the sha256 of this media cue's file, once the analyser has hashed it — the key the route below is addressed by. Empty for every kind but media, and until the hash exists | runtime | 5.8 |
+| `/godot/cue/<id>/hash` | `s` | ro | none | 1 | the sha256 of this media cue's file, once the analyser has hashed it — the key the route below is addressed by. A media cue's only — a memo, group, fade or stop has no such node *(PR 5.8's reading of owner `media`; this cell said "empty for every kind but media")* — and empty until the hash exists *and* its pyramid does | runtime | 5.8 |
 
 **The node carries three numbers where §3.30 says two, deliberately, and §14.15 carries the
 amendment rather than this row carrying the departure in silence.** Lightness is the frequency
@@ -3935,8 +3939,8 @@ same port, content-addressed:
 
 | Request | Answers | Headers | Refuses |
 |---|---|---|---|
-| `GET /media/<hash>/timbre?level=N` | that level's frames, exactly the bytes the `.tpy` holds | `application/octet-stream`; `Cache-Control: max-age=31536000, immutable` | 400 for a hash that is not exactly 64 hex characters, or a level that is not a number; 404 for a hash the snapshot does not hold, or a level the pyramid does not have |
-| `GET /media/<hash>/timbre?INFO` | the header as JSON: `sha256`, `seconds`, `sampleRate`, `window`, `hop`, and a `levels` array of `{ frames, bytes }` | `application/json`; the same immutable header | as above, minus the level |
+| `GET /media/<hash>/timbre?level=N` | that level's frames, exactly the bytes the `.tpy` holds | `application/octet-stream`; `Cache-Control: max-age=31536000, immutable` *(built as `no-cache`: PR 5.8's note below)* | 400 for a hash that is not exactly 64 hex characters *(built: 64 **lower-case** hex, so upper case is 400 too)*, or a level that is not a number; 404 for a hash the snapshot does not hold *(or holds without a pyramid)*, or a level the pyramid does not have |
+| `GET /media/<hash>/timbre?INFO` | the header as JSON: `sha256`, `seconds`, `sampleRate`, `window`, `hop`, and a `levels` array of `{ frames, bytes }` *(built with `formatVersion` after `sha256`)* | `application/json`; the same immutable header *(built as `no-cache`)* | as above, minus the level |
 
 `?INFO` exists so that a forty-pixel Gogo bar and a full-width editor waveform each ask for the
 level they want in one round trip rather than fetching the finest and throwing most of it away,
@@ -3947,6 +3951,9 @@ directory answers `Cache-Control: no-store` (`OscQueryServer.cpp:246`) because t
 edited while the engine runs and a stale module is a bug the author cannot see (decision V,
 §14.3). A pyramid is named by the sha256 of its own source, so a given URL can never answer
 differently; a year is not optimism about the cache, it is a statement about content addressing.
+*Corrected by PR 5.8 (2026-09-14), and the note at the end of this section says why: the name is
+the audio's, not the analysis's, so the route answers `no-cache`.* The content address still
+does the other half of this paragraph's work unchanged.
 The same property is what makes the route safe: **the hash is validated as sixty-four hex
 characters and looked up in the snapshot, so no request text ever becomes a filesystem path.**
 `/ui` needs `file.isAChildOf (clientDirectory)` (`:232-238`) precisely because a request there
@@ -3984,6 +3991,62 @@ deliberate consequence: none of it will exist under `wfg replay`, which is corre
 no files to hash and no HTTP server, so `timbre` is empty and the bar is grey, which is the same
 answer §3.30 gives for a clip whose cache has not arrived. §14.8 says why the analyser will
 write no record a replay would have to reproduce.
+
+**What PR 5.8 built (2026-09-14), and what its review changed.** The two rows landed as drawn,
+`run,timbre` beside `position` and `media,hash` beside `duration`. `ParameterTree` gains
+`setMediaInfo`, takes **one** `snapshot()` per publish and reads every hash and every timbre out
+of it, so a record landing mid-publish cannot give one run colours another lacks. The document half
+leaves a roster of media cues and their `file` behind, and the runtime half emits
+`/godot/cue/<id>/hash` over it: `prepare`'s pair, exactly once per media cue wherever it sits,
+list, group, header or persistent section. The hash reads empty until the record has its pyramid as
+well as its hash, so no client can read a hash the route would refuse. `timbre` is
+`timbre::frameAt` — the finest frame at `floor (position × rate / hop)`, held at both ends — printed
+as the hue to a tenth of a degree and the other two to thousandths, fine enough that every byte
+still prints differently. A silent frame reads `0 0 0`, a real reading and not the empty "not
+analysed yet". The route is a generic hook on the server, `serveRoute (prefix, handler)`, so the
+shell stays free of Go.dot, and it sits beside `/ui` exactly where this section put it. The hook
+refuses a registration after `start()` (the HTTP thread reads the table without a lock), an empty
+or `/` prefix, a prefix ending in `/`, and an empty handler. The server writes `Content-Type`,
+`Content-Length` and `Transfer-Encoding` itself, and drops a handler's own copies. The pyramid
+answer, `oscquery/TimbreRoute`, checks in the order drawn: shape, then hash, then question, then
+records. The console prints the reading in words on a media run's row, and not for a run that
+failed before it launched. Four corrections:
+
+- **No year of `immutable`: every pyramid and every `?INFO` is `no-cache`**, and every refusal
+  stays `no-store`. The URL names the audio, but the bytes
+  also depend on the analysis. A moved ramp stop bumps `timbre::formatVersion`, and the pyramid is
+  rebuilt *under the same name* (§14.12). The author will move stops while looking at the bar,
+  and a browser keeping a year-old copy would go on showing the old colours, as if the move had
+  done nothing. The handler sees no request headers, so an ETag and a 304 were not available either.
+  So `no-cache`: a browser may keep a copy but must ask again before reusing it, and a page keeps
+  the levels it has fetched in memory for its own life anyway. `?INFO` now carries
+  `formatVersion`, second after `sha256`. Immutability can come back with a URL that names the
+  version too — once a client has somewhere to learn the version *before* it asks.
+- **Every throw is a 500, not only a `std::exception`.** juce_simpleweb already survives a
+  `std::exception` from a handler and answers it with nothing. A throw of any other type left
+  `io_service::run()`, and JUCE's thread entry swallowed it: the one thread that carries the HTTP
+  port *and* the WebSocket ended quietly, every subscription with it, and `stop()` then waited for
+  ever on a connection flag nobody would clear. The route's guard catches everything, and its 500
+  says `no-store` like every other refusal.
+- **The table's cells, as built:** the hash node exists on media cues only; a hash is 64
+  *lower-case* hex characters and anything else is 400, upper case included; and 404 also covers a
+  hash the analyser holds without a pyramid. The line numbers this section cites in
+  `OscQueryServer.cpp` have moved twice since it was drawn; the code's comments now carry the
+  reasons.
+- **A fix outside the timbre, found while building it.** `collectCue` answered *every* row named
+  `duration` from the media table — a fade's and a stop's too, which are lengths somebody decided —
+  so every fade and every stop has published a duration of nought whatever the show said, since
+  PR 4.1. The branch is now a media cue's only, and a test pins all three kinds.
+
+**Proposed, and the author's (PR 5.8's review, 2026-09-14): a `run,hash` beside `run,timbre`.**
+`cue/<id>/hash` follows the file the cue names *now*, while a run plays the file it was armed with
+(`Run::media`, taken at the first arm). So once a playing cue's `file` is edited, or a run outlives
+its cue, a bar keyed by `cue/<run.cue>/hash` draws one file's colours under the other's playhead,
+and it disagrees with `run/<id>/timbre` at that same point — `cue/<id>/duration` already has the
+same mismatch, and the console's row shows it. One runtime row — the hash of `Run::media`'s record,
+under the same rule that the pyramid must be present — would key a run's bar by what the run
+actually plays, and would give the bar its length through `?INFO`. It belongs with 5.17, the first
+code that draws a bar. Until then, the `media,hash` description says which file it follows.
 
 ### 14.6 The document grows two attributes
 

@@ -274,6 +274,29 @@ namespace wfg::audio::timbre
         return pyramid;
     }
 
+    const Frame* frameAt (const TimbrePyramid& pyramid, double seconds) noexcept
+    {
+        if (pyramid.frames() == 0 || pyramid.sampleRate == 0 || ! std::isfinite (seconds))
+            return nullptr;
+
+        const auto& finest = pyramid.levels.front();
+
+        /*  KEPT A DOUBLE UNTIL IT IS KNOWN TO BE AN INDEX. Converting first
+            would be undefined for a position of 1e300 seconds, and a negative
+            one is no size_t at all; compared as a double, both simply land on
+            an end. */
+        const auto index = std::floor (seconds * static_cast<double> (pyramid.sampleRate)
+                                       / static_cast<double> (hopSize));
+
+        if (! (index > 0.0))
+            return &finest.front();
+
+        if (index >= static_cast<double> (finest.size() - 1))
+            return &finest.back();
+
+        return &finest[static_cast<std::size_t> (index)];
+    }
+
     //==============================================================================
     struct Analyser::Impl
     {

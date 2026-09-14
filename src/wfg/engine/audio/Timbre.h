@@ -168,6 +168,28 @@ namespace wfg::audio
         TimbrePyramid pyramidOf (std::vector<Frame> finest, std::uint32_t sampleRate,
                                  std::uint64_t samples);
 
+        /*  THE FRAME PLAYING `seconds` INTO THE FILE: the finest level's frame
+            whose stretch holds that moment - the seconds times the sample rate,
+            over the hop, rounded down. What `/godot/run/<id>/timbre` reads for
+            every running clip on every tick (PR 5.8), and it is a
+            multiplication and an index, which is the "table lookup" PRD §3.30
+            promised the tick thread (namespace draft §14.5). Never a coarser
+            level: a playhead is one instant, and the finest frame is the one
+            that describes it.
+
+            HELD AT BOTH ENDS rather than refused. Before the start of the file
+            is its first frame, and past the end its last: a run that has
+            finished keeps its last playhead for as long as the tree keeps
+            publishing it, and a position a hair past the last sample - the
+            sample clock and a header's length need not agree to the frame - is
+            still the end of that file, not a file with no colour.
+
+            NULL ONLY WHEN THERE IS NO ANSWER TO GIVE: a finest level with no
+            frames, a sample rate of nought, or a position that is not a finite
+            number. The tree publishes all three as the empty "not analysed"
+            and never as a colour. */
+        const Frame* frameAt (const TimbrePyramid& pyramid, double seconds) noexcept;
+
         //==========================================================================
         /*  THE ANALYSIS, one stretch at a time, so a file an hour long is read
             a hop at a time rather than held whole. Hand it every stretch in

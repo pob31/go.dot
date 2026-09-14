@@ -34,6 +34,8 @@
 #include "TestSupport.h"
 
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/cue/Run.h>
@@ -45,8 +47,14 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <cstdint>
+#include <map>
+#include <memory>
 #include <set>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace wfg;
 using namespace wfg::tree;
@@ -734,4 +742,524 @@ TEST_CASE ("tree: an empty tree is still a tree")
 
     CHECK (parameters.snapshot() == first);
     CHECK (parameters.snapshot()->tick() == 0);
+}
+
+//==============================================================================
+/*  PR 5.8: THE TWO NODES THAT READ THE ANALYSER, a run's `timbre` and a media
+    cue's `hash` - both published by the runtime half, both empty until the
+    analyser has answered, and neither of them ever a guess (namespace draft
+    §14.5).
+
+    Nothing here analyses a sound. The pyramid is sixty-four frames whose bytes
+    are chosen, handed to a MediaInfo the way the analyser hands it one, so
+    every reading below is known before the tree is asked. */
+namespace
+{
+    namespace timbre = audio::timbre;
+
+    const std::string bedFile = "bed.wav";
+
+    /*  Sixty-four hex characters, the shape the analyser publishes. Which ones
+        is nothing to the tree, which prints a hash and never reads it. */
+    const std::string bedHash = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    /*  Where the MediaInfo is told the files are: an absolute folder that is
+        never made, so every length reads nought and nothing depends on the
+        directory the suite was started in - which a relative `file`, taken as
+        given, would be read against. */
+    std::string nowhere()
+    {
+        return juce::File::getSpecialLocation (juce::File::tempDirectory)
+                   .getChildFile ("wfg-tree-" + juce::Uuid().toDashedString())
+                   .getFullPathName().toStdString();
+    }
+
+    /*  A media cue naming `file`, at the head of `parentId` - the main list
+        unless something else is asked for. */
+    std::string addMediaCue (Rig& rig, const std::string& file,
+                             const std::string& parentId = "7K2QM9X4")
+    {
+        const auto created = rig.document.createCue (parentId, 0, "media", "Bed");
+        REQUIRE (created.ok);
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + created.id + "/file", file).ok);
+
+        rig.parameters.markStale();
+        return created.id;
+    }
+
+    /*  A run of that cue as the runner leaves one: the file copied onto the run
+        at its first arm, the position written on every tick. Looked up again by
+        identifier afterwards and never held, because a second `create` may
+        move every run in the table. */
+    void addRun (Rig& rig, const std::string& runId, const std::string& cueId,
+                 const std::string& file, double seconds)
+    {
+        rig.runs.create (runId, cueId, "media");
+
+        auto* run = rig.runs.find (runId);
+        REQUIRE (run != nullptr);
+
+        run->media = file;
+        run->position = seconds;
+    }
+
+    void moveRun (Rig& rig, const std::string& runId, double seconds)
+    {
+        auto* run = rig.runs.find (runId);
+        REQUIRE (run != nullptr);
+
+        run->position = seconds;
+    }
+
+    /*  SIXTY-FOUR FRAMES AT 48 kHz, each unlike its neighbours - one level,
+        since a pyramid stops at sixty-four - so the frame a position picks is
+        the only one that could print what it prints. Frame 30's hue byte is 8,
+        which is 11.25 degrees: a half exactly, so the rounding has to say which
+        way it goes. Frame 50 is silence. */
+    std::vector<timbre::Frame> bedFrames()
+    {
+        std::vector<timbre::Frame> frames (64);
+
+        for (std::size_t k = 0; k < frames.size(); ++k)
+        {
+            const auto step = static_cast<int> (k);
+
+            frames[k].hue = static_cast<std::uint8_t> ((step * 37) % 256);
+            frames[k].saturation = static_cast<std::uint8_t> (40 + step * 3);
+            frames[k].lightness = static_cast<std::uint8_t> (38 + step * 2);
+            frames[k].peak = static_cast<std::uint8_t> (step);
+        }
+
+        frames[30].hue = 8;
+        frames[50] = timbre::Frame {};
+
+        return frames;
+    }
+
+    /*  A record as the analyser publishes one: the hash and the pyramid
+        together, never one without the other. */
+    audio::MediaRecord analysedRecord (const std::string& hash, std::vector<timbre::Frame> frames)
+    {
+        const auto samples = static_cast<std::uint64_t> (frames.size())
+                               * static_cast<std::uint64_t> (timbre::hopSize);
+
+        audio::MediaRecord record;
+        record.contentHash = hash;
+        record.pyramid = std::make_shared<const audio::TimbrePyramid> (
+            timbre::pyramidOf (std::move (frames), 48000u, samples));
+
+        return record;
+    }
+
+    /*  THE TEXT, RESTATED from its rule rather than asked of the tree - a test
+        that called the tree's own formatter would pass whatever it did. The
+        hue to the nearest tenth of a degree, the saturation and the lightness
+        to the nearest thousandth, a half rounded up, and no trailing zero.
+        Worked in integers with the decimal point written by hand: a different
+        road from the engine's doubles and its shortest-round-trip formatter,
+        to the same text. A quotient a / b rounded half up is (2a + b) / 2b. */
+    std::string expectedTimbre (const timbre::Frame& frame)
+    {
+        const auto decimal = [] (int scaled, int places)
+        {
+            int unit = 1;
+
+            for (int i = 0; i < places; ++i)
+                unit *= 10;
+
+            auto fraction = std::to_string (scaled % unit);
+
+            while (fraction.size() < static_cast<std::size_t> (places))
+                fraction.insert (fraction.begin(), '0');
+
+            while (! fraction.empty() && fraction.back() == '0')
+                fraction.pop_back();
+
+            const auto whole = std::to_string (scaled / unit);
+            return fraction.empty() ? whole : whole + "." + fraction;
+        };
+
+        // A hue is its byte times 360 over 256 degrees, so tenths are times 3600.
+        const auto tenths = (2 * frame.hue * 3600 + 256) / 512;
+
+        // The unit range is the byte over 255, so thousandths are times 1000.
+        const auto thousandths = [] (int value) { return (2 * value * 1000 + 255) / 510; };
+
+        return decimal (tenths, 1) + " "
+             + decimal (thousandths (frame.saturation), 3) + " "
+             + decimal (thousandths (frame.lightness), 3);
+    }
+
+    std::string textAt (const TreeSnapshot& snapshot, const std::string& address)
+    {
+        const auto* node = snapshot.find (address);
+        REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+        REQUIRE (node->soleValue().has_value());
+        return node->soleValue()->getString();
+    }
+}
+
+TEST_CASE ("tree: a run's timbre is the frame at its position, in three numbers a byte can hold")
+{
+    /*  Under fr_FR as well as C, like every case in this file: three numbers
+        with decimal points in one string is exactly what a formatter that
+        consulted the locale would get wrong. */
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+    const auto cueId = addMediaCue (rig, bedFile);
+
+    audio::MediaInfo media { rig.document, nowhere() };
+    media.publish (bedFile, analysedRecord (bedHash, bedFrames()));
+    rig.parameters.setMediaInfo (&media);
+
+    const auto frames = bedFrames();
+
+    /*  The restated rule, pinned first against arithmetic done by hand, so the
+        two roads cannot agree by sharing a mistake. Frame 4 is bytes 148, 52
+        and 46: 208.125 degrees, 0.2039 and 0.1804. Frame 30 is 11.25 degrees,
+        and a half goes up. */
+    REQUIRE (expectedTimbre (frames[4]) == "208.1 0.204 0.18");
+    REQUIRE (expectedTimbre (frames[30]) == "11.3 0.51 0.384");
+    REQUIRE (expectedTimbre (frames[50]) == "0 0 0");
+
+    const auto address = std::string ("/godot/run/R1/timbre");
+    addRun (rig, "R1", cueId, bedFile, 0.1);
+
+    /*  0.1 s is 4 800 samples, 4.69 hops: frame 4. */
+    const auto first = rig.publish (0);
+    CHECK (textAt (*first, address) == expectedTimbre (frames[4]));
+
+    /*  What the node declares, from its row: read-only, a string, and a rate
+        cap of 10 - the first in the table that is not 1, 5 or 50, on purpose,
+        and an instruction to a surface rather than anything the engine does
+        (§14.5). */
+    const auto* node = first->find (address);
+    REQUIRE (node != nullptr);
+    CHECK (node->access == Access::read);
+    CHECK (node->typeTags == "s");
+    CHECK (node->rateCap == doctest::Approx (10.0));
+
+    /*  0.3 s is 14 400 samples, 14.06 hops: frame 14, and another reading. */
+    moveRun (rig, "R1", 0.3);
+    CHECK (textAt (*rig.publish (1), address) == expectedTimbre (frames[14]));
+    CHECK (expectedTimbre (frames[14]) != expectedTimbre (frames[4]));
+
+    /*  0.65 s is 31 200 samples, 30.47 hops: the half. */
+    moveRun (rig, "R1", 0.65);
+    CHECK (textAt (*rig.publish (2), address) == "11.3 0.51 0.384");
+
+    /*  1.07 s is 51 360 samples, 50.16 hops: silence, which is a reading and
+        not the empty "not analysed yet". */
+    moveRun (rig, "R1", 1.07);
+    CHECK (textAt (*rig.publish (3), address) == "0 0 0");
+
+    /*  And past the end of the file, its last frame: a finished run keeps its
+        last playhead for as long as it is published. */
+    moveRun (rig, "R1", 30.0);
+    CHECK (textAt (*rig.publish (4), address) == expectedTimbre (frames[63]));
+}
+
+TEST_CASE ("tree: a run's timbre is empty until there is a frame to read, and never a guess")
+{
+    /*  Empty is §3.30's grey - a client draws its own - and it has to be empty
+        in every case where the engine does not know, rather than a colour
+        borrowed from somewhere or a nought that would read as silence. */
+    Rig rig;
+    const auto cueId = addMediaCue (rig, bedFile);
+
+    addRun (rig, "R1", cueId, bedFile, 0.1);
+    addRun (rig, "R2", cueId, "elsewhere.wav", 0.1);     // a file no record names
+    rig.runs.create ("R3", "B3N8R5TW", "memo");           // a run that plays no file
+
+    const auto readings = [&rig] (std::int64_t tick)
+    {
+        const auto snapshot = rig.publish (tick);
+
+        return std::vector<std::string> { textAt (*snapshot, "/godot/run/R1/timbre"),
+                                          textAt (*snapshot, "/godot/run/R2/timbre"),
+                                          textAt (*snapshot, "/godot/run/R3/timbre") };
+    };
+
+    const std::vector<std::string> nothing { "", "", "" };
+
+    /*  NO MEDIAINFO AT ALL, which is any tree built without `setMediaInfo`.
+        No verb builds one that way: `wfg tree` and `wfg serve` both hand
+        theirs the show's, and `wfg replay` builds no ParameterTree at all - it
+        hands its runner the lengths the log recorded and has no tree to hand
+        anything. So this is the tree's own default rather than a session
+        anybody runs, and it owes the same honest nothing as every step below:
+        each node there all the same, empty.
+
+        THE MEDIA CUE'S `hash` AS WELL AS THE RUNS' TIMBRES. The roster it is
+        published against is walked out of the document, not out of a
+        MediaInfo, so a tree that was never told where the records are still
+        knows which cues are media cues - and the shape of a cue's node list
+        is the show's to decide, never a matter of which objects the verb that
+        built the tree happened to wire to it. */
+    CHECK (readings (0) == nothing);
+
+    const auto hashAddress = "/godot/cue/" + cueId + "/hash";
+    const auto bare = rig.parameters.snapshot();
+
+    CHECK (bare->find (hashAddress) != nullptr);
+    CHECK (textAt (*bare, hashAddress).empty());
+
+    /*  A MediaInfo over the show before the analyser has published anything:
+        the file has a record, with its length and no pyramid. */
+    audio::MediaInfo media { rig.document, nowhere() };
+    rig.parameters.setMediaInfo (&media);
+
+    REQUIRE (media.snapshot()->count (bedFile) == 1u);
+    CHECK (readings (1) == nothing);
+
+    /*  A hash with no pyramid is still nothing to read a frame from. */
+    audio::MediaRecord hashedOnly;
+    hashedOnly.contentHash = bedHash;
+    media.publish (bedFile, hashedOnly);
+
+    CHECK (readings (2) == nothing);
+
+    /*  Nor is a pyramid with no frames - a file of no samples - at any
+        position. */
+    media.publish (bedFile, analysedRecord (bedHash, {}));
+    CHECK (readings (3) == nothing);
+
+    /*  And the same rig reads a frame the moment there is one, so the empties
+        above are the engine's answer and not a rig that could read nothing.
+        The other two stay empty: one names a file nobody analysed, and one
+        plays no file at all. */
+    media.publish (bedFile, analysedRecord (bedHash, bedFrames()));
+    CHECK (readings (4) == std::vector<std::string> { expectedTimbre (bedFrames()[4]), "", "" });
+}
+
+TEST_CASE ("tree: a media cue's hash is published by the runtime half, and arrives without an edit")
+{
+    Rig rig;
+    const auto cueId = addMediaCue (rig, bedFile);
+
+    audio::MediaInfo media { rig.document, nowhere() };
+    rig.parameters.setMediaInfo (&media);
+
+    const auto address = "/godot/cue/" + cueId + "/hash";
+    const auto before = rig.publish (0);
+
+    /*  Empty until the analyser answers - and there from the start, so a
+        client watching the cue never sees its node list change shape. */
+    CHECK (textAt (*before, address).empty());
+
+    const auto* node = before->find (address);
+    REQUIRE (node != nullptr);
+    CHECK (node->access == Access::read);
+    CHECK (node->rateCap == doctest::Approx (1.0));
+
+    /*  A media cue's alone: a memo and a group have no file to hash. */
+    CHECK (before->find (announce + "/hash") == nullptr);
+    CHECK (before->find (preshow + "/hash") == nullptr);
+
+    const auto revision = rig.document.revision();
+
+    /*  A hash without its pyramid is one the route would answer with a 404,
+        so the tree does not print it either. */
+    audio::MediaRecord hashedOnly;
+    hashedOnly.contentHash = bedHash;
+    media.publish (bedFile, hashedOnly);
+
+    CHECK (textAt (*rig.publish (1), address).empty());
+
+    /*  THE PROOF IT IS THE RUNTIME HALF. The record lands and the very next
+        publish reads it, with no edit to the show and no `markStale` - so the
+        document half is still the one built at tick 0. Published from there,
+        the hash would read empty until somebody happened to edit a cue. */
+    media.publish (bedFile, analysedRecord (bedHash, bedFrames()));
+
+    const auto after = rig.publish (2);
+
+    CHECK (textAt (*after, address) == bedHash);
+    CHECK (rig.document.revision() == revision);
+
+    /*  And to a listener it is a value push, not a path. */
+    const auto changes = diff (*before, *after);
+
+    CHECK (changes.added.empty());
+    CHECK (changes.removed.empty());
+    CHECK (std::find (changes.valueChanged.begin(), changes.valueChanged.end(), address)
+             != changes.valueChanged.end());
+
+    //--------------------------------------------------------------------------
+    /*  THE ROSTER IS REFILLED, NOT GROWN. The runtime half reads each hash
+        against `declaredMedia`, which the document half leaves behind every
+        time it is rebuilt - and everything above built that half exactly
+        once, so none of it would notice a rebuild that appended to the roster,
+        or one that kept a cue the show no longer has. Two edits, then, that
+        pass only if it is walked afresh out of the show as it now stands.
+
+        FIRST THE CUE IS POINTED AT ANOTHER FILE: a second take of the bed,
+        analysed under a hash of its own. Both records stay in the MediaInfo,
+        which files them by path and forgets nothing, so the one thing that
+        can move the cue from the first to the second is a roster pairing the
+        cue with the file it names NOW. A roster kept would print the old hash;
+        one appended to would carry two `hash` leaves at one address, and
+        `find` would answer with whichever it reached first - which is why the
+        address is counted across the whole tree rather than looked up, the
+        way the case below counts every address. */
+    const auto takeTwo = std::string ("bed-take2.wav");
+    const auto takeTwoHash = std::string ("fedcba9876543210fedcba9876543210fedcba9876543210fedcba9876543210");
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + cueId + "/file", takeTwo).ok);
+    media.publish (takeTwo, analysedRecord (takeTwoHash, bedFrames()));
+    rig.parameters.markStale();
+
+    const auto moved = rig.publish (3);
+    const auto nodes = moved->all();
+
+    const auto occurrences = [&nodes] (const std::string& path)
+    {
+        return std::count_if (nodes.begin(), nodes.end(),
+                              [&path] (const Node* each) { return each->address == path; });
+    };
+
+    CHECK (textAt (*moved, address) == takeTwoHash);
+    CHECK (occurrences (address) == 1);
+    CHECK (occurrences ("/godot/cue/" + cueId) == 1);
+
+    /*  THEN THE CUE IS DELETED, through the engine, as a client deletes one.
+        Its file's record is still in the MediaInfo - a file outlives the cue
+        that named it - so the records cannot say the cue has gone, and only
+        the roster can. The container has to go with the leaf: `/godot/cue/<id>`
+        is the document half's for as long as the show declares the cue, and a
+        `hash` leaf left behind would have the runtime half make a container of
+        its own to hold it - a cue a client could still find, in a show that no
+        longer has it. */
+    REQUIRE (rig.apply (4, "cli", "object.delete", { osc::Value::string (cueId) }).applied == 1);
+
+    const auto gone = rig.publish (4);
+
+    CHECK (gone->find (address) == nullptr);
+    CHECK (gone->find ("/godot/cue/" + cueId) == nullptr);
+}
+
+TEST_CASE ("tree: every media cue has one hash wherever it sits, and every run one timbre")
+{
+    /*  The media roster is threaded through every walk that reaches a cue - a
+        list's members, a group's members, a group's header, a list's
+        persistent section - so there is a media cue in each, each naming a file
+        of its own, and each must come out once with exactly its own file's
+        hash. And the whole tree is walked, because both halves carrying an
+        address would make the answer depend on which one `find` reached
+        first. */
+    Rig rig;
+
+    const auto preshowId = std::string ("D9FH2JKA");
+
+    const auto header = rig.document.createRole (preshowId, "header");
+    REQUIRE (header.ok);
+
+    const auto section = rig.document.createPersistent ("7K2QM9X4");
+    REQUIRE (section.ok);
+
+    const std::vector<std::pair<std::string, std::string>> placements {
+        { "7K2QM9X4", "bed.wav" },
+        { preshowId,  "rain.wav" },
+        { header.id,  "preroll.wav" },
+        { section.id, "room.wav" },
+        { "7K2QM9X4", "later.wav" } };      // never analysed
+
+    std::vector<std::string> cues;
+
+    for (const auto& [parent, file] : placements)
+        cues.push_back (addMediaCue (rig, file, parent));
+
+    audio::MediaInfo media { rig.document, nowhere() };
+
+    /*  Every file but the last analysed, each under a hash of its own letter. */
+    const auto hashFor = [&placements] (std::size_t i)
+    {
+        return i + 1 < placements.size() ? std::string (64, static_cast<char> ('a' + static_cast<int> (i)))
+                                         : std::string();
+    };
+
+    for (std::size_t i = 0; i + 1 < placements.size(); ++i)
+        media.publish (placements[i].second, analysedRecord (hashFor (i), bedFrames()));
+
+    rig.parameters.setMediaInfo (&media);
+    addRun (rig, "R1", cues.front(), "bed.wav", 0.1);
+
+    const auto snapshot = rig.publish (0);
+    const auto nodes = snapshot->all();
+
+    const auto occurrences = [&nodes] (const std::string& address)
+    {
+        return std::count_if (nodes.begin(), nodes.end(),
+                              [&address] (const Node* each) { return each->address == address; });
+    };
+
+    for (std::size_t i = 0; i < cues.size(); ++i)
+    {
+        const auto hashAddress = "/godot/cue/" + cues[i] + "/hash";
+        INFO ("address: " << hashAddress);
+
+        CHECK (occurrences (hashAddress) == 1);
+        CHECK (occurrences ("/godot/cue/" + cues[i]) == 1);
+        CHECK (textAt (*snapshot, hashAddress) == hashFor (i));
+    }
+
+    CHECK (occurrences ("/godot/run/R1/timbre") == 1);
+    CHECK (textAt (*snapshot, "/godot/run/R1/timbre") == expectedTimbre (bedFrames()[4]));
+
+    /*  And every address in the tree exactly once, the walk the root's own case
+        makes. */
+    std::set<std::string> seen;
+
+    for (const auto* node : nodes)
+    {
+        INFO ("address: " << node->address);
+        CHECK (seen.insert (node->address).second);
+    }
+
+    CHECK (seen.size() == snapshot->size());
+}
+
+TEST_CASE ("tree: a fade's and a stop's duration is the one the show says, and only a media cue's is its file's")
+{
+    /*  THREE ROWS SHARE THE NAME `duration` AND MEAN TWO THINGS. On a media cue
+        it is a READOUT - how long the file is, read from its header at open and
+        never stored. On a fade and a stop it is a DECISION - how long the fade
+        takes - written in the show, rw, and saved. The tree answered all three
+        from the media table until PR 5.8: a fade names no `file`, so it found
+        nothing there and published nought, and every client showed the
+        operator a two-second fade as a zero-second one, and an edit to it as
+        not having happened. Caught while PR 5.8 added the media owner's second
+        runtime row. */
+    doc::ShowDocument document;
+    const juce::File bundle { juce::String (std::string (WFG_TEST_FIXTURES_DIR))
+                                + "/bundles/fade-stop" };
+    REQUIRE (doc::Bundle::open (bundle, document).ok);
+
+    Engine engine;
+    MountTable mounts;
+    cue::RunTable runs;
+    ParameterTree parameters { document, engine.commands(), mounts, runs };
+
+    /*  The one media cue's file, with a length nobody would mistake for a
+        fade's. */
+    const std::map<std::string, double> lengths { { "thunder.wav", 4.5 } };
+    parameters.setMediaDurations (&lengths);
+
+    EngineState state;
+    state.version = "test";
+    const auto snapshot = parameters.publish (0, state);
+
+    const auto valueAt = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE (node != nullptr);
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    CHECK (valueAt ("/godot/cue/E4GP6QSC/duration") == osc::Value::float64 (2.0));    // a fade
+    CHECK (valueAt ("/godot/cue/M5TQ7XVA/duration") == osc::Value::float64 (3.0));    // a stop
+    CHECK (valueAt ("/godot/cue/P9XKC2WR/duration") == osc::Value::float64 (1.0));    // another fade
+    CHECK (valueAt ("/godot/cue/B3N8R5TW/duration") == osc::Value::float64 (4.5));    // the media cue's file
 }

@@ -97,7 +97,9 @@ namespace wfg::audio
         same number `MediaInfo::durations()` holds, restated so that a reader of
         a snapshot has the whole record without asking two objects. An empty
         `contentHash` and a null `pyramid` mean NOT ANALYSED YET, which the tree
-        will publish as nothing at all rather than as grey (§14.12). */
+        publishes as nothing at all rather than as grey (§14.12, since PR 5.8:
+        `run/<id>/timbre` and `cue/<id>/hash` both read empty until the pyramid
+        is here). */
     struct MediaRecord
     {
         double seconds = 0.0;

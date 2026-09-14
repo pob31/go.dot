@@ -46,6 +46,7 @@
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/oscquery/EngineNamespace.h>
 #include <wfg/engine/oscquery/OscQueryServer.h>
+#include <wfg/engine/oscquery/TimbreRoute.h>
 #include <wfg/engine/tree/TreeCommands.h>
 #include <wfg/engine/log/Replay.h>
 
@@ -1117,6 +1118,10 @@ namespace
         wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
 
         parameters.setMediaDurations (&mediaInfo.durations());
+
+        /*  The records half too, so a tree dump carries every `cue/<id>/hash`
+            a session would publish - empty, since nothing here analyses. */
+        parameters.setMediaInfo (&mediaInfo);
         parameters.setListState (&runner.listState());
         runner.setMediaDurations (&mediaInfo.durations());
 
@@ -2083,6 +2088,13 @@ namespace
         wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
 
         parameters.setMediaDurations (&mediaInfo.durations());
+
+        /*  AND THE OTHER HALF OF THE SAME OBJECT, for `run/timbre` and
+            `cue/<id>/hash` (PR 5.8, §14.5): the records the analyser publishes
+            late, read through one snapshot per publish. The durations above
+            stay a separate pointer on purpose: the slot analysis caches on
+            that address. */
+        parameters.setMediaInfo (&mediaInfo);
         parameters.setListState (&runner.listState());
         runner.setMediaDurations (&mediaInfo.durations());
 
@@ -2357,6 +2369,20 @@ namespace
 
         if (clientDirectory != juce::File())
             server.serveClientFrom (clientDirectory);
+
+        /*  THE PYRAMIDS, on the same port and not in the tree (PR 5.8,
+            §14.5): kilobytes of frames that never change for a given file
+            would otherwise ride on every poll a client makes. Answered from
+            the records the analyser has published, in memory, on the HTTP
+            thread - which is shared with the WebSocket, so nothing on this
+            route may wait for a disk. `mediaInfo` outlives the server: it is
+            declared first, and `server.stop()` runs before either goes. */
+        server.serveRoute (wfg::oscquery::mediaRoutePrefix,
+                           [&mediaInfo] (const std::string& requestPath, const std::string& requestQuery)
+                           {
+                               return wfg::oscquery::answerTimbreRoute (mediaInfo, requestPath,
+                                                                        requestQuery);
+                           });
 
         if (! server.start (requestedHttp, nameSpace))
         {

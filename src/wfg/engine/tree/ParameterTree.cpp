@@ -23,8 +23,13 @@
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/Schema.h>
 
+#include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/audio/Timbre.h>
+
 #include <algorithm>
+#include <cmath>
 #include <set>
+#include <utility>
 
 namespace wfg::tree
 {
@@ -540,6 +545,7 @@ namespace wfg::tree
                          std::vector<Node>& out,
                          const std::map<std::string, double>* durations,
                          std::vector<std::string>& roster,
+                         std::vector<std::pair<std::string, std::string>>& mediaRoster,
                          const char* role = "member")
         {
             const auto element = node.getType().toString().toStdString();
@@ -559,6 +565,14 @@ namespace wfg::tree
             /*  KEPT FOR THE RUNTIME HALF, which has no document to walk. See
                 `ParameterTree::declaredCues`. */
             roster.push_back (id);
+
+            /*  And a media cue's file beside it, read the way MediaInfo keys
+                its records - the raw attribute, as `mediaFilesNamedBy` reads
+                it - so the hash the runtime half looks up is the file this cue
+                names and not a spelling of it. See
+                `ParameterTree::declaredMedia`. */
+            if (isMedia)
+                mediaRoster.emplace_back (id, node[juce::Identifier ("file")].toString().toStdString());
 
             /*  EVERY KIND IS A CUE FIRST. A media cue has a number, a name and
                 a pre-wait like any other and is addressed at /godot/cue/<id>,
@@ -605,6 +619,18 @@ namespace wfg::tree
                 if (name == "prepare")
                     continue;
 
+                /*  NOR IS A MEDIA CUE'S `hash`, for the same reason with a
+                    different clock. It arrives when the analyser has read the
+                    file - seconds or minutes after the show opened, on a thread
+                    of its own - and nothing about the show moves when it does,
+                    so published from here it would read empty until somebody
+                    happened to edit a cue. The runtime half emits it against
+                    the media roster this walk leaves behind, and only there:
+                    both halves carrying the address would make the answer
+                    depend on which one `find` reached first (§14.5). */
+                if (row->owner == "media" && name == "hash")
+                    continue;
+
                 std::string text;
 
                 /*  Derived from the element, never stored - which is what makes
@@ -619,14 +645,22 @@ namespace wfg::tree
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
                 else if (name == "role")   text = role;
-                else if (name == "duration")
+                else if (name == "duration" && isMedia)
                 {
                     /*  READ ONCE WHEN THE SHOW WAS OPENED, and nought when
                         nobody read any: a replay, a tree dump of a bundle with
                         no media folder, a test. Nought is the same answer a
                         missing or unreadable file gives, and §3.13's solver
                         reads it as "I do not know how long this is" rather than
-                        as "this has ended". */
+                        as "this has ended".
+
+                        A MEDIA CUE'S ONLY, and the guard is a fix (PR 5.8).
+                        `fade` and `stop` carry a `duration` row of their own -
+                        a length somebody DECIDED, rw and stored - and without
+                        it this branch answered theirs from the media table too,
+                        keyed by a `file` they do not have: every fade and stop
+                        published a duration of nought whatever the show said,
+                        since PR 4.1. Theirs falls through to the stored text. */
                     const auto named = node[juce::Identifier ("file")].toString().toStdString();
                     const auto found = durations != nullptr ? durations->find (named)
                                                             : std::map<std::string, double>::const_iterator {};
@@ -747,12 +781,13 @@ namespace wfg::tree
 
                     for (const auto& roleChild : child)
                         if (roleChild.hasProperty (idProperty))
-                            collectCue (roleChild, id, roleIndex++, out, durations, roster, childRole);
+                            collectCue (roleChild, id, roleIndex++, out, durations, roster,
+                                        mediaRoster, childRole);
 
                     continue;
                 }
 
-                collectCue (child, id, childIndex++, out, durations, roster);
+                collectCue (child, id, childIndex++, out, durations, roster, mediaRoster);
             }
         }
     }
@@ -805,6 +840,10 @@ namespace wfg::tree
             runtime half publishes `prepare` against it. See
             `ParameterTree::declaredCues`. */
         std::vector<std::string> cueOrder;
+
+        /*  And every media cue with the file it names, for `hash`. See
+            `ParameterTree::declaredMedia`. */
+        std::vector<std::pair<std::string, std::string>> mediaOrder;
 
         /*  And every list, for `aim`, `solve` and `statePosition` - three more
             answers that are about a session rather than about a show. */
@@ -892,7 +931,7 @@ namespace wfg::tree
                             continue;
 
                         if (cue.hasProperty (idProperty))
-                            collectCue (cue, id, index++, nodes, durations, cueOrder);
+                            collectCue (cue, id, index++, nodes, durations, cueOrder, mediaOrder);
                     }
 
                     if (const auto section = list.getChildWithName ("Persistent");
@@ -903,7 +942,7 @@ namespace wfg::tree
                         for (const auto& cue : section)
                             if (cue.hasProperty (idProperty))
                                 collectCue (cue, id, persistentIndex++, nodes, durations,
-                                            cueOrder, "persistent");
+                                            cueOrder, mediaOrder, "persistent");
                     }
                 }
             }
@@ -1093,6 +1132,7 @@ namespace wfg::tree
         }
 
         declaredCues = std::move (cueOrder);
+        declaredMedia = std::move (mediaOrder);
         declaredLists = std::move (listOrder);
 
         //----------------------------------------------------------------------
@@ -1174,6 +1214,49 @@ namespace wfg::tree
             }
 
             return out;
+        }
+
+        /*  `/godot/run/<id>/timbre`: the frame playing at the run's position,
+            as three numbers, or nothing - and nothing is "not analysed yet",
+            never a colour (§14.5).
+
+            ROUNDED BEFORE IT IS PRINTED: the hue to a tenth of a degree, the
+            saturation and the lightness to a thousandth. A frame is four bytes,
+            so that is fine enough that every byte still prints differently from
+            its neighbours - a hue step is 1.40625 degrees and a unit step
+            1/255 - and coarse enough that 52/255 does not reach a client as
+            seventeen digits of a byte's worth of information. Printed by the
+            formatter the whole tree uses, so a French locale moves no decimal
+            point.
+
+            EMPTY for a run that plays no file, for a tree that was handed no
+            MediaInfo - a test's - and for a file whose pyramid
+            has not arrived. A silent frame is `0 0 0`, and that is a reading:
+            lightness nought is below the ramp's darkest, so no client can take
+            it for a low sound. */
+        std::string timbreText (const cue::Run& run, const audio::MediaRecords* records)
+        {
+            if (records == nullptr || run.media.empty())
+                return {};
+
+            const auto found = records->find (run.media);
+
+            if (found == records->end() || found->second.pyramid == nullptr)
+                return {};
+
+            const auto* frame = audio::timbre::frameAt (*found->second.pyramid, run.position);
+
+            if (frame == nullptr)
+                return {};
+
+            const auto rounded = [] (double value, double steps)
+            {
+                return osc::formatDouble (std::round (value * steps) / steps);
+            };
+
+            return rounded (audio::timbre::hueOf (*frame), 10.0) + " "
+                 + rounded (audio::timbre::saturationOf (*frame), 1000.0) + " "
+                 + rounded (audio::timbre::lightnessOf (*frame), 1000.0);
         }
     }
 
@@ -1468,6 +1551,39 @@ namespace wfg::tree
                 }
         }
 
+        /*  WHAT THE ANALYSER HAS PUBLISHED, ASKED ONCE. Every hash below and
+            every run's timbre further down read this one map, so a publish
+            costs one pointer copy under MediaInfo's short lock however many
+            clips are playing - and all of them answer out of the same moment,
+            rather than a record landing between two runs and giving one of
+            them colours the other does not have. Empty with no MediaInfo. */
+        const auto mediaRecords = mediaInfo != nullptr ? mediaInfo->snapshot()
+                                                       : std::shared_ptr<const audio::MediaRecords> {};
+
+        /*  THE HASH OF EACH MEDIA CUE'S FILE, against the roster the document
+            half left behind: `prepare`'s pair, the other half of the skip in
+            `collectCue` (§14.5). A hash arrives from the analyser's thread
+            while nothing about the show moves, so it is read here, where
+            nothing is cached.
+
+            EMPTY UNTIL THE RECORD HAS A PYRAMID AS WELL AS A HASH. The analyser
+            publishes the two together, and asking for both here too means no
+            client can ever read a hash that `/media/<hash>/timbre` would answer
+            with a 404. */
+        if (const auto* row = rowNamed ("media", "hash"))
+            for (const auto& [cueId, file] : declaredMedia)
+            {
+                std::string text;
+
+                if (mediaRecords != nullptr)
+                    if (const auto found = mediaRecords->find (file);
+                        found != mediaRecords->end() && found->second.pyramid != nullptr)
+                        text = found->second.contentHash;
+
+                runtime.push_back (makeLeaf (std::string (godot) + "/cue/" + cueId + "/hash",
+                                             *row, text));
+            }
+
         /*  WHO HOLDS EACH DECLARED SLOT, AND WHO IS WAITING FOR IT.
 
             Read off the run table rather than kept beside it, which is the
@@ -1534,6 +1650,11 @@ namespace wfg::tree
                 else if (name == "state")     text = run.state;
                 else if (name == "track")     text = std::to_string (run.track);
                 else if (name == "position")  text = osc::formatDouble (run.position);
+
+                /*  A table lookup at that same position, every tick: the 10 in
+                    the row is what a surface is told to draw it at, and nothing
+                    here throttles it (§14.5). */
+                else if (name == "timbre")    text = timbreText (run, mediaRecords.get());
                 else if (name == "level")     text = osc::formatDouble (run.level);
                 else if (name == "late")      text = std::to_string (run.late);
                 else if (name == "parent")    text = run.parent;
@@ -1571,7 +1692,9 @@ namespace wfg::tree
             test caught it because the case needs a show with a declared slot AND
             the whole-tree walk that counts addresses, and no fixture had both.
             `prepare` puts every CUE in the same position, which is what made it
-            visible. */
+            visible. A media cue's `hash` needs nothing more: a media cue is a
+            cue, so `declaredCues` already names its container, and
+            `/godot/run/<id>`, where `timbre` lives, is this half's alone. */
         std::vector<std::string> ownedByTheDocument {
             std::string (rootAddress), std::string (godot),
             std::string (godot) + "/document",
