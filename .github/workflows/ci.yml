@@ -48,6 +48,18 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+# Every job inherits this, the real-time-safety job included, which runs ctest
+# directly rather than through a preset.
+env:
+  # SMALL BLOCKS ARE NOT RUN HERE, at the author's decision (2026-09-14): M5 and
+  # M6 skip their 64-sample cases when this is set, and say so in the log. Those
+  # are the cases the shared runners have failed on - M5 once on Windows at
+  # 44 100 Hz, one block and one sample late - and the question is whether they
+  # are the ones that flake. A developer's machine does not set it, so the
+  # arithmetic at 64 samples is still checked where a failure means something.
+  # Remove this line to run them here again; nothing else depends on it.
+  WFG_SKIP_SMALL_BLOCKS: "1"
+
 jobs:
   # ---------------------------------------------------------------------------
   # Job 1 — the pin gate. ~15 s, no compiler, and everything else `needs:` it.

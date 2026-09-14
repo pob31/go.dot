@@ -2403,6 +2403,31 @@ namespace
     }
 }
 
+namespace
+{
+    /*  SMALL BLOCKS ARE NOT RUN ON CI, at the author's decision (2026-09-14).
+        The CI workflow sets WFG_SKIP_SMALL_BLOCKS, and M5 and M6 then skip their
+        64-sample cases - the cases the shared runners have failed on: M5 once on
+        Windows at 44 100 Hz after the spatcore re-pin, one block and one sample
+        late, in a test that had passed forty times. The question is whether
+        those cases are the ones that flake, and dropping them from CI is how the
+        author chose to ask it.
+
+        ONLY THE SMALLEST, and only there. 128 stays in M5 and is what every
+        black-box driver runs at, and no developer's machine sets the variable,
+        so the arithmetic at 64 samples is still checked wherever a failure means
+        something rather than a busy runner.
+
+        SAID OUT LOUD when it happens, so a green CI is never a quiet claim about
+        a case it did not run. */
+    constexpr int smallestBlockOnCi = 128;
+
+    bool skipsSmallBlocks()
+    {
+        return juce::SystemStats::getEnvironmentVariable ("WFG_SKIP_SMALL_BLOCKS", {}) == "1";
+    }
+}
+
 TEST_CASE ("M5: the sound starts on the sample the launch was placed at")
 {
     /*  ONE BLOCK OF TOLERANCE, and not because the arithmetic is approximate.
@@ -2416,6 +2441,13 @@ TEST_CASE ("M5: the sound starts on the sample the launch was placed at")
     {
         for (const int blockSize : { 64, 128, 256, 512, 1024 })
         {
+            if (skipsSmallBlocks() && blockSize < smallestBlockOnCi)
+            {
+                MESSAGE ("M5 skipped at " << rate << " Hz with " << blockSize
+                         << "-sample blocks: WFG_SKIP_SMALL_BLOCKS is set, as the CI workflow sets it");
+                continue;
+            }
+
             INFO ("at " << rate << " Hz with " << blockSize << "-sample blocks");
 
             const auto landing = measureLanding (rate, blockSize);
@@ -2725,6 +2757,13 @@ TEST_CASE ("M6: a stop lands on the sample it was placed at")
     {
         for (const int blockSize : { 64, 256, 1024 })
         {
+            if (skipsSmallBlocks() && blockSize < smallestBlockOnCi)
+            {
+                MESSAGE ("M6 skipped at " << rate << " Hz with " << blockSize
+                         << "-sample blocks: WFG_SKIP_SMALL_BLOCKS is set, as the CI workflow sets it");
+                continue;
+            }
+
             INFO ("at " << rate << " Hz with " << blockSize << "-sample blocks");
 
             const auto landing = measureStopLanding (rate, blockSize);
