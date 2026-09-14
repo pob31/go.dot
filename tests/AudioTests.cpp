@@ -2418,8 +2418,14 @@ namespace
         so the arithmetic at 64 samples is still checked wherever a failure means
         something rather than a busy runner.
 
-        SAID OUT LOUD when it happens, so a green CI is never a quiet claim about
-        a case it did not run. */
+        SAID OUT LOUD when it happens: a MESSAGE for each case skipped, which any
+        run that shows this test's output prints - a local run, or a CI run that
+        failed. ctest does NOT print a passing test's output, so on a green CI
+        run the record is the variable itself, which GitHub prints in every
+        step's environment block, and the comment beside it in ci.yml. *This
+        paragraph is a correction (2026-09-14):* it first claimed the MESSAGE
+        kept a green CI honest, and the first green run showed no MESSAGE at all
+        - M23's timing line, the control, was missing from it too. */
     constexpr int smallestBlockOnCi = 128;
 
     bool skipsSmallBlocks()

@@ -52,7 +52,9 @@ concurrency:
 # directly rather than through a preset.
 env:
   # SMALL BLOCKS ARE NOT RUN HERE, at the author's decision (2026-09-14): M5 and
-  # M6 skip their 64-sample cases when this is set, and say so in the log. Those
+  # M6 skip their 64-sample cases when this is set, with a MESSAGE for each -
+  # which ctest prints only for a test that FAILS, so on a green run this line,
+  # repeated in every step's environment block, is the record of it. Those
   # are the cases the shared runners have failed on - M5 once on Windows at
   # 44 100 Hz, one block and one sample late - and the question is whether they
   # are the ones that flake. A developer's machine does not set it, so the
