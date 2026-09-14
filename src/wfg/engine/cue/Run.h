@@ -252,6 +252,21 @@ namespace wfg::cue
         std::string cue;
         std::string kind;
 
+        /*  THE FILE THIS RUN IS PLAYING, as the document writes it - bundle-
+            relative, the key `audio::MediaInfo` files its records under - or
+            empty for every kind but media.
+
+            THE RUN'S OWN COPY, and not a lookup through `cue` each time it is
+            asked, because the question outlives the cue: undoing a delete can
+            leave a run sounding whose cue is gone (§14.9), and it must still be
+            able to say what it plays. Copied in `Runner::armMedia` ABOVE the
+            null-player return, beside the slot claim and for the claim's
+            reason: which file a cue names is a fact about the document, not
+            about the audio side - so a replay, which has no Player, carries it
+            exactly as a hosted session does. PR 5.8 reads it for the timbre
+            lookup; nothing publishes it yet. */
+        std::string media;
+
         std::string state { runState::armed };
 
         /*  The fixed track it plays on, or -1 before one is reserved and after

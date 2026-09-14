@@ -1933,6 +1933,27 @@ namespace wfg::cue
             (§13.4). */
         claimSlotsFor (cue, runId);
 
+        /*  THE FILE, beside the claim and above the same return, for the same
+            reason: which file a cue names is the document's business, not the
+            audio side's. Copied below it, `Run::media` would be empty on every
+            replay and on every `wfg serve` without `--hosted`, and the case it
+            exists for - a run that goes on sounding after an undo took its cue
+            away, and must still say what it plays - is one a replay reproduces
+            (namespace draft §14.5).
+
+            ONCE, AT THE FIRST ARM. With an audio side the first arm reserves a
+            track and the guard above returns on every later one, so a hosted
+            run keeps the file it was armed with. Without one the track stays -1
+            and a run can be armed twice - a cue with a pre-wait, armed and then
+            fired; a sequence member, spawned and armed and launched minutes
+            later - and a second read would pick up an edit the hosted session
+            never plays. So the copy is taken only while the run has none, which
+            makes every configuration agree with the one that sounds. *Corrected
+            in PR 5.6's review (2026-09-14).* The one edge left is a cue that
+            named no file at its first arm, whose later arm may still read one. */
+        if (run->media.empty())
+            run->media = textOf (cue, "file");
+
         /*  NO AUDIO SIDE IS A COMPLETE CONFIGURATION, not a failure. A show
             replayed has no Player and must still create the run, advance
             standby and write the same log - only the sound is missing.
@@ -1945,7 +1966,9 @@ namespace wfg::cue
         if (audio == nullptr)
             return;
 
-        const auto named = textOf (cue, "file");
+        /*  The run's copy rather than a second read of the document, so the
+            file resolved and played below is the file the run says it plays. */
+        const auto named = run->media;
 
         /*  RESOLVED AGAINST THE BUNDLE, and checked here rather than three
             layers down. A cue naming a file the bundle does not have fails its

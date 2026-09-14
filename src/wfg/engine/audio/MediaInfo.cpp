@@ -19,7 +19,11 @@
 #include <wfg/engine/document/ShowDocument.h>
 
 #include <functional>
+#include <map>
 #include <memory>
+#include <mutex>
+#include <string>
+#include <utility>
 
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_core/juce_core.h>
@@ -94,5 +98,78 @@ namespace wfg::audio
         visit (document.root());
 
         return durations;
+    }
+
+    //==============================================================================
+    namespace
+    {
+        /*  The first snapshot: every file the show named, with the seconds just
+            read, no hash and no pyramid. Built from the frozen map rather than
+            by a second walk, so the records and the durations have the same
+            keys by construction. */
+        std::shared_ptr<const MediaRecords> unanalysedRecordsOf (const std::map<std::string, double>& lengths)
+        {
+            auto records = std::make_shared<MediaRecords>();
+
+            for (const auto& [path, seconds] : lengths)
+            {
+                MediaRecord record;
+                record.seconds = seconds;
+                records->emplace (path, std::move (record));
+            }
+
+            return records;
+        }
+    }
+
+    MediaInfo::MediaInfo (const doc::ShowDocument& document, const std::string& mediaFolder)
+        : frozenDurations (mediaDurations (document, mediaFolder)),
+          published (unanalysedRecordsOf (frozenDurations))
+    {
+    }
+
+    std::shared_ptr<const MediaRecords> MediaInfo::snapshot() const
+    {
+        const std::lock_guard<std::mutex> lock { swapMutex };
+        return published;
+    }
+
+    void MediaInfo::publish (const std::string& path, MediaRecord record)
+    {
+        /*  THE FROZEN SECONDS, whatever the publisher passed, for a file both
+            halves know. A record whose length disagreed with `durations()`
+            would be the second copy §13.4 warns about, and the tree and the
+            timbre route would each be right about a different number. A file
+            imported after the open has no frozen length to agree with, so its
+            record keeps the seconds the analyser read - and `durations()`,
+            which is read only at open, never hears of it. */
+        if (const auto frozen = frozenDurations.find (path); frozen != frozenDurations.end())
+            record.seconds = frozen->second;
+
+        const std::lock_guard<std::mutex> publishing { publisherMutex };
+
+        std::shared_ptr<const MediaRecords> current;
+
+        {
+            const std::lock_guard<std::mutex> lock { swapMutex };
+            current = published;
+        }
+
+        /*  BUILT OUTSIDE THE READERS' LOCK, which is the point of the shape: a
+            reader on the tick thread waits for a pointer copy and never for a
+            map copy. Nothing it can see is edited - this is a new map. */
+        auto next = std::make_shared<MediaRecords> (*current);
+        next->insert_or_assign (path, std::move (record));
+
+        {
+            const std::lock_guard<std::mutex> lock { swapMutex };
+            published = std::move (next);
+        }
+
+        /*  `current` is released after the swap and outside the readers' lock,
+            so a previous map nobody else holds is freed here, on the
+            publisher's thread. One a reader still holds is freed by that reader
+            when it lets go - the tick thread at worst, which may free, and never
+            the audio thread, which reads none of this. */
     }
 }

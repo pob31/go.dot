@@ -202,7 +202,10 @@ namespace wfg::cue
         /*  The side table the last build read. Compared by ADDRESS: the map is
             filled once when the show is opened and handed over by pointer, so a
             different pointer is a different show's media and the same pointer
-            is the same numbers. */
+            is the same numbers. `audio::MediaInfo` is what keeps both halves of
+            that true in a session - a const map in an object that can be
+            neither copied nor moved - and a case in `MediaCueTests.cpp` pins it
+            by counting rebuilds across a late publish. */
         const std::map<std::string, double>* builtWith = nullptr;
 
         std::size_t rebuildCount = 0;

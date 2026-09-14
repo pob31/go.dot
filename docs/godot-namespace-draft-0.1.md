@@ -3901,6 +3901,20 @@ and still able to say what it is playing (§14.9) — would be lost in exactly t
 written for. `Run::cue` and `Run::kind` are strings today (`Run.h:252-253`); 5.6 will add
 `media` beside them.
 
+*And only at the first arm — a refinement PR 5.6's review added (2026-09-14).* With an audio side
+the first arm reserves a track, and `armMedia`'s own guard returns on every later one, so a hosted
+run keeps the file it was armed with. Without one the track stays −1 and a run can be armed twice
+— a cue with a pre-wait, armed on entry and again when the wait elapses; a sequence member,
+spawned and armed and launched minutes later — and a second read would pick up an edit the hosted
+session never plays. So the copy is taken only while the run has none, and every configuration
+agrees with the one that sounds. The test that pins it was checked the only way that proves a
+test: with the guard removed it fails, reading the edited file.
+
+The same double arm reaches `claimSlotsFor`, which PR 5.6 did not touch: on a second no-player arm
+`holderOf` answers with the run itself, so a Feed would queue the run behind its own claim and an
+Insert would warn `no-channel` against itself. It is suspected from reading, not seen in a test,
+and it lives in Phase 4's claim logic, so it is recorded here rather than fixed in passing.
+
 **`rate_cap 10` is what the node declares, not what the engine does.** The value is copied from
 the schema row into the published `Node` (`ParameterTree.cpp:202`) and emitted as OSCQuery's
 `"RATE_CAP"` (`tree/OscQueryJson.cpp:171`); the only code in the engine that *acts* on a rate
@@ -5081,6 +5095,19 @@ address never moves and whose contents never change after load, and the hash and
 live where the pointer-keyed cache never looks. `ParameterTree::setMediaDurations` sets `stale =
 true` (`ParameterTree.h:165-169`), a full document-half rebuild, which is the second reason it
 is called once and never again.
+
+**What PR 5.6 built (2026-09-14), and one thing its review changed.** The durations are a
+`const` member, so the compiler refuses any later write, and `MediaInfo` can be neither copied nor
+moved, so the address cannot drift; `MediaCueTests` pins the law where it bites — publish,
+publish, publish a record, publish, and the slot analysis rebuilds nothing, while the same numbers
+at another address rebuild exactly once, which proves the count can move. The first build refused
+to publish a path the show had not named at open, to keep the two halves' keys identical. *That
+was corrected in review:* the plan queues 5.7's analyser for any file a `media/file` edit
+introduces mid-session, and a refusal would have left an imported file grey until the show was
+reopened. So `publish` takes any path; a path both halves know has its seconds forced to the
+frozen value, and one the show did not name at open keeps the seconds its publisher read. The
+snapshot may therefore name a file `durations()` does not — never the reverse — and `durations()`
+never grows, which is all the law ever required.
 
 **`wfg replay` is a third owner of that table and it is not a `MediaInfo`.** Replay declares its
 own `std::map<std::string, double> durations;` at `Console.cpp:490`, hands it to the Runner by

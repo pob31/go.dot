@@ -48,15 +48,65 @@
 
     No JUCE type in the signature: the tree and the document read this and
     neither of them names an audio library.
+
+    TWO HALVES SINCE PR 5.6, and they are not allowed to behave alike (namespace
+    draft §14.12). The DURATIONS are frozen at load and read by address, fifty
+    times a second, by a cache that cannot tell a changed number from an
+    unchanged one. The HASH and the PYRAMID arrive late, from a thread of their
+    own, and are read through a snapshot that is swapped whole. One record per
+    file keeps the two from becoming two tables that disagree; the rule below
+    about who may write which half keeps the cache honest.
 */
 
 #include <map>
+#include <memory>
+#include <mutex>
 #include <string>
 
 namespace wfg::doc { class ShowDocument; }
 
 namespace wfg::audio
 {
+    /*  WHAT A FILE SOUNDS LIKE, at every zoom - and PR 5.7's to define, which is
+        why it is only named here (§14.12: window 2048, hop 1024, then halvings
+        down to 64 frames). A `shared_ptr` to an incomplete type may be declared,
+        copied, moved and destroyed anywhere, empty or not: its deleter is
+        type-erased and captured once, where the pointer is first made from a
+        complete object - which happens in 5.7's analyser, the one place that
+        will include the definition. What needs the complete type is only
+        MAKING one, and dereferencing it. 5.7 plugs in by defining
+        `wfg::audio::TimbrePyramid` as a STRUCT, or by changing the word here: a
+        class/struct mismatch between a declaration and its definition warns on
+        MSVC (C4099) and on Clang (-Wmismatched-tags). GCC, which the strict job
+        runs, leaves that warning off by default, so the build would not catch
+        it - which is why the rule is written here rather than trusted to CI. */
+    struct TimbrePyramid;
+
+    /*  EVERYTHING GO.DOT KNOWS ABOUT ONE MEDIA FILE, keyed elsewhere by the
+        bundle-relative path the document writes.
+
+        Path is the key because path is what a cue names; the content hash is a
+        FIELD because it arrives late and because the cache it keys
+        (`media/.timbre/<sha256>.tpy`) is a different question - "have these
+        bytes been analysed" - from the one a cue asks. A second map from path to
+        hash would be a second thing to keep in step, and by §13.4's rule the one
+        that is wrong is always the copy.
+
+        `seconds` is the length read at load and never anything else: it is the
+        same number `MediaInfo::durations()` holds, restated so that a reader of
+        a snapshot has the whole record without asking two objects. An empty
+        `contentHash` and a null `pyramid` mean NOT ANALYSED YET, which the tree
+        will publish as nothing at all rather than as grey (§14.12). */
+    struct MediaRecord
+    {
+        double seconds = 0.0;
+        std::string contentHash;
+        std::shared_ptr<const TimbrePyramid> pyramid;
+    };
+
+    /*  One record per file the show named when it was opened, by that path. */
+    using MediaRecords = std::map<std::string, MediaRecord>;
+
     /*  Seconds, or 0.0 when the file is absent, unreadable, or in a format this
         build has no reader for. Never throws. */
     double mediaDurationSeconds (const std::string& absolutePath);
@@ -74,7 +124,118 @@ namespace wfg::audio
 
         `mediaFolder` is the bundle's `media/` directory; a cue names its file
         relative to it. Reads each file once, on the thread that opens the
-        show. */
+        show.
+
+        KEPT AS A FUNCTION, with `MediaInfo` below as its one caller in the
+        engine, so that there is exactly one reading of how long a show's media
+        is and not two that could drift: the object is built on this, and a test
+        compares the two. */
     std::map<std::string, double> mediaDurations (const doc::ShowDocument& document,
                                                   const std::string& mediaFolder);
+
+    //==============================================================================
+    /*  THE SHOW'S MEDIA, one record per file, owned by the verb that opened it.
+
+        THE DURATIONS HALF IS FROZEN, and that is law rather than an aside.
+        `durations()` is handed by ADDRESS to the parameter tree, the runner,
+        the solver and the show walk, and `SlotAnalysis::ensureBuilt` - which
+        `ParameterTree::publish` calls first thing, every publish - skips its
+        rebuild only when the revision AND that address are the ones it last
+        built with. Both halves of that test are sharp:
+
+          - an address that moved, or a map reached through a pointer somebody
+            swapped, fails the test on every publish and rebuilds the slot walk
+            fifty times a second on the tick thread;
+          - numbers that changed UNDER the same address pass the test, and every
+            slot overlap is then computed from stale seconds, silently.
+
+        So the map is a const member, filled once by `mediaDurations` in the
+        constructor, and nothing writes to it afterwards - not `publish`, not the
+        analyser PR 5.7 will start, not a corrected length a full read might
+        find. The seconds are what they were when the show was opened, which is
+        also what a replay of this session will be told (the log's `media`
+        lines are written from this map).
+
+        THE LATE HALF IS A SNAPSHOT: an immutable map swapped whole under a
+        short mutex, the shape `ParameterTree::publish` and `snapshot()` use. A
+        reader holding one keeps it, unchanged, for as long as it likes; a
+        publish never edits a map anybody can see.
+
+        `wfg replay` does NOT build one of these. It hands the runner a plain map
+        filled from the log's own `media` lines, because a replay must use the
+        lengths that were true when the log was written - and a `MediaInfo`
+        there would mean hashing a bundle the replay was told not to trust. */
+    class MediaInfo
+    {
+    public:
+        /*  Reads every distinct file's length, on the calling thread - the one
+            that opens the show, before the first publish and before any socket
+            is open. That cost is Phase 4's and unchanged by this class. */
+        MediaInfo (const doc::ShowDocument& document, const std::string& mediaFolder);
+
+        /*  NEITHER COPYABLE NOR MOVABLE, and this is what enforces the law above
+            rather than a matter of style. Every consumer holds `&durations()`;
+            a copy would hand out a second address for the same show and a move
+            would leave the first one pointing into a husk. With both deleted,
+            the only way to get a durations map is to ask the one object that
+            owns it, and its address is fixed for as long as that object lives. */
+        MediaInfo (const MediaInfo&) = delete;
+        MediaInfo (MediaInfo&&) = delete;
+        MediaInfo& operator= (const MediaInfo&) = delete;
+        MediaInfo& operator= (MediaInfo&&) = delete;
+
+        ~MediaInfo() = default;
+
+        /*  Any thread. The SAME reference on every call, into a map that never
+            changes after construction - hand its address to anything that
+            caches on one. */
+        const std::map<std::string, double>& durations() const noexcept { return frozenDurations; }
+
+        /*  Any thread. The most recently published records - never nullptr,
+            and never changed after it is returned. Before anything is
+            published, every file the show named, with its seconds, an empty
+            hash and a null pyramid. */
+        std::shared_ptr<const MediaRecords> snapshot() const;
+
+        /*  PR 5.7's analyser thread calls this; in PR 5.6 only tests do.
+
+            Builds a new map from the current one plus this record, outside the
+            reader's lock, and swaps it in under that lock. Publishers are
+            serialised among themselves by a second mutex, so two of them cannot
+            each copy the same map and lose one another's record - a reader never
+            waits for that one.
+
+            A PATH THE SHOW NAMED AT OPEN has its `seconds` REPLACED by the
+            frozen one, so the two halves cannot disagree about a file they both
+            know - the analyser's business there is the hash and the pyramid.
+
+            A PATH IT DID NOT is published as given, and `durations()` never
+            learns of it. The plan queues the analyser for "any file a
+            media/file edit introduces", which is a file somebody imported
+            mid-session: it has no frozen length, because the durations were
+            read once at open and must never change (the law above), and it
+            still deserves its colours now rather than at the next open. So the
+            snapshot may name a file `durations()` does not; the reverse can
+            never happen, and `durations()` never grows. *Corrected in PR 5.6's
+            review (2026-09-14):* the first build refused such a path, which
+            would have left an imported file grey until the show was reopened.
+            */
+        void publish (const std::string& path, MediaRecord record);
+
+    private:
+        /*  Declared FIRST, and const: it is filled by the constructor's
+            initialiser list and by nothing, ever, afterwards. */
+        const std::map<std::string, double> frozenDurations;
+
+        /*  A plain mutex rather than the RtSnapshot spin lock, for
+            `ParameterTree::publishMutex`'s reason: no reader is the audio
+            thread, and a pointer copy is the whole of what anyone holds it for.
+            The lipogram (PRD §4.2) is about the audio thread and not these. */
+        mutable std::mutex swapMutex;
+        std::shared_ptr<const MediaRecords> published;
+
+        /*  Held by a publisher for the whole of a copy-and-swap, and never by a
+            reader. */
+        std::mutex publisherMutex;
+    };
 }

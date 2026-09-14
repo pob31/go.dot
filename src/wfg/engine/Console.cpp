@@ -1096,25 +1096,26 @@ namespace
                    wfg::tree::loadAllMountsFromBundle (document, mounts, target))
                 std::cerr << "    " << problem << std::endl;
 
-        wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
-
         /*  HOW LONG EVERY MEDIA FILE IS, read once, here, on the thread that
             opened the show - before the first snapshot is published and long
             before any audio exists. §3.13's solver cannot answer "is this cue
             still playing" without it, and nothing in Go.dot has ever known.
 
-            It outlives `parameters` because it is declared beside it and the
-            tree only borrows it. */
-        const auto durations =
-            wfg::audio::mediaDurations (document,
-                                        target.isDirectory()
-                                          ? target.getChildFile ("media")
-                                                  .getFullPathName().toStdString()
-                                          : std::string());
+            It outlives `parameters` because it is declared before it, and the
+            tree only borrows it. A `MediaInfo` rather than a bare map since PR
+            5.6, and the address handed over is `durations()`, which is the same
+            address for as long as this object lives - the slot analysis caches
+            on exactly that (`audio/MediaInfo.h`). */
+        const wfg::audio::MediaInfo mediaInfo {
+            document,
+            target.isDirectory() ? target.getChildFile ("media").getFullPathName().toStdString()
+                                 : std::string() };
 
-        parameters.setMediaDurations (&durations);
+        wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+
+        parameters.setMediaDurations (&mediaInfo.durations());
         parameters.setListState (&runner.listState());
-        runner.setMediaDurations (&durations);
+        runner.setMediaDurations (&mediaInfo.durations());
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;
@@ -1906,26 +1907,31 @@ namespace
         for (const auto& problem : wfg::tree::loadAllMountsFromBundle (document, mounts, target))
             std::cerr << "    " << problem << std::endl;
 
-        wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
-
         /*  HOW LONG EVERY MEDIA FILE IS, read once, here, on the thread that
             opened the show - before the first snapshot is published and long
             before any audio exists. §3.13's solver cannot answer "is this cue
             still playing" without a duration, and nothing in Go.dot has ever
             known one. The log header below writes the same numbers down.
 
-            It outlives `parameters` because it is declared beside it; the tree
-            only borrows it. */
-        const auto durations =
-            wfg::audio::mediaDurations (document,
-                                        target.isDirectory()
-                                          ? target.getChildFile ("media")
-                                                  .getFullPathName().toStdString()
-                                          : std::string());
+            It outlives `parameters` because it is declared before it; the tree
+            only borrows it.
 
-        parameters.setMediaDurations (&durations);
+            A `MediaInfo` since PR 5.6, so that PR 5.7's analyser has somewhere
+            to put a file's hash and pyramid - but what the tree and the runner
+            are handed is `durations()`, one address for this object's whole
+            life, into numbers nothing changes after this line. The slot
+            analysis decides whether to rebuild, every publish, by comparing
+            that address (`audio/MediaInfo.h`). */
+        const wfg::audio::MediaInfo mediaInfo {
+            document,
+            target.isDirectory() ? target.getChildFile ("media").getFullPathName().toStdString()
+                                 : std::string() };
+
+        wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+
+        parameters.setMediaDurations (&mediaInfo.durations());
         parameters.setListState (&runner.listState());
-        runner.setMediaDurations (&durations);
+        runner.setMediaDurations (&mediaInfo.durations());
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;
@@ -2014,7 +2020,7 @@ namespace
             the sounds were even if the sounds have gone. A file that is missing
             is written with nought bytes and nought seconds rather than skipped:
             that it was named and absent is the interesting part. */
-        for (const auto& [named, seconds] : durations)
+        for (const auto& [named, seconds] : mediaInfo.durations())
         {
             const auto file = target.isDirectory()
                                 ? target.getChildFile ("media").getChildFile (juce::String (named))
