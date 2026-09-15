@@ -737,6 +737,16 @@ namespace wfg::tree
                 if (childElement == "Feed" || childElement == "Insert")
                 {
                     const auto* owner = childElement == "Feed" ? "feed" : "insert";
+
+                    /*  A LITERAL, because `Attribute::element` is a view. It was
+                        built from `childElement.toStdString()`, a temporary that
+                        died at the end of its own line and left the view
+                        pointing at freed memory for every row below. Nothing
+                        read it yet - attributeText asks the row, not the
+                        element - which is why it only showed as a warning
+                        (clang's dangling-gsl), and why it is fixed before the
+                        first reader of `element` finds it the other way. */
+                    const auto* elementName = childElement == "Feed" ? "Feed" : "Insert";
                     const auto childId = child[idProperty].toString().toStdString();
 
                     if (! childId.empty())
@@ -746,7 +756,7 @@ namespace wfg::tree
 
                         for (const auto* row : doc::Schema::rowsForOwner (owner))
                         {
-                            const doc::Attribute attribute { childElement.toStdString(), row };
+                            const doc::Attribute attribute { elementName, row };
                             const auto name = std::string (row->name);
                             const auto text = name == "cue" ? id
                                                             : storedText (attribute, child);

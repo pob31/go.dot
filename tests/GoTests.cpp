@@ -966,6 +966,98 @@ TEST_CASE ("claim: a run that FAILS gives its slots back, and nothing sends run.
     CHECK (rig.runs.holderOf (rig.slotId) == nullptr);
 }
 
+TEST_CASE ("claim: with no audio side, a cue armed twice does not wait on itself")
+{
+    /*  SUSPECTED IN PR 5.6 (namespace §14.5), AND THIS IS THE TEST THAT WAS
+        OWED BEFORE ANY FIX. With no audio side a run's track stays -1, so a
+        cue with a pre-wait is armed when it is entered and again when the wait
+        elapses and the fire path finds no track. The second arm reaches
+        `claimSlotsFor`, which asks `holderOf` - and the holder of every slot
+        the run took at its first arm is the run itself. Read as busy, that
+        would put the run in its own queue for a Feed, `pending` on a slot it
+        holds, and warn `no-channel` against itself for an Insert.
+
+        That configuration is `wfg replay`'s and every `wfg serve` without
+        `--hosted` - the black-box drivers, a laptop with no interface - while
+        a hosted session reserves a track at the first arm and never arms
+        twice. The two would disagree about what the slot rows say. */
+    ClaimRig rig;
+    rig.runner.setPlayer (nullptr);
+
+    const auto channel = rig.document.createRackChannel ("mono");
+    REQUIRE (channel.ok);
+    REQUIRE (rig.document.createInsert (rig.mediaId, channel.id).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/preWait", "0.1").ok);
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string (rig.mediaId) });
+
+    const auto* entered = rig.runs.liveRunOf (rig.mediaId);
+    REQUIRE (entered != nullptr);
+    REQUIRE (entered->state == std::string (cue::runState::waiting));
+
+    const auto id = entered->id;
+    REQUIRE (rig.runs.find (id)->claims.size() == 2u);
+
+    /*  THE SECOND ARM IS SEEN TO HAPPEN, as PR 5.6's own case insists: the run
+        leaves `waiting`, which is the path that arms again. */
+    bool left = false;
+
+    for (int n = 0; n < 50 && ! left; ++n)
+    {
+        rig.tickOnce();
+        left = rig.runs.find (id)->state != std::string (cue::runState::waiting);
+    }
+
+    REQUIRE (left);
+
+    /*  The same run, still holding both, waiting on neither, and warning of
+        nothing: a slot it holds is not busy to it. */
+    CHECK (rig.runs.find (id)->claims.size() == 2u);
+    CHECK (rig.runs.find (id)->pending.empty());
+    CHECK (rig.runs.find (id)->warning.empty());
+    CHECK (rig.runs.waitersFor (rig.slotId).empty());
+}
+
+TEST_CASE ("claim: with no audio side, a cue armed twice behind another waits in the queue once")
+{
+    /*  The other half of the same double arm: a slot somebody else holds.
+        The first arm queues the run, and the second must not queue it again -
+        a run in the queue twice is one the head of the queue would be handed
+        twice. */
+    ClaimRig rig;
+    rig.runner.setPlayer (nullptr);
+
+    //  With no audio side nothing launches, so a fired cue stays armed and
+    //  holds its slot for as long as the case needs it to.
+    rig.submitAndTick ("cue.fire", { osc::Value::string (rig.mediaId) });
+
+    const auto* holder = rig.runs.liveRunOf (rig.mediaId);
+    REQUIRE (holder != nullptr);
+    REQUIRE (rig.runs.holderOf (rig.slotId) == holder);
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.secondId + "/preWait", "0.1").ok);
+    rig.submitAndTick ("cue.fire", { osc::Value::string (rig.secondId) });
+
+    const auto* entered = rig.runs.liveRunOf (rig.secondId);
+    REQUIRE (entered != nullptr);
+
+    const auto id = entered->id;
+    REQUIRE (rig.runs.find (id)->pending == std::vector<std::string> { rig.slotId });
+
+    bool left = false;
+
+    for (int n = 0; n < 50 && ! left; ++n)
+    {
+        rig.tickOnce();
+        left = rig.runs.find (id)->state != std::string (cue::runState::waiting);
+    }
+
+    REQUIRE (left);
+
+    CHECK (rig.runs.find (id)->pending == std::vector<std::string> { rig.slotId });
+    CHECK (rig.runs.waitersFor (rig.slotId).size() == 1u);
+}
+
 TEST_CASE ("claim: a rack channel degrades rather than waits")
 {
     /*  §3.9e gives each slot kind a failure policy of its own, and the rack's is

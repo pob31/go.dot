@@ -1891,6 +1891,22 @@ namespace wfg::cue
 
             const auto* holder = runs.holderOf (slotId);
 
+            /*  A SLOT THIS RUN ALREADY HOLDS, OR ALREADY WAITS FOR, IS NOT
+                ASKED FOR AGAIN. With no audio side a run is armed twice - a
+                pre-wait arms it on entry, and the fire path arms it again when
+                the wait is over because its track is still -1 - and the second
+                arm used to find the run itself holding the slot and read that
+                as busy: a Feed queued behind its own claim, and an Insert
+                warned `no-channel` against itself. That is the configuration
+                `wfg replay` runs in and every serve without `--hosted`, and a
+                hosted session, which reserves a track at the first arm, never
+                reaches it - so the two disagreed about what the slot rows said.
+                Suspected in PR 5.6 (namespace §14.5) and confirmed by a test
+                before this line was written. */
+            if (holder == run
+                  || std::find (run->pending.begin(), run->pending.end(), slotId) != run->pending.end())
+                continue;
+
             if (holder == nullptr)
             {
                 run->claims.push_back (slotId);
@@ -5324,7 +5340,7 @@ namespace wfg::cue
                             draws one of its own. */
                         { { "run", 's', true, true } },
                         true,
-                        [&engine, &runner, &document, &focus, withRun]
+                        [&engine, &runner, &document, &focus]
                         (CommandContext& context, const std::vector<osc::Value>& args)
                         {
                             const auto list = focus.list (document);

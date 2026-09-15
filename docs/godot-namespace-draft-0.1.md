@@ -4013,6 +4013,12 @@ The same double arm reaches `claimSlotsFor`, which PR 5.6 did not touch: on a se
 `holderOf` answers with the run itself, so a Feed would queue the run behind its own claim and an
 Insert would warn `no-channel` against itself. It is suspected from reading, not seen in a test,
 and it lives in Phase 4's claim logic, so it is recorded here rather than fixed in passing.
+*Confirmed and fixed (2026-09-15).* A test written first, before any change, showed all three:
+a cue with a pre-wait, fired with no audio side, ended `pending` on the slot it held, listed as a
+waiter for it, and warning `no-channel` against its own rack channel. `claimSlotsFor` now leaves
+alone a slot the run already holds or already waits for. The second half matters as well: a run
+queued behind another cue and armed twice was queued twice, which the second test found when
+the guard was cut back to its first half.
 
 **`rate_cap 10` is what the node declares, not what the engine does.** The value is copied from
 the schema row into the published `Node` (`ParameterTree.cpp:202`) and emitted as OSCQuery's
