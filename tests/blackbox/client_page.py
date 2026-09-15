@@ -49,6 +49,8 @@ Exit codes: 0 everything held, 1 something did not, 2 the harness could not run.
 from __future__ import annotations
 
 import json
+import posixpath
+import re
 import sys
 import tempfile
 import time
@@ -391,6 +393,163 @@ def refuses_a_bad_directory() -> int:
     return report.finish()
 
 
+IMPORT = re.compile(r'^\s*import\s+(?:[^"\']*?\s+from\s+)?["\']([^"\']+)["\'];?', re.M)
+SIGNATURE = re.compile(r"^([a-z][\w.]*)((?:\s+(?:<[^>]+>|\[[^\]]+\]))*)\s*$")
+
+
+def signatures() -> "dict[str, list[tuple[str, str, bool]]]":
+    """`wfg commands`, read back: each command's arguments as (type, kind,
+    variadic), kind being 'required' or 'optional'. The same text a person
+    reads, so the check and the help cannot disagree about a signature."""
+    code, out, err = common.run_wfg("commands")
+    if code != 0:
+        raise HarnessError(f"wfg commands exited {code}: {err}")
+
+    found = {}
+    for line in out.splitlines():
+        match = SIGNATURE.match(line)
+        if not match:
+            continue
+        params = []
+        for token in re.findall(r"<[^>]+>|\[[^\]]+\]", match.group(2)):
+            kind = "required" if token.startswith("<") else "optional"
+            inner = token[1:-1]
+            variadic = inner.endswith("...")
+            inner = inner[:-3] if variadic else inner
+            params.append((inner.split(":", 1)[1] if ":" in inner else "*", kind, variadic))
+        found[match.group(1)] = params
+    return found
+
+
+def fits(args: "list[str]", params: "list[tuple[str, str, bool]]") -> "str | None":
+    """Why `args` - the type tags a gesture sends - do not fit a command's
+    signature, or None when they do: every required argument given, none past
+    the last one the command takes, each of the type it declares."""
+    required = sum(1 for _, kind, _ in params if kind == "required")
+    variadic = bool(params) and params[-1][2]
+
+    if len(args) < required:
+        return f"sends {len(args)} arguments where {required} are required"
+    if not variadic and len(args) > len(params):
+        return f"sends {len(args)} arguments to a command that takes {len(params)}"
+
+    for n, tag in enumerate(args):
+        declared = params[min(n, len(params) - 1)][0]
+        if declared not in ("*", tag):
+            return f"argument {n + 1} is '{tag}' where the command declares '{declared}'"
+
+    return None
+
+
+def modules(locale: "str | None") -> int:
+    """THE PAGE AS MODULES (PR 5.10), checked the way a browser would load it.
+
+    A page with no build step breaks in one way a bundler would have caught: a
+    module that is not there, or not served as JavaScript, and a browser shows
+    a blank page and says why only in its console. So the shell is read for its
+    module script, the graph is walked from app.js by the imports each file
+    names, and every file in it must answer 200 with a JavaScript type - and no
+    module may sit in the folder that nothing imports, which is a file edited
+    in vain.
+
+    AND THE GESTURE TABLE AGAINST THE ENGINE (the check 5.18 was to add, landed
+    with the table). `gestures/commands.json` says which named command each key
+    and gesture sends; every name must be one `wfg commands` lists, and the
+    argument types each gesture sends must fit that command's signature - so a
+    gesture naming a command that is not there, or sending it the wrong
+    arguments, fails here rather than on an evening. The transport's buttons
+    name theirs in `data-cmd`, and the shell and the table must agree about
+    which those are."""
+    report = Report(f"the page's modules and its gesture table ({locale or 'C'})")
+
+    with tempfile.TemporaryDirectory(prefix="wfg-modules-") as scratch:
+        bundle = common.copy_bundle(FIXTURE, Path(scratch) / "minimal")
+
+        with Server(bundle, locale=locale, ui=CLIENT) as server:
+            port = server.http_port
+            status, shell = common.http_get(port, "/ui")
+            report.equal(status, 200, "GET /ui answers with the shell")
+
+            entry = re.search(r'<script\s+type="module"\s+src="([^"]+)"', shell)
+            report.check(bool(entry), 'the shell loads its script as <script type="module">')
+
+            status, headers, _ = common.http_get_bytes(port, "/ui/styles.css")
+            report.equal(status, 200, "GET /ui/styles.css answers")
+            report.check(headers.get("content-type", "").startswith("text/css"),
+                         "as text/css", headers.get("content-type", ""))
+
+            seen = set()
+            if entry:
+                pending = [entry.group(1)]
+                bad = []
+                while pending:
+                    path = pending.pop()
+                    if path in seen:
+                        continue
+                    seen.add(path)
+                    status, headers, body = common.http_get_bytes(port, path)
+                    kind = headers.get("content-type", "")
+                    if status != 200 or not kind.startswith("text/javascript"):
+                        bad.append(f"{path}: {status} {kind}")
+                        continue
+                    base = path.rsplit("/", 1)[0]
+                    for spec in IMPORT.findall(body.decode("utf-8")):
+                        if spec.startswith("./") or spec.startswith("../"):
+                            pending.append(posixpath.normpath(base + "/" + spec))
+                        else:
+                            bad.append(f"{path} imports {spec!r}, which is not a path in this folder")
+
+                report.check(not bad, f"every module the page imports answers as JavaScript "
+                                      f"({len(seen)} of them, walked from {entry.group(1)})",
+                             "; ".join(bad))
+
+                on_disk = {"/ui/" + p.relative_to(CLIENT).as_posix()
+                           for p in CLIENT.rglob("*.js") if "tests" not in p.relative_to(CLIENT).parts}
+                orphans = sorted(on_disk - seen)
+                report.check(not orphans, "and no module in the folder is one nothing imports",
+                             ", ".join(orphans))
+
+            status, headers, body = common.http_get_bytes(port, "/ui/gestures/commands.json")
+            report.equal(status, 200, "GET /ui/gestures/commands.json answers")
+            report.check(headers.get("content-type", "").startswith("application/json"),
+                         "as application/json", headers.get("content-type", ""))
+
+            try:
+                table = json.loads(body.decode("utf-8"))
+            except ValueError as problem:
+                report.check(False, "and it is JSON", str(problem))
+                return report.finish()
+
+            known = signatures()
+            wrong = []
+            for section in ("keys", "gestures"):
+                for name, entry_ in table.get(section, {}).items():
+                    command = entry_.get("command", "")
+                    if command not in known:
+                        wrong.append(f"{section} {name!r}: {command!r} is not a command")
+                        continue
+                    why = fits(entry_.get("args", []), known[command])
+                    if why:
+                        wrong.append(f"{section} {name!r} ({command}): {why}")
+            for command in table.get("buttons", []):
+                if command not in known:
+                    wrong.append(f"button {command!r} is not a command")
+                elif fits([], known[command]):
+                    wrong.append(f"button {command!r} sends nothing, and {fits([], known[command])}")
+
+            counted = len(table.get("keys", {})) + len(table.get("gestures", {})) + len(table.get("buttons", []))
+            report.check(not wrong, f"every command the table names is one wfg commands lists, "
+                                    f"and every gesture's arguments fit it ({counted} entries)",
+                         "; ".join(wrong))
+
+            in_shell = set(re.findall(r'data-cmd="([^"]+)"', shell))
+            listed = set(table.get("buttons", []))
+            report.equal(sorted(in_shell ^ listed), [],
+                         "the shell's data-cmd buttons and the table's list are the same names")
+
+    return report.finish()
+
+
 def main() -> int:
     try:
         common.find_binary()
@@ -409,7 +568,7 @@ def main() -> int:
             locale = argument.split("=", 1)[1]
 
     try:
-        return max(run(locale), serves_files(locale), edits(locale),
+        return max(run(locale), serves_files(locale), modules(locale), edits(locale),
                    refuses_a_bad_directory())
     except HarnessError as problem:
         print(f"client_page: {problem}", file=sys.stderr)

@@ -1,0 +1,420 @@
+/*
+    This file is part of Go.dot — https://github.com/pob31/go.dot
+
+    Copyright (C) 2026 Pierre-Olivier Boulant
+
+    Go.dot is free software: you can redistribute it and/or modify it under the
+    terms of the GNU General Public License as published by the Free Software
+    Foundation, either version 3 of the License, or (at your option) any later
+    version. Go.dot is distributed in the hope that it will be useful, but
+    WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY
+    or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License
+    (LICENSE, at the repository root) for more details.
+
+    SPDX-License-Identifier: GPL-3.0-or-later
+*/
+
+/*  DARK, because PRD §2 requires it and a booth is dark. The palette is two
+    greys, one warm accent and one cool one; everything else is weight and
+    position. */
+:root {
+  --ink:        #e8e6e1;
+  --ink-dim:    #8b8781;
+  --ink-faint:  #56534f;
+  --ground:     #16161a;
+  --panel:      #1d1d22;
+  --panel-high: #24242b;
+  --rule:       #2e2e36;
+  --standby:    #e8b04b;
+  --live:       #4bc38a;
+  --stopping:   #d98b4b;
+  --failed:     #d9564b;
+  --waiting:    #6f8ec9;
+  --picked:     #7f7ad6;
+
+  --row: 26px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; height: 100%;
+  background: var(--ground); color: var(--ink);
+  font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.num { font-family: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Consolas, monospace;
+       font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------------- layout */
+/*  THE PANES TAKE THE ROW THAT GROWS, BY NUMBER, whatever sits above them. The
+    rows over them are banners that come and go - the recovery offer and the
+    last refusal: either, both or neither - and an element that is `hidden` or
+    `display: none` is not a grid item at all. Placed in order, the panes landed
+    in whichever row the count of visible banners happened to reach. With no
+    refusal on screen that was an `auto` row, which stops where the panes'
+    contents stop; with both banners up it would have been the refusal in the
+    `1fr` row, and on a short show - the kind somebody recovers in a rehearsal
+    room - the refusal would have been stretched down the screen over the space
+    the panes left. So there are two rows for banners, each as tall as what is
+    in it and nothing at all when it is empty, and the panes are always in the
+    fifth, which is the one that grows. */
+#app { display: grid; grid-template-rows: auto auto auto auto 1fr; height: 100%; }
+
+#panes {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(210px, 0.85fr) minmax(300px, 1.05fr);
+  grid-row: 5;
+  min-height: 0;
+}
+@media (max-width: 1080px) {
+  #panes { grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr); }
+}
+
+.pane { display: flex; flex-direction: column; min-height: 0; min-width: 0;
+        background: var(--panel); }
+.pane + .pane { border-left: 1px solid var(--rule); }
+
+.pane > header {
+  display: flex; align-items: baseline; gap: 10px;
+  padding: 7px 12px; border-bottom: 1px solid var(--rule);
+  background: var(--ground);
+}
+.pane > header h2 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .06em;
+                    text-transform: uppercase; color: var(--ink-dim); }
+.pane > header .sub { font-size: 11px; color: var(--ink-faint); }
+
+.scroll { overflow: auto; flex: 1; min-height: 0; padding: 4px 0 24px; }
+
+/* ------------------------------------------------------------ the strip */
+#strip {
+  display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
+  padding: 6px 12px; border-bottom: 1px solid var(--rule);
+  background: var(--ground); font-size: 11px; color: var(--ink-dim);
+}
+#strip .brand { font-weight: 600; color: var(--ink); letter-spacing: .04em; }
+#strip .stat { display: flex; gap: 5px; align-items: baseline; }
+/*  A STAT THAT IS SOMETIMES ABSENT has to be told so: the rule above gives
+    every stat `display: flex`, which outranks the browser's own rule for the
+    `hidden` attribute, so without this line `hidden` on a stat hides nothing. */
+#strip .stat[hidden] { display: none; }
+#strip .stat b { font-weight: 500; color: var(--ink-faint); text-transform: uppercase;
+                 letter-spacing: .05em; font-size: 10px; }
+#strip .stat span { color: var(--ink); }
+#strip .warn span { color: var(--failed); }
+
+/*  UNSAVED WORK, in the standby's amber rather than the failure red: nothing
+    has gone wrong, something is not on disk yet. And the words carry it, not
+    the colour (§4.8) - "unsaved changes" against "saved", so a reader who
+    cannot tell amber from ink still reads the answer. */
+#strip .dirty span { color: var(--standby); }
+
+/*  SHOW MODE, in the cool accent rather than either warm one: nothing is wrong
+    and nothing is waiting to be saved, the show is simply fixed. And again the
+    word carries it - "locked" against "open" - so the colour is a second
+    telling and never the only one (§4.8). */
+#strip .locked span { color: var(--waiting); font-weight: 600; }
+
+#link { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+#link .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
+#link.up   .dot { background: var(--live); }
+#link.half .dot { background: var(--stopping); }
+#link.down .dot { background: var(--failed); }
+
+/* ------------------------------------------------------------ transport */
+#transport {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 12px; border-bottom: 1px solid var(--rule); background: var(--ground);
+}
+
+button {
+  font: inherit; font-size: 11px; color: var(--ink);
+  background: var(--panel-high); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 4px 10px; cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--ink-faint); }
+button:disabled { color: var(--ink-faint); cursor: default; }
+
+/*  GO IS NOT A BUTTON LIKE THE OTHERS, and it is the one place on this page
+    where colour is allowed to shout - though it does not carry the meaning on
+    its own (§4.8): it is also the widest control here and the only one in
+    capitals. */
+#go { background: var(--standby); color: #1b1206; border-color: var(--standby);
+      font-weight: 700; letter-spacing: .12em; padding: 5px 26px; }
+#go:hover { filter: brightness(1.08); }
+
+#transport .hint { color: var(--ink-faint); font-size: 10px; margin-left: auto; }
+
+/*  WHAT UNDO WOULD UNMAKE, IN A WORD. The engine names every transaction
+    after the command that opened it, so this line says "undo: object.delete"
+    rather than "undo" - and it is the readout rather than a decoration,
+    because a greyed-out button says that something is unavailable and never
+    says which something it was (§4.8). The greying is the second telling. */
+#transport .undo-note { color: var(--ink-faint); font-size: 10px; }
+
+/*  THE LOCK SITS AT THE FAR END FROM GO, on purpose: it is the one control on
+    this row that a forearm in the dark should not find on the way to GO. Its
+    label says what pressing it will do, and `aria-pressed` says what it is. */
+#lock[aria-pressed="true"] { border-color: var(--waiting); color: var(--waiting); }
+
+/*  SAID AT THE MOMENT OF CONFUSION. A list with no standby is a list where GO
+    and both arrows do nothing, on purpose: only an explicit park arms one,
+    because "next from nowhere" would have to invent a starting cue. Which is
+    right, and is indistinguishable from a broken transport unless somebody
+    says so. */
+#transport .clear-note { color: var(--standby); font-size: 11px; }
+
+/*  THE LAST REFUSAL, said out loud. OSC has no reply channel, so a write the
+    engine would not take comes back only as a reading at
+    /godot/engine/lastError - and a client that does not show it is a client
+    where editing appears to do nothing at all. */
+#refusal { display: none; padding: 5px 12px; background: #2a1615;
+           border-bottom: 1px solid var(--failed); color: var(--ink); font-size: 11px; }
+#refusal.stranded { background: #2a2116; border-bottom-color: var(--standby); padding: 10px 12px;
+                    font-size: 12px; line-height: 1.6; }
+#refusal.stranded b { color: var(--standby); font-weight: 600; }
+#refusal.stranded code { color: var(--ink); background: var(--panel-high);
+                         padding: 1px 5px; border-radius: 3px; }
+#refusal.show { display: block; }
+#refusal code { color: var(--ink-dim); }
+
+/*  THE ONE DECISION THE ENGINE WILL NOT TAKE FOR ANYBODY. It opened this bundle
+    beside unsaved work from a session that did not end, and it has adopted
+    none of it (§14.10). In the standby's amber, as unsaved work is on the
+    strip, because it is the same fact - something is not the show yet - and
+    nothing has gone wrong. The sentences carry it and the colour is the second
+    telling (§4.8): a pair of buttons marked "recover" and "discard" is a riddle
+    to somebody who did not know there was anything to recover. Recover is the
+    one drawn in amber because it is the one that throws nothing away on disk -
+    the show file is untouched and revert still reaches it - whereas discard is
+    final. No `display` here, so that `hidden` is left to do the hiding. */
+#recovery { padding: 10px 12px; background: #2a2116; border-bottom: 1px solid var(--standby);
+            color: var(--ink); font-size: 12px; line-height: 1.6; }
+#recovery b { color: var(--standby); font-weight: 600; }
+#recovery code { color: var(--ink); background: var(--panel-high);
+                 padding: 1px 5px; border-radius: 3px; }
+#recovery .choice { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+#recovery .choice button { font-size: 12px; padding: 5px 12px; }
+#recovery [data-cmd="document.recover"] { border-color: var(--standby); color: var(--standby); }
+
+/* ------------------------------------------------------------- cue rows */
+.list-tabs { display: flex; gap: 2px; padding: 0 8px; }
+.list-tab {
+  padding: 4px 10px; font-size: 11px; border: 1px solid transparent;
+  border-bottom: none; border-radius: 4px 4px 0 0;
+  color: var(--ink-dim); cursor: pointer;
+}
+.list-tab:hover { color: var(--ink); }
+.list-tab[data-focused="yes"] {
+  background: var(--panel); border-color: var(--rule); color: var(--ink);
+}
+.list-tab .mark { color: var(--standby); }
+
+.row {
+  display: grid;
+  grid-template-columns: 18px 62px 1fr auto;
+  align-items: center; gap: 8px;
+  min-height: var(--row); padding: 0 12px 0 0;
+  border-left: 3px solid transparent;
+}
+.row:hover { background: var(--panel-high); }
+
+/*  THE STANDBY, and colour is not the only thing saying so (§4.8): a wedge in
+    the gutter, a rule down the left edge, the row a shade lighter, and the
+    word itself on the right. Any one of those would do on its own. */
+.row[data-standby="yes"] {
+  background: var(--panel-high);
+  border-left-color: var(--standby);
+}
+.row[data-standby="yes"] .gutter::before { content: "\25B8"; color: var(--standby); }
+
+/*  SELECTED IS NOT STANDBY, and the two are drawn so differently that neither
+    can be read for the other: standby is a wedge and a warm rule, a selection
+    is a cool outline and a name in full white. §3.5 is emphatic that picking a
+    row must not move the pointer, so the page has to make the difference plain
+    before anybody presses GO. */
+.row[data-picked="yes"] { outline: 1px solid var(--picked); outline-offset: -1px; }
+.row[data-picked="yes"] .name .text { color: #fff; }
+
+.row[data-enabled="no"] .name,
+.row[data-enabled="no"] .number { color: var(--ink-faint); text-decoration: line-through; }
+
+/*  THE PARKING TARGET, and it has to be findable. The wedge appears here on
+    hover, the whole cell is clickable, and the row lights its own left edge as
+    the pointer crosses it - because an eighteen-pixel column with a faint glyph
+    in it is a thing somebody can use a show without ever noticing. The author
+    did not, which is how this comment came to be written.
+
+    AND IT HAS TO BE AS TALL AS THE ROW, which it was not. `.row` centres its
+    cells, and a cell with nothing in it is centred down to no height at all:
+    the gutter is empty on every row but the standby's, so on every other row
+    the one place a click parks the standby was eighteen pixels by none, and
+    nobody could land on it - or hover it, which is why the wedge above never
+    showed either. Stretched, it is the row's full height, and it centres its
+    own wedge, so the standby's sits exactly where `align-items` put it before.
+
+    ONLY WHERE IT PARKS. A derived header line has a gutter too, to keep its
+    cells in line with the rows, and no `data-park`: clicking there picks the
+    member, as anywhere else on that line. Now that the cell can be hovered it
+    must not offer the wedge, or it would promise a park it cannot make. */
+.gutter { color: var(--ink-faint); font-size: 11px;
+          align-self: stretch; display: flex; align-items: center; justify-content: center; }
+.gutter[data-park] { cursor: pointer; }
+.gutter[data-park]:hover::before { content: "\25B8"; color: var(--standby); }
+.row:hover { border-left-color: var(--rule); }
+.row:hover[data-standby="yes"] { border-left-color: var(--standby); }
+
+.number { color: var(--ink-dim); text-align: right; font-size: 12px; }
+
+.name { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.name .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.twist { width: 12px; color: var(--ink-faint); cursor: pointer; user-select: none;
+         font-size: 9px; flex: none; }
+.twist:hover { color: var(--ink); }
+
+.kind {
+  flex: none; font-size: 9px; letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-faint); border: 1px solid var(--rule); border-radius: 3px;
+  padding: 0 4px; line-height: 15px;
+}
+
+.tail { display: flex; gap: 10px; align-items: center; font-size: 10px;
+        color: var(--ink-faint); }
+.tail .trig { color: var(--waiting); letter-spacing: 0; }
+.tail .flag { letter-spacing: .05em; text-transform: uppercase; }
+.tail .flag.warn { color: var(--waiting); text-transform: none; letter-spacing: 0; cursor: help; }
+.tail .flag.ready { color: var(--live); text-transform: none; letter-spacing: 0; cursor: help; }
+#aimbar {
+  display: flex; align-items: center; gap: 10px; padding: 6px 12px;
+  border-top: 1px solid var(--rule); background: var(--panel-high); font-size: 11px;
+}
+#aimbar .what { text-transform: uppercase; letter-spacing: .08em; color: var(--ink-faint); }
+#aimbar .at { color: var(--ink); min-width: 90px; }
+#aimbar input[type="range"] { flex: 1; accent-color: var(--picked); }
+#aimbar .landed { color: var(--ink-faint); }
+#aim-steps {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 12px 6px;
+  background: var(--panel-high); font-size: 11px;
+}
+#aim-steps .what { text-transform: uppercase; letter-spacing: .08em; color: var(--ink-faint); }
+#aim-steps .step {
+  padding: 1px 7px; border: 1px solid var(--rule); border-radius: 9px;
+  color: var(--ink); cursor: pointer; white-space: nowrap;
+}
+#aim-steps .step i { color: var(--ink-faint); font-style: normal; margin-left: 4px; }
+#aim-steps .step.aimed { border-color: var(--picked); color: var(--picked); }
+#aim-steps .none { color: var(--ink-faint); font-style: italic; }
+.run .who .asserted, .row .flag.asserted { color: var(--live); }
+#aim-plan {
+  max-height: 132px; overflow-y: auto; padding: 0 12px 8px;
+  background: var(--panel-high); font-size: 11px; color: var(--ink-faint);
+}
+#aim-plan .line { padding: 1px 0; }
+#aim-plan .line b { color: var(--ink); font-weight: 500; }
+#aim-plan .confused { color: var(--waiting); }
+#aim-plan .none { color: var(--ink-faint); font-style: italic; }
+
+.tail .flag.preset { color: var(--picked); text-transform: none; letter-spacing: 0; cursor: help; }
+.row.derived .name .text, .row.derived .number { font-style: italic; color: var(--ink-faint); }
+.row.derived .tail .flag { color: var(--picked); }
+.tail .standby-word { color: var(--standby); }
+
+.band {
+  font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-faint); padding: 3px 0 1px;
+}
+
+/* --------------------------------------------------------- running pane */
+.run {
+  display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: baseline;
+  padding: 4px 12px 4px 0; border-left: 3px solid var(--rule);
+}
+.run .who { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.run .who .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run .meta { font-size: 10px; color: var(--ink-faint); display: flex; gap: 10px;
+             align-items: baseline; }
+.run .meta button { padding: 1px 6px; font-size: 10px; }
+
+.state {
+  font-size: 9px; letter-spacing: .07em; text-transform: uppercase;
+  padding: 0 5px; line-height: 16px; border-radius: 3px;
+  border: 1px solid currentColor; flex: none;
+}
+.state[data-s="playing"]  { color: var(--live); }
+.state[data-s="waiting"]  { color: var(--waiting); }
+.state[data-s="postWait"] { color: var(--waiting); }
+.state[data-s="armed"]    { color: var(--standby); }
+.state[data-s="stopping"] { color: var(--stopping); }
+.state[data-s="failed"]   { color: var(--failed); }
+.state[data-s="done"]     { color: var(--ink-faint); }
+
+.run[data-s="playing"]  { border-left-color: var(--live); }
+.run[data-s="armed"]    { border-left-color: var(--standby); }
+.run[data-s="waiting"]  { border-left-color: var(--waiting); }
+.run[data-s="postWait"] { border-left-color: var(--waiting); }
+.run[data-s="stopping"] { border-left-color: var(--stopping); }
+.run[data-s="failed"]   { border-left-color: var(--failed); }
+.run[data-s="done"]     { opacity: .45; }
+
+/* ------------------------------------------------------------- inspector */
+#inspect { padding: 10px 12px 30px; }
+
+#inspect .who { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
+#inspect .who .text { font-size: 14px; }
+#inspect .who .id { font-size: 10px; color: var(--ink-faint); }
+
+.group-head {
+  font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink-faint); margin: 14px 0 5px; padding-bottom: 3px;
+  border-bottom: 1px solid var(--rule);
+}
+
+.field { display: grid; grid-template-columns: 96px 1fr; gap: 8px;
+         align-items: center; padding: 2px 0; }
+.field > label { font-size: 11px; color: var(--ink-dim); text-align: right;
+                 overflow: hidden; text-overflow: ellipsis; }
+.field .ro { font-size: 12px; color: var(--ink-faint); overflow: hidden;
+             text-overflow: ellipsis; white-space: nowrap; }
+
+.field input[type=text], .field input[type=number], .field select {
+  font: inherit; font-size: 12px; width: 100%;
+  color: var(--ink); background: var(--ground);
+  border: 1px solid var(--rule); border-radius: 3px; padding: 2px 6px;
+}
+.field input:focus, .field select:focus { outline: none; border-color: var(--picked); }
+.field input[data-dirty="yes"] { border-color: var(--standby); }
+.field input[type=checkbox] { accent-color: var(--standby); width: 14px; height: 14px; }
+
+/*  A CHECKBOX SAYS WHEN IT HAS THE KEYBOARD, because while it has it, it keeps
+    Space (the keydown handler says why) - and the rule above shows the focus
+    as a border colour, which a native checkbox does not paint. Without this, a
+    box reached with Tab would take the next Space with nothing on screen to say
+    it was going to. `:focus-visible` rather than `:focus`, because a box
+    clicked with the mouse lets go of the focus straight away and never needs
+    the outline. */
+.field input[type=checkbox]:focus-visible { outline: 1px solid var(--picked); outline-offset: 2px; }
+
+.trigger-row {
+  display: flex; align-items: baseline; gap: 8px; padding: 2px 0;
+  font-size: 12px; cursor: pointer; color: var(--ink-dim);
+}
+.trigger-row:hover { color: var(--ink); }
+.trigger-row[data-picked="yes"] { color: #fff; }
+.trigger-row .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.trigger-row .off { color: var(--ink-faint); text-decoration: line-through; }
+
+.back { font-size: 11px; color: var(--waiting); cursor: pointer; }
+.back:hover { text-decoration: underline; }
+
+.actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.actions .danger { border-color: #5a2b28; color: #e0918b; }
+.actions .danger:hover { border-color: var(--failed); }
+
+/* -------------------------------------------------------- empty states */
+/*  PRD §4.7: easter eggs live where idle eyes wander - a splash, an About, an
+    EMPTY STATE. Never in the error path. */
+.empty { padding: 42px 20px; text-align: center; color: var(--ink-faint); }
+.empty .line { font-size: 15px; font-style: italic; color: var(--ink-dim); }
+.empty .under { font-size: 11px; margin-top: 8px; }

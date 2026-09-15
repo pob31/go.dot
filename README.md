@@ -242,8 +242,10 @@ handoff to Phase 5 is
 **There is now something to look at, and to work in.** `wfg serve <bundle>
 --ui=clients/console` serves a client from `/ui` on the OSCQuery port; open that
 address in a browser and the cue list, the groups nested inside it, the standby
-pointer and the running pane are on screen. It is a plain HTML page with no build
-step and no dependency.
+pointer and the running pane are on screen. It is plain HTML, CSS and ES modules,
+one file per pane, with no build step and no dependency: the engine serves the
+folder as it sits on disk, so a pane is changed by editing its file and
+refreshing the tab.
 
 It reads by polling the tree the engine already publishes and writes by sending
 binary OSC on the WebSocket that answers on the same port — so an edit in its

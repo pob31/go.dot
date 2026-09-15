@@ -1,0 +1,28 @@
+{
+  "about": "Which named command each of the console's gestures sends (PRD 4.11, namespace draft 14.3). Read by this page when it starts, and meant to be read by the desktop client too (14.16) rather than copied into it, so the two cannot drift on the names. Checked against `wfg commands` by tests/blackbox/client_page.py: every command here must exist, and the argument types a gesture sends must fit its signature. `args` are the OSC type tags the gesture sends, in order. A write to a node's own address is `node.set` by the engine's own rule and is not listed.",
+  "keys": {
+    "Space":       { "command": "go",               "args": [] },
+    "ArrowDown":   { "command": "standby.next",     "args": [] },
+    "ArrowUp":     { "command": "standby.previous", "args": [] },
+    "Mod+Z":       { "command": "undo",             "args": [] },
+    "Mod+Shift+Z": { "command": "redo",             "args": [] },
+    "Mod+S":       { "command": "document.save",    "args": [] }
+  },
+  "gestures": {
+    "go":           { "command": "go",               "args": [],                     "where": "the GO button" },
+    "park":         { "command": "standby.set",      "args": ["s"],                  "where": "a row's left edge, or 'standby here' in the inspector" },
+    "focus-list":   { "command": "list.focus",       "args": ["s"],                  "where": "a list's tab" },
+    "new-list":     { "command": "list.create",      "args": ["s"],                  "where": "the + tab" },
+    "aim":          { "command": "list.aim",         "args": ["s", "s", "d"],        "where": "a row, a step chip, or the aim slider" },
+    "load-to-time": { "command": "list.loadToTime",  "args": ["s"],                  "where": "the aim's load button" },
+    "kill":         { "command": "run.kill",         "args": ["s"],                  "where": "a run's kill button" },
+    "add-cue":      { "command": "cue.create",       "args": ["s", "i", "s", "s"],   "where": "the inspector's add buttons" },
+    "add-trigger":  { "command": "trigger.create",   "args": ["s", "s"],             "where": "the inspector's trigger buttons" },
+    "add-role":     { "command": "group.role",       "args": ["s", "s"],             "where": "the inspector's header and footer buttons" },
+    "move":         { "command": "object.move",      "args": ["s", "s", "i"],        "where": "the inspector's up and down buttons" },
+    "delete":       { "command": "object.delete",    "args": ["s"],                  "where": "the inspector's delete button" },
+    "revert":       { "command": "document.revert",  "args": [],                     "where": "the revert button, after it asks" }
+  },
+  "buttons": ["standby.previous", "standby.next", "standby.clear", "undo", "redo",
+              "document.save", "document.recover", "document.discardRecovery"]
+}

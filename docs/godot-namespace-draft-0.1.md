@@ -3714,6 +3714,48 @@ a menu picked with the mouse let go of the keyboard; blurs the slider on a point
 not on a key step, so a slider reached with Tab keeps stepping; and chains the polls, one in
 flight.
 
+*What PR 5.10 built (2026-09-15).* **The split, with behaviour unchanged and measured to be.**
+M24 after it reads 6.7 ms for `render()`, against 6.3–6.8 ms before it, and every behaviour
+5.9's instrument checks — the scroll, Space from a focused slider, the arrow, a focused button,
+Escape — reads the same. The files as built:
+
+- **`plumbing/`**: `osc.js`, `link.js`, `poll.js` and `tree.js`.
+- **`model/`**: `index.js`, which adds `triggersOf` and `overlaps` to the tree object so every
+  view still asks the tree, and `selection.js`. No `layout.js` yet: it is 5.14's, and it lands
+  with the presets it holds.
+- **`views/`**: `didi.js`, `gogo.js`, `inspector.js`, `aim.js`, `strip.js` and `transport.js`.
+  With them `common.js`, the text every view says the same way; `reconcile.js`, the keyed rows;
+  and `view.js`, described below. The header and the curve are 5.13's and 5.16b's.
+- **`gestures/`**: `clicks.js`, `keys.js`, `fields.js` and `table.js`, beside `commands.json`.
+  `fields.js` holds the inspector's commit-and-Escape rules and the pointer state the key
+  handler shares.
+- **`styles.css`** and **`app.js`**, and **`index.html`** as the shell.
+
+Three things the split had to decide:
+
+- **The shell addresses `/ui/app.js` and `/ui/styles.css`, not `./app.js`.** The engine answers
+  `/ui` and `/ui/` with the same page, and a path relative to `/ui` would look for the modules at
+  the root of the server. That is the one address the instrument, and anybody typing it, uses.
+  Imports inside the modules stay relative, since they resolve against the module.
+- **A classic script in the shell says what a module cannot.** A browser refuses to load modules
+  for a page opened from disk, so "this has to be served by the engine" is said by the shell. The
+  same script catches a module that failed to load, which is the one thing an edit can break on a
+  page with no build step. The browser says why only in its console, so the page points there.
+- **`view.js` is a seam, not ceremony.** A module's names are not the window's, so the M24
+  instrument could no longer wrap `render` by its global name. Every render now goes through a
+  `view` object that `app.js` fills, published with the tree as `window.goDot`, and that is where
+  the instrument wraps them.
+
+**`gestures/commands.json` is the table §14.3 drew, read by the page.** It has three parts:
+`keys`, each key and its command; `gestures`, each click's command with the OSC type tags it
+sends; and `buttons`, the names the transport's buttons carry in their own `data-cmd`. Every key
+and click finds its command's name through the table, and no key or click handler spells one.
+**The check 5.18 was to add landed with the table.** `client_page.py` walks the module graph as a
+browser would and refuses an orphaned module. It holds every entry to `wfg commands`, both the
+name and whether the gesture's arguments fit the signature, and holds the shell's `data-cmd` list
+to the table's. With a command misspelt or an argument given the wrong type, it fails, which was
+tried.
+
 **Then the module split, and the no-build rule is load-bearing rather than frugal.** 5.10 will
 cut the one file into `plumbing/{osc,link,poll,tree}.js`, `model/{index,selection,layout}.js`,
 `views/{strip,transport,didi,gogo,header,inspector,aim,curve}.js`, `gestures/{keys,clicks}.js`

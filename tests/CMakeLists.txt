@@ -765,6 +765,11 @@ add_test(NAME blackbox.triggers.fr_FR
 set_tests_properties(blackbox.triggers.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# The client the engine serves at /ui: the page, its files as bytes, and since
+# PR 5.10 its modules - the graph walked from app.js the way a browser loads it,
+# every file answering as JavaScript and none left that nothing imports - and
+# its gesture table, every command named in gestures/commands.json checked
+# against `wfg commands` for its name and the arguments each gesture sends.
 add_test(NAME blackbox.client.C
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/client_page.py"
                  --wfg-locale=C)

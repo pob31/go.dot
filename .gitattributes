@@ -34,6 +34,8 @@ CMakeLists.txt text eol=lf
 *.cpp  text eol=lf
 *.md   text eol=lf
 *.html text eol=lf
+*.js   text eol=lf
+*.css  text eol=lf
 
 # Event-log fixtures, and this one IS a correctness matter. A replay fixture is
 # committed so the engine can be required to reproduce it byte for byte; if Git

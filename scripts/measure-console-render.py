@@ -40,9 +40,11 @@ Then, inside the page:
 
   (a) RENDER. The page's own `render` is wrapped, and each of `renderStrip`,
       `renderLists`, `renderAim`, `renderRuns`, `renderInspector`,
-      `tree.triggersOf` and `tree.overlaps` - by name, through the global
-      binding `poll()` and `render()` look them up by, so the page runs its
-      own code and nothing else - and the page is left to poll on its own. Per
+      `tree.triggersOf` and `tree.overlaps` - by name, where the page looks
+      them up: on the `window.goDot` it publishes since PR 5.10, whose
+      `view` every render goes through, or as the global bindings the page
+      before it declared - so the page runs its own code and nothing else -
+      and the page is left to poll on its own. Per
       render: the total's median and worst, and each part's median. The two
       render costs M24 asks to see apart are reported APART, because keying
       the rows fixes only the first: the rows (§14.3's first defect -
@@ -930,9 +932,13 @@ class Browser:
 # once, so the first request is timed; the wrappers go in at DOMContentLoaded,
 # when the page's script has declared what they wrap and no reply has yet been
 # drawn. `targets` is written by `wrap_targets` below: for each name, how to
-# read the binding and how to replace it. A top-level function declaration in
-# a classic script is a writable global binding, which is what lets a wrapper
-# stand where poll() and render() look the name up.
+# read the binding and how to replace it. The page since PR 5.10 is ES modules,
+# whose names are not the window's: it publishes `window.goDot = { tree, view }`
+# and calls render and its parts through `view`, so a wrapper put there is the
+# one it reaches. The page before it was a classic script, where a top-level
+# function declaration is a writable global binding and a wrapper stands where
+# poll() and render() look the name up; `--ui-rev` serves that page, so both
+# are tried, the modules' first.
 INSTRUMENT = r"""
 (function (targets) {
   "use strict";
@@ -1328,7 +1334,9 @@ PICK_ROW = r"""
 PICKED = r"""
 (() => {
   const inspect = document.getElementById("inspect");
-  return { picked: typeof picked !== "undefined" ? picked : "(no global picked)",
+  const g = window.goDot;
+  return { picked: g && g.selection ? g.selection.picked
+                 : typeof picked !== "undefined" ? picked : "(no picked to read)",
            inspector: inspect ? inspect.textContent.replace(/\s+/g, " ").trim().slice(0, 120)
                               : null,
            nameFields: [...document.querySelectorAll('[data-set$="/name"]')]
@@ -1384,15 +1392,29 @@ def wrap_targets(names: "list[str]") -> str:
         root = parts[0]
         label = json.dumps(name)
 
+        # THE PAGE SINCE PR 5.10 IS MODULES, and a module's names are not the
+        # window's: it publishes `window.goDot = { tree, view }` instead, and
+        # calls `render` and its parts through `view` so a wrapper put there is
+        # the one it reaches (clients/console/views/view.js). So a name is
+        # looked for there first - `render` on `goDot.view`, `tree.triggersOf`
+        # on `goDot.tree` - and only then as the global binding the page before
+        # 5.10 declared, which is what `--ui-rev` serves.
         if len(parts) == 1:
-            get = f'() => (typeof {root} === "function" ? {root} : undefined)'
-            put = f"(f) => {{ {root} = f; }}"
+            key = json.dumps(root)
+            get = (f'() => {{ const g = window.goDot; '
+                   f'if (g && g.view && typeof g.view[{key}] === "function") return g.view[{key}]; '
+                   f'return typeof {root} === "function" ? {root} : undefined; }}')
+            put = (f'(f) => {{ const g = window.goDot; '
+                   f'if (g && g.view && typeof g.view[{key}] === "function") g.view[{key}] = f; '
+                   f'else {root} = f; }}')
         else:
-            holder = ".".join(parts[:-1])
+            base = (f'((window.goDot && window.goDot[{json.dumps(root)}]) || '
+                    f'(typeof {root} !== "undefined" ? {root} : undefined))')
+            walk = "".join(f"[{json.dumps(p)}]" for p in parts[1:-1])
             key = json.dumps(parts[-1])
-            get = (f'() => ((typeof {root} !== "undefined" && {holder}) '
-                   f'? {holder}[{key}] : undefined)')
-            put = f"(f) => {{ {holder}[{key}] = f; }}"
+            holder = f"(() => {{ const b = {base}; return b ? b{walk} : undefined; }})()"
+            get = f"() => {{ const h = {holder}; return h ? h[{key}] : undefined; }}"
+            put = f"(f) => {{ const h = {holder}; h[{key}] = f; }}"
 
         entries.append(f"{{ label: {label}, get: {get}, set: {put} }}")
 
