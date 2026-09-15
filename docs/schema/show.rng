@@ -596,7 +596,7 @@
       </optional>
       <optional>
         <attribute name="curve">
-          <a:documentation>The shape it takes between the two levels. Linear in the dB domain, which is what a fader feels like; sCurve eases out of the start and into the end, for a fade that should not announce itself. Two shapes until the curve editor of Phase 5.</a:documentation>
+          <a:documentation>The shape it takes between the two levels. Linear in the dB domain, which is what a fader feels like; sCurve eases out of the start and into the end, for a fade that should not announce itself. The two shapes a fade has when nobody has drawn one: not read while points holds a curve, because two shapes multiplied together would be a third that nobody drew.</a:documentation>
           <choice>
             <value>linear</value>
             <value>sCurve</value>
@@ -622,7 +622,7 @@
       </optional>
       <optional>
         <attribute name="level">
-          <a:documentation>Where the fade ends, in dB. -120 is silence rather than a very small number, and it is the default because a fade to silence is what most fades are - a fresh fade cue is a slow cut to nothing, which is a real thing to want and can only ever make the show quieter.</a:documentation>
+          <a:documentation>Where the fade ends, in dB. -120 is silence rather than a very small number, and it is the default because a fade to silence is what most fades are - a fresh fade cue is a slow cut to nothing, which is a real thing to want and can only ever make the show quieter. Not read while points holds a curve, whose last level is where that fade ends.</a:documentation>
           <data type="double">
             <param name="minInclusive">-120</param>
             <param name="maxInclusive">12</param>
@@ -645,6 +645,16 @@
         <attribute name="number">
           <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="points">
+          <a:documentation>A curve somebody drew, as (t, level) pairs: t a fraction of the duration and level in dB, within the -120..12 a fade&apos;s level may take. The fade meets each breakpoint at its time and runs straight in dB between them, which is what linear already means. Empty, the default, means curve applies - so a fade written before there was anything to draw with goes on meaning what it meant. Where it holds a curve it is the whole of the shape, and its last level is where the fade ends. The fade leaves from wherever the run&apos;s level is rather than from the first breakpoint&apos;s, for the reason a fade over a fade does: anything else is a jump, and a jump on a PA is a click. Refused, when written and when the show loads, unless it is pairs whose times climb strictly from exactly 0 to exactly 1.</a:documentation>
+          <list>
+            <zeroOrMore>
+              <data type="double"/>
+            </zeroOrMore>
+          </list>
         </attribute>
       </optional>
       <optional>

@@ -41,16 +41,21 @@
     show is a mistake nobody can explain afterwards.
 */
 
+#include <wfg/engine/document/FadePoints.h>
+
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace wfg::cue
 {
-    /*  The shape a fade takes between its two levels.
+    /*  The shape a fade takes between its two levels, when nobody has drawn
+        one.
 
-        Two of them until Phase 5's curve editor, which is when a designer gets
-        to draw one. Both are monotonic: a fade that overshot would put a level
-        somewhere nobody asked for, briefly, and briefly is enough.
+        Both are monotonic: a fade that overshot would put a level somewhere
+        nobody asked for, briefly, and briefly is enough. A drawn curve is not
+        bound by that (it may dip and come back, because somebody drew it to),
+        and is the other overload of fadeLevelDb below.
     */
     enum class FadeCurve
     {
@@ -70,6 +75,26 @@ namespace wfg::cue
         tick gets the destination rather than a level past it.
     */
     double fadeLevelDb (double fromDb, double toDb, double progress, FadeCurve) noexcept;
+
+    /*  The level at a point through a DRAWN fade (`Fade/@points`, PR 5.16a):
+        straight in dB between the two breakpoints either side of `progress`.
+        In dB because that is what `linear` already means between two levels,
+        and a straight line in the curve editor meaning anything else would be
+        two definitions of one shape (§14.6).
+
+        FROM WHERE THE LEVEL IS, NOT FROM THE FIRST BREAKPOINT'S LEVEL. The
+        drawing's first level is where it starts on the page; the fade starts
+        where the run is, for the reason a fade over a fade does - anything
+        else is a jump, and a jump on a PA is a click. So the first segment
+        runs from `fromDb` to the second breakpoint, and every breakpoint after
+        the first is met exactly, at its time.
+
+        `points` is a curve as doc::readFadePoints judges one: two or more,
+        times climbing from 0 to 1. Anything shorter answers `fromDb` - a level
+        that does not move - rather than read past the end of it.
+    */
+    double fadeLevelDb (double fromDb, const std::vector<doc::FadePoint>& points,
+                        double progress) noexcept;
 
     //==============================================================================
     /*  One fade in flight. A value the Runner holds and advances; it owns
@@ -93,6 +118,12 @@ namespace wfg::cue
         int ticksDone = 0;
 
         FadeCurve curve = FadeCurve::linear;
+
+        /*  THE CURVE SOMEBODY DREW, when they drew one; empty means `curve`
+            applies. Where it is not empty it is the whole of the shape and
+            `curve` is not read: two shapes multiplied together would be a
+            third shape nobody drew (§14.6). `toDb` is then its last level. */
+        std::vector<doc::FadePoint> points;
 
         /*  Whether the target is stopped when the fade arrives. What a stop cue
             with the `fade` verb is: a fade to silence, and then a stop - so the
@@ -140,8 +171,10 @@ namespace wfg::cue
             if (ticksTotal <= 0)
                 return toDb;
 
-            return fadeLevelDb (fromDb, toDb,
-                                static_cast<double> (ticksDone) / ticksTotal, curve);
+            const auto progress = static_cast<double> (ticksDone) / ticksTotal;
+
+            return points.empty() ? fadeLevelDb (fromDb, toDb, progress, curve)
+                                  : fadeLevelDb (fromDb, points, progress);
         }
     };
 }

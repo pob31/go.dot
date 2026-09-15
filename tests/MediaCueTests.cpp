@@ -320,6 +320,39 @@ TEST_CASE ("gains: an empty list is zero values, not one empty one")
     CHECK (published->typeTags.empty());
 }
 
+TEST_CASE ("gains: a route made by the command, with no gains yet, survives a save and a reopen")
+{
+    /*  FOUND BY PR 5.16a. `route.create` makes a Route with no gains; the
+        writer omits an empty list as the default it is; and the reader, until
+        that PR, demanded the attribute back and refused the whole file. Every
+        other case here gives its route gains by hand before writing, which is
+        why none of them saw it - and no client could have given one gains
+        before 5.16a taught the write door lists. */
+    Rig rig;
+
+    const auto cueId = rig.createMedia ("Thunder");
+    const auto route = rig.document.createRoute (cueId, "J3MT5XYA");
+    REQUIRE (route.ok);
+
+    const auto written = doc::CanonicalXml::write (rig.document);
+    INFO (written);
+    CHECK (written.find ("gains=") == std::string::npos);
+
+    doc::ShowDocument reloaded;
+    const auto result = doc::CanonicalXml::read (written, reloaded);
+
+    std::string reported;
+
+    for (const auto& problem : result.problems)
+        reported += "\n  " + problem;
+
+    INFO ("reported:" << reported);
+    REQUIRE (result.ok);
+
+    CHECK (reloaded.getAttribute ("/godot/route/" + route.id + "/gains") == std::string (""));
+    CHECK (doc::CanonicalXml::write (reloaded) == written);
+}
+
 TEST_CASE ("gains: a list that fails anywhere publishes nothing, not the part that parsed")
 {
     /*  Half a routing matrix is not a smaller routing matrix, it is a different

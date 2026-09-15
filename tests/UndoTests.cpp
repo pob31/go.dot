@@ -238,6 +238,36 @@ TEST_CASE ("undo: a value written is taken back, and put back again")
     CHECK (rig.undoName() == "cue.create");
 }
 
+TEST_CASE ("undo: a curve redrawn is taken back to the curve it was")
+{
+    /*  A list goes on the history like any other value (PR 5.16a): the door
+        stores it through the same `historyFor` a scalar goes through, so a
+        curve editor's commit is one step and Undo puts the old drawing back. */
+    Rig rig;
+
+    REQUIRE (rig.apply (0, "list.create", { text ("Main"), text (mainList) }).applied == 1);
+    REQUIRE (rig.apply (1, "cue.create", { text (mainList), osc::Value::int32 (0),
+                                           text ("fade"), text ("Dip"),
+                                           text (firstCue) }).applied == 1);
+
+    const auto points = "/godot/cue/" + firstCue + "/points";
+
+    REQUIRE (rig.apply (10, "node.set", { text (points), text ("0 0 0.5 -30 1 -10") }).applied == 1);
+    REQUIRE (rig.apply (200, "node.set", { text (points), text ("0 0 0.25 -40 1 -10") }).applied == 1);
+
+    /*  A drawing that is not a curve is refused, and leaves nothing to undo. */
+    CHECK (rig.apply (300, "node.set", { text (points), text ("0 0 1") }).rejected == 1);
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("node.set"));
+    CHECK (rig.document.getAttribute (points) == std::string ("0 0 0.5 -30 1 -10"));
+
+    REQUIRE (rig.document.undo (doc::UndoDomain::document) == std::string ("node.set"));
+    CHECK (rig.document.getAttribute (points) == std::string (""));
+
+    REQUIRE (rig.document.redo (doc::UndoDomain::document) == std::string ("node.set"));
+    CHECK (rig.document.getAttribute (points) == std::string ("0 0 0.5 -30 1 -10"));
+}
+
 TEST_CASE ("undo: a create taken back and put back keeps the identifier it drew")
 {
     Rig rig;
@@ -686,6 +716,7 @@ TEST_CASE ("undo: toVar's switch and the reader's copy of it agree, type for typ
         "      <Group id=\"D9FH2JKA\" name=\"Preshow\" loops=\"3\">\n"
         "        <Cue id=\"B3N8R5TW\" enabled=\"false\" name=\"House to half\" preWait=\"1.5\"/>\n"
         "      </Group>\n"
+        "      <Fade id=\"E4GP6QSC\" name=\"Dip\" points=\"0 0 0.5 -30 1 -10\"/>\n"
         "    </List>\n"
         "  </Lists>\n"
         "  <Mounts/>\n"
@@ -707,6 +738,8 @@ TEST_CASE ("undo: toVar's switch and the reader's copy of it agree, type for typ
     REQUIRE (fromWriter.setAttribute ("/godot/cue/" + theGroup + "/loops", "3").ok);
     REQUIRE (fromWriter.setAttribute ("/godot/cue/" + firstCue + "/enabled", "false").ok);
     REQUIRE (fromWriter.setAttribute ("/godot/cue/" + firstCue + "/preWait", "1.5").ok);
+    REQUIRE (fromWriter.createCue (mainList, 1, "fade", "Dip", inGroupA).ok);
+    REQUIRE (fromWriter.setAttribute ("/godot/cue/" + inGroupA + "/points", "0 0 0.50 -30 1 -10").ok);
 
     const auto agree = [&] (const std::string& id, const char* attribute, const char* expected)
     {
@@ -731,13 +764,22 @@ TEST_CASE ("undo: toVar's switch and the reader's copy of it agree, type for typ
         rewrite of an `id` would be the silent drop. */
     agree (firstCue, "id", "string");
 
+    /*  A LIST, which the write door learned in PR 5.16a and which this case
+        was waiting for. Neither side goes through `toVar`: both hold a list as
+        its canonical text, so both must hold a STRING - and the same string,
+        since the writer was handed `0.50` and has to have canonicalised it
+        exactly as the reader does. A list the writer held as anything else
+        would compare type-loosely against the reader's, and the drop this case
+        exists to prevent would be waiting on the first rewrite of a curve. */
+    agree (inGroupA, "points", "string");
+    CHECK (fromReader.findById (inGroupA)[juce::Identifier ("points")].toString()
+             == fromWriter.findById (inGroupA)[juce::Identifier ("points")].toString());
+
     /*  ValueType::integer64 has no `persist == show` row to test with — nothing
         a document holds is declared `h` — and the writer's switch answers it in
-        the same arm as `integer`, so the pin above covers both. A list-typed
-        row (`d*`) is not testable either: the write choke point cannot write a
-        list yet, so there is only one writer of one and nothing to agree with.
-        Both are here so that the row which arrives first is added to this case
-        rather than found by a dropped write. */
+        the same arm as `integer`, so the pin above covers both. It is here so
+        that the row which arrives first is added to this case rather than found
+        by a dropped write. */
 }
 
 TEST_CASE ("undo: nothing published and nothing logged carries a wall-clock time")

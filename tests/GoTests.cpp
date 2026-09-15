@@ -43,12 +43,17 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/Solver.h>
 #include <wfg/engine/document/DocumentCommands.h>
+#include <wfg/engine/document/FadePoints.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/Replay.h>
 
+#include <algorithm>
+#include <cstddef>
+#include <iterator>
 #include <set>
+#include <vector>
 
 using namespace wfg;
 
@@ -1302,6 +1307,15 @@ namespace
 
         std::string fadeId, stopId;
     };
+
+    /*  The same double, for a level that has to arrive EXACTLY rather than
+        nearly. Spelled as two comparisons rather than `==` so the strict
+        preset's -Wfloat-equal has nothing to say about a comparison that is
+        meant. */
+    bool same (double a, double b) noexcept
+    {
+        return ! (a < b) && ! (a > b);
+    }
 }
 
 TEST_CASE ("fade curve: dB, monotonic, and it arrives exactly")
@@ -1357,6 +1371,45 @@ TEST_CASE ("fade curve: dB, monotonic, and it arrives exactly")
     CHECK (cue::fadeCurveFrom ("wobble") == FadeCurve::linear);
 }
 
+TEST_CASE ("fade curve: a drawn curve meets every breakpoint after the first, and leaves from where the run is")
+{
+    /*  The arithmetic of `Fade/@points` on its own (PR 5.16a, §14.6). */
+    using cue::fadeLevelDb;
+
+    const auto drawn = doc::readFadePoints ("0 0 0.5 -30 1 -10");
+    REQUIRE (drawn.problem.empty());
+    REQUIRE (drawn.points.size() == 3u);
+
+    const auto& points = drawn.points;
+
+    /*  EXACTLY AT EACH BREAKPOINT AFTER THE FIRST, with nothing but the
+        breakpoint's own level - a dip to -30 that bottomed out at -29.99 would
+        be a drawing the fade did not quite follow. */
+    CHECK (same (fadeLevelDb (0.0, points, 0.5), -30.0));
+    CHECK (same (fadeLevelDb (0.0, points, 1.0), -10.0));
+
+    /*  Straight in dB between them, which is what `linear` means. */
+    CHECK (fadeLevelDb (0.0, points, 0.25) == doctest::Approx (-15.0));
+    CHECK (fadeLevelDb (0.0, points, 0.75) == doctest::Approx (-20.0));
+
+    /*  FROM WHERE THE RUN IS, NOT FROM THE FIRST BREAKPOINT. A run sitting at
+        -6 dB starts the drawing at -6 and joins it at the second breakpoint;
+        starting at the drawn 0 would be a six-decibel jump, which on a PA is a
+        click. */
+    CHECK (same (fadeLevelDb (-6.0, points, 0.0), -6.0));
+    CHECK (fadeLevelDb (-6.0, points, 0.25) == doctest::Approx (-18.0));
+    CHECK (same (fadeLevelDb (-6.0, points, 0.5), -30.0));
+
+    /*  Clamped, like the two words. */
+    CHECK (same (fadeLevelDb (0.0, points, 1.5), -10.0));
+    CHECK (same (fadeLevelDb (-6.0, points, -0.5), -6.0));
+
+    /*  And a drawing too short to be one does not move the level rather than
+        read past its end. The door and the loader never let one through. */
+    CHECK (same (fadeLevelDb (-6.0, {}, 0.5), -6.0));
+    CHECK (same (fadeLevelDb (-6.0, { doc::FadePoint { 0.0, -20.0 } }, 0.5), -6.0));
+}
+
 //==============================================================================
 TEST_CASE ("fade: it moves the run's level, one value a tick, and arrives")
 {
@@ -1391,6 +1444,92 @@ TEST_CASE ("fade: it moves the run's level, one value a tick, and arrives")
     INFO ("level writes: " << rig.audio.levels.size());
     CHECK (rig.audio.levels.size() >= 40u);
     CHECK (rig.audio.levels.back().second == doctest::Approx (-20.0));
+}
+
+TEST_CASE ("fade: a drawn curve lands on each breakpoint's level at its time")
+{
+    /*  PR 5.16a. Two seconds - a hundred ticks - dipping to -30 dB at the
+        halfway point and coming back up to -10. The fade's own `level` and
+        `curve` say something else entirely, and are not read: where points
+        exist they are the whole of the shape (§14.6). */
+    FadeRig rig;
+
+    rig.setCue (rig.fadeId, "duration", "2");
+    rig.setCue (rig.fadeId, "level", "-120");
+    rig.setCue (rig.fadeId, "curve", "sCurve");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.fadeId + "/points",
+                                        "0 0 0.5 -30 1 -10").ok);
+
+    const auto mediaRun = rig.startMedia();
+    REQUIRE (rig.runs.find (mediaRun)->level == doctest::Approx (0.0));
+
+    rig.fire (rig.fadeId);
+
+    /*  The level after every tick, so the case can find the dip wherever the
+        first tick of the fade happens to fall rather than assume it. */
+    std::vector<double> levels;
+
+    for (int i = 0; i < 120; ++i)
+    {
+        rig.tickOnce();
+        levels.push_back (rig.runs.find (mediaRun)->level);
+    }
+
+    const auto bottom = std::min_element (levels.begin(), levels.end());
+    const auto dip = static_cast<std::size_t> (std::distance (levels.begin(), bottom));
+
+    /*  THE DIP IS EXACTLY THE BREAKPOINT, and it is the only sample there. */
+    CHECK (same (*bottom, -30.0));
+    CHECK (std::count_if (levels.begin(), levels.end(),
+                          [] (double level) { return same (level, -30.0); }) == 1);
+
+    /*  Halfway to the dip, halfway down in dB - linear, and not the sCurve the
+        fade's `curve` names, which would still be near the top at a quarter. */
+    REQUIRE (dip >= 25u);
+    CHECK (levels[dip - 25] == doctest::Approx (-15.0));
+
+    /*  Fifty ticks - one second, the other half of the fade - after the dip, it
+        arrives at the last breakpoint: -10, not the -120 `level` says. And it
+        stays there. */
+    REQUIRE (dip + 50 < levels.size());
+    CHECK (same (levels[dip + 50], -10.0));
+    CHECK (levels[dip + 49] < -10.0);
+    CHECK (same (levels.back(), -10.0));
+
+    /*  The media run is still playing - a fade is not a stop. */
+    CHECK (rig.runs.find (mediaRun)->state == cue::runState::playing);
+}
+
+TEST_CASE ("fade: a drawn curve leaves from the run's level, not from its first breakpoint")
+{
+    /*  The media cue plays at -6 dB and the drawing starts at 0. Following the
+        drawing literally would jump six decibels up on the first tick of the
+        fade, and a jump on a PA is a click - so the fade leaves from -6, for
+        the reason a fade over a fade leaves from where the level has got to. */
+    FadeRig rig;
+
+    rig.setCue (rig.mediaId, "level", "-6");
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.fadeId + "/points",
+                                        "0 0 1 -20").ok);
+
+    const auto mediaRun = rig.startMedia();
+    REQUIRE (rig.runs.find (mediaRun)->level == doctest::Approx (-6.0));
+
+    rig.fire (rig.fadeId);
+    rig.tickOnce();
+
+    const auto first = rig.runs.find (mediaRun)->level;
+    INFO ("one tick into the fade: " << first << " dB");
+
+    /*  One or two ticks of a one-second fade from -6 to -20: a little below -6,
+        and nowhere near the drawn 0. */
+    CHECK (first < -6.0);
+    CHECK (first > -7.0);
+
+    for (int i = 0; i < 60; ++i)
+        rig.tickOnce();
+
+    CHECK (same (rig.runs.find (mediaRun)->level, -20.0));
 }
 
 TEST_CASE ("fade: the fade's own run finishes when the fade does")

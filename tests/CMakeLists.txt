@@ -217,6 +217,22 @@ add_test(NAME wfg.replay.fade.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fade-stop
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# A fade somebody DREW (PR 5.16a, namespace section 14.6): one read from the
+# file, one drawn during the session by a single node.set carrying the whole
+# list, and two drawings refused - `bad-value` for numbers that are not a curve,
+# `type-mismatch` for a word where a number goes. The levels a drawn fade passes
+# through are the unit suite's to check, for fade-stop's reason; what this pins
+# is the write door, which before 5.16a refused every list. Run against the old
+# door it fails on the first node.set, which was tried.
+add_test(NAME wfg.replay.fade-curve.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/fade-curve.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fade-curve
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.fade-curve.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/fade-curve.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fade-curve
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # The fifth replay fixture, and the first that is not about Go.dot's own state
 # at all: every record in it is about a lighting desk that is not here. A replay
 # re-applies all of them against a mount table built from the bundle, reaches

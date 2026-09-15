@@ -18,11 +18,14 @@
 
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/command/Command.h>
+#include <wfg/engine/document/FadePoints.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <map>
 #include <cctype>
+#include <cstddef>
 #include <algorithm>
+#include <string>
 #include <unordered_set>
 
 namespace wfg::doc
@@ -127,6 +130,13 @@ namespace wfg::doc
             schema's formatter, the same one the event log uses. */
         std::string toText (const Attribute& attribute, const juce::var& value)
         {
+            /*  A LIST IS HELD AS ITS CANONICAL TEXT (CanonicalXml says why), so
+                its text is the var's string. Before PR 5.16a it fell through to
+                the `number` case below, which read "1 0 0 1" as one double and
+                handed back the first gain of a matrix as if it were the matrix. */
+            if (attribute.isList())
+                return value.toString().toStdString();
+
             switch (attribute.type())
             {
                 case ValueType::string:
@@ -147,6 +157,68 @@ namespace wfg::doc
             }
 
             return {};
+        }
+
+        /*  How many elements a list's text holds: XSD's list form, whitespace
+            between, and nothing at all is none. */
+        std::size_t countTokens (const std::string& text)
+        {
+            std::size_t count = 0, i = 0;
+
+            while (i < text.size())
+            {
+                while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) != 0)
+                    ++i;
+
+                if (i >= text.size())
+                    break;
+
+                ++count;
+
+                while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) == 0)
+                    ++i;
+            }
+
+            return count;
+        }
+
+        /*  THE ONE THING ABOUT A ROUTING MATRIX THE DOCUMENT CAN CHECK: that it
+            is a whole number of rows, one per channel of the cue, each as wide
+            as the destination. How many channels the cue HAS is the file's, and
+            the file arrives on a different machine from the one the show was
+            written on.
+
+            Empty is a cue routed nowhere YET, which is a show being written and
+            not a broken one - `resolveRouting` says so in as many words at arm
+            time. Asked by validate() and by the write door, so that the two
+            cannot come to disagree about what a matrix is. */
+        bool coefficientsFit (std::size_t count, int width) noexcept
+        {
+            return count == 0 || count % static_cast<std::size_t> (std::max (1, width)) == 0;
+        }
+
+        /*  The width a Route's bus or a Feed's slot declares, for the write
+            door. A pointer at nothing, or at the wrong kind of thing, answers 1
+            - which every count fits - because that is the `refers` column's
+            warning and never a refusal, exactly as validate() treats it. */
+        int destinationWidth (const ShowDocument& document, const juce::ValueTree& destination)
+        {
+            const auto element = destination.getType().toString();
+            const auto isRoute = element == "Route";
+
+            if (! isRoute && element != "Feed")
+                return 1;
+
+            const auto targetId = destination[juce::Identifier (isRoute ? "bus" : "slot")]
+                                      .toString().toStdString();
+            const auto target = document.findById (targetId);
+
+            if (! target.isValid() || target.getType().toString() != (isRoute ? "Bus" : "Slot"))
+                return 1;
+
+            const juce::Identifier width { "width" };
+
+            return target.hasProperty (width) ? static_cast<int> (target[width]) : 1;
         }
 
         std::vector<std::string> splitAddress (const std::string& address)
@@ -747,6 +819,48 @@ namespace wfg::doc
         {
             if (auto refusal = refuseIfLocked())
                 return *refusal;
+        }
+
+        /*  A LIST, which this door could not take until PR 5.16a (§14.6):
+            `parseValue` read "0 -60 1 0" as one number and refused it, so the
+            two `gains` rows had never been written by a client. Parsed element
+            by element through the reader's own function and stored as its
+            canonical text, which is exactly how the reader stores one - so a
+            list written here and a list loaded from a file are the same value.
+            A bad element is the wrong kind of thing and answers `type-mismatch`,
+            as a bad scalar does.
+
+            AND THE LIST MUST BE WHAT ITS ROW SAYS IT IS, or it answers
+            `bad-value`: every element was a number, and together they are not
+            a curve or not a matrix. A fade's points must pair up, climb from 0
+            to 1 and stay in a fade's range; a destination's gains must be whole
+            rows as wide as its bus or slot. Asked here as well as in
+            validate(), by the same functions, because this is the one door a
+            client writes through - and validate() REFUSES THE FILE. A write
+            applied here that the next load refused would have turned one
+            datagram into a show that does not open, which is a great deal
+            worse than a refusal the client can read. */
+        if (target.attribute->isList())
+        {
+            std::string canonical;
+
+            if (! Schema::parseList (*target.attribute, text, canonical).ok)
+                return EditResult::failed (reason::typeMismatch);
+
+            const auto name = target.attribute->name();
+
+            if (target.attribute->element == "Fade" && name == "points"
+                && ! readFadePoints (canonical).problem.empty())
+                return EditResult::failed (reason::badValue);
+
+            if (name == "gains"
+                && ! coefficientsFit (countTokens (canonical), destinationWidth (*this, target.node)))
+                return EditResult::failed (reason::badValue);
+
+            target.node.setProperty (juce::Identifier (juce::String (std::string (name))),
+                                     juce::var (juce::String (canonical)), historyFor (*target.attribute));
+
+            return EditResult::succeeded (target.node[idProperty].toString().toStdString());
         }
 
         Value value;
@@ -1468,8 +1582,32 @@ namespace wfg::doc
                         var carries the wrong type as well as one out of range -
                         which is the whole point, because a string-typed "1" is
                         exactly what a careless loader leaves behind. */
-                    Value parsedValue;
                     const auto text = toText (*attribute, node[name]);
+
+                    /*  A list element by element, as the reader takes one - and
+                        a fade's points as a curve besides, by the same function
+                        the write door and the Runner ask (FadePoints.h). */
+                    if (attribute->isList())
+                    {
+                        std::string canonical;
+                        const auto list = Schema::parseList (*attribute, text, canonical);
+
+                        if (! list.ok)
+                        {
+                            problems.push_back (here + ": \"" + attributeName + "\" " + list.error);
+                        }
+                        else if (elementName == "Fade" && attributeName == "points")
+                        {
+                            const auto curve = readFadePoints (canonical);
+
+                            if (! curve.problem.empty())
+                                problems.push_back (here + ": \"points\" " + curve.problem);
+                        }
+
+                        continue;
+                    }
+
+                    Value parsedValue;
                     const auto parsed = Schema::parseValue (*attribute, text, parsedValue);
 
                     if (! parsed.ok)
@@ -1846,27 +1984,6 @@ namespace wfg::doc
             const std::map<std::string, int>& busWidth;
             const std::map<std::string, int>& slotWidth;
 
-            static std::size_t countTokens (const std::string& text)
-            {
-                std::size_t count = 0, i = 0;
-
-                while (i < text.size())
-                {
-                    while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) != 0)
-                        ++i;
-
-                    if (i >= text.size())
-                        break;
-
-                    ++count;
-
-                    while (i < text.size() && std::isspace (static_cast<unsigned char> (text[i])) == 0)
-                        ++i;
-                }
-
-                return count;
-            }
-
             void check (const juce::ValueTree& node, const char* element, const char* target,
                         const std::map<std::string, int>& widths)
             {
@@ -1877,18 +1994,13 @@ namespace wfg::doc
                 if (found == widths.end())
                     return;                 // dangling: the `refers` column's warning
 
-                const auto width = static_cast<std::size_t> (std::max (1, found->second));
+                const auto width = std::max (1, found->second);
                 const auto gains = countTokens (node[juce::Identifier ("gains")]
                                                   .toString().toStdString());
 
-                /*  A cue routed nowhere YET is an ordinary state for a show
-                    being written, and it is silent rather than wrong -
-                    `resolveRouting` says so in as many words at arm time. Only
-                    a list that exists and does not divide is a mistake. */
-                if (gains == 0)
-                    return;
-
-                if (gains % width != 0)
+                /*  The rule itself is `coefficientsFit`, which the write door
+                    asks too - an empty list included, which fits. */
+                if (! coefficientsFit (gains, width))
                     problems.push_back (std::string ("/Show/.../") + element + "[" + id + "]: "
                                           + std::to_string (gains) + " coefficients do not divide"
                                             " into a destination " + std::to_string (width)

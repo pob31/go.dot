@@ -149,6 +149,8 @@ add_library(wfg_engine STATIC
     wfg/engine/document/DocumentWriter.h
     wfg/engine/document/EphemeralState.cpp
     wfg/engine/document/EphemeralState.h
+    wfg/engine/document/FadePoints.cpp
+    wfg/engine/document/FadePoints.h
     wfg/engine/document/Ids.cpp
     wfg/engine/document/Ids.h
     wfg/engine/document/RelaxNg.cpp

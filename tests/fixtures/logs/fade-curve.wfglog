@@ -1,0 +1,61 @@
+# wfg-log 1
+# fixture fade-curve — a fade somebody drew, a second one drawn during the
+# session, and two drawings the door would not take.
+#
+# PR 5.16a gave a fade `points`: (t, level) pairs a curve editor draws, which the
+# fade meets in turn instead of following its `curve` word (namespace §14.6).
+# What that does to a LEVEL is not in this file and cannot be, for fade-stop's
+# reason: §3.15 keeps the fifty values a second out of the log, a replay does not
+# even run the tick hooks that compute them, and the level a drawn fade passes
+# through is checked sample by sample in the unit suite instead.
+#
+# So this is the session half, and the half that changed. Until 5.16a the write
+# door parsed "0 0 0.5 -20 1 -6" as ONE number and refused it, so the node.set
+# below would have been an R record with `type-mismatch` - no client could
+# write a list of any kind. Now it is applied, the two drawings that are not
+# curves are refused with the reason each deserves, and a drawn fade is a fade
+# like any other: GO on it makes a run, and the run ends when the fade does.
+#
+# Hand-written and hand-checked like the others; `wfg replay --bundle` re-applies
+# every line with no Tracktion, no device and no sound.
+#
+# The graph came up. Four voices, two outputs, thirty-six nodes.
+A 0 0 engine audio.editBuilt s:"hosted" i:4 i:2 i:36
+#
+# The standby cue armed ahead of time, and found a voice.
+A 40 1 udp:10.0.0.5:9000 audio.arm s:"B3N8R5TW" s:"G7W9EF36"
+A 42 2 engine audio.armed s:"G7W9EF36" i:0
+#
+# GO, and the sound started two ticks later. Standby moves on to the Dip.
+A 100 3 udp:10.0.0.5:9000 go s:"G7W9EF36"
+A 102 4 engine run.started s:"G7W9EF36"
+#
+# THE SECOND FADE IS DRAWN while the first cue plays: a dip to -20 at halfway,
+# arriving at -6. One node.set carrying the whole list, as a curve editor sends
+# it on commit, and the list is the value - there is no second datagram per
+# breakpoint for a replay to put back together.
+A 150 5 udp:10.0.0.5:9000 node.set s:"/godot/cue/P9XKC2WR/points" s:"0 0 0.5 -20 1 -6"
+#
+# A drawing with a breakpoint missing its level. Every element is a number, so
+# the type was right; together they are not a curve, which is `bad-value` - and
+# the curve drawn a moment ago stays.
+R 160 6 udp:10.0.0.5:9000 bad-value node.set s:"/godot/cue/P9XKC2WR/points" s:"0 0 0.5 -20 1"
+#
+# And one with a word where a number goes, which is the wrong KIND of thing:
+# `type-mismatch`, as it would be for a scalar.
+R 170 7 udp:10.0.0.5:9000 type-mismatch node.set s:"/godot/cue/P9XKC2WR/points" s:"0 0 half -20 1 -6"
+#
+# GO ON THE DIP, drawn in the file rather than during the session. Two seconds,
+# down to -30 at halfway and back up to -10, none of which is written here: the
+# fade is recomputed from the cue. The document's `level` and `curve` are not
+# even set on it, and would not be read if they were.
+A 200 8 udp:10.0.0.5:9000 go s:"H2K4M6NP"
+#
+# A hundred ticks later, which is the two seconds, the fade's run is done. The
+# media run plays on at -10 dB - a fade is not a stop.
+A 300 9 engine run.ended s:"H2K4M6NP"
+#
+# GO ON THE FADE DRAWN AT TICK 150: a second of it, from where the Dip left the
+# level, through -20 and up to -6. Fifty ticks, and done.
+A 400 10 udp:10.0.0.5:9000 go s:"Q6RS8TW2"
+A 450 11 engine run.ended s:"Q6RS8TW2"

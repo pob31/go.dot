@@ -647,6 +647,172 @@ TEST_CASE ("document: the canonical spelling of a number is pinned")
 }
 
 //==============================================================================
+/*  LISTS THROUGH THE WRITE DOOR (PR 5.16a, namespace §14.6).
+
+    Until this PR no list-typed attribute could be written by a client:
+    setAttribute parsed "1 0 0 1" as one number and refused it, and getAttribute
+    handed a stored list back as its first element. The two `gains` rows had
+    been unreachable through node.set since Phase 2, and nothing noticed because
+    nothing had tried. */
+namespace
+{
+    /*  A media cue routed to a stereo bus, and a fade aimed at it. */
+    ShowDocument routed()
+    {
+        const std::string xml =
+            "<Show>\n"
+            "  <Lists>\n"
+            "    <List id=\"7K2QM9X4\" name=\"Sound\">\n"
+            "      <Media id=\"B3N8R5TW\" file=\"thunder.wav\" name=\"Thunder\">\n"
+            "        <Route id=\"Z04EH7PH\" bus=\"J3MT5XYA\" gains=\"1 0 0 1\"/>\n"
+            "      </Media>\n"
+            "      <Fade id=\"E4GP6QSC\" duration=\"2\" name=\"Dip\" target=\"B3N8R5TW\"/>\n"
+            "    </List>\n"
+            "  </Lists>\n"
+            "  <Mounts/>\n"
+            "  <Audio tracks=\"4\">\n"
+            "    <Bus id=\"J3MT5XYA\" name=\"Main L/R\" width=\"2\"/>\n"
+            "  </Audio>\n"
+            "</Show>\n";
+
+        ShowDocument document;
+        const auto result = CanonicalXml::read (xml, document);
+
+        for (const auto& problem : result.problems)
+            INFO (problem);
+
+        REQUIRE (result.ok);
+        return document;
+    }
+}
+
+TEST_CASE ("document: a list is written through the door and reads back whole")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    auto document = routed();
+    const std::string gains = "/godot/route/Z04EH7PH/gains";
+
+    /*  WHOLE, which it was not: the stored text went through the `number` arm
+        of toText and came back as "1". */
+    CHECK (document.getAttribute (gains) == std::string ("1 0 0 1"));
+
+    /*  Written, and canonicalised on the way in exactly as the reader does a
+        file's - so `0.50` and `0.5` are one show. */
+    REQUIRE (document.setAttribute (gains, "0.50  0\t0 1").ok);
+    CHECK (document.getAttribute (gains) == std::string ("0.5 0 0 1"));
+    CHECK (CanonicalXml::write (document).find ("gains=\"0.5 0 0 1\"") != std::string::npos);
+    CHECK (document.validate().empty());
+
+    /*  A cue routed nowhere yet is a show being written, not a broken one. */
+    REQUIRE (document.setAttribute (gains, "").ok);
+    CHECK (document.getAttribute (gains) == std::string (""));
+    REQUIRE (document.setAttribute (gains, "1 0 0 1").ok);
+
+    /*  One bad element refuses the whole list, as the reader does: three of
+        four gains is not a smaller matrix, it is a different one. */
+    CHECK (document.setAttribute (gains, "1 0 zero 1").reason == reason::typeMismatch);
+
+    /*  AND A LIST OF NUMBERS THAT IS NOT A MATRIX is refused at the door rather
+        than applied - three coefficients into a bus two wide. validate() refuses
+        that file, so applying it would have turned one datagram into a show
+        that does not open. */
+    CHECK (document.setAttribute (gains, "1 0 1").reason == reason::badValue);
+
+    /*  Neither refusal moved anything. */
+    CHECK (document.getAttribute (gains) == std::string ("1 0 0 1"));
+    CHECK (document.validate().empty());
+}
+
+TEST_CASE ("document: a fade's points are a curve, or they are refused")
+{
+    auto document = routed();
+    const std::string points = "/godot/cue/E4GP6QSC/points";
+
+    /*  None drawn: the default, and `curve` applies. */
+    CHECK (document.getAttribute (points) == std::string (""));
+
+    /*  A dip and a recovery: three breakpoints, times climbing from 0 to 1. */
+    REQUIRE (document.setAttribute (points, "0 0  0.50 -30 1 -10").ok);
+    CHECK (document.getAttribute (points) == std::string ("0 0 0.5 -30 1 -10"));
+    CHECK (document.validate().empty());
+
+    struct Case { const char* text; const char* refusal; const char* why; };
+
+    const Case cases[] = {
+        { "0 0 0.5 -30 1",       reason::badValue,     "an odd count - a breakpoint is a time and a level" },
+        { "0 0 0.5 -30 0.5 -10 1 0", reason::badValue, "two breakpoints at one time are a jump" },
+        { "0 0 0.6 -30 0.4 -10 1 0", reason::badValue, "times that go back" },
+        { "0.1 0 1 -10",         reason::badValue,     "a curve that starts after the fade does" },
+        { "0 0 0.9 -10",         reason::badValue,     "a curve that ends before the fade does" },
+        { "0 0 1.5 -10",         reason::badValue,     "a time outside the fade" },
+        { "0 0 1 -130",          reason::badValue,     "a level no fade may reach" },
+        { "0 0 1 13",            reason::badValue,     "a level above a fade's 12 dB" },
+        { "0 -6",                reason::badValue,     "one breakpoint is not a curve" },
+        { "0 0 half -30 1 -10",  reason::typeMismatch, "an element that is not a number at all" },
+    };
+
+    for (const auto& c : cases)
+    {
+        INFO (c.why << ": \"" << c.text << "\"");
+        CHECK (document.setAttribute (points, c.text).reason == std::string (c.refusal));
+
+        /*  And a refusal leaves the curve that was there. */
+        CHECK (document.getAttribute (points) == std::string ("0 0 0.5 -30 1 -10"));
+    }
+
+    /*  Cleared, it is the two words again - and the file says nothing. */
+    REQUIRE (document.setAttribute (points, "").ok);
+    CHECK (CanonicalXml::write (document).find ("points=") == std::string::npos);
+}
+
+TEST_CASE ("document: a file holding a fade that is not a curve does not open, and says why")
+{
+    /*  The loader's half of the rule, by the same function the door asks. A
+        hand-edited file is how a bad curve arrives, and it must be refused when
+        the show is read rather than discovered on the GO. */
+    struct Case { const char* points; const char* mentions; };
+
+    const Case cases[] = {
+        { "0 0 0.5 -30 1",  "odd number" },
+        { "0 0 0.5 -30 0.4 -10 1 0", "does not come after" },
+        { "0.2 0 1 -10",    "starts at 0" },
+        { "0 0 0.8 -10",    "ends at 1" },
+        { "0 0 1 -200",     "outside -120..12" },
+    };
+
+    for (const auto& c : cases)
+    {
+        const std::string xml =
+            "<Show><Lists><List id=\"7K2QM9X4\" name=\"Sound\">"
+            "<Fade id=\"E4GP6QSC\" duration=\"2\" name=\"Dip\" points=\"" + std::string (c.points) + "\"/>"
+            "</List></Lists><Mounts/><Audio tracks=\"4\"/></Show>";
+
+        INFO ("points=\"" << c.points << "\"");
+
+        ShowDocument document;
+        const auto result = CanonicalXml::read (xml, document);
+
+        CHECK_FALSE (result.ok);
+
+        bool mentioned = false;
+        std::string reported;
+
+        for (const auto& problem : result.problems)
+        {
+            reported += "\n  " + problem;
+
+            if (problem.find ("points") != std::string::npos
+                && problem.find (c.mentions) != std::string::npos)
+                mentioned = true;
+        }
+
+        INFO ("reported:" << reported);
+        CHECK (mentioned);
+    }
+}
+
+//==============================================================================
 TEST_CASE ("document commands: every structural edit is a named command")
 {
     /*  PRD §4.11 — every gesture-reachable action exists as a named command. The

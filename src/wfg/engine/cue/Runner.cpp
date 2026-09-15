@@ -31,6 +31,7 @@
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
+#include <utility>
 
 namespace wfg::cue
 {
@@ -2256,13 +2257,28 @@ namespace wfg::cue
     //==============================================================================
     void Runner::fireFade (const juce::ValueTree& cue, const std::string& runId)
     {
+        /*  A DRAWN CURVE, when there is one, is the whole of the shape: its last
+            breakpoint is where the fade ends, and `level` and `curve` are not
+            read (§14.6). Not combined - two shapes multiplied together are a
+            third shape nobody drew.
+
+            A list the write door and the loader both refuse cannot be here. One
+            that got here anyway would come back with no points, and the fade
+            would play as its two words say rather than do nothing on a show
+            night - the reason fadeCurveFrom reads an unknown word as linear. */
+        auto drawn = doc::readFadePoints (textOf (cue, "points"));
+
+        const auto toDb = drawn.points.empty() ? numberOf (cue, "level")
+                                               : drawn.points.back().levelDb;
+
         beginFade (cue[idProperty].toString().toStdString(),
                           textOf (cue, "target"),
                           runId, "fade",
-                          numberOf (cue, "level"),
+                          toDb,
                           numberOf (cue, "duration"),
                           fadeCurveFrom (textOf (cue, "curve")),
-                          false);
+                          false,
+                          std::move (drawn.points));
     }
 
     void Runner::fireStop (const juce::ValueTree& cue, const std::string& runId)
@@ -2354,7 +2370,7 @@ namespace wfg::cue
                           runId, "stop",
                           silenceDb, seconds,
                           fadeCurveFrom (textOf (cue, "curve")),
-                          true);
+                          true, {});
     }
 
     Runner::Takeover Runner::resolveTakeover (const std::string& targetId)
@@ -2435,7 +2451,7 @@ namespace wfg::cue
                             const std::string& targetCueId,
                             const std::string& selfRunId, const std::string& kind,
                             double toDb, double seconds, FadeCurve curve,
-                            bool stopWhenDone)
+                            bool stopWhenDone, std::vector<doc::FadePoint> points)
     {
         juce::ignoreUnused (selfCueId, kind);
 
@@ -2530,6 +2546,7 @@ namespace wfg::cue
         job.toDb = toDb;
         job.ticksTotal = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
         job.curve = curve;
+        job.points = std::move (points);
         job.stopWhenDone = stopWhenDone;
 
         /*  THE STOP THIS FADE INHERITED, if it took over from one.

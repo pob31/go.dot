@@ -395,14 +395,28 @@ namespace wfg::doc
                     decision every show has to state and no number here could be
                     right for every rig. The rule is general rather than a named
                     exception so that the next such attribute needs a table row
-                    and nothing else. */
+                    and nothing else.
+
+                    A LIST IS A STRING FOR THIS PURPOSE, and until PR 5.16a the
+                    rule said otherwise. "" is a list - the empty one, a cue
+                    routed nowhere yet - and the writer has always omitted it
+                    as the default it is, so the reader demanding it back was
+                    the two disagreeing: `route.create` makes a Route with no
+                    gains, a save wrote it without them, and the reopen refused
+                    the file. Nothing had tripped over it: every test that saves
+                    a Route gives it gains by hand first, and no client could
+                    give it any before the write door learned lists. Neither
+                    row is defaulted to an
+                    IDENTITY by this (PRD §3.9b): absent is the empty matrix,
+                    which routes nothing, exactly as `gains=""` always did. */
                 for (const auto& attribute : element->attributes)
                 {
                     if (attribute.hasDefault() || attribute.persist() != Persist::show)
                         continue;
 
                     if (attribute.type() == ValueType::string
-                          || attribute.type() == ValueType::blob)
+                          || attribute.type() == ValueType::blob
+                          || attribute.isList())
                         continue;
 
                     const juce::String attributeName { std::string (attribute.name()) };

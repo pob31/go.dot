@@ -1,0 +1,15 @@
+<Show>
+  <Lists>
+    <List id="7K2QM9X4" name="Sound">
+      <Media id="B3N8R5TW" file="thunder.wav" name="Thunder" number="1">
+        <Route id="Z04EH7PH" bus="J3MT5XYA" gains="1 0 0 1"/>
+      </Media>
+      <Fade id="E4GP6QSC" duration="2" name="Dip" number="2" points="0 0 0.5 -30 1 -10" target="B3N8R5TW"/>
+      <Fade id="P9XKC2WR" duration="1" name="Redrawn" number="3" target="B3N8R5TW"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="4">
+    <Bus id="J3MT5XYA" name="Main L/R" width="2"/>
+  </Audio>
+</Show>

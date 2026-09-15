@@ -4189,6 +4189,89 @@ could drift; here, the second element does not get the attribute at all. An oper
 shaped exit writes a fade with the shape and a stop after it, which is two cues that say what
 they are.
 
+*What PR 5.16a built (2026-09-15).* **The row, the door, and one rule asked in three places.**
+`fade,points` is in the table with an empty default and no range, because its elements alternate
+between two ranges and no single column can say both. What a curve *is* lives in one function,
+`doc::readFadePoints` (`document/FadePoints.{h,cpp}`), which the write door, `validate()` and the
+Runner all ask, so the three cannot drift. The door took lists as this section said it had to:
+`Schema::parseList`, the reader's own function, for each element, and the canonical text stored
+as a string, which is what the reader stores. A bad element answers `type-mismatch`, as a bad
+scalar does. `toText` reads a list back whole. `validate()` had been re-parsing list attributes
+through the `number` arm too, so it checked a matrix's first gain and no others. Nobody noticed
+because the reader checks every element on load. It has its own list branch now.
+
+**Four places where the text above was short, corrected here rather than left to be found:**
+
+- **The door refuses what `validate()` refuses, and not only `validate()`.** The table says
+  `validate()` refuses a bad curve, and it does. But `validate()` refuses the *file*: a curve the
+  door had applied would save, and the next open would refuse the show, so one datagram would
+  leave a show that does not open. The door answers `bad-value` for a list whose elements are
+  numbers but which is not a curve. For the same reason it answers `bad-value` for `gains` that
+  are not whole rows as wide as their bus or slot. That rule, `coefficientsFit`, is now the one
+  function `validate()` asks too. Before this PR no client could write a list at all, so the door
+  had never had the question to answer.
+- **A drawn fade leaves from where the run is, not from its first breakpoint.** This section
+  called the levels absolute, which is right for every breakpoint but the first. The first is
+  where the drawing starts on the page. The fade starts wherever the level has got to, which is
+  the rule `FadeJob.h` already keeps for a fade taking over from a fade: anything else is a jump,
+  and a jump on a PA is a click. So the first segment runs from the run's level to the second
+  breakpoint, and every breakpoint after the first is met exactly, at its time.
+  *Proposed, and the author's to overrule.* The alternative, honouring the drawn start and
+  jumping to it, is one line in `cue::fadeLevelDb`. 5.16b's editor should show the first point's
+  level as the level the fade leaves from, not one that can be dragged.
+- **`level` is not read either, as well as `curve`.** Absolute levels make the last breakpoint
+  where the fade ends. `level` would have been a second answer to that question, so where points
+  exist it is ignored, and the CSV descriptions of both words say so. 5.16b's inspector should
+  grey them out.
+- **`route.create` had never survived a save.** It makes a Route with no gains, and the writer
+  omits an empty list as the default it is. The reader, though, requires every `persist=show`
+  row with no default unless `""` is a value of its type, and it classed a list with the
+  numbers. So the reopen refused the file: *"`<Route>` must carry `gains`"*. `createFeed` had the
+  same hole. For a list, as for a string, `""` is a value (the empty one), so the rule now skips
+  lists as it skips strings (`CanonicalXml.cpp`). Absent gains are the empty matrix, which
+  routes nothing, exactly as `gains=""` always did, so neither row gains an identity default
+  (§3.9b). Nothing had tripped over it: every test that saves a Route gives it gains by hand
+  first, and no client could give it any. `MediaCueTests` now pins the round trip. `points` was
+  what found it, because an empty curve is the ordinary case.
+
+**Two hazards found and not fixed, for the author.**
+
+- **A re-pointed destination can leave a show that does not open.** Re-pointing a Route's
+  `bus`, or a Feed's `slot`, at a destination of a different width is applied by the door. The
+  next open then refuses the file for gains that no longer divide, and that has been true since
+  Phase 2. The remedy is the same `coefficientsFit` asked when a `bus` or `slot` is written. It is
+  not in this PR because it changes what a scalar write to a Phase 2 row means, and that deserves
+  its own sentence in §13.
+- **A list sent as N arguments is written as its first.** A datagram to a node becomes `node.set`
+  with `packet.args.front()` and nothing after it (`oscquery/EngineNamespace.cpp`). So a generic
+  OSCQuery client that reads `TYPE "dddd"` and sends four doubles writes one. For a curve, or for
+  gains into a bus two or more wide, the result is refused as `bad-value`, which is at least
+  honest. For gains into a bus one channel wide it is applied, and it is the wrong matrix. The
+  console sends a list as one string, as §14.2's *one value, as text* says a client should, and
+  5.16b's editor will too. Joining N numeric arguments into the list's text, for document list
+  rows only, is a few lines in the namespace and the `node.set` handler. It is also a decision
+  about the wire contract, and mounted namespaces take the same first-argument road, so it is the
+  author's.
+
+**The console reads a list as one text field** (`views/inspector.js`). It holds the whole list,
+space-separated, and is written back as one `node.set`. Read as a scalar before, a list field
+showed only its first element. An empty list was not shown at all, because the tree serves it
+with no `TYPE`: there is no tag to give zero values. This is a reading, not the editor: 5.16b's
+curve is the view.
+
+**Tests.** `DocumentTests`: a list written and read back whole, and the refusals. A curve's ten
+ways of not being one. A file holding a bad curve refused at load, naming it. `GoTests`, where
+the fade cases live (the plan said `RunTests`): the arithmetic on its own; a two-second fade
+that dips to −30 lands on it exactly at its time and on −10 fifty ticks later, with `level` at
+−120 and `curve` at `sCurve` both ignored; a run at −6 leaves from −6 and not from the drawn 0.
+`UndoTests`: the list row that the `toVar` agreement case was waiting for (*"the row which
+arrives first is added to this case"*), and a redrawn curve undone to the one before.
+`MediaCueTests`: a route with no gains survives a save and a reopen. And the replay fixture
+`fade-curve.wfglog`, with its bundle. It holds a curve drawn during the session by one
+`node.set`, and two drawings refused with the reason each deserves. Run against the old door, it
+fails on the first `node.set`; that was tried. As `fade-stop` says of every fade, it pins the
+session and not the levels, which the unit suite checks sample by sample.
+
 ### 14.7 Operator commands
 
 Six new commands and one gesture that is not a command. Every one of them is reachable from the

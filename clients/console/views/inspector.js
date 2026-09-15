@@ -34,7 +34,7 @@ function fieldsFor(id) {
     if (!match) continue;
 
     const node = tree.at[address];
-    if (!node || typeof node.TYPE !== "string") continue;      // a container, not a value
+    if (!node || (typeof node.TYPE !== "string" && !isList(node))) continue;   // a container
 
     found.push({ address: address, owner: match[1], name: match[2], node: node });
   }
@@ -50,10 +50,32 @@ function fieldsFor(id) {
   return found;
 }
 
+/*  A LIST NODE - a route's `gains`, a fade's `points` - carries one type tag
+    per element, so its TYPE is as long as its value (§14.6). It is shown and
+    typed as the space-separated text the file uses: one field for the whole
+    list and one node.set on commit, which the engine's door parses element by
+    element. Read as a scalar, it showed the first element alone, and an empty
+    one was not shown at all. The curve editor (PR 5.16b) will draw `points`;
+    until then this is how they are read. */
+function isList(node) {
+  if (typeof node.TYPE === "string") return node.TYPE.length !== 1;
+
+  /*  AN EMPTY LIST IS SERVED WITH NO TYPE AT ALL, there being no tag to give
+      zero values, and with no CONTENTS either - which is what tells it from a
+      container. */
+  return !node.CONTENTS && node.ACCESS !== undefined;
+}
+
+function shownValue(node) {
+  if (isList(node)) return Array.isArray(node.VALUE) ? node.VALUE.join(" ") : "";
+
+  return Array.isArray(node.VALUE) && node.VALUE.length ? node.VALUE[0] : "";
+}
+
 function controlFor(field) {
   const node = field.node;
   const writable = (Number(node.ACCESS) & 2) !== 0;
-  const value = Array.isArray(node.VALUE) && node.VALUE.length ? node.VALUE[0] : "";
+  const value = shownValue(node);
   const range = Array.isArray(node.RANGE) && node.RANGE.length ? node.RANGE[0] : null;
   const set = ' data-set="' + esc(field.address) + '"';
 
@@ -72,6 +94,12 @@ function controlFor(field) {
 
   if (node.TYPE === "T" || node.TYPE === "F") {
     return '<input type="checkbox"' + set + (value === true ? " checked" : "") + ">";
+  }
+
+  /*  Before the number test, which an empty list's TYPE would pass: "" is
+      found at the start of "ifdh". */
+  if (isList(node)) {
+    return '<input type="text" class="list"' + set + ' value="' + esc(value) + '">';
   }
 
   if ("ifdh".indexOf(node.TYPE) >= 0) {
@@ -270,9 +298,13 @@ function refreshFields(pane) {
     if (input === document.activeElement || input.dataset.dirty === "yes") continue;
 
     const node = tree.node(input.dataset.set);
-    if (!node || !Array.isArray(node.VALUE) || !node.VALUE.length) continue;
+    if (!node) continue;
 
-    const value = node.VALUE[0];
+    /*  An empty list is a value - the curve was cleared - where an empty
+        scalar is a node with nothing to say yet. */
+    if (!isList(node) && (!Array.isArray(node.VALUE) || !node.VALUE.length)) continue;
+
+    const value = shownValue(node);
 
     if (input.type === "checkbox") input.checked = value === true;
     else if (String(input.value) !== String(value)) input.value = value;

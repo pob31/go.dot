@@ -828,10 +828,13 @@ namespace wfg::cue
 
         Takeover resolveTakeover (const std::string& targetId);
 
+        /*  `points` is a drawn curve, or empty for the two words; a stop
+            passes it empty, having no curve to draw (§14.6). */
         void beginFade (const std::string& selfCueId,
                         const std::string& targetCueId,
                         const std::string& selfRunId, const std::string& kind,
-                        double toDb, double seconds, FadeCurve, bool stopWhenDone);
+                        double toDb, double seconds, FadeCurve, bool stopWhenDone,
+                        std::vector<doc::FadePoint> points);
 
         void advanceFades (Engine& engine, std::int64_t tick);
         void advanceSends (Engine& engine);

@@ -17,6 +17,8 @@
 #include <wfg/engine/cue/FadeJob.h>
 
 #include <algorithm>
+#include <cstddef>
+#include <vector>
 
 namespace wfg::cue
 {
@@ -47,5 +49,39 @@ namespace wfg::cue
             is what a hand on a fader does, and what every desk in every theatre
             has trained everyone to expect. */
         return fromDb + (toDb - fromDb) * shaped;
+    }
+
+    double fadeLevelDb (double fromDb, const std::vector<doc::FadePoint>& points,
+                        double progress) noexcept
+    {
+        if (points.size() < 2)
+            return fromDb;
+
+        const auto t = std::clamp (progress, 0.0, 1.0);
+
+        /*  The segment whose END is the first breakpoint at or after `t`, so
+            that a `t` landing exactly on a breakpoint is answered as the end of
+            the segment before it - which is that breakpoint's level, exactly. */
+        std::size_t end = 1;
+
+        while (end + 1 < points.size() && points[end].t < t)
+            ++end;
+
+        const auto& from = points[end - 1];
+        const auto& to = points[end];
+
+        /*  The first segment leaves from the run's level, not the drawing's:
+            see the header. */
+        const auto startDb = end == 1 ? fromDb : from.levelDb;
+        const auto span = to.t - from.t;
+        const auto along = span > 0.0 ? std::clamp ((t - from.t) / span, 0.0, 1.0) : 1.0;
+
+        /*  Arrives EXACTLY, rather than at a start plus a difference that
+            rounding left a hair short: a breakpoint at -120 dB is a silence
+            and -119.99 is not. */
+        if (along >= 1.0)
+            return to.levelDb;
+
+        return startDb + (to.levelDb - startDb) * along;
     }
 }
