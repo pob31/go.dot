@@ -35,6 +35,7 @@ CMakeLists.txt text eol=lf
 *.md   text eol=lf
 *.html text eol=lf
 *.js   text eol=lf
+*.mjs  text eol=lf
 *.css  text eol=lf
 
 # Event-log fixtures, and this one IS a correctness matter. A replay fixture is

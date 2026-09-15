@@ -490,6 +490,12 @@ reading that works identically on all three platforms but is still a reading.
    CI runs the same file, so it cannot rot. It brings `python3-lxml` with it;
    see the Windows note for why the build insists on it.
 
+**Optional, on any of the three: Node.js 22.7 or newer** (or 20.19 on the 20 line).
+It runs the console's pure modules under `node --test` as the ctest entry
+`console.unit`, and nothing else uses it. Without it, or with an older one, the
+entry is left out and configure prints a line saying why; the page itself needs
+no Node, no build and no install, now or later.
+
 ### Step by step
 
 **1. Clone with submodules**
@@ -554,7 +560,8 @@ The suite runs the unit binary twice (once under `C`, once under `fr_FR`); the
 product binary once per serialising verb per locale (`canon`, `replay`, `schema`,
 `validate`, `commands`) plus `--version` and `selftest`; and two Python gates —
 the generated schema header against the parameter table, and every show fixture
-against the committed RELAX NG grammar through lxml.
+against the committed RELAX NG grammar through lxml. Where Node.js is new enough,
+`console.unit` runs the console's own tests as well.
 
 On **Windows**, `dev` needs an *x64 Native Tools Command Prompt for VS* (or a
 shell where `vcvars64.bat` has run) — Ninja cannot find `cl.exe` from a plain
@@ -676,7 +683,8 @@ scripts/             bootstrap, the Linux package list, the pin gate
 clients/console/     the web client the engine serves at /ui; reads by polling,
                      writes binary OSC, no build step, no dependency
 src/                 wfg_engine (the library) and wfg (the binary)
-tests/               the doctest suite and every add_test() in the project
+tests/               the doctest suite and every add_test() in the project;
+                     tests/console/ holds the page's node --test files
 spikes/              throwaway PRD §6.1 validation programs
 ThirdParty/          JUCE, tracktion_engine, juce_simpleweb (+ its nested asio)
                      and spatcore, all pinned submodules

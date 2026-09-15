@@ -3814,6 +3814,40 @@ automation is refused for the reason §14.15 gives. What that leaves genuinely u
 DOM — that the marker is on the right row, that the pill click hits the right run — and §14.15
 records it as a gap rather than pretending the two cheaper checks close it.
 
+*What PR 5.18 built (2026-09-15).* **`node --test` over the pure modules, where Node is new
+enough to run them.** The tests are `tests/console/*.test.mjs`. They live in the test tree
+rather than in `clients/console/tests/` as the plan had it, so the folder the engine serves
+stays the page and nothing else, and `client_page.py`'s orphan check has nothing to exempt. They
+import the page's own files as the browser does, with no copy, no build step and no
+`package.json`. Three files, 29 cases:
+
+- **`osc.test.mjs`** holds the encoder to the packets `OscCodecTests.cpp` builds by hand: the
+  specification's 440, the padding rule, every tag the page sends, two's complement, UTF-8, and
+  the aim's double beside the float it would otherwise be, both spelled out by hand. It also
+  checks that a list goes as one string, which is §14.6's contract with the door.
+- **`reconcile.test.mjs`** counts the reconciler's own promises. An unchanged row costs nothing
+  at all. A changed one keeps its element and its buttons, and only the difference is written.
+  One row moved costs one move whichever way it went, and a block moved costs one move per row
+  in it. A row leaving costs one removal. A key wanted twice is drawn twice. `morph`'s rules are
+  checked too, the focused field among them. The count is taken on `fake-dom.mjs`, the least DOM
+  `reconcile.js` touches. *This corrects §14.15,* which called the reconciler "a pure function
+  over a `Map<id, element>`". It is not one: it works on the DOM, and reads what is on screen
+  from the screen. So it is tested on a DOM small enough to count what changed, and what changed
+  is the one thing about it a browser would not say.
+- **`model.test.mjs`** covers `flatten`, the tree's questions, the trigger index filed by reply
+  (a new reply is a new index), overlaps told to both cues of a pair, and `esc` and `seconds`.
+
+Each file was tried against a mutation of the code it covers. The padding rule, the
+reconciler's step past a carried row, and an index keyed by something other than the reply were
+each broken in turn, and each broke its file.
+
+**Registered as `console.unit` only where it can pass.** `find_program (WFG_NODE node)` comes
+first, then the version. The page's files are `.js` ES modules with nothing beside them to say
+so. Node reads such a file as a module from 22.7, or from 20.19 on the 20 line. An older Node,
+or none at all, gets a STATUS line and no entry. There is one entry and not one per locale,
+since nothing here formats a number for a person. `intersect`/`agree` and `pointsToText` belong
+to 5.12 and 5.16b, which will add their tests with the code; the harness is ready for them.
+
 ### 14.4 `/godot/document` grows, and one of its rows is written by a client
 
 **The container is already split down the middle, and the split is the `persist` column rather
@@ -5882,7 +5916,11 @@ means a browser download on three runners, on every job, to assert what the two 
 5.18 will add cover between them (§14.3). That is plan decision 11, here to be overruled early
 rather than late. What it leaves untested is the DOM, and the one piece of DOM worth a test is
 5.9's keyed reconciler, written as a pure function over a `Map<id, element>` and tested there
-instead. Playwright when the page has stopped moving, if at all.
+instead. Playwright when the page has stopped moving, if at all. *(Corrected by PR 5.18,
+2026-09-15: the reconciler works on the DOM and is not a pure function over a map, so it is
+tested on the least DOM it touches, where what it changed can be counted (§14.3). No workflow
+installs a JavaScript runtime even now: `console.unit` runs on the Node each runner image
+already carries.)*
 
 **The JUCE desktop client beyond an outline**, per decision T, and the `WebBrowserComponent`
 shell beyond the paragraph §14.16 gives it. What would make it start is written there and is one

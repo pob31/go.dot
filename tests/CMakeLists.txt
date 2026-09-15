@@ -797,3 +797,58 @@ add_test(NAME blackbox.client.fr_FR
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.client.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# -----------------------------------------------------------------------------
+# The console's pure modules under `node --test` (PR 5.18, namespace section
+# 14.3): the OSC encoder against the bytes tests/OscCodecTests.cpp writes by
+# hand, the keyed reconciler counted on the least DOM it touches, and the read
+# half's model. tests/console/*.test.mjs, importing the page's own files from
+# clients/console exactly as the browser does - nothing is copied or built.
+#
+# OPTIONAL, AND SAID SO. Node.js is the one dependency this adds and nothing
+# else needs it: a machine without one configures, builds and tests as before,
+# and this prints why the entry is missing rather than leaving it to be
+# noticed. The version matters too. The page's files are ES modules ending in
+# .js with no package.json to say so - the browser knows from the page's
+# <script type="module">, and the folder stays the page and nothing else - and
+# Node reads such a file as a module only from 22.7, or from 20.19 on the 20
+# line. An older one would fail every import, which is a machine's problem and
+# not the page's, so it is skipped with the reason as well.
+#
+# ONE ENTRY, NOT ONE PER LOCALE. Nothing here formats a number for a person:
+# JavaScript's number-to-text is not locale-aware, and the bytes on the wire
+# never were.
+find_program(WFG_NODE node)
+
+if(WFG_NODE)
+    execute_process(COMMAND "${WFG_NODE}" --version
+                    OUTPUT_VARIABLE WFG_NODE_VERSION
+                    OUTPUT_STRIP_TRAILING_WHITESPACE
+                    ERROR_QUIET)
+
+    set(WFG_NODE_MAJOR 0)
+    set(WFG_NODE_MINOR 0)
+
+    if(WFG_NODE_VERSION MATCHES "^v([0-9]+)\\.([0-9]+)")
+        set(WFG_NODE_MAJOR ${CMAKE_MATCH_1})
+        set(WFG_NODE_MINOR ${CMAKE_MATCH_2})
+    endif()
+
+    if(WFG_NODE_MAJOR GREATER 22
+       OR (WFG_NODE_MAJOR EQUAL 22 AND WFG_NODE_MINOR GREATER_EQUAL 7)
+       OR (WFG_NODE_MAJOR EQUAL 20 AND WFG_NODE_MINOR GREATER_EQUAL 19))
+        file(GLOB WFG_CONSOLE_TESTS CONFIGURE_DEPENDS
+             "${CMAKE_CURRENT_SOURCE_DIR}/console/*.test.mjs")
+
+        add_test(NAME console.unit COMMAND "${WFG_NODE}" --test ${WFG_CONSOLE_TESTS})
+        set_tests_properties(console.unit PROPERTIES TIMEOUT 120)
+
+        message(STATUS "console.unit: node ${WFG_NODE_VERSION} at ${WFG_NODE}")
+    else()
+        message(STATUS "console.unit: skipped - node ${WFG_NODE_VERSION} at ${WFG_NODE} is older than "
+                       "22.7 (or 20.19), and reads the page's .js files as CommonJS")
+    endif()
+else()
+    message(STATUS "console.unit: skipped - no node on this machine; the console's pure modules "
+                   "are tested where Node.js 22.7 or later is installed")
+endif()
