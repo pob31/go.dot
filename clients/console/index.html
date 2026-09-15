@@ -250,9 +250,24 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     hover, the whole cell is clickable, and the row lights its own left edge as
     the pointer crosses it - because an eighteen-pixel column with a faint glyph
     in it is a thing somebody can use a show without ever noticing. The author
-    did not, which is how this comment came to be written. */
-.gutter { text-align: center; color: var(--ink-faint); font-size: 11px; cursor: pointer; }
-.gutter:hover::before { content: "\25B8"; color: var(--standby); }
+    did not, which is how this comment came to be written.
+
+    AND IT HAS TO BE AS TALL AS THE ROW, which it was not. `.row` centres its
+    cells, and a cell with nothing in it is centred down to no height at all:
+    the gutter is empty on every row but the standby's, so on every other row
+    the one place a click parks the standby was eighteen pixels by none, and
+    nobody could land on it - or hover it, which is why the wedge above never
+    showed either. Stretched, it is the row's full height, and it centres its
+    own wedge, so the standby's sits exactly where `align-items` put it before.
+
+    ONLY WHERE IT PARKS. A derived header line has a gutter too, to keep its
+    cells in line with the rows, and no `data-park`: clicking there picks the
+    member, as anywhere else on that line. Now that the cell can be hovered it
+    must not offer the wedge, or it would promise a park it cannot make. */
+.gutter { color: var(--ink-faint); font-size: 11px;
+          align-self: stretch; display: flex; align-items: center; justify-content: center; }
+.gutter[data-park] { cursor: pointer; }
+.gutter[data-park]:hover::before { content: "\25B8"; color: var(--standby); }
 .row:hover { border-left-color: var(--rule); }
 .row:hover[data-standby="yes"] { border-left-color: var(--standby); }
 
@@ -377,6 +392,15 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 .field input:focus, .field select:focus { outline: none; border-color: var(--picked); }
 .field input[data-dirty="yes"] { border-color: var(--standby); }
 .field input[type=checkbox] { accent-color: var(--standby); width: 14px; height: 14px; }
+
+/*  A CHECKBOX SAYS WHEN IT HAS THE KEYBOARD, because while it has it, it keeps
+    Space (the keydown handler says why) - and the rule above shows the focus
+    as a border colour, which a native checkbox does not paint. Without this, a
+    box reached with Tab would take the next Space with nothing on screen to say
+    it was going to. `:focus-visible` rather than `:focus`, because a box
+    clicked with the mouse lets go of the focus straight away and never needs
+    the outline. */
+.field input[type=checkbox]:focus-visible { outline: 1px solid var(--picked); outline-offset: 2px; }
 
 .trigger-row {
   display: flex; align-items: baseline; gap: 8px; padding: 2px 0;
@@ -586,10 +610,10 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     same socket to whoever sends LISTEN, and that is the right answer for a
     surface somebody is operating from. It is not the right answer for a view
     whose job is still to be looked at and argued with: a poll of the whole tree
-    has no decode step to be wrong, and at ten a second it is imperceptible
-    against a fifty-hertz engine. */
+    has no decode step to be wrong, and at ten a second at most it is
+    imperceptible against a fifty-hertz engine. */
 
-const POLL_MS = 100;
+const POLL_MS = 100;               // at most this often; `poll` says why it can be less
 
 const el = (id) => document.getElementById(id);
 
@@ -634,17 +658,55 @@ const tree = {
   /*  A cue's triggers, found by asking every trigger which cue it belongs to.
       There is no `triggerOrder` node to read: a trigger says where it sits and
       the containment is not copied anywhere, so this is the only answer that
-      cannot go stale. */
+      cannot go stale.
+
+      ASKED ONCE PER POLL, AND NOT ONCE PER ROW. The asking used to happen on
+      every call - a walk over every address in the tree with a regular
+      expression - and every cue row calls this, so each render cost the rows
+      times the addresses: five hundred cues against the thousands of
+      addresses five hundred cues publish, to find a handful of triggers. In
+      a browser that took longer than the hundred milliseconds between one
+      poll and the next, so the page spent its whole time rendering and the
+      wheel and the clicks waited behind it. Now the first question after a
+      poll reads every trigger's answer in one pass and files it under the
+      cue it names, and every question after that is a lookup. It is still
+      each trigger saying where it sits - the index is only those answers,
+      filed by cue - and it is filed in its turn under the reply it was read
+      from, so a new reply is a new index and no index outlives its reply.
+
+      IN A WEAKMAP KEYED BY THE REPLY, not in a property that remembers which
+      reply the index came from. Such a property keeps that reply alive, and
+      on a poll that draws no row - an empty list, no list at all - nothing
+      asks for the index again, so the whole previous tree, every node of it,
+      would stay in memory beside the current one. A WeakMap answers the same
+      question and still lets the old reply go.
+
+      What comes back is the index's own list: read it, do not change it. */
+  triggerIndexes: new WeakMap(),
+
   triggersOf(cueId) {
-    const found = [];
+    let index = this.triggerIndexes.get(this.at);
 
-    for (const address of Object.keys(this.at)) {
-      const match = /^\/godot\/trigger\/([0-9A-Z]+)\/cue$/.exec(address);
+    if (!index) {
+      index = new Map();
 
-      if (match && this.get(address, "") === cueId) found.push(match[1]);
+      for (const address of Object.keys(this.at)) {
+        if (!address.startsWith("/godot/trigger/")) continue;
+
+        const match = /^\/godot\/trigger\/([0-9A-Z]+)\/cue$/.exec(address);
+
+        if (!match) continue;
+
+        const cue = this.get(address, "");
+
+        if (!index.has(cue)) index.set(cue, []);
+        index.get(cue).push(match[1]);
+      }
+
+      this.triggerIndexes.set(this.at, index);
     }
 
-    return found;
+    return index.get(cueId) || [];
   },
   run(id, name, fallback) { return this.get("/godot/run/" + id + "/" + name, fallback); },
   slot(id, name, fallback) { return this.get("/godot/slot/" + id + "/" + name, fallback); },
@@ -825,8 +887,219 @@ function seconds(value) {
   return Number.isFinite(n) && n > 0 ? n + "s" : "";
 }
 
+/*  ROWS ARE KEPT, NOT REDRAWN.
+
+    Both lists used to be written as one string into their pane's `innerHTML`
+    on every poll. That threw away every row and built it again - hundreds of
+    them, ten times a second, whether anything on them had changed or not -
+    and left the browser the whole list to lay out afresh after each poll.
+    And a row swapped for a new one between the press and the release of a
+    click is a click that did nothing: the browser drops a click whose press
+    landed on an element that has since gone, and at ten polls a second an
+    ordinary click, held for about a tenth of one, can straddle a poll - so a
+    pick, a park or a kill could simply not happen, with nothing to say so.
+
+    So a row is now drawn as a KEY and its markup - the key saying what the
+    row is and where it sits: `cue:<id>`, `band:<group>:header`, `run:<id>` -
+    and the pane is brought into line with the list of them. A row whose
+    markup is what it was last time is left alone, element and all. A row
+    whose markup changed keeps its element too, and what changed on it is
+    changed in place - its attributes and its text (`morph`, below). Rows out
+    of order are put back in order by moving as few of them as the walk in
+    `reconcile` can find - one move for one row moved, whichever way it went,
+    and not a move for every row it passed. A row that is new is made, and a
+    row no longer wanted goes. The pane itself is never emptied.
+
+    WHICH IS ALSO WHAT KEEPS THE SCROLL, by construction rather than by luck.
+    Emptying a pane was thought to throw its scroll away - an empty pane has
+    nothing to scroll - and in Chromium it did not, because the pane was
+    emptied and refilled in one breath with nothing laying the page out in
+    between: the operator's place held only because the new rows were exactly
+    as tall as the old. A pane that is never emptied depends on neither.
+
+    COMPARED AS MARKUP, because the markup is the row's whole state: a row is
+    written as one string, as everything on this page is, so the same string
+    is the one test that cannot miss a field somebody adds to a row later.
+
+    AND PATCHED WHEN IT DIFFERS, NOT REPLACED. The first cut replaced a
+    changed row whole, on the reasoning that few rows change on any one poll,
+    and it was wrong about the row where it mattered most. A playing media run
+    changes on every poll - its position moves and so does its timbre - so its
+    row, and the kill button on it, was a new element ten times a second: a
+    press and a release either side of a poll landed on two different
+    elements, and the operator pressed kill on a cue that was sounding and
+    nothing happened. Patched, a row keeps its element for as long as it is
+    wanted, and so does every button on it. `morph` is not the second renderer
+    a patcher sounds like, because it knows nothing about rows: the markup is
+    still the one account of what a row says, and `morph` only makes what is
+    on screen match it. What a click can still lose is the poll on which a row
+    gains or loses a part ahead of the thing clicked, which `morph` says.
+
+    WHAT IS ON SCREEN IS READ OFF THE SCREEN, from the key each row carries
+    in `data-key`, rather than remembered beside it: there is then no second
+    record to go stale, and anything in the pane that is not a keyed row -
+    written there some other way - is simply not wanted, and goes.
+
+    A KEY WANTED TWICE is made unique rather than dropped. The keys say where
+    as well as what because one cue can be on screen twice - its own row, and
+    the derived line in the header of the group that gets it ready - and a
+    tree that named one object twice would still be drawn as it says: a
+    reconcile that quietly lost a row would be the worse of the two bugs.
+
+    `make` turns markup into an element and is there to be replaced by a
+    test; the page always uses `rowElement`. */
+const drawnFrom = new WeakMap();          // row element -> the markup it was made from
+const rowFactory = document.createElement("template");
+
+/*  A template, because what is written into one is inert until it is placed:
+    nothing in it loads or runs while it is being made into a row. */
+function rowElement(html) {
+  rowFactory.innerHTML = html;
+  return rowFactory.content.firstElementChild || document.createElement("div");
+}
+
+/*  ONE TREE BROUGHT INTO LINE WITH ANOTHER, keeping every node it can.
+
+    `live` is what is on screen and `fresh` is what the markup makes now, and
+    the two are walked together. Where both have a node of the same kind at
+    the same place, the live one stays and only the difference is copied onto
+    it: an attribute set or taken away, a text changed. Where they do not - a
+    span where a button was - that one child is replaced and its siblings are
+    left where they are. What the fresh tree has beyond the live one is moved
+    across, and what the live one has beyond the fresh one goes.
+
+    BY POSITION, AND NOT BY MATCHING CHILDREN UP, because a row's parts come
+    in a fixed order and there are few of them: the gutter is always a cue
+    row's first cell, and the kill button always the last thing in a run's
+    `.meta`. What position costs is the poll on which a row gains or loses a
+    part AHEAD of the one being clicked. A run's position and timbre join its
+    readings when it launches, before its kill button, so on that poll the
+    place where the button stood holds a span in the fresh tree and a new
+    button is made after it: a click straddling that poll is still lost. That
+    is a poll or two in a run's life - its launch, a `late` appearing - where
+    it used to be every poll of it.
+
+    A FOCUSED FIELD IS LEFT AS IT STANDS, the rule `refreshFields` and
+    `renderAim` already keep: a value written under somebody's typing or their
+    finger is a control fighting the person using it. No row has a field
+    today; this is here so that the first to grow one starts from that rule.
+    It would not be all such a row needs - once somebody has touched a field,
+    its attribute is no longer its value, which is why `refreshFields` writes
+    the value itself. */
+function morph(live, fresh) {
+  if (live === document.activeElement && /^(INPUT|SELECT|TEXTAREA)$/.test(live.nodeName)) return;
+
+  for (const { name } of Array.from(live.attributes)) {
+    if (!fresh.hasAttribute(name)) live.removeAttribute(name);
+  }
+
+  for (const { name, value } of Array.from(fresh.attributes)) {
+    if (live.getAttribute(name) !== value) live.setAttribute(name, value);
+  }
+
+  /*  Both lists copied first: moving a fresh child into the live tree takes
+      it out of the fresh one, and a list read while it shrinks skips. */
+  const have = Array.from(live.childNodes);
+  const want = Array.from(fresh.childNodes);
+
+  want.forEach((wanted, n) => {
+    const kept = have[n];
+
+    if (!kept) live.appendChild(wanted);
+    else if (kept.nodeType !== wanted.nodeType || kept.nodeName !== wanted.nodeName)
+      live.replaceChild(wanted, kept);
+    else if (kept.nodeType === 1) morph(kept, wanted);
+    else if (kept.nodeValue !== wanted.nodeValue) kept.nodeValue = wanted.nodeValue;
+  });
+
+  for (let n = want.length; n < have.length; n += 1) live.removeChild(have[n]);
+}
+
+function reconcile(container, rows, make) {
+  const build = make || rowElement;
+
+  const wanted = new Map();               // key -> markup, in the order drawn
+
+  for (const row of rows) {
+    let key = String(row.key);
+
+    if (wanted.has(key)) {
+      let n = 2;
+      while (wanted.has(key + "#" + n)) n += 1;
+      key += "#" + n;
+    }
+
+    wanted.set(key, row.html);
+  }
+
+  /*  What goes, goes FIRST, before anything is put in order. Taken out during
+      the walk instead, a row leaving the middle of the list would sit in the
+      way of every row after it, and each of those would be moved past it to
+      reach its place - one departure costing a move per row below it. */
+  const onScreen = new Map();
+
+  for (const child of Array.from(container.children)) {
+    const key = child.dataset ? child.dataset.key : undefined;
+
+    if (key !== undefined && wanted.has(key) && !onScreen.has(key)) onScreen.set(key, child);
+    else container.removeChild(child);
+  }
+
+  /*  Then the walk: `next` is the element standing where the next row should
+      be, so a row already in its place costs nothing but a comparison.
+
+      A row that is on screen and drawn from other markup is MORPHED into what
+      the new markup makes, key and all - the key is set on the fresh element
+      first, or `morph` would take it off the live one as an attribute the
+      fresh tree does not have. It is replaced only if it is now a different
+      element altogether, which a row that keeps its key never is today.
+
+      THE ROW THAT WAS CARRIED IS THE ONE MOVED, not the rows it passed. When
+      the row wanted next is not the one standing there, the plain answer is
+      to fetch it. But when one row has been carried later - moved down, or
+      overtaken by a whole open group moved up above it - that row stays put
+      and every row after it is fetched past it, one move each. A move is a
+      removal and an insertion, and a removal loses a press in progress, so
+      each of those rows would lose a click although nothing on it had
+      changed. So when the row wanted next stands just after the one in the
+      way, the walk steps past the one in the way instead. That row keeps its
+      key and is moved once, when its own turn comes, and one row carried
+      either way costs one move. */
+  let next = container.firstElementChild;
+
+  for (const [key, html] of wanted) {
+    let row = onScreen.get(key);
+
+    if (!row || drawnFrom.get(row) !== html) {
+      const made = build(html);
+
+      made.dataset.key = key;
+
+      if (row && row.nodeName === made.nodeName) {
+        morph(row, made);
+      } else {
+        if (row) {
+          container.replaceChild(made, row);
+          if (next === row) next = made;
+        }
+
+        row = made;
+      }
+
+      drawnFrom.set(row, html);
+    }
+
+    if (row !== next && next && row === next.nextElementSibling) next = row;
+
+    if (row === next) next = row.nextElementSibling;
+    else container.insertBefore(row, next);
+  }
+}
+
 /*  ONE CUE ROW. `depth` is the indent, `role` is member / header / footer, and
-    `standby` is the identifier the pointer is on for this list. */
+    `standby` is the identifier the pointer is on for this list. The row, and
+    the rows of a group's contents after it, go into `out` as a key and the
+    markup, for `reconcile` to bring the pane into line with. */
 /*  What each of §13.6's six words means, said once so the row can be short. */
 function prepareNote(word) {
   return ({
@@ -904,7 +1177,7 @@ function cueRow(id, depth, role, standby, out) {
     ? '<span class="twist" data-fold="' + id + '">' + (open ? "▼" : "▶") + "</span>"
     : '<span class="twist"></span>';
 
-  out.push(
+  out.push({ key: "cue:" + id, html:
     '<div class="row" data-pick="' + id + '"' +
       ' data-standby="' + (id === standby ? "yes" : "no") + '"' +
       ' data-picked="' + (id === picked ? "yes" : "no") + '"' +
@@ -940,7 +1213,7 @@ function cueRow(id, depth, role, standby, out) {
            : "") +
         (id === standby ? '<span class="flag standby-word">standby</span>' : "") +
       "</div>" +
-    "</div>");
+    "</div>" });
 
   if (!isGroup || !open) return;
 
@@ -957,9 +1230,10 @@ function cueRow(id, depth, role, standby, out) {
   const band = (depth + 1) * 16 + 92;
 
   if (header.length || derived.length) {
-    out.push('<div class="band" style="padding-left:' + band + 'px">header</div>');
+    out.push({ key: "band:" + id + ":header",
+               html: '<div class="band" style="padding-left:' + band + 'px">header</div>' });
 
-    derived.forEach((child) => presetLine(child, depth + 1, out));
+    derived.forEach((child) => presetLine(child, id, depth + 1, out));
     header.forEach((child) => cueRow(child, depth + 1, "header", standby, out));
   }
 
@@ -967,7 +1241,8 @@ function cueRow(id, depth, role, standby, out) {
     cueRow(child, depth + 1, "member", standby, out));
 
   if (footer.length) {
-    out.push('<div class="band" style="padding-left:' + band + 'px">footer</div>');
+    out.push({ key: "band:" + id + ":footer",
+               html: '<div class="band" style="padding-left:' + band + 'px">footer</div>' });
     footer.forEach((child) => cueRow(child, depth + 1, "footer", standby, out));
   }
 }
@@ -978,9 +1253,11 @@ function cueRow(id, depth, role, standby, out) {
     header - it is a reading of a mark on a cue that lives somewhere else in the
     list. It carries the same `data-pick` as the member's own row, so clicking
     it selects the member and the inspector opens the thing that can actually be
-    edited. There is one object, and this is a second view of it. */
-function presetLine(id, depth, out) {
-  out.push(
+    edited. There is one object, and this is a second view of it - which is why
+    its key names the group whose header it is drawn in: `cue:<id>` is already
+    the member's own row. */
+function presetLine(id, group, depth, out) {
+  out.push({ key: "preset:" + group + ":" + id, html:
     '<div class="row derived" data-pick="' + id + '"' +
       ' data-picked="' + (id === picked ? "yes" : "no") + '">' +
       '<div class="gutter"></div>' +
@@ -994,7 +1271,7 @@ function presetLine(id, depth, out) {
         '<span class="flag" title="got ready by this header; it runs where it sits in the' +
         ' list">preset</span>' +
       "</div>" +
-    "</div>");
+    "</div>" });
 }
 
 function renderLists() {
@@ -1003,28 +1280,46 @@ function renderLists() {
   const lists = tree.ids("/godot/list/order");
   const focus = tree.get("/godot/list/focus", "") || lists[0] || "";
 
-  el("tabs").innerHTML = lists.map((id) =>
+  /*  THE TABS ARE KEPT AS THE ROWS ARE, and for the same reason: each tab is
+      something to click - `list.focus`, or the `+` that makes a list - and a
+      tab written afresh on every poll can be swapped for a new element
+      between the press and the release, so the click does nothing. */
+  const tabs = lists.map((id) => ({ key: "tab:" + id, html:
     '<div class="list-tab" data-focus="' + id + '"' +
       ' data-focused="' + (id === focus ? "yes" : "no") + '">' +
       (id === focus ? '<span class="mark">▸ </span>' : "") +
       esc(tree.get("/godot/list/" + id + "/name", id)) +
-    "</div>").join("") +
-    '<div class="list-tab" data-newlist="yes" title="a second list runs beside this one">+</div>';
+    "</div>" }));
+
+  tabs.push({ key: "tab:+", html:
+    '<div class="list-tab" data-newlist="yes" title="a second list runs beside this one">+</div>' });
+
+  reconcile(el("tabs"), tabs);
 
   const pane = el("cues");
 
+  /*  THE EMPTY STATE IS A ROW LIKE ANY OTHER, keyed `empty`, so the same
+      reconcile that draws the rows takes it away the moment the first one
+      arrives, and puts it back when the last one goes. */
   if (!lists.length) {
-    pane.innerHTML = '<div class="empty"><div class="line">Rien à faire.</div>' +
-                     '<div class="under">This show has no cue list yet.</div></div>';
+    reconcile(pane, [{ key: "empty", html:
+      '<div class="empty"><div class="line">Rien à faire.</div>' +
+      '<div class="under">This show has no cue list yet.</div></div>' }]);
     return;
   }
 
   const standby = tree.get("/godot/list/" + focus + "/standby", "");
   const cues = tree.ids("/godot/list/" + focus + "/order");
+  const persistent = tree.ids("/godot/list/" + focus + "/persistentOrder");
 
-  if (!cues.length) {
-    pane.innerHTML = '<div class="empty"><div class="line">Rien à faire.</div>' +
-                     '<div class="under">Nothing in this list.</div></div>';
+  /*  EMPTY ONLY WHEN BOTH ARE. The engine publishes the persistent section
+      apart from `order`, so a list whose only cues are persistent - a bed and
+      nothing else - has an empty `order`. Reading `order` alone called that
+      list empty and hid its cues, which were drawn nowhere else as rows. */
+  if (!cues.length && !persistent.length) {
+    reconcile(pane, [{ key: "empty", html:
+      '<div class="empty"><div class="line">Rien à faire.</div>' +
+      '<div class="under">Nothing in this list.</div></div>' }]);
     return;
   }
 
@@ -1036,15 +1331,14 @@ function renderLists() {
       are what should be running at all times, checked after every trigger and
       put back when they are not, so they sit below the last row rather than
       among them - and GO never reaches one. */
-  const persistent = tree.ids("/godot/list/" + focus + "/persistentOrder");
-
   if (persistent.length) {
-    out.push('<div class="band" title="checked after every trigger, and put back' +
-             ' when it is not as declared">persistent</div>');
+    out.push({ key: "band:persistent",
+               html: '<div class="band" title="checked after every trigger, and put back' +
+                     ' when it is not as declared">persistent</div>' });
     persistent.forEach((id) => cueRow(id, 0, "persistent", standby, out));
   }
 
-  pane.innerHTML = out.join("");
+  reconcile(pane, out);
 }
 
 /*  WHETHER A RUN'S LAUNCH HAS BEEN PLACED, asked of the one node that knows.
@@ -1197,7 +1491,7 @@ function runRow(id, depth, out) {
 
   const finished = state === "done" || state === "failed";
 
-  out.push(
+  out.push({ key: "run:" + id, html:
     '<div class="run" data-s="' + esc(state) + '"' +
       ' style="padding-left:' + (12 + depth * 14) + 'px">' +
       '<div class="who">' +
@@ -1213,11 +1507,16 @@ function runRow(id, depth, out) {
         (finished ? ""
                   : '<button data-kill="' + id + '" title="immediate: no footer">kill</button>') +
       "</div>" +
-    "</div>");
+    "</div>" });
 
   tree.ids("/godot/run/" + id + "/children").forEach((child) => runRow(child, depth + 1, out));
 }
 
+/*  Keyed by run and reconciled like the cue list, for the same two reasons: a
+    pane of running cues is as long as the show is busy and has a scroll to
+    keep, and a run keeps its row's element - and the kill button on it - from
+    one poll to the next. Whether or not the row changed: this is the pane
+    where it changes on every poll, for as long as a cue is playing. */
 function renderRuns() {
   const all = tree.ids("/godot/run/order");
   const pane = el("runs");
@@ -1225,14 +1524,15 @@ function renderRuns() {
   if (!all.length) {
     /*  §7's other phrase, for the state it names: the show is complete and all
         is silent. It is an empty state, which §4.7 says is where these belong. */
-    pane.innerHTML = '<div class="empty"><div class="line">They do not move.</div>' +
-                     '<div class="under">Nothing is running.</div></div>';
+    reconcile(pane, [{ key: "empty", html:
+      '<div class="empty"><div class="line">They do not move.</div>' +
+      '<div class="under">Nothing is running.</div></div>' }]);
     return;
   }
 
   const out = [];
   all.filter((id) => !tree.run(id, "parent", "")).forEach((id) => runRow(id, 0, out));
-  pane.innerHTML = out.join("");
+  reconcile(pane, out);
 }
 
 /* ------------------------------------------------------------- inspector */
@@ -1368,7 +1668,7 @@ function renderInspector() {
   const signature = picked + "|" + fields.map((f) => f.address).join(",");
 
   /*  REBUILT ONLY WHEN THE SHAPE CHANGES, and that is not an optimisation. The
-      poll arrives ten times a second, and rebuilding the panel on each one
+      poll arrives up to ten times a second, and rebuilding the panel on each one
       would take the cursor out of the box somebody is typing in - which is the
       ordinary way a live-updating editor becomes unusable. So the markup is
       made once per selection, and the values below are refreshed in place:
@@ -1513,19 +1813,31 @@ function refreshFields(pane) {
     cue, offset -1 - so going back is one click on the step rather than typing
     a time; the click aims, and the button beside it is what makes it so. The
     letter is shown as a word on hover, because a history that can say which
-    steps nobody pressed is one that can explain a scene starting on its own. */
+    steps nobody pressed is one that can explain a scene starting on its own.
+
+    KEPT AS THE ROWS ARE, since a chip is something to click, and KEYED BY
+    THE STEP ITSELF - its tick, cue and letter, as the history spells it -
+    never by its place in the line. A new step pushes every chip one place
+    along. If chips were keyed by place, the chip under the pointer would
+    become the next cue's between the press and the release, and the click
+    would aim at a cue nobody chose. Keyed by the step, each chip moves and
+    keeps its element, so a click that straddles the move ends on a different
+    element and is lost. A lost click can be made again; an aim at the wrong
+    cue is a wrong answer to the question the operator asked. The seconds,
+    which change on every poll, are changed in place. */
 function renderSteps(focus, atCue) {
   const box = el("aim-steps");
   const text = String(tree.get("/godot/list/" + focus + "/history", ""));
   const steps = text ? text.split(" ") : [];
+  const chips = [{ key: "label", html: '<span class="what">steps</span>' }];
 
   if (!steps.length) {
-    box.innerHTML = '<span class="what">steps</span><span class="none">none taken yet</span>';
+    chips.push({ key: "none", html: '<span class="none">none taken yet</span>' });
+    reconcile(box, chips);
     return;
   }
 
   const now = Number(tree.get("/godot/engine/tick", 0));
-  const chips = [];
 
   for (const step of steps.slice(0, 12)) {
     const parts = step.split(":");
@@ -1538,16 +1850,18 @@ function renderSteps(focus, atCue) {
       : ago < 60 ? Math.round(ago) + " s ago"
       : Math.round(ago / 60) + " min ago";
 
-    chips.push('<span class="step' + (cue === atCue ? " aimed" : "") + '" data-step="' +
-               esc(cue) + '" title="' + esc(how + " at tick " + parts[0] +
-               " — click to aim before it") + '">' + esc(cueName(cue)) +
-               "<i>" + esc(when) + "</i></span>");
+    chips.push({ key: "step:" + step, html:
+      '<span class="step' + (cue === atCue ? " aimed" : "") + '" data-step="' +
+      esc(cue) + '" title="' + esc(how + " at tick " + parts[0] +
+      " — click to aim before it") + '">' + esc(cueName(cue)) +
+      "<i>" + esc(when) + "</i></span>" });
   }
 
   if (steps.length > 12)
-    chips.push('<span class="none">and ' + (steps.length - 12) + " more</span>");
+    chips.push({ key: "more", html:
+      '<span class="none">and ' + (steps.length - 12) + " more</span>" });
 
-  box.innerHTML = '<span class="what">steps</span>' + chips.join("");
+  reconcile(box, chips);
 }
 
 function renderAim() {
@@ -1835,6 +2149,16 @@ function renderStrip() {
   banner.innerHTML = refusal ? "refused: <code>" + esc(refusal) + "</code>" : "";
 }
 
+/*  EVERY PART IS CALLED BY ITS NAME, and the page depends on that.
+    `render` and the five parts it calls stay top-level function declarations
+    and are called by their bare names. `triggersOf` and `overlaps` stay
+    methods on `tree` and are called as `tree.triggersOf` and `tree.overlaps`.
+    The reason is scripts/measure-console-render.py, which times M24 by
+    putting a wrapper where each of those names is looked up once the page
+    has loaded. If one became a const, it could not be wrapped. If one became
+    a closure, or were called through a reference taken before the wrappers
+    went in, it would never reach its wrapper, and its cost would silently
+    drop out of the number it belongs in. */
 function render() {
   const show = tree.get("/godot/document/path", "");
 
@@ -1852,15 +2176,83 @@ function render() {
 /* ------------------------------------------------------------- the poll */
 
 let failures = 0;
+let heard = performance.now();     // when the engine last answered, or the page opened
 
 function link(state, text) {
   el("link").className = state;
   el("link-text").textContent = text;
 }
 
+/*  ONE POLL IN FLIGHT, and the next one asked for only when it is over.
+
+    The page used to start a poll every hundred milliseconds with
+    `setInterval`, whether or not the last one had answered. On a small show
+    nobody could tell: the tree came back in a few milliseconds. On a 500-cue
+    show `GET /godot` is 8.6 MB, which a Debug engine takes about a second to
+    send, so requests were asked for ten times faster than they were answered
+    and queued in the browser - about 1350 were counted unanswered at once -
+    and past the browser's cap every new one failed the moment it was made. In
+    four measured runs of seven the page drew once in four minutes, or never:
+    a show of a real size could not be looked at, and the poll was why. A
+    Release engine sends the same tree in under a tenth of a second, which is
+    inside the interval, but only just - a busier machine, a slower tablet or
+    a longer show, and it would not be.
+
+    So each poll asks for the next when it ends, answered or failed: after
+    what is left of a hundred milliseconds since it began, or at once if it
+    took longer than that. The cadence is at most ten a second and never
+    faster than the engine can answer, which is what a poll of the whole tree
+    can honestly promise. What a 500-cue tree costs to serve is recorded
+    beside M24's answer (namespace draft §14.14).
+
+    STILL WAITING IS SAID OUT LOUD TOO, and the chain is why it has to be.
+    With one poll in flight, a request the engine never answers - a process
+    stopped in a debugger, a network gone quiet without saying so - is a page
+    that asks nothing more and draws nothing more, and it would go on saying
+    "live" over a view that had frozen: the one thing §3.17 says a client must
+    never do. So while a poll waits for its answer, the link counts the
+    seconds, from two: about twice what a Debug engine takes to answer for the
+    500-cue tree, so that an ordinary slow answer is never taken for silence.
+    The request is not abandoned at a deadline: a slow answer is still an
+    answer, and a page that gave up after so many seconds would never draw a
+    show that took longer than that to serve.
+
+    THE ANSWER IS THE HEADERS, NOT THE LAST BYTE. The engine builds the whole
+    reply before it writes any of it, then writes the headers and the body
+    together, so when `fetch` resolves the engine has already answered in
+    full. What comes after is the network and this page. Counting silence up
+    to the last byte meant that a working engine on a slow link - a tablet
+    across the room, an 8.6 MB tree - was reported in red as not answering,
+    on every poll. So silence is counted only until the headers arrive. A
+    body that is slow to arrive is reported as exactly that, without the red
+    of an engine that has gone, and with the seconds beside it, so that a
+    transfer stalled halfway shows as a count that keeps climbing. */
 async function poll() {
+  const began = performance.now();
+  let spoke = null;                // when this poll's headers came: the engine had answered
+
+  const waiting = setInterval(() => {
+    const now = performance.now();
+
+    if (spoke === null) {
+      const quiet = Math.floor((now - Math.max(heard, began)) / 1000);
+
+      if (quiet >= 2) link("down", "no answer for " + quiet + " s");
+      return;
+    }
+
+    const arriving = Math.floor((now - spoke) / 1000);
+
+    if (arriving >= 2) {
+      link(socketUp ? "up" : "half", (socketUp ? "live" : "reading only") +
+                                     " · receiving the tree, " + arriving + " s");
+    }
+  }, 1000);
+
   try {
     const reply = await fetch("/godot", { cache: "no-store" });
+
+    spoke = heard = performance.now();
 
     if (!reply.ok) throw new Error("the engine answered " + reply.status);
 
@@ -1871,26 +2263,43 @@ async function poll() {
         that cannot write looks exactly like one that can until somebody tries.
         The tree is read over HTTP and every edit goes out over the socket, so
         a socket that is down is a page that reads perfectly and changes
-        nothing - which is worth saying before a note goes missing. */
-    link(socketUp ? "up" : "half", socketUp ? "live" : "reading only");
-    render();
+        nothing - which is worth saying before a note goes missing.
+
+        AND SAID ONLY ONCE THE TREE IS DRAWN. A render that throws leaves
+        every pane after the one that threw as it was - the running pane's
+        kill buttons included - so it is said on the link and written to the
+        console, apart from the engine's failures: the engine did answer, and
+        counting a drawing that failed as a poll that failed would say
+        "not connected" about an engine that is, three polls late. */
+    try {
+      render();
+      link(socketUp ? "up" : "half", socketUp ? "live" : "reading only");
+    } catch (problem) {
+      console.error(problem);
+      link("down", "drawing failed: " +
+                   (problem && problem.message ? problem.message : String(problem)));
+    }
   } catch (problem) {
     failures += 1;
 
     /*  STALE IS SAID OUT LOUD rather than left to be inferred from numbers that
         stopped moving. §3.17 asks for exactly this of the tablet, and the
         reason is the same here: a view that quietly freezes is worse than one
-        that has gone, because somebody will act on it. */
-    /*  STALE IS SAID OUT LOUD rather than left to be inferred from numbers that
-        stopped moving, and the two reasons it can be stale are told apart. A
-        404 means something answered and it was not Go.dot - a static server
-        somebody pointed at this folder - and that is a different mistake from
-        an engine that has gone. */
+        that has gone, because somebody will act on it. And the two reasons it
+        can be stale are told apart. A 404 means something answered and it was
+        not Go.dot - a static server somebody pointed at this folder - and that
+        is a different mistake from an engine that has gone. */
     if (failures > 2) {
       link("down", /404/.test(problem.message)
                      ? "no engine here (something else is serving this page)"
                      : "not connected (" + problem.message + ")");
     }
+  } finally {
+    clearInterval(waiting);
+
+    /*  The next one, whatever became of this one: a failure that did not ask
+        again would be a page that stopped trying. */
+    setTimeout(poll, Math.max(0, POLL_MS - (performance.now() - began)));
   }
 }
 
@@ -1919,6 +2328,15 @@ function stranded() {
 /* ------------------------------------------------------------- gestures */
 
 document.addEventListener("click", (event) => {
+  /*  A CHECKBOX CLICKED WITH THE MOUSE LETS GO OF THE FOCUS, as the slider
+      does. While it holds the focus it keeps Space (the keydown handler says
+      why), and somebody who has just clicked a box is not about to press
+      Space on it: their next Space is GO. `detail` counts the presses behind
+      a click, and a click made by Space has none, so a box ticked from the
+      keyboard keeps the focus it was reached with. By now the box has already
+      changed, and its `change` still follows, focus or no focus. */
+  if (event.target && event.target.type === "checkbox" && event.detail > 0) event.target.blur();
+
   const data = event.target && event.target.dataset;
 
   if (data && data.fold) {
@@ -2064,44 +2482,196 @@ document.addEventListener("input", (event) => {
   }
 });
 
+/*  WHAT A FIELD SAID WHEN IT WAS ENTERED, so that Escape can put it back. Taken
+    on the way in rather than when the typing starts, because by the first
+    `input` the first keystroke is already in the value. `refreshFields` never
+    writes into the field with the focus, so what is recorded here stays what
+    the field said until the focus leaves it. */
+document.addEventListener("focusin", (event) => {
+  const target = event.target;
+
+  if (target && target.dataset && target.dataset.set && target.type !== "checkbox") {
+    target.dataset.before = target.value;
+  }
+});
+
+/*  A MENU PICKED WITH THE MOUSE LETS GO OF THE KEYBOARD once it has been
+    picked from, for the slider's reason and the transport's. A select keeps
+    the focus after a click, and while it has it the arrows change its option
+    - and a closed menu commits every change - so the key an operator meant
+    for the standby would quietly rewrite a trigger's type. The press is what
+    tells a menu picked with the mouse from one reached with Tab, and the one
+    reached with Tab keeps its arrows, because that is how it is worked from
+    the keyboard. The mark is dropped on any key and when the menu loses the
+    focus, so a menu opened with the mouse and closed without a choice does
+    not throw away a later choice made from the keyboard. */
+let menuPointed = null;            // the menu a pointer last pressed, until it is picked from
+
+/*  Whether the key being pressed steps the aim slider, whose `change` is
+    then no release (the change listener says so). */
+let aimKeyStep = false;
+const SLIDER_STEPS = new Set(["ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Home", "End"]);
+
+document.addEventListener("pointerdown", (event) => {
+  const target = event.target;
+
+  menuPointed = target && target.closest ? target.closest("select") : null;
+  aimKeyStep = false;
+});
+
+document.addEventListener("focusout", (event) => {
+  if (event.target === menuPointed) menuPointed = null;
+});
+
 document.addEventListener("change", (event) => {
   const target = event.target;
+
+  /*  THE SLIDER LETS GO WHEN A POINTER LETS GO OF IT. Dragged, its `input`
+      events are the aim moving under the finger and `change` is the finger
+      lifting - and a slider keeps the focus after that unless it is told not
+      to. Kept, the focus would go on holding two things the slider has no use
+      for once nobody is touching it. The keys, first: the narrowed guard
+      below no longer lets a slider take Space or the arrows from GO, and
+      letting go here means the transport does not rest on that guard alone.
+      And its own readout: `renderAim` never writes the engine's aim into a
+      slider that has the focus - that is what stops it fighting a finger - so
+      a slider left holding the focus would go on showing the offset it was
+      let go at, whatever the aim became afterwards from another page or a
+      surface.
+
+      A STEP FROM THE KEYBOARD IS NOT A RELEASE, though it fires `change`
+      just the same, once per key and before the next key arrives. Letting go
+      there would give a slider reached with Tab one step and hand the next
+      key to the page: one step per visit, of a hundred and twenty-two. So
+      the keydown handler marks a key that steps the slider, and the `change`
+      that key makes leaves the focus where it was. Up and Down are not among
+      those keys: they stay the standby's, as §14.3 asks. */
+  if (target && target.id === "aim-offset") {
+    if (aimKeyStep) { aimKeyStep = false; return; }
+
+    target.blur();
+    return;
+  }
+
   const address = target && target.dataset ? target.dataset.set : null;
 
   if (!address) return;
 
+  /*  ESCAPE NEVER WRITES. The Escape branch below marks the field while it
+      takes the focus away, and a `change` that leaving fires is not an edit
+      anybody made. */
+  if (target.dataset.abandoning === "yes") return;
+
   setNode(address, target.type === "checkbox" ? (target.checked ? "true" : "false")
                                               : target.value);
   target.dataset.dirty = "";
+
+  /*  WHAT IT SAYS NOW IS WHAT ESCAPE GOES BACK TO. Enter commits a box and
+      leaves the focus in it, so from here on the value the engine holds is
+      this one, and not what the box said when it was entered. Escape after
+      more typing should bring back this value. Putting back the older one
+      would show a value the show no longer has, and leaving the box then
+      counts as a change since the Enter: Edge sent that older value as an
+      edit, and Escape had written to the show. */
+  if (target.type !== "checkbox") target.dataset.before = target.value;
+
+  if (target === menuPointed) {
+    menuPointed = null;
+    target.blur();
+  }
 });
 
-/*  GO ON SPACE (§3.5, which calls it a sacred convention). Refused while a
-    field has the focus, because somebody typing a cue name has every right to
-    a space in it - and that is exactly the accident this guard is here to
-    stop.
+/*  GO ON SPACE (§3.5, which calls it a sacred convention), and the standby on
+    the arrows. Refused while the focus is in a control whose keys are what
+    somebody is typing or choosing - a text or number box, a menu, a text area
+    - because somebody typing a cue name has every right to a space in it, and
+    that is exactly the accident this guard is here to stop.
+
+    THOSE CONTROLS, AND NOT EVERY CONTROL. The guard used to refuse for any
+    INPUT, SELECT or TEXTAREA, and the aim slider is an INPUT: once somebody
+    had touched it, Space no longer fired GO and the arrows moved the slider
+    instead of the standby - the transport gone deaf, with nothing on screen
+    to say so. A slider, a checkbox or a button has nothing to type, so the
+    keys go past it to GO and the standby - all but one, below - and the
+    `preventDefault` beside them keeps that same Space from pressing the
+    button as well: a button is pressed on the RELEASE of Space, and only
+    when its press was not refused, so a Space after clicking undo is GO and
+    never a second undo. An input of a type not named in `PASSES_THE_KEYS`
+    counts as text, which is the side to be wrong on, because the two ways of
+    being wrong are not alike: a GO that did not fire can be pressed again,
+    and a GO fired by a space somebody meant to type is a sound in the room -
+    revert is honest that the audio has already escaped (§4.5).
+
+    A CHECKBOX KEEPS SPACE, and only Space. It is the one key that ticks a
+    box - Enter does nothing to one outside a form - so a box that passed it
+    on to GO could not be ticked from the keyboard at all, and every attempt
+    would fire a GO. That is the rule above pointing the other way, because
+    on a box Space means choosing. So an unmodified Space is left to a box
+    that holds the focus, while its arrows and its accelerators still pass.
+    That does not bring back the deaf transport, because a box clicked with
+    the mouse lets go of the focus at once (the click listener says so): the
+    Space after a click is GO, as it is after the slider. The only box that
+    keeps Space is one somebody reached with Tab, and its outline says so.
+    A radio would want the same, and its arrows too. The page has none, so
+    radio is left out of `PASSES_THE_KEYS` and counts as text until one is
+    needed.
+
+    A MENU KEEPS ITS KEYS when it was reached with Tab, because there the
+    arrows are how it is worked, and it lets go of the focus once it has been
+    picked from with the mouse (the change listener says so).
+
+    ESCAPE LETS GO, and that is all it does. It takes the focus off whatever
+    holds it, so the keys come back to the transport without a click on
+    something harmless first; and it is answered before the guard, because a
+    field is exactly where it is wanted. A field with an edit in it is put
+    back to the last value it committed before it is left - what it said when
+    it was entered, or what an Enter has sent since. A field commits on
+    `change`, which leaving it fires, so a blur on its own would commit the
+    very half-typed value Escape was pressed to abandon. And the leaving is
+    marked, so that no `change` it fires is sent: a browser that measures a
+    change against an older value than the page does would otherwise send the
+    put-back value as an edit. An Escape that ends a composition belongs to
+    the input method and is left to it. WebKit reports that key after the
+    composition has ended, so it arrives with `isComposing` false, and only
+    its keyCode, 229, says whose it was. It is not the graceful abort PRD §4.4
+    gives Esc. That is Phase 10's, and until then this page says nothing
+    about the three levels of stop rather than implying half of one.
 
     AND UNDO ON CTRL/⌘-Z, AND SAVE ON CTRL/⌘-S, which are the two modified keys
-    this page claims. The second line used to return on ANY modifier, which was
-    right while nothing here wanted one and is now the line that would swallow
-    the accelerators, so the modified keys are answered first and every other
-    modified key still leaves by the same door. Two properties survive that
-    unchanged, and both were the reason the blanket return was there. An
-    unmodified Space still reaches GO, because the branch below is entered only
-    when Ctrl or ⌘ is down. And a field with the focus has already returned
-    above, so Ctrl-Z while somebody is typing a cue name is the browser's own
-    undo of the typing - which is what the person pressing it meant, and is not
-    this document's history.
+    this page claims, and MODIFIED KEYS ARE STILL ANSWERED FIRST - after Escape
+    and the guard, before Space and the arrows. The line after the guard used
+    to return on ANY modifier, which was right while nothing here wanted one
+    and is now the line that would swallow the accelerators, so the modified
+    keys are answered first and every other modified key still leaves by the
+    same door: that is what keeps ctrl-Space from ever being GO and ctrl-↓
+    from ever being a standby step. Two properties survive that unchanged, and
+    both were the reason the blanket return was there. An unmodified Space
+    still reaches GO, because the branch below is entered only when Ctrl or ⌘
+    is down. And a field that takes text has already returned above, so Ctrl-Z
+    while somebody is typing a cue name is the browser's own undo of the
+    typing - which is what the person pressing it meant, and is not this
+    document's history. A menu returns there too for its own keys, but not
+    for these: with Ctrl or ⌘ down it is let past the guard. A menu has
+    nothing pending, because its choice was committed when it was made. The
+    browser has no undo to give it, and its Ctrl-S would offer to save this
+    page. So the narrower guard changes only the controls that take no text:
+    with the slider, a checkbox or a menu holding the focus - as with a
+    button, which the old guard never caught - Ctrl-Z is this document's
+    undo, because there is no typing there for the browser to take back.
 
     SAVE TAKES THE BROWSER'S OWN CTRL-S AWAY, which is what `preventDefault` is
     for there: unanswered, the key offers to save this page as a web page,
     which is the one file on the machine nobody wanted. Shift is left alone,
     because ctrl-shift-S is Save As everywhere else and this page has none to
     give; quietly turning it into a plain save would write to a place the
-    person had not meant to name. And in a field the guard has already
-    returned, so ctrl-S there is the browser's too - which is the lesser of two
-    surprises. A field commits on `change`, when it loses the focus, so a save
-    sent from inside one would write the show WITHOUT the value still being
-    typed: the one save that loses exactly what its author was looking at.
+    person had not meant to name. And in a field that takes text the guard has
+    already returned, so ctrl-S there is the browser's too - which is the
+    lesser of two surprises. A field commits on `change`, when it loses the
+    focus, so a save sent from inside one would write the show WITHOUT the
+    value still being typed: the one save that loses exactly what its author
+    was looking at. A checkbox or a menu has nothing still being typed - each
+    committed when it was chosen - so with one holding the focus the save is
+    this page's.
 
     ON `key` AND NOT `code`, unlike Space and the arrows above. `code` is the
     physical key, which is exactly right for those two and exactly wrong for a
@@ -2114,10 +2684,48 @@ document.addEventListener("change", (event) => {
     §4.11 is why there are buttons as well: each keystroke is an accelerator
     over the named command its button sends - `undo`, `redo`, `document.save` -
     and neither of them is a second vocabulary for "the UI did it". */
-document.addEventListener("keydown", (event) => {
-  const tag = document.activeElement ? document.activeElement.tagName : "";
+const PASSES_THE_KEYS = new Set(["range", "checkbox", "color", "button", "submit", "reset"]);
 
-  if (/^(INPUT|SELECT|TEXTAREA)$/.test(tag)) return;
+function wantsTheKeys(element) {
+  if (!element) return false;
+  if (element.isContentEditable) return true;
+  if (element.tagName === "TEXTAREA" || element.tagName === "SELECT") return true;
+  if (element.tagName !== "INPUT") return false;
+
+  return !PASSES_THE_KEYS.has(String(element.type || "text").toLowerCase());
+}
+
+document.addEventListener("keydown", (event) => {
+  const held = document.activeElement;
+
+  menuPointed = null;
+  aimKeyStep = !!held && held.id === "aim-offset" && SLIDER_STEPS.has(event.key);
+
+  if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
+    if (!held || held === document.body || typeof held.blur !== "function") return;
+
+    if (held.dataset && held.dataset.dirty === "yes") {
+      if (held.dataset.before !== undefined) held.value = held.dataset.before;
+      held.dataset.dirty = "";
+    }
+
+    event.preventDefault();
+
+    const mark = held.dataset;
+
+    if (mark) mark.abandoning = "yes";
+
+    try { held.blur(); } finally { if (mark) delete mark.abandoning; }
+
+    return;
+  }
+
+  const menuAccelerator = (event.metaKey || event.ctrlKey) && !!held && held.tagName === "SELECT";
+
+  if (wantsTheKeys(held) && !menuAccelerator) return;
+
+  if (event.code === "Space" && !!held && held.type === "checkbox" &&
+      !event.ctrlKey && !event.metaKey && !event.altKey) return;
 
   if (event.metaKey || event.ctrlKey) {
     if (event.altKey) return;
@@ -2189,8 +2797,7 @@ for (const button of document.querySelectorAll("#transport [data-cmd], #recovery
 
 if (servedByEngine) {
   openSocket();
-  poll();
-  setInterval(poll, POLL_MS);
+  poll();                          // and every poll asks for the next one
 } else {
   stranded();
 }

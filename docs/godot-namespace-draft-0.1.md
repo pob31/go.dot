@@ -3695,6 +3695,25 @@ scanning every address per row per render. **M24** measures `render()` on a 500-
 before and after, in the PR (§14.14). A view drawn on top of a page that loses the operator's
 scroll is a view nobody can judge, which is the whole reason these come first.
 
+*Corrected by PR 5.9 (2026-09-15), from what its instrument saw rather than what this paragraph
+predicted.* **The scroll did not snap, in Chromium.** The pane was emptied and refilled with
+nothing laid out in between, and the rows came back the same height, so Edge kept `scrollTop`
+in every trial — by script, by the wheel, and with the standby moving on every poll; Firefox and
+Safari were not checked. What the wholesale `innerHTML` did cost was two other things. Every
+row was rebuilt and laid out ten times a second. And **a click whose press and release fell
+either side of a poll was lost**, because the two landed on different elements and the browser
+fires no click at all: a *kill* pressed on a playing cue did nothing, which was reproduced. The
+slider guard was exactly as described: Space after touching it never reached GO. And M24 found a
+**third blocker this paragraph did not name**: the page started a poll every hundred
+milliseconds whether or not the last had answered, and against a Debug engine serving the
+500-cue tree it queued some 1350 requests and drew once in four minutes, or never. So 5.9 keys
+the rows *and patches a changed row in place*, keeping its elements, a kill button's included,
+across polls; builds the trigger index once per poll, which turned out to be nearly all the time
+(§14.14's M24); narrows the guard, gives Escape a meaning, and lets a checkbox keep its Space and
+a menu picked with the mouse let go of the keyboard; blurs the slider on a pointer release but
+not on a key step, so a slider reached with Tab keeps stepping; and chains the polls, one in
+flight.
+
 **Then the module split, and the no-build rule is load-bearing rather than frugal.** 5.10 will
 cut the one file into `plumbing/{osc,link,poll,tree}.js`, `model/{index,selection,layout}.js`,
 `views/{strip,transport,didi,gogo,header,inspector,aim,curve}.js`, `gestures/{keys,clicks}.js`
@@ -5612,7 +5631,52 @@ and decision T's sequencing holds without further argument; if it does not, the 
 render a window rather than a list — a real design change to a view the author is still moving —
 or the JUCE client's `ListBox`, which recycles components for exactly this, starts earlier than
 decision T says. That second answer would be the one measurement here that makes the layout stop
-moving for a reason other than the author being satisfied with it.
+moving for a reason other than the author being satisfied with it. *(Wording corrected by PR 5.9:
+the two things to measure apart are the two render costs 5.9 changes — the rows, §14.3's first
+defect, and the trigger scan, §14.3's index. §14.3's second defect, the slider's guard, costs no
+render time at all.)*
+
+**M24 answered, on the Windows box (PR 5.9, 2026-09-15): the page can hold the show.** Headless
+Edge 153 against a **Release** engine serving M18's shape — five hundred media cues over twenty
+slots, plus seventeen groups and twenty triggers, 517 rows, written by
+`tests/fixtures/make_large_show.py` — and timed by `scripts/measure-console-render.py`. The
+instrument wraps the page's own functions by name, is installed before the page's first request,
+and lets ten polls go by. The page before 5.9 (`--ui-rev 7154bb2`) and the page after were run
+back to back, three times over:
+
+| per poll, median (worst) | the page before | the page after |
+|---|---|---|
+| `render()` | 559 (577) · 539 (570) · 568 (575) ms | 6.8 (7.5) · 6.3 (6.8) · 6.8 (10.9) ms |
+| the trigger scan, 517 calls a render | 541 · 524 · 548 ms | 1.2 · 1.1 · 1.2 ms |
+| the rows (the third pair: less the overlap scan's 0.6 ms, which neither version changed) | 18.6 · 16.1 · 17.4 ms | 5.0 · 4.7 · 4.3 ms |
+| the layout a render leaves behind | 19.8 · 18.5 ms | 6.9 · 6.5 ms |
+| polls apart | 594 · 599 ms | 115 · 110 ms |
+
+**The scan was 97 % of the page's time**, and it was never the rows: keyed rows took the rows
+from about 17 ms to about 4.5 and the layout after them from 19 to 7, and the index took the scan
+from half a second to one. Before, the page spent more than half of every second inside `render()`
+and drew at under two polls a second, with the main thread too busy to take a click. After, a
+render is about a fifteenth of the poll. **Decision T's premise holds on this machine: the page is
+the operator client, and neither a windowed strip nor an early `ListBox` is called for by this
+number.** The same runs also give the three behaviours a before-and-after. Space from a
+keyboard-focused slider reaches GO after and did not before, and the arrow moves the standby
+rather than the slider. Escape restores a field and writes nothing. The list keeps its scroll in
+both, which is §14.3's correction.
+
+**Two costs M24 was not asked about, recorded beside it because the page's own comments point
+here.** *The tree is 8.6 MB* at 500 cues. The Release engine serves it in about 60 ms and the
+reply takes about 30 ms to cross loopback, while the Debug engine takes about a second. *And the
+page used to ask ten times a second whether or not it had been answered*: against a Debug engine
+that queued about 1350 requests in the browser. Past the browser's cap every new one then failed
+at once, and in four measured runs of seven the page drew once in four minutes, or never. One poll
+in flight fixes the second of these, and after it the Debug engine's page draws in 1.3 s at a
+poll a second. The first is the next wall, and it is not the page's. Ten polls a second of 8.6 MB
+is 86 MB/s, which loopback carries and a tablet's Wi-Fi would not. So the show a tablet can follow
+at ten a second is bounded by the transport, long before `render()` is the limit. LISTEN pushes,
+which the server already speaks (§14.2), or a poll that asks for values rather than the whole
+description, are the two ways past it. Both belong with 5.10's `plumbing/`, and choosing between
+them is the author's call. That figure is inferred from these sizes and not measured on a tablet,
+which is owed. **The Mac mini's M24 is owed too**, beside M22's and M23's.
 
 **The calendar and the importance disagree, and it is worth saying which is which.** M23 comes
 round first, because 5.5 is the first pull request that waits on a number. M22 matters most — it
