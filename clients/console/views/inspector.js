@@ -172,32 +172,45 @@ function fieldMarkup(field) {
          esc(field.name) + "</label>" + controlFor(field) + "</div>";
 }
 
-/*  The blocks above, each under its own heading, in the order they are worked
-    through. `headings` is false inside the details fold: what is in there is
-    a short list of readings and a heading per owner over them would be more
-    furniture than the rows it names. */
+/*  The blocks above, each wrapped with its own heading, in the order they are
+    worked through.
+
+    WRAPPED RATHER THAN INTERLEAVED, and that is what lets the stylesheet put a
+    heading BESIDE its fields instead of over them when there is width for it
+    (author, 2026-09-16: "the labels can go on the same row as the parameters
+    in the foot orientation to avoid having to scroll too much"). Four headings
+    over four blocks cost four rows of a pane that is a third of the screen
+    tall; beside them they cost none. A flat list of headings and fields could
+    not do it: a heading has to know which fields it heads to sit next to them.
+
+    `headings` is false inside the details fold, which is a short list of
+    readings where a heading per block would be more furniture than rows. */
 function fieldsMarkup(fields, kind, headings) {
-  let said = null;
+  if (headings === false) return fields.map(fieldMarkup).join("");
+
   let out = "";
+  let said;
+  let block = "";
+
+  const close = () => (said === undefined ? "" :
+    '<div class="block">' +
+      '<div class="group-head">' + (said === null ? "" : esc(said)) + "</div>" +
+      '<div class="fields">' + block + "</div>" +
+    "</div>");
 
   for (const field of fields) {
-    if (headings === false) {
-      out += fieldMarkup(field);
-      continue;
-    }
-
     const heading = headingOf(blockOf(field, kind), kind);
 
     if (heading !== said) {
+      out += close();
       said = heading;
-
-      if (heading !== null) out += '<div class="group-head">' + esc(heading) + "</div>";
+      block = "";
     }
 
-    out += fieldMarkup(field);
+    block += fieldMarkup(field);
   }
 
-  return out;
+  return out + close();
 }
 
 /*  THE FOLD ITSELF, with the identifier at the top of it. An id is the one

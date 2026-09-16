@@ -18,7 +18,7 @@
     disk, the lock, the undo stack's words, and the engine's own numbers. */
 
 import { tree } from "../plumbing/tree.js";
-import { panel } from "../model/selection.js";
+import { panel, selection } from "../model/selection.js";
 import { el, esc } from "./common.js";
 
 function renderStrip() {
@@ -118,13 +118,21 @@ function renderStrip() {
       of two states they are looking at from a word that could be either. The
       panes themselves are arranged by the stylesheet off `data-layout`. */
   const atFoot = panel.layout === "foot";
+  const panes = el("panes");
 
-  el("panes").dataset.layout = panel.layout;
-  el("layout").textContent = atFoot ? "inspector to the side" : "inspector to the foot";
+  panes.dataset.layout = panel.layout;
+
+  /*  AND WHETHER THERE IS ANYTHING TO INSPECT, which is what decides whether
+      the middle pane is there at all. Read from the page's own selection and
+      never told to the engine (§14.1). */
+  panes.dataset.picked = selection.picked ? "yes" : "no";
+
+  el("layout").textContent = atFoot ? "inspector between the panes" : "inspector at the foot";
   el("layout").title = atFoot
-    ? "put it back in a column of its own, beside the running pane"
-    : "put it across the foot, under both panes - more width for a waveform"
-      + " or a curve, and less distance from the row you picked";
+    ? "put it back between the cue list and the running pane, where it appears"
+      + " when a cue is picked and stands down when none is"
+    : "put it across the foot, under both panes - the width a waveform or a"
+      + " curve wants, and the shape the editor panel will take";
 
   /*  WHAT UNDO WOULD UNMAKE, AND IN WHOSE WORDS.
 

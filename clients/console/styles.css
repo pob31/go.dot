@@ -109,15 +109,60 @@ html, body {
     fifth, which is the one that grows. */
 #app { display: grid; grid-template-rows: auto auto auto auto 1fr; height: 100%; }
 
+/*  THE INSPECTOR BETWEEN THE TWO IT SERVES, AND ONLY WHEN THERE IS SOMETHING
+    IN IT (author, 2026-09-16: "maybe when something is selected we shrink Didi
+    and Gogo to place the Inspector in the middle").
+
+    Two things follow from putting it in the middle rather than at the far
+    edge. The distance from the row somebody picked to the field they are about
+    to change is one pane instead of two, which is the back and forth the
+    author was counting. And Gogo - which is a readout, not a thing one works
+    on - stops sitting between the list and the fields, where it was only ever
+    in the way of that gesture.
+
+    AND IT IS NOT THERE WHEN NOTHING IS PICKED. An inspector saying "nothing to
+    declare" was taking a third of the screen to say it; the two panes that do
+    have something to say take the width instead. Picking a cue brings it back.
+    Which is also why the pane is the thing that goes rather than its contents:
+    a hidden pane is not a grid item, so the other two simply grow.
+
+    The order is the stylesheet's and not the markup's: the document keeps the
+    reading order - the list, what is running, what is selected - and the grid
+    places the third between the first two. */
 #panes {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(calc(210px * var(--type)), 0.85fr)
-                         minmax(calc(300px * var(--type)), 1.05fr);
+  grid-template-columns: minmax(0, 1.4fr) minmax(calc(300px * var(--type)), 1.1fr)
+                         minmax(calc(210px * var(--type)), 0.9fr);
   grid-row: 5;
   min-height: 0;
 }
+/*  ALL THREE PLACED, ROW AND COLUMN, and the row is not decoration: an item
+    given a column but left to find its own row is placed by the sparse rule,
+    which never goes back. Didi took row 1 column 1, Gogo - the second in the
+    markup - took row 1 column 3, and the inspector, asking for column 2 after
+    the cursor had passed it, was put on a row of its own underneath. Which
+    looked like the foot arrangement arriving uninvited. */
+#panes > #pane-didi    { grid-column: 1; grid-row: 1; }
+#panes > #pane-inspect { grid-column: 2; grid-row: 1; }
+#panes > #pane-gogo    { grid-column: 3; grid-row: 1; }
+
+#panes[data-picked="no"] {
+  grid-template-columns: minmax(0, 1.5fr) minmax(calc(260px * var(--type)), 0.9fr);
+}
+#panes[data-picked="no"] > #pane-inspect { display: none; }
+#panes[data-picked="no"] > #pane-gogo { grid-column: 2; grid-row: 1; }
+
 @media (max-width: 1080px) {
-  #panes { grid-template-columns: minmax(0, 1fr) minmax(calc(260px * var(--type)), 0.9fr); }
+  #panes, #panes[data-picked="no"] {
+    grid-template-columns: minmax(0, 1fr) minmax(calc(260px * var(--type)), 0.9fr);
+  }
+
+  /*  At a tablet's width there is room for two panes, and the one somebody is
+      working in wins: picking a cue puts the inspector beside the list and the
+      running pane steps out, which is the same rule one pane narrower. */
+  #panes > #pane-inspect { grid-column: 2; grid-row: 1; }
+  #panes > #pane-gogo { grid-column: 2; grid-row: 1; }
+  #panes[data-picked="yes"] > #pane-gogo { display: none; }
 }
 
 /*  THE INSPECTOR AT THE FOOT, which is the other arrangement worth looking at.
@@ -132,12 +177,15 @@ html, body {
     header and a scroller, and the fields inside flow into columns on their own
     when the pane is wide enough (below). Which arrangement is on is the page's
     own business and the engine is never told (§14.1). */
-#panes[data-layout="foot"] {
+#panes[data-layout="foot"], #panes[data-layout="foot"][data-picked="no"] {
   grid-template-columns: minmax(0, 1.45fr) minmax(calc(210px * var(--type)), 1fr);
   grid-template-rows: minmax(0, 1.35fr) minmax(calc(180px * var(--type)), 1fr);
 }
-#panes[data-layout="foot"] > .pane:nth-child(3) {
-  grid-column: 1 / -1;
+#panes[data-layout="foot"] > #pane-didi { grid-column: 1; grid-row: 1; }
+#panes[data-layout="foot"] > #pane-gogo { grid-column: 2; grid-row: 1; }
+#panes[data-layout="foot"] > #pane-inspect {
+  display: block;
+  grid-column: 1 / -1; grid-row: 2;
   border-left: none;
   border-top: 1px solid var(--rule);
 }
@@ -147,16 +195,30 @@ html, body {
     Asked of the inspector's own pane, so it is right in either arrangement and
     at any window: a side column never reaches this width, and the foot does.
 
-    The blocks stay blocks: a heading, the fold, the buttons and the cue's own
-    name span every column, so what flows is the fields under each heading. */
+    THE HEADING GOES BESIDE ITS FIELDS RATHER THAN OVER THEM, which is four
+    rows saved in a pane a third of the screen tall - and the author's own
+    point: a foot one has to scroll is a foot that has not helped. The first
+    block's heading cell is empty, deliberately: it keeps every block's fields
+    starting at the same place down the pane, so the eye has one left edge
+    rather than five. */
 @container (min-width: 700px) {
-  #inspect {
-    display: grid; align-content: start;
-    grid-template-columns: repeat(auto-fill, minmax(calc(300px * var(--type)), 1fr));
+  .block {
+    display: grid; align-items: start; column-gap: 14px;
+    grid-template-columns: calc(96px * var(--type)) minmax(0, 1fr);
+  }
+  .block > .group-head { text-align: right; padding-top: 7px; }
+
+  /*  AND THE EMPTY ONE KEEPS ITS CELL. Hidden, as it is in the stacked form
+      where it would draw a blank row, the first block's fields fell into the
+      heading's own narrow track and overflowed it - four fields down a
+      120-pixel column while every other block flowed across the pane. Here the
+      cell is what holds the left edge every block's fields share. */
+  .block > .group-head:empty { display: block; }
+  .block > .fields {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(calc(290px * var(--type)), 1fr));
     column-gap: 22px;
   }
-  #inspect > .who, #inspect > .back, #inspect > .group-head,
-  #inspect > .actions, #inspect > details.derived, #inspect > .empty { grid-column: 1 / -1; }
 }
 
 .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0;
@@ -362,6 +424,16 @@ button:disabled { color: var(--ink-off); cursor: default; }
     the narrow template lost while the `display: none` on the cells won: three
     tracks of empty grid, and every cue name squeezed into what was left of the
     row - 112px of 512 at a 1200px window, measured. */
+/*  THREE TIERS RATHER THAN TWO, because the middle one is where the page
+    spends its time now: with the inspector between the panes the cue list is
+    about seven hundred pixels, which is wide enough for the columns and not
+    wide enough for them AND a whole name - "Position t..." was the cost. The
+    columns give up their own width first, which they can afford: what they
+    hold is `30.0`, not a sentence. */
+@container (max-width: 860px) {
+  .row, .cols { --when: calc(40px * var(--type)); }
+}
+
 @container (max-width: 640px) {
   .row { grid-template-columns: var(--cue-grid-narrow); }
   .cols { grid-template-columns: var(--cue-grid-narrow); }
@@ -578,6 +650,12 @@ button:disabled { color: var(--ink-off); cursor: default; }
 .trigger-row[data-picked="yes"] { color: #fff; }
 .trigger-row .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trigger-row .off { color: var(--ink-faint); text-decoration: line-through; }
+
+/*  A BLOCK: a heading and the fields it heads. Stacked in a narrow pane - the
+    heading over its fields, as the inspector has always read - and side by
+    side where there is room (the container query above). An empty heading is
+    the first block's, which is the cue itself and wants no word over it. */
+.block > .group-head:empty { display: none; }
 
 /*  THE DETAILS FOLD: what the engine says back, out of the way of what
     somebody decided (§4.10). Shut by default, and drawn as a fold rather than
