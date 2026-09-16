@@ -20,7 +20,7 @@
 
 import { tree } from "../plumbing/tree.js";
 import { dbl, int, str } from "../plumbing/osc.js";
-import { folded, selection } from "../model/selection.js";
+import { folded, panel, selection } from "../model/selection.js";
 import { view } from "../views/view.js";
 import { el } from "../views/common.js";
 import { aimedList } from "../views/aim.js";
@@ -40,6 +40,16 @@ document.addEventListener("click", (event) => {
 
   if (data && data.fold) {
     if (folded.has(data.fold)) folded.delete(data.fold); else folded.add(data.fold);
+    view.render();
+    return;
+  }
+
+  /*  THE INSPECTOR'S DETAILS, which is the same gesture one pane over. The
+      <summary> toggles itself as well - that is what the element is for - and
+      this records WHICH WAY it went, so the next render draws what the reader
+      last chose rather than shutting it again under their hand. */
+  if (data && data.details) {
+    panel.details = !panel.details;
     view.render();
     return;
   }

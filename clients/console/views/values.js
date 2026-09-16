@@ -121,6 +121,22 @@ function refreshFields(pane) {
     if (input.type === "checkbox") input.checked = value === true;
     else if (String(input.value) !== String(value)) input.value = value;
   }
+
+  /*  AND THE VALUES NOBODY MAY WRITE, which have no box to write into and were
+      therefore drawn once and never again: a cue's `prepare`, a media cue's
+      `duration` and every identifier the inspector shows would say what they
+      said when the cue was picked, for as long as it stayed picked. They are
+      text rather than controls, so nothing here can be typing in one. */
+  for (const cell of pane.querySelectorAll("[data-read]")) {
+    const node = tree.node(cell.dataset.read);
+
+    if (!node) continue;
+
+    const value = shownValue(node, cell);
+    const said = value === "" ? "—" : String(value);
+
+    if (cell.textContent !== said) cell.textContent = said;
+  }
 }
 
 export { isList, shownValue, commitText, refreshFields };

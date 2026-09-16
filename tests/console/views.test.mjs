@@ -105,3 +105,21 @@ test("a run says playing and armed as marks, and every other state as its word",
     assert.equal(said.includes("mark"), false);
   }
 });
+
+test("the inspector keeps decisions and folds away what the engine says back", async () => {
+  const { decided } = await import("../../clients/console/views/inspector.js");
+
+  /*  §4.10's line, read off the node rather than off a list of names: a value
+      anybody may write is a decision, a read-only one is derived. ACCESS 3 is
+      read-write, 1 is read-only. */
+  assert.equal(decided({ node: { ACCESS: 3 } }), true);
+  assert.equal(decided({ node: { ACCESS: 2 } }), true);
+  assert.equal(decided({ node: { ACCESS: 1 } }), false);
+  assert.equal(decided({ node: { ACCESS: 0 } }), false);
+
+  /*  The rows the author named - a cue's identity and structure, a media
+      cue's hash - are all read-only, so all of them fold away by themselves. */
+  for (const name of ["index", "kind", "parent", "role", "prepare", "hash", "cue"]) {
+    assert.equal(decided({ name, node: { ACCESS: 1 } }), false, name + " is not a decision");
+  }
+});

@@ -540,6 +540,24 @@ button:disabled { color: var(--ink-off); cursor: default; }
 .trigger-row .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trigger-row .off { color: var(--ink-faint); text-decoration: line-through; }
 
+/*  THE DETAILS FOLD: what the engine says back, out of the way of what
+    somebody decided (§4.10). Shut by default, and drawn as a fold rather than
+    hidden - the values inside it are what an operator opens an inspector for
+    when a cue is not where they thought it was. */
+details.derived { margin-top: 10px; border-top: 1px solid var(--rule); }
+details.derived > summary {
+  list-style: none; cursor: pointer; user-select: none;
+  padding: 5px 0 4px; font-size: var(--t-9); letter-spacing: .1em;
+  text-transform: uppercase; color: var(--ink-faint);
+}
+details.derived > summary::-webkit-details-marker { display: none; }
+
+/*  The same two carets the cue list turns its groups with, so a fold is a fold
+    wherever somebody meets one on this page. */
+details.derived > summary::before { content: "\25B8"; margin-right: 6px; }
+details.derived[open] > summary::before { content: "\25BE"; }
+details.derived > summary:hover { color: var(--ink); }
+
 .back { font-size: var(--t-11); color: var(--waiting); cursor: pointer; }
 .back:hover { text-decoration: underline; }
 

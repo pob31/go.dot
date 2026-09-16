@@ -18,7 +18,7 @@
     each node says about itself (§14.2), and the gestures that act on it. */
 
 import { tree } from "../plumbing/tree.js";
-import { selection } from "../model/selection.js";
+import { panel, selection } from "../model/selection.js";
 import { el, esc } from "./common.js";
 import { isList, shownValue, refreshFields } from "./values.js";
 
@@ -51,6 +51,64 @@ function fieldsFor(id) {
   return found;
 }
 
+/*  WHAT SOMEBODY DECIDED, AND WHAT THE ENGINE SAYS BACK.
+
+    PRD §4.10 draws this line for the document - "the document holds what
+    someone decided, never what the machine happened to be doing" - and the
+    parameter table already carries the answer per row: a value anybody may
+    write is a decision, and a read-only one is derived from the structure or
+    observed from a file. A cue's `index`, `parent`, `role` and `kind`, a media
+    cue's `duration` and its `hash`: none of those is something an operator
+    sets, and all of them were sitting in the same list as the name and the
+    level (author, 2026-09-16).
+
+    So the read-only ones go behind a fold. They are not hidden - a pointer at
+    the wrong parent is exactly what somebody opens an inspector to find out -
+    and they are not editable anywhere else either. They are simply not the
+    page an operator is reading when they pick a cue.
+
+    ASKED OF THE NODE AND NEVER OF A LIST OF NAMES HERE. A row that becomes
+    writable, or arrives writable, moves by itself. */
+function decided(field) {
+  return (Number(field.node.ACCESS) & 2) !== 0;
+}
+
+function fieldMarkup(field) {
+  return '<div class="field"><label title="' + esc(field.node.DESCRIPTION || "") + '">' +
+         esc(field.name) + "</label>" + controlFor(field) + "</div>";
+}
+
+/*  The owner word over the rows it owns, as the tree groups them. */
+function fieldsMarkup(fields, from) {
+  let owner = from;
+  let out = "";
+
+  for (const field of fields) {
+    if (field.owner !== owner) {
+      owner = field.owner;
+      out += '<div class="group-head">' + esc(owner) + "</div>";
+    }
+
+    out += fieldMarkup(field);
+  }
+
+  return out;
+}
+
+/*  THE FOLD ITSELF, with the identifier at the top of it. An id is the one
+    thing in here nobody decided and everybody needs occasionally - it is what
+    a log record, a refusal and a script all name a cue by - so it is the first
+    line inside rather than a word beside the title. */
+function detailsMarkup(id, fields) {
+  return '<details class="derived"' + (panel.details ? " open" : "") + ">" +
+           '<summary data-details="yes">details</summary>' +
+           '<div class="field"><label title="the identifier this cue is known by,' +
+           ' in every record and every command">id</label>' +
+           '<div class="ro num">' + esc(id) + "</div></div>" +
+           fieldsMarkup(fields, null) +
+         "</details>";
+}
+
 function controlFor(field) {
   const node = field.node;
   const writable = (Number(node.ACCESS) & 2) !== 0;
@@ -60,8 +118,18 @@ function controlFor(field) {
 
   /*  READ-ONLY IS SHOWN AND NOT HIDDEN. `kind`, `parent`, `index` and `role`
       are derived rather than decided (§4.10), and they are exactly what
-      somebody looks at when a cue is not where they thought it was. */
-  if (!writable) return '<div class="ro">' + esc(value === "" ? "—" : value) + "</div>";
+      somebody looks at when a cue is not where they thought it was - which is
+      why they are behind the fold rather than gone.
+
+      AND IT IS KEPT TRUE. Such a value has no box for `refreshFields` to write
+      into, so it used to be drawn once and left: a cue's `prepare` word, a
+      media cue's `duration`, would say what they said when the cue was picked
+      for as long as it stayed picked. `data-read` is the address it goes on
+      saying. */
+  if (!writable) {
+    return '<div class="ro" data-read="' + esc(field.address) + '">' +
+           esc(value === "" ? "—" : value) + "</div>";
+  }
 
   if (range && Array.isArray(range.VALS)) {
     return "<select" + set + ">" +
@@ -119,22 +187,20 @@ function renderInspector() {
   if (selection.picked && tree.node("/godot/trigger/" + selection.picked + "/kind")) {
     const owner = tree.trigger(selection.picked, "cue", "");
     const fields = fieldsFor(selection.picked);
-    const signature = "trigger|" + selection.picked + "|" + fields.map((f) => f.address).join(",");
+    const signature = "trigger|" + selection.picked + "|" + (panel.details ? "open" : "shut")
+                        + "|" + fields.map((f) => f.address).join(",");
 
     if (pane.dataset.showing !== signature) {
       pane.dataset.showing = signature;
 
       let out =
         '<div class="who"><span class="text">' + esc(triggerSummary(selection.picked)) +
-        '</span><span class="kind">trigger</span>' +
-        '<span class="id num">' + esc(selection.picked) + "</span></div>" +
+        '</span><span class="kind">trigger</span></div>' +
         '<div class="back" data-pick="' + esc(owner) + '">\u2190 ' +
         esc(tree.cue(owner, "name", "") || owner) + "</div>";
 
-      for (const field of fields) {
-        out += '<div class="field"><label title="' + esc(field.node.DESCRIPTION || "") + '">' +
-               esc(field.name) + "</label>" + controlFor(field) + "</div>";
-      }
+      out += fieldsMarkup(fields.filter(decided), null);
+      out += detailsMarkup(selection.picked, fields.filter((f) => !decided(f)));
 
       out += '<div class="group-head">structure</div><div class="actions">' +
              '<button class="danger" data-delete="' + esc(selection.picked) + '">delete</button></div>';
@@ -156,7 +222,10 @@ function renderInspector() {
 
   const kind = tree.cue(selection.picked, "kind", "memo");
   const fields = fieldsFor(selection.picked);
-  const signature = selection.picked + "|" + fields.map((f) => f.address).join(",");
+  /*  THE FOLD IS PART OF THE SHAPE, so opening it redraws the panel rather
+      than waiting for the selection to change under it. */
+  const signature = selection.picked + "|" + (panel.details ? "open" : "shut") + "|"
+                      + fields.map((f) => f.address).join(",");
 
   /*  REBUILT ONLY WHEN THE SHAPE CHANGES, and that is not an optimisation. The
       poll arrives up to ten times a second, and rebuilding the panel on each one
@@ -175,20 +244,10 @@ function renderInspector() {
 
     let out =
       '<div class="who"><span class="text">' + esc(tree.cue(selection.picked, "name", "") || "—") +
-      '</span><span class="kind">' + esc(kind) + "</span>" +
-      '<span class="id num">' + esc(selection.picked) + "</span></div>";
+      '</span><span class="kind">' + esc(kind) + "</span></div>";
 
-    let owner = null;
-
-    for (const field of fields) {
-      if (field.owner !== owner) {
-        owner = field.owner;
-        out += '<div class="group-head">' + esc(owner) + "</div>";
-      }
-
-      out += '<div class="field"><label title="' + esc(field.node.DESCRIPTION || "") + '">' +
-             esc(field.name) + "</label>" + controlFor(field) + "</div>";
-    }
+    out += fieldsMarkup(fields.filter(decided), null);
+    out += detailsMarkup(selection.picked, fields.filter((f) => !decided(f)));
 
     /*  THE CUE'S TRIGGERS, listed rather than folded into the fields above:
         they are objects with identifiers of their own, a cue may have several,
@@ -270,4 +329,4 @@ function renderInspector() {
   refreshFields(pane);
 }
 
-export { renderInspector };
+export { renderInspector, decided };

@@ -25,4 +25,15 @@ const folded = new Set();          // group ids the reader has closed
     imported binding is one no importer may assign to. */
 const selection = { picked: null };
 
-export { folded, selection };
+/*  AND WHETHER THE INSPECTOR'S DETAILS ARE OPEN (author, 2026-09-16: "hide the
+    internal stuff like the various UIDs, hash and other things that are not
+    really necessary for the user").
+
+    Shut by default and kept for as long as the page is open, like a folded
+    group and for the same reason: it is what this reader is looking at, not
+    something the show knows (§14.1). It does not survive a reload, which is
+    the honest place to leave it until 5.14 gives the page somewhere of its own
+    to remember such things. */
+const panel = { details: false };
+
+export { folded, panel, selection };
