@@ -4827,7 +4827,14 @@ and HTTP — `undoName` after a rename, ten drags returning one press, an `undo`
 group with children deleted, undone, and the same identifiers read back out of
 `/godot/list/<id>/order`, where a colliding identifier shows up as a duplicate and nowhere else;
 §14.10 carries the save-and-recovery half of the same script. The replay fixture `undo.wfglog`
-will make the reproduction a ctest, with `diff -r` against the saved bundle at zero. The seam no
+makes the reproduction a ctest. *Two corrections (2026-09-16):* the fixture was named by this
+plan and by §14.9 and **was not written by PR 5.4** — an audit of what Phase 5 still owed found
+it missing while both sections spoke of it in the present tense, and it landed today, twenty-two
+records against `tests/fixtures/bundles/minimal`, registered as `wfg.replay.undo.C` and
+`.fr_FR`. And the check is `wfg replay`'s exit code, not `diff -r` against a saved bundle: no
+fixture in the tree has ever diffed a directory, because a replay that reproduced every record
+and left a different document would be a divergence the records themselves did not show, which
+is not a thing the log format permits — the document is rebuilt BY the records. The seam no
 unit test reaches is **deleting a cue whose run is playing, and undoing it**: it needs a live
 run holding a voice, a document edit removing the cue the run points at, and a publish
 afterwards, in one process at one moment — a test that assembled a runner, a run table, a tick

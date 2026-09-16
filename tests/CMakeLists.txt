@@ -421,6 +421,32 @@ add_test(NAME wfg.replay.midi.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/midi
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The fifteenth, and the only one whose whole subject is a command that undoes
+# another. PR 5.4 named this file and PR 5.4 did not write it; an audit of what
+# Phase 5 still owed found the gap, and section 14.9 had been claiming in the
+# present tense that it was here.
+#
+# `undo` and `redo` answer with the domain they moved and the NAME of the
+# transaction they moved, and that pair is the whole of the guarantee. A replay
+# rebuilds its own undo stack from the same inputs - the transaction hook is
+# installed by `replay` as well as by `serve`, and the coalescing window keys on
+# the address, the origin and the tick, all three of which are in the log - so a
+# stack that drifted by one step answers with a different word, or runs out a
+# gesture early, and the record does not match. The unit suite asserts the
+# stack; only a log can assert what the stack SAYS.
+#
+# It was checked the way the others were, by making it fail: the window widened
+# from twenty-five ticks to two hundred and fifty joins two renames and a drag
+# into fewer transactions, and record 15 comes back `nothing-to-undo`.
+add_test(NAME wfg.replay.undo.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/undo.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/minimal
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.undo.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/undo.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/minimal
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a

@@ -1,0 +1,85 @@
+# wfg-log 1
+# fixture undo — an edit taken back, put back, and refused twice.
+#
+# PR 5.4 named this file and PR 5.4 did not write it. §14.9 has said since that
+# it pins the undo records; it did not, and the gap was found by an audit of
+# what Phase 5 still owed (2026-09-16). This is that fixture, written the way
+# the others were: by hand, and checked by hand.
+#
+# WHAT IT PINS, which no other test does. `undo` and `redo` are ordinary logged
+# commands, and what they answer with is the whole of the guarantee: the domain
+# they moved and the NAME of the transaction they moved. A replay rebuilds its
+# own stack from the same inputs - the transaction hook is installed by `replay`
+# as well as by `serve`, and the coalescing window keys on the address, the
+# origin and the tick, all three of which are in this file - so a stack that
+# drifted by one would answer with a different name and this fixture would fail
+# on that record, with both names on screen. The unit suite asserts the stack;
+# only a log can assert what the stack SAYS.
+#
+# It needs no audio side and no socket: every record here is a document edit.
+#
+# The engine came up on the minimal bundle beside it.
+A 0 0 engine audio.editBuilt s:"hosted" i:8 i:2 i:36
+#
+# ONE FIELD, TWICE, FAR ENOUGH APART TO BE TWO GESTURES. The coalescing window
+# is twenty-five ticks on the same address from the same origin (§14.9), and
+# these are sixty apart: two transactions, two steps to take back.
+A 40 1 udp:10.0.0.5:9000 node.set s:"/godot/cue/B3N8R5TW/name" s:"House to full"
+A 100 2 udp:10.0.0.5:9000 node.set s:"/godot/cue/B3N8R5TW/name" s:"Houselights out"
+#
+# AND WITHIN THE WINDOW, from the same origin and the same address: a drag,
+# which is ONE step however many values it sent. Three records, one transaction
+# - and the undo below proves it by taking all three back at once.
+A 140 3 udp:10.0.0.5:9000 node.set s:"/godot/cue/F7HR8TVD/postWait" s:"2"
+A 150 4 udp:10.0.0.5:9000 node.set s:"/godot/cue/F7HR8TVD/postWait" s:"2.5"
+A 160 5 udp:10.0.0.5:9000 node.set s:"/godot/cue/F7HR8TVD/postWait" s:"3"
+#
+# UNDO, and its applied arguments are the domain and the transaction's own name
+# - the command that opened it. A client puts that word after "Undo".
+A 200 6 cli undo s:"document" s:"node.set"
+#
+# REDO puts the same transaction back, and says so the same way.
+A 210 7 cli redo s:"document" s:"node.set"
+#
+# A CREATE IS ITS OWN STEP, named after itself, and the identifier it draws is
+# in the record because a replay must not draw its own.
+A 250 8 udp:10.0.0.5:9000 cue.create s:"D9FH2JKA" i:2 s:"memo" s:"To be undone" s:"2R4QMT5H"
+#
+# Taken back: the cue goes, and the identifier goes back to the registry.
+A 300 9 cli undo s:"document" s:"cue.create"
+#
+# A DELETE OF A GROUP, undone whole. The group carries two cues, and what comes
+# back carries them with their own identifiers - which is the case the plan
+# named and the unit suite checks object by object.
+A 350 10 udp:10.0.0.5:9000 object.delete s:"D9FH2JKA"
+A 400 11 cli undo s:"document" s:"object.delete"
+#
+# THE POINTER IS NOT AN EDIT (§14.9, plan decision 3). A standby move is a state
+# row, which no history carries: the undo after it takes back the rename above
+# and not the pointer.
+A 420 12 udp:10.0.0.5:9000 standby.set s:"B3N8R5TW"
+A 440 13 cli undo s:"document" s:"node.set"
+#
+# THE REST OF THE STACK, taken back one gesture at a time: the drag above was
+# one step, and the two renames before it are the two under it. Three undos
+# reach the bottom, because five edit records went in as three steps - which is
+# the arithmetic the coalescing window decides, and the reason this file counts
+# them out loud.
+A 460 14 cli undo s:"document" s:"node.set"
+A 480 15 cli undo s:"document" s:"node.set"
+#
+# THE STACK RUNS OUT, and that is a refusal with its own reason rather than a
+# command that quietly does nothing.
+R 500 16 cli nothing-to-undo undo
+#
+# AND A LOCKED SHOW REFUSES IT (§14.11). The lock is a state row written like
+# any other node, so locking is not itself undoable - and unlocking gets
+# through, or the lock could never be lifted.
+A 550 17 udp:10.0.0.5:9000 node.set s:"/godot/document/locked" s:"true"
+R 560 18 cli locked undo
+R 570 19 cli locked redo
+A 580 20 udp:10.0.0.5:9000 node.set s:"/godot/document/locked" s:"false"
+#
+# With the lock lifted, redo works again: the history survived the refusals
+# untouched, which is what makes a refusal a refusal.
+A 600 21 cli redo s:"document" s:"node.set"
