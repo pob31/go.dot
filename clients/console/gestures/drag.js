@@ -169,13 +169,13 @@ function chainAbove(id) {
   let node = id;
 
   for (let step = 0; step < 64 && node; step += 1) {
-    const parent = tree.cue(node, "parent", "");
+    const parent = reading.cue(node, "parent", "");
 
     if (!parent) break;
 
     up.push(parent);
 
-    if (!tree.node("/godot/cue/" + parent + "/kind")) break;
+    if (!reading.node("/godot/cue/" + parent + "/kind")) break;
 
     node = parent;
   }
@@ -211,7 +211,7 @@ function subtreeOf(id) {
     held.add(one);
 
     for (const sequence of ["order", "headerOrder", "footerOrder", "persistentOrder"]) {
-      for (const child of tree.ids("/godot/cue/" + one + "/" + sequence)) todo.push(child);
+      for (const child of reading.ids("/godot/cue/" + one + "/" + sequence)) todo.push(child);
     }
   }
 
@@ -256,10 +256,10 @@ function carriedMarks(held) {
   const carried = [];
 
   for (const one of held) {
-    const group = tree.cue(one, "preset", "");
+    const group = reading.cue(one, "preset", "");
 
     if (!group || held.has(group)) continue;
-    if (tree.ids("/godot/cue/" + group + "/headerDerived").indexOf(one) < 0) continue;
+    if (reading.ids("/godot/cue/" + group + "/headerDerived").indexOf(one) < 0) continue;
 
     carried.push({ cue: one, group: group });
   }
@@ -279,9 +279,9 @@ function brokenBy(carried, chain) {
     telling a list from a group: the only honest difference between the two
     identifiers is which address answers. */
 function membersOf(parent) {
-  const asList = tree.node("/godot/list/" + parent + "/order");
+  const asList = reading.node("/godot/list/" + parent + "/order");
 
-  return tree.ids((asList ? "/godot/list/" : "/godot/cue/") + parent + "/order");
+  return reading.ids((asList ? "/godot/list/" : "/godot/cue/") + parent + "/order");
 }
 
 /*  A SECTION, SAID ALOUD. "a header", "a footer" - and "the persistent band",
@@ -316,6 +316,27 @@ function railFor(depth) {
 /*  WHAT IS BEING CARRIED, and nothing about it that the page could be asked
     for instead. `id` is empty exactly when no drag of ours is in the air, and
     every handler below asks it first. */
+/*  THE DOCUMENT THIS GESTURE READS, WHICH IS THE ONE ON SCREEN.
+
+    The rows stand still for the length of a drag; the POLL does not, and the
+    engine does not. So every question this file asks - which members a parent
+    has, how deep a row is, what a cue's `preset` names, where a group's subtree
+    ends - was being asked of a document that could have changed since the hand
+    went down, while the mark was being drawn against rows that could not. A
+    cue created, deleted or moved by a second operator mid-drag, and the index
+    computed at the drop names a place the mark never pointed at.
+
+    `tree.at` is REPLACED wholesale by each poll rather than mutated, and the
+    render runs immediately after that assignment - so the object held at
+    `dragstart` IS, exactly, the document the frozen rows were drawn from.
+    Pinning it costs one reference and no copy. `Object.create` over `tree`
+    keeps every one of its questions - they are all `this.at` lookups - so there
+    is no second implementation to keep in step with the first.
+
+    Released with the hold, so that everything outside a drag reads the live
+    document as it always did. */
+let reading = tree;
+
 const drag = {
   id: "",                 // the cue being dragged
   row: null,              // its row, which wears the pale mark
@@ -400,7 +421,7 @@ function unmark() {
     second field is the word "list" and never a cue, so it ends the walk - which
     is right: that band belongs to the list and not to any group. */
 function blockEnd(row, id) {
-  const kind = tree.cue(id, "kind", "memo");
+  const kind = reading.cue(id, "kind", "memo");
 
   if (kind !== "group") return row;
 
@@ -425,11 +446,31 @@ function blockEnd(row, id) {
 }
 
 /*  The element the mark goes in front of, skipping the mark itself - it is a
-    child of the pane like any other and would otherwise be measured from. */
+    child of the pane like any other and would otherwise be measured from.
+
+    `next &&` IS LOAD-BEARING AND NOT A HABIT. `mark` is null until the first
+    landing of a page session draws one, and the last child of the pane has no
+    next sibling - so on the FIRST drag, aimed at the bottom half of the last
+    element, the test was `null === null`, it passed, and the line under it
+    dereferenced null. The handler threw before it could cancel the event, so
+    the reader got no mark, no words, a barred cursor and a drop the browser
+    refused: the gesture silently inert, which is the one thing this file's
+    refusals exist to prevent. It cured itself as soon as the pointer crossed
+    any other row, which is why it survived every test and every hand check -
+    and it landed on the first drag of a session, the one that decides whether
+    an operator believes dragging works at all.
+
+    Not only the pane's last row, either: the caller asks this of `blockEnd`,
+    so a list ending in an OPEN GROUP threw for a pointer in the lower third of
+    that group's own row, which can be most of a screen above the bottom.
+
+    `null` is already right for every caller: the mark is inserted before it,
+    and inserting before nothing is inserting at the foot of the pane, which is
+    exactly where "after the last element" belongs. */
 function elementAfter(row) {
   let next = row.nextElementSibling;
 
-  if (next === mark) next = next.nextElementSibling;
+  if (next && next === mark) next = next.nextElementSibling;
 
   return next;
 }
@@ -505,11 +546,32 @@ function landingFor(event) {
       it mid-drag, and the answer would then be a list whose rows are not the
       ones under the hand. views/didi.js writes what it drew onto the pane for
       this reason, and it is out of the reconciler's reach there, so it survives
-      the hold along with the rows it describes. */
+      the hold along with the rows it describes.
+
+      AND BELOW THE LAST ROW IS THE ONLY PLACE THAT MEANS IT. The pane is not
+      rows all the way to its edges: `.scroll` carries four pixels of padding
+      above the first row, and `scrollbar-gutter: stable` reserves fourteen more
+      down the whole of its right-hand side. A pointer in either of those is
+      over the pane with a row BESIDE it rather than under it, and reading that
+      as "the bottom" sent a cue somebody was aiming three levels inside a group
+      to the foot of the list - with no refusal, and on a pane that scrolls with
+      the mark drawn somewhere they could not see. The gutter is the worse of
+      the two, because it runs the full height.
+
+      Where the page cannot tell what was meant it says nothing at all, which is
+      what it already does for a pointer off the pane entirely: no mark, the
+      event not cancelled, and the browser's own barred cursor. Nothing is lost
+      - the bottom is still reachable, by aiming under the last row, which is
+      where a hand goes anyway. */
   if (!row) {
     const list = pane.dataset.list || "";
 
     if (!list) return null;
+
+    const tail = pane.lastElementChild === mark ? mark.previousElementSibling
+                                                : pane.lastElementChild;
+
+    if (!tail || event.clientY <= tail.getBoundingClientRect().bottom) return null;
 
     return said({ on: null, mark: "", before: null, rail: "", refused: false,
                   parent: list, at: dropIndex(membersOf(list), drag.id, "", "after") });
@@ -561,7 +623,7 @@ function landingFor(event) {
                    " and never be seen again, which is why the engine refuses it too.");
   }
 
-  const kind = tree.cue(id, "kind", "memo");
+  const kind = reading.cue(id, "kind", "memo");
   const side = sideFor(fractionIn(row, event.clientY), kind === "group");
 
   /*  INSIDE THIS GROUP, AS ITS FIRST MEMBER, and this is the one target whose
@@ -593,7 +655,7 @@ function landingFor(event) {
       perfectly well. What decides is the cue's own `role`: "member" is a place
       in a sequence that has an address, and the other three are places in a
       section that has none. */
-  const role = tree.cue(id, "role", "member");
+  const role = reading.cue(id, "role", "member");
 
   if (role !== "member") {
     return refused(row, halfAt, rail,
@@ -602,7 +664,7 @@ function landingFor(event) {
                    " section; it cannot be reordered inside one.");
   }
 
-  const parent = tree.cue(id, "parent", "");
+  const parent = reading.cue(id, "parent", "");
   const members = parent ? membersOf(parent) : [];
 
   /*  A ROW THE PAGE CANNOT PLACE. Neither of these should happen - a cue whose
@@ -727,6 +789,7 @@ function release() {
   drag.carried = [];
   drag.landing = null;
 
+  reading = tree;
   view.holding = false;
 
   if (drag.row) {
@@ -739,7 +802,42 @@ function release() {
   if (wasHolding && typeof view.render === "function") view.render();
 }
 
+/*  A PRESS THAT BEGAN IN A BOX IS NOT A DRAG, whatever the row around it says.
+
+    A row carries `draggable`, and a `draggable` ancestor takes the press inside
+    its descendants with it: pressing in a cue's preWait box and sweeping across
+    the digits to select them lifted the whole cue instead, so the three time
+    columns the author asked for became unselectable the day dragging arrived.
+    Measured with real pointer events rather than dispatched ones, which is the
+    only way to see it - a synthetic `dragstart` cannot tell you that the
+    browser would have started one.
+
+    THE FLAG RATHER THAN THE ATTRIBUTE. Taking `draggable` off the row on
+    mousedown also works and is racy with this page's own reconciler: `morph`
+    copies the fresh row's attributes onto the live one whenever that row's
+    markup changes, so an attribute written by hand is wiped by whichever poll
+    lands mid-press. A module-level flag is nobody's to overwrite.
+
+    AND CANCELLING IS WHAT GIVES THE SWEEP BACK: a `dragstart` whose default is
+    prevented leaves the browser to fall back to the ordinary text selection it
+    would have done before this file existed. Capture phase on both, so the
+    flag is true before any other handler runs and false again however the
+    press ends. */
+let pressedInABox = false;
+
+document.addEventListener("mousedown", (event) => {
+  pressedInABox = !!(event.target.closest
+                       && event.target.closest("input, select, textarea, [contenteditable]"));
+}, true);
+
+document.addEventListener("mouseup", () => { pressedInABox = false; }, true);
+
 document.addEventListener("dragstart", (event) => {
+  if (pressedInABox) {
+    event.preventDefault();
+    return;
+  }
+
   const from = event.target.closest && event.target.closest("#cues");
   const row = from ? event.target.closest("[data-pick]") : null;
   const id = row && row.dataset ? row.dataset.pick : "";
@@ -762,6 +860,7 @@ document.addEventListener("dragstart", (event) => {
   drag.carried = carriedMarks(drag.held);
   drag.landing = null;
 
+  reading = Object.create(tree, { at: { value: tree.at } });
   view.holding = true;
 
   if (event.dataTransfer) {

@@ -144,7 +144,11 @@ function element(name, { id = "", key = "", data = {}, rail = "", top = 0, heigh
     removeProperty: (property) => node.properties.delete(property),
   };
 
-  node.getBoundingClientRect = () => ({ top: top, height: height });
+  /*  `bottom` as well as `top`, because a real rect carries it and the gesture
+      asks for it: the pane's background means "the end of the list" only BELOW
+      the last row, and that is the comparison it makes. A fixture that answered
+      `undefined` there would let a case pass that a browser fails. */
+  node.getBoundingClientRect = () => ({ top: top, height: height, bottom: top + height });
 
   node.closest = (selector) => {
     for (let up = node; up; up = up.parentNode) if (matches(up, selector)) return up;
@@ -186,6 +190,13 @@ function element(name, { id = "", key = "", data = {}, rail = "", top = 0, heigh
 
       return among[among.indexOf(node) + 1] || null;
     },
+  });
+
+  /*  And the same for the pane's last child, for the same reason: it moves as
+      the mark is put in and taken out, and the gesture reads it to find where
+      the rows stop. */
+  Object.defineProperty(node, "lastElementChild", {
+    get() { return node.children[node.children.length - 1] || null; },
   });
 
   return node;

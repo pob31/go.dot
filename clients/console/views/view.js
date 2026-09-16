@@ -62,9 +62,12 @@ const view = {
       wherever and however it did, and gestures/drag.js clears the flag there,
       first, before anything that could throw.
 
-      A FLAG THAT IS NOT THERE IS NOT SET: it is `undefined` on a page whose
-      drag module never loaded and in a test that stands a document in, and
-      undefined draws. */
+      A FLAG THAT IS NOT THERE IS NOT SET, which is why it is written HERE as a
+      literal rather than left to the gesture to create: from the moment this
+      module loads it is `false`, on a page whose drag module never loaded as
+      much as on one that is about to set it, and in a test that stands a
+      document in. The reader below is a truthiness test all the same, so a
+      flag that somehow was not there would draw rather than freeze. */
   holding: false,
 };
 

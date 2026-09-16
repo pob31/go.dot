@@ -944,12 +944,23 @@ button:disabled { color: var(--ink-off); cursor: default; }
     take a `dragover` away from the thing it is describing.
 
     A FLEX ROW WITH ITS CONTENTS AT THE FAR END, so a label put inside it - the
-    warning below - is centred on the line and overflows it either way instead
-    of being laid out inside two pixels, and sits at the end away from the names
-    and the indent. A line with no label in it is still a line. */
+    warning below - overflows the two pixels instead of being laid out inside
+    them, and sits at the end away from the names and the indent. A line with no
+    label in it is still a line.
+
+    AND THE LABEL HANGS BELOW THE RULE RATHER THAN STRADDLING IT, which is
+    `flex-start` and not `center`. Centred, half of a label sits above the mark,
+    and at the first gap of a list that half is above the pane's top edge and
+    clipped away: measured at twenty-five pixels gone, taking the ✕ and the
+    opening words of a refusal with them - the reader was told a drop was
+    impossible by a sentence beginning in the middle. Below the rule, the same
+    label at the LAST gap of a full list hangs a few pixels past the bottom
+    instead, which is the scrollable direction and therefore reachable. The rule
+    itself is always inside the pane; it is only the label that had anywhere to
+    fall off. */
 .drop-line {
   position: relative; z-index: 1;
-  display: flex; align-items: center; justify-content: flex-end;
+  display: flex; align-items: flex-start; justify-content: flex-end;
   height: 2px; margin: -1px 12px -1px 0;
   margin-left: calc(var(--rail) + 3px);
   background: var(--picked); border-radius: 1px;

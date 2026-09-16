@@ -658,9 +658,11 @@ function renderLists() {
       until that row's markup changes - and then goes without notice. Neither
       half of that is a cleanup anybody can lean on.
 
-      A FLAG THAT IS NOT THERE IS NOT SET. `view.holding` is undefined on a page
-      whose drag module never loaded, and in a test that stands a document in;
-      undefined draws. */
+      A FLAG THAT IS NOT THERE IS NOT SET. `view.holding` is `false` from the
+      moment views/view.js loads - it is a literal on that object, not something
+      gestures/drag.js creates - so this reads a boolean on a page whose drag
+      module never loaded and in a test that stands a document in alike. It is a
+      truthiness test all the same, so an absent flag would draw. */
   if (view.holding) return;
 
   const pane = el("cues");
