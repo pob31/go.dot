@@ -18,13 +18,97 @@
     their headers and footers, and the persistent band at its foot. */
 
 import { tree } from "../plumbing/tree.js";
-import { folded, selection } from "../model/selection.js";
+import { selection } from "../model/selection.js";
+import { folded } from "../model/remember.js";
 import { el, esc, cueName } from "./common.js";
 import { refreshFields } from "./values.js";
 import { reconcile } from "./reconcile.js";
 
-/*  The current answer, refreshed by `renderLists` and read by `cueRow`. */
+/*  The current answer, refreshed by `listRows` and read by `cueRow`. */
 let overlapping = new Map();
+
+/*  WHERE THE READER WAS JUST SENT, and whether this is the row they were sent
+    to. `selection.reveal` is set by the click that follows a tendril - from a
+    derived line to the member's own row, or from the mark on a member up to
+    the header that gets it ready - and it names the reconciler key of the row
+    at the other end, with the moment the highlight stops meaning anything.
+
+    IT IS ASKED WHILE THE MARKUP IS WRITTEN, and the highlight is an attribute
+    in that markup, because the markup is a row's whole state: `morph` copies
+    the fresh element's attributes onto the live one and removes any the fresh
+    one lacks, so a class put on an element after a render is wiped by the next
+    poll a tenth of a second later. A flash that lasted one poll would be a
+    flash nobody saw.
+
+    And the run-out is read here rather than timed: there is no timer to cancel
+    when the reader clicks somewhere else, and a page that has stopped polling -
+    a laptop lid shut on it - wakes up with the highlight already over rather
+    than with one still to come. */
+function revealing(key) {
+  const reveal = selection.reveal;
+
+  if (!reveal) return false;
+
+  if (Date.now() >= reveal.until) {
+    selection.reveal = null;
+    return false;
+  }
+
+  return reveal.key === key;
+}
+
+/*  A SECTION, AS A FRAME THAT SHUTS (author, 2026-09-16: "I think we're missing
+    a clearer delimiter between the header section and footer, something like a
+    collapsible frame").
+
+    A header and a footer used to be announced by a bare word and nothing else,
+    so where one ended and the members began was a matter of reading the indents
+    - and in a group with both, the footer's word was the only thing between the
+    last member and the first footer cue. Now the word heads a frame: a rule
+    along the top and down the left of every row the section holds, closed off
+    by a short rule under the last of them, and a twist that shuts the whole
+    thing away.
+
+    DRAWN AS A RAIL ON EACH ROW RATHER THAN AS A BOX AROUND THEM, because the
+    reconciler keeps ONE FLAT LIST of keyed rows: a wrapper element would be a
+    second level of nesting it does not model, and every row inside it would
+    have to be reconciled against the wrapper rather than against the pane. So
+    each row carries the frame's left edge as its own `::before` at `--rail`,
+    and this head and its end draw the two corners.
+
+    THE END ROW IS PUSHED AFTER THE LINES, not worked out from a count, because
+    a header cue may itself be an open group whose own children follow it: the
+    last row of the section is whatever `lines` pushed last, and there is no
+    other way to be right about that.
+
+    THE HEAD'S KEY IS "band:" + THE FOLD KEY and the end's is that with ":end",
+    so the three names a section has are one name said three ways and a section
+    cannot be half-renamed. `folded` holds the SHUT ones - present means shut -
+    which is what it has always meant for a group's own twist. */
+function frame(out, fold, word, count, rail, note, lines) {
+  const shut = folded.has(fold);
+
+  out.push({ key: "band:" + fold, html:
+    '<div class="band" data-fold="' + fold + '" data-shut="' + (shut ? "yes" : "no") + '"' +
+      ' style="padding-left:' + rail + "; --rail:" + rail + '"' +
+      ' title="' + esc(note) + '">' +
+      '<span class="twist">' + (shut ? "▶" : "▼") + "</span>" +
+      '<span class="word">' + esc(word) + "</span>" +
+      '<span class="count">' + count + "</span>" +
+    "</div>" });
+
+  /*  SHUT IS NOT HIDDEN-BUT-DRAWN: the rows are never pushed, so the reconciler
+      takes their elements away and a shut header costs nothing to have. The
+      count on the head is what says how many went, which is also §4.8's rule
+      kept - the twist is a shape, the count is a number, and neither is a
+      colour. */
+  if (shut) return;
+
+  lines();
+
+  out.push({ key: "band:" + fold + ":end",
+             html: '<div class="band-end" style="--rail:' + rail + '"></div>' });
+}
 
 /*  What each of §13.6's six words means, said once so the row can be short. */
 function prepareNote(word) {
@@ -85,11 +169,24 @@ function timeCell(id, name) {
          "</div>";
 }
 
-/*  ONE CUE ROW. `depth` is the indent, `role` is member / header / footer, and
-    `standby` is the identifier the pointer is on for this list. The row, and
-    the rows of a group's contents after it, go into `out` as a key and the
-    markup, for `reconcile` to bring the pane into line with. */
-function cueRow(id, depth, role, standby, out) {
+/*  ONE CUE ROW. `depth` is the indent and `standby` is the identifier the
+    pointer is on for this list. The row, and the rows of a group's contents
+    after it, go into `out` as a key and the markup, for `reconcile` to bring
+    the pane into line with.
+
+    `section` AND `rail` ARE THE FRAME THIS ROW IS DRAWN INSIDE - "header",
+    "footer", "persistent", or "" for a plain member of a list or a group, which
+    is most rows. They travel down the recursion rather than being read off the
+    cue's own `role`, because a row is inside a frame when it is DRAWN inside
+    one: a group sitting in a header has role "header", but its members have
+    role "member" and are still drawn between that header's two band rows, so
+    they have to carry the rail or the frame's left edge would break in the
+    middle of it. A nested section of its own overrides both - a row draws one
+    rail, and the innermost frame is the one it is in.
+
+    This is the parameter that used to be `role`, passed by every caller and
+    read by none. */
+function cueRow(id, depth, section, rail, standby, out) {
   const kind = tree.cue(id, "kind", "memo");
   const isGroup = kind === "group";
   const open = isGroup && !folded.has(id);
@@ -123,6 +220,24 @@ function cueRow(id, depth, role, standby, out) {
       fact said in words - which is also what §4.8 wants. */
   const preparedBy = tree.cue(id, "preset", "");
 
+  /*  AND WHETHER THAT HEADER ACTUALLY SHOWS IT, which is not the same question.
+
+      `preset` names an ANCESTOR, and a value naming anything else is a `wfg
+      validate` warning the engine tolerates rather than refuses - the grammar
+      says so in as many words, "the repair is somebody dragging it somewhere
+      sensible and yesterday's show must still open". So the mark can name a
+      group whose `headerDerived` does not list this cue: one drag, or one typo
+      in the inspector's own `preset` box, and there it is.
+
+      The MARK is still worth saying - somebody wrote it and PRD §4.10 says the
+      document holds what they decided. The LINK is not, because there is
+      nothing at the far end of it: `openForKey` would open that group and its
+      header section, throwing away whatever the reader had folded, and show
+      them a section the line is not in. A way in to a place the page cannot
+      reach is worse than no way in. */
+  const reachable = !!preparedBy &&
+    tree.ids("/godot/cue/" + preparedBy + "/headerDerived").indexOf(id) >= 0;
+
   /*  HOW FAR AHEAD THIS ONE HAS BEEN GOT, in the word the engine uses.
 
       PRD §3.12's horizon reaches a block before anybody presses anything, and
@@ -142,6 +257,8 @@ function cueRow(id, depth, role, standby, out) {
 
   out.push({ key: "cue:" + id, html:
     '<div class="row" data-pick="' + id + '"' +
+      (section ? ' data-in="' + section + '" style="--rail:' + rail + '"' : "") +
+      (revealing("cue:" + id) ? ' data-flash="yes"' : "") +
       ' data-standby="' + (id === standby ? "yes" : "no") + '"' +
       ' data-picked="' + (id === selection.picked ? "yes" : "no") + '"' +
       ' data-enabled="' + (enabled ? "yes" : "no") + '">' +
@@ -159,8 +276,16 @@ function cueRow(id, depth, role, standby, out) {
              ' trigger(s)">\u26A1' + (triggers.length > 1 ? triggers.length : "") + "</span>"
            : "") +
         (preparedBy
-           ? '<span class="flag preset" title="' +
-             esc("got ready by the header of " + cueName(preparedBy)) +
+           ? '<span class="flag preset"' +
+             (reachable ? ' data-reveal="preset:' + preparedBy + ":" + id + '"' : "") +
+             ' title="' +
+             esc(reachable
+                   ? "got ready by the header of " + cueName(preparedBy) +
+                     " \u2014 click to go to that line, opening what has to open"
+                   : "marked to be got ready by " + cueName(preparedBy) +
+                     ", which is not a group this cue is inside \u2014 so no header" +
+                     " prepares it, and it runs at its own moment as though the mark" +
+                     " were not there") +
              '">\u2191 ' + esc(cueName(preparedBy)) + "</span>"
            : "") +
         (prepare && prepare !== "idle"
@@ -187,32 +312,44 @@ function cueRow(id, depth, role, standby, out) {
   /*  THE LINES NOBODY WROTE. A member marked `preset` for this group is got
       ready by this header and still runs where it sits - so it appears here in
       italics, as a reading of the mark rather than as a cue of its own, and
-      double-clicking it opens the member it IS. Derived lines come first,
-      because that is the order the horizon prepares them in: a written header
-      cue may reasonably depend on what the presets set. */
+      clicking it picks the member AND goes to the member's own row, which is
+      the thing that can be edited. Derived lines come first, because that is
+      the order the horizon prepares them in: a written header cue may
+      reasonably depend on what the presets set. */
   const derived = tree.ids("/godot/cue/" + id + "/headerDerived");
-  /*  WHERE A BAND'S LABEL SITS: the indent, plus the gutter and the number
-      column that every row above it carries. Those two are scaled by the type
-      knob, so the offset has to be as well - written as a calc rather than as
-      the 92 it comes to at --type 1, or the labels walk left of the rows they
-      head the moment the type moves. */
+  /*  WHERE A BAND'S LABEL SITS, AND WHERE ITS FRAME STANDS: the indent, plus
+      the gutter and the number column that every row above it carries. Those
+      two are scaled by the type knob, so the offset has to be as well - written
+      as a calc rather than as the 92 it comes to at --type 1, or the labels
+      walk left of the rows they head the moment the type moves. The same
+      figure is the frame's `--rail`, so the rule down the side of a section
+      stands at the label's own x however the type is set. */
   const band = "calc(" + ((depth + 1) * 16) + "px + 12px + 80px * var(--type))";
 
   if (header.length || derived.length) {
-    out.push({ key: "band:" + id + ":header",
-               html: '<div class="band" style="padding-left:' + band + '">header</div>' });
-
-    derived.forEach((child) => presetLine(child, id, depth + 1, out));
-    header.forEach((child) => cueRow(child, depth + 1, "header", standby, out));
+    frame(out, id + ":header", "header", derived.length + header.length, band,
+          "runs before the members - the italic lines are got ready here and run where" +
+          " they sit in the list",
+          () => {
+            derived.forEach((child) => presetLine(child, id, depth + 1, band, out));
+            header.forEach((child) => cueRow(child, depth + 1, "header", band, standby, out));
+          });
   }
 
+  /*  AND THE MEMBERS BETWEEN THEM STAY PLAIN, carrying whatever frame this
+      group itself is in and no other. The two frames are what delimits the
+      sections; a third one around the middle would be a box drawn around
+      "everything else", which is not a section and has no word to head it. */
   tree.ids("/godot/cue/" + id + "/order").forEach((child) =>
-    cueRow(child, depth + 1, "member", standby, out));
+    cueRow(child, depth + 1, section, rail, standby, out));
 
   if (footer.length) {
-    out.push({ key: "band:" + id + ":footer",
-               html: '<div class="band" style="padding-left:' + band + '">footer</div>' });
-    footer.forEach((child) => cueRow(child, depth + 1, "footer", standby, out));
+    frame(out, id + ":footer", "footer", footer.length, band,
+          "runs after the members, and after an Esc as well - a graceful abort takes this" +
+          " same path, entered early (§4.4)",
+          () => {
+            footer.forEach((child) => cueRow(child, depth + 1, "footer", band, standby, out));
+          });
   }
 }
 
@@ -224,10 +361,22 @@ function cueRow(id, depth, role, standby, out) {
     it selects the member and the inspector opens the thing that can actually be
     edited. There is one object, and this is a second view of it - which is why
     its key names the group whose header it is drawn in: `cue:<id>` is already
-    the member's own row. */
-function presetLine(id, group, depth, out) {
+    the member's own row.
+
+    AND IT SAYS WHERE THAT OTHER ROW IS (author, 2026-09-16: "I could get the
+    focus of a header item with the actual cue"). `data-reveal` names the
+    member's own key, so the click that picks the member also opens whatever
+    has to be open for that row to exist and takes the reader to it. It is a
+    second view of one object, and now it is one that can be got out of.
+
+    It is always a header line, so it carries the header's frame without being
+    asked which section it is in. */
+function presetLine(id, group, depth, rail, out) {
   out.push({ key: "preset:" + group + ":" + id, html:
     '<div class="row derived" data-pick="' + id + '"' +
+      ' data-reveal="cue:' + id + '"' +
+      ' data-in="header" style="--rail:' + rail + '"' +
+      (revealing("preset:" + group + ":" + id) ? ' data-flash="yes"' : "") +
       ' data-picked="' + (id === selection.picked ? "yes" : "no") + '">' +
       '<div class="gutter"></div>' +
       '<div class="number num">' + esc(tree.cue(id, "number", "")) + "</div>" +
@@ -244,9 +393,66 @@ function presetLine(id, group, depth, out) {
     "</div>" });
 }
 
-function renderLists() {
+/*  EVERY ROW OF ONE LIST, as keys and markup and nothing else.
+
+    Split out of `renderLists` so that what this pane DECIDES can be read
+    without a browser: which rows a list draws, in what order, inside which
+    frames, with which of them shut. The rest of `renderLists` - the tabs, the
+    pane, the reconcile, the pass over the fields - is what it does with them,
+    and needs a document.
+
+    IT ASKS FOR THE OVERLAP INDEX ITSELF rather than being handed it, so that a
+    test needs nothing but a served tree; the index is built once per call and
+    read by every row, which is why it is not built per row. */
+function listRows(focus, standby) {
   overlapping = tree.overlaps();
 
+  const cues = tree.ids("/godot/list/" + focus + "/order");
+  const persistent = tree.ids("/godot/list/" + focus + "/persistentOrder");
+
+  /*  EMPTY ONLY WHEN BOTH ARE. The engine publishes the persistent section
+      apart from `order`, so a list whose only cues are persistent - a bed and
+      nothing else - has an empty `order`. Reading `order` alone called that
+      list empty and hid its cues, which were drawn nowhere else as rows. */
+  if (!cues.length && !persistent.length) {
+    return [{ key: "empty", html:
+      '<div class="empty"><div class="line">Rien à faire.</div>' +
+      '<div class="under">Nothing in this list.</div></div>' }];
+  }
+
+  const out = [];
+
+  cues.forEach((id) => cueRow(id, 0, "", "", standby, out));
+
+  /*  THE PERSISTENT SECTION, at the foot of the list and marked as its own
+      thing (§3.29). It is not part of the order the pointer walks: these cues
+      are what should be running at all times, checked after every trigger and
+      put back when they are not, so they sit below the last row rather than
+      among them - and GO never reaches one.
+
+      It is a section like a header or a footer, so it is drawn as one and folds
+      like one. Its rail is the offset a depth-0 row's name sits at - the same
+      calc a group's band uses, with the indent taken out - so the frame stands
+      under the names rather than out at the pane's edge.
+
+      ITS FOLD KEY NAMES THE LIST, because a second list has a persistent
+      section of its own and the two are shut and opened apart; and because the
+      key has to be told from a cue's, which is what the "list:" in front of it
+      is for. */
+  if (persistent.length) {
+    const rail = "calc(12px + 80px * var(--type))";
+
+    frame(out, "list:" + focus + ":persistent", "persistent", persistent.length, rail,
+          "checked after every trigger, and put back when it is not as declared",
+          () => {
+            persistent.forEach((id) => cueRow(id, 0, "persistent", rail, standby, out));
+          });
+  }
+
+  return out;
+}
+
+function renderLists() {
   const lists = tree.ids("/godot/list/order");
   const focus = tree.get("/godot/list/focus", "") || lists[0] || "";
 
@@ -279,36 +485,59 @@ function renderLists() {
   }
 
   const standby = tree.get("/godot/list/" + focus + "/standby", "");
-  const cues = tree.ids("/godot/list/" + focus + "/order");
-  const persistent = tree.ids("/godot/list/" + focus + "/persistentOrder");
 
-  /*  EMPTY ONLY WHEN BOTH ARE. The engine publishes the persistent section
-      apart from `order`, so a list whose only cues are persistent - a bed and
-      nothing else - has an empty `order`. Reading `order` alone called that
-      list empty and hid its cues, which were drawn nowhere else as rows. */
-  if (!cues.length && !persistent.length) {
-    reconcile(pane, [{ key: "empty", html:
-      '<div class="empty"><div class="line">Rien à faire.</div>' +
-      '<div class="under">Nothing in this list.</div></div>' }]);
-    return;
+  reconcile(pane, listRows(focus, standby));
+
+  /*  AND THE READER IS TAKEN TO THE ROW THEY ASKED FOR, once, after the rows
+      exist. It cannot be done before the reconcile: the row at the other end of
+      a tendril is very often one that was not on screen at all a moment ago -
+      that is why `openForKey` had to unfold something to reach it - so there is
+      nothing to scroll to until the pane has been brought into line.
+
+      THE ROW IS FOUND BY WALKING THE CHILDREN and comparing `data-key`, not by
+      building a selector. The pane is one flat list of keyed rows, so its
+      children ARE the whole of the candidates, and comparing the key as a
+      string is exactly what `reconcile` wrote there - including the `#2` it
+      appends to a key it was asked for twice - with no selector syntax in
+      between to quote, escape or get wrong.
+
+      `block: "nearest"` is the whole point of the gesture: a row already on
+      screen is not moved, so following a tendril to something the reader can
+      already see does not throw the list about under them. And `scrolled` is
+      set on the reveal rather than the scroll being repeated every poll, or a
+      reader who scrolled away during the second the highlight lasts would be
+      dragged back ten times.
+
+      Guarded both ways because neither is certain: the row may not be there
+      (the reveal was for a cue this poll's tree no longer has), and a document
+      stood in by a test has no `scrollIntoView`. */
+  const reveal = selection.reveal;
+
+  if (reveal && !reveal.scrolled) {
+    const found = Array.from(pane.children)
+                       .find((child) => child.dataset && child.dataset.key === reveal.key);
+
+    if (found) {
+      if (typeof found.scrollIntoView === "function") found.scrollIntoView({ block: "nearest" });
+
+      /*  AND THE MARK IS LIT AGAIN FROM THE TOP. A second ask for a row that is
+          still marked changes no attribute - `data-flash` is already "yes" -
+          and a CSS animation restarts only when its NAME goes from none to
+          something, so the wash would not run again and the second ask would
+          draw nothing at all. Taken off, the layout flushed, put back. It
+          belongs here rather than in the markup because this is the one block
+          that happens exactly once per ask, which is what `scrolled` latches;
+          and the row is left carrying exactly what the markup says, so the next
+          poll's `morph` has nothing to undo. */
+      if (found.hasAttribute("data-flash") && typeof found.offsetWidth === "number") {
+        found.removeAttribute("data-flash");
+        void found.offsetWidth;
+        found.setAttribute("data-flash", "yes");
+      }
+
+      reveal.scrolled = true;
+    }
   }
-
-  const out = [];
-  cues.forEach((id) => cueRow(id, 0, "member", standby, out));
-
-  /*  THE PERSISTENT SECTION, at the foot of the list and marked as its own
-      thing (§3.29). It is not part of the order the pointer walks: these cues
-      are what should be running at all times, checked after every trigger and
-      put back when they are not, so they sit below the last row rather than
-      among them - and GO never reaches one. */
-  if (persistent.length) {
-    out.push({ key: "band:persistent",
-               html: '<div class="band" title="checked after every trigger, and put back' +
-                     ' when it is not as declared">persistent</div>' });
-    persistent.forEach((id) => cueRow(id, 0, "persistent", standby, out));
-  }
-
-  reconcile(pane, out);
 
   /*  AND THE VALUES IN THE TIME BOXES, after the rows are in place.
 
@@ -321,4 +550,4 @@ function renderLists() {
   refreshFields(pane);
 }
 
-export { renderLists, timeCell };
+export { listRows, renderLists, timeCell };

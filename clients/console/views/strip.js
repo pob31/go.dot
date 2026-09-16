@@ -18,7 +18,8 @@
     disk, the lock, the undo stack's words, and the engine's own numbers. */
 
 import { tree } from "../plumbing/tree.js";
-import { panel, selection } from "../model/selection.js";
+import { panel } from "../model/remember.js";
+import { selection } from "../model/selection.js";
 import { el, esc } from "./common.js";
 
 function renderStrip() {

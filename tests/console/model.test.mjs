@@ -17,13 +17,21 @@
 /*  THE READ HALF: a reply flattened, the questions every view asks of it, and
     the indexes built once per reply (plumbing/tree.js, model/index.js), plus
     the few spellings every view shares (views/common.js). All of it pure, and
-    all of it what a row is drawn from. */
+    all of it what a row is drawn from.
+
+    And at the foot of the file, the one question that walks the other way:
+    model/remember.js's `openTo`, which climbs from a cue to the list it is in
+    and unfolds everything shut between the two, so that a row somebody has
+    been sent to is a row that is actually drawn. It reads the same `parent`
+    and `role` a cue publishes about itself, which is why it is tested here
+    against a served tree rather than beside the storage. */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { flatten, tree } from "../../clients/console/plumbing/tree.js";
 import "../../clients/console/model/index.js";
+import { folded, openForKey, openTo } from "../../clients/console/model/remember.js";
 import { esc } from "../../clients/console/views/common.js";
 
 /*  A leaf as the engine serves one, and a container of them. */
@@ -101,4 +109,128 @@ test("an overlap is told to both cues of the pair, under the slot's name", () =>
 test("markup is escaped for the double-quoted attributes the page writes", () => {
   assert.equal(esc('a & b <c> "d"'), "a &amp; b &lt;c&gt; &quot;d&quot;");
   assert.equal(esc(42), "42");
+});
+
+
+/*  THE WALK UP, from here down.
+
+    A cue as the engine publishes one for that walk: what kind it is - which is
+    how `openTo` tells a cue from the list, since a list publishes no `kind` -
+    where it sits, and how it sits there.
+
+    These run in a Node with no `localStorage` at all, which is the private
+    window and a second pin for nothing: `openForKey` saves what it opened, and
+    a save that cannot write has to leave the page working. */
+const cue = (id, parent, role, kind = "memo") =>
+  [leaf("/godot/cue/" + id + "/kind", kind),
+   leaf("/godot/cue/" + id + "/parent", parent),
+   leaf("/godot/cue/" + id + "/role", role)];
+
+test("opening a row unfolds every container it is inside, and nothing else", () => {
+  folded.clear();
+
+  tree.at = reply([
+    ...cue("OUTER", "L", "member", "group"),
+    ...cue("INNER", "OUTER", "member", "group"),
+    ...cue("M", "INNER", "header", "fade"),
+    ...cue("ELSEWHERE", "L", "member", "group"),
+  ]);
+
+  for (const key of ["OUTER", "INNER", "INNER:header", "ELSEWHERE"]) folded.add(key);
+
+  openTo("M");
+
+  /*  BOTH GROUPS OVER IT AND THE SECTION IT SITS IN. A row is drawn only when
+      every one of those is open, so unfolding all but one of them is the same
+      as unfolding none: the reveal would land on nothing. */
+  assert.equal(folded.has("INNER:header"), false, "the header section it is in");
+  assert.equal(folded.has("INNER"), false, "the group that header belongs to");
+  assert.equal(folded.has("OUTER"), false, "and the group over that one");
+
+  /*  AND NOT THE WHOLE SHOW. A reveal that unfolded everything would cost the
+      reader the shape they had folded their list into, which is the state this
+      PR went to the trouble of remembering. */
+  assert.equal(folded.has("ELSEWHERE"), true);
+});
+
+test("a persistent cue is reached by opening the band at the foot of its list", () => {
+  folded.clear();
+
+  tree.at = reply([...cue("BED", "L", "persistent", "media"), ...cue("C1", "L", "member")]);
+  folded.add("list:L:persistent");
+
+  openTo("BED");
+  assert.equal(folded.has("list:L:persistent"), false);
+
+  /*  IT IS THE ROLE AND NOT THE LIST THAT SAYS SO. A cue sitting plainly in
+      the list is not in the persistent band, and opening the band for it would
+      unfold a section the reader had shut on purpose. */
+  folded.clear();
+  folded.add("list:L:persistent");
+
+  openTo("C1");
+  assert.equal(folded.has("list:L:persistent"), true);
+});
+
+test("the walk up stops rather than going round for ever", () => {
+  /*  A `parent` that leads back to where it started cannot happen in a document
+      the engine wrote, which is exactly why it is worth a bound: this walk
+      reads a reply that arrived half-built, or one from a version that spells
+      containment differently, and a browser tab spinning in a loop during a
+      show is not a failure anybody can recover from. Reaching the assertions
+      below IS the test. */
+  folded.clear();
+
+  tree.at = reply([...cue("A", "B", "member", "group"), ...cue("B", "A", "member", "group")]);
+  folded.add("A");
+  folded.add("B");
+
+  openTo("A");
+
+  assert.equal(folded.has("A"), false);
+  assert.equal(folded.has("B"), false);
+
+  /*  And a row the reply does not carry at all is a walk that ends at once -
+      a poll that arrived half-built, or a cue deleted between the click and
+      the render. */
+  tree.at = reply([]);
+  folded.add("SOMETHING");
+
+  openTo("GHOST");
+  assert.equal(folded.has("SOMETHING"), true, "a cue nobody published unfolds nothing");
+});
+
+test("a header line opens the header that draws it, and a row opens where it lives", () => {
+  /*  THE TWO FORMS ARE NOT THE SAME WALK, and this is the pair that says so: a
+      member marked `preset` for one group can live inside another entirely -
+      that is the point of it, the header gets it ready and it runs where it
+      sits - so the derived line opens the group whose header DRAWS it, and the
+      member's own row opens the group that HOLDS it. */
+  const served = reply([
+    ...cue("G", "L", "member", "group"),
+    ...cue("OTHER", "L", "member", "group"),
+    ...cue("D", "OTHER", "member", "fade"),
+  ]);
+
+  tree.at = served;
+  folded.clear();
+  for (const key of ["G", "G:header", "OTHER"]) folded.add(key);
+
+  openForKey("preset:G:D");
+
+  assert.equal(folded.has("G"), false, "the group the line is drawn in");
+  assert.equal(folded.has("G:header"), false, "and its header, or the line is still not drawn");
+  assert.equal(folded.has("OTHER"), true, "but not where the member itself lives");
+
+  tree.at = served;
+  folded.clear();
+  for (const key of ["G", "G:header", "OTHER"]) folded.add(key);
+
+  openForKey("cue:D");
+
+  assert.equal(folded.has("OTHER"), false);
+  assert.equal(folded.has("G"), true);
+  assert.equal(folded.has("G:header"), true);
+
+  folded.clear();
 });

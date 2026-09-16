@@ -14,43 +14,45 @@
     SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-/*  WHAT THE READER IS LOOKING AT, which is the page's and never the
-    engine's (§14.1): the groups folded shut, and the inspected cue - NOT the
-    standby (§3.5). */
+/*  WHAT THE READER HAS PICKED, which is the page's and never the engine's
+    (§14.1): the inspected cue - NOT the standby (§3.5), which is the show's and
+    lives in a node.
 
-const folded = new Set();          // group ids the reader has closed
+    WHAT IS FOLDED IS NO LONGER HERE. Folding and the inspector's arrangement
+    moved to model/remember.js when they gained a memory that survives a reload;
+    they are the same kind of thing as this file's subject - the reader's own
+    view, never the document's - but they are written down and this is not. What
+    is picked is deliberately NOT remembered: it is a question somebody is asking
+    right now, and a page that reopened three days later still pointing at a cue
+    would be asserting an interest nobody has. */
 
-/*  In an object rather than a variable of its own, because it is written
-    from more than one module - a click picks, a new show clears - and an
-    imported binding is one no importer may assign to. */
-const selection = { picked: null };
+/*  In an object rather than a variable of its own, because it is written from
+    more than one module - a click picks, a new show clears - and an imported
+    binding is one no importer may assign to. */
+const selection = {
+  picked: null,
 
-/*  AND WHETHER THE INSPECTOR'S DETAILS ARE OPEN (author, 2026-09-16: "hide the
-    internal stuff like the various UIDs, hash and other things that are not
-    really necessary for the user").
+  /*  WHERE THE PAGE HAS JUST BEEN SENT, while it is still worth saying so.
 
-    Shut by default and kept for as long as the page is open, like a folded
-    group and for the same reason: it is what this reader is looking at, not
-    something the show knows (§14.1). It does not survive a reload, which is
-    the honest place to leave it until 5.14 gives the page somewhere of its own
-    to remember such things. */
-const panel = {
-  details: false,
+      `null`, or `{ key, until, scrolled }`: the reconciler key of the row a
+      reveal was aimed at, the moment the highlight stops being drawn, and
+      whether the list has already been scrolled to it.
 
-  /*  WHERE THE INSPECTOR SITS: "side" is the third column it has always been,
-      "foot" is a band across the bottom under Didi and Gogo.
+      A reveal is how the two views of one cue are joined up (author,
+      2026-09-16: "I could get the focus of a header item with the actual cue"):
+      a derived line in a header and the member's own row are the same object
+      drawn twice, and clicking either goes to the other. Arriving at a row in a
+      list of five hundred is no use if the row does not say it is the one that
+      was asked for, so it is marked for about a second and then is not.
 
-      The author raised it with the page open (2026-09-16): three columns mean
-      picking on the left and adjusting on the right, over and over, and the
-      two views that are coming - a curve with draggable breakpoints (5.16b)
-      and a coloured bar of a file (5.17) - both want width rather than depth,
-      which is why QLab puts its inspector at the foot. Neither answer is
-      obviously right, so the page can be flipped and looked at.
-
-      Here rather than in localStorage for the fold's reason: the page holds no
-      storage of its own until 5.14 gives it some, and the display presets that
-      PR lands are where this belongs in the end. */
-  layout: "side",
+      IN THE MARKUP AND NOT ON THE ELEMENT. views/didi.js draws the mark as an
+      attribute on the row it emits, because the reconciler copies a fresh
+      element's attributes onto the live one and removes any the fresh one
+      lacks: a class added to a live element after a render is wiped by the next
+      poll, a tenth of a second later. `scrolled` is here for the same kind of
+      reason - the scroll must happen once, when the row first exists, and not
+      again on every poll for as long as the mark is up. */
+  reveal: null,
 };
 
-export { folded, panel, selection };
+export { selection };

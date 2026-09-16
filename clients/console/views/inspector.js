@@ -18,7 +18,8 @@
     each node says about itself (§14.2), and the gestures that act on it. */
 
 import { tree } from "../plumbing/tree.js";
-import { panel, selection } from "../model/selection.js";
+import { panel } from "../model/remember.js";
+import { selection } from "../model/selection.js";
 import { el, esc } from "./common.js";
 import { isList, shownValue, refreshFields } from "./values.js";
 

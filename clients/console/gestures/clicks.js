@@ -20,11 +20,37 @@
 
 import { tree } from "../plumbing/tree.js";
 import { dbl, int, str } from "../plumbing/osc.js";
-import { folded, panel, selection } from "../model/selection.js";
+import { openForKey, panel, save, toggle } from "../model/remember.js";
+import { selection } from "../model/selection.js";
 import { view } from "../views/view.js";
 import { el } from "../views/common.js";
 import { aimedList } from "../views/aim.js";
 import { gesture } from "./table.js";
+
+/*  GO AND LOOK AT A ROW, which two of the branches below share.
+
+    A row can be asked for that is not currently drawn - a member folded away
+    inside two shut groups, a derived line in a shut header - so the asking has
+    two halves: `openForKey` unfolds whatever has to be open for a row with that
+    key to exist at all (model/remember.js), and `selection.reveal` says which
+    row it was and for how long, which is Didi's to draw.
+
+    IT IS DIDI'S AND NOT THIS FILE'S because the mark has to be in the markup:
+    the reconciler copies a fresh element's attributes onto the live one and
+    removes the ones the fresh element lacks, so anything this handler added to
+    an element by hand would be wiped by the next poll a tenth of a second
+    later. What this records is a fact about what the reader asked for; the
+    render decides how to say it.
+
+    A SHADE LONGER THAN THE HIGHLIGHT IT LIGHTS, which fades over a second, so
+    the deadline outlives the animation rather than cutting it short on a poll
+    that lands at the wrong moment. */
+const REVEAL_MS = 1100;
+
+function lookAt(key) {
+  openForKey(key);
+  selection.reveal = { key: key, until: Date.now() + REVEAL_MS, scrolled: false };
+}
 
 document.addEventListener("click", (event) => {
   /*  A CHECKBOX CLICKED WITH THE MOUSE LETS GO OF THE FOCUS, as the slider
@@ -38,16 +64,35 @@ document.addEventListener("click", (event) => {
 
   const data = event.target && event.target.dataset;
 
-  if (data && data.fold) {
-    if (folded.has(data.fold)) folded.delete(data.fold); else folded.add(data.fold);
+  /*  ANYTHING THAT SAYS IT FOLDS, and `closest` rather than the target's own
+      dataset because the thing that folds is no longer only the twist: a
+      header's or a footer's band is a head with a word and a count beside its
+      twist, and somebody aiming at a section clicks the WORD. A twist is a
+      six-pixel glyph, which is a poor target on a desktop and an unusable one
+      on the tablet this page is meant to be operated from. The twist stays as
+      the shape that says which way it is (§4.8); the whole head is the button.
+
+      Where it is BECAUSE IT WINS: a group's twist sits inside a row that picks,
+      so the two gestures overlap on exactly one element, and folding is what
+      somebody who aimed at the twist meant. */
+  const foldable = event.target.closest && event.target.closest("[data-fold]");
+
+  if (foldable) {
+    toggle(foldable.dataset.fold);
     view.render();
     return;
   }
 
   /*  WHERE THE INSPECTOR SITS, which is the page's own arrangement and no
-      business of the engine's (§14.1). One button, two answers. */
+      business of the engine's (§14.1). One button, two answers, and the answer
+      is written down as it is given: an arrangement somebody settled on that
+      went back to "side" on every refresh would be one they stopped flipping.
+      It is kept for the MACHINE and not per show, since which way somebody
+      likes their panes is a fact about the desk they are sitting at
+      (model/remember.js). */
   if (data && data.layout) {
     panel.layout = panel.layout === "foot" ? "side" : "foot";
+    save();
     view.render();
     return;
   }
@@ -55,9 +100,11 @@ document.addEventListener("click", (event) => {
   /*  THE INSPECTOR'S DETAILS, which is the same gesture one pane over. The
       <summary> toggles itself as well - that is what the element is for - and
       this records WHICH WAY it went, so the next render draws what the reader
-      last chose rather than shutting it again under their hand. */
+      last chose rather than shutting it again under their hand. Written down
+      with the arrangement above, and for the same reason. */
   if (data && data.details) {
     panel.details = !panel.details;
+    save();
     view.render();
     return;
   }
@@ -151,6 +198,35 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  /*  LOOKING IS NOT PICKING, and this branch is the whole difference.
+
+      A member marked `preset` for some group carries a flag saying which header
+      gets it ready, and that flag is now a way of going there. It is a
+      SECOND thing on a row that already picks, which is why it is read off the
+      clicked element ITSELF and not off `closest`: the flag is the only element
+      in the row that carries `data-reveal`, so aiming at it is unambiguous, and
+      aiming anywhere else in the row still picks the row below.
+
+      Before the picking branch because it must beat it: the flag lives inside
+      the row, and somebody who clicked the flag asked to be shown somewhere
+      else, not to re-pick the cue they were already standing on. Nothing here
+      touches `selection.picked` - the inspector goes on showing what it was
+      showing, which is what makes this a glance rather than a move.
+
+      AND NOT WHEN THE SAME ELEMENT ALSO PICKS, which the derived line in a
+      header does: that whole row carries both, and it means both - pick the
+      member, then go to the row it runs from. A click that lands on the row
+      itself rather than on one of its cells would otherwise be caught here and
+      returned from, so the same line would pick or not pick depending on
+      whether the pointer was over a word or over the space between two of
+      them. Two attributes on one element is the flag's case only; the row's
+      case is answered below, where the pick is. */
+  if (data && data.reveal && !data.pick) {
+    lookAt(data.reveal);
+    view.render();
+    return;
+  }
+
   const row = event.target.closest && event.target.closest("[data-pick]");
 
   /*  PICKING A ROW IS ASKING ABOUT IT. The inspector already opens on a click,
@@ -163,5 +239,18 @@ document.addEventListener("click", (event) => {
       gesture("aim", [str(list), str(row.dataset.pick),
                            dbl(Number(el("aim-offset").value))]);
   }
-  if (row) { selection.picked = row.dataset.pick; view.render(); }
+  if (row) {
+    selection.picked = row.dataset.pick;
+
+    /*  AND A ROW THAT IS A SECOND VIEW OF A CUE SAYS WHERE THE FIRST ONE IS.
+        The derived line in a header is a reading of a mark on a member that
+        lives further down the list, so the whole ROW carries `data-reveal`:
+        clicking it picks the member - there is one object and the inspector
+        edits it - and goes to the row that member actually runs from, which is
+        the question anybody clicking a line in italics is asking. One gesture,
+        both answers, no second aim. */
+    if (row.dataset.reveal) lookAt(row.dataset.reveal);
+
+    view.render();
+  }
 });

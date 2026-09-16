@@ -56,6 +56,15 @@
   /*  The inspector's own ground, a shade off the other panes: see #pane-inspect. */
   --panel-inspect: #21212a;
   --panel-high: #24242b;
+
+  /*  A SECTION'S OWN GROUND, and the only one on this page that goes UNDER the
+      panel rather than over it. A header or a footer is a part of the list set
+      INTO it, and the recess is the first thing that says so - before the frame
+      around it is read and before the word at its head is. Near enough to
+      `--panel` that it never reads as a second pane, far enough that the step
+      survives a projector or a photograph. */
+  --panel-in:   #191920;
+
   --rule:       #3a3a45;
   --standby:    #e8b04b;
   --live:       #4bc38a;
@@ -524,6 +533,21 @@ button:disabled { color: var(--ink-off); cursor: default; }
   .row > .when, .cols > .when { display: none; }
 }
 
+/*  A SECTION IS A SHADE RECESSED, and this one declaration of the frame has to
+    be written HERE rather than with the rest of it - the frame's own block is
+    further down, under "sections as frames".
+
+    `.row[data-in]` and `.row:hover` each weigh one class and one thing beside
+    it, so they are equals and the LATER of the two wins. Written under the
+    hover, the recess would have held its ground with the pointer over the row,
+    and a standby parked inside a header would have kept the recess instead of
+    its own lighter ground - which is the same cascade this file has already got
+    wrong twice, once in a container query and once at the foot arrangement.
+    Written above them, every state of a row still beats it, which is what a
+    ground is for. The flash further down needs none of this care: an animation
+    outranks a plain declaration whatever the two weigh. */
+.row[data-in] { background: var(--panel-in); }
+
 .row:hover { background: var(--panel-high); }
 
 /*  THE STANDBY, and colour is not the only thing saying so (§4.8): a wedge in
@@ -622,7 +646,27 @@ button:disabled { color: var(--ink-off); cursor: default; }
 #aim-plan .confused { color: var(--waiting); }
 #aim-plan .none { color: var(--ink-faint); font-style: italic; }
 
-.tail .flag.preset { color: var(--picked); text-transform: none; letter-spacing: 0; cursor: help; }
+/*  THE MARK THAT GOES SOMEWHERE (author, 2026-09-16: "I could get the focus of
+    a header item with the actual cue"). It was a `help` cursor over a sentence
+    naming the header that gets this cue ready; the sentence is still there and
+    the mark is now a way in as well - `data-reveal` on it opens whatever has to
+    open and takes the reader to the line in that header. So it is a pointer,
+    and it says so under one: an underline, which is this page's own idiom for a
+    word that goes somewhere (`.back`, in the inspector), and a little more
+    light. The hover weighs one class more than the rule above it, so neither
+    depends on which comes first.
+
+    ONLY WHERE IT ACTUALLY GOES SOMEWHERE, which is why both are keyed on
+    `[data-reveal]` rather than on the class. A `preset` naming a group this cue
+    is not inside is a warning the engine tolerates rather than refuses, so that
+    header shows no line for it and the row is drawn with the mark and no
+    `data-reveal` (views/didi.js says why). A mark that looked like a link and
+    did nothing would be the worse of the two answers, so the inert one keeps
+    the `help` cursor its sentence has always deserved. */
+.tail .flag.preset { color: var(--picked); text-transform: none; letter-spacing: 0;
+                     cursor: help; }
+.tail .flag.preset[data-reveal] { cursor: pointer; }
+.tail .flag.preset[data-reveal]:hover { text-decoration: underline; filter: brightness(1.15); }
 .row.derived .name .text, .row.derived .number { font-style: italic; color: var(--ink-faint); }
 .row.derived .tail .flag { color: var(--picked); }
 .tail .standby-word { color: var(--standby); }
@@ -630,6 +674,152 @@ button:disabled { color: var(--ink-off); cursor: default; }
 .band {
   font-size: var(--t-9); letter-spacing: .1em; text-transform: uppercase;
   color: var(--ink-faint); padding: 3px 0 1px;
+}
+
+/* ----------------------------------------------------- sections as frames */
+/*  A HEADER AND A FOOTER READ AS FRAMES, AND THEY SHUT (author, 2026-09-16: "I
+    think we're missing a clearer delimiter between the header section and
+    footer, something like a collapsible frame").
+
+    THE FRAME IS A RAIL AND TWO CORNERS AND NEVER A BOX, because the cue list is
+    one flat list of keyed rows and there is no element around a section to put
+    a border on. The head draws the top edge, every row inside draws the same
+    one-pixel rule down its own left side, and the end row - pushed after
+    whatever turned out to be the last line of the section - turns that rule
+    right and stops it. Three elements drawing one shape, which holds together
+    only while all three measure from the same left edge: see the border below.
+
+    `--rail` IS WHERE THE BAND'S OWN WORD STANDS, handed to all three as an
+    inline style by views/didi.js and scaled by the type knob there. Everything
+    in this block is measured from it, so the frame keeps its place at any size
+    of type. */
+
+/*  THE THREE PIXELS A ROW RESERVES FOR THE STANDBY RULE, borrowed by the two
+    band elements. An absolutely placed child is laid out from its parent's
+    PADDING box, so without this border the head's corner and the end's would
+    each stand three pixels left of the rails they are drawn to meet. `.cols`
+    borrows the same border for the same reason and says so above. */
+.band[data-fold], .band-end { position: relative; border-left: 3px solid transparent; }
+
+/*  AND A RAIL TO FALL BACK ON. All three carry `--rail` inline, so this is
+    never read in practice; it is here because a `left` built on a custom
+    property that is not there is not nought but INVALID, and an invalid `left`
+    leaves the rule at the row's own start rather than leaving it out. Depth
+    nought's offset, which is the persistent band's. */
+.row[data-in], .band[data-fold], .band-end { --rail: calc(12px + 80px * var(--type)); }
+
+/*  WHERE THE RULE STANDS: eight pixels left of the label - AND NEVER LEFT OF
+    THE NUMBER COLUMN, which is what the floor under it is for.
+
+    Eight is comfortable for a group's section, whose rail falls in the empty
+    indent of the name cell: sixteen pixels of it per level deep. The persistent
+    band at the foot of a list is at depth nought and has no indent at all, and
+    there eight pixels left of the label is four pixels INSIDE the number
+    column - the rule would have been drawn straight through the cue numbers.
+    The number column ends at `calc(8px + 80px * var(--type))` in this
+    coordinate, so the floor is three pixels past it: in the gutter between a
+    number and a name, clear of both, wherever the type knob is set. `max()` is
+    a far older thing than the container queries this file already leans on. */
+.row[data-in]::before,
+.band[data-fold]::before,
+.band-end::before {
+  content: ""; position: absolute; pointer-events: none;
+  left: max(calc(var(--rail) - 8px), calc(11px + 80px * var(--type)));
+}
+
+.row[data-in] { position: relative; }
+.row[data-in]::before { top: 0; bottom: 0; width: 1px; background: var(--rule); }
+
+/*  THE HEAD, and the whole of it is the target: the click handler asks for the
+    nearest `[data-fold]` rather than for the twist itself, so a word missed by
+    a pixel still opens the section - which is why the word lifts under the
+    pointer and not only the twist.
+
+    THE WORD CARRIES IT AND THE COUNT SAYS HOW MUCH (§4.8): the twist is a
+    shape, the word is a word, and the count is a number - how many lines the
+    section holds, or how many are hidden while it is shut. Not one of the three
+    is a colour. The count is the dimmer of the two greys, which is the only
+    thing in the head that ranks them. */
+.band[data-fold] {
+  display: flex; align-items: center; gap: 6px;
+  padding-top: 6px; padding-bottom: 3px;
+  cursor: pointer; user-select: none;
+
+  /*  THE HEAD AND THE END TAKE THE SECTION'S GROUND TOO, so the recess begins
+      at the rule over the word and ends under the last row rather than a line
+      short of each. Nothing else gives a band a ground, so unlike the rows'
+      recess above this one has nothing to lose to. */
+  background: var(--panel-in);
+}
+.band[data-fold] > .word { color: var(--ink-dim); }
+.band[data-fold] > .count { color: var(--ink-faint); letter-spacing: 0; }
+.band[data-fold]:hover > .word, .band[data-fold]:hover > .twist { color: var(--ink); }
+
+/*  The top edge, and the rail coming down out of its left end to meet the first
+    row of the section. It is drawn above the word rather than beside it, so the
+    word sits inside the frame it heads; it stops where a row's own contents
+    stop, twelve pixels short of the pane, which is the edge `.cols` and every
+    row already keep. */
+.band[data-fold]::before {
+  top: 0; bottom: 0; right: 12px;
+  border-top: 1px solid var(--rule);
+  border-left: 1px solid var(--rule);
+  border-top-left-radius: 4px;
+}
+
+/*  AND NOTHING IS FRAMED WHEN NOTHING IS SHOWN. A shut section keeps the rule
+    over its word - that rule is what parts it from the rows above, open or
+    shut - and loses the rail under it, which would otherwise hang off the
+    bottom of the head with nothing to enclose. More specific than the rule it
+    trims, so it does not turn on which of them is written first. */
+.band[data-fold][data-shut="yes"]::before {
+  border-left-color: transparent; border-top-left-radius: 0;
+}
+
+/*  THE END: a few pixels of rail turning right, and the section is closed. The
+    row holds nothing at all, so its height is the whole of it. */
+.band-end { height: 7px; background: var(--panel-in); }
+.band-end::before {
+  top: 0; width: 14px; height: 6px;
+  border-bottom: 1px solid var(--rule);
+  border-left: 1px solid var(--rule);
+  border-bottom-left-radius: 4px;
+}
+
+/*  THE REVEAL: where the reader was just sent. `data-flash` is in the markup
+    for as long as the reveal lasts, and has to be - `morph` copies the fresh
+    element's attributes onto the live one and takes away the ones it does not
+    carry, so a class put on a row after a render is wiped by the next poll a
+    tenth of a second later.
+
+    A WASH RATHER THAN AN OUTLINE, so that it reads as the row lighting up and
+    not as a second selection, and in the selection's own purple because that is
+    what the reader followed to get here. The literal rgba is `--picked` at a
+    third of itself: a keyframe has to fade towards a transparent form of the
+    SAME colour or the wash darkens on its way out, and that is a mix this page
+    would otherwise have to work out at run time.
+
+    It needs no help from the cascade. An animation outranks every plain
+    declaration whatever the two weigh, so the wash is seen over a hover, over a
+    standby's lighter ground and over a section's recess alike. */
+@keyframes row-revealed {
+  from { background-color: rgba(154, 149, 228, .34); }
+  to   { background-color: rgba(154, 149, 228, 0); }
+}
+.row[data-flash="yes"] { animation: row-revealed 1s ease-out; }
+
+/*  AND STILL SOMETHING TO SEE FOR ANYBODY WHO HAS ASKED FOR NO MOTION. An
+    outline held for as long as the attribute is there, rather than a second of
+    movement; a shade heavier than a selection's, so a row that is both is still
+    plainly the one that was just found. It weighs exactly what the selection's
+    outline weighs and stands after it, which is what settles the two. And the
+    flash is never the only telling (§4.8): the sections above it opened, and
+    the pane scrolled the row into view. */
+@media (prefers-reduced-motion: reduce) {
+  .row[data-flash="yes"] {
+    animation: none;
+    outline: 2px solid var(--picked); outline-offset: -2px;
+  }
 }
 
 /* --------------------------------------------------------- running pane */

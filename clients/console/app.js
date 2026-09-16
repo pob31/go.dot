@@ -18,7 +18,8 @@ import { tree } from "./plumbing/tree.js";
 import { servedByEngine, openSocket } from "./plumbing/link.js";
 import { poll } from "./plumbing/poll.js";
 import "./model/index.js";
-import { folded, selection } from "./model/selection.js";
+import { selection } from "./model/selection.js";
+import { adopt } from "./model/remember.js";
 import { view } from "./views/view.js";
 import { renderStrip } from "./views/strip.js";
 import { renderLists } from "./views/didi.js";
@@ -60,11 +61,12 @@ import { table, loadTable } from "./gestures/table.js";
     a view is changed by changing its file and refreshing the tab - during a
     show that is already running, with the engine untouched and the runs still
     playing. `index.html` is the shell; `styles.css` its look; `plumbing/` the
-    socket, the poll and the tree; `model/` the indexes and the selection;
-    `views/` one file per pane; `gestures/` the clicks, the fields, the keys,
-    and `commands.json`, the table that says which named command each gesture
-    sends - read by this page, and by the desktop client when it comes
-    (§14.16), so that the two cannot drift on the names. */
+    socket, the poll and the tree; `model/` the indexes, the selection and what
+    this reader is remembered to be looking at; `views/` one file per pane;
+    `gestures/` the clicks, the fields, the keys, and `commands.json`, the table
+    that says which named command each gesture sends - read by this page, and by
+    the desktop client when it comes (§14.16), so that the two cannot drift on
+    the names. */
 
 let lastShow = null;               // whose identifiers the selection means
 
@@ -75,8 +77,19 @@ function render() {
   const show = tree.get("/godot/document/path", "");
 
   /*  Folding and the selection are the reader's, and they are kept across polls
-      - but not across a different show, where the identifiers mean nothing. */
-  if (show !== lastShow) { folded.clear(); selection.picked = null; lastShow = show; }
+      - but not across a different show, where the identifiers mean nothing.
+
+      `adopt` does both halves of that for the folds: it drops the ones that
+      belonged to the show being left, and loads whatever this reader last had
+      shut in the one being opened (model/remember.js). What is picked and where
+      the page was last sent are dropped and not reloaded - they are questions
+      somebody was asking about the old document. */
+  if (show !== lastShow) {
+    adopt(show);
+    selection.picked = null;
+    selection.reveal = null;
+    lastShow = show;
+  }
 
   view.renderStrip();
   view.renderLists();

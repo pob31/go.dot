@@ -3862,8 +3862,8 @@ or none at all, gets a STATUS line and no entry. There is one entry and not one 
 since nothing here formats a number for a person. `intersect`/`agree` and `pointsToText` belong
 to 5.12 and 5.16b, which will add their tests with the code; the harness is ready for them.
 
-*What the author changed while looking (2026-09-16).* **The page went in front of him for the
-first time, and the next nine commits are his notes rather than the plan's.** They are recorded
+*What the author changed while looking (2026-09-16).* **The page went in front of the author for
+the first time, and the commits below are their notes rather than the plan's.** They are recorded
 here because §14.3 is where this client's design lives, and because several of them decide
 things the remaining views inherit.
 
@@ -3905,6 +3905,45 @@ things the remaining views inherit.
   with the inspector also carrying the selection's own colour on its heading and its leading
   edge, so it is told apart after the movement as well as during it. `prefers-reduced-motion`
   turns the movement off and leaves the colour.
+- **A section is a frame that shuts** — *"I think we're missing a clearer delimiter between the
+  header section and footer, something like a collapsible frame"*. A group's header, its footer
+  and a list's persistent band each get a head row (a twist, the word, a count), a rule down the
+  left of every row the section holds, and an end row closing it. **Drawn as a rail on each row
+  rather than as a box around them**, because the reconciler keeps ONE FLAT LIST of keyed rows:
+  a wrapper element would be a second level of nesting it does not model, and every row inside
+  it would have to be reconciled against the wrapper rather than against the pane. The end row
+  is pushed after the lines rather than worked out from a count, because a header cue may itself
+  be an open group whose own children follow it. And the frame travels DOWN the recursion: a
+  group sitting in a header has role `header`, but its members have role `member` and are still
+  drawn between that header's two band rows, so what a row is drawn INSIDE is the question, not
+  what its own `role` says.
+- **And what the reader shut outlives the reload** — *"yes we need to store the expanded and
+  collapsed state of the different containers"*. `model/remember.js`: one localStorage key,
+  `godot.console.view`, holding the shut keys per document path and the panel's two preferences
+  globally, capped at twelve documents by recency — with the document being written taken out of
+  the eviction's reach, or a machine whose clock ran ahead and was put right would sort tonight's
+  show off its own end. It is the reader's and never the engine's (§14.1): a second operator on a
+  second tablet folds their own groups with no byte reaching anybody else, which is also why it
+  is not a node and needs no row in the table. Every touch of storage is wrapped, because naming
+  `localStorage` is itself what throws in a browser told to block site data: a private window or
+  a quota refusal leaves the page working exactly as it did before the file existed, with the
+  fold lasting as long as the tab. **This is the store 5.14's display presets land in**; it
+  arrived early because the author asked for the folds.
+- **A header line and the cue it is a view of point at each other** — *"I could get the focus of
+  a header item with the actual cue"*. A derived line is the one place on this page where ONE
+  OBJECT IS DRAWN TWICE: its own row where it sits in the list, and an italic line in the header
+  of the group that gets it ready. Clicking the line now picks the member AND takes the reader to
+  the member's own row — whatever must be unfolded is unfolded first (the walk is up `parent` and
+  `role`, both published and derived, so it cannot disagree with the tree the rows come from),
+  the row is scrolled in with `block: "nearest"`, which does nothing when it is already on screen
+  so the list never jumps for no reason, and it is marked for about a second. The mark is IN THE
+  MARKUP rather than set on the element afterwards: `morph` copies the fresh element's attributes
+  onto the live one and removes any the fresh one lacks, so a class set by hand is wiped by the
+  next poll a tenth of a second later. The mark on a member's own row goes the other way and does
+  NOT move the selection — looking is not picking — and it is a link only where the header it
+  names actually shows the line: `preset` naming a non-ancestor is a validate warning the engine
+  tolerates rather than refuses, and a way in to a place the page cannot reach would open that
+  group and its header, throwing away the folds the reader now keeps, to show them nothing.
 
 **Two things the author named for later, neither started.** A **toolbar** — *"there are probably
 a tool bar to design too"* — which is a design question about what an operator reaches for
