@@ -18,6 +18,7 @@
     disk, the lock, the undo stack's words, and the engine's own numbers. */
 
 import { tree } from "../plumbing/tree.js";
+import { panel } from "../model/selection.js";
 import { el, esc } from "./common.js";
 
 function renderStrip() {
@@ -111,6 +112,19 @@ function renderStrip() {
   lockButton.textContent = isLocked ? "unlock the show" : "lock the show";
   lockButton.setAttribute("aria-pressed", isLocked ? "true" : "false");
   lockButton.disabled = !isLocked && !isOpen;
+
+  /*  AND WHERE THE INSPECTOR SITS, in the same shape as the lock: the button
+      says what it would DO, not what is true, so nobody has to work out which
+      of two states they are looking at from a word that could be either. The
+      panes themselves are arranged by the stylesheet off `data-layout`. */
+  const atFoot = panel.layout === "foot";
+
+  el("panes").dataset.layout = panel.layout;
+  el("layout").textContent = atFoot ? "inspector to the side" : "inspector to the foot";
+  el("layout").title = atFoot
+    ? "put it back in a column of its own, beside the running pane"
+    : "put it across the foot, under both panes - more width for a waveform"
+      + " or a curve, and less distance from the row you picked";
 
   /*  WHAT UNDO WOULD UNMAKE, AND IN WHOSE WORDS.
 

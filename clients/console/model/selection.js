@@ -34,6 +34,23 @@ const selection = { picked: null };
     something the show knows (§14.1). It does not survive a reload, which is
     the honest place to leave it until 5.14 gives the page somewhere of its own
     to remember such things. */
-const panel = { details: false };
+const panel = {
+  details: false,
+
+  /*  WHERE THE INSPECTOR SITS: "side" is the third column it has always been,
+      "foot" is a band across the bottom under Didi and Gogo.
+
+      The author raised it with the page open (2026-09-16): three columns mean
+      picking on the left and adjusting on the right, over and over, and the
+      two views that are coming - a curve with draggable breakpoints (5.16b)
+      and a coloured bar of a file (5.17) - both want width rather than depth,
+      which is why QLab puts its inspector at the foot. Neither answer is
+      obviously right, so the page can be flipped and looked at.
+
+      Here rather than in localStorage for the fold's reason: the page holds no
+      storage of its own until 5.14 gives it some, and the display presets that
+      PR lands are where this belongs in the end. */
+  layout: "side",
+};
 
 export { folded, panel, selection };

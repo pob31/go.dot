@@ -44,6 +44,14 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  /*  WHERE THE INSPECTOR SITS, which is the page's own arrangement and no
+      business of the engine's (§14.1). One button, two answers. */
+  if (data && data.layout) {
+    panel.layout = panel.layout === "foot" ? "side" : "foot";
+    view.render();
+    return;
+  }
+
   /*  THE INSPECTOR'S DETAILS, which is the same gesture one pane over. The
       <summary> toggles itself as well - that is what the element is for - and
       this records WHICH WAY it went, so the next render draws what the reader

@@ -120,6 +120,45 @@ html, body {
   #panes { grid-template-columns: minmax(0, 1fr) minmax(calc(260px * var(--type)), 0.9fr); }
 }
 
+/*  THE INSPECTOR AT THE FOOT, which is the other arrangement worth looking at.
+
+    Three columns mean picking a row on the left and adjusting it on the right,
+    all evening; QLab puts its inspector across the bottom for that reason, and
+    because the things one edits there - a waveform, a curve - want width. The
+    two views this page has coming are exactly those (5.16b, 5.17).
+
+    So: Didi and Gogo share the top, the inspector takes the whole foot, and
+    nothing about the panes themselves changes - each is still a pane with a
+    header and a scroller, and the fields inside flow into columns on their own
+    when the pane is wide enough (below). Which arrangement is on is the page's
+    own business and the engine is never told (§14.1). */
+#panes[data-layout="foot"] {
+  grid-template-columns: minmax(0, 1.45fr) minmax(calc(210px * var(--type)), 1fr);
+  grid-template-rows: minmax(0, 1.35fr) minmax(calc(180px * var(--type)), 1fr);
+}
+#panes[data-layout="foot"] > .pane:nth-child(3) {
+  grid-column: 1 / -1;
+  border-left: none;
+  border-top: 1px solid var(--rule);
+}
+
+/*  AND THE FIELDS FLOW INTO COLUMNS WHERE THERE IS ROOM FOR THEM, which is
+    what makes the foot worth having rather than one very wide field per line.
+    Asked of the inspector's own pane, so it is right in either arrangement and
+    at any window: a side column never reaches this width, and the foot does.
+
+    The blocks stay blocks: a heading, the fold, the buttons and the cue's own
+    name span every column, so what flows is the fields under each heading. */
+@container (min-width: 700px) {
+  #inspect {
+    display: grid; align-content: start;
+    grid-template-columns: repeat(auto-fill, minmax(calc(300px * var(--type)), 1fr));
+    column-gap: 22px;
+  }
+  #inspect > .who, #inspect > .back, #inspect > .group-head,
+  #inspect > .actions, #inspect > details.derived, #inspect > .empty { grid-column: 1 / -1; }
+}
+
 .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0;
         background: var(--panel); container-type: inline-size; }
 .pane + .pane { border-left: 1px solid var(--rule); }
