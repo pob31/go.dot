@@ -19,7 +19,8 @@
 
 import { tree } from "../plumbing/tree.js";
 import { folded, selection } from "../model/selection.js";
-import { el, esc, seconds, cueName } from "./common.js";
+import { el, esc, cueName } from "./common.js";
+import { refreshFields } from "./values.js";
 import { reconcile } from "./reconcile.js";
 
 /*  The current answer, refreshed by `renderLists` and read by `cueRow`. */
@@ -37,6 +38,53 @@ function prepareNote(word) {
 }
 
 
+/*  THE THREE TIMES, AS COLUMNS SOMEBODY CAN TYPE IN (author, 2026-09-16).
+
+    They were two words in the tail - `wait 2s`, `hold 3s` - which said what a
+    cue does and could not be changed without opening it. A cue list is where
+    the timing of a scene is read across rows rather than down one, so they are
+    columns: the same three attributes the inspector offers, in the same order
+    a cue lives them, aligned so a column can be read at a glance.
+
+    APPLICABLE OR NOT IS THE TREE'S ANSWER, never a list of kinds kept here. A
+    memo has no `duration` node, so its cell is empty; a media cue's duration is
+    the file's length, published read-only (§4.10), so it is shown and not
+    offered; a fade's and a stop's are decisions, so they are boxes. The day a
+    kind gains or loses one of these rows, this follows without an edit.
+
+    Each box is an ordinary field: `data-set` is the address, and the commit,
+    the Escape and the "do not write under somebody's hands" rule are the ones
+    gestures/fields.js already keeps for the inspector. */
+function timeCell(id, name) {
+  const node = tree.node("/godot/cue/" + id + "/" + name);
+
+  if (!node) return '<div class="when"></div>';
+
+  const writable = (Number(node.ACCESS) & 2) !== 0;
+  const value = Array.isArray(node.VALUE) && node.VALUE.length ? node.VALUE[0] : "";
+  const said = String(node.DESCRIPTION || "");
+  const note = esc(name + (said ? " — " + said.split(". ")[0] : ""));
+
+  /*  AND A READ-ONLY NOUGHT IS BLANK TOO, or one column would spell nothing in
+      two ways: an empty box where a fade waits for none, and `0.0` where a
+      media cue's file could not be read and its length is unknown. The title
+      still names the attribute, so the empty cell can be asked. */
+  if (!writable) {
+    const number = Number(value);
+    const shown = value === "" || !Number.isFinite(number) || number === 0
+                    ? "" : number.toFixed(1);
+
+    return '<div class="when ro" title="' + note + '">' + esc(shown) + "</div>";
+  }
+
+  return '<div class="when">' +
+           '<input type="number" step="any" min="0" data-blank-zero="yes"' +
+           ' data-set="/godot/cue/' + esc(id) + "/" + esc(name) + '"' +
+           ' value="' + esc(Number(value) === 0 ? "" : value) + '"' +
+           ' title="' + note + '">' +
+         "</div>";
+}
+
 /*  ONE CUE ROW. `depth` is the indent, `role` is member / header / footer, and
     `standby` is the identifier the pointer is on for this list. The row, and
     the rows of a group's contents after it, go into `out` as a key and the
@@ -50,9 +98,6 @@ function cueRow(id, depth, role, standby, out) {
   const number = esc(tree.cue(id, "number", ""));
   const name = esc(tree.cue(id, "name", "") || "—");
 
-  const pre = seconds(tree.cue(id, "preWait", 0));
-  const post = seconds(tree.cue(id, "postWait", 0));
-
   const flags = [];
 
   if (isGroup) {
@@ -61,8 +106,6 @@ function cueRow(id, depth, role, standby, out) {
     flags.push(mode === "timeline" ? "timeline" : advance === "auto" ? "auto" : "manual");
   }
 
-  if (pre) flags.push("wait " + pre);
-  if (post) flags.push("hold " + post);
   if (!enabled) flags.push("disabled");
 
   /*  A cue somebody else can fire. Worth a mark on the row rather than only in
@@ -133,6 +176,7 @@ function cueRow(id, depth, role, standby, out) {
            : "") +
         (id === standby ? '<span class="flag standby-word">standby</span>' : "") +
       "</div>" +
+      timeCell(id, "preWait") + timeCell(id, "duration") + timeCell(id, "postWait") +
     "</div>" });
 
   if (!isGroup || !open) return;
@@ -147,11 +191,16 @@ function cueRow(id, depth, role, standby, out) {
       because that is the order the horizon prepares them in: a written header
       cue may reasonably depend on what the presets set. */
   const derived = tree.ids("/godot/cue/" + id + "/headerDerived");
-  const band = (depth + 1) * 16 + 92;
+  /*  WHERE A BAND'S LABEL SITS: the indent, plus the gutter and the number
+      column that every row above it carries. Those two are scaled by the type
+      knob, so the offset has to be as well - written as a calc rather than as
+      the 92 it comes to at --type 1, or the labels walk left of the rows they
+      head the moment the type moves. */
+  const band = "calc(" + ((depth + 1) * 16) + "px + 12px + 80px * var(--type))";
 
   if (header.length || derived.length) {
     out.push({ key: "band:" + id + ":header",
-               html: '<div class="band" style="padding-left:' + band + 'px">header</div>' });
+               html: '<div class="band" style="padding-left:' + band + '">header</div>' });
 
     derived.forEach((child) => presetLine(child, id, depth + 1, out));
     header.forEach((child) => cueRow(child, depth + 1, "header", standby, out));
@@ -162,7 +211,7 @@ function cueRow(id, depth, role, standby, out) {
 
   if (footer.length) {
     out.push({ key: "band:" + id + ":footer",
-               html: '<div class="band" style="padding-left:' + band + 'px">footer</div>' });
+               html: '<div class="band" style="padding-left:' + band + '">footer</div>' });
     footer.forEach((child) => cueRow(child, depth + 1, "footer", standby, out));
   }
 }
@@ -191,6 +240,7 @@ function presetLine(id, group, depth, out) {
         '<span class="flag" title="got ready by this header; it runs where it sits in the' +
         ' list">preset</span>' +
       "</div>" +
+      '<div class="when"></div><div class="when"></div><div class="when"></div>' +
     "</div>" });
 }
 
@@ -259,6 +309,16 @@ function renderLists() {
   }
 
   reconcile(pane, out);
+
+  /*  AND THE VALUES IN THE TIME BOXES, after the rows are in place.
+
+      A box that has been typed in once keeps the value it was given - the
+      browser stops reflecting the `value` attribute into a field the moment
+      anybody touches it - so an undo, or a second operator's edit, would never
+      reach a box that had ever been used. The inspector has had this pass
+      since it grew fields; this is the same one (views/values.js), and it
+      leaves alone whatever has the focus or holds an uncommitted edit. */
+  refreshFields(pane);
 }
 
-export { renderLists };
+export { renderLists, timeCell };

@@ -18,21 +18,68 @@
     greys, one warm accent and one cool one; everything else is weight and
     position. */
 :root {
+  /*  THE TYPE KNOB, and there is one so that "bigger" is one number rather
+      than thirty-six edits. Every font-size on the page reads a token below,
+      and every token is its original size times this: 1 is the page as it was
+      first drawn, 1.25 is where the author put it on 2026-09-16, looking at a
+      booth screen from a booth's distance. The tokens keep their original
+      names so the scale the page was designed at is still legible. */
+  --type: 1.25;
+
+  --t-9:  calc(9px  * var(--type));
+  --t-10: calc(10px * var(--type));
+  --t-11: calc(11px * var(--type));
+  --t-12: calc(12px * var(--type));
+  --t-13: calc(13px * var(--type));
+  --t-14: calc(14px * var(--type));
+  --t-15: calc(15px * var(--type));
+
   --ink:        #e8e6e1;
-  --ink-dim:    #8b8781;
-  --ink-faint:  #56534f;
+
+  /*  THE TWO GREYS, LIFTED (author, 2026-09-16: "the darker grey text is too
+      dark to read on a black background"). Against the panel they now measure
+      about 8:1 and 5:1 rather than 4.8:1 and 2.1:1, so the faint grey - which
+      carries the strip's labels, every chip on a run row and every read-only
+      value in the inspector - is above the 4.5:1 an eye is entitled to.
+
+      A THIRD GREY FOR WHAT IS GENUINELY OFF. A disabled button used to borrow
+      the faint one; lifting that alone would have made `undo` with nothing to
+      undo look live. `--ink-off` is what dead now means, and it is the only
+      grey on the page that is meant to be hard to read. */
+  --ink-dim:    #b4afa7;
+  --ink-faint:  #8f8a83;
+  --ink-off:    #625f5b;
+
   --ground:     #16161a;
   --panel:      #1d1d22;
   --panel-high: #24242b;
-  --rule:       #2e2e36;
+  --rule:       #3a3a45;
   --standby:    #e8b04b;
   --live:       #4bc38a;
   --stopping:   #d98b4b;
-  --failed:     #d9564b;
-  --waiting:    #6f8ec9;
-  --picked:     #7f7ad6;
+  --failed:     #e0685d;
+  --waiting:    #86a3db;
+  --picked:     #9a95e4;
 
-  --row: 26px;
+  /*  The row grows with the type, or a taller line would sit in a box drawn
+      for a shorter one. */
+  --row: calc(26px * var(--type));
+
+  /*  ONE TEMPLATE FOR THE CUE LIST, read by every row, by the derived lines
+      and by the column heads over them - so the three time columns line up
+      down the pane and under their own names, and moving a column is one edit
+      rather than four that must agree. */
+  --when: calc(54px * var(--type));
+
+  /*  EVERY TRACK BOUNDED BELOW, so the row compresses instead of running off
+      the side of the pane. Fixed tracks that add up to more than the pane give
+      a grid that overflows, and the rows would then scroll sideways under
+      column heads that do not - which is worse than a narrow box. */
+  --cue-grid: minmax(0, calc(18px * var(--type))) minmax(0, calc(62px * var(--type)))
+              minmax(0, 1fr) minmax(0, auto)
+              minmax(0, var(--when)) minmax(0, var(--when)) minmax(0, var(--when));
+  --cue-grid-narrow: minmax(0, calc(18px * var(--type))) minmax(0, calc(62px * var(--type)))
+                     minmax(0, 1fr) minmax(0, auto);
 }
 
 * { box-sizing: border-box; }
@@ -40,7 +87,7 @@
 html, body {
   margin: 0; height: 100%;
   background: var(--ground); color: var(--ink);
-  font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  font: var(--t-13)/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -64,16 +111,17 @@ html, body {
 
 #panes {
   display: grid;
-  grid-template-columns: minmax(0, 1.5fr) minmax(210px, 0.85fr) minmax(300px, 1.05fr);
+  grid-template-columns: minmax(0, 1.5fr) minmax(calc(210px * var(--type)), 0.85fr)
+                         minmax(calc(300px * var(--type)), 1.05fr);
   grid-row: 5;
   min-height: 0;
 }
 @media (max-width: 1080px) {
-  #panes { grid-template-columns: minmax(0, 1fr) minmax(260px, 0.9fr); }
+  #panes { grid-template-columns: minmax(0, 1fr) minmax(calc(260px * var(--type)), 0.9fr); }
 }
 
 .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0;
-        background: var(--panel); }
+        background: var(--panel); container-type: inline-size; }
 .pane + .pane { border-left: 1px solid var(--rule); }
 
 .pane > header {
@@ -81,17 +129,20 @@ html, body {
   padding: 7px 12px; border-bottom: 1px solid var(--rule);
   background: var(--ground);
 }
-.pane > header h2 { margin: 0; font-size: 12px; font-weight: 600; letter-spacing: .06em;
+.pane > header h2 { margin: 0; font-size: var(--t-12); font-weight: 600; letter-spacing: .06em;
                     text-transform: uppercase; color: var(--ink-dim); }
-.pane > header .sub { font-size: 11px; color: var(--ink-faint); }
+.pane > header .sub { font-size: var(--t-11); color: var(--ink-faint); }
 
-.scroll { overflow: auto; flex: 1; min-height: 0; padding: 4px 0 24px; }
+/*  `scrollbar-gutter` so a pane that grows a scrollbar does not shift its rows
+    sideways out from under the column heads above them. */
+.scroll { overflow: auto; flex: 1; min-height: 0; padding: 4px 0 24px;
+          scrollbar-gutter: stable; }
 
 /* ------------------------------------------------------------ the strip */
 #strip {
   display: flex; align-items: center; gap: 18px; flex-wrap: wrap;
   padding: 6px 12px; border-bottom: 1px solid var(--rule);
-  background: var(--ground); font-size: 11px; color: var(--ink-dim);
+  background: var(--ground); font-size: var(--t-11); color: var(--ink-dim);
 }
 #strip .brand { font-weight: 600; color: var(--ink); letter-spacing: .04em; }
 #strip .stat { display: flex; gap: 5px; align-items: baseline; }
@@ -100,7 +151,7 @@ html, body {
     `hidden` attribute, so without this line `hidden` on a stat hides nothing. */
 #strip .stat[hidden] { display: none; }
 #strip .stat b { font-weight: 500; color: var(--ink-faint); text-transform: uppercase;
-                 letter-spacing: .05em; font-size: 10px; }
+                 letter-spacing: .05em; font-size: var(--t-10); }
 #strip .stat span { color: var(--ink); }
 #strip .warn span { color: var(--failed); }
 
@@ -129,12 +180,12 @@ html, body {
 }
 
 button {
-  font: inherit; font-size: 11px; color: var(--ink);
+  font: inherit; font-size: var(--t-11); color: var(--ink);
   background: var(--panel-high); border: 1px solid var(--rule); border-radius: 4px;
   padding: 4px 10px; cursor: pointer;
 }
 button:hover:not(:disabled) { border-color: var(--ink-faint); }
-button:disabled { color: var(--ink-faint); cursor: default; }
+button:disabled { color: var(--ink-off); cursor: default; }
 
 /*  GO IS NOT A BUTTON LIKE THE OTHERS, and it is the one place on this page
     where colour is allowed to shout - though it does not carry the meaning on
@@ -144,14 +195,14 @@ button:disabled { color: var(--ink-faint); cursor: default; }
       font-weight: 700; letter-spacing: .12em; padding: 5px 26px; }
 #go:hover { filter: brightness(1.08); }
 
-#transport .hint { color: var(--ink-faint); font-size: 10px; margin-left: auto; }
+#transport .hint { color: var(--ink-faint); font-size: var(--t-10); margin-left: auto; }
 
 /*  WHAT UNDO WOULD UNMAKE, IN A WORD. The engine names every transaction
     after the command that opened it, so this line says "undo: object.delete"
     rather than "undo" - and it is the readout rather than a decoration,
     because a greyed-out button says that something is unavailable and never
     says which something it was (§4.8). The greying is the second telling. */
-#transport .undo-note { color: var(--ink-faint); font-size: 10px; }
+#transport .undo-note { color: var(--ink-faint); font-size: var(--t-10); }
 
 /*  THE LOCK SITS AT THE FAR END FROM GO, on purpose: it is the one control on
     this row that a forearm in the dark should not find on the way to GO. Its
@@ -163,16 +214,16 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     because "next from nowhere" would have to invent a starting cue. Which is
     right, and is indistinguishable from a broken transport unless somebody
     says so. */
-#transport .clear-note { color: var(--standby); font-size: 11px; }
+#transport .clear-note { color: var(--standby); font-size: var(--t-11); }
 
 /*  THE LAST REFUSAL, said out loud. OSC has no reply channel, so a write the
     engine would not take comes back only as a reading at
     /godot/engine/lastError - and a client that does not show it is a client
     where editing appears to do nothing at all. */
 #refusal { display: none; padding: 5px 12px; background: #2a1615;
-           border-bottom: 1px solid var(--failed); color: var(--ink); font-size: 11px; }
+           border-bottom: 1px solid var(--failed); color: var(--ink); font-size: var(--t-11); }
 #refusal.stranded { background: #2a2116; border-bottom-color: var(--standby); padding: 10px 12px;
-                    font-size: 12px; line-height: 1.6; }
+                    font-size: var(--t-12); line-height: 1.6; }
 #refusal.stranded b { color: var(--standby); font-weight: 600; }
 #refusal.stranded code { color: var(--ink); background: var(--panel-high);
                          padding: 1px 5px; border-radius: 3px; }
@@ -190,18 +241,18 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     the show file is untouched and revert still reaches it - whereas discard is
     final. No `display` here, so that `hidden` is left to do the hiding. */
 #recovery { padding: 10px 12px; background: #2a2116; border-bottom: 1px solid var(--standby);
-            color: var(--ink); font-size: 12px; line-height: 1.6; }
+            color: var(--ink); font-size: var(--t-12); line-height: 1.6; }
 #recovery b { color: var(--standby); font-weight: 600; }
 #recovery code { color: var(--ink); background: var(--panel-high);
                  padding: 1px 5px; border-radius: 3px; }
 #recovery .choice { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
-#recovery .choice button { font-size: 12px; padding: 5px 12px; }
+#recovery .choice button { font-size: var(--t-12); padding: 5px 12px; }
 #recovery [data-cmd="document.recover"] { border-color: var(--standby); color: var(--standby); }
 
 /* ------------------------------------------------------------- cue rows */
 .list-tabs { display: flex; gap: 2px; padding: 0 8px; }
 .list-tab {
-  padding: 4px 10px; font-size: 11px; border: 1px solid transparent;
+  padding: 4px 10px; font-size: var(--t-11); border: 1px solid transparent;
   border-bottom: none; border-radius: 4px 4px 0 0;
   color: var(--ink-dim); cursor: pointer;
 }
@@ -213,11 +264,71 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 
 .row {
   display: grid;
-  grid-template-columns: 18px 62px 1fr auto;
+  grid-template-columns: var(--cue-grid);
   align-items: center; gap: 8px;
   min-height: var(--row); padding: 0 12px 0 0;
   border-left: 3px solid transparent;
 }
+
+/*  THE COLUMN HEADS. The same template as a row, the same left border so the
+    three-pixel standby rule does not shift them, and the engine's own names
+    for what the boxes under them write. */
+/*  THE SAME RESERVED GUTTER THE ROWS' SCROLLER TAKES, or the heads sit fifteen
+    pixels right of every row they name - for ever, not only while a list is
+    long enough to scroll. `overflow` is what makes `scrollbar-gutter` apply at
+    all; on a platform with overlay scrollbars both gutters are nought and this
+    still agrees. */
+.cols {
+  display: grid; grid-template-columns: var(--cue-grid);
+  align-items: center; gap: 8px;
+  padding: 2px 12px 3px 0; border-left: 3px solid transparent;
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--t-9); letter-spacing: .07em; text-transform: uppercase;
+  color: var(--ink-faint);
+  overflow: hidden; scrollbar-gutter: stable;
+}
+.cols .when { text-align: right; padding-right: 5px; }
+
+/*  THE TIME COLUMNS: a box that looks like a reading until it is wanted, so a
+    hundred rows of them do not read as a form. The border arrives on hover and
+    the focus ring is the same purple a selection is drawn in. */
+.when { text-align: right; min-width: 0; }
+.when.ro { color: var(--ink-faint); font-size: var(--t-11); padding-right: 5px; }
+.when input {
+  width: 100%; text-align: right; font: inherit; font-size: var(--t-11);
+  color: var(--ink); background: transparent; border-radius: 3px;
+  border: 1px solid transparent; padding: 1px 4px;
+}
+.when input:hover { border-color: var(--rule); }
+.when input:focus { border-color: var(--picked); background: var(--ground); outline: none; }
+.when input::placeholder { color: var(--ink-off); }
+.row[data-enabled="no"] .when input { color: var(--ink-faint); }
+
+/*  AND THE COLUMNS STAND DOWN WHEN THE PANE CANNOT HOLD THEM AND A NAME BOTH.
+
+    Three boxes take about two hundred pixels, and under that the name - the
+    one thing a row exists to say - goes to "The s..." and then to nothing at
+    all. The times are still in the inspector, which is where they were until
+    today.
+
+    ASKED OF THE PANE AND NOT OF THE WINDOW. A media query knows how wide the
+    screen is, which is not the question: the cue list is one column of a grid
+    whose share changes with the window, with the count of panes and, one day,
+    with a layout preset (5.14). A container query asks the pane itself, so the
+    answer stays right whatever is beside it.
+
+    AND IT COMES AFTER THE RULES IT OVERRIDES, which is not a tidiness matter.
+    A container query carries no specificity of its own, so `.row` inside one
+    and `.row` outside it are equals and the later wins. Written above them,
+    the narrow template lost while the `display: none` on the cells won: three
+    tracks of empty grid, and every cue name squeezed into what was left of the
+    row - 112px of 512 at a 1200px window, measured. */
+@container (max-width: 640px) {
+  .row { grid-template-columns: var(--cue-grid-narrow); }
+  .cols { grid-template-columns: var(--cue-grid-narrow); }
+  .row > .when, .cols > .when { display: none; }
+}
+
 .row:hover { background: var(--panel-high); }
 
 /*  THE STANDBY, and colour is not the only thing saying so (§4.8): a wedge in
@@ -258,29 +369,29 @@ button:disabled { color: var(--ink-faint); cursor: default; }
     cells in line with the rows, and no `data-park`: clicking there picks the
     member, as anywhere else on that line. Now that the cell can be hovered it
     must not offer the wedge, or it would promise a park it cannot make. */
-.gutter { color: var(--ink-faint); font-size: 11px;
+.gutter { color: var(--ink-faint); font-size: var(--t-11);
           align-self: stretch; display: flex; align-items: center; justify-content: center; }
 .gutter[data-park] { cursor: pointer; }
 .gutter[data-park]:hover::before { content: "\25B8"; color: var(--standby); }
 .row:hover { border-left-color: var(--rule); }
 .row:hover[data-standby="yes"] { border-left-color: var(--standby); }
 
-.number { color: var(--ink-dim); text-align: right; font-size: 12px; }
+.number { color: var(--ink-dim); text-align: right; font-size: var(--t-12); }
 
 .name { display: flex; align-items: center; gap: 7px; min-width: 0; }
 .name .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-.twist { width: 12px; color: var(--ink-faint); cursor: pointer; user-select: none;
-         font-size: 9px; flex: none; }
+.twist { width: calc(12px * var(--type)); color: var(--ink-faint); cursor: pointer; user-select: none;
+         font-size: var(--t-9); flex: none; }
 .twist:hover { color: var(--ink); }
 
 .kind {
-  flex: none; font-size: 9px; letter-spacing: .07em; text-transform: uppercase;
+  flex: none; font-size: var(--t-9); letter-spacing: .07em; text-transform: uppercase;
   color: var(--ink-faint); border: 1px solid var(--rule); border-radius: 3px;
   padding: 0 4px; line-height: 15px;
 }
 
-.tail { display: flex; gap: 10px; align-items: center; font-size: 10px;
+.tail { display: flex; gap: 10px; align-items: center; font-size: var(--t-10);
         color: var(--ink-faint); }
 .tail .trig { color: var(--waiting); letter-spacing: 0; }
 .tail .flag { letter-spacing: .05em; text-transform: uppercase; }
@@ -288,15 +399,15 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 .tail .flag.ready { color: var(--live); text-transform: none; letter-spacing: 0; cursor: help; }
 #aimbar {
   display: flex; align-items: center; gap: 10px; padding: 6px 12px;
-  border-top: 1px solid var(--rule); background: var(--panel-high); font-size: 11px;
+  border-top: 1px solid var(--rule); background: var(--panel-high); font-size: var(--t-11);
 }
 #aimbar .what { text-transform: uppercase; letter-spacing: .08em; color: var(--ink-faint); }
-#aimbar .at { color: var(--ink); min-width: 90px; }
+#aimbar .at { color: var(--ink); min-width: calc(90px * var(--type)); }
 #aimbar input[type="range"] { flex: 1; accent-color: var(--picked); }
 #aimbar .landed { color: var(--ink-faint); }
 #aim-steps {
   display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 0 12px 6px;
-  background: var(--panel-high); font-size: 11px;
+  background: var(--panel-high); font-size: var(--t-11);
 }
 #aim-steps .what { text-transform: uppercase; letter-spacing: .08em; color: var(--ink-faint); }
 #aim-steps .step {
@@ -308,8 +419,8 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 #aim-steps .none { color: var(--ink-faint); font-style: italic; }
 .run .who .asserted, .row .flag.asserted { color: var(--live); }
 #aim-plan {
-  max-height: 132px; overflow-y: auto; padding: 0 12px 8px;
-  background: var(--panel-high); font-size: 11px; color: var(--ink-faint);
+  max-height: calc(132px * var(--type)); overflow-y: auto; padding: 0 12px 8px;
+  background: var(--panel-high); font-size: var(--t-11); color: var(--ink-faint);
 }
 #aim-plan .line { padding: 1px 0; }
 #aim-plan .line b { color: var(--ink); font-weight: 500; }
@@ -322,7 +433,7 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 .tail .standby-word { color: var(--standby); }
 
 .band {
-  font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  font-size: var(--t-9); letter-spacing: .1em; text-transform: uppercase;
   color: var(--ink-faint); padding: 3px 0 1px;
 }
 
@@ -343,15 +454,27 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 .run .who { display: flex; align-items: baseline; gap: 7px; overflow: hidden;
             flex: 1 1 auto; min-width: 12em; }
 .run .who .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.run .meta { font-size: 10px; color: var(--ink-faint); display: flex; gap: 10px;
-             align-items: baseline; flex: 0 0 auto; margin-left: auto;
+.run .meta { font-size: var(--t-10); color: var(--ink-faint); display: flex; gap: 10px;
+             align-items: baseline; flex: 0 1 auto; min-width: 0; margin-left: auto;
              flex-wrap: wrap; justify-content: flex-end; }
-.run .meta button { padding: 1px 6px; font-size: 10px; }
+.run .meta button { padding: 1px 6px; font-size: var(--t-10); }
 
+/*  ONE COLUMN FOR THE STATE, wide enough for the longest word, so a run's name
+    does not slide sideways as the cue goes from armed to playing to done. In
+    scaled pixels rather than em: the mark below sets its own font-size, and an
+    em floor would balloon with it. */
 .state {
-  font-size: 9px; letter-spacing: .07em; text-transform: uppercase;
+  font-size: var(--t-9); letter-spacing: .07em; text-transform: uppercase;
   padding: 0 5px; line-height: 16px; border-radius: 3px;
   border: 1px solid currentColor; flex: none;
+  min-width: calc(62px * var(--type)); text-align: center;
+}
+
+/*  A MARK RATHER THAN A WORD, for the two states a busy pane is full of: no
+    box around it, and big enough to read as a shape at a booth's distance. */
+.state.mark {
+  border: none; padding: 0 2px; font-size: var(--t-13); letter-spacing: 0;
+  line-height: 1; cursor: help;
 }
 .state[data-s="playing"]  { color: var(--live); }
 .state[data-s="waiting"]  { color: var(--waiting); }
@@ -373,30 +496,31 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 #inspect { padding: 10px 12px 30px; }
 
 #inspect .who { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
-#inspect .who .text { font-size: 14px; }
-#inspect .who .id { font-size: 10px; color: var(--ink-faint); }
+#inspect .who .text { font-size: var(--t-14); }
+#inspect .who .id { font-size: var(--t-10); color: var(--ink-faint); }
 
 .group-head {
-  font-size: 9px; letter-spacing: .1em; text-transform: uppercase;
+  font-size: var(--t-9); letter-spacing: .1em; text-transform: uppercase;
   color: var(--ink-faint); margin: 14px 0 5px; padding-bottom: 3px;
   border-bottom: 1px solid var(--rule);
 }
 
-.field { display: grid; grid-template-columns: 96px 1fr; gap: 8px;
+.field { display: grid; grid-template-columns: calc(96px * var(--type)) 1fr; gap: 8px;
          align-items: center; padding: 2px 0; }
-.field > label { font-size: 11px; color: var(--ink-dim); text-align: right;
+.field > label { font-size: var(--t-11); color: var(--ink-dim); text-align: right;
                  overflow: hidden; text-overflow: ellipsis; }
-.field .ro { font-size: 12px; color: var(--ink-faint); overflow: hidden;
+.field .ro { font-size: var(--t-12); color: var(--ink-faint); overflow: hidden;
              text-overflow: ellipsis; white-space: nowrap; }
 
 .field input[type=text], .field input[type=number], .field select {
-  font: inherit; font-size: 12px; width: 100%;
+  font: inherit; font-size: var(--t-12); width: 100%;
   color: var(--ink); background: var(--ground);
   border: 1px solid var(--rule); border-radius: 3px; padding: 2px 6px;
 }
 .field input:focus, .field select:focus { outline: none; border-color: var(--picked); }
 .field input[data-dirty="yes"] { border-color: var(--standby); }
-.field input[type=checkbox] { accent-color: var(--standby); width: 14px; height: 14px; }
+.field input[type=checkbox] { accent-color: var(--standby);
+                              width: calc(14px * var(--type)); height: calc(14px * var(--type)); }
 
 /*  A CHECKBOX SAYS WHEN IT HAS THE KEYBOARD, because while it has it, it keeps
     Space (the keydown handler says why) - and the rule above shows the focus
@@ -409,14 +533,14 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 
 .trigger-row {
   display: flex; align-items: baseline; gap: 8px; padding: 2px 0;
-  font-size: 12px; cursor: pointer; color: var(--ink-dim);
+  font-size: var(--t-12); cursor: pointer; color: var(--ink-dim);
 }
 .trigger-row:hover { color: var(--ink); }
 .trigger-row[data-picked="yes"] { color: #fff; }
 .trigger-row .what { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .trigger-row .off { color: var(--ink-faint); text-decoration: line-through; }
 
-.back { font-size: 11px; color: var(--waiting); cursor: pointer; }
+.back { font-size: var(--t-11); color: var(--waiting); cursor: pointer; }
 .back:hover { text-decoration: underline; }
 
 .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
@@ -427,5 +551,5 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 /*  PRD §4.7: easter eggs live where idle eyes wander - a splash, an About, an
     EMPTY STATE. Never in the error path. */
 .empty { padding: 42px 20px; text-align: center; color: var(--ink-faint); }
-.empty .line { font-size: 15px; font-style: italic; color: var(--ink-dim); }
-.empty .under { font-size: 11px; margin-top: 8px; }
+.empty .line { font-size: var(--t-15); font-style: italic; color: var(--ink-dim); }
+.empty .under { font-size: var(--t-11); margin-top: 8px; }

@@ -24,7 +24,7 @@ import assert from "node:assert/strict";
 
 import { flatten, tree } from "../../clients/console/plumbing/tree.js";
 import "../../clients/console/model/index.js";
-import { esc, seconds } from "../../clients/console/views/common.js";
+import { esc } from "../../clients/console/views/common.js";
 
 /*  A leaf as the engine serves one, and a container of them. */
 const leaf = (path, value) => ({ FULL_PATH: path, TYPE: "s", VALUE: [value] });
@@ -101,10 +101,4 @@ test("an overlap is told to both cues of the pair, under the slot's name", () =>
 test("markup is escaped for the double-quoted attributes the page writes", () => {
   assert.equal(esc('a & b <c> "d"'), "a &amp; b &lt;c&gt; &quot;d&quot;");
   assert.equal(esc(42), "42");
-});
-
-test("a duration is said in seconds, and nothing is said for none", () => {
-  assert.equal(seconds(2.5), "2.5s");
-  assert.equal(seconds(0), "");
-  assert.equal(seconds("soon"), "");
 });

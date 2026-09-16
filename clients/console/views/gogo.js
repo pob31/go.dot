@@ -55,6 +55,32 @@ function launched(state) {
       && state !== "failed";
 }
 
+/*  HOW A RUN SAYS WHAT IT IS DOING (author, 2026-09-16: "'Armed' can be an icon
+    or just the yellow mark and 'Playing' can be just the green mark").
+
+    The two states a busy pane is full of are drawn as a mark; every other one
+    keeps its word, because the words that are left - waiting, preparing,
+    postWait, stopping, failed, done - are the ones an operator has to read
+    rather than recognise, and there are never many of them at once.
+
+    A MARK AND NOT A COLOUR (§4.8). The two marks differ in SHAPE before they
+    differ in hue - a filled triangle for a cue that is sounding, a ring for one
+    that is ready and has not been let go - so a screen that is being
+    photographed, a projector that is warm, or an eye that does not sort green
+    from amber still tells armed from playing. The word is on the mark as its
+    title, the row's left edge carries the same state, and `data-s` is on both,
+    which is what the stylesheet colours. */
+const MARKS = { playing: "▶", armed: "○" };
+
+function stateMark(state) {
+  const mark = MARKS[state];
+
+  if (!mark) return '<span class="state" data-s="' + esc(state) + '">' + esc(state) + "</span>";
+
+  return '<span class="state mark" data-s="' + esc(state) + '" title="' + esc(state) +
+         '" role="img" aria-label="' + esc(state) + '">' + mark + "</span>";
+}
+
 /*  THE RUNNING PANE, as a tree: a group's run holds its members' runs, which is
     what `parent` and `children` publish. Present tense - a finished run is kept
     for five seconds and then stops being published at all, which is why nothing
@@ -175,7 +201,7 @@ function runRow(id, depth, out) {
     '<div class="run" data-s="' + esc(state) + '"' +
       ' style="padding-left:' + (12 + depth * 14) + 'px">' +
       '<div class="who">' +
-        '<span class="state" data-s="' + esc(state) + '">' + esc(state) + "</span>" +
+        stateMark(state) +
         '<span class="text">' + esc(name) + "</span>" +
         (asserted === true || asserted === "true"
            ? '<span class="asserted" title="the persistent section put this back">asserted</span>'
@@ -215,4 +241,4 @@ function renderRuns() {
   reconcile(pane, out);
 }
 
-export { renderRuns };
+export { renderRuns, stateMark };

@@ -78,7 +78,7 @@
     <button id="revert"
             title="reloads the saved show; every change since is lost">revert</button>
 
-    <span class="hint">space GO · ↑ ↓ standby · ctrl/⌘-Z undo · ctrl/⌘-S save ·
+    <span class="hint" id="hint">space GO · ↑ ↓ standby · ctrl/⌘-Z undo · ctrl/⌘-S save ·
                        a row to inspect · its LEFT EDGE to park</span>
     <button id="lock" aria-pressed="false" disabled>lock the show</button>
   </div>
@@ -141,6 +141,24 @@
         <span class="sub">the cue list — the one that remembers</span>
       </header>
       <div class="list-tabs" id="tabs"></div>
+
+      <!--  THE COLUMN HEADS over the cue list, and the only labels in it. They
+            name the three attributes the boxes under them write, in the
+            engine's own words and in the order a cue lives them - so the page
+            and the namespace keep one vocabulary (§14.1) and an operator
+            reading `preWait` here finds `preWait` in the inspector.
+
+            Written here rather than drawn: the columns are always there, and a
+            head that came and went with the rows would move the list under
+            somebody's hand. Four empty cells first, for the gutter, the
+            number, the name and the tail. -->
+      <div class="cols" id="cue-cols">
+        <div></div><div></div><div></div><div></div>
+        <div class="when">preWait</div>
+        <div class="when">duration</div>
+        <div class="when">postWait</div>
+      </div>
+
       <div class="scroll" id="cues"></div>
 
       <!--  WHERE THE OPERATOR IS POINTING, AND WHAT WOULD BE TRUE THERE.

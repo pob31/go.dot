@@ -15,7 +15,7 @@
 */
 
 /*  The few things every view says the same way: an element by its id, text
-    made safe for markup, a duration, and a cue as somebody would say it. */
+    made safe for markup, and a cue as somebody would say it. */
 
 import { tree } from "../plumbing/tree.js";
 
@@ -24,11 +24,6 @@ const el = (id) => document.getElementById(id);
 function esc(text) {
   return String(text).replace(/[&<>"]/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
-}
-
-function seconds(value) {
-  const n = Number(value);
-  return Number.isFinite(n) && n > 0 ? n + "s" : "";
 }
 
 /*  A cue as somebody would say it out loud: its number and its name, falling
@@ -41,4 +36,4 @@ function cueName(id) {
   return said || id;
 }
 
-export { el, esc, seconds, cueName };
+export { el, esc, cueName };

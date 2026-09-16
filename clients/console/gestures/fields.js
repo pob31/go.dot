@@ -20,6 +20,7 @@
     gestures/keys.js, which reads and clears it. */
 
 import { setNode } from "../plumbing/link.js";
+import { commitText } from "../views/values.js";
 import { aimHere } from "../views/aim.js";
 
 document.addEventListener("input", (event) => {
@@ -45,6 +46,25 @@ document.addEventListener("focusin", (event) => {
   if (target && target.dataset && target.dataset.set && target.type !== "checkbox") {
     target.dataset.before = target.value;
   }
+});
+
+/*  AND A BOX THE BROWSER CANNOT READ IS LET GO OF WHEN THE HAND LEAVES IT.
+
+    A number box holding `1e` or `-` has an empty value and raw text the
+    sanitiser kept, so no `change` is fired when the focus goes: the field
+    stayed marked as holding an uncommitted edit for ever, and `refreshFields`
+    skips exactly those - so that one box never took another value from the
+    engine again, silently, for the rest of the session. The mark goes here,
+    and the text nobody can read goes with it, which lets the next reply put
+    the engine's own value back. */
+document.addEventListener("focusout", (event) => {
+  const target = event.target;
+
+  if (! target || ! target.dataset || ! target.dataset.set || target.type === "checkbox") return;
+
+  target.dataset.dirty = "";
+
+  if (target.validity && target.validity.badInput) target.value = "";
 });
 
 /*  A MENU PICKED WITH THE MOUSE LETS GO OF THE KEYBOARD once it has been
@@ -120,8 +140,16 @@ document.addEventListener("change", (event) => {
       anybody made. */
   if (target.dataset.abandoning === "yes") return;
 
-  setNode(address, target.type === "checkbox" ? (target.checked ? "true" : "false")
-                                              : target.value);
+  const sent = commitText(target);
+
+  setNode(address, sent);
+
+  /*  WHAT THIS BOX SAYS NOW, until the engine says it too (views/values.js).
+      The refresh skips a box whose last commit the tree has not caught up
+      with, so a value does not flash back to what it was for the one frame
+      between the write and the reply that carries it. */
+  target.dataset.sent = target.value;
+  target.dataset.sentAt = String(Date.now());
   target.dataset.dirty = "";
 
   /*  WHAT IT SAYS NOW IS WHAT ESCAPE GOES BACK TO. Enter commits a box and

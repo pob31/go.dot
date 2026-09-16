@@ -68,6 +68,15 @@ class FakeElement extends FakeNode {
         element.setAttribute("data-" + kebab(String(key)), value);
         return true;
       },
+
+      /*  `delete element.dataset.x` takes the attribute away in a browser, and
+          the page relies on that: views/values.js drops its in-flight mark
+          that way. Without this trap the proxy deleted a property of an empty
+          object and the attribute stayed, which is a fake that lies. */
+      deleteProperty(_, key) {
+        if (typeof key === "string") element.attributeMap.delete("data-" + kebab(key));
+        return true;
+      },
     });
   }
 

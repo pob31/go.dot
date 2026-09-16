@@ -161,7 +161,25 @@ document.addEventListener("keydown", (event) => {
 
   const menuAccelerator = (event.metaKey || event.ctrlKey) && !!held && held.tagName === "SELECT";
 
-  if (wantsTheKeys(held) && !menuAccelerator) return;
+  /*  SPACE IS GO, EVEN FROM A NUMBER BOX, and that is not a compromise: a
+      number box CANNOT hold a space - the HTML value sanitiser drops it, so
+      the keystroke does nothing at all there - and a space pressed over a cue
+      list means one thing. Didi's time columns put three such boxes on every
+      row, so without this a click on a pre-wait left the transport deaf with
+      nothing on screen to say so: exactly the failure this file records for
+      the aim slider, on the pane where GO lives.
+
+      THE ARROWS STAY WITH THE BOX, because stepping a number is what a number
+      box is for and an operator typing a wait wants them. So do the
+      accelerators. What says which is which is the transport, in words, for
+      as long as a box holds the keys (views/transport.js). */
+  const numberBox = !!held && held.tagName === "INPUT"
+                      && String(held.type || "").toLowerCase() === "number";
+
+  const spaceIsGo = numberBox && event.code === "Space"
+                      && !event.ctrlKey && !event.metaKey && !event.altKey;
+
+  if (wantsTheKeys(held) && !menuAccelerator && !spaceIsGo) return;
 
   if (event.code === "Space" && !!held && held.type === "checkbox" &&
       !event.ctrlKey && !event.metaKey && !event.altKey) return;
@@ -188,3 +206,5 @@ document.addEventListener("keydown", (event) => {
   else if (event.code === "ArrowDown") { event.preventDefault(); press("ArrowDown"); }
   else if (event.code === "ArrowUp") { event.preventDefault(); press("ArrowUp"); }
 });
+
+export { wantsTheKeys };

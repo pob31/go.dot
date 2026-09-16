@@ -20,9 +20,47 @@
 import { tree } from "../plumbing/tree.js";
 import { command, send } from "../plumbing/link.js";
 import { gesture } from "../gestures/table.js";
+import { wantsTheKeys } from "../gestures/keys.js";
 import { el } from "./common.js";
 
 el("go").addEventListener("click", () => gesture("go", []));
+
+/*  WHERE THE KEYBOARD IS, IN WORDS.
+
+    A box with the focus keeps the arrows and the accelerators - stepping a
+    number is what a number box is for - so while one has them the hint beside
+    GO would otherwise be telling an operator that ctrl-Z undoes, when ctrl-Z
+    is the browser's typing-undo and the arrows are moving a pre-wait rather
+    than the standby. Didi's time columns put three such boxes on every row, so
+    this is now one click away at all times.
+
+    SAID, AND NOT COLOURED (§4.8). The focus ring on a box is a pixel of hue on
+    a control the pointer is already resting on; the sentence is what an
+    operator reads. Space is still GO from a number box (gestures/keys.js), and
+    the sentence says that too, because the one thing nobody may be made to
+    wonder about is whether GO will fire.
+
+    ON THE DOCUMENT, because focus moves between elements this module does not
+    own; `focusout` runs before the next element has it, so the answer is asked
+    for after the browser has settled. */
+const hint = el("hint");
+const HINT_KEYS = hint ? hint.textContent : "";
+const HINT_TYPING = "typing in a box · space still GO · esc gives the keyboard back";
+
+function sayWhereTheKeysAre() {
+  if (! hint) return;
+
+  const typing = wantsTheKeys(document.activeElement);
+
+  hint.dataset.typing = typing ? "yes" : "no";
+
+  const said = typing ? HINT_TYPING : HINT_KEYS;
+
+  if (hint.textContent !== said) hint.textContent = said;
+}
+
+document.addEventListener("focusin", sayWhereTheKeysAre);
+document.addEventListener("focusout", () => setTimeout(sayWhereTheKeysAre, 0));
 
 /*  THE LOCK IS A NODE, NOT A COMMAND (namespace draft §14.7): the toggle is a
     `node.set` on /godot/document/locked like any other write, carrying the

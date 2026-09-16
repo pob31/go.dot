@@ -20,6 +20,7 @@
 import { tree } from "../plumbing/tree.js";
 import { selection } from "../model/selection.js";
 import { el, esc } from "./common.js";
+import { isList, shownValue, refreshFields } from "./values.js";
 
 /*  Every address in the tree that belongs to this object, whatever owner word
     publishes it. A media cue carries `/godot/cue/<id>/name` and
@@ -48,28 +49,6 @@ function fieldsFor(id) {
       || a.name.localeCompare(b.name));
 
   return found;
-}
-
-/*  A LIST NODE - a route's `gains`, a fade's `points` - carries one type tag
-    per element, so its TYPE is as long as its value (§14.6). It is shown and
-    typed as the space-separated text the file uses: one field for the whole
-    list and one node.set on commit, which the engine's door parses element by
-    element. Read as a scalar, it showed the first element alone, and an empty
-    one was not shown at all. The curve editor (PR 5.16b) will draw `points`;
-    until then this is how they are read. */
-function isList(node) {
-  if (typeof node.TYPE === "string") return node.TYPE.length !== 1;
-
-  /*  AN EMPTY LIST IS SERVED WITH NO TYPE AT ALL, there being no tag to give
-      zero values, and with no CONTENTS either - which is what tells it from a
-      container. */
-  return !node.CONTENTS && node.ACCESS !== undefined;
-}
-
-function shownValue(node) {
-  if (isList(node)) return Array.isArray(node.VALUE) ? node.VALUE.join(" ") : "";
-
-  return Array.isArray(node.VALUE) && node.VALUE.length ? node.VALUE[0] : "";
 }
 
 function controlFor(field) {
@@ -289,26 +268,6 @@ function renderInspector() {
   }
 
   refreshFields(pane);
-}
-
-/*  Values only, and only where nobody is working: never into a field that has
-    the focus, and never over an edit that has not been committed. */
-function refreshFields(pane) {
-  for (const input of pane.querySelectorAll("[data-set]")) {
-    if (input === document.activeElement || input.dataset.dirty === "yes") continue;
-
-    const node = tree.node(input.dataset.set);
-    if (!node) continue;
-
-    /*  An empty list is a value - the curve was cleared - where an empty
-        scalar is a node with nothing to say yet. */
-    if (!isList(node) && (!Array.isArray(node.VALUE) || !node.VALUE.length)) continue;
-
-    const value = shownValue(node);
-
-    if (input.type === "checkbox") input.checked = value === true;
-    else if (String(input.value) !== String(value)) input.value = value;
-  }
 }
 
 export { renderInspector };
