@@ -26,7 +26,7 @@ import { isList, shownValue, refreshFields } from "./values.js";
     publishes it. A media cue carries `/godot/cue/<id>/name` and
     `/godot/media/<id>/file` at once, and the inspector shows both without ever
     being told that media cues have files. */
-function fieldsFor(id) {
+function fieldsFor(id, kind) {
   const found = [];
   const pattern = new RegExp("^/godot/([a-z]+)/" + id + "/([A-Za-z]+)$");
 
@@ -40,15 +40,109 @@ function fieldsFor(id) {
     found.push({ address: address, owner: match[1], name: match[2], node: node });
   }
 
-  /*  The common rows first and the kind's own after, alphabetical inside each,
-      which is the order the tree itself is in - so a reader who has seen the
-      namespace is not learning a second arrangement here. */
-  found.sort((a, b) =>
-    (a.owner === "cue" ? 0 : 1) - (b.owner === "cue" ? 0 : 1)
-      || a.owner.localeCompare(b.owner)
-      || a.name.localeCompare(b.name));
+  found.sort(inWorkingOrder(kind));
 
   return found;
+}
+
+/*  THE ORDER SOMEBODY WORKS IN, which is not the order the tree is in.
+
+    The tree is alphabetical inside each owner, and the panel used to be as
+    well: a fade's `curve` sat five rows above its `points` and a group's
+    `advance`, `mode` and `selection` were scattered down the list with `loops`
+    and `play` between them, so writing one cue meant hunting for the next
+    thing to say (author, 2026-09-16). Time reads worst of all alphabetically -
+    `postWait` before `preWait`, and `duration` under another owner word
+    entirely - though it is the one order everybody already knows: what happens
+    before, how long, what happens after.
+
+    SO THE PANEL IS FOUR BLOCKS, in the order somebody fills them in:
+
+      what it is        number, name, colour, notes
+      when              preWait, duration, postWait
+      what it does      the kind's own rows, each kind in its own working order
+      in the list       enabled, preset
+
+    `duration` joins the timing block whatever kind publishes it, which is the
+    whole reason the blocks are not the owner words they were: a fade's
+    duration belongs between its waits and not under a heading of its own.
+
+    KEYED ON THE KIND AND NOT ON THE OWNER WORD, which is a correction to the
+    first cut of this: every attribute a cue carries publishes under
+    `/godot/cue/<id>/`, whatever owner the parameter table files it under, so
+    the owner here is `cue` for all of them and a table keyed on `fade` or
+    `group` matched nothing. The kind is what the cue itself says it is.
+
+    WRITTEN DOWN ONCE, HERE, AS DATA. Reordering a kind is a line in a table
+    rather than a change to any code, which is what makes this cheap to argue
+    about with the page open. And a row NOBODY HAS NAMED still appears: it
+    falls to the end of its block, alphabetically, so a new row in the
+    parameter table shows up in a predictable place instead of vanishing. */
+const WHEN = ["preWait", "duration", "postWait"];
+
+const SAID_FIRST = ["number", "name", "colour", "notes"];
+const SAID_LAST = ["enabled", "preset"];
+
+const KIND_ORDER = {
+  media:   ["file", "level", "startOffset"],
+  fade:    ["target", "level", "curve", "points"],
+  stop:    ["target", "verb", "curve"],
+  osc:     ["address", "value", "wait", "timeout"],
+  midi:    ["port", "channel", "type", "number", "data", "sysex", "wait"],
+  group:   ["mode", "advance", "selection", "play", "loops", "seed"],
+  range:   ["name", "in", "out", "loops"],
+  trigger: ["kind", "enabled", "address", "value", "port", "channel",
+            "type", "number", "data", "at"],
+};
+
+/*  Which block a field belongs to, for a cue (or a trigger) of this kind. A
+    name the kind claims is the kind's; the timing three are always the timing
+    three; what is left is the cue itself, before or after. */
+function blockOf(field, kind) {
+  if (WHEN.indexOf(field.name) >= 0) return 1;
+  if ((KIND_ORDER[kind] || []).indexOf(field.name) >= 0) return 2;
+  if (SAID_FIRST.indexOf(field.name) >= 0) return 0;
+
+  return 3;
+}
+
+/*  Where it sits inside that block. A name no table carries answers `-1`,
+    which sorts after every name that is carried - and alphabetically among its
+    own, by the comparator below. */
+function rankOf(field, block, kind) {
+  if (block === 0) return SAID_FIRST.indexOf(field.name);
+  if (block === 1) return WHEN.indexOf(field.name);
+  if (block === 2) return (KIND_ORDER[kind] || []).indexOf(field.name);
+
+  return SAID_LAST.indexOf(field.name);
+}
+
+function inWorkingOrder(kind) {
+  return (a, b) => {
+    const blockA = blockOf(a, kind);
+    const blockB = blockOf(b, kind);
+
+    if (blockA !== blockB) return blockA - blockB;
+
+    const rankA = rankOf(a, blockA, kind);
+    const rankB = rankOf(b, blockB, kind);
+
+    if (rankA !== rankB) return (rankA < 0 ? Infinity : rankA) - (rankB < 0 ? Infinity : rankB);
+
+    return a.name.localeCompare(b.name);
+  };
+}
+
+/*  The heading over each block. The kind's own block wears the kind's own word
+    - `media`, `fade`, `group` - because that is what the namespace calls it
+    and §14.2 asks a client to teach the namespace rather than a vocabulary of
+    its own. The first block has none: it is the cue itself. */
+function headingOf(block, kind) {
+  if (block === 0) return null;
+  if (block === 1) return "when";
+  if (block === 2) return kind;
+
+  return "in the list";
 }
 
 /*  WHAT SOMEBODY DECIDED, AND WHAT THE ENGINE SAYS BACK.
@@ -78,15 +172,26 @@ function fieldMarkup(field) {
          esc(field.name) + "</label>" + controlFor(field) + "</div>";
 }
 
-/*  The owner word over the rows it owns, as the tree groups them. */
-function fieldsMarkup(fields, from) {
-  let owner = from;
+/*  The blocks above, each under its own heading, in the order they are worked
+    through. `headings` is false inside the details fold: what is in there is
+    a short list of readings and a heading per owner over them would be more
+    furniture than the rows it names. */
+function fieldsMarkup(fields, kind, headings) {
+  let said = null;
   let out = "";
 
   for (const field of fields) {
-    if (field.owner !== owner) {
-      owner = field.owner;
-      out += '<div class="group-head">' + esc(owner) + "</div>";
+    if (headings === false) {
+      out += fieldMarkup(field);
+      continue;
+    }
+
+    const heading = headingOf(blockOf(field, kind), kind);
+
+    if (heading !== said) {
+      said = heading;
+
+      if (heading !== null) out += '<div class="group-head">' + esc(heading) + "</div>";
     }
 
     out += fieldMarkup(field);
@@ -99,13 +204,13 @@ function fieldsMarkup(fields, from) {
     thing in here nobody decided and everybody needs occasionally - it is what
     a log record, a refusal and a script all name a cue by - so it is the first
     line inside rather than a word beside the title. */
-function detailsMarkup(id, fields) {
+function detailsMarkup(id, fields, kind) {
   return '<details class="derived"' + (panel.details ? " open" : "") + ">" +
            '<summary data-details="yes">details</summary>' +
            '<div class="field"><label title="the identifier this cue is known by,' +
            ' in every record and every command">id</label>' +
            '<div class="ro num">' + esc(id) + "</div></div>" +
-           fieldsMarkup(fields, null) +
+           fieldsMarkup(fields, kind, false) +
          "</details>";
 }
 
@@ -186,7 +291,8 @@ function renderInspector() {
       the cue it belongs to. */
   if (selection.picked && tree.node("/godot/trigger/" + selection.picked + "/kind")) {
     const owner = tree.trigger(selection.picked, "cue", "");
-    const fields = fieldsFor(selection.picked);
+    const kind = "trigger";
+    const fields = fieldsFor(selection.picked, kind);
     const signature = "trigger|" + selection.picked + "|" + (panel.details ? "open" : "shut")
                         + "|" + fields.map((f) => f.address).join(",");
 
@@ -199,8 +305,8 @@ function renderInspector() {
         '<div class="back" data-pick="' + esc(owner) + '">\u2190 ' +
         esc(tree.cue(owner, "name", "") || owner) + "</div>";
 
-      out += fieldsMarkup(fields.filter(decided), null);
-      out += detailsMarkup(selection.picked, fields.filter((f) => !decided(f)));
+      out += fieldsMarkup(fields.filter(decided), kind, true);
+      out += detailsMarkup(selection.picked, fields.filter((f) => !decided(f)), kind);
 
       out += '<div class="group-head">structure</div><div class="actions">' +
              '<button class="danger" data-delete="' + esc(selection.picked) + '">delete</button></div>';
@@ -221,7 +327,7 @@ function renderInspector() {
   }
 
   const kind = tree.cue(selection.picked, "kind", "memo");
-  const fields = fieldsFor(selection.picked);
+  const fields = fieldsFor(selection.picked, kind);
   /*  THE FOLD IS PART OF THE SHAPE, so opening it redraws the panel rather
       than waiting for the selection to change under it. */
   const signature = selection.picked + "|" + (panel.details ? "open" : "shut") + "|"
@@ -246,8 +352,8 @@ function renderInspector() {
       '<div class="who"><span class="text">' + esc(tree.cue(selection.picked, "name", "") || "—") +
       '</span><span class="kind">' + esc(kind) + "</span></div>";
 
-    out += fieldsMarkup(fields.filter(decided), null);
-    out += detailsMarkup(selection.picked, fields.filter((f) => !decided(f)));
+    out += fieldsMarkup(fields.filter(decided), kind, true);
+    out += detailsMarkup(selection.picked, fields.filter((f) => !decided(f)), kind);
 
     /*  THE CUE'S TRIGGERS, listed rather than folded into the fields above:
         they are objects with identifiers of their own, a cue may have several,
@@ -329,4 +435,4 @@ function renderInspector() {
   refreshFields(pane);
 }
 
-export { renderInspector, decided };
+export { renderInspector, decided, blockOf, headingOf, inWorkingOrder };

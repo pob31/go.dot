@@ -123,3 +123,45 @@ test("the inspector keeps decisions and folds away what the engine says back", a
     assert.equal(decided({ name, node: { ACCESS: 1 } }), false, name + " is not a decision");
   }
 });
+
+test("the inspector puts a cue's fields in the order somebody works through them", async () => {
+  const { blockOf, headingOf, inWorkingOrder } =
+    await import("../../clients/console/views/inspector.js");
+
+  const field = (name) => ({ owner: "cue", name, node: { ACCESS: 3 } });
+  const ordered = (names, kind) => names.map(field).sort(inWorkingOrder(kind)).map((f) => f.name);
+
+  /*  TIME READS AS TIME: what happens before, how long, what happens after -
+      which alphabetical order gets exactly backwards. */
+  assert.deepEqual(ordered(["postWait", "duration", "preWait"], "fade"),
+                   ["preWait", "duration", "postWait"]);
+
+  /*  A GROUP'S THREE WORDS TOGETHER (author, 2026-09-16): what kind of group,
+      how it moves, how a round is ordered - and the round's own numbers after
+      them, rather than scattered between them by the alphabet. */
+  assert.deepEqual(ordered(["seed", "advance", "loops", "mode", "play", "selection"], "group"),
+                   ["mode", "advance", "selection", "play", "loops", "seed"]);
+
+  /*  A fade says what it moves, where to, and how. */
+  assert.deepEqual(ordered(["points", "curve", "level", "target"], "fade"),
+                   ["target", "level", "curve", "points"]);
+
+  /*  And the whole panel, in blocks: what it is, when, what it does, how it
+      sits in the list. */
+  assert.deepEqual(
+    ordered(["preset", "target", "name", "postWait", "enabled", "number", "preWait", "level"], "fade"),
+    ["number", "name", "preWait", "postWait", "target", "level", "enabled", "preset"]);
+
+  /*  A row nobody named still appears, at the end of the block it falls in,
+      so a new one in the parameter table cannot go missing. */
+  assert.deepEqual(ordered(["zebra", "enabled", "aardvark"], "memo"),
+                   ["enabled", "aardvark", "zebra"]);
+
+  /*  The headings: none over the cue itself, the kind's own word over its own
+      rows, and the two words the page uses for the rest. */
+  assert.equal(headingOf(blockOf(field("name"), "fade"), "fade"), null);
+  assert.equal(headingOf(blockOf(field("preWait"), "fade"), "fade"), "when");
+  assert.equal(headingOf(blockOf(field("curve"), "fade"), "fade"), "fade");
+  assert.equal(headingOf(blockOf(field("mode"), "group"), "group"), "group");
+  assert.equal(headingOf(blockOf(field("preset"), "fade"), "fade"), "in the list");
+});
