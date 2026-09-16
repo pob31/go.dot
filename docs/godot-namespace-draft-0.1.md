@@ -3678,6 +3678,20 @@ presets and no show mode; no save gesture at all — `document.save` is never se
 gestures, and no colour. Half of that list is waiting on Half A, which is the sequencing
 argument in the preamble making itself felt.
 
+*That paragraph describes the page of 2026-09-10, and four of its clauses are now false
+(2026-09-16).* The page sends **twenty-one** named commands and the inspector's `node.set`, not
+fifteen: the six the gesture table gained with Half A's nodes are `undo`, `redo`,
+`document.save`, `document.revert`, `document.recover` and `document.discardRecovery`
+(`clients/console/gestures/commands.json`). `document.save` is sent from a button and from
+Ctrl/⌘-S, undo and redo from buttons that carry the transaction's own name and from Ctrl/⌘-Z and
+Ctrl/⌘-Shift-Z, and the lock is written as well as read, from a button in the transport. And the
+page has colour: a playing media cue's timbre is on its run row as three numbers in words
+(§14.12's rule kept — the words are the carrier, not the colour). What is still true is the
+operator half this section was written to name: no run pointer on a cue-list row, no
+`run.advance`, `run.prune`, `run.unprune` or `run.stop`, no round pills, no range on the strip,
+no bulk edit, no header pane, no curve editor, no display presets and no show mode. Those are
+5.11 to 5.17, and they are the phase's second half rather than a debt.
+
 **Two defects come before any new view, because each of them ends a rehearsal on its own.**
 `renderLists` replaces a pane's `innerHTML` wholesale (`clients/console/index.html:900`, and the
 running pane at `:987`) ten times a second, so a long list's scroll snaps to the top between one
