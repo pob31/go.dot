@@ -175,7 +175,10 @@ namespace wfg::doc
             logs the identifier it produced, and replaying the log supplies it. */
         EditResult createList (const std::string& name, const std::string& id = {});
 
-        /** `kind` is "memo" or "group"; a group is a cue that holds cues. */
+        /** `kind` is "memo" or "group"; a group is a cue that holds cues.
+
+            `index` is a MEMBER position, the same number `move` takes and the
+            same one `order` publishes - see `document/Sequence.h`. */
         EditResult createCue (const std::string& parentId, int index,
                               const std::string& kind, const std::string& name,
                               const std::string& id = {});
@@ -263,9 +266,16 @@ namespace wfg::doc
         /** Removes the object and everything under it, releasing identifiers. */
         EditResult remove (const std::string& id);
 
-        /** Moves an object to a new parent and index. An index past the end
+        /** Moves an object to a new parent and position. An index past the end
             appends; a negative index is refused rather than clamped, because it
-            usually means the caller computed it wrong. */
+            usually means the caller computed it wrong.
+
+            `newIndex` IS A MEMBER POSITION - a place in the sequence
+            `/godot/cue/<id>/order` publishes, counted the way a client counts
+            rows - and not a raw child index. A group's <Header>, <Footer> and
+            <Persistent> children hold no position and are stepped over;
+            `document/Sequence.h` is the one rule that says so, and says what
+            reading the two numbers as one cost. */
         EditResult move (const std::string& id, const std::string& newParentId, int newIndex);
 
         //======================================================================
@@ -563,6 +573,9 @@ namespace wfg::doc
             document before it reaches its door. */
         std::optional<EditResult> refuseIfLocked() const;
 
+        /*  The door every create comes through. `index` is a member position,
+            as it is everywhere else in this class; the creates that append
+            rather than place pass `doc::endOfSequence` and say so in a word. */
         EditResult insertObject (juce::ValueTree parent, int index,
                                  std::string_view elementName,
                                  const std::string& id,

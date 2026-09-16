@@ -22,6 +22,7 @@
 
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/Schema.h>
+#include <wfg/engine/document/Sequence.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
@@ -249,14 +250,22 @@ namespace wfg::tree
             return std::string (attribute.defaultText());
         }
 
-        /** The child identifiers of a container, in order, space-separated. */
-        /*  The identifiers of a container's children, in order, space-separated.
+        /*  The identifiers of a container's members, in order, space-separated.
 
             `only` narrows it to one element name, which is what a group's
             header and footer need: `order` is the group's MEMBERS and a header
             is not one of them - a client reading `order` is reading the cue
             list, and the two cues that run before and after it are a different
-            question with two nodes of their own. */
+            question with two nodes of their own.
+
+            WHICH CHILD IS A MEMBER IS NO LONGER DECIDED HERE. The predicate
+            used to be written out on the line below, and it was the only
+            statement of it anywhere - so when the document's `object.move` and
+            `cue.create` came to read their index as a position in THIS
+            sequence, the choice was to copy it into the door or to lift it out.
+            Two copies of one rule is how a publisher and a door come to
+            disagree about what a show says, so it lives in
+            `document/Sequence.h` and this asks it like anyone else. */
         std::string orderOf (const juce::ValueTree& node, const char* only = nullptr)
         {
             std::string out;
@@ -266,11 +275,8 @@ namespace wfg::tree
                 if (! child.hasProperty (idProperty))
                     continue;
 
-                const auto element = child.getType().toString();
-
-                if (only != nullptr ? element != only
-                                    : (element == "Header" || element == "Footer"
-                                        || element == "Persistent"))
+                if (only != nullptr ? child.getType().toString() != only
+                                    : ! doc::isSequenceChild (child))
                     continue;
 
                 if (! out.empty())
@@ -780,6 +786,26 @@ namespace wfg::tree
 
                 if (childElement == "Trigger")
                 {
+                    /*  A TRIGGER IS IN `order` AND NOT IN THIS COUNT, which is
+                        a disagreement worth writing down rather than leaving
+                        for whoever meets it.
+
+                        It carries an identifier and is not a header, a footer
+                        or a section, so `orderOf` lists it among the parent's
+                        members - while the walk here passes over it before
+                        `childIndex` is spent, so the `index` every cue beneath
+                        it publishes counts cues only. On a group that holds a
+                        trigger the two therefore differ by one from the trigger
+                        down.
+
+                        Nothing is changed about it here, deliberately. The
+                        index in `object.move` and `cue.create` is read against
+                        the sequence a CLIENT can see, which is `order`
+                        (`document/Sequence.h`), so the door and the publisher
+                        agree with each other whatever this count says. Making
+                        all three agree means deciding whether a trigger is a
+                        member at all - a question about the namespace, not
+                        about a walk, and one with its own PR to come. */
                     collectTrigger (child, id, out);
                     continue;
                 }

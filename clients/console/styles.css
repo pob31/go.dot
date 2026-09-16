@@ -564,8 +564,31 @@ button:disabled { color: var(--ink-off); cursor: default; }
     is a cool outline and a name in full white. §3.5 is emphatic that picking a
     row must not move the pointer, so the page has to make the difference plain
     before anybody presses GO. */
-.row[data-picked="yes"] { outline: 1px solid var(--picked); outline-offset: -1px; }
+/*  AND MANY CHOSEN READ AS ONE BLOCK, not as a stack of boxes. Six rows each
+    drawn in its own outline is six things; what somebody who has just
+    shift-clicked a scene has is ONE thing with six rows in it, and the ground
+    is what says so - it runs together down the run of rows while an outline
+    draws a line between every pair of them.
+
+    THE OUTLINE MOVES TO THE ANCHOR, which is the row a range is measured from
+    and the row the up/down buttons and the add buttons still act on. One cue
+    picked is its own anchor, so the ordinary case is exactly what it was: a
+    cool outline and a name in full white, with the ground added under it. */
+.row[data-picked="yes"] { background: rgba(154, 149, 228, .16); }
 .row[data-picked="yes"] .name .text { color: #fff; }
+.row[data-anchor="yes"] { outline: 1px solid var(--picked); outline-offset: -1px; }
+
+/*  A RANGE IS DRAGGED OUT WITH SHIFT, AND SHIFT IS ALSO HOW A BROWSER EXTENDS A
+    TEXT SELECTION. Without this, shift-clicking the sixth row down left every
+    cue name and number between the two highlighted in the browser's own blue -
+    over the top of the selection the page had just drawn, and saying something
+    the page does not mean. The rows are chrome, not prose.
+
+    The boxes are exempt, and have to be: a value somebody is about to correct
+    must still be selectable, and a cue's name is in the inspector's own `name`
+    box, where it can be read, selected and copied like any other text. */
+.row, .band, .band-end, .cols { user-select: none; }
+.row input, .row select, .row textarea { user-select: text; }
 
 .row[data-enabled="no"] .name,
 .row[data-enabled="no"] .number { color: var(--ink-faint); text-decoration: line-through; }
@@ -915,6 +938,22 @@ button:disabled { color: var(--ink-off); cursor: default; }
     clicked with the mouse lets go of the focus straight away and never needs
     the outline. */
 .field input[type=checkbox]:focus-visible { outline: 1px solid var(--picked); outline-offset: 2px; }
+
+/*  MIXED, WHICH IS A WORD AND NOT AN EMPTINESS (§4.8, and PRD §3.5's own term
+    for it). Four cues chosen and four different names is not a blank field -
+    a blank field is a name nobody has written - so the box says `mixed` where
+    its value would be, the menu carries the word as an option it will not let
+    anybody choose, and the tick box, which has a third state but no word for
+    it, gets the word beside the dash.
+
+    In italics and a shade back, because it is the panel talking about the
+    cues rather than one of the cues talking. Lighter than `--ink-off`, which
+    is what DEAD means on this page: a mixed field is very much alive - typing
+    in it writes to all of them. */
+.field input::placeholder { color: var(--ink-faint); font-style: italic; }
+.field .pair { display: flex; align-items: center; gap: 8px; }
+.field .ro.mixed { font-style: italic; color: var(--ink-faint); font-size: var(--t-11); }
+.field option[data-mixed] { font-style: italic; color: var(--ink-faint); }
 
 .trigger-row {
   display: flex; align-items: baseline; gap: 8px; padding: 2px 0;

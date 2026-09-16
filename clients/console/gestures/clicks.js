@@ -21,7 +21,7 @@
 import { tree } from "../plumbing/tree.js";
 import { dbl, int, str } from "../plumbing/osc.js";
 import { openForKey, panel, save, toggle } from "../model/remember.js";
-import { selection } from "../model/selection.js";
+import { pickAlso, pickNothing, pickOne, pickThrough, selection } from "../model/selection.js";
 import { view } from "../views/view.js";
 import { el } from "../views/common.js";
 import { aimedList } from "../views/aim.js";
@@ -50,6 +50,91 @@ const REVEAL_MS = 1100;
 function lookAt(key) {
   openForKey(key);
   selection.reveal = { key: key, until: Date.now() + REVEAL_MS, scrolled: false };
+}
+
+/*  THE ORDER THE READER IS LOOKING AT, read off the pane itself.
+
+    It is not the order of `/godot/list/<id>/order`, and working it out from the
+    tree would be writing views/didi.js a second time and getting it wrong: what
+    is on screen is one flat run of rows in which a group's members sit under
+    it, a header's cues sit under a band, folded groups have contributed nothing
+    at all, and a member marked `preset` appears TWICE - once as a derived line
+    in the header that gets it ready, and once as its own row further down. The
+    pane's children ARE that run, in that order, because that is what the
+    reconciler leaves there. It is the only order a reader could point at two
+    rows and mean "and everything between these", so it is the only order a
+    range can honestly be taken in.
+
+    EVERY ROW, DUPLICATES AND ALL, because a range is taken by POSITION and only
+    then reduced to cues. De-duplicating first was tried and is wrong, in the
+    exact case it was written for: the member whose derived line sits in a
+    header ABOVE the anchor had that earlier position kept, which put it outside
+    a range that starts at the anchor - so a shift-click over a scene silently
+    skipped the one cue in it that had a mark. Measured on the phase4 show: six
+    rows highlighted, the seventh between them left out. A cue is in a range
+    when a reader can see one of its rows between the two they clicked, and that
+    is a question about rows. `drawnPicks` reduces the same walk to cues, for
+    the gesture that wants an order rather than a span. */
+function drawnRows() {
+  const pane = el("cues");
+  const rows = [];
+
+  if (!pane) return rows;
+
+  for (const child of Array.from(pane.children)) {
+    if (child.dataset && child.dataset.pick) rows.push(child);
+  }
+
+  return rows;
+}
+
+/*  ONE ID IS ONE CUE however many lines are reading it: an inspector shown the
+    same cue twice would offer its own field against itself, and a batch edit
+    would write it twice. */
+function onlyOnce(ids) {
+  const out = [];
+
+  for (const id of ids) if (out.indexOf(id) < 0) out.push(id);
+
+  return out;
+}
+
+function drawnPicks() {
+  return onlyOnce(drawnRows().map((row) => row.dataset.pick));
+}
+
+/*  FROM THE ANCHOR TO HERE, in that drawn order and whichever way round the two
+    rows fall: a reader dragging a selection upwards means the same block as one
+    dragging it down.
+
+    A range with nothing to measure from is just the row that was clicked - that
+    is what happens on the first shift-click of a session, or after a delete
+    took the anchor out of the document - and so is a range whose far end is not
+    on screen, which the fold can do between the click that set the anchor and
+    this one. Neither is worth a refusal: the reader gets the row they clicked,
+    with the anchor on it, and their next shift-click means something. */
+function rangeTo(row) {
+  const rows = drawnRows();
+  const to = rows.indexOf(row);
+
+  if (to < 0) return [row.dataset.pick];
+
+  /*  THE ANCHOR'S NEAREST ROW, because the anchor can be on screen twice as
+      well, and the two rows a reader is pointing at are the two they can see -
+      not the pair that happens to be furthest apart. With one row each, which
+      is every case but a preset mark, this is simply where the anchor is. */
+  let from = -1;
+
+  rows.forEach((candidate, n) => {
+    if (candidate.dataset.pick !== selection.picked) return;
+    if (from < 0 || Math.abs(n - to) < Math.abs(from - to)) from = n;
+  });
+
+  if (from < 0) return [row.dataset.pick];
+
+  const span = from <= to ? rows.slice(from, to + 1) : rows.slice(to, from + 1);
+
+  return onlyOnce(span.map((one) => one.dataset.pick));
 }
 
 document.addEventListener("click", (event) => {
@@ -178,7 +263,7 @@ document.addEventListener("click", (event) => {
         the next one they dismiss without reading will be the one that
         mattered. */
     gesture("delete", [str(data.delete)]);
-    selection.picked = null;
+    pickNothing();
     return;
   }
 
@@ -193,7 +278,7 @@ document.addEventListener("click", (event) => {
 
     if (list) gesture("aim", [str(list), str(step.dataset.step), dbl(-1)]);
 
-    selection.picked = step.dataset.step;
+    pickOne(step.dataset.step);
     view.render();
     return;
   }
@@ -227,12 +312,64 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  /*  CLICKING ON NOTHING MEANS NOTHING, which is a gesture and not an accident
+      (author, 2026-09-16, with the page open: "clicking in the background or
+      top of Didi should deselect the selected cues and close the inspector").
+      The inspector shuts by itself once nothing is picked - views/strip.js sets
+      `data-picked` on the panes from this same selection - so there is nothing
+      to close here and no command to send: what is being looked at is the
+      page's own and the engine is never told (§14.1).
+
+      THREE PLACES AND NOT "ANYWHERE ELSE", because "anywhere else" is the
+      whole page. The transport, the strip, the aim bar with its slider and its
+      load button, the inspector's own fields: those are all clicks made WHILE
+      looking at something, and a selection that fell over every time somebody
+      reached for the offset slider would make §3.13's look-before-you-leap
+      unusable. What deselects is the list's own furniture, where there is
+      demonstrably no cue under the pointer - the pane's background below the
+      last row, the column heads, and the pane's heading. The list tabs are
+      not in it: a tab is a thing that does something.
+
+      The background is the `#cues` element ITSELF rather than anything drawn
+      inside it. Everything the reconciler puts in there is a row, a section
+      band or the empty state, and each of those says what it is; the element
+      is what is left when none of them is under the pointer. */
+  const bare = event.target &&
+               (event.target.id === "cues" ||
+                (event.target.closest &&
+                 (event.target.closest("#cue-cols") ||
+                  event.target.closest("#pane-didi > header"))));
+
+  if (bare) {
+    pickNothing();
+    view.render();
+    return;
+  }
+
   const row = event.target.closest && event.target.closest("[data-pick]");
+
+  /*  WHETHER THIS CLICK LANDS ON A ROW OR ASSEMBLES A SET. ctrl/⌘ adds the row
+      to what is chosen or takes it back out; shift takes everything between the
+      anchor and here. ⌘ and ctrl are one gesture because this page is operated
+      from both kinds of machine, often on the same show, and nobody should have
+      to remember which desk they are sitting at. */
+  const adding = event.metaKey || event.ctrlKey;
+  const ranging = event.shiftKey;
 
   /*  PICKING A ROW IS ASKING ABOUT IT. The inspector already opens on a click,
       and §3.13's question is about the row somebody is looking at - so one
-      gesture does both rather than making them aim a second time. */
-  if (row && row.dataset && row.dataset.pick) {
+      gesture does both rather than making them aim a second time.
+
+      BUT AN AIM NAMES ONE CUE, so a click that is building a set does not send
+      one. §3.13's pointer answers "where would the show be if I went from
+      here", and there is no answer to that for nine cues at once: the gesture
+      takes a single id, so a shift-click over a block would either send a
+      handful of aims with only the last one surviving, or aim at whichever row
+      the loop happened to end on. A plain click is the one gesture that says
+      unambiguously which row the reader's hand is on, so it is the one that
+      moves the aim; while a set is being assembled the aim stays where the last
+      plain click left it, which is where the reader left it. */
+  if (row && row.dataset && row.dataset.pick && !adding && !ranging) {
     const list = aimedList();
 
     if (list)
@@ -240,7 +377,14 @@ document.addEventListener("click", (event) => {
                            dbl(Number(el("aim-offset").value))]);
   }
   if (row) {
-    selection.picked = row.dataset.pick;
+    /*  ONE ROW, ONE MORE ROW, OR EVERYTHING BETWEEN - the author's other ask of
+        2026-09-16, "multiple selection for batch editing does not work", in the
+        three gestures every list on every desk already uses for it. The model
+        keeps the anchor and the set in step (model/selection.js); this decides
+        only which of the three was meant. */
+    if (ranging) pickThrough(rangeTo(row));
+    else if (adding) pickAlso(row.dataset.pick, drawnPicks());
+    else pickOne(row.dataset.pick);
 
     /*  AND A ROW THAT IS A SECOND VIEW OF A CUE SAYS WHERE THE FIRST ONE IS.
         The derived line in a header is a reading of a mark on a member that
@@ -248,8 +392,14 @@ document.addEventListener("click", (event) => {
         clicking it picks the member - there is one object and the inspector
         edits it - and goes to the row that member actually runs from, which is
         the question anybody clicking a line in italics is asking. One gesture,
-        both answers, no second aim. */
-    if (row.dataset.reveal) lookAt(row.dataset.reveal);
+        both answers, no second aim.
+
+        NOT WHILE A SET IS BEING BUILT. A reveal unfolds whatever has to open
+        and scrolls the list to somewhere else, and somebody ctrl-clicking their
+        way down a block would have the rows they were aiming at moved out from
+        under their hand between one click and the next. Going to the other view
+        of a cue is a gesture in its own right, and it is a plain click. */
+    if (row.dataset.reveal && !adding && !ranging) lookAt(row.dataset.reveal);
 
     view.render();
   }

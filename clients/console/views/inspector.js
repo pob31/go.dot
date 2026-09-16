@@ -15,35 +15,52 @@
 */
 
 /*  THE INSPECTOR: every field of the picked cue or trigger, built out of what
-    each node says about itself (§14.2), and the gestures that act on it. */
+    each node says about itself (§14.2), and the gestures that act on it - and,
+    when more than one cue is chosen, the fields they have in common, with the
+    mixed-value semantics §3.5 asks for. */
 
 import { tree } from "../plumbing/tree.js";
+import { str } from "../plumbing/osc.js";
 import { panel } from "../model/remember.js";
 import { selection } from "../model/selection.js";
-import { el, esc } from "./common.js";
-import { isList, shownValue, refreshFields } from "./values.js";
+import { el, esc, cueName } from "./common.js";
+import { isList, shownValue, commitText, refreshFields } from "./values.js";
 
-/*  Every address in the tree that belongs to this object, whatever owner word
-    publishes it. A media cue carries `/godot/cue/<id>/name` and
+/*  Every address in the tree that belongs to these objects, whatever owner word
+    publishes each one. A media cue carries `/godot/cue/<id>/name` and
     `/godot/media/<id>/file` at once, and the inspector shows both without ever
-    being told that media cues have files. */
-function fieldsFor(id, kind) {
-  const found = [];
-  const pattern = new RegExp("^/godot/([a-z]+)/" + id + "/([A-Za-z]+)$");
+    being told that media cues have files.
+
+    ONE WALK FOR HOWEVER MANY ARE ASKED FOR, which is why the identifier is read
+    out of the address rather than written into the pattern. A panel over
+    several cues has to know which fields they have in COMMON before it knows
+    what shape it is, so these lists are rebuilt on every poll whether or not
+    anything is redrawn - and a walk per cue would be fifty walks of every
+    address a five-hundred-cue show publishes, ten times a second. */
+function fieldsForAll(ids) {
+  const found = new Map();
+  const pattern = /^\/godot\/([a-z]+)\/([^/]+)\/([A-Za-z]+)$/;
+
+  for (const id of ids) found.set(id, []);
 
   for (const address of Object.keys(tree.at)) {
     const match = pattern.exec(address);
     if (!match) continue;
 
+    const mine = found.get(match[2]);
+    if (!mine) continue;
+
     const node = tree.at[address];
     if (!node || (typeof node.TYPE !== "string" && !isList(node))) continue;   // a container
 
-    found.push({ address: address, owner: match[1], name: match[2], node: node });
+    mine.push({ address: address, owner: match[1], name: match[3], node: node });
   }
 
-  found.sort(inWorkingOrder(kind));
+  return ids.map((id) => found.get(id));
+}
 
-  return found;
+function fieldsFor(id, kind) {
+  return fieldsForAll([id])[0].sort(inWorkingOrder(kind));
 }
 
 /*  THE ORDER SOMEBODY WORKS IN, which is not the order the tree is in.
@@ -96,12 +113,31 @@ const KIND_ORDER = {
             "type", "number", "data", "at"],
 };
 
+/*  THE NAMES A KIND CLAIMS - or, when several cues are chosen at once, the
+    names any of their kinds claims, in the order the kinds were given. Two
+    fades and two stops share `target` and `curve`, and those rows belong in
+    the kinds' block, where somebody looks for what a cue DOES, rather than
+    swept to the end with `enabled` and `preset` because no single kind's table
+    was consulted. One kind is still one kind: `KIND_ORDER[kind] || []`,
+    unchanged. */
+function claimedBy(kind) {
+  if (!Array.isArray(kind)) return KIND_ORDER[kind] || [];
+
+  const names = [];
+
+  for (const one of kind) {
+    for (const name of KIND_ORDER[one] || []) if (names.indexOf(name) < 0) names.push(name);
+  }
+
+  return names;
+}
+
 /*  Which block a field belongs to, for a cue (or a trigger) of this kind. A
     name the kind claims is the kind's; the timing three are always the timing
     three; what is left is the cue itself, before or after. */
 function blockOf(field, kind) {
   if (WHEN.indexOf(field.name) >= 0) return 1;
-  if ((KIND_ORDER[kind] || []).indexOf(field.name) >= 0) return 2;
+  if (claimedBy(kind).indexOf(field.name) >= 0) return 2;
   if (SAID_FIRST.indexOf(field.name) >= 0) return 0;
 
   return 3;
@@ -113,7 +149,7 @@ function blockOf(field, kind) {
 function rankOf(field, block, kind) {
   if (block === 0) return SAID_FIRST.indexOf(field.name);
   if (block === 1) return WHEN.indexOf(field.name);
-  if (block === 2) return (KIND_ORDER[kind] || []).indexOf(field.name);
+  if (block === 2) return claimedBy(kind).indexOf(field.name);
 
   return SAID_LAST.indexOf(field.name);
 }
@@ -137,11 +173,16 @@ function inWorkingOrder(kind) {
 /*  The heading over each block. The kind's own block wears the kind's own word
     - `media`, `fade`, `group` - because that is what the namespace calls it
     and §14.2 asks a client to teach the namespace rather than a vocabulary of
-    its own. The first block has none: it is the cue itself. */
+    its own. The first block has none: it is the cue itself.
+
+    SEVERAL KINDS WEAR ALL OF THEIR WORDS, joined: "fade + stop" over the rows
+    two fades and two stops all carry. Naming only the first would tell a
+    reader they were editing fades, which is exactly the misunderstanding a
+    bulk edit must not leave anybody in. */
 function headingOf(block, kind) {
   if (block === 0) return null;
   if (block === 1) return "when";
-  if (block === 2) return kind;
+  if (block === 2) return Array.isArray(kind) ? kind.join(" + ") : kind;
 
   return "in the list";
 }
@@ -163,9 +204,15 @@ function headingOf(block, kind) {
     page an operator is reading when they pick a cue.
 
     ASKED OF THE NODE AND NEVER OF A LIST OF NAMES HERE. A row that becomes
-    writable, or arrives writable, moves by itself. */
+    writable, or arrives writable, moves by itself.
+
+    AND OF EVERY NODE, WHERE A FIELD STANDS FOR SEVERAL CUES: read-only for any
+    of them is read-only for all. A box that wrote to three of four and was
+    refused by the fourth would be the worst of both answers - some of the show
+    changed, with nothing on screen saying which - so the row is a reading for
+    all four and says what it says behind the fold. */
 function decided(field) {
-  return (Number(field.node.ACCESS) & 2) !== 0;
+  return (field.nodes || [field.node]).every((node) => (Number(node.ACCESS) & 2) !== 0);
 }
 
 function fieldMarkup(field) {
@@ -217,23 +264,45 @@ function fieldsMarkup(fields, kind, headings) {
 /*  THE FOLD ITSELF, with the identifier at the top of it. An id is the one
     thing in here nobody decided and everybody needs occasionally - it is what
     a log record, a refusal and a script all name a cue by - so it is the first
-    line inside rather than a word beside the title. */
-function detailsMarkup(id, fields, kind) {
+    line inside rather than a word beside the title.
+
+    ALL OF THEM WHEN SEVERAL ARE CHOSEN, up to a dozen, because the reason to
+    open this fold over a selection is to take the identifiers somewhere else -
+    a script, a message, a note about what went wrong. Past a dozen the row
+    would be longer than the panel and nobody is copying fifty by eye, so it
+    says how many more there are and stops. */
+const NAMED_IDS = 12;
+
+function detailsMarkup(ids, fields, kind) {
+  const many = ids.length > 1;
+  const said = ids.length > NAMED_IDS
+    ? ids.slice(0, NAMED_IDS).join(" ") + " … and " + (ids.length - NAMED_IDS) + " more"
+    : ids.join(" ");
+
   return '<details class="derived"' + (panel.details ? " open" : "") + ">" +
            '<summary data-details="yes">details</summary>' +
-           '<div class="field"><label title="the identifier this cue is known by,' +
-           ' in every record and every command">id</label>' +
-           '<div class="ro num">' + esc(id) + "</div></div>" +
+           '<div class="field"><label title="the identifier' +
+           (many ? "s these cues are" : " this cue is") +
+           ' known by, in every record and every command">id' + (many ? "s" : "") + "</label>" +
+           '<div class="ro num">' + esc(said) + "</div></div>" +
            fieldsMarkup(fields, kind, false) +
          "</details>";
 }
 
 function controlFor(field) {
   const node = field.node;
-  const writable = (Number(node.ACCESS) & 2) !== 0;
+  const writable = decided(field);
   const value = shownValue(node);
   const range = Array.isArray(node.RANGE) && node.RANGE.length ? node.RANGE[0] : null;
   const set = ' data-set="' + esc(field.address) + '"';
+
+  /*  EVERY CUE THIS ONE CONTROL STANDS FOR, on the control itself: the first
+      address is the one `data-set` already names, and the rest are what
+      `sayMixed` reads to find out whether they agree and what a commit writes
+      to after gestures/fields.js has sent the first. A field of one cue
+      carries none of this and is drawn exactly as it always was. */
+  const many = Array.isArray(field.all) && field.all.length > 1;
+  const all = many ? ' data-all="' + esc(field.all.join(" ")) + '"' : "";
 
   /*  READ-ONLY IS SHOWN AND NOT HIDDEN. `kind`, `parent`, `index` and `role`
       are derived rather than decided (§4.10), and they are exactly what
@@ -246,12 +315,20 @@ function controlFor(field) {
       for as long as it stayed picked. `data-read` is the address it goes on
       saying. */
   if (!writable) {
-    return '<div class="ro" data-read="' + esc(field.address) + '">' +
+    return '<div class="ro" data-read="' + esc(field.address) + '"' + all + ">" +
            esc(value === "" ? "—" : value) + "</div>";
   }
 
   if (range && Array.isArray(range.VALS)) {
-    return "<select" + set + ">" +
+    /*  THE WORD ITSELF AS AN OPTION, for a menu over cues that do not agree
+        (§4.8: an unchosen menu and a chosen one differ by nothing a
+        photograph would show). Disabled, so that nobody can ask for "mixed" -
+        it is not a value any parameter takes - and first, so `sayMixed` can
+        show it by index. `sayMixed` is also what selects it: a menu drawn
+        showing one cue's answer and left there would be a quiet lie about the
+        other three. */
+    return "<select" + set + all + ">" +
+      (many ? '<option value="" disabled data-mixed="yes">' + MIXED + "</option>" : "") +
       range.VALS.map((v) =>
         '<option value="' + esc(v) + '"' + (String(v) === String(value) ? " selected" : "") +
         ">" + esc(v) + "</option>").join("") +
@@ -259,13 +336,24 @@ function controlFor(field) {
   }
 
   if (node.TYPE === "T" || node.TYPE === "F") {
+    /*  A TICK BOX HAS A THIRD STATE AND NO WORD FOR IT. `indeterminate` is a
+        dash in a box, which is a shape and not a word, so the word goes
+        beside it (§4.8) and is shown or hidden by `sayMixed` as the answer
+        changes under the panel. The wrapper keeps the field a two-column
+        grid: a label and one thing beside it. */
+    if (many) {
+      return '<span class="pair"><input type="checkbox"' + set + all +
+             (value === true ? " checked" : "") + '>' +
+             '<span class="ro mixed" data-word="' + MIXED + '" hidden>' + MIXED + "</span></span>";
+    }
+
     return '<input type="checkbox"' + set + (value === true ? " checked" : "") + ">";
   }
 
   /*  Before the number test, which an empty list's TYPE would pass: "" is
       found at the start of "ifdh". */
   if (isList(node)) {
-    return '<input type="text" class="list"' + set + ' value="' + esc(value) + '">';
+    return '<input type="text" class="list"' + set + all + ' value="' + esc(value) + '">';
   }
 
   if ("ifdh".indexOf(node.TYPE) >= 0) {
@@ -273,14 +361,377 @@ function controlFor(field) {
     const min = range && range.MIN !== undefined ? ' min="' + esc(range.MIN) + '"' : "";
     const max = range && range.MAX !== undefined ? ' max="' + esc(range.MAX) + '"' : "";
 
-    return '<input type="number" step="' + step + '"' + min + max + set +
+    return '<input type="number" step="' + step + '"' + min + max + set + all +
            ' value="' + esc(value) + '">';
   }
 
-  return '<input type="text"' + set + ' value="' + esc(value) + '">';
+  return '<input type="text"' + set + all + ' value="' + esc(value) + '">';
 }
 
 const KINDS = ["memo", "media", "fade", "stop", "osc", "group"];
+
+/*  ─────────────────────────────────────────────── several cues at once ──
+
+    WHAT N CUES HAVE IN COMMON, AND WHAT EDITING THEM COSTS.
+
+    §3.5 asks for exactly this and words it in one line: "show the value when
+    all members agree, show mixed otherwise, and typing sets all". The model is
+    model/selection.js's - `picked` is the ANCHOR, one cue or none, and `chosen`
+    is every cue chosen in drawn order, the anchor among them. One chosen cue is
+    the page's whole life and is drawn by the code below this, unchanged, on
+    purpose: a rewrite that made the ordinary case subtly different would be a
+    bad trade for a panel somebody opens now and then.
+
+    N SEPARATE WRITES, AND N SEPARATE UNDOS. A commit here sends one `node.set`
+    datagram per cue, because that is all the engine offers: there is no bulk
+    command and nobody has asked for one. So an edit to four cues is four
+    transactions in the history, and taking it back is four presses of ctrl/⌘-Z.
+    That is worth writing down rather than hiding: the alternative is an engine
+    change, and the honest thing in the meantime is to say so where somebody
+    reaching for the gesture will read it - the panel's own title sentence, and
+    the delete button's. Recorded here, not built.
+
+    WHAT IS NOT BUILT, AND WHERE IT WOULD GO. §3.5 also gives the group view a
+    filter by contained kind - "all audio, all video, all OSC, all MIDI" - so
+    that a mixed group offers one kind's fields rather than the thin
+    intersection of everything. That belongs with the group shortcut, which is a
+    second route into this same panel and is not this round's; until it exists a
+    selection of two kinds shows what the two kinds share, which is honest and
+    sometimes very little. */
+
+const MIXED = "mixed";
+
+/*  THE FIELD NAMES EVERY LIST CARRIES, in the order the first list gives them.
+    Small and total on purpose: no lists at all is nothing in common, one list
+    is that list, and lists with nothing in common are empty rather than an
+    error. A name repeated within the first list is answered once - two owners
+    can publish the same word for one cue, and two identical rows in a panel
+    would be two boxes writing to different addresses under one label. */
+function intersect(lists) {
+  if (!Array.isArray(lists) || !lists.length) return [];
+
+  const first = lists[0] || [];
+  const common = [];
+
+  for (const name of first) {
+    if (common.indexOf(name) >= 0) continue;
+    if (lists.every((list) => Array.isArray(list) && list.indexOf(name) >= 0)) common.push(name);
+  }
+
+  return common;
+}
+
+/*  Whether N values are all the same value. Nothing and one thing agree with
+    themselves; everything else is compared as text, because that is how a
+    control shows it and the question this answers is what a control should
+    show. */
+function agree(values) {
+  if (!Array.isArray(values) || values.length < 2) return true;
+
+  const first = String(values[0]);
+
+  return values.every((value) => String(value) === first);
+}
+
+/*  One row per field the chosen cues all carry, each holding every address it
+    stands for. The control's shape - its type, its range, its sentence - is
+    taken from the first cue: those come from one row of the parameter table,
+    so every cue that has the field has the same row. What is NOT taken from
+    the first cue is whether anybody may write it (`decided` asks all of them).
+
+    SORTED BY THE KINDS PRESENT rather than by the first cue's kind, so the
+    blocks the rows fall into and the headings over them are the same
+    arrangement. */
+function sharedFields(ids, kinds) {
+  const lists = fieldsForAll(ids);
+  const names = intersect(lists.map((list) => list.map((field) => field.name)));
+  const shared = [];
+
+  for (const name of names) {
+    const each = lists.map((list) => list.find((field) => field.name === name));
+
+    shared.push({
+      address: each[0].address,
+      owner: each[0].owner,
+      name: name,
+      node: each[0].node,
+      nodes: each.map((field) => field.node),
+      all: each.map((field) => field.address),
+    });
+  }
+
+  return shared.sort(inWorkingOrder(kinds));
+}
+
+/*  WHERE THE PANEL SAYS "MIXED", and it is said after every refresh rather than
+    drawn once into the markup, because agreement is a live question: another
+    client - or the second, third and fourth write of this panel's own commit -
+    can bring four values together or take them apart while the panel stands
+    open.
+
+    NOT UNDER SOMEBODY'S HANDS AND NOT OVER A COMMIT IN FLIGHT. Both rules are
+    views/values.js's and gestures/fields.js's, and both are asked here rather
+    than copied: the field with the focus is left alone, a field holding an
+    uncommitted edit is left alone, and a field whose last commit the tree has
+    not caught up with is left alone until `refreshFields` has decided whether
+    that commit took. Without the last of those, a value typed into a mixed box
+    would be blanked again a tenth of a second later - by this loop, reading
+    four cues that have not all answered yet - which reads exactly like an edit
+    that did not take. */
+function sayMixed(pane) {
+  for (const control of pane.querySelectorAll("[data-all]")) {
+    const values = [];
+
+    for (const address of String(control.dataset.all).split(" ")) {
+      const node = tree.node(address);
+
+      if (node) values.push(shownValue(node, control));
+    }
+
+    const mixed = values.length > 1 && !agree(values);
+
+    /*  A READING RATHER THAN A CONTROL, behind the fold. `refreshFields` keeps
+        it true whenever the cues agree, and this is the other answer. */
+    if (control.dataset.read !== undefined) {
+      if (mixed && control.textContent !== MIXED) control.textContent = MIXED;
+      continue;
+    }
+
+    if (control === document.activeElement || control.dataset.dirty === "yes") continue;
+    if (control.dataset.sent !== undefined) continue;
+
+    if (control.type === "checkbox") {
+      const word = control.nextElementSibling;
+
+      control.indeterminate = mixed;
+
+      if (word && word.dataset.word === MIXED) word.hidden = !mixed;
+      continue;
+    }
+
+    if (control.tagName === "SELECT") {
+      /*  The disabled option `controlFor` put first. Where they agree the
+          refresh has already chosen the option that says so. */
+      if (mixed) control.selectedIndex = 0;
+      continue;
+    }
+
+    /*  AN EMPTY BOX WITH THE WORD IN IT. The placeholder is put on and taken
+        off as the answer changes, and never written into the markup, because a
+        box whose four cues all hold "" would then claim they disagreed. */
+    if (mixed) {
+      control.value = "";
+      if (control.placeholder !== MIXED) control.placeholder = MIXED;
+    } else if (control.placeholder) {
+      control.removeAttribute("placeholder");
+    }
+  }
+}
+
+/*  THE WRITE HALF AND THE COMMAND TABLE, ASKED FOR AT THE MOMENT THEY ARE USED
+    rather than imported at the top of this file.
+
+    plumbing/link.js reads `location` as it loads - it has to know whether this
+    page was served by the engine at all before it opens a socket - and
+    gestures/table.js imports it. This module is imported by the console's
+    tests, which give it the least DOM the markup needs and no `location`
+    whatever, so a static import would make the whole panel untestable and buy
+    nothing: nothing here sends anything until somebody commits an edit or
+    presses delete, and by then the browser has had the module for minutes.
+
+    THE FIRST OF THE N IS NOT SENT HERE, and that is the shape of the whole
+    feature: the control carries the first address in `data-set` and the first
+    identifier in `data-delete`, so gestures/fields.js commits it under all its
+    own rules - what Escape takes back, what a menu does when it is picked from,
+    what the in-flight mark says - and gestures/clicks.js deletes it as the
+    named command it already is (§4.11). This sends the SAME thing to the rest.
+    Two handlers, one rule, and none of that rule copied. */
+function writeRest(addresses, text) {
+  if (!addresses.length) return;
+
+  import("../plumbing/link.js").then((link) => {
+    for (const address of addresses) link.setNode(address, text);
+  });
+}
+
+function deleteRest(ids) {
+  if (!ids.length) return;
+
+  import("../gestures/table.js").then((commands) => {
+    for (const id of ids) commands.gesture("delete", [str(id)]);
+  });
+}
+
+/*  Wired to the pane the first time it is drawn, and never again: the element
+    itself outlives every render - only its contents are replaced - so one
+    wiring holds for the life of the page. On the pane rather than on the
+    document because these two gestures exist nowhere else, and at render time
+    rather than at import because a module that wires listeners as it loads is a
+    module that cannot be read by anything but a browser. */
+function wirePane(pane) {
+  if (!pane || pane.dataset.wired === "yes" || typeof pane.addEventListener !== "function") return;
+
+  pane.dataset.wired = "yes";
+
+  pane.addEventListener("change", (event) => {
+    const target = event.target;
+    const all = target && target.dataset ? target.dataset.all : undefined;
+
+    if (!all) return;
+
+    /*  ESCAPE NEVER WRITES, and it must not write to the other three either.
+        gestures/fields.js marks the field while it takes the focus away. */
+    if (target.dataset.abandoning === "yes") return;
+
+    writeRest(String(all).split(" ").slice(1), commitText(target));
+  });
+
+  pane.addEventListener("click", (event) => {
+    const button = event.target && event.target.closest
+                     ? event.target.closest("[data-delete-all]") : null;
+
+    if (!button) return;
+
+    deleteRest(String(button.dataset.deleteAll).split(" ").slice(1));
+  });
+}
+
+/*  THE STRUCTURE BUTTONS OVER A SELECTION, and what each of them acts on.
+
+    DELETE IS THE ONLY ONE THAT MEANS ALL OF THEM. The rest are aimed at the
+    ANCHOR and say so in their own title, because "move four cues one earlier"
+    has no single obvious meaning - four cues in three groups, two of them
+    adjacent, moved one place towards a neighbour that is itself moving - and a
+    button that did something defensible but unguessable to a show is worse
+    than a button that does one thing. The anchor is the cue somebody clicked
+    last, which is the one their pointer is already on.
+
+    A GROUP'S OWN BUTTONS ARE NOT OFFERED HERE - `+ media inside`, `+ header`,
+    `+ footer`. They are about one group and its sections; a panel whose
+    subject is four cues is not where somebody is arranging one of them. Pick
+    the group on its own and they are all there.
+
+    AND THE ANCHOR-ONLY ONES ARE DRAWN ONLY WHILE THERE IS AN ANCHOR. Every one
+    of them is carried out by gestures/clicks.js against `selection.picked` -
+    that is what `data-move` and `data-add` mean - so a panel that drew them
+    while what is picked was NOT one of the chosen would aim them at a cue it
+    is not showing. The selection model says the anchor is always among the
+    chosen; this is what the panel does if that ever stops being true, and it
+    is silence rather than a wrong guess. */
+function manyStructure(anchor, chosen) {
+  let out = '<div class="group-head">structure</div><div class="actions">';
+
+  if (anchor) {
+    const parent = tree.cue(anchor, "parent", "");
+    const siblings = tree.ids((tree.node("/godot/list/" + parent + "/order")
+                                 ? "/godot/list/" : "/godot/cue/") + parent + "/order");
+    const at = siblings.indexOf(anchor);
+    const said = esc(cueName(anchor));
+    const rest = chosen.length - 1;
+    const only = " — " + said + " only, not the other " + (rest === 1 ? "one" : rest);
+
+    out += '<button data-park="' + esc(anchor) + '" title="GO will act on ' + said +
+           ' — the cue this selection is anchored on">▸ standby here</button>';
+
+    out += '<button data-move="' + (at - 1) + '" data-parent="' + esc(parent) + '"' +
+           (at > 0 ? "" : " disabled") + ' title="one earlier' + only + '">▲</button>';
+    out += '<button data-move="' + (at + 1) + '" data-parent="' + esc(parent) + '"' +
+           (at >= 0 && at < siblings.length - 1 ? "" : " disabled") +
+           ' title="one later' + only + '">▼</button>';
+
+    for (const kind of KINDS) {
+      out += '<button data-add="' + kind + '" data-into="' + esc(parent) + '"' +
+             ' title="after ' + said + only + '">+ ' + kind + "</button>";
+    }
+  }
+
+  /*  ALL OF THEM, ONE AT A TIME, and the title says what that costs before
+      anybody presses it. The first identifier is gestures/clicks.js's, which
+      is where the named command and the clearing of what is picked already
+      live; the rest are this file's. */
+  out += '<button class="danger" data-delete="' + esc(chosen[0]) + '" data-delete-all="' +
+         esc(chosen.join(" ")) + '" title="deletes all ' + chosen.length +
+         ', one at a time: taking that back is ' + chosen.length +
+         ' presses of undo">delete ' + chosen.length + "</button>";
+
+  return out + "</div>";
+}
+
+/*  THE PANEL ITSELF. Rebuilt only when its shape changes, for the reason the
+    one-cue panel is: the poll arrives up to ten times a second and a panel
+    rebuilt on each one would take the cursor out of the box somebody is typing
+    in. WHAT IS MIXED IS NOT PART OF THE SHAPE - it is said by `sayMixed` into
+    the panel that stands - so four values coming together under a commit
+    redraw nothing. */
+function renderMany(pane, chosen) {
+  const anchor = chosen.indexOf(selection.picked) >= 0 ? selection.picked : "";
+  const kinds = chosen.map((id) => tree.cue(id, "kind", "memo"));
+  const present = [];
+
+  for (const kind of kinds) if (present.indexOf(kind) < 0) present.push(kind);
+
+  const fields = sharedFields(chosen, present);
+  const signature = "many|" + chosen.join(" ") + "|" + anchor + "|" + present.join("+") + "|"
+                      + (panel.details ? "open" : "shut") + "|"
+                      + fields.map((f) => f.address).join(",");
+
+  if (pane.dataset.showing !== signature) {
+    pane.dataset.showing = signature;
+
+    /*  HOW MANY, AND OF WHAT. "4 cues" answers the first question and the
+        tally answers the second - two fades and two memos, which is what tells
+        a reader why the panel is showing them six rows instead of a fade's
+        eleven. */
+    const tally = present.map((kind) =>
+      kinds.filter((one) => one === kind).length + " " + kind).join(" · ");
+
+    let out =
+      '<div class="who" title="every edit here is written to each of the ' + chosen.length +
+      ' separately: taking one back is ' + chosen.length + ' presses of undo">' +
+      '<span class="text">' + chosen.length + ' cues</span>' +
+      '<span class="kind">' + esc(tally) + "</span></div>";
+
+    out += fieldsMarkup(fields.filter(decided), present, true);
+    out += detailsMarkup(chosen, fields.filter((field) => !decided(field)), present);
+
+    /*  THE TRIGGERS SECTION IS ABOUT ONE CUE, so over a selection it is a
+        heading and nothing else. A trigger is an object with an identifier of
+        its own and its own page, four cues' triggers in one list would say
+        nothing about which cue each belonged to, and the `+ osc` buttons send
+        `add-trigger` at whatever is picked - so a section drawn here would
+        quietly aim at the anchor while looking like it meant all four. The
+        heading stays because a section that vanished with no word would be a
+        small mystery every time somebody chose a second cue. */
+    out += '<div class="group-head">triggers — one cue at a time</div>';
+
+    out += manyStructure(anchor, chosen);
+
+    pane.innerHTML = out;
+    sayMixed(pane);
+    return;
+  }
+
+  refreshFields(pane);
+  sayMixed(pane);
+}
+
+/*  WHICH OF THE CHOSEN ARE STILL THERE, in the order they were chosen and each
+    of them once. A selection is the page's own (§14.1) and the document is
+    not: cues are deleted from here, from another client and from a script, and
+    `chosen` is not told. So the panel asks the tree rather than trusting the
+    list, which is also what empties it after a delete of all N - the ids stop
+    being cues, nothing is chosen, and the pane says there is nothing to
+    declare. */
+function chosenCues() {
+  const asked = Array.isArray(selection.chosen) ? selection.chosen : [];
+  const live = [];
+
+  for (const id of asked) {
+    if (live.indexOf(id) < 0 && tree.node("/godot/cue/" + id + "/kind")) live.push(id);
+  }
+
+  return live;
+}
 
 /*  What a trigger says in one line, which is enough to tell two of them apart
     without opening either. */
@@ -298,6 +749,8 @@ function triggerSummary(id) {
 
 function renderInspector() {
   const pane = el("inspect");
+
+  wirePane(pane);
 
   /*  A TRIGGER IS INSPECTED LIKE ANYTHING ELSE, because it is addressed like
       anything else: the fields come from `/godot/trigger/<id>/*` through the
@@ -320,7 +773,7 @@ function renderInspector() {
         esc(tree.cue(owner, "name", "") || owner) + "</div>";
 
       out += fieldsMarkup(fields.filter(decided), kind, true);
-      out += detailsMarkup(selection.picked, fields.filter((f) => !decided(f)), kind);
+      out += detailsMarkup([selection.picked], fields.filter((f) => !decided(f)), kind);
 
       out += '<div class="group-head">structure</div><div class="actions">' +
              '<button class="danger" data-delete="' + esc(selection.picked) + '">delete</button></div>';
@@ -330,6 +783,17 @@ function renderInspector() {
     }
 
     refreshFields(pane);
+    return;
+  }
+
+  /*  MORE THAN ONE CUE CHOSEN, and that is the only thing that sends the panel
+      down the other road. One chosen cue - which is what an ordinary click
+      leaves, and what the page spends its life in - falls straight through to
+      the panel below, byte for byte the one it has always drawn. */
+  const chosen = chosenCues();
+
+  if (chosen.length > 1) {
+    renderMany(pane, chosen);
     return;
   }
 
@@ -367,7 +831,7 @@ function renderInspector() {
       '</span><span class="kind">' + esc(kind) + "</span></div>";
 
     out += fieldsMarkup(fields.filter(decided), kind, true);
-    out += detailsMarkup(selection.picked, fields.filter((f) => !decided(f)), kind);
+    out += detailsMarkup([selection.picked], fields.filter((f) => !decided(f)), kind);
 
     /*  THE CUE'S TRIGGERS, listed rather than folded into the fields above:
         they are objects with identifiers of their own, a cue may have several,
@@ -449,4 +913,4 @@ function renderInspector() {
   refreshFields(pane);
 }
 
-export { renderInspector, decided, blockOf, headingOf, inWorkingOrder };
+export { renderInspector, decided, blockOf, headingOf, inWorkingOrder, intersect, agree };

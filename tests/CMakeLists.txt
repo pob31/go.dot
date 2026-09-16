@@ -69,6 +69,7 @@ add_executable(wfg_tests
     EventLogTests.cpp
     EngineTests.cpp
     DocumentTests.cpp
+    SequenceTests.cpp
     BundleTests.cpp
     DocumentWriterTests.cpp
     ClockTests.cpp

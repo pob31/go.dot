@@ -32,11 +32,20 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/Run.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/EphemeralState.h>
 #include <wfg/engine/log/Replay.h>
+
+/*  THE TREE, in a file about the document, for one reason: `order` is a derived
+    value. The document refuses to store it - that is what derived means - so
+    `getAttribute` answers std::nullopt and the parameter tree is the only place
+    the member sequence exists. The member-index cases below read it there,
+    which is also where a client reads it. */
+#include <wfg/engine/tree/Mount.h>
+#include <wfg/engine/tree/ParameterTree.h>
 
 #include <juce_core/juce_core.h>
 
@@ -517,6 +526,404 @@ TEST_CASE ("document: an identifier supplied twice is refused")
 
     CHECK_FALSE (document.createList ("Other", "7K2QM9X4").ok);
     CHECK_FALSE (document.createList ("Other", "lowercase").ok);
+}
+
+//==============================================================================
+/*  AN INDEX IS A MEMBER POSITION, NOT A CHILD POSITION.
+
+    `object.move <id> <parent> <index>` and `cue.create <parent> <index> <kind>
+    <name>` used to hand their index straight to juce::ValueTree. That index
+    therefore counted EVERY child element of the parent - the <Header>, the
+    <Footer>, the <Persistent> section, a <Trigger> - while every client counts
+    MEMBERS, because members are all the tree publishes. `/godot/cue/<id>/order`
+    lists them, `/godot/cue/<id>/index` numbers them, and nothing anywhere says
+    where the <Header> element sits among its siblings. A client could not have
+    computed the number the engine wanted even if it had been told that the
+    engine wanted a different one.
+
+    MEASURED ON A RUNNING ENGINE, on a group whose children were
+    [Header, Media, Osc, Group, Footer]: the inspector's ▼ on the Osc sent
+    `object.move <osc> <group> 1`, the Osc swapped places with the <Header>
+    element, and no member moved at all. The command reported itself applied,
+    the button did nothing, and every drag-and-drop gesture aimed at that group
+    would have inherited it.
+
+    THESE CASES ASSERT ON THE MEMBER SEQUENCE and never on a raw child index,
+    because the raw child index is exactly the thing that was wrong. The
+    sequence is read where a client reads it: `order` is derived, so the
+    document itself answers std::nullopt for it and the parameter tree is what
+    computes it - through `orderOf`, which is the rule the two doors now ask as
+    well, so a disagreement between the door and the published order is no
+    longer expressible.
+
+    THE ONE RAW POSITION ANYTHING HERE CLAIMS IS THE HEADER'S OWN. It is the
+    group's first child in the file, and no member index may put a cue above it.
+    That is a claim about the header rather than about the cue that moved, and
+    it is the half of the defect a member sequence alone cannot see: moving a
+    member to position 0 read back correctly while the cue had in fact jumped
+    over the header on its way there.
+*/
+namespace
+{
+    /*  The ids of the hand-authored show below, named once so that a case can
+        say which cue it is moving rather than which eight characters. They are
+        the `groups` fixture bundle's ids on purpose: that bundle is the shape
+        the defect was measured on, and a reader who opens it finds this group.
+
+        `announcement` rather than `announce`, and `topCue` rather than
+        `houseToHalf`, because the edit-lock block further down this file names
+        a `houseToHalf` of its own in this same namespace. */
+    const std::string stagedList   { "7K2QM9X4" };
+    const std::string topCue       { "B3N8R5TW" };    // a member of the LIST, not of the group
+    const std::string stagedGroup  { "D9FH2JKA" };
+    const std::string walkIn       { "E4GP6QSC" };    // member 0, child 1
+    const std::string announcement { "F7HR8TVD" };    // member 1, child 2
+    const std::string doors        { "P4QRST67" };    // member 2, child 3
+    const std::string stagedHeader { "H1AAAA22" };    // child 0, and not a member at all
+    const std::string preArm       { "H2BBBB33" };
+    const std::string stagedFooter { "F1CCCC44" };    // child 4, and not a member either
+    const std::string releaseCue   { "F2DDDD55" };
+
+    /*  A group whose file order and whose member order are different things.
+        The <Header> is its first child and the <Footer> its last, so each of
+        the three members sits one place further down the element list than it
+        sits in `order` - and any arithmetic that counts children rather than
+        members gets a different answer here for every index there is.
+
+        Hand-authored, for the reason the top of this file gives: a fixture
+        produced by the code under test proves only that the code agrees with
+        itself. A header written FIRST is what makes the shape, and it is also
+        the shape a show acquires in practice - `createRole` appends, so a group
+        that was given its header before its members has exactly this file. */
+    ShowDocument staged()
+    {
+        const std::string xml =
+            "<Show>\n"
+            "  <Lists>\n"
+            "    <List id=\"7K2QM9X4\" name=\"Act One\">\n"
+            "      <Cue id=\"B3N8R5TW\" name=\"House to half\"/>\n"
+            "      <Group id=\"D9FH2JKA\" name=\"Preshow\">\n"
+            "        <Header id=\"H1AAAA22\">\n"
+            "          <Cue id=\"H2BBBB33\" name=\"Pre-arm the rig\"/>\n"
+            "        </Header>\n"
+            "        <Cue id=\"E4GP6QSC\" name=\"Walk-in\"/>\n"
+            "        <Cue id=\"F7HR8TVD\" name=\"Announce\"/>\n"
+            "        <Cue id=\"P4QRST67\" name=\"Doors\"/>\n"
+            "        <Footer id=\"F1CCCC44\">\n"
+            "          <Cue id=\"F2DDDD55\" name=\"Release channels\"/>\n"
+            "        </Footer>\n"
+            "      </Group>\n"
+            "    </List>\n"
+            "  </Lists>\n"
+            "  <Mounts/>\n"
+            "  <Audio tracks=\"0\"/>\n"
+            "</Show>\n";
+
+        ShowDocument document;
+        const auto result = CanonicalXml::read (xml, document);
+
+        for (const auto& problem : result.problems)
+            INFO (problem);
+
+        REQUIRE (result.ok);
+        return document;
+    }
+
+    /*  The show, the commands a client sends, and the tree those commands are
+        read back out of.
+
+        THROUGH THE COMMANDS, because the claim is about what a client's gesture
+        does and the gesture is `object.move`. The creates go through the
+        document as well as through `cue.create`, since `insertObject` is the
+        one door every create in the file arrives at and a rule applied at the
+        command only would leave nine other creates counting children.
+
+        markStale() before every publish: the tree caches the document half and
+        is told by the engine loop when the show moved, which a test editing the
+        document under it has to do for itself. */
+    struct MemberRig
+    {
+        MemberRig()
+        {
+            registerDocumentCommands (engine.commands(), document);
+
+            /*  Opened but never read here. A refused command writes a rejected
+                record with its reason, and a log nobody opened is a second
+                thing that could be wrong about a case whose subject is
+                arithmetic. */
+            engine.log().openInMemory ({});
+        }
+
+        Engine::TickResult run (const std::string& name, std::vector<osc::Value> args)
+        {
+            REQUIRE (engine.submit (origin::cli, name, std::move (args)));
+            return engine.processTick (nextTick++);
+        }
+
+        /** `object.move`, exactly as a drag or an inspector arrow sends it. */
+        void moveMember (const std::string& id, const std::string& parent, int index)
+        {
+            INFO ("object.move " << id << " " << parent << " " << index);
+            CHECK (run ("object.move", { osc::Value::string (id),
+                                         osc::Value::string (parent),
+                                         osc::Value::int32 (index) }).applied == 1);
+        }
+
+        osc::Value valueAt (const std::string& address)
+        {
+            parameters.markStale();
+
+            tree::EngineState state;
+            const auto snapshot = parameters.publish (nextTick++, state);
+
+            const auto* node = snapshot->find (address);
+            REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+            REQUIRE (node->soleValue().has_value());
+
+            return *node->soleValue();
+        }
+
+        /** The member sequence of a group or a list, as a client reads it. */
+        std::string orderOf (const std::string& cueId)
+        {
+            return valueAt ("/godot/cue/" + cueId + "/order").getString();
+        }
+
+        std::string listOrderOf (const std::string& listId)
+        {
+            return valueAt ("/godot/list/" + listId + "/order").getString();
+        }
+
+        /** Where the header's and the footer's own cues sit; not members. */
+        std::string headerOrderOf (const std::string& cueId)
+        {
+            return valueAt ("/godot/cue/" + cueId + "/headerOrder").getString();
+        }
+
+        std::string footerOrderOf (const std::string& cueId)
+        {
+            return valueAt ("/godot/cue/" + cueId + "/footerOrder").getString();
+        }
+
+        /** Which element the group's first child is. The header's own claim. */
+        std::string firstChildElementOf (const std::string& cueId) const
+        {
+            return document.findById (cueId).getChild (0).getType().toString().toStdString();
+        }
+
+        ShowDocument document = staged();
+        Engine engine;
+        tree::MountTable mounts;
+        cue::RunTable runs;
+        tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+        std::int64_t nextTick = 0;
+    };
+}
+
+TEST_CASE ("member index: a move down one lands one member later, which is what it did not do")
+{
+    MemberRig rig;
+
+    /*  The sequence everything below is said against, and the reason the shape
+        is worth the twenty lines it costs: three members at child positions 1,
+        2 and 3. */
+    REQUIRE (rig.orderOf (stagedGroup) == walkIn + " " + announcement + " " + doors);
+
+    /*  THE MEASURED BUG, in one line. `announcement` is member 1 and child 2,
+        so "one member later" is member index 2 - and the old arithmetic read
+        that as child index 2, which is where the cue already was. moveChild
+        moved it nowhere, the command reported itself applied, and the operator
+        watched a row that would not move.
+
+        NO CASE ANYWHERE IN THE SUITE PINNED THE OLD ARITHMETIC, which is why
+        it survived three phases: every group and every list that a test moved
+        a cue in had no <Header>, no <Footer> and no <Persistent> section at
+        the moment it was asked, so member and child agreed on every index and
+        the arithmetic was never put a question it could get wrong. Nothing
+        below is a changed assertion. The absence of this shape was the bug. */
+    rig.moveMember (announcement, stagedGroup, 2);
+
+    CHECK (rig.orderOf (stagedGroup) == walkIn + " " + doors + " " + announcement);
+
+    /*  AND THE OTHER PUBLISHED HALF AGREES. `index` has counted members since
+        the header existed - the walk skips a <Header> before it increments -
+        so a door that counted children was publishing one number and obeying
+        another. A client that read `index`, added one and sent the result got
+        the silent no-op above; that round trip is now closed. */
+    CHECK (rig.valueAt ("/godot/cue/" + announcement + "/index") == osc::Value::int32 (2));
+    CHECK (rig.valueAt ("/godot/cue/" + walkIn + "/index") == osc::Value::int32 (0));
+    CHECK (rig.valueAt ("/godot/cue/" + doors + "/index") == osc::Value::int32 (1));
+
+    // Down one from the top, for the same claim one place higher up.
+    rig.moveMember (walkIn, stagedGroup, 1);
+    CHECK (rig.orderOf (stagedGroup) == doors + " " + walkIn + " " + announcement);
+}
+
+TEST_CASE ("member index: a move up one lands one member earlier, and never above the header")
+{
+    MemberRig rig;
+
+    /*  `doors` is member 2 and child 3. One member earlier is member index 1,
+        which the old arithmetic read as child index 1 - two members up rather
+        than one, landing it in front of `walkIn`. Up by one and up by two are
+        the same gesture to an operator holding ▲ down, which is how a defect
+        like this survives a demonstration. */
+    rig.moveMember (doors, stagedGroup, 1);
+    CHECK (rig.orderOf (stagedGroup) == walkIn + " " + doors + " " + announcement);
+
+    /*  AND TO THE TOP, which is the case a member sequence alone cannot judge.
+        Child index 0 is the <Header>'s, so the old arithmetic put the cue in
+        front of it - and then published exactly the order asked for, because
+        `orderOf` skips the header whichever side of it the cue is on. The file
+        had quietly acquired a group whose header ran second. */
+    rig.moveMember (doors, stagedGroup, 0);
+    CHECK (rig.orderOf (stagedGroup) == doors + " " + walkIn + " " + announcement);
+    CHECK (rig.firstChildElementOf (stagedGroup) == "Header");
+
+    /*  A position past the end appends, as it always has - with the difference
+        that "the end" is now the end of the MEMBERS. Where the cue lands
+        relative to the <Footer> element is not asserted: a footer is a footer
+        because of its element name and not because of where it sits, and
+        pinning that would pin a detail of the insertion rather than the rule. */
+    rig.moveMember (doors, stagedGroup, 99);
+    CHECK (rig.orderOf (stagedGroup) == walkIn + " " + announcement + " " + doors);
+
+    // And a negative index is still refused rather than clamped.
+    CHECK (rig.run ("object.move", { osc::Value::string (doors),
+                                     osc::Value::string (stagedGroup),
+                                     osc::Value::int32 (-1) }).rejected == 1);
+
+    CHECK (rig.orderOf (stagedGroup) == walkIn + " " + announcement + " " + doors);
+}
+
+TEST_CASE ("member index: a cue is created at a member position, and order reads it back there")
+{
+    MemberRig rig;
+
+    /*  Through `cue.create` with the identifier supplied, so the case can name
+        the cue it is looking for. Member index 1 is child index 2 here; the old
+        arithmetic inserted at child 1, which is in front of `walkIn`, so the
+        cue a client asked for "after the first one" arrived before it. */
+    const std::string inserted { "N3WMEM01" };
+
+    CHECK (rig.run ("cue.create", { osc::Value::string (stagedGroup), osc::Value::int32 (1),
+                                    osc::Value::string ("memo"), osc::Value::string ("Inserted"),
+                                    osc::Value::string (inserted) }).applied == 1);
+
+    CHECK (rig.orderOf (stagedGroup)
+             == walkIn + " " + inserted + " " + announcement + " " + doors);
+
+    /*  AT THE TOP, through the document rather than the command, because
+        `insertObject` is the door all ten creates share and the rule has to be
+        the door's. Same trap as the move to 0: the order below reads correctly
+        under the old arithmetic too, and the header is what says it did not. */
+    const auto first = rig.document.createCue (stagedGroup, 0, "memo", "First");
+    REQUIRE (first.ok);
+
+    CHECK (rig.orderOf (stagedGroup)
+             == first.id + " " + walkIn + " " + inserted + " " + announcement + " " + doors);
+    CHECK (rig.firstChildElementOf (stagedGroup) == "Header");
+
+    // Past the end still appends, and a negative index is still refused.
+    const auto last = rig.document.createCue (stagedGroup, 99, "memo", "Last");
+    REQUIRE (last.ok);
+
+    CHECK (rig.orderOf (stagedGroup)
+             == first.id + " " + walkIn + " " + inserted + " " + announcement + " "
+                  + doors + " " + last.id);
+
+    CHECK_FALSE (rig.document.createCue (stagedGroup, -1, "memo", "Nope").ok);
+}
+
+TEST_CASE ("member index: a move into another parent counts that parent's members")
+{
+    MemberRig rig;
+
+    /*  The drag that crosses a boundary: a cue at the list's top level, dropped
+        between the group's first and second members. The list it leaves counts
+        members too, and has none of its own to confuse - which is the point of
+        doing it in this direction. */
+    REQUIRE (rig.listOrderOf (stagedList) == topCue + " " + stagedGroup);
+
+    rig.moveMember (topCue, stagedGroup, 1);
+
+    CHECK (rig.orderOf (stagedGroup) == walkIn + " " + topCue + " " + announcement + " " + doors);
+    CHECK (rig.listOrderOf (stagedList) == stagedGroup);
+    CHECK (rig.valueAt ("/godot/cue/" + topCue + "/parent") == osc::Value::string (stagedGroup));
+
+    /*  The cross-parent limb is an `addChild` rather than a `moveChild`, so it
+        had a bug of its own with the same cause and a different symptom: child
+        index 1 is after the header, so the cue arrived one member too early
+        rather than not at all. Dropping it at the top would have arrived in
+        front of the header. */
+    rig.moveMember (topCue, stagedGroup, 0);
+    CHECK (rig.orderOf (stagedGroup) == topCue + " " + walkIn + " " + announcement + " " + doors);
+    CHECK (rig.firstChildElementOf (stagedGroup) == "Header");
+
+    // And back out, into the list it came from, in front of the group.
+    rig.moveMember (topCue, stagedList, 0);
+    CHECK (rig.listOrderOf (stagedList) == topCue + " " + stagedGroup);
+    CHECK (rig.orderOf (stagedGroup) == walkIn + " " + announcement + " " + doors);
+}
+
+TEST_CASE ("member index: the header and the footer are untouched by every one of those gestures")
+{
+    /*  §3.6 makes a header and a footer cue lists the group runs for ITSELF, so
+        a reorder of the members is not a statement about either of them. Every
+        gesture the cases above make, made once more in a row, and then the two
+        sections are asked whether anything happened to them. */
+    MemberRig rig;
+
+    rig.moveMember (announcement, stagedGroup, 2);
+    rig.moveMember (doors, stagedGroup, 0);
+    rig.moveMember (walkIn, stagedGroup, 99);
+    rig.moveMember (topCue, stagedGroup, 1);
+
+    REQUIRE (rig.document.createCue (stagedGroup, 0, "memo", "First").ok);
+    REQUIRE (rig.document.createCue (stagedGroup, 2, "memo", "Middle").ok);
+    REQUIRE (rig.document.createCue (stagedGroup, 99, "memo", "Last").ok);
+
+    /*  Both sections are still there, still hold the one cue each was written
+        with, and still hold it in the same place. */
+    CHECK (rig.headerOrderOf (stagedGroup) == preArm);
+    CHECK (rig.footerOrderOf (stagedGroup) == releaseCue);
+
+    const auto header = rig.document.findById (stagedHeader);
+    const auto footer = rig.document.findById (stagedFooter);
+
+    REQUIRE (header.isValid());
+    REQUIRE (footer.isValid());
+    CHECK (header.getType().toString() == "Header");
+    CHECK (footer.getType().toString() == "Footer");
+    CHECK (header.getParent() == rig.document.findById (stagedGroup));
+    CHECK (footer.getParent() == rig.document.findById (stagedGroup));
+
+    CHECK (rig.document.findById (preArm).getParent() == header);
+    CHECK (rig.document.findById (releaseCue).getParent() == footer);
+
+    /*  AND NEITHER SECTION'S CUE EVER BECAME A MEMBER, which is the failure a
+        rule that counted the wrong children would eventually produce: a header
+        cue that shows up in the group's list, gets a row of its own in the
+        console, and is run twice. */
+    const auto order = rig.orderOf (stagedGroup);
+
+    CHECK (order.find (preArm) == std::string::npos);
+    CHECK (order.find (releaseCue) == std::string::npos);
+    CHECK (order.find (stagedHeader) == std::string::npos);
+    CHECK (order.find (stagedFooter) == std::string::npos);
+
+    // The header is still the group's first child, after all of it.
+    CHECK (rig.firstChildElementOf (stagedGroup) == "Header");
+
+    /*  And the show is one a file can hold: the two sections are still spelled
+        where they were, with the identifiers they were written with. */
+    const auto written = CanonicalXml::write (rig.document);
+
+    CHECK (written.find ("<Header id=\"" + stagedHeader + "\">") != std::string::npos);
+    CHECK (written.find ("<Footer id=\"" + stagedFooter + "\">") != std::string::npos);
+
+    CHECK (rig.document.validate().empty());
+    CHECK (rig.document.warnings().empty());
 }
 
 //==============================================================================

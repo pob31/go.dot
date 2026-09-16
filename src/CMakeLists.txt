@@ -159,6 +159,8 @@ add_library(wfg_engine STATIC
     wfg/engine/document/Schema.h
     wfg/engine/document/SchemaTable.generated.h
     wfg/engine/document/SchemaTypes.h
+    wfg/engine/document/Sequence.cpp
+    wfg/engine/document/Sequence.h
     wfg/engine/document/ShowDocument.cpp
     wfg/engine/document/ShowDocument.h
     wfg/engine/command/Command.h

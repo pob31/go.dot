@@ -14,8 +14,8 @@
     SPDX-License-Identifier: GPL-3.0-or-later
 */
 
-/*  DIDI, the cue list: every row of the focused list, the groups inside it,
-    their headers and footers, and the persistent band at its foot. */
+/*  DIDI, the cue list: the persistent band at its head, then every row of the
+    focused list, the groups inside it, and their headers and footers. */
 
 import { tree } from "../plumbing/tree.js";
 import { selection } from "../model/selection.js";
@@ -26,6 +26,23 @@ import { reconcile } from "./reconcile.js";
 
 /*  The current answer, refreshed by `listRows` and read by `cueRow`. */
 let overlapping = new Map();
+
+/*  EVERY ROW THE READER HAS CHOSEN, as a set, refreshed by `listRows` in the
+    same breath and for the same reason: it is one answer the whole pass reads.
+
+    `selection.chosen` is an ARRAY because order is what a range means - it is
+    what a drag carries and what a delete walks - but a row only ever asks the
+    one question "am I in it", and asking an array that is five hundred long,
+    once per row, is a quarter of a million comparisons inside a render that has
+    about 6.5ms to finish on a show that size (M24). So the array is turned into
+    a set once per render and every row asks the set. The ordinary case, one
+    picked row, costs one small allocation a poll, which is nothing beside the
+    markup this pane builds anyway.
+
+    IT FALLS BACK TO `picked` when there is no array, so this pane still draws
+    the one chosen row if it is ever loaded beside a selection model that has
+    not grown the range yet. */
+let chosen = new Set();
 
 /*  WHERE THE READER WAS JUST SENT, and whether this is the row they were sent
     to. `selection.reveal` is set by the click that follows a tendril - from a
@@ -255,12 +272,24 @@ function cueRow(id, depth, section, rail, standby, out) {
     ? '<span class="twist" data-fold="' + id + '">' + (open ? "▼" : "▶") + "</span>"
     : '<span class="twist"></span>';
 
+  /*  CHOSEN, AND WHICH ONE OF THE CHOSEN IS THE ANCHOR.
+
+      EVERY row of a range draws `data-picked`, not just the one clicked last: a
+      range that marked a single row would be a selection whose size the reader
+      cannot see, and the next thing anybody does with a range is drag it or
+      delete it. THE ANCHOR is told apart because it is the row a shift-click
+      measures from - extend the range and it is the end that stays put - so it
+      answers "where will this grow from" before the gesture rather than after.
+
+      Both are attributes and the look is the stylesheet's to give. §4.8 asks
+      that whatever it gives the anchor is not a colour on its own. */
   out.push({ key: "cue:" + id, html:
     '<div class="row" data-pick="' + id + '"' +
       (section ? ' data-in="' + section + '" style="--rail:' + rail + '"' : "") +
       (revealing("cue:" + id) ? ' data-flash="yes"' : "") +
       ' data-standby="' + (id === standby ? "yes" : "no") + '"' +
-      ' data-picked="' + (id === selection.picked ? "yes" : "no") + '"' +
+      ' data-picked="' + (chosen.has(id) ? "yes" : "no") + '"' +
+      ' data-anchor="' + (id === selection.picked ? "yes" : "no") + '"' +
       ' data-enabled="' + (enabled ? "yes" : "no") + '">' +
       '<div class="gutter" data-park="' + id + '" title="park the standby here"></div>' +
       '<div class="number num">' + number + "</div>" +
@@ -370,14 +399,20 @@ function cueRow(id, depth, section, rail, standby, out) {
     second view of one object, and now it is one that can be got out of.
 
     It is always a header line, so it carries the header's frame without being
-    asked which section it is in. */
+    asked which section it is in.
+
+    AND IT IS DRAWN CHOSEN WHEN THE MEMBER IS, anchor and all, because there is
+    one object and a reader who cannot see that both lines are the same cue is
+    the reader this view was drawn for. It asks the set by the member's id, so
+    it needs no place in the range of its own. */
 function presetLine(id, group, depth, rail, out) {
   out.push({ key: "preset:" + group + ":" + id, html:
     '<div class="row derived" data-pick="' + id + '"' +
       ' data-reveal="cue:' + id + '"' +
       ' data-in="header" style="--rail:' + rail + '"' +
       (revealing("preset:" + group + ":" + id) ? ' data-flash="yes"' : "") +
-      ' data-picked="' + (id === selection.picked ? "yes" : "no") + '">' +
+      ' data-picked="' + (chosen.has(id) ? "yes" : "no") + '"' +
+      ' data-anchor="' + (id === selection.picked ? "yes" : "no") + '">' +
       '<div class="gutter"></div>' +
       '<div class="number num">' + esc(tree.cue(id, "number", "")) + "</div>" +
       '<div class="name" style="padding-left:' + (depth * 16) + 'px">' +
@@ -406,6 +441,9 @@ function presetLine(id, group, depth, rail, out) {
     read by every row, which is why it is not built per row. */
 function listRows(focus, standby) {
   overlapping = tree.overlaps();
+  chosen = new Set(Array.isArray(selection.chosen)
+                     ? selection.chosen
+                     : selection.picked ? [selection.picked] : []);
 
   const cues = tree.ids("/godot/list/" + focus + "/order");
   const persistent = tree.ids("/godot/list/" + focus + "/persistentOrder");
@@ -422,13 +460,27 @@ function listRows(focus, standby) {
 
   const out = [];
 
-  cues.forEach((id) => cueRow(id, 0, "", "", standby, out));
+  /*  THE PERSISTENT SECTION, AT THE HEAD OF THE LIST and marked as its own
+      thing (§3.29) (author, 2026-09-16: "I would place the persistent container
+      towards the top since this is something that runs as soon as the show
+      starts").
 
-  /*  THE PERSISTENT SECTION, at the foot of the list and marked as its own
-      thing (§3.29). It is not part of the order the pointer walks: these cues
-      are what should be running at all times, checked after every trigger and
-      put back when they are not, so they sit below the last row rather than
-      among them - and GO never reaches one.
+      It was drawn at the foot, and the reason it was there has not stopped
+      being true: these cues are not on the order the pointer walks, GO never
+      reaches one, and a band among the ordered rows is a place the pointer
+      looks like it could stop. The reason it is now at the head is the other
+      half of §3.29 - a persistent cue is what should be running at ALL times,
+      checked after every trigger and put back when it is not - so it is already
+      running before anybody has pressed anything. What is already on is what
+      somebody reading a list from the top needs first: the ordered rows say
+      what will happen, and these say what is under them while it does.
+
+      SO THE BAND'S TITLE HAS TO SAY BOTH FACTS, which is also where §4.8 is
+      kept here: the word heads the frame, the count says how many there are,
+      and the title says both that these are checked after every trigger and put
+      back when they are not, and that GO never reaches one. Without that second
+      half a reader meeting them first would take the top of the list for the
+      first thing GO does, which is the one wrong thing this move could teach.
 
       It is a section like a header or a footer, so it is drawn as one and folds
       like one. Its rail is the offset a depth-0 row's name sits at - the same
@@ -443,11 +495,15 @@ function listRows(focus, standby) {
     const rail = "calc(12px + 80px * var(--type))";
 
     frame(out, "list:" + focus + ":persistent", "persistent", persistent.length, rail,
-          "checked after every trigger, and put back when it is not as declared",
+          "already running before anybody presses anything: checked after every trigger," +
+          " and put back when it is not as declared — and GO never reaches one, so the" +
+          " list the pointer walks starts below this band",
           () => {
             persistent.forEach((id) => cueRow(id, 0, "persistent", rail, standby, out));
           });
   }
+
+  cues.forEach((id) => cueRow(id, 0, "", "", standby, out));
 
   return out;
 }

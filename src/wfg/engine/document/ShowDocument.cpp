@@ -19,6 +19,7 @@
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/document/FadePoints.h>
+#include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/osc/OscValue.h>
 
 #include <map>
@@ -65,8 +66,6 @@ namespace wfg::doc
             return cue::isOnManualPath (list, cueId);
         }
 
-        /*  The identifier after `cueId` among a container's children, or empty
-            when it is the last one or is not there. */
         /*  The list a cue belongs to, however deep it is - or an invalid tree
             when it is not in one. The standby repairs below need it because a
             cue can now be several levels down. */
@@ -78,13 +77,38 @@ namespace wfg::doc
             return node;
         }
 
+        /*  The identifier after `cueId` among a container's MEMBERS, or empty
+            when it is the last one or is not there. */
         std::string siblingAfter (const juce::ValueTree& container, const std::string& cueId)
         {
             bool found = false;
 
             for (const auto& child : container)
             {
-                if (! child.hasProperty (idProperty))
+                /*  MEMBERS, and not every identified child — the same rule the
+                    index in a command is read against (`document/Sequence.h`).
+
+                    It asked only for an identifier until the index became a
+                    member position, and on a group whose last member was being
+                    deleted the answer it gave was the <Footer> element's own
+                    identifier. A standby that names a footer is refused by the
+                    write door, so the repair silently did nothing and left the
+                    list parked on the cue that had just gone — the frozen GO
+                    key `remove` describes at length below. A list with a
+                    <Persistent> section had the same hole. Skipped, the answer
+                    is empty instead, `cue::nextStandby` is consulted, and the
+                    pointer lands where `next` would have carried it.
+
+                    NOT THE WHOLE HOLE, and the rest is somebody's decision
+                    rather than this line's: a <Trigger> is a member by the rule
+                    above, and a DISABLED cue is a member too, and the write
+                    door refuses both as a standby - so both still answer here
+                    with an identifier that is quietly thrown away. What knows
+                    where a pointer may stand is `cue::stops`, and the honest
+                    repair is for this to ask the cursor instead of walking the
+                    children itself. That is a question about the standby
+                    repair, not about the index a command carries. */
+                if (! isSequenceChild (child))
                     continue;
 
                 const auto childId = child[idProperty].toString().toStdString();
@@ -1028,16 +1052,27 @@ namespace wfg::doc
                               toVar (value), nullptr);
         }
 
-        parent.addChild (node, std::min (index, parent.getNumChildren()), structuralHistory());
+        /*  THE INDEX IS A MEMBER POSITION, translated here into the raw child
+            index juce::ValueTree wants - `document/Sequence.h` says why, and
+            what reading the two as one number cost. No clamp is needed: the
+            translation never answers past the last child, because "past the
+            last member" already answers `getNumChildren()`, which is where an
+            append belongs. */
+        parent.addChild (node, rawIndexForPosition (parent, index), structuralHistory());
 
         return EditResult::succeeded (objectId);
     }
 
     EditResult ShowDocument::createList (const std::string& name, const std::string& id)
     {
+        /*  `endOfSequence` here and in every create below that appends rather
+            than places: the index those creates pass is a member position like
+            any other now, and a raw child count passed as one would be the very
+            confusion `document/Sequence.h` exists to end - it happens to mean
+            the same thing only because a container never has fewer children
+            than members. */
         return insertObject (showNode.getChildWithName ("Lists"),
-                             showNode.getChildWithName ("Lists").getNumChildren(),
-                             "List", id, { { "name", name } });
+                             endOfSequence, "List", id, { { "name", name } });
     }
 
     EditResult ShowDocument::createCue (const std::string& parentId, int index,
@@ -1076,7 +1111,7 @@ namespace wfg::doc
         if (cue.getType().toString() != "Media")
             return EditResult::failed (reason::typeMismatch);
 
-        return insertObject (cue, cue.getNumChildren(), "Route", id,
+        return insertObject (cue, endOfSequence, "Route", id,
                              { { "bus", busId } });
     }
 
@@ -1096,7 +1131,7 @@ namespace wfg::doc
         if (mount.getType().toString() != "Mount")
             return EditResult::failed (reason::typeMismatch);
 
-        return insertObject (mount, mount.getNumChildren(), "Slot", id,
+        return insertObject (mount, endOfSequence, "Slot", id,
                              { { "address", address } });
     }
 
@@ -1135,7 +1170,7 @@ namespace wfg::doc
             audio.addChild (rack, -1, nullptr);
         }
 
-        return insertObject (rack, rack.getNumChildren(), "Channel", id,
+        return insertObject (rack, endOfSequence, "Channel", id,
                              { { "class", channelClass } });
     }
 
@@ -1151,7 +1186,7 @@ namespace wfg::doc
         if (cue.getType().toString() != "Media")
             return EditResult::failed (reason::typeMismatch);
 
-        return insertObject (cue, cue.getNumChildren(), "Feed", id,
+        return insertObject (cue, endOfSequence, "Feed", id,
                              { { "slot", slotId } });
     }
 
@@ -1167,7 +1202,7 @@ namespace wfg::doc
         if (cue.getType().toString() != "Media")
             return EditResult::failed (reason::typeMismatch);
 
-        return insertObject (cue, cue.getNumChildren(), "Insert", id,
+        return insertObject (cue, endOfSequence, "Insert", id,
                              { { "channel", channelId } });
     }
 
@@ -1195,7 +1230,7 @@ namespace wfg::doc
         if (in < 0.0 || ! (out > in))
             return EditResult::failed (reason::badValue);
 
-        return insertObject (cue, cue.getNumChildren(), "Range", id,
+        return insertObject (cue, endOfSequence, "Range", id,
                              { { "in", osc::formatDouble (in) },
                                { "out", osc::formatDouble (out) } });
     }
@@ -1219,7 +1254,7 @@ namespace wfg::doc
         if (kind != "osc" && kind != "midi" && kind != "clock")
             return EditResult::failed (reason::badValue);
 
-        return insertObject (cue, cue.getNumChildren(), "Trigger", id,
+        return insertObject (cue, endOfSequence, "Trigger", id,
                              { { "kind", kind } });
     }
 
@@ -1252,10 +1287,12 @@ namespace wfg::doc
             return EditResult::succeeded (existing[idProperty].toString().toStdString());
 
         /*  AT THE END, whatever it is. Where a header sits among the members is
-            not what makes it a header - the element is - and inserting it at
-            the top would reorder the members of every group that gained one
-            later. */
-        return insertObject (group, group.getNumChildren(), element, id, {});
+            not what makes it a header - the element is - and it HAS no member
+            position to ask for: `order` does not name it, which is the whole
+            reason `document/Sequence.h` exists. So it asks for none, and
+            `endOfSequence` lands it after the last child, where `createRole`
+            has always put it. */
+        return insertObject (group, endOfSequence, element, id, {});
     }
 
     EditResult ShowDocument::createPersistent (const std::string& listId, const std::string& id)
@@ -1273,7 +1310,9 @@ namespace wfg::doc
         if (const auto existing = list.getChildWithName ("Persistent"); existing.isValid())
             return EditResult::succeeded (existing[idProperty].toString().toStdString());
 
-        return insertObject (list, list.getNumChildren(), "Persistent", id, {});
+        /*  At the end and with no member position, for the reason the header
+            above gives: `order` does not name the section either. */
+        return insertObject (list, endOfSequence, "Persistent", id, {});
     }
 
     EditResult ShowDocument::createMount (const std::string& prefix,
@@ -1282,7 +1321,7 @@ namespace wfg::doc
     {
         auto mounts = showNode.getChildWithName ("Mounts");
 
-        return insertObject (mounts, mounts.getNumChildren(), "Mount", id,
+        return insertObject (mounts, endOfSequence, "Mount", id,
                              { { "prefix", prefix }, { "namespace", namespaceFile } });
     }
 
@@ -1489,17 +1528,54 @@ namespace wfg::doc
             next move of the same parent on its own - so it is the transaction
             rule above, and not this line, that keeps two ▲ presses from
             collapsing into one step. A cross-parent move is two actions in one
-            transaction, undone in reverse. */
+            transaction, undone in reverse.
+
+            AND BOTH LIMBS READ `newIndex` AS A MEMBER POSITION, translated
+            through the one rule in `document/Sequence.h`. A raw child index is
+            a number no client has ever been able to see; this is the number
+            they all send.
+
+            THE SAME TRANSLATION SERVES BOTH, which is worth the paragraph it
+            takes, because the two JUCE calls underneath want different things
+            and it is not obvious that one answer satisfies them.
+
+            `addChild (child, index)` INSERTS: the child lands at `index` and
+            everything from there on shifts along. `rawIndexForPosition` answers
+            the raw index of the member holding that position, so the newcomer
+            takes its place and pushes it down - which is what an insert at a
+            position means. The cross-parent limb has also taken the child out
+            of its old parent by then, and the new parent never held it, so the
+            children it walks are the ones that will be there.
+
+            `moveChild (from, to)` does NOT insert: JUCE takes the child out and
+            puts it back so that it ENDS UP at index `to` in a list of the same
+            length (juce_ArrayBase.h, moveInternal - a memmove either way, then
+            the element written at `to`). The answer is the same all the same,
+            and here is why. Moving EARLIER, to a member at raw index m below
+            the child: m is below the removal point, so nothing before it
+            shifts, and the child lands exactly where that member was - in front
+            of it. Moving LATER, to a member at raw index m above the child:
+            taking the child out drops that member to m-1, so ending up at m
+            puts the child directly after it - and after the member that holds
+            position p is where position p is, once the child itself is no
+            longer counted below it. Both give the member the caller asked for.
+
+            THE CLAMP IS STILL HERE for the move, and only for the move: a
+            position past the end answers `getNumChildren()`, which is a legal
+            insertion point but one index past the last slot a move can end at.
+            JUCE clamps it too, with and without an undo manager - this says so
+            where it is read rather than leaving it to a library detail. */
         if (oldParent == newParent)
         {
             const auto from = newParent.indexOf (node);
-            const auto to = std::min (newIndex, newParent.getNumChildren() - 1);
+            const auto to = std::min (rawIndexForPosition (newParent, newIndex),
+                                      newParent.getNumChildren() - 1);
             newParent.moveChild (from, to, structuralHistory());
         }
         else
         {
             oldParent.removeChild (node, structuralHistory());
-            newParent.addChild (node, std::min (newIndex, newParent.getNumChildren()),
+            newParent.addChild (node, rawIndexForPosition (newParent, newIndex),
                                 structuralHistory());
         }
 
