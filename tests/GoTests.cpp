@@ -2987,6 +2987,94 @@ TEST_CASE ("group: a header's cues are published as cues, and are not members of
     CHECK (rig.roleOf (rig.groupId, "header") == header);
 }
 
+TEST_CASE ("go: from inside a group the machine parents, it fires the one cue and not the scene")
+{
+    /*  WHAT THE AUTHOR WILL DO FIRST after 2026-09-16, and therefore the case
+        that has to be right before anything else about that day is.
+
+        They asked, with the page open, to be able to "select a cue within a
+        group individually to start from this level" - and named timeline groups
+        specifically: "even start all cues timelines should move the standby
+        pointer from one cue to the next to try each individual cue it
+        contains". Asked what GO should then do, they decided: GO fires the ONE
+        cue the pointer is on, and starting the whole group FROM there is a
+        second named gesture, which is a later round's.
+
+        So this is the try-one-cue gesture, end to end: park on the middle
+        member of a scene the machine parents - which the write door refused
+        outright until that day - press GO, and get that cue and nothing else.
+
+        THE FAILURE IT IS GUARDING AGAINST IS THE SCENE STARTING. Entering a
+        timeline group schedules every member at entry (§3.6), so an
+        implementation that let the press descend into the group would give the
+        operator the whole scene when they asked for one line of it - and would
+        do it while they were trying to check that one line in a tech rehearsal,
+        which is the worst possible moment to be handed a cue they did not ask
+        for. The automatic sequence is the same mistake read one member at a
+        time. */
+    Rig rig;
+
+    /*  Three memos, because this is about WHAT RAN and not about sound, and a
+        memo's run finishes on the tick after it fires. A cue after the group so
+        that "the pointer stayed inside the scene" is distinguishable from "the
+        pointer left it". */
+    const auto scene = rig.document.createCue (rig.listId, 2, "group", "Scene").id;
+    const auto one = rig.document.createCue (scene, 0, "memo", "One").id;
+    const auto two = rig.document.createCue (scene, 1, "memo", "Two").id;
+    const auto three = rig.document.createCue (scene, 2, "memo", "Three").id;
+
+    rig.document.createCue (rig.listId, 3, "memo", "After");
+
+    SUBCASE ("a timeline group")
+    {
+        rig.document.setAttribute ("/godot/cue/" + scene + "/mode", "timeline");
+    }
+
+    SUBCASE ("an automatic sequence")
+    {
+        rig.document.setAttribute ("/godot/cue/" + scene + "/advance", "auto");
+    }
+
+    /*  PARKED ON THE MIDDLE MEMBER. This line is the whole of what changed:
+        `setStandby` writes through the document's own door, and until
+        2026-09-16 that door refused this outright. */
+    rig.setStandby (two);
+    REQUIRE (rig.standby() == two);
+
+    CHECK (rig.submitAndTick ("go").applied >= 1);
+
+    /*  THE SCENE DID NOT ENTER, asked the moment the press lands, because a
+        group that entered is `playing` from that tick.
+
+        `liveRunOf` and not "has no run at all": the pointer sitting inside a
+        scene is a horizon (§3.12), so the block may well have been PREPARED,
+        and a preparation is a promise rather than a performance - which is
+        exactly the distinction `liveRunOf` is there to draw. What must not have
+        happened is that promise being adopted and the scene started. */
+    CHECK (rig.runs.liveRunOf (scene) == nullptr);
+
+    /*  And the pointer moved to the next MEMBER, not past the whole chain.
+        §3.5's "positionally after the automated chain" is what GO on the
+        group's own row does; from inside, the next press is the next line the
+        operator wants to hear. */
+    CHECK (rig.standby() == three);
+
+    // The cue the pointer was on ran.
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (two).empty(); }));
+
+    /*  AND NOTHING ELSE DID, given long enough that it would have. A timeline
+        that entered would have scheduled the third member at entry; an
+        automatic sequence would have advanced to it as soon as the second was
+        done. Forty ticks is most of a second at this rate, and both memos
+        finish in one. */
+    for (int n = 0; n < 40; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runOf (one) == "");
+    CHECK (rig.runOf (three) == "");
+    CHECK (rig.runs.liveRunOf (scene) == nullptr);
+}
+
 //==============================================================================
 /*  A MANUAL SEQUENCE GROUP: the operator is the parent.
 
@@ -4273,13 +4361,22 @@ TEST_CASE ("jump: the pointer lands after the target and the state position agre
     rig.jumpTo (rig.middle, 1.0);
 
     /*  AFTER THE SCENE, AND NOT ON ITS THIRD MEMBER, which is the interesting
-        half. "Positionally after the target" has to mean the next place the
-        POINTER MAY STAND: §3.5 lets it sit at the top of a list or inside a
-        manual sequence group and nowhere else, because those are the only
-        places a GO means anything. A jump into the middle of a timeline scene
-        therefore leaves the operator after the whole scene - which is also what
-        they want, since the scene is now running and the next press is what
-        comes after it. */
+        half. "Positionally after the target" has to mean the next place a GO
+        would mean something, and a jump has just set the whole scene running:
+        the third member is already scheduled, so a pointer left on it would arm
+        the operator's next press to fire a cue the scene is about to fire
+        itself.
+
+        THE REASON THIS USED TO GIVE WAS A DIFFERENT ONE, and it stopped being
+        true on 2026-09-16. It said the pointer may sit at the top of a list or
+        inside a manual sequence group "and nowhere else" - which was the rule
+        until the author asked for the pointer to stand inside every group, and
+        is the rule the solver's own copy of the walk (`ShowWalk.h`,
+        `Placed::mayLandHere`) still applies. The behaviour here is right for
+        the reason above and the assertion has not moved; what has moved is that
+        the cursor and the solver now answer "where may the pointer be"
+        differently, and this is the case that would notice if somebody made the
+        solver agree. */
     CHECK (rig.standby() == rig.after);
 
     const auto landed = rig.runner.listState().positionOf (rig.listId);
@@ -5828,8 +5925,15 @@ TEST_CASE ("persistent: the section is published, and its cues say where they si
 TEST_CASE ("persistent: the pointer skips the section and cannot be parked in it")
 {
     /*  The cursor skips it as it skips a footer, and `standby.set` refuses -
-        with `not-manual-path` rather than `not-in-list`, because the cue IS in
-        this list and the remedy is somewhere else entirely. */
+        with `not-a-stop` rather than `not-in-list`, because the cue IS in this
+        list and the remedy is somewhere else entirely.
+
+        THE CODE WAS SPELLED `not-manual-path` UNTIL 2026-09-16, when the
+        pointer learned to stand inside every group and what was left being
+        refused stopped being a question about nesting. The section is one of
+        the three things still refused, so this case did not move with the
+        rename - which is the point of naming the code here rather than only
+        counting the rejection. */
     PersistentRig rig;
 
     rig.setStandby (rig.mediaId);
@@ -5841,6 +5945,7 @@ TEST_CASE ("persistent: the pointer skips the section and cannot be parked in it
 
     const auto refused = rig.submitAndTick ("standby.set", { osc::Value::string (rig.bed) });
     CHECK (refused.rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::notAStop) != std::string::npos);
     CHECK (rig.standby() != rig.bed);
 }
 

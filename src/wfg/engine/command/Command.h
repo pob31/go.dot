@@ -114,17 +114,31 @@ namespace wfg
         inline constexpr const char* nonFinite       = "non-finite";
         inline constexpr const char* unknownId       = "unknown-id";
 
-        /*  The cue exists, is in this list, and is somewhere the pointer may
-            not stand: inside a timeline or an automatic group, or in a header
-            or a footer.
+        /*  The cue exists and is in this list, and it is not one of that list's
+            STOPS - the places the standby pointer is allowed to stand. What is
+            left after that is a cue in a group's header, in its footer, or in a
+            persistent section: cue lists a group runs for itself (§3.6), never
+            a row of the show the operator steps through. The remedy is to park
+            on the group that owns it.
 
-            ITS OWN CODE rather than `not-in-list`, because it sends somebody
+            SPELLED `not-manual-path` UNTIL 2026-09-16, and the rename is a
+            contract change made deliberately rather than a tidy-up: this code
+            reaches `lastError` and the namespace draft's reason table, so
+            somebody's client is matching on the string. It had to move because
+            the rule underneath it moved. The pointer may now be parked inside a
+            timeline or an automatic group, so that one cue of a scene can be
+            tried on its own, and "not on the manual path" both refused things
+            that are no longer refused and named a rule that is no longer the
+            rule - the worst kind of stale word, one a reader would act on.
+            `not-a-stop` is said in `stops`, which is the word `cue/CueList.cpp`
+            already gives the places the pointer may be, and it stays true
+            however much else widens.
+
+            ITS OWN CODE rather than `not-in-list`, because the two send somebody
             somewhere different. `not-in-list` means "you named the wrong list";
-            this means "that cue is one the MACHINE advances" (§3.5 - only GO
-            moves standby, and a pointer the scheduler also moved would be two
-            things moving one pointer). The remedy is to make the group manual,
-            or to park on the group instead. */
-        inline constexpr const char* notManualPath   = "not-manual-path";
+            this one means "that cue is part of a group's preparation, not a row
+            of the show". */
+        inline constexpr const char* notAStop        = "not-a-stop";
 
         /*  A manual sequence group was asked to run by something that is not
             GO - `cue.fire`, or a trigger.

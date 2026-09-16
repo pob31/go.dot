@@ -845,6 +845,19 @@ back on if nobody feels strongly by then.
   the house adjusting parameters while the show runs, and locking that would mean locking the
   mixing. §14.11 draws the predicate and the doors.
 
+- **X — The pointer may stand inside every group** (settled 2026-09-16, with the page open): asked
+  directly whether a cue inside an automatic or a timeline group is a place the standby may be put,
+  the author answered **every group**, and that GO there fires **that one cue**. So residence widens
+  to *any cue of this list that is not in a header, a footer or a persistent section*, `standby.set`
+  stops refusing a member of a non-manual group, and ▲/▼ from inside one walk that group's members
+  and climb out at its ends. What does **not** widen is the step from outside: ▲/▼ still descend
+  only into a manual sequence group, or a reader walking a list top to bottom would land on an
+  automatic group's first member and the GO meant for the scene would fire one cue of it (decision
+  M unchanged). Starting the group from the member the pointer is on is a **second named gesture**,
+  decided to exist and deliberately not built in this round; §12.6 proposes `go.from` and says what
+  is open about it. The old refusal's recorded reason — a pointer the machine also moves — was
+  about the operator's model rather than a race: only GO ever writes the standby.
+
 ### Open, with the subphase that forces each
 
 | # | Question | Forced by | Fallback if undecided |
@@ -1362,11 +1375,18 @@ The invariant on `list/@standby` widens from *a top-level child* to *a cue of th
 ancestor group is a manual sequence group*, in **all four places it lives**: the legality check,
 the document's write door, the repair when the standby cue is deleted (advance to the next
 remaining sibling *inside the group*, or climb out), and the clear when it is moved away.
-`standby.set` on a member of an auto or timeline group is refused with a new atom,
-**`not-manual-path`** — the pointer cannot be the parent of something the machine parents.
-`not-in-list` keeps its meanings. `standby.set` also stops refusing media, fade, stop and osc cues,
-which it has done since Phase 2 by accepting only elements named `Cue` or `Group` — a bug no
-fixture exercised, because every one parks on a memo or restores standby from `state.xml`.
+`standby.set` on a cue of this list that is not a place the pointer may stand is refused with a new
+atom. *(That invariant widens once more on 2026-09-16 and the atom is renamed with it; the note
+below this subsection is the whole of it, and the sentence that follows is the rule as it stands.)*
+**`not-a-stop`** — the cue exists, it belongs to this list, and it is not one of the list's stops:
+a header cue, a footer cue, or a cue of the persistent section (§13.11). Those three are a group's
+own preparation, its release and a list's standing assertion rather than rows an operator steps
+through, and `stops()` leaves all three out by construction, so nothing had to be taught to refuse
+them. `not-in-list` keeps its meanings — the cue belongs to another list, or there is no list at
+all — and the two stay separate atoms because they send somebody somewhere different.
+`standby.set` also stops refusing media, fade, stop and osc cues, which it has done since Phase 2
+by accepting only elements named `Cue` or `Group` — a bug no fixture exercised, because every one
+parks on a memo or restores standby from `state.xml`.
 
 GO on a member whose manual group has **no live run** — the pointer was placed inside by
 `standby.set` or restored from `state.xml` — creates the group run, runs the header, and the member
@@ -1378,6 +1398,132 @@ timeline or auto group for the same reason.
 What descent changes that already exists, so PR 3.4 replaces rather than discovers it: decision
 C's two tests, the recorded session in `CueListTests` that asserts `standby.set` on a nested cue
 is *refused*, and every fixture that carries a `<Group>` — all manual sequence groups by default.
+
+*What the author asked for while looking, and the two rules it becomes (2026-09-16).* **The
+pointer may stand inside every group** — decision X in §9, with PRD §3.5 amended to carry it. The
+question arrived with the page open and the arrows under their hand: *"up and down stand by as
+well as the up and down keyboard arrows move the standby pointer to the next group or individual
+cue. However I can't select a cue within a group individually to start from this level, acting on
+the following cues. Even start all cues timelines should move the standby pointer from one cue to
+the next to try each individual cues it contains."* Asked directly whether that meant every group
+or only the manual ones, they answered **every group** — and, in the same breath, that GO on a
+member fires **that one cue**, with starting the group from that member left to a second named
+gesture this round does not build — the *(proposed)* block at the end of this note.
+
+**What was measured on a live engine before any of this was written**, because most of the walk
+the author was asking for already existed and the interesting question was which half. A manual
+sequence group's members already walk under ▲/▼ — verified against a running engine rather than
+read out of this document. An automatic group is one stop, and parking inside it is refused. A
+timeline group is the same. Header, footer and persistent cues are never on the path and never
+were, deliberately. So the ask is not a new traversal: it is the same traversal let into two more
+kinds of container, and all the work is in saying exactly where.
+
+**Rule one — the pointer may be FOUND, and therefore parked, anywhere it is allowed to be.**
+`findOnPath` descends into every group rather than only into manual sequences, and that is the
+whole of the change to residence: any cue of this list that is not in a header, a footer or a
+persistent section is a place the pointer may be. The walk then follows for nothing. `stepFrom`
+already steps through `stops (parent)` and climbs out at either end, so once the pointer is
+*inside* an automatic or a timeline group it walks that group's members and leaves by its ends —
+which is the author's *"move the standby pointer from one cue to the next to try each individual
+cue it contains"*, arrived at by widening one predicate rather than by writing a second cursor.
+The sections stay out by construction: `stops()` returns a container's cue children, and `Header`,
+`Footer` and `Persistent` are containers rather than cues, so a walk that descends into every
+group still descends into no section — which is the same thing §13.11 found from the other side
+when the persistent section needed no cursor code at all.
+
+**Rule two — stepping ONTO a group from outside is unchanged**, and this is why there are two
+rules here rather than one. `descendTo` and `descendToLast` keep descending only into manual
+sequences. They are applied when the walk steps onto a cue, so under a walk that descended
+everywhere a reader running ▼ down a list would land on an automatic group's FIRST MEMBER instead
+of on the group's own row, and the GO that was meant to fire the scene would fire one cue of it.
+That is not a new behaviour badly chosen; it is every show already written changing meaning in
+silence, and being found out during a performance. Residence and descent are two questions —
+where a pointer may be PUT, and what a STEP lands on — and the author's answer is to the first.
+Decision M stands untouched: a GO at an automatic or a timeline group's row fires the scene and
+leaves the pointer positionally after it (§3.5).
+
+**So nothing in an existing show changes.** A list walked top to bottom stops on the rows it
+stopped on yesterday. What is new is that `standby.set` on a member of an automatic or a timeline
+group is no longer refused, and that ▲/▼ *from there* walks that group — a position the operator
+now has to ask for, by picking the member and standing on it, which is the shape the author
+described: start from this level, acting on the cues that follow.
+
+**Only GO ever writes the standby, so the reason the old rule recorded was never a race.**
+`reason::notManualPath` explained itself as *"that cue is one the MACHINE advances (§3.5 — only GO
+moves standby, and a pointer the scheduler also moved would be two things moving one pointer)"*.
+The second half of that is not what this engine does: the runner advances runs and writes
+`list/@standby` nowhere, which is the rule §14.7's own column states command by command and the
+Phase 4 black-box driver asserts by reading a second list's pointer across a command and finding
+it unchanged. What the refusal was really protecting was the OPERATOR'S MODEL — a pointer sitting
+inside a chain the machine is stepping through *looks* like a pointer about to be overtaken, and
+it never would have been. That is a judgement about their own dark booth and it is theirs to make;
+they have now made it the other way. Nothing had to be made safe for it, which is worth saying
+plainly rather than leaving a reader to wonder what was given up: the widening costs one predicate
+and no new invariant.
+
+**The atom is renamed because what it refuses is no longer what it says.** `not-manual-path` was a
+sentence about nesting — *the pointer cannot be the parent of something the machine parents* — and
+nesting is precisely what has stopped being refused. What is left is a section question, so the
+word becomes **`not-a-stop`**: the cue is in this list, and it is not one of the list's stops. A
+reason code is part of the log format and therefore a contract (`command/Command.h:107-109`), so
+the rename is a change to that contract and is recorded here rather than quietly made — a log
+written before today carries `not-manual-path`, and what it meant by it is the sentence above. The
+predicate both doors ask goes the same way and for the same reason: `isOnManualPath` becomes
+`mayStandOn`, named for the QUESTION rather than for an answer that has changed once and may
+change again.
+
+**Two edges the widening leaves exactly where they are, named here rather than fixed.** Stepping
+out of a non-manual group and back into it is not a round trip. From its first member ▲ finds
+nothing before it among the group's stops, climbs out, and takes the group's previous sibling;
+▼ from there lands on the group's own ROW rather than back on the member, because `descendTo` does
+not enter a group the machine parents. The operator ends one row higher than they started, on the
+scene rather than in it, and the members are reachable by `standby.set` and by walking on from one
+of them but never by walking in. Both ways of closing that — resting on the row on the way out of
+its own members, or refusing to climb out of a group the pointer was deliberately put inside —
+change what ▲ and ▼ do somewhere else, and neither is what was asked for in this round, so it
+waits for somebody to try it with a show open. And **the manual loop's wrap stays keyed on the
+group being a manual sequence**: a pointer parked inside a timeline or an automatic group to try
+one cue leaves at the last member like any other stop rather than wrapping into that group's next
+round. §3.6's wrap exists to keep the operator inside a scene they are the parent of; holding them
+inside one that runs its own rounds unasked would be the machine moving them around, which is the
+one thing §3.5 has always refused.
+
+**One predicate widens and the other does not, and they part company on purpose.** `mayStandOn`,
+over `findOnPath`, answers *where may the pointer be put*. `ShowWalk::Placed::onManualPath` — a
+second predicate, in another file, written for the solver — answers the different
+question the solver asks — *where does a jump LEAVE the pointer* — and §13.9's answer to that
+stays "after the whole scene" (`cue/Solver.cpp:196-209`). Parking inside a timeline scene is a
+decision somebody takes; being put there is the machine choosing for them, and it would leave an
+operator standing on the third member of a scene they did not aim at. §13.16's *"§3.5 lets the
+pointer sit at the top of a list or inside a manual sequence group and nowhere else"* was one
+sentence doing for both questions, and is now true only of the second. Whether a jump should ever
+land inside a scene is §13.9's question and the author's; this round does not answer it, and the
+field's name will want revisiting on the day it is answered.
+
+**The second gesture: decided to exist, and not built here** *(proposed)*. The author settled that
+GO stays *fire the one cue the pointer is on*, and that starting the group from the member the
+pointer is on is a gesture of its own. Its name, its arguments and its edges are this document's
+proposal and not yet theirs.
+
+- **A group run already holds what "enter at member N" needs.** `round` is the ordered member ids
+  for the pass, drawn when the round begins, published at `/godot/run/<id>/round` (§12.2), logged
+  as `run.round` and read back on replay (§12.3). Entering at member N is a round that **begins**
+  at N — the same list, started at an index — so there is no new run machinery to build, and a
+  replay reproduces the entry for free, because the round is the data and a replay never consults
+  the RNG.
+- **Suggested name `go.from`, no arguments**, acting on the focused list's standby exactly as `go`
+  does — so it is reachable as a named command (constraint 11) and a page's key finds it through
+  `gestures/commands.json` like every other gesture, rather than being a modifier the engine never
+  hears about. With the standby at a list's top level there is no group to start from and
+  `go.from` is plain `go`.
+- **Open, and each of these is a decision rather than an implementation detail.** What *from here*
+  means in a **timeline** group, whose members are simultaneous by construction: starting a
+  timeline scene at its fourth member is §3.13's `list.aim` and a load-to-time in all but name, so
+  it should either **be** that or be refused, rather than become a third thing that resembles both.
+  Where the pointer goes afterwards — out of the group, as decision M leaves it, or onto the member
+  after the one entered at. And whether it is refused while the show is locked: `go` is not
+  (§14.11 — a lock stops edits, not the show), and `go.from` starts a scene rather than editing
+  one, so the same answer looks right and has not been given.
 
 ### 12.7 `/godot/list` — the container §2.3 said Phase 3 publishes *(built in PR 3.2)*
 
@@ -2758,7 +2904,8 @@ while a persistent cue re-asserts.
 **Kinds honoured in Phase 4: media, osc and midi.** A fade, a stop or a group in the section is a
 `wfg validate` warning and is ignored — a fade asserts nothing, a stop is the thing that suspends an
 assertion, and a group is a lifetime rather than a state. The cursor skips the section as it skips a
-footer, `standby.set` refuses its cues with `not-manual-path`, and they are not GO targets.
+footer, `standby.set` refuses its cues with `not-a-stop` (`not-manual-path` until 2026-09-16,
+§12.6), and they are not GO targets.
 
 **The assertion is a mode of the solver, not a second mechanism** — §3.29 says so in those words.
 After any applied `go`, `cue.fire` or `trigger.fire`, the next tick's hook solves for the persistent
@@ -2790,7 +2937,9 @@ identified container beside the members, with the same children a header takes �
 walks a container for cue elements, skips it by construction, and `standby.set` refuses its cues with
 `not-manual-path` because `findOnPath` never descends into it. Neither needed a line of new code,
 which is the shape saying it is right: the section is not a place the pointer can be, and nothing had
-to learn that it was not.
+to learn that it was not. *(The atom is `not-a-stop` from 2026-09-16 and the sentence survives the
+rename intact: `findOnPath` now descends into every group, and a section is not a group — `stops()`
+returns cue children, and `Persistent` is a container. §12.6.)*
 
 **`solvePersistent` is the same walk read for a different question.** It takes the section's cues as
 what should be true, and drops any the rows *before the pointer* stop — the same last-writer reading
@@ -3944,6 +4093,19 @@ things the remaining views inherit.
   names actually shows the line: `preset` naming a non-ancestor is a validate warning the engine
   tolerates rather than refuses, and a way in to a place the page cannot reach would open that
   group and its header, throwing away the folds the reader now keeps, to show them nothing.
+- **And one of the day's notes was not about the page at all.** *"I can't select a cue within a
+  group individually to start from this level, acting on the following cues"* — which is the
+  standby pointer, and therefore the engine. It is written where the cursor's rules live, in §12.6,
+  rather than here, and it is **decision X** in §9: the pointer may now stand on any cue that is
+  not in a header, a footer or a persistent section, so ▲/▼ walk an automatic or a timeline group's
+  members from inside it; what a step from OUTSIDE lands on is deliberately unchanged, or ▼ down a
+  list would land on an automatic group's first member and GO would fire one cue where the operator
+  meant the scene. The page inherits all of it without a line of its own — the arrows already send
+  `standby.next`/`previous` and the *park* gesture already sends `standby.set`, and both now reach
+  further — which is what a gesture table naming commands rather than behaviours is for. The second
+  gesture the author asked for in the same breath, *start the group from here*, is `go.from` in
+  §12.6 and is *(proposed)*: when it is settled it is one row in `gestures/commands.json` and one
+  key.
 
 **Two things the author named for later, neither started.** A **toolbar** — *"there are probably
 a tool bar to design too"* — which is a design question about what an operator reaches for
@@ -6058,6 +6220,15 @@ nobody wins. Two buttons say the same thing and cannot half-happen"*
 (`clients/console/index.html:1176-1184`). ▲ and ▼ over `object.move` stay the gesture until the
 author asks otherwise — with the one wrinkle undo introduces, that two ▲ presses inside one open
 transaction collapse into one undo step whether anybody wanted that or not (§14.9).
+
+**The second GO gesture.** The author decided on 2026-09-16 that starting a group from the member
+the pointer is on is a gesture of its own, and that GO stays *fire the one cue the pointer is on*
+(decision X). What is built is the pointer half — the standby may stand inside every group, and
+▲/▼ walk it from there (§12.6). The gesture is not: §12.6 proposes `go.from` and names three
+things about it that are the author's rather than this document's, one of them being what *from
+here* can even mean in a timeline group, whose members are simultaneous — which is §3.13's
+`list.aim` and a load-to-time under another name. A command whose meaning in one of the three
+group modes is still a question is better named once than renamed.
 
 **PRD amendments this phase will propose at close-out**, recorded now so they are not
 rediscovered: §3.30's *"PR 4.1's `MediaInfo` side table… is where the cache is looked up"*

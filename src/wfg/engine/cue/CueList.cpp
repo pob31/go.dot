@@ -66,7 +66,13 @@ namespace wfg::cue
     //==============================================================================
     namespace
     {
-        /*  Whether a cue is a group the pointer goes INSIDE: a manual sequence.
+        /*  Whether a cue is a group the WALK goes inside: a manual sequence.
+
+            THE WALK, and no longer "the pointer", which is the distinction this
+            file turns on since 2026-09-16. The pointer may be put inside a group
+            of any kind; what only a manual sequence gets is `descendTo` entering
+            it when a reader steps onto its row from outside. The two are
+            written out at `descendTo` and `findOnPath` below.
 
             Read from the document with its defaults applied - `mode` defaults
             to `sequence` and `advance` to `manual`, so a group somebody made
@@ -110,8 +116,9 @@ namespace wfg::cue
             the reason is that the list was here and was wrong: a MIDI cue was
             added in PR 3.11 and the standby pointer could not stand on one,
             which showed up as a saved show refusing to restore its own pointer
-            with `not-manual-path` - a message about nesting, for a cue at the
-            top level of its list.
+            with the standby refusal - `not-a-stop` today, `not-manual-path`
+            when it happened - a message about nesting, for a cue at the top
+            level of its list.
 
             `ownerForElement` answers "cue" for every kind there is, because
             that is what decides the ADDRESS a cue is published at; a kind that
@@ -124,7 +131,15 @@ namespace wfg::cue
                      == "cue";
         }
 
-        /** The cues the pointer may stand on among a container's children. */
+        /*  The cues the pointer may stand on among a container's children.
+
+            THE WORD THE REST OF THIS FILE IS SPELLED IN, and the one a refusal
+            carries out to a client: a cue that is not one of these is refused
+            with `not-a-stop`. What it leaves out is everything that is not an
+            enabled cue ELEMENT of this container - a <Header>, a <Footer>, a
+            <Persistent> section, a route, a range, a trigger - which is why
+            those are never entered by anything below: they are not stops, so
+            nothing recurses into them. */
         std::vector<juce::ValueTree> stops (const juce::ValueTree& container)
         {
             std::vector<juce::ValueTree> out;
@@ -136,13 +151,35 @@ namespace wfg::cue
             return out;
         }
 
-        /*  The first place the pointer can stand at or below this cue: itself,
-            unless it is a manual group, in which case its first member - and so
-            on down, because a manual group's first member may be one too.
+        /*  Where a pointer ARRIVING FROM OUTSIDE lands on this cue: on the cue
+            itself, unless it is a manual group, in which case on its first
+            member - and so on down, because a manual group's first member may
+            be one too.
 
             An EMPTY manual group has nowhere inside it, so the pointer stands
             on the group row itself: GO there completes it, which is the honest
-            thing for a container somebody has not filled in yet. */
+            thing for a container somebody has not filled in yet.
+
+            MANUAL SEQUENCES ONLY, AND THAT IS NOT AN OVERSIGHT. This is the
+            line that keeps GO firing a scene rather than a scene's first cue,
+            and the next person to read these four functions will be tempted to
+            make them agree with `findOnPath`, which since 2026-09-16 descends
+            into every group. They are not the same question and they must not
+            give the same answer.
+
+            `findOnPath` answers MAY THE POINTER BE HERE, and the answer is yes
+            for any member of any group: the operator may park inside a timeline
+            or an automatic group to try one of its cues on its own. This
+            answers WHERE DOES THE WALK PUT IT, and for a group the machine
+            parents the answer has to be the group's own row. A reader stepping
+            down a list expects `next` to land on the scene and GO to fire the
+            scene; if this descended too, that press would start the scene's
+            first cue alone and every show already written would do something
+            different under its operator's hands.
+
+            So the inside of a non-manual group is somewhere the pointer may be
+            PUT and never somewhere the walk carries it into. What that costs at
+            the far end is written out in `stepFrom`. */
         juce::ValueTree descendTo (const juce::ValueTree& cue)
         {
             if (! isManualSequence (cue))
@@ -153,7 +190,9 @@ namespace wfg::cue
             return inside.empty() ? cue : descendTo (inside.front());
         }
 
-        /** The last place the pointer can stand at or below this cue. */
+        /** The last place the walk puts a pointer arriving from outside - the
+            mirror of `descendTo`, and manual sequences only for the same reason
+            it is. */
         juce::ValueTree descendToLast (const juce::ValueTree& cue)
         {
             if (! isManualSequence (cue))
@@ -164,8 +203,43 @@ namespace wfg::cue
             return inside.empty() ? cue : descendToLast (inside.back());
         }
 
-        /*  The cue with this identifier, searched only where the pointer may
-            go: down through manual groups, never into a header or a footer. */
+        /*  The cue with this identifier, searched everywhere the pointer is
+            allowed to stand: down through every group, at any depth, and never
+            into a header, a footer or a persistent section - `stops` leaves
+            those out, so nothing here has to name them.
+
+            EVERY GROUP, NOT ONLY THE MANUAL ONES, since 2026-09-16, and this
+            one word is the whole of the change. The author asked for it with
+            the page open: they could move the pointer from group to group but
+            could not select a cue within a group to start from that level, and
+            "even start all cues timelines should move the standby pointer from
+            one cue to the next to try each individual cue it contains". Making
+            the pointer FINDABLE inside a timeline group is enough to make it
+            walkable there too, because `stepFrom` already walks `stops (parent)`
+            and climbs out at the ends - it never asked what kind of group it was
+            standing in, only what kind it was stepping onto.
+
+            THE OLD RULE WAS ABOUT THE MENTAL MODEL, NOT ABOUT A RACE, which is
+            why it could be changed by a decision rather than by a mechanism. It
+            read "only manual sequences", and the reason recorded for it was that
+            a pointer inside an automatic chain would be a pointer the machine
+            also moves, and two things moving one pointer is how an operator
+            presses GO expecting cue 12 and gets 14. But only GO ever writes the
+            standby; the runner never does, and measuring a live engine confirmed
+            it. The model was the author's to choose and they have chosen the
+            other one: the pointer may stand inside every group, GO fires the one
+            cue it is on, and a second named gesture - not in this round - starts
+            the group from there.
+
+            What this does NOT change is where the walk LANDS from outside, which
+            is `descendTo`'s question and still answers manual sequences only.
+
+            AND IT ASKS NOTHING ABOUT THE CHILD'S KIND before recursing, on the
+            same argument that generalised `isCueElement` above: a list of which
+            elements can contain cues is a list that grows and is forgotten.
+            `stops` of anything that holds no cues is empty and the recursion
+            ends there, so the test would only be an optimisation over a handful
+            of children, bought with a second place to keep in step. */
         juce::ValueTree findOnPath (const juce::ValueTree& container, const std::string& cueId)
         {
             for (const auto& child : stops (container))
@@ -173,9 +247,8 @@ namespace wfg::cue
                 if (child[idProperty].toString().toStdString() == cueId)
                     return child;
 
-                if (isManualSequence (child))
-                    if (const auto found = findOnPath (child, cueId); found.isValid())
-                        return found;
+                if (const auto found = findOnPath (child, cueId); found.isValid())
+                    return found;
             }
 
             return {};
@@ -186,7 +259,13 @@ namespace wfg::cue
             what tells the caller to climb.
 
             `list` is the top, so climbing stops there rather than walking out of
-            the show. */
+            the show.
+
+            IT NEVER ASKS WHAT KIND OF GROUP IT IS STANDING IN. It walks
+            `stops (parent)` whatever the parent is, which is why widening
+            `findOnPath` was enough to give the author what they asked for: a
+            pointer that can be FOUND inside a timeline group is one this walks
+            around inside it, one member at a time, for no new code at all. */
         juce::ValueTree stepFrom (const juce::ValueTree& list, const juce::ValueTree& from,
                                   bool forwards)
         {
@@ -217,14 +296,50 @@ namespace wfg::cue
                     and the place before its first member is whatever precedes
                     it.
 
-                    THE GROUP ROW ITSELF IS NEVER A STOP, which is decision M
-                    (2026-09-06) seen from the inside: GO at a manual group's row
-                    fires its first member, so the row and the first member are
-                    one position rather than two, and `descendTo` never leaves
-                    the pointer on the row going forwards. Stopping there going
-                    backwards would have made the path asymmetric - a press of
-                    `previous` followed by `next` would not have come back to
-                    where it started. */
+                    THE WALK NEVER RESTS ON A MANUAL GROUP'S ROW, which is
+                    decision M (2026-09-06) seen from the inside: GO at a manual
+                    group's row fires its first member, so the row and the first
+                    member are one position rather than two, and `descendTo`
+                    never leaves the pointer on the row going forwards. Stopping
+                    there going backwards would have made the path asymmetric - a
+                    press of `previous` followed by `next` would not have come
+                    back to where it started. (`standby.set` can still put the
+                    pointer on that row, and always could: the row is a stop like
+                    any other cue. It is the WALK that steps through it.)
+
+                    IT DOES REST ON ANY OTHER GROUP'S ROW - it has to, or a
+                    timeline group could not be armed at all - and that is where
+                    the asymmetry went instead. Here is exactly what happens,
+                    read off these lines rather than guessed, because it is the
+                    first thing anybody will try after 2026-09-16.
+
+                    With the pointer on the FIRST member of a timeline or an
+                    automatic group, `previous` finds nothing before it among
+                    `stops (group)`, climbs to the group, and takes the group's
+                    previous SIBLING - `descendToLast` of it, so that sibling's
+                    last member when the sibling is a manual sequence. The
+                    group's own row is stepped straight over. When the group is
+                    the first child of the list there is nothing before it
+                    either, the climb reaches `list`, and the pointer stays put.
+
+                    And `next` from where `previous` just left lands on the
+                    group's ROW, not back on the member it came from, because
+                    `descendTo` does not enter a group the machine parents. So
+                    out of a non-manual group, `previous` then `next` is not a
+                    round trip: it leaves the operator one row higher than they
+                    started, on the scene rather than in it. Entering is the same
+                    shape read the other way - from the row, `next` steps past
+                    the whole chain, so the members are reachable by
+                    `standby.set` and by walking on from one of them, never by
+                    walking in.
+
+                    LEFT EXACTLY AS IT IS, deliberately, and it is a question to
+                    answer with the page open and a show on it. Both ways of
+                    closing it - resting on the row on the way out of its own
+                    members, or refusing to climb out of a group the pointer was
+                    put inside - change what `previous` and `next` do somewhere
+                    else, and neither is the change the author asked for in this
+                    round. */
                 cue = parent;
             }
 
@@ -284,7 +399,18 @@ namespace wfg::cue
 
             RUN-AWARE AND OPTIONAL, so that every caller that has no run table -
             a validator, a test of the document alone - gets the pure document
-            answer and the same behaviour a group with no loops has. */
+            answer and the same behaviour a group with no loops has.
+
+            STILL KEYED ON `isManualSequence`, AND NOT ON "the pointer is inside
+            a group", which is the one place in this file where the two did not
+            move together on 2026-09-16. This rule is about §3.6's loop: the
+            operator is the parent of a manual group, so the pointer has to stay
+            in the scene while the scene has rounds to play. A timeline or an
+            automatic group runs its own rounds without being asked, so a pointer
+            parked inside one to try a single cue is a place somebody chose to
+            stand, and holding it there while the machine looped would be the
+            machine moving the operator around. It leaves at the last member,
+            like any other stop. */
         if (runs != nullptr)
         {
             const auto group = from.getParent();
@@ -323,7 +449,7 @@ namespace wfg::cue
         return previous.isValid() ? previous[idProperty].toString().toStdString() : current;
     }
 
-    bool isOnManualPath (const juce::ValueTree& list, const std::string& cueId)
+    bool mayStandOn (const juce::ValueTree& list, const std::string& cueId)
     {
         return cueId.empty() || findOnPath (list, cueId).isValid();
     }

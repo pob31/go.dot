@@ -52,8 +52,8 @@ namespace wfg::cue
     {
         //----------------------------------------------------------------------
         registry.add ({ "standby.set",
-                        "Parks the focused list's standby on a cue. GO acts on whatever this"
-                        " names.",
+                        "Parks the focused list's standby on a cue, including one inside a group."
+                        " GO acts on whatever this names.",
                         { { "cue", 's', false } },
                         true,
                         [&document, &focus] (CommandContext&, const std::vector<osc::Value>& args)
@@ -100,25 +100,37 @@ namespace wfg::cue
                                     cue.getType().toString().toStdString()) != "cue")
                                 return Outcome::rejected (reason::unknownId);
 
-                            /*  THE MANUAL PATH, not the top level, since PR
-                                3.4 - the pointer descends into a manual
-                                sequence group (§3.6), so a member of one is a
-                                legal place to park.
+                            /*  ANYWHERE THE POINTER MAY STAND, which has widened
+                                twice. PR 3.4 took it from the list's top level
+                                to the manual path, because the pointer descends
+                                into a manual sequence group (§3.6). 2026-09-16
+                                took it to any enabled cue this list holds, at
+                                any depth: the author asked to be able to select
+                                a cue within a group and start from that level,
+                                so a member of a timeline or an automatic group
+                                is a legal place to park too.
 
-                                The two refusals are told apart because they
-                                send somebody somewhere different. `not-in-list`
-                                means the cue belongs to another list.
-                                `not-manual-path` means it is in THIS list and
-                                is one the machine advances - inside an
-                                automatic chain, or in a header - and the remedy
-                                is to make the group manual or to park on the
-                                group instead. */
-                            if (! isOnManualPath (list, cueId))
+                                THIS DOOR IS NOW WIDER THAN THE WALK, on purpose.
+                                `standby.next` will not carry the pointer into a
+                                timeline group - it steps onto the group's row
+                                and GO there fires the scene - but `standby.set`
+                                will put it there, and that is the whole of what
+                                was asked for. A surface offering "start from
+                                this cue" sends this command.
+
+                                The two refusals are told apart because they send
+                                somebody somewhere different. `not-in-list` means
+                                the cue belongs to another list. `not-a-stop`
+                                means it is in THIS list and is not a row of the
+                                show at all - a cue in some group's header, its
+                                footer or a persistent section - and the remedy
+                                is to park on the group that owns it. */
+                            if (! mayStandOn (list, cueId))
                             {
                                 const auto elsewhere = ! isInList (list, cueId);
 
                                 return Outcome::rejected (elsewhere ? reason::notInList
-                                                                    : reason::notManualPath);
+                                                                    : reason::notAStop);
                             }
 
                             return moveStandbyTo (document, list, cueId, args);
@@ -142,8 +154,9 @@ namespace wfg::cue
 
         //----------------------------------------------------------------------
         registry.add ({ "standby.next",
-                        "Moves the focused list's standby to the next cue. A group is one cue;"
-                        " at the end, and from nowhere, it stays put.",
+                        "Moves the focused list's standby to the next cue. A group the machine"
+                        " runs is one cue from outside and member by member from inside; at the"
+                        " end, and from nowhere, it stays put.",
                         {},
                         true,
                         [&document, &focus] (CommandContext&, const std::vector<osc::Value>& args)

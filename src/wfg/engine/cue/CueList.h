@@ -38,24 +38,51 @@
     standby commands, a direct write to its node, a load, and the structural
     repair below. Nothing else touches it.
 
-    THE POINTER DESCENDS INTO A MANUAL SEQUENCE GROUP, and steps over every
-    other kind as one sibling. PRD §3.6: "manual - a member starts on GO. The
-    standby pointer DESCENDS INTO the group; the operator is the parent."
+    THE POINTER MAY STAND INSIDE EVERY GROUP; THE WALK DESCENDS INTO ONLY A
+    MANUAL ONE. Two rules, not one, and holding them apart is the whole of
+    reading this file.
 
-    Which is the whole distinction. A timeline group schedules its members at
-    entry and an automatic sequence advances itself, so in both the machine is
-    the parent and there is nothing for the pointer to do inside: it steps past
-    the whole chain to the next sibling, the instant GO is pressed (§3.5). In a
-    manual group the operator is the parent, so the pointer has to be able to
-    stand on each member in turn.
+    THE WALK is the older of the two and is unchanged. PRD §3.6: "manual - a
+    member starts on GO. The standby pointer DESCENDS INTO the group; the
+    operator is the parent." A timeline group schedules its members at entry and
+    an automatic sequence advances itself, so in both the machine is the parent;
+    a reader stepping down a list with `next` lands on such a group's own row and
+    the following press steps past the whole chain to the next sibling, the
+    instant GO is pressed (§3.5). GO on a scene fires the scene, and that is the
+    behaviour every show written before this depends on.
+
+    WHERE THE POINTER MAY BE PUT widened on 2026-09-16, asked for by the author
+    with the page open. They could move the pointer from group to group but could
+    not select a cue within a group to start from that level, "even start all
+    cues timelines should move the standby pointer from one cue to the next to
+    try each individual cue it contains". So `standby.set` now accepts any
+    enabled cue this list holds, at any depth - the members of a timeline or an
+    automatic group among them - and once the pointer is inside a group of any
+    kind, `next` and `previous` walk that group's members and climb out at its
+    ends. GO fires the one cue the pointer is on; starting the group FROM there
+    is a second named gesture, which is a later round's.
+
+    Between them the two rules say this: the inside of a group the machine
+    parents is somewhere the pointer may be PUT and never somewhere the walk
+    carries it into. What that costs where the two meet - stepping out of such a
+    group and back - is written out at `stepFrom` in the .cpp, along with why it
+    is left alone until somebody has answered it with a show open.
+
+    The reason the old rule gave for refusing all of this was that a pointer
+    inside an automatic chain would be a pointer the machine also moves. That was
+    about the operator's mental model and not about a race: only GO ever writes
+    the standby, and the runner never does. A model is the author's to choose,
+    and they have chosen this one.
 
     Phase 1 stepped over ALL of them and said so where it asserted it - "a
     Phase 1 group has no runtime behaviour to descend into" - and named the test
     for the choice so that this moment would be visible rather than a surprise.
 
-    A HEADER AND A FOOTER ARE NEVER ENTERED. They are cue lists the group runs
-    for itself (§3.6); the pointer is the operator's position in the show, and
-    the operator does not step through a group's preparation.
+    A HEADER, A FOOTER AND A PERSISTENT SECTION ARE NEVER ENTERED, and that did
+    not widen with the rest. They are cue lists a group runs for itself (§3.6);
+    the pointer is the operator's position in the show, and the operator does not
+    step through a group's preparation. They are what a refusal from the standby
+    door now means, and the reason it carries - `not-a-stop` - is named for them.
 
     FOCUS IS RESOLVED RATHER THAN MAINTAINED, and since PR 3.2 it is also
     PUBLISHED. Phase 1 settled it at the smallest thing that made `standby.next`
@@ -95,20 +122,21 @@ namespace wfg::cue
         a derived value what its own source says. */
     std::vector<std::string> childrenOf (const juce::ValueTree& container);
 
-    /*  The next and previous top-level child of `list`, given where the standby
-        is now.
+    /*  Where the standby goes next, and where it came from.
 
         At the ends and from empty they return `current` unchanged - the pointer
-        stays put rather than wrapping or arming itself. "Next past the end
-        stays put" is the approved plan's; staying put from EMPTY is the
-        author's (2026-09-06), and it means only `standby.set` arms a list.
-        There is no wrap anywhere, which is what the end-of-list rule is for.
+        stays put rather than wrapping or arming itself. "Next past the end stays
+        put" is the approved plan's; staying put from EMPTY is the author's
+        (2026-09-06), and it means only `standby.set` arms a list. There is no
+        wrap anywhere, which is what the end-of-list rule is for.
 
-        Disabled cues are NOT skipped. A disabled cue is still a row in the
-        list, and skipping is a running-behaviour decision that Phase 1 has no
-        runner to justify; Phase 3 revisits it when a GO that does nothing
-        becomes a real failure rather than a hypothetical one. */
-    /*  Where the standby goes next, and where it came from.
+        (Two of Phase 1's sentences stood here until 2026-09-16 and had gone
+        false where a reader would trust them most: "the next and previous
+        TOP-LEVEL CHILD", which PR 3.4 widened to the manual path, and "disabled
+        cues are NOT skipped", which `stops` has filtered out since. Both were
+        contradicted three paragraphs further down, so the file disagreed with
+        itself about what a press of `next` does. Struck rather than left to be
+        read past: this header is the specification.)
 
         THESE REPLACED A FLAT `nextOf`/`previousOf` in PR 3.4 rather than
         joining them, because two answers to "where does the pointer go" would
@@ -116,10 +144,18 @@ namespace wfg::cue
         stale is the one the invariant is checked against.
 
         It descends into an enabled manual sequence group to its first enabled
-        member, steps over a timeline or automatic group as one sibling
-        (positionally past the whole chain - §3.5), skips disabled cues, never
-        enters a header or a footer, and climbs back out to the group's next
+        member, steps onto a timeline or automatic group as one sibling and then
+        past the whole chain (§3.5), skips disabled cues, never enters a header,
+        a footer or a persistent section, and climbs back out to the group's next
         sibling when its members are exhausted.
+
+        AND IT WALKS THE MEMBERS OF A GROUP IT IS ALREADY INSIDE, whatever kind
+        of group that is. Since 2026-09-16 `standby.set` can park the pointer on
+        a member of a timeline or an automatic group, to try one cue of a scene
+        on its own; from there these step through that group's members one at a
+        time and climb out at its ends, exactly as they do in a manual one. Only
+        the way IN differs, and only for a group the machine parents - the walk
+        stops on its row and steps over it.
 
         THE DOCUMENT IS ENOUGH TO ANSWER THIS. Which way the pointer goes is a
         question about the SHOW - what is a manual group, what is enabled - and
@@ -132,20 +168,36 @@ namespace wfg::cue
                              const RunTable* runs = nullptr);
     std::string previousStandby (const juce::ValueTree& list, const std::string& current);
 
-    /*  Whether the pointer may stand on this cue: it belongs to this list, and
-        every group between it and the list is a manual sequence.
+    /*  MAY THE POINTER STAND HERE: is `cueId` one of this list's stops - an
+        enabled cue it holds, at any depth, that is not inside a header, a footer
+        or a persistent section - or the empty string, which is nowhere at all
+        and is always legal because an empty pointer is a resting state (§3.5).
 
-        The rule §3.5 implies rather than states. A pointer inside an automatic
-        chain would be a pointer the machine also moves, and two things moving
-        one pointer is how an operator presses GO expecting cue 12 and gets 14. */
-    bool isOnManualPath (const juce::ValueTree& list, const std::string& cueId);
+        NAMED FOR THE QUESTION SINCE 2026-09-16, because the answer changed. It
+        was `isOnManualPath` and it meant "every group between this cue and the
+        list is a manual sequence"; the pointer may now be put inside a timeline
+        or an automatic group too, so the old name described a rule that is no
+        longer the rule - and a name that lies about the rule is worse than no
+        comment at all. Its refusal moved with it: `not-manual-path` became
+        `reason::notAStop`, "not-a-stop", which is what is actually left to
+        refuse.
+
+        BOTH DOORS ASK THIS ONE - `standby.set` and the document's own write door
+        - so a client cannot learn one answer from the command and another from
+        the node, and so the pointer cannot be put anywhere `next` and `previous`
+        could not then walk it away from. It is NOT the same question as where
+        the walk would have LANDED it: `standby.set` reaching somewhere the walk
+        does not go is the point of this change, not a hole in it. */
+    bool mayStandOn (const juce::ValueTree& list, const std::string& cueId);
 
     /** True when `cueId` is one of `list`'s immediate children. */
     bool isTopLevelChild (const juce::ValueTree& list, const std::string& cueId);
 
     /** True when `cueId` is anywhere in this list, at any depth - including
-        places the pointer may not stand. What tells "another list's cue" from
-        "this list's cue, inside a chain the machine advances". */
+        places the pointer may not stand. What tells "another list's cue"
+        (`not-in-list`) from "this list's cue, in some group's own header, footer
+        or persistent section" (`not-a-stop`), which are two refusals that send
+        somebody somewhere different. */
     bool isInList (const juce::ValueTree& list, const std::string& cueId);
 
     //==============================================================================

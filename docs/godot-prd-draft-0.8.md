@@ -224,6 +224,29 @@ sequence, standby lands on the cue *positionally after* the whole automated chai
 time: the standby pointer is ready for the operator's next action while the
 automated sequence runs on its own. The run pointers catch up underneath it.
 
+**The pointer may stand inside every group** *(amended in 0.8, at the author's
+direction, 2026-09-16 — decision X, `docs/godot-namespace-draft-0.1.md` §9 and
+§12.6)*. The standby may be parked on **any cue of its list**, at the top level
+or inside a group of any mode — timeline, automatic sequence or manual. What it
+may not stand on is a cue that is not one of the list's stops: a header cue, a
+footer cue or a cue of the persistent section (§3.29), which are a group's own
+preparation, its release and a list's standing assertion rather than rows an
+operator steps through; or a cue of another list, which has its own pointer.
+Inside an automatic or a timeline group the pointer sits on one member, GO
+fires **that member**, and stepping standby forward or back walks that group's
+members and climbs out at its ends — which is how an operator tries the cues of
+a scene one at a time, or starts a rehearsal from the middle of one. Starting
+the whole group from the member the pointer is on is a **second named gesture**
+*(proposed)*, not GO.
+
+**Stepping onto a group from outside is the other question, and its answer is
+unchanged.** Stepping standby down a list lands on a timeline or an automatic
+group's **own row**, never inside it; only a manual sequence group is descended
+into (§3.6). The row is where GO fires the scene, so a walk that
+descended everywhere would leave the operator on a group's first member and
+fire one cue where they meant the whole thing. Where a pointer may be *put* and
+what a *step* lands on are two rules; only the first is about every group.
+
 ### 3.6 Groups
 
 **No auto-follow, no auto-continue. One GO equals one row.** Structure lives in
@@ -236,7 +259,11 @@ Two attributes, not three types:
   - **auto** — a member starts when the previous completes.
   - **manual** — a member starts on GO. The standby pointer *descends into* the
     group; the operator is the parent. Toggleable during tech; a mid-run change
-    takes effect at the next member boundary.
+    takes effect at the next member boundary. The descent is what a **step**
+    from outside the group lands on, and it stays manual-only; where the
+    pointer may be **put** is §3.5's rule and it is every group *(amended in
+    0.8, at the author's direction, 2026-09-16 — decision X,
+    `docs/godot-namespace-draft-0.1.md` §9)*.
 
 *Amended 2026-09-07.* A third mode exists, the **sampler group** (§3.27): the
 scheduler launches none of its members and the operator's hand launches them
@@ -1797,6 +1824,19 @@ waypoint — which its forward walk does, provided a refresh is an event it sees
 A show-long soundboard needs none of this: a parallel list with only fader
 triggers is live all night with no arm and no release. The sampler group is the
 scene-scoped form.
+
+*One sentence above — "members are refused by standby-set the way header and
+footer cues are" — is flagged rather than amended (2026-09-16), because the
+answer is the author's and they have not been asked.* §3.5 now lets the pointer
+stand on any cue that is not in a header, a footer or a persistent section, and
+a sampler group's members are none of those, so this refusal is the one place
+the document still says otherwise. What the author was asked was whether a
+member of a **timeline or automatic** group is a place to park, and they
+answered *every group*; a sampler group is a scheduling mode rather than a
+container, and whether the pointer may sit on a member the operator's own hand
+launches is a question about what GO would mean there. It stays as written until
+they say so, and nothing in this section is built either way for several phases
+yet.
 
 **Voices.** Each playing member is a track (§3.25), and a full bank as one
 track per cell is the wrong price; the group declares its voices, and the claim

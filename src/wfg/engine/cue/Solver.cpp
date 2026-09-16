@@ -197,12 +197,15 @@ namespace wfg::cue
             the operator where the next GO would take the show on, which is what
             "take it back to cue 12" leaves them wanting. */
         /*  THE NEXT PLACE THE POINTER MAY STAND, which is not always the next
-            row. §3.5 lets it sit at the top of a list or inside a manual
-            sequence group and nowhere else - so a jump into the middle of a
-            timeline scene leaves the pointer after the SCENE, not on the
-            scene's third member, where nobody could press anything. */
+            row. The pointer may now be PARKED on a member of any group
+            (decision X, 2026-09-16), but a jump may not LEAVE it there: a jump
+            into the middle of a timeline scene leaves the pointer after the
+            SCENE, because the scene is about to fire its third member itself
+            and a press landing on it would fire it twice.
+            `ShowWalk::Placed::mayLandHere` carries that narrower rule and says
+            why it is narrower. */
         for (const auto& entry : walk.placed)
-            if (entry.row > target->row && entry.onManualPath)
+            if (entry.row > target->row && entry.mayLandHere)
             {
                 plan.standby = entry.id;
                 break;

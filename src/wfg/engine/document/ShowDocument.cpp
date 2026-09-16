@@ -37,33 +37,37 @@ namespace wfg::doc
         const juce::Identifier standbyProperty { "standby" };
         const juce::Identifier lockedProperty { "locked" };
 
-        /*  Whether a value is a legal standby for this list: somewhere on its
-            MANUAL PATH, or nothing at all.
+        /*  Whether a value is a legal standby for this list: one of the places
+            the pointer may stand, or nothing at all.
 
-            Named for the question rather than for the shape, because
-            cue::isOnManualPath answers the shape question and answers it
-            differently on one input - the empty string is nowhere at all, and
-            it IS a legal standby, because an empty pointer is a resting state
-            (§3.5) rather than a failure. Two same-named predicates disagreeing
-            on the empty string is a trap, so only one of them carries the name. */
+            Named for the question this door asks rather than for the shape of
+            the answer, and it keeps its own line for the empty string rather
+            than leaning on the one `cue::mayStandOn` has. An empty pointer is
+            nowhere at all and IS a legal standby - a resting state (§3.5),
+            never a failure - and that is a rule about what a SHOW may hold,
+            stated here where the write is refused, not a detail borrowed from a
+            predicate that could be narrowed one day without anyone thinking
+            about this line. */
         bool isLegalStandbyFor (const juce::ValueTree& list, const std::string& cueId)
         {
             if (cueId.empty())
                 return true;             // empty is the resting value, always legal
 
-            /*  THE MANUAL PATH, not the top level, since PR 3.4.
+            /*  ANYWHERE THE POINTER MAY STAND, which has widened twice: to the
+                manual path in PR 3.4, and to any enabled cue this list holds on
+                2026-09-16, when the author asked to be able to park inside a
+                timeline or an automatic group and try one cue of a scene on its
+                own. What is refused now is a cue in a group's header, in its
+                footer, or in a persistent section - lists a group runs for
+                itself (§3.6), never the operator's position in the show.
 
-                PRD §3.6 puts the pointer INSIDE a manual sequence group - "the
-                operator is the parent" - so a member of one is a legal place to
-                stand. A member of a timeline or an automatic group is not: the
-                machine advances those, and a pointer the machine also moves is
-                how an operator presses GO expecting cue 12 and gets 14 (§3.5).
-
-                It asks `cue::isOnManualPath`, which is the same walk the cursor
-                takes, so the pointer cannot be PUT anywhere `next` could not
-                have carried it. Two answers to that question would eventually
-                be two different answers. */
-            return cue::isOnManualPath (list, cueId);
+                It asks `cue::mayStandOn`, which is the same question
+                `standby.set` asks, so a client cannot learn one answer from the
+                command and another from the node. Two answers to that would
+                eventually be two DIFFERENT answers, and the load path - a
+                state.xml written against a show that has since been edited -
+                only ever comes through here. */
+            return cue::mayStandOn (list, cueId);
         }
 
         /*  The list a cue belongs to, however deep it is - or an invalid tree
@@ -895,14 +899,16 @@ namespace wfg::doc
 
         /*  ONE REFERENTIAL INVARIANT, and it is named rather than generalised.
 
-            A list's standby must name one of that list's own top-level children
-            or be empty. The schema can say a value is a string in range; it has
-            no way to say a value must be the identifier of a child of the
-            element carrying it, and adding a referential column to the
-            parameter table for a single attribute would be building the
-            generalisation before there are two cases to generalise. Phase 3's
-            run pointer is the second case; that is when the column earns
-            itself.
+            A list's standby must name a cue that list may be parked on - one of
+            its stops, in `cue/CueList.h`'s word - or be empty. (It read "one of
+            that list's own top-level children" until PR 3.4 and was true when it
+            was written; the pointer has descended into groups since.) The schema
+            can say a value is a string in range; it has no way to say a value
+            must be the identifier of a child of the element carrying it, and
+            adding a referential column to the parameter table for a single
+            attribute would be building the generalisation before there are two
+            cases to generalise. Phase 3's run pointer is the second case; that
+            is when the column earns itself.
 
             IT LIVES HERE because here is the only door. The standby commands,
             a client's node.set and EphemeralState restoring a saved show all
@@ -920,13 +926,14 @@ namespace wfg::doc
                 from the node.
 
                 `not-in-list`: that cue belongs somewhere else, or is not a cue.
-                `not-manual-path`: it is in THIS list, inside a chain the
-                MACHINE advances, and the remedy is to make the group manual or
-                to park on the group instead. */
+                `not-a-stop`: it is in THIS list and is not one of the places the
+                pointer may stand - a cue in a group's header, in its footer, or
+                in a persistent section - and the remedy is to park on the group
+                that owns it. */
             const auto elsewhere = ! cue::isInList (target.node, value.getString());
 
             return EditResult::failed (elsewhere ? reason::notInList
-                                                 : reason::notManualPath);
+                                                 : reason::notAStop);
         }
 
         /*  THE HISTORY THE ROW BELONGS ON, which is the document's for a
@@ -1505,13 +1512,21 @@ namespace wfg::doc
             advanced. Advancing would be guessing that the operator meant to
             stay where they were; clearing says plainly that what they were
             parked on has gone somewhere else. */
-        /*  WIDENED IN PR 3.4 from "leaving a list's top level" to "leaving the
-            manual path", because the pointer can now stand inside a manual
-            sequence group. Moving a cue from one place on that path to another
-            leaves the pointer alone - it stores an identifier, and §3.5 is
-            explicit that it does not follow the shape of the list around. What
-            clears it is the cue landing somewhere the pointer is not allowed to
-            be: inside an automatic group, inside a header, or in another list. */
+        /*  WIDENED TWICE, AND THE TEST IS ALWAYS THE SAME ONE: does the pointer
+            still have anywhere to be. PR 3.4 took it from "leaving a list's top
+            level" to "leaving the manual path"; 2026-09-16 took it to "leaving
+            the places the pointer may stand", which is now any enabled cue the
+            list holds at any depth.
+
+            Moving a cue from one of those places to another leaves the pointer
+            alone - it stores an identifier, and §3.5 is explicit that it does
+            not follow the shape of the list around. What clears it is the cue
+            landing somewhere the pointer is not allowed to be: in a header, in a
+            footer, in a persistent section, or in another list.
+
+            The test below asks `cue::mayStandOn` rather than listing those four,
+            which is why the line itself has come through both widenings
+            unedited: whatever the rule becomes, it asks the rule. */
         const auto vacated = listContaining (oldParent);
 
         const auto wasParkedOnIt = vacated.isValid()
@@ -1581,9 +1596,11 @@ namespace wfg::doc
 
         /*  Asked AFTER the move, because whether the cue is still somewhere the
             pointer may be is a question about where it has landed. A cue that
-            moved within the manual path of the same list keeps the pointer. */
+            moved from one stop of the same list to another keeps the pointer -
+            including, since 2026-09-16, a cue dragged into a timeline group,
+            which is a move that used to clear it. */
         if (! vacatedList.empty()
-              && ! cue::isOnManualPath (findById (vacatedList), id))
+              && ! cue::mayStandOn (findById (vacatedList), id))
             setAttribute ("/godot/list/" + vacatedList + "/standby", "");
 
         return EditResult::succeeded (id);

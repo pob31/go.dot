@@ -388,15 +388,44 @@ namespace wfg::cue
             descent: `fireStandby` fires that one itself, and the horizon adds
             it deliberately. Two callers, one shape - which matters, because
             adoption is one of them recognising the other's work, and a descent
-            they disagreed about would be a scene created twice. */
+            they disagreed about would be a scene created twice.
+
+            AND IT STOPS AT THE FIRST GROUP THE OPERATOR IS NOT THE PARENT OF,
+            which is new today and is the other half of the author's decision
+            (2026-09-16). The pointer may now be parked on a member of an
+            automatic or a timeline group; GO fires THAT CUE and not the scene,
+            and starting the whole group from it is a second named gesture.
+
+            The walk therefore climbs only while the groups it passes are ones
+            the operator drives. A member of a manual sequence plays as part of
+            its group, which is what the paragraph in `fireStandby` says and
+            what §3.6 means by a group organising its members' time - so the
+            manual ones above it still have to be live before the member can be
+            their child. An automatic or timeline group is the MACHINE's to
+            enter: making it live here would have GO start the scene the
+            operator was trying to audition one cue of, which is precisely what
+            they asked not to happen.
+
+            STOPPING RATHER THAN FILTERING, because the two differ and only one
+            of them is right. A manual group inside an automatic one inside a
+            manual one is reached by stopping with just the innermost; filtering
+            would have kept the outermost as well and made it the member's
+            parent ACROSS a group the machine owns, which is a scene entered by
+            a side door. The contiguous run of manual groups immediately around
+            the cue is the whole of what GO may bring to life. */
         std::vector<juce::ValueTree> ancestors;
 
         for (auto node = document.findById (cueId).getParent();
              node.isValid() && node != list;
              node = node.getParent())
         {
-            if (node.getType().toString() == "Group")
-                ancestors.push_back (node);
+            if (node.getType().toString() != "Group")
+                continue;
+
+            if (! isManualGroup (node))
+                break;
+
+            ancestors.push_back (node);
         }
 
         std::reverse (ancestors.begin(), ancestors.end());

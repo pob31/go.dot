@@ -17,6 +17,20 @@
 /*
     The standby pointer: where GO will act, and which list it will act on.
 
+    SINCE 2026-09-16 IT IS TWO RULES AND NOT ONE, and the cases in this file are
+    split between them. WHERE THE POINTER MAY BE PUT is any enabled cue the list
+    holds, at any depth, that is not inside a header, a footer or a persistent
+    section - the members of a timeline or an automatic group among them, which
+    is what the author asked for. WHERE THE WALK PUTS IT is unchanged: `next`
+    and `previous` descend into a manual sequence group and step onto every
+    other kind as one row, so a reader going down a list still lands on a scene
+    and GO there still fires the scene.
+
+    The two meet where a group's members are reachable by `standby.set` and by
+    walking on from one of them, and never by walking in. Whoever is tempted to
+    make the two agree should read the cursor section at the foot of this file
+    first, because half of those cases exist to catch exactly that.
+
     THREE OF THESE TESTS ARE NAMED FOR A CHOICE RATHER THAN A RULE, because the
     sources do not settle them and the author did (2026-09-06): a group is an
     opaque sibling, `next` and `previous` stay put from an empty standby, and a
@@ -43,6 +57,7 @@
 
 #include <juce_core/juce_core.h>
 
+#include <cstdint>
 #include <string>
 #include <vector>
 
@@ -128,7 +143,7 @@ TEST_CASE ("standby: traversal walks the top-level children, in order")
     CHECK_FALSE (isTopLevelChild (list, walkIn));       // it is inside the group
 
     // ...but it IS somewhere the pointer may stand, which is a different question.
-    CHECK (isOnManualPath (list, walkIn));
+    CHECK (mayStandOn (list, walkIn));
 }
 
 TEST_CASE ("standby: a manual group IS descended into, which was the Phase 1 choice reversed")
@@ -192,7 +207,7 @@ TEST_CASE ("standby: a disabled cue is not skipped (a Phase 1 choice)")
     // The disabled group is stepped over entirely, members and all.
     const auto list = rig.listNode (mainList);
     CHECK (nextStandby (list, houseToHalf) == houseToHalf);   // nothing after it
-    CHECK_FALSE (isOnManualPath (list, walkIn));
+    CHECK_FALSE (mayStandOn (list, walkIn));
 
     // And a disabled MEMBER is skipped without the group being skipped.
     REQUIRE (rig.run (2, "node.set",
@@ -223,7 +238,7 @@ TEST_CASE ("standby.set: it parks on a top-level cue of the focused list, and no
     CHECK (rig.standbyOf (mainList) == preshow);
 }
 
-TEST_CASE ("standby.set: the cue must exist, be a cue, and be at the list's top level")
+TEST_CASE ("standby.set: the cue must exist, be a cue, and be somewhere the pointer may stand")
 {
     Rig rig;
 
@@ -235,26 +250,59 @@ TEST_CASE ("standby.set: the cue must exist, be a cue, and be at the list's top 
     CHECK (rig.run (2, "standby.set", { osc::Value::string (wfsMount) }).rejected == 1);
     CHECK (rig.engine.lastError().find (reason::unknownId) != std::string::npos);
 
-    /*  A cue nested inside a MANUAL group is now legal, because that is where
-        §3.6 puts the pointer - "the operator is the parent". Phase 1 refused it
-        and this is the assertion turning over. */
+    /*  A cue nested inside a MANUAL group is legal, because that is where §3.6
+        puts the pointer - "the operator is the parent". Phase 1 refused it and
+        PR 3.4 was the assertion turning over. */
     CHECK (rig.run (3, "standby.set", { osc::Value::string (walkIn) }).applied == 1);
     CHECK (rig.standbyOf (mainList) == walkIn);
 
-    /*  Inside an AUTOMATIC one it is refused, and with a code of its own. The
-        machine advances that chain, so a pointer in it would be a pointer two
-        things move - which is how an operator presses GO expecting cue 12 and
-        gets 14 (§3.5). `not-in-list` would have sent them to look at the wrong
-        thing: the cue is in this list, and what is wrong is the group. */
+    /*  AND SO IS A CUE INSIDE AN AUTOMATIC ONE, WHICH IS TODAY'S REVERSAL AND
+        IS WHAT THIS PART OF THE CASE USED TO PIN THE OPPOSITE OF.
+
+        It made the group automatic and checked that `standby.set` on a member
+        was refused `not-manual-path`, on the argument that the machine advances
+        that chain and a pointer in it would be a pointer two things move.
+
+        The author, with the page open (2026-09-16): "I can't select a cue
+        within a group individually to start from this level, acting on the
+        following cues. Even start all cues timelines should move the standby
+        pointer from one cue to the next to try each individual cue it
+        contains." Asked directly, they decided that the pointer may stand
+        inside every group.
+
+        The old argument does not survive being looked at: only GO ever writes
+        the standby and the runner never does, so there was never a race here -
+        the reason was about the operator's mental model, and the model the
+        author wants is the one where a single cue of a scene can be tried on
+        its own.
+
+        What did NOT change is the WALK. Stepping onto this group from outside
+        still lands on the group's own row, so a reader going down the list
+        still finds the scene and GO there still fires the scene. The cursor
+        cases at the foot of this file are where that half is held down. */
     REQUIRE (rig.run (4, "node.set",
                       { osc::Value::string ("/godot/cue/" + preshow + "/advance"),
                         osc::Value::string ("auto") }).applied == 1);
 
-    CHECK (rig.run (5, "standby.set", { osc::Value::string (announce) }).rejected == 1);
-    CHECK (rig.engine.lastError().find (reason::notManualPath) != std::string::npos);
+    CHECK (rig.run (5, "standby.set", { osc::Value::string (announce) }).applied == 1);
+    CHECK (rig.standbyOf (mainList) == announce);
+
+    /*  WHAT IS STILL REFUSED IS WHAT IS NOT A STOP AT ALL, and a header is the
+        nearest example: it is a cue list the group runs for ITSELF (§3.6), and
+        the operator does not step through a group's preparation. So a cue in
+        one is not a place the pointer may stand however manual the group is.
+
+        With a code of its own rather than `not-in-list`, because the two send
+        somebody somewhere different: the cue IS in this list. */
+    const auto header = rig.document.createRole (preshow, "header");
+    REQUIRE (header.ok);
+    const auto preArm = rig.document.createCue (header.id, 0, "memo", "Pre-arm").id;
+
+    CHECK (rig.run (6, "standby.set", { osc::Value::string (preArm) }).rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::notAStop) != std::string::npos);
 
     // And the refusal left the pointer where it was.
-    CHECK (rig.standbyOf (mainList) == walkIn);
+    CHECK (rig.standbyOf (mainList) == announce);
 }
 
 TEST_CASE ("standby.set: every kind of cue can be parked on, not only a memo and a group")
@@ -353,27 +401,119 @@ TEST_CASE ("standby: a direct node write goes through the same invariant")
     CHECK (rig.engine.lastError().find (reason::notInList) != std::string::npos);
 
     /*  A cue inside a MANUAL group is accepted here for the same reason
-        `standby.set` accepts it: both doors ask `isOnManualPath`, which is the
-        same walk the cursor takes. Two answers to "where may the pointer be"
-        would eventually be two different answers, and the one that went stale
-        would be whichever this door used. */
+        `standby.set` accepts it: both doors ask `mayStandOn`, which is the one
+        place "where may the pointer be" is answered. Two answers to that would
+        eventually be two DIFFERENT answers, and the one that went stale would
+        be whichever this door used. (It is not the same question as where the
+        walk would have LANDED the pointer - since 2026-09-16 `standby.set`
+        reaches places `next` does not, deliberately.) */
     CHECK (rig.run (3, "node.set",
                     { osc::Value::string (address), osc::Value::string (walkIn) }).applied == 1);
     CHECK (rig.standbyOf (mainList) == walkIn);
 
-    // And inside an automatic one it is refused here too, with the same code.
+    /*  AND INSIDE AN AUTOMATIC ONE IT IS ACCEPTED HERE TOO, which is the other
+        half of the 2026-09-16 reversal. This is the second place that pinned
+        the refusal - the same cue, the same `not-manual-path` - and the two
+        doors turned over together because they ask the same question of the
+        same walk. That they agree is the property; which answer they agree on
+        is the author's. */
     REQUIRE (rig.run (31, "node.set",
                       { osc::Value::string ("/godot/cue/" + preshow + "/advance"),
                         osc::Value::string ("auto") }).applied == 1);
 
     CHECK (rig.run (32, "node.set",
-                    { osc::Value::string (address), osc::Value::string (announce) }).rejected == 1);
-    CHECK (rig.engine.lastError().find (reason::notManualPath) != std::string::npos);
+                    { osc::Value::string (address), osc::Value::string (announce) }).applied == 1);
+    CHECK (rig.standbyOf (mainList) == announce);
+
+    /*  The refusal has not gone; it has moved to what is still not a stop. A
+        FOOTER here and a header in the command case above, so that the two
+        doors are checked against different halves of one rule rather than both
+        against whichever example somebody wrote first. */
+    const auto footer = rig.document.createRole (preshow, "footer");
+    REQUIRE (footer.ok);
+    const auto release = rig.document.createCue (footer.id, 0, "memo", "Release").id;
+
+    CHECK (rig.run (33, "node.set",
+                    { osc::Value::string (address), osc::Value::string (release) }).rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::notAStop) != std::string::npos);
+    CHECK (rig.standbyOf (mainList) == announce);
 
     // Emptying it is always legal.
-    CHECK (rig.run (4, "node.set",
+    CHECK (rig.run (34, "node.set",
                     { osc::Value::string (address), osc::Value::string ("") }).applied == 1);
     CHECK (rig.standbyOf (mainList) == "");
+}
+
+TEST_CASE ("standby.set: what is refused now is what is not a stop, and it says which")
+{
+    /*  THE WHOLE REFUSAL, IN ONE CASE, because after 2026-09-16 it is a shorter
+        list than it was and a reader should be able to see all of it at once.
+
+        Until that day a member of a timeline or an automatic group was refused
+        too, and the code said `not-manual-path` - a message about NESTING,
+        which is what the check was. The author asked for the pointer to stand
+        inside every group, so what is left being refused has nothing to do with
+        nesting: it is the places that are not stops on anybody's walk through
+        the show. Hence a code that names that instead. A reason is part of the
+        log format and therefore a contract (`Command.h` says so), so this is a
+        case about the WORD as much as about the behaviour.
+
+        FOUR KINDS AND TWO CODES, which is the discrimination that matters.
+        Three of them are in this list and one is not, and a client told
+        `not-in-list` about a header cue would go and look at the wrong list. */
+    Rig rig;
+
+    const auto header = rig.document.createRole (preshow, "header");
+    const auto footer = rig.document.createRole (preshow, "footer");
+    const auto section = rig.document.createPersistent (mainList);
+
+    REQUIRE (header.ok);
+    REQUIRE (footer.ok);
+    REQUIRE (section.ok);
+
+    const auto preArm = rig.document.createCue (header.id, 0, "memo", "Pre-arm").id;
+    const auto release = rig.document.createCue (footer.id, 0, "memo", "Release").id;
+    const auto bed = rig.document.createCue (section.id, 0, "memo", "Rain").id;
+
+    REQUIRE (rig.standbyOf (mainList) == houseToHalf);
+
+    std::int64_t step = 0;
+
+    /*  A header and a footer are the group's own preparation and release
+        (§3.6); a persistent section is §3.29's bed, asserted at every GO and
+        never stepped through. None of the three is a row an operator walks, so
+        none of them is a place the pointer may be put. */
+    for (const auto& offPath : { preArm, release, bed })
+    {
+        INFO ("off the path: " << offPath);
+
+        CHECK (rig.run (++step, "standby.set", { osc::Value::string (offPath) }).rejected == 1);
+        CHECK (rig.engine.lastError().find (reason::notAStop) != std::string::npos);
+        CHECK (rig.standbyOf (mainList) == houseToHalf);
+    }
+
+    /*  AND THE FOURTH ANSWERS DIFFERENTLY, deliberately. A cue in another list
+        is a perfectly good stop - just not one of THIS list's - so the remedy
+        is to focus the other list rather than to go looking at a group nobody
+        wrote. The case below is where that discrimination is proved against a
+        predicate that searched the whole show; this is here so that the two
+        codes are read side by side, which is the only way anyone notices they
+        are two. */
+    REQUIRE (rig.run (++step, "list.create", { osc::Value::string ("Second") }).applied == 1);
+
+    const auto secondList = rig.document.root().getChildWithName ("Lists").getChild (1)
+                              .getProperty ("id").toString().toStdString();
+
+    REQUIRE (rig.run (++step, "cue.create",
+                      { osc::Value::string (secondList), osc::Value::int32 (0),
+                        osc::Value::string ("memo"),
+                        osc::Value::string ("Elsewhere") }).applied == 1);
+
+    const auto elsewhere = childrenOf (rig.document.findById (secondList)).front();
+
+    CHECK (rig.run (++step, "standby.set", { osc::Value::string (elsewhere) }).rejected == 1);
+    CHECK (rig.engine.lastError().find (reason::notInList) != std::string::npos);
+    CHECK (rig.standbyOf (mainList) == houseToHalf);
 }
 
 TEST_CASE ("standby: one list cannot be parked on another list's cue")
@@ -488,12 +628,23 @@ TEST_CASE ("standby: deleting some other cue leaves it exactly where it was")
     CHECK (rig.standbyOf (mainList) == houseToHalf);
 }
 
-TEST_CASE ("standby: moving the cue off the manual path clears it, and along it does not")
+TEST_CASE ("standby: moving the cue where the pointer may not stand clears it, and otherwise not")
 {
-    /*  WIDENED IN PR 3.4 from "out of the list's top level", because the
-        pointer can now stand inside a manual sequence group. What matters is
-        not the depth the cue moved to but whether the pointer is still allowed
-        to be there.
+    /*  WIDENED TWICE, AND THE TEST IS ALWAYS THE SAME ONE: does the pointer
+        still have anywhere to be.
+
+        PR 3.4 took it from "out of the list's top level" to "off the manual
+        path", because the pointer had just learned to stand inside a manual
+        sequence group. 2026-09-16 takes it to "out of the places the pointer
+        may stand", which is now any enabled cue this list holds at any depth.
+
+        THIS CASE USED TO PIN THE OPPOSITE OF ITS OWN SECOND HALF. It made the
+        group automatic, moved the cue in, and checked that the pointer had
+        emptied - because a member of a group the machine advances was nowhere
+        the pointer could be. It is now somewhere it can be, so that move keeps
+        the pointer, and the clearing has moved to something that is still not a
+        stop: the group's HEADER, which is a cue list the group runs for ITSELF
+        (§3.6) and which no operator steps through.
 
         Clearing says plainly that what they were parked on has gone somewhere
         else; advancing would be guessing that the operator meant to stay where
@@ -501,16 +652,16 @@ TEST_CASE ("standby: moving the cue off the manual path clears it, and along it 
     Rig rig;
     REQUIRE (rig.standbyOf (mainList) == houseToHalf);
 
-    /*  Into a MANUAL group: still on the path, so the pointer follows the cue.
-        It stores an identifier, and §3.5 says it does not move as a side effect
-        of the show being edited around it. */
+    /*  Into a MANUAL group: still a stop, so the pointer follows the cue. It
+        stores an identifier, and §3.5 says it does not move as a side effect of
+        the show being edited around it. */
     CHECK (rig.run (1, "object.move",
                     { osc::Value::string (houseToHalf), osc::Value::string (preshow),
                       osc::Value::int32 (0) }).applied == 1);
 
     CHECK (rig.standbyOf (mainList) == houseToHalf);
 
-    // Into an AUTOMATIC one: off the path, so it clears.
+    // And into an AUTOMATIC one, which is the assertion that turned over today.
     REQUIRE (rig.run (2, "node.set",
                       { osc::Value::string ("/godot/cue/" + preshow + "/advance"),
                         osc::Value::string ("auto") }).applied == 1);
@@ -518,6 +669,16 @@ TEST_CASE ("standby: moving the cue off the manual path clears it, and along it 
     CHECK (rig.run (3, "object.move",
                     { osc::Value::string (houseToHalf), osc::Value::string (preshow),
                       osc::Value::int32 (1) }).applied == 1);
+
+    CHECK (rig.standbyOf (mainList) == houseToHalf);
+
+    // Into that group's header: not a stop, so the pointer empties.
+    const auto header = rig.document.createRole (preshow, "header");
+    REQUIRE (header.ok);
+
+    CHECK (rig.run (4, "object.move",
+                    { osc::Value::string (houseToHalf), osc::Value::string (header.id),
+                      osc::Value::int32 (0) }).applied == 1);
 
     CHECK (rig.standbyOf (mainList) == "");
 }
@@ -932,17 +1093,34 @@ TEST_CASE ("container nodes: a focus naming a list the show no longer has resolv
 }
 
 //==============================================================================
-/*  THE STANDBY CURSOR: the manual path through a show.
+/*  THE STANDBY CURSOR: the operator's path through a show, and it is now two
+    rules rather than one.
 
     PRD §3.6, on a manual sequence group: "a member starts on GO. The standby
     pointer DESCENDS INTO the group; the operator is the parent." And on the
     other two kinds, the machine is the parent - a timeline schedules everything
-    at entry and an automatic sequence advances itself - so there is nothing
-    inside for the pointer to do, and §3.5 sends it positionally past the whole
-    chain the instant GO is pressed.
+    at entry and an automatic sequence advances itself - so §3.5 sends the
+    pointer positionally past the whole chain the instant GO is pressed.
 
     Phase 1 stepped over all of them and named the test for the choice so that
-    this moment would be visible. The test below is that one, rewritten.
+    this moment would be visible; PR 3.4 made the manual one descend.
+
+    WHAT 2026-09-16 ADDED is the pointer standing INSIDE the other two, which
+    the author asked for after using the page: "I can't select a cue within a
+    group individually to start from this level ... Even start all cues
+    timelines should move the standby pointer from one cue to the next to try
+    each individual cue it contains."
+
+    That is not the same sentence as "the walk descends into every group", and
+    the difference is the whole of the design. STEPPING ONTO a group from
+    outside is unchanged - a reader going down the list lands on the group's own
+    row, and GO there fires the scene - while the pointer may be FOUND, and so
+    parked, on any cue that is not inside a header, a footer or a persistent
+    section. Being findable is what makes the walk work from the inside, because
+    the step already runs among a parent's own stops and climbs out at its ends.
+
+    Two rules, three cases below for the first and three for the second, and
+    each of them fails if its own rule is removed.
 */
 namespace
 {
@@ -999,27 +1177,194 @@ TEST_CASE ("cursor: it descends into a manual group and climbs back out")
     CHECK (previousStandby (list, rig.m1) == rig.top);
 }
 
-TEST_CASE ("cursor: an automatic group is one sibling, and its members are not stops")
+TEST_CASE ("cursor: stepping onto an automatic or a timeline group lands on the GROUP, not inside it")
 {
-    /*  §3.5: standby lands on the cue positionally AFTER the whole automated
-        chain, the instant GO is pressed. The machine is the parent there, and a
-        pointer inside a chain the machine is also advancing would be two things
-        moving one pointer - which is how an operator presses GO expecting cue
-        12 and gets 14. */
+    /*  THE HALF OF THE 2026-09-16 CHANGE THAT IS A RULE ABOUT NOT CHANGING, and
+        the one a careless simplification would break.
+
+        The author asked for the pointer to be able to stand inside every group.
+        The obvious way to give them that is to make the WALK descend into every
+        group - and it is wrong. `descendTo` is applied when stepping ONTO a
+        cue, so a reader going down a list would land on an automatic group's
+        FIRST MEMBER instead of on the group, and the GO they pressed next would
+        fire one cue where they meant the scene. Every show that exists would
+        change under them, silently, and the symptom would be a scene that no
+        longer plays.
+
+        So it is two rules and not one. The pointer may be FOUND, and therefore
+        parked, anywhere it is allowed to be - that is the case below. Stepping
+        onto a group from outside is unchanged - that is this one, asserted for
+        both kinds and in both directions.
+
+        THIS CASE USED TO SAY MORE THAN THAT. It also checked that those groups'
+        members were not stops at all, which is exactly what the author
+        reversed; that half has moved to the cases below, with the answer the
+        other way round. */
+    CursorRig rig;
+
+    SUBCASE ("an automatic sequence")
+    {
+        const auto list = rig.list();
+
+        // Forwards: onto the group's own row, and then past the whole chain.
+        CHECK (nextStandby (list, rig.m3) == rig.auto_);
+        CHECK (nextStandby (list, rig.auto_) == rig.tail);
+
+        // Backwards: onto the row again, and not onto its last member.
+        CHECK (previousStandby (list, rig.tail) == rig.auto_);
+    }
+
+    SUBCASE ("a timeline group")
+    {
+        /*  The manual group made into a timeline one, so that the case is about
+            the KIND rather than about which group the rig happens to put where:
+            the same three members, read the other way. */
+        rig.document.setAttribute ("/godot/cue/" + rig.manual + "/mode", "timeline");
+
+        const auto list = rig.list();
+
+        CHECK (nextStandby (list, rig.top) == rig.manual);
+        CHECK (nextStandby (list, rig.manual) == rig.auto_);
+
+        CHECK (previousStandby (list, rig.auto_) == rig.manual);
+    }
+
+    SUBCASE ("and a manual sequence still descends, exactly as it did")
+    {
+        /*  The contrast, in the same case, because "it lands on the group" only
+            means something beside a kind that does not. §3.6: in a manual
+            sequence "a member starts on GO. The standby pointer DESCENDS INTO
+            the group; the operator is the parent." */
+        const auto list = rig.list();
+
+        CHECK (nextStandby (list, rig.top) == rig.m1);
+        CHECK (previousStandby (list, rig.auto_) == rig.m3);
+    }
+}
+
+TEST_CASE ("cursor: the pointer stands on a member of an automatic group, and walks that group")
+{
+    /*  THE OTHER HALF, AND THE ONE THE AUTHOR ASKED FOR (2026-09-16, with the
+        page open): "Up and down stand by as well as the up and down keyboard
+        arrows move the standby pointer to the next group or individual cue.
+        However I can't select a cue within a group individually to start from
+        this level, acting on the following cues. Even start all cues timelines
+        should move the standby pointer from one cue to the next to try each
+        individual cue it contains."
+
+        Both of these were refused that morning, `not-manual-path`, and the
+        reason recorded for the refusal was that "a pointer inside an automatic
+        chain would be a pointer the machine also moves". It never was: only GO
+        writes the standby, and the runner never does. The reason was about the
+        operator's mental model, and the model the author wants is the one where
+        a single cue of a scene can be tried on its own.
+
+        `findOnPath` descending into every group is the whole of the change.
+        `stepFrom` already walks `stops (parent)` and climbs out at the ends, so
+        a pointer that can be FOUND inside a group walks that group for nothing
+        - which is precisely "move the standby pointer from one cue to the next
+        to try each individual cue it contains". */
     CursorRig rig;
     const auto list = rig.list();
 
-    CHECK (nextStandby (list, rig.auto_) == rig.tail);
-    CHECK (previousStandby (list, rig.tail) == rig.auto_);
+    CHECK (mayStandOn (list, rig.a1));
+    CHECK (mayStandOn (list, rig.a2));
 
-    // Its members are not on the path at all.
-    CHECK_FALSE (isOnManualPath (list, rig.a1));
-    CHECK_FALSE (isOnManualPath (list, rig.a2));
+    // Along the members, one at a time, in both directions.
+    CHECK (nextStandby (list, rig.a1) == rig.a2);
+    CHECK (previousStandby (list, rig.a2) == rig.a1);
 
-    // Nor is a timeline group's, whatever its advance says.
+    /*  AND OUT AT THE ENDS, to the group's siblings - which is what makes this
+        a way through the whole list rather than a trap inside one scene.
+
+        Backwards out of the first member lands on the last STOP of whatever
+        precedes the group, and what precedes this one is a manual sequence, so
+        that is its last member rather than its row. Both rules in one line. */
+    CHECK (nextStandby (list, rig.a2) == rig.tail);
+    CHECK (previousStandby (list, rig.a1) == rig.m3);
+
+    /*  AND WHERE THE TWO RULES MEET, LEAVING A GROUP THE MACHINE PARENTS IS NOT
+        A ROUND TRIP. Pinned rather than left to be discovered, because it is the
+        first thing anybody will try after today and because the choice is the
+        author's to make with a show open rather than a reader's to tidy away.
+
+        `previous` off the first member climbed out to M3; `next` from M3 lands
+        on the AUTO GROUP'S ROW, not back on the member it came from, because
+        the walk does not enter a group the machine parents. So the operator
+        finishes one row higher than they started - on the scene rather than in
+        it - and the members are reachable by `standby.set` and by walking on
+        from one of them, never by walking in.
+
+        Both ways of closing that would change what `next` and `previous` do
+        somewhere else, so neither is in this round. If a later one closes it,
+        this assertion is where the decision shows up. */
+    CHECK (nextStandby (list, rig.m3) == rig.auto_);
+}
+
+TEST_CASE ("cursor: and on a member of a timeline group, which walks the same way")
+{
+    /*  A timeline group schedules every member at entry (§3.6), so the machine
+        is its parent in a stronger sense than an automatic sequence's - and the
+        author named it anyway: "even start all cues timelines". The pointer
+        standing on a member of one is how an operator tries that member alone.
+        What starts the whole scene from there is a second named gesture, and it
+        is deliberately not in this round. */
+    CursorRig rig;
     rig.document.setAttribute ("/godot/cue/" + rig.manual + "/mode", "timeline");
-    CHECK (nextStandby (rig.list(), rig.top) == rig.manual);
-    CHECK_FALSE (isOnManualPath (rig.list(), rig.m2));
+
+    const auto list = rig.list();
+
+    CHECK (mayStandOn (list, rig.m1));
+    CHECK (mayStandOn (list, rig.m2));
+    CHECK (mayStandOn (list, rig.m3));
+
+    CHECK (nextStandby (list, rig.m1) == rig.m2);
+    CHECK (nextStandby (list, rig.m2) == rig.m3);
+    CHECK (previousStandby (list, rig.m2) == rig.m1);
+
+    /*  Out of the last member to what follows the GROUP - and what follows it
+        is an automatic group, which is stepped ONTO rather than into. The two
+        rules meet in that one assertion. */
+    CHECK (nextStandby (list, rig.m3) == rig.auto_);
+    CHECK (previousStandby (list, rig.m1) == rig.top);
+}
+
+TEST_CASE ("cursor: a cue two groups deep, with a non-manual group between it and the list, is a stop")
+{
+    /*  The rule is "anywhere the pointer is allowed to be", not "one level in",
+        and the difference only shows when the groups are of different kinds.
+
+        An implementation that asked whether the PARENT was a group would pass
+        every case above and fail this one. So would one that kept the old walk
+        and simply allowed a single automatic group at the bottom of it. What is
+        being asserted is that the question is asked of the WHOLE path and the
+        answer is yes for every group on it. */
+    CursorRig rig;
+
+    // An automatic group inside the manual one, between M1 and M2.
+    const auto inner = rig.document.createCue (rig.manual, 1, "group", "Inner").id;
+    rig.document.setAttribute ("/godot/cue/" + inner + "/advance", "auto");
+
+    const auto i1 = rig.document.createCue (inner, 0, "memo", "I1").id;
+    const auto i2 = rig.document.createCue (inner, 1, "memo", "I2").id;
+
+    const auto list = rig.list();
+
+    CHECK (mayStandOn (list, i1));
+    CHECK (mayStandOn (list, i2));
+
+    /*  STEPPING ONTO IT IS STILL STEPPING ONTO THE GROUP, one level down. The
+        reader walking the manual scene finds the inner scene as one row, and GO
+        there fires the inner scene - which is the same guarantee as at the top
+        level, and is the one that would go if the walk descended everywhere. */
+    CHECK (nextStandby (list, rig.m1) == inner);
+    CHECK (nextStandby (list, inner) == rig.m2);
+    CHECK (previousStandby (list, rig.m2) == inner);
+
+    // And from inside it: the members, then out to what follows the inner group.
+    CHECK (nextStandby (list, i1) == i2);
+    CHECK (nextStandby (list, i2) == rig.m2);
+    CHECK (previousStandby (list, i1) == rig.m1);
 }
 
 TEST_CASE ("cursor: a disabled cue is not a stop, and a disabled group is not entered")
@@ -1039,7 +1384,7 @@ TEST_CASE ("cursor: a disabled cue is not a stop, and a disabled group is not en
 
     rig.document.setAttribute ("/godot/cue/" + rig.manual + "/enabled", "false");
     CHECK (nextStandby (rig.list(), rig.top) == rig.auto_);
-    CHECK_FALSE (isOnManualPath (rig.list(), rig.m1));
+    CHECK_FALSE (mayStandOn (rig.list(), rig.m1));
 }
 
 TEST_CASE ("cursor: a header and a footer are never entered")
@@ -1060,8 +1405,8 @@ TEST_CASE ("cursor: a header and a footer are never entered")
     CHECK (nextStandby (rig.list(), rig.top) == rig.m1);
     CHECK (nextStandby (rig.list(), rig.m3) == rig.auto_);
 
-    CHECK_FALSE (isOnManualPath (rig.list(), opening));
-    CHECK_FALSE (isOnManualPath (rig.list(), closing));
+    CHECK_FALSE (mayStandOn (rig.list(), opening));
+    CHECK_FALSE (mayStandOn (rig.list(), closing));
 }
 
 TEST_CASE ("cursor: nested manual groups, and an empty one the pointer stands on")

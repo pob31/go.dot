@@ -175,19 +175,31 @@ namespace wfg::cue
         double from = 0.0;
         double to = 0.0;
 
-        /*  WHETHER THE STANDBY POINTER MAY STAND HERE.
+        /*  WHETHER A JUMP MAY LEAVE THE POINTER HERE, which since 2026-09-16 is
+            NOT the same question as whether the pointer may STAND here.
 
-            §3.5, and PR 3.4 widened it: the pointer may sit at the top of a
-            list or inside a MANUAL SEQUENCE group, because those are the ones
-            whose members start on GO. It may not sit inside a timeline or an
-            automatic group - nobody presses anything there - nor in a header or
-            a footer, which are a group's own preparation and release rather
-            than places an operator steps through.
+            It used to be. `cue::mayStandOn` answered both until the author
+            decided that the pointer may be parked on a member of any group
+            (decision X): a cue inside a timeline or an automatic scene is now
+            a perfectly good place to park, because parking there is how
+            somebody auditions that one cue. So residence widened.
 
-            The solver needs it to say where a jump leaves the pointer: "the
-            next row" is the wrong answer when the next row is a member of the
-            timeline scene the jump has just landed in. */
-        bool onManualPath = false;
+            THIS DID NOT, and the distinction is the point rather than an
+            oversight. A jump - §3.13's `load to time`, and the solver's plan -
+            puts the show where it would be at some moment and then has to
+            leave the pointer somewhere the operator can PRESS ON from. The
+            next row is the wrong answer when that row is the third member of
+            the timeline scene the jump has just landed in: the scene is about
+            to fire that member itself, and a press would fire it twice. So a
+            jump still lands after the whole scene, which is what it always
+            did.
+
+            Deliberately a second, narrower rule, and named for what it decides
+            rather than for how it is computed - so the next reader does not
+            "fix" it into agreeing with `cue::mayStandOn`. A header or a footer
+            is out of both, being a group's own preparation and release rather
+            than a place an operator steps through. */
+        bool mayLandHere = false;
     };
 
     /** The rows a group spans, so that "the group has ended" is a row. */
@@ -278,8 +290,9 @@ namespace wfg::cue
                 the one direction this analysis is not allowed to be wrong
                 in. So it falls back to rows. */
             /*  Every ancestor a manual sequence, and not inside a header or a
-                footer. See `Placed::onManualPath`. */
-            entry.onManualPath = ! insideARole;
+                footer. See `Placed::mayLandHere`, which says why this stayed
+                narrow while where the pointer may STAND was widened. */
+            entry.mayLandHere = ! insideARole;
 
             for (const auto& groupId : ancestors)
             {
@@ -288,7 +301,7 @@ namespace wfg::cue
                 if (! group.isValid()
                      || reader.text (group, "group", "mode") == "timeline"
                      || reader.text (group, "group", "advance") == "auto")
-                    entry.onManualPath = false;
+                    entry.mayLandHere = false;
             }
 
             entry.timed = timing.known && length.has_value();
