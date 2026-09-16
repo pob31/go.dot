@@ -19,7 +19,7 @@
     "add-cue":      { "command": "cue.create",       "args": ["s", "i", "s", "s"],   "where": "the inspector's add buttons" },
     "add-trigger":  { "command": "trigger.create",   "args": ["s", "s"],             "where": "the inspector's trigger buttons" },
     "add-role":     { "command": "group.role",       "args": ["s", "s"],             "where": "the inspector's header and footer buttons" },
-    "move":         { "command": "object.move",      "args": ["s", "s", "i"],        "where": "the inspector's up and down buttons" },
+    "move":         { "command": "object.move",      "args": ["s", "s", "i"],        "where": "a row dragged in the cue list, and the inspector's up and down buttons - which stay, because a drag does not exist under a finger" },
     "delete":       { "command": "object.delete",    "args": ["s"],                  "where": "the inspector's delete button" },
     "revert":       { "command": "document.revert",  "args": [],                     "where": "the revert button, after it asks" }
   },

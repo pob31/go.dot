@@ -23,6 +23,7 @@ import { folded } from "../model/remember.js";
 import { el, esc, cueName } from "./common.js";
 import { refreshFields } from "./values.js";
 import { reconcile } from "./reconcile.js";
+import { view } from "./view.js";
 
 /*  The current answer, refreshed by `listRows` and read by `cueRow`. */
 let overlapping = new Map();
@@ -101,12 +102,27 @@ function revealing(key) {
     THE HEAD'S KEY IS "band:" + THE FOLD KEY and the end's is that with ":end",
     so the three names a section has are one name said three ways and a section
     cannot be half-renamed. `folded` holds the SHUT ones - present means shut -
-    which is what it has always meant for a group's own twist. */
+    which is what it has always meant for a group's own twist.
+
+    AND BOTH EDGES NAME THEIR SECTION IN A WORD, for the drag. A <Header>, a
+    <Footer> and a <Persistent> have an identifier in the file and NO ADDRESS in
+    the tree - /godot/cue/<that id> is a 404 - so no client can learn one, no
+    client can name one as a parent, and a drop INTO one of them is not
+    expressible. The page has to refuse that drop and SAY so rather than let it
+    quietly do nothing, and to say so it first has to know that the thing under
+    the pointer is a band at all. That is the one question about a band the tree
+    cannot be asked: it is not a cue, it has no identifier to look up, and the
+    rest of what it carries is a fold key and a count. So `data-band` puts the
+    word on the head and on the end alike - one word, the three sections'
+    three - and a pointer resting in the gap above a section or below it has
+    something to read. It is fixed markup and not a per-poll value, so the
+    reconciler leaves it alone for as long as the section stands. */
 function frame(out, fold, word, count, rail, note, lines) {
   const shut = folded.has(fold);
 
   out.push({ key: "band:" + fold, html:
-    '<div class="band" data-fold="' + fold + '" data-shut="' + (shut ? "yes" : "no") + '"' +
+    '<div class="band" data-fold="' + fold + '" data-band="' + esc(word) + '"' +
+      ' data-shut="' + (shut ? "yes" : "no") + '"' +
       ' style="padding-left:' + rail + "; --rail:" + rail + '"' +
       ' title="' + esc(note) + '">' +
       '<span class="twist">' + (shut ? "▶" : "▼") + "</span>" +
@@ -124,7 +140,8 @@ function frame(out, fold, word, count, rail, note, lines) {
   lines();
 
   out.push({ key: "band:" + fold + ":end",
-             html: '<div class="band-end" style="--rail:' + rail + '"></div>' });
+             html: '<div class="band-end" data-band="' + esc(word) + '"' +
+                   ' style="--rail:' + rail + '"></div>' });
 }
 
 /*  What each of §13.6's six words means, said once so the row can be short. */
@@ -283,8 +300,49 @@ function cueRow(id, depth, section, rail, standby, out) {
 
       Both are attributes and the look is the stylesheet's to give. §4.8 asks
       that whatever it gives the anchor is not a colour on its own. */
+
+  /*  AND THE ROW CAN BE LIFTED (author, 2026-09-16: "can we drag and drop cues
+      or groups to reorder them?").
+
+      The inspector's ▲▼ buttons declined this once and named the reason
+      honestly - "a row that moves under the pointer while the tree is being
+      re-fetched is a fight nobody wins" - so that, and not the dragging, is
+      what this round had to answer. It is answered in `renderLists`, where the
+      pane is held still for as long as the hand is down. What a row owes after
+      that is one attribute saying it may be picked up.
+
+      EVERY REAL ROW CARRIES IT, the cues in a header, in a footer and in the
+      persistent band included. Those can be dragged OUT of their section: a cue
+      says its `parent`, that parent is the GROUP or the LIST rather than the
+      section object, and both of those have an address, so `object.move` can
+      name where such a cue is going. What no client can name is the section
+      itself, and a drop INTO one is therefore not expressible - but that is a
+      refusal about the TARGET under the pointer, not about the row in the hand.
+      A row nothing may be dropped against is still a row somebody may want to
+      lift.
+
+      AND `data-in` IS NOT THAT REFUSAL, though it sits right here and looks
+      like it. It says which frame a row is DRAWN in, which is not the same fact
+      as which container holds it: a group sitting in a header has members of
+      its own, drawn on that header's rail and carrying `data-in="header"`,
+      whose parent is the group and which reorder among themselves perfectly
+      well. The question "may this be dropped against" is the cue's own `role`,
+      published per cue beside its `parent` and its `kind`. Asked of the tree at
+      the moment of the drop it is one poll old; baked into this markup it would
+      be a value the reconciler rewrites every poll, on five hundred rows, to
+      say what the tree was going to say anyway.
+
+      AND THE POSITION A DROP SENDS IS A PLACE IN `order`, which is the sequence
+      the recursion below walks - NOT the `index` node a cue also publishes.
+      They are the same number on nearly every show and they are not the same
+      thing: `index` is counted by the tree's own walk, which steps over a
+      trigger without spending a number on it, so on a group holding a trigger
+      the two differ by one from the trigger down. `object.move` is read against
+      `order`, the publisher says so in as many words, and `order` is what this
+      pane draws from - so the list a drop counts in is the list a reader is
+      looking at, which is the only way the arithmetic can be checked by eye. */
   out.push({ key: "cue:" + id, html:
-    '<div class="row" data-pick="' + id + '"' +
+    '<div class="row" data-pick="' + id + '" draggable="true"' +
       (section ? ' data-in="' + section + '" style="--rail:' + rail + '"' : "") +
       (revealing("cue:" + id) ? ' data-flash="yes"' : "") +
       ' data-standby="' + (id === standby ? "yes" : "no") + '"' +
@@ -404,10 +462,31 @@ function cueRow(id, depth, section, rail, standby, out) {
     AND IT IS DRAWN CHOSEN WHEN THE MEMBER IS, anchor and all, because there is
     one object and a reader who cannot see that both lines are the same cue is
     the reader this view was drawn for. It asks the set by the member's id, so
-    it needs no place in the range of its own. */
+    it needs no place in the range of its own.
+
+    AND IT IS THE ONE ROW THAT CANNOT BE DRAGGED, NOR DROPPED AGAINST - the one
+    place in this pane where the drag has to be told something the tree would
+    otherwise answer wrongly rather than not at all.
+
+    It carries the member's `data-pick` on purpose, because a click on it means
+    the member; and that is exactly what makes it dangerous to a drop. Ask the
+    tree about that identifier and it answers truthfully about the member's OWN
+    row - a parent and an index somewhere else entirely in the list - so a drop
+    aimed just above or just below this line would be computed against a place
+    the pointer is nowhere near, and would land there, silently and correctly by
+    its own arithmetic. This line is a reading of a mark, not a place in an
+    order. There is no order here to insert into: the derived lines are in the
+    sequence `headerDerived` publishes, which is derived from marks on cues that
+    live elsewhere and is not a thing `object.move` can write.
+
+    So it says so twice over, because the two halves of a drag ask in two
+    different ways. No `draggable`, which settles the SOURCE - a div is not
+    draggable unless it says it is, and nothing above it in this pane is either.
+    And `data-derived` for the TARGET, where the row under the pointer is being
+    read rather than lifted and an absent attribute proves nothing at all. */
 function presetLine(id, group, depth, rail, out) {
   out.push({ key: "preset:" + group + ":" + id, html:
-    '<div class="row derived" data-pick="' + id + '"' +
+    '<div class="row derived" data-pick="' + id + '" data-derived="yes"' +
       ' data-reveal="cue:' + id + '"' +
       ' data-in="header" style="--rail:' + rail + '"' +
       (revealing("preset:" + group + ":" + id) ? ' data-flash="yes"' : "") +
@@ -528,12 +607,70 @@ function renderLists() {
 
   reconcile(el("tabs"), tabs);
 
+  /*  AND HERE THE CUE PANE STOPS FOR AS LONG AS THE HAND IS DOWN.
+
+      `view.holding` is set by gestures/drag.js between `dragstart` and
+      `dragend`, and while it is set this render draws no rows at all. That is
+      not caution about a rare case: a drag is one gesture held across dozens of
+      polls, and this pane's reconciler spends those polls moving rows and
+      rewriting the ones whose markup changed. Either of those, done to the row
+      the pointer is over, breaks the gesture in a way nobody can see going
+      wrong - the row the hand was aimed at between one poll and the next is a
+      different element, so the drop is read against whatever now stands in that
+      place. It is the click that straddles a poll (views/reconcile.js), held
+      for a second instead of a tenth, and with a structural edit at the end of
+      it rather than a pick.
+
+      WHAT IS SUSPENDED IS ONE PANE'S RECONCILE AND NOTHING ELSE. The poll goes
+      on fetching, the strip, the aim, the runs and the inspector go on being
+      drawn from it, and the next poll after `dragend` brings this pane into
+      line with everything that arrived meanwhile - which is what a reconciler
+      is for and why this costs no recovery code. The tabs are drawn above this
+      line and go on drawing: they are a different container, nothing a tab says
+      moves a row in the cue pane, and a list somebody else renames mid-drag
+      should still say its new name.
+
+      EVERYTHING BELOW IT IS THE CUE PANE, and all of it waits:
+
+      - the rows, which is the point;
+      - the two empty states, which are rows in this same pane put there by this
+        same reconcile. A show whose last list is closed under a dragging hand
+        would otherwise have the pane emptied beneath the drag. Held, the rows
+        stand a moment stale and the drop that follows names a cue the engine no
+        longer has - which the engine refuses, in words, which is the honest end
+        to that story;
+      - the reveal's scroll, which MUST wait: taking the reader to a row they
+        were sent to is the one thing on this page that moves the list under the
+        pointer on purpose. Nothing can ask for one mid-drag anyway, a reveal
+        being set by a click, and the ask is latched on `selection.reveal`
+        rather than timed - so one somehow left pending is honoured on the poll
+        after the drop, not lost;
+      - `refreshFields`, which is the tail of a reconcile that did not happen.
+        It writes values and moves nothing, so it would be safe to run; it is
+        skipped because there is nothing newly drawn for it to write into and
+        nobody reads a number in a column while their hand is on a row.
+
+      AND IT CLEANS UP AFTER NOBODY. The line between two rows, or the frame
+      round a group being dropped into, is the drag module's to insert while the
+      reconciler is still, and the drag module's to take away at `dragend`: a
+      row whose markup is what it was is not touched by the next reconcile at
+      all, element, attributes and all, so anything put on one by hand survives
+      until that row's markup changes - and then goes without notice. Neither
+      half of that is a cleanup anybody can lean on.
+
+      A FLAG THAT IS NOT THERE IS NOT SET. `view.holding` is undefined on a page
+      whose drag module never loaded, and in a test that stands a document in;
+      undefined draws. */
+  if (view.holding) return;
+
   const pane = el("cues");
 
   /*  THE EMPTY STATE IS A ROW LIKE ANY OTHER, keyed `empty`, so the same
       reconcile that draws the rows takes it away the moment the first one
       arrives, and puts it back when the last one goes. */
   if (!lists.length) {
+    pane.dataset.list = "";
+
     reconcile(pane, [{ key: "empty", html:
       '<div class="empty"><div class="line">Rien à faire.</div>' +
       '<div class="under">This show has no cue list yet.</div></div>' }]);
@@ -541,6 +678,22 @@ function renderLists() {
   }
 
   const standby = tree.get("/godot/list/" + focus + "/standby", "");
+
+  /*  AND THE PANE SAYS WHICH LIST THESE ROWS ARE, which stopped being the same
+      question as which list is focused the moment the pane could be held still.
+
+      A drop below the last row means the end of the list the reader is looking
+      at, and the obvious way to name that list is to ask the tree for
+      `/godot/list/focus`. During a drag that is the wrong question: focus is a
+      value in the document, a second operator or a script can move it, and the
+      answer would then be a list whose rows are not the ones under the hand -
+      so a cue would be moved into the end of a list nobody was pointing at, by
+      arithmetic that was correct throughout. This attribute is what the rows on
+      screen were drawn from, which is the only list a pointer can be over, and
+      it is set here rather than per row because it is one fact about the whole
+      pane. Being on the container it is also out of the reconciler's reach,
+      which is what lets it survive the hold along with the rows it describes. */
+  pane.dataset.list = focus;
 
   reconcile(pane, listRows(focus, standby));
 

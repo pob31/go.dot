@@ -845,6 +845,183 @@ button:disabled { color: var(--ink-off); cursor: default; }
   }
 }
 
+/* -------------------------------------------------------- drag and drop */
+/*  A ROW CAN BE CARRIED NOW (author, 2026-09-16: "can we drag and drop cues or
+    groups to reorder them?"). The comment at the inspector's two arrows turned
+    this down once and named, while doing so, the thing this block has to answer
+    rather than forget: a row that moves under the pointer while the tree is
+    being re-fetched is a fight nobody wins.
+
+    SO NOTHING HERE TAKES UP ANY ROOM, AND NOTHING HERE MOVES. The mark that
+    says where a cue will land is two pixels tall and gives those two pixels
+    back in negative margins, so the rows either side of it stand exactly where
+    they stood and the list does not shuffle as the mark walks down it. The row
+    being carried keeps its box and only goes pale. And not one rule below has a
+    transition on it: a landing mark that eased into place would trail a pointer
+    that has already moved on, which is the same complaint said a second way -
+    so there is nothing here for `prefers-reduced-motion` to turn off, and no
+    block turning it off that would go stale the day somebody added one.
+
+    THE ROWS ALREADY REFUSE A TEXT SELECTION, which is what a drag needs and
+    what a shift-click needed before it: `.row, .band, .band-end, .cols` far
+    above, with the boxes exempted. It is not repeated here. */
+
+/*  A HAND THAT CAN LIFT. `[draggable]` on its own would also match a row marked
+    `draggable="false"`, and the `:not` is kept for the day one is - but no row
+    is marked so today, and the reason is worth having written down because it
+    was got wrong while this round was being built.
+
+    A CUE INSIDE A HEADER, A FOOTER OR THE PERSISTENT BAND CAN BE LIFTED OUT.
+    What has no address in the tree is the SECTION - its identifier is in the
+    file and nowhere else - so what no client can name is a DESTINATION inside
+    one. The row in the hand is a different question: a cue's `parent` names the
+    group or the list, both of which have addresses, so dragging it out is
+    perfectly expressible, and at present it is the ONLY way to do it (the
+    inspector's up and down buttons are both dead for a header cue, whose place
+    is not in the group's `order` at all). So the hand is offered on every row,
+    and what is refused - in words, at the moment of the drop - is a destination
+    the page cannot name.
+
+    AND THE BOXES KEEP THEIR OWN. `cursor` inherits, so a grab on the row would
+    reach the three time boxes in it, and a field somebody is about to type a
+    number into would offer a hand where the caret belongs. `auto` is what the
+    browser draws for an editable box, which is that caret. The twist and the
+    gutter set their own cursor already and need nothing here. */
+.row[draggable]:not([draggable="false"]) { cursor: grab; }
+.row[draggable] input { cursor: auto; }
+
+/*  LIFTED OUT. The browser carries its own picture of the row under the
+    pointer, so what is left behind should read as the space the cue came from
+    rather than as the cue: pale, and otherwise exactly the row it was - same
+    height, same columns, same place - because that is still where the cue stays
+    if the drag is abandoned. The same fade a finished run wears at the foot of
+    the running pane, which is this page's one way of saying "still here, and
+    not the thing to look at".
+
+    TWO SPELLINGS, AND THEY ARE ONE STATE. A class is what a gesture module
+    reaches for; an attribute is what a row is drawn with. The reconciler copies
+    the fresh row's attributes onto the live one and takes away the ones it does
+    not carry, so which of the two survives a poll is the drag module's problem
+    and not this file's. Whichever it emits, the other matches nothing here and
+    costs nothing. */
+.row.dragging, .row[data-dragging="yes"] { opacity: .4; }
+
+/*  WHERE IT WILL LAND: two pixels of the selection's own purple, at the indent
+    of the place it is going, stopping twelve pixels short of the pane as every
+    row and every frame already does.
+
+    IT TAKES NO HEIGHT AT ALL. Two pixels of rule and a pixel of negative margin
+    at each end come to nothing, so a mark that appears between two rows - and
+    moves from gap to gap as the pointer does - never pushes a row down. A list
+    that shuffled under the hand as the mark moved would be exactly the fight
+    the inspector's comment named.
+
+    THE THREE PIXELS A ROW RESERVES FOR THE STANDBY RULE, ADDED BACK. A row's
+    contents begin inside that border and a frame's rail is measured from there,
+    so a mark drawn from the pane's own edge would stand three pixels left of
+    both - little enough to read as a mistake rather than as a difference. The
+    bands take those three pixels as a transparent border of their own; this one
+    cannot, because a background paints under a transparent border and the rule
+    would simply be three pixels longer at the same place. So it is in the
+    margin, where it moves the mark itself.
+
+    THE OFFSET ITSELF IS THE DRAG MODULE'S TO SAY, in either of the two ways
+    this page already says it: `--rail` inline, which is what views/didi.js
+    hands every row and every band of a section, or a plain inline `margin-left`,
+    which beats the line below by being inline and then owns the three pixels
+    too. And where it says NEITHER - a drop at the top level of a list, where
+    there is no indent to keep - a `var(--rail)` with nothing to read makes the
+    whole `calc` invalid at computed-value time and `margin-left` falls back to
+    its initial nought, which is the nought the shorthand above it asked for:
+    the mark spans the pane. A fallback length here would have been worse than
+    none, because it would have put the mark at SOME indent and the wrong one.
+
+    ABOVE THE ROWS AND OUT OF THE POINTER'S WAY. Positioned, so the rule paints
+    over the ground of the row after it rather than under it - backgrounds paint
+    in tree order, and the row below would otherwise cover the half of the mark
+    that overlaps it. `pointer-events` off, so the element under the pointer is
+    always the row the drop is being measured against and the mark can never
+    take a `dragover` away from the thing it is describing.
+
+    A FLEX ROW WITH ITS CONTENTS AT THE FAR END, so a label put inside it - the
+    warning below - is centred on the line and overflows it either way instead
+    of being laid out inside two pixels, and sits at the end away from the names
+    and the indent. A line with no label in it is still a line. */
+.drop-line {
+  position: relative; z-index: 1;
+  display: flex; align-items: center; justify-content: flex-end;
+  height: 2px; margin: -1px 12px -1px 0;
+  margin-left: calc(var(--rail) + 3px);
+  background: var(--picked); border-radius: 1px;
+  pointer-events: none;
+}
+
+/*  THE GROUP THAT WOULD TAKE IT, drawn as a box round the whole row rather than
+    as a colour in it (§4.8): the shape is the telling and the purple is the
+    second one - the same purple, because this is still the page saying where
+    the cue is going. Two pixels, which is heavier than the one pixel of the
+    same colour the anchor of a selection wears, so a group that happens to be
+    both reads as the destination rather than as the anchor.
+
+    AND IT IS THE LATER RULE THAT SETTLES THAT. `.row.drop-into` and
+    `.row[data-anchor="yes"]` each weigh two classes' worth and are equals; so
+    does the reveal's outline in the reduced-motion block above. Written here,
+    after all of them, the mark a hand is making in this instant wins over the
+    marks the page was already showing - which is right for as long as the hand
+    is making one, and no longer. This file has got that ordering wrong three
+    times, each recorded where it happened. */
+.row.drop-into, .band.drop-into { outline: 2px solid var(--picked); outline-offset: -2px; }
+
+/*  AND THE ONES THAT CANNOT TAKE IT AT ALL. A header, a footer and the
+    persistent band are containers with identifiers in the file and no address
+    in the tree: no client can learn one, so `object.move` cannot be told to
+    move a cue into one and the page must not pretend otherwise. A group cannot
+    be dropped inside itself. A derived preset line is the reading of a mark and
+    not a place anything sits. None of those can be sent, so none of them may be
+    offered - and a refusal has to be SAID rather than shown, which is why the
+    drag module writes the reason into a label and why this rule is not the
+    whole of it (§4.8). Three tellings then: the line round the row is dashed
+    rather than solid, the words are there to be read, and the red is the last
+    of the three. Thin as well as dashed, so a refusal never looks heavier on
+    the screen than a drop that would work. */
+.row.drop-no, .band.drop-no { outline: 1px dashed var(--failed); outline-offset: -1px; }
+.drop-line.drop-no { background: var(--failed); }
+
+/*  THE TWO LABELS, which are the words in both cases and differ only in what
+    they are about. Small, one line of type below a row's own, on a ground of
+    their own so a sentence stays readable over whatever rows it covers, and
+    bounded in width so a reason does not stretch the length of the pane. They
+    never take the pointer: a label under the cursor would steal the `dragover`
+    from the row being measured, and the mark would flicker as the reader moved
+    along it. */
+.drop-no .why, .drop-why,
+.drop-line .warn, .drop-warn {
+  display: inline-block; max-width: calc(280px * var(--type));
+  font-size: var(--t-10); line-height: calc(15px * var(--type));
+  border-radius: 3px; padding: 0 6px;
+  pointer-events: none;
+}
+
+/*  THE REASON, on the refusal banner's own dark red with the red kept to the
+    border: the words are what has to be read and `--ink` on that ground is what
+    reads, which is how `#refusal` at the top of the page is drawn and for the
+    same reason. */
+.drop-no .why, .drop-why {
+  color: var(--ink); background: #2a1615; border: 1px solid var(--failed);
+}
+
+/*  THE PRESET WARNING: warm, and not a refusal. A cue moved out of the group
+    whose header gets it ready keeps its mark, and the engine tolerates a mark
+    that no longer reaches - views/didi.js says what the row then shows and the
+    inspector says it at length. So this is a consequence of something somebody
+    is allowed to do, said in the amber unsaved work and an unarmed transport
+    are said in, and never in the red of something that will not happen. On the
+    same warm ground the recovery offer and a stranded refusal use, which is
+    this page's one warm panel. */
+.drop-line .warn, .drop-warn {
+  color: var(--standby); background: #2a2116; border: 1px solid var(--standby);
+}
+
 /* --------------------------------------------------------- running pane */
 /*  THE NAME KEEPS ITS SIDE OF THE ROW, and the readings wrap rather than
     taking it. A media run that is sounding says its track, its level, its

@@ -29,6 +29,7 @@ import { renderInspector } from "./views/inspector.js";
 import "./views/transport.js";
 import "./gestures/clicks.js";
 import "./gestures/fields.js";
+import "./gestures/drag.js";
 import "./gestures/keys.js";
 import { table, loadTable } from "./gestures/table.js";
 
