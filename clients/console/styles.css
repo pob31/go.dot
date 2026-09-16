@@ -327,14 +327,25 @@ button:disabled { color: var(--ink-faint); cursor: default; }
 }
 
 /* --------------------------------------------------------- running pane */
+/*  THE NAME KEEPS ITS SIDE OF THE ROW, and the readings wrap rather than
+    taking it. A media run that is sounding says its track, its level, its
+    position and its three timbre numbers, which is wider than this pane is at
+    a three-column window - and `auto` gave the readings all of it: the name
+    was squeezed to nothing and the two pills, which do not shrink, were drawn
+    on top of the numbers. Seen in a screenshot of the phase4 fixture, one cue
+    playing. The floor on the first column is what keeps a cue nameable and the
+    wrap is what stops anything overlapping; a pane too narrow for one line now
+    reads as two. */
 .run {
-  display: grid; grid-template-columns: 1fr auto; gap: 8px; align-items: baseline;
+  display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 8px;
   padding: 4px 12px 4px 0; border-left: 3px solid var(--rule);
 }
-.run .who { display: flex; align-items: baseline; gap: 7px; min-width: 0; }
+.run .who { display: flex; align-items: baseline; gap: 7px; overflow: hidden;
+            flex: 1 1 auto; min-width: 12em; }
 .run .who .text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .run .meta { font-size: 10px; color: var(--ink-faint); display: flex; gap: 10px;
-             align-items: baseline; }
+             align-items: baseline; flex: 0 0 auto; margin-left: auto;
+             flex-wrap: wrap; justify-content: flex-end; }
 .run .meta button { padding: 1px 6px; font-size: 10px; }
 
 .state {
