@@ -858,6 +858,25 @@ back on if nobody feels strongly by then.
   is open about it. The old refusal's recorded reason — a pointer the machine also moves — was
   about the operator's model rather than a race: only GO ever writes the standby.
 
+- **Y — Media arrives through the desktop client, not through the page** (settled 2026-09-16):
+  asked whether dropping a sound file into the cue list should make media cues, and dropping one
+  onto a media cue should link it, the author answered that the gesture **waits for the C++ client**
+  (§14.16) and that nothing is built on the page in the meantime. What forced the question is a
+  fact about browsers rather than a preference: **a page is never told a dropped file's path.** It
+  is given the name and the bytes, deliberately, so the web client cannot say *"the file is at
+  D:udioain.wav"* — it can only offer to COPY one into the show. And `media/@file` is
+  deliberately relative to the bundle's `media/` folder, for the reason the parameter table gives
+  in as many words: *"a show travels between machines and an absolute path is a fact about the
+  machine it was authored on."* So the page's only honest route is an import, and the engine has
+  none: `OscQueryServer` answers `GET` and refuses every other method (`:211-216`), there is no
+  upload route and no import command. The desktop client is where a real path exists.
+  **What this leaves open, for whenever that client starts:** whether an import COPIES into the
+  bundle (it must, given the relative path) or is offered a way to reference outside it; whether
+  the bytes arriving are a document decision — logged and undoable — or a fact about the disk that
+  only the cue naming the file records (§4.10 suggests the second); what a name collision does; and
+  whether a locked show refuses one. This is the first gesture where the two clients genuinely
+  cannot be the same, which bears on §9's question E and on decision U.
+
 ### Open, with the subphase that forces each
 
 | # | Question | Forced by | Fallback if undecided |
@@ -6255,6 +6274,23 @@ which §13.16 records as still owed — and the Phase 3 ones still waiting. They
 delegated per the standing rule, and applied when the author says so.
 
 ### 14.16 The desktop client — an outline, and what would make it start
+
+**AND IT NOW HAS ITS FIRST JOB THAT THE PAGE CANNOT DO AT ALL (decision Y, 2026-09-16).** The
+author asked for two gestures — a media file dropped into the cue list making media cues, and one
+dropped onto a media cue linking it, with a confirmation before an existing file is replaced — and
+both were deferred here rather than built. The reason is not scheduling. **A browser never tells a
+page the path of a dropped file**: it gives the name and the bytes and withholds the rest,
+deliberately and by design, so a web client cannot express *"use the file where it sits"* at all.
+It can only offer to copy one into the show, and the engine has nowhere to receive it —
+`OscQueryServer` answers `GET` and refuses every other method, and there is no import command. A
+JUCE file drop hands over a real path.
+
+That makes media import the first thing on either client's list that is not a matter of which one
+was written first, and the evidence §9's question E has been waiting for is now one item closer:
+not a hole the engine must open for a second client, but a capability the FIRST client cannot have.
+Whatever is built, `media/@file` stays relative to the bundle, so an import is a COPY however it is
+reached — which means the engine will need an import path in the end regardless, and the desktop
+client is simply where the gesture can begin. §9's decision Y lists what is open about it.
 
 **§9's question E is not answered here, and this outline assumes E's own recorded fallback: a
 separate client.** The question — the desktop UI in process or a client of its own — has been
