@@ -127,7 +127,7 @@ function renderStrip() {
       never told to the engine (§14.1). */
   panes.dataset.picked = selection.picked ? "yes" : "no";
 
-  el("layout").textContent = atFoot ? "inspector between the panes" : "inspector at the foot";
+  el("layout").textContent = atFoot ? "inspector in the middle" : "inspector at the foot";
   el("layout").title = atFoot
     ? "put it back between the cue list and the running pane, where it appears"
       + " when a cue is picked and stands down when none is"

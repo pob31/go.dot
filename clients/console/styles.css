@@ -52,6 +52,9 @@
 
   --ground:     #16161a;
   --panel:      #1d1d22;
+
+  /*  The inspector's own ground, a shade off the other panes: see #pane-inspect. */
+  --panel-inspect: #21212a;
   --panel-high: #24242b;
   --rule:       #3a3a45;
   --standby:    #e8b04b;
@@ -135,6 +138,24 @@ html, body {
                          minmax(calc(210px * var(--type)), 0.9fr);
   grid-row: 5;
   min-height: 0;
+
+  /*  AND IT MOVES RATHER THAN JUMPS (author, 2026-09-16: "I would add a quick
+      animation to show Didi and Gogo contracting and the Inspector coming in
+      rather than instant redraw since we have very similar panels").
+
+      The three panes are drawn alike on purpose, so a pane appearing between
+      two others is a change an eye can miss entirely: the layout is simply
+      different from one frame to the next, and the operator has to work out
+      what moved. A sixth of a second of it moving is enough to be seen and
+      short enough to stay out of the way - the eye follows the edge, and the
+      question "what changed?" does not arise.
+
+      TRACK BY TRACK, which is why both templates below are three tracks of the
+      same SHAPE - `minmax(<length>, <flex>)` either way, down to the collapsed
+      one being `minmax(0px, 0fr)` rather than nothing at all. A template that
+      changed its number of tracks would not interpolate, and the panes would
+      jump exactly as they did before. */
+  transition: grid-template-columns 170ms ease, grid-template-rows 170ms ease;
 }
 /*  ALL THREE PLACED, ROW AND COLUMN, and the row is not decoration: an item
     given a column but left to find its own row is placed by the sparse rule,
@@ -146,16 +167,40 @@ html, body {
 #panes > #pane-inspect { grid-column: 2; grid-row: 1; }
 #panes > #pane-gogo    { grid-column: 3; grid-row: 1; }
 
+/*  NOTHING PICKED: the middle track goes to nothing and the other two take
+    what it had. The pane is still a grid item - it has to be, or there would
+    be nothing to animate - and is hidden at the END of the movement rather
+    than at the start of it: `visibility` steps rather than fades, so its delay
+    is what keeps the pane on screen while it closes and takes it out of the
+    tab order once it has. */
 #panes[data-picked="no"] {
-  grid-template-columns: minmax(0, 1.5fr) minmax(calc(260px * var(--type)), 0.9fr);
+  grid-template-columns: minmax(0, 1.5fr) minmax(0px, 0fr)
+                         minmax(calc(260px * var(--type)), 0.9fr);
 }
-#panes[data-picked="no"] > #pane-inspect { display: none; }
-#panes[data-picked="no"] > #pane-gogo { grid-column: 2; grid-row: 1; }
+/*  AND ONLY WHERE THE PANE IS A COLUMN. At the foot it is a band that is
+    always there - the empty state included, since that band is where a curve
+    or a waveform will be drawn - and this rule reached it too: the foot rule
+    below overrides `display` and nothing else, so the cascade, which is
+    resolved per PROPERTY, left `opacity: 0` and `visibility: hidden` standing.
+    The bottom third of the window went to bare ground with nothing in it, and
+    no screenshot caught it because every shot of the foot had a cue picked. */
+#panes:not([data-layout="foot"])[data-picked="no"] > #pane-inspect {
+  opacity: 0;
+  visibility: hidden;
+  border-left-width: 0;
+  transition: opacity 120ms ease, visibility 0s linear 170ms;
+}
+
+#panes > #pane-inspect {
+  overflow: hidden;
+  transition: opacity 140ms ease 30ms, visibility 0s linear 0s;
+}
 
 @media (max-width: 1080px) {
   #panes, #panes[data-picked="no"] {
     grid-template-columns: minmax(0, 1fr) minmax(calc(260px * var(--type)), 0.9fr);
   }
+  #panes:not([data-layout="foot"])[data-picked="no"] > #pane-inspect { display: none; }
 
   /*  At a tablet's width there is room for two panes, and the one somebody is
       working in wins: picking a cue puts the inspector beside the list and the
@@ -163,6 +208,20 @@ html, body {
   #panes > #pane-inspect { grid-column: 2; grid-row: 1; }
   #panes > #pane-gogo { grid-column: 2; grid-row: 1; }
   #panes[data-picked="yes"] > #pane-gogo { display: none; }
+}
+
+/*  AND NO MOVEMENT AT ALL FOR ANYBODY WHO HAS ASKED FOR NONE. A booth machine
+    set to reduce motion means it: the panes change as they did before, at
+    once, and nothing here is lost - the colour below says which pane is which
+    without moving. */
+@media (prefers-reduced-motion: reduce) {
+  /*  `!important`, which is the one place this stylesheet uses it and the
+      conventional idiom for exactly this. Without it the rule reaches the
+      grid's own transition - same selector, later in the file - and loses to
+      the pane's, which is `#panes[data-picked="no"] > #pane-inspect` and one
+      id heavier. The width stopped moving and the fade carried on, which is
+      not what anybody who turns motion off is asking for. */
+  #panes, #panes > .pane { transition: none !important; }
 }
 
 /*  THE INSPECTOR AT THE FOOT, which is the other arrangement worth looking at.
@@ -184,7 +243,13 @@ html, body {
 #panes[data-layout="foot"] > #pane-didi { grid-column: 1; grid-row: 1; }
 #panes[data-layout="foot"] > #pane-gogo { grid-column: 2; grid-row: 1; }
 #panes[data-layout="foot"] > #pane-inspect {
-  display: block;
+  /*  `flex` AND NOT `block`, which is not a tidiness matter: a pane is a flex
+      column - a header that stays and a scroller that takes the rest - and as
+      a block its scroller had no bounded height, so `#inspect` grew to its
+      content and the pane's own `overflow: hidden` clipped it. Measured in a
+      browser at 1400x800: 348 pixels cut off, with `delete` past the edge and
+      no scrollbar to reach it. */
+  display: flex;
   grid-column: 1 / -1; grid-row: 2;
   border-left: none;
   border-top: 1px solid var(--rule);
@@ -208,12 +273,14 @@ html, body {
   }
   .block > .group-head { text-align: right; padding-top: 7px; }
 
-  /*  AND THE EMPTY ONE KEEPS ITS CELL. Hidden, as it is in the stacked form
-      where it would draw a blank row, the first block's fields fell into the
-      heading's own narrow track and overflowed it - four fields down a
-      120-pixel column while every other block flowed across the pane. Here the
-      cell is what holds the left edge every block's fields share. */
-  .block > .group-head:empty { display: block; }
+  /*  AND THE EMPTY ONE KEEPS ITS CELL. Hidden - as it is in the stacked form,
+      where it would draw a blank row - the first block's fields fall into the
+      heading's own narrow track and overflow it: four fields down a
+      120-pixel column while every other block flows across the pane. Measured
+      that way twice, because the rule that hides it is written further down
+      the file and won on order the first time; the `#inspect` here is what
+      settles it on specificity instead, whatever the order. */
+  #inspect .block > .group-head:empty { display: block; }
   .block > .fields {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(calc(290px * var(--type)), 1fr));
@@ -223,6 +290,23 @@ html, body {
 
 .pane { display: flex; flex-direction: column; min-height: 0; min-width: 0;
         background: var(--panel); container-type: inline-size; }
+
+/*  AND THE INSPECTOR IS TOLD APART WITHOUT WAITING FOR IT TO MOVE. The three
+    panes are drawn alike, which is right for two of them - a list and a
+    running list - and wrong for the third: it is the only one that is ABOUT
+    something, and which something is a thing the operator chose a moment ago.
+
+    So it carries the selection's own colour, the purple a picked row is
+    outlined in, on its heading and as a line down its leading edge - the same
+    colour saying "this pane is that row". A shade lighter in the ground, too,
+    so the difference survives a photograph or a projector that flattens hue.
+
+    NOT COLOUR ALONE (§4.8): the pane says INSPECTOR and "what someone decided"
+    in words above everything else it holds, and the cue's own name is the
+    first thing in it. The colour is the third telling, not the first. */
+#pane-inspect { background: var(--panel-inspect); }
+#pane-inspect > header { border-left: 2px solid var(--picked); }
+#pane-inspect > header h2 { color: var(--picked); }
 .pane + .pane { border-left: 1px solid var(--rule); }
 
 .pane > header {

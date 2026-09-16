@@ -3862,7 +3862,56 @@ or none at all, gets a STATUS line and no entry. There is one entry and not one 
 since nothing here formats a number for a person. `intersect`/`agree` and `pointsToText` belong
 to 5.12 and 5.16b, which will add their tests with the code; the harness is ready for them.
 
-### 14.4 `/godot/document` grows, and one of its rows is written by a client
+*What the author changed while looking (2026-09-16).* **The page went in front of him for the
+first time, and the next nine commits are his notes rather than the plan's.** They are recorded
+here because §14.3 is where this client's design lives, and because several of them decide
+things the remaining views inherit.
+
+- **Type and contrast.** Every font size reads one knob, `--type`, at **1.25** — *"enlarge font
+  by 25% more or less"* — with the original sizes kept as named tokens so the scale the page was
+  drawn at stays legible. The two greys are lifted to about 8:1 and 5:1 against the panel, from
+  4.8:1 and 2.1:1: *"the darker grey text is too dark to read on a black background"*. A third
+  grey, `--ink-off`, is what a disabled control wears, since lifting the faint one alone would
+  have made every dead button look live.
+- **Didi grew three columns** — `preWait`, `duration`, `postWait`, editable where the row is
+  (*"when each field is applicable"*, which the TREE answers: a memo has no duration node, a
+  media cue's is the file's length and read-only, a fade's is a decision). A nought shows as an
+  empty box, and clearing one commits a nought: the display rule and the commit rule are one
+  pair in `views/values.js`, because the first without the second taught a gesture the engine
+  refused.
+- **Gogo says `playing` and `armed` as marks** — ▶ and ○ — *"can be an icon or just the yellow
+  mark"*. Two SHAPES rather than two colours, which is what keeps §4.8: the word stays as the
+  title and the label, and every other state keeps its word outright.
+- **The inspector hides what the engine says back** behind a `details` fold — *"hide the internal
+  stuff like the various UIDs, hash and other things"* — split by `ACCESS` rather than by a list
+  of names, so a row that becomes writable moves by itself. The identifier is the first line
+  inside it.
+- **And it reads in the order somebody works**: what it is, `when` (preWait, duration, postWait —
+  *"something logical time wise"*), the kind's own rows, how it sits in the list. Keyed on the
+  cue's KIND, not the owner word: every attribute a cue carries publishes under
+  `/godot/cue/<id>/`, whatever owner the table files it under. A group's `mode`, `advance` and
+  `selection` sit together, which was the author's own example: *"so the user will set one after
+  the next and not hunt for the next thing much further down the list"*.
+- **The inspector is the middle pane, and only when something is picked.** *"It means a lot of
+  back and forth from left to right selecting and adjusting... QLab has the Inspector at the
+  bottom"*. Between the two panes, the pick-to-field distance is one pane rather than two, and
+  Gogo — a readout — stops sitting between the list and the fields. With nothing picked the pane
+  closes and the cue list takes the width. **The foot arrangement is on a button beside it**,
+  where the block headings sit beside their fields rather than over them, and it is where the
+  bottom editor panel belongs when there is something wide to draw: 5.16b's curve, 5.17's bar,
+  video after that. The author's shape for it: *"when we need to display something like a
+  timeline or a waveform/video we open a panel at the bottom of the screen"*.
+- **The panes move rather than jump**, 170 ms of it, *"since we have very similar panels"* —
+  with the inspector also carrying the selection's own colour on its heading and its leading
+  edge, so it is told apart after the movement as well as during it. `prefers-reduced-motion`
+  turns the movement off and leaves the colour.
+
+**Two things the author named for later, neither started.** A **toolbar** — *"there are probably
+a tool bar to design too"* — which is a design question about what an operator reaches for
+without the keyboard, and belongs beside 5.11's gestures rather than before them. And the
+**application's own parameters** (audio device, ports, the display preset) — *"once we are in the
+C++ design"*, which is §14.16's client and not this page: the engine has no `/godot/app` and the
+browser has no honest place to keep one.
 
 **The container is already split down the middle, and the split is the `persist` column rather
 than the rhythm of the value.** The document half loops over `rowsForOwner ("document")`, skips
