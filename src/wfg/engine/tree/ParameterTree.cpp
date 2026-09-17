@@ -1384,6 +1384,11 @@ namespace wfg::tree
             else if (name == "name")  text = state.documentName;
             else if (name == "dirty") text = state.documentDirty ? "true" : "false";
 
+            /*  The show half's change count, as a number a client keys a
+                cached picture on - EngineState says what moves it and, more
+                to the point, what does not. */
+            else if (name == "revision") text = std::to_string (state.documentRevision);
+
             /*  The undo history, as four readings and not one: what a client
                 needs to draw a menu is whether each half is available and what
                 each would be called, and a single string carrying all of it

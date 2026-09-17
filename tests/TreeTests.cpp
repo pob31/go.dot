@@ -118,6 +118,7 @@ namespace
             state.tick = tick;
             state.errorCount = engine.errorCount();
             state.lastError = engine.lastError();
+            state.documentRevision = document.showRevision();   // as serve's after-tick does
             return parameters.publish (tick, state);
         }
 
@@ -742,6 +743,44 @@ TEST_CASE ("tree: an empty tree is still a tree")
 
     CHECK (parameters.snapshot() == first);
     CHECK (parameters.snapshot()->tick() == 0);
+}
+
+TEST_CASE ("tree: the document's revision moves on an edit and stays put on a standby move")
+{
+    /*  /godot/document/revision is the number a client keys a cached picture
+        of the show on, so what does NOT move it is the point of the node: the
+        document half of a snapshot is rebuilt whenever any command applies,
+        and a chain of runs would have a cue list rebuilt several times a
+        second for a show nobody edited. A standby move is the state-row write
+        a GO makes, and it is the one this case pins as inert. */
+    Rig rig;
+
+    const auto revisionAt = [&rig] (std::int64_t tick)
+    {
+        const auto snapshot = rig.publish (tick);
+        const auto* node = snapshot->find ("/godot/document/revision");
+
+        REQUIRE (node != nullptr);
+        REQUIRE (node->soleValue().has_value());
+        REQUIRE (node->soleValue()->isInt64());     // an `h` row, like the tick
+        return node->soleValue()->getInt64();
+    };
+
+    const auto opened = revisionAt (0);
+    CHECK (opened >= 1);                            // never 0: that is a client's "no picture yet"
+    CHECK (revisionAt (1) == opened);               // nothing applied, nothing moves
+
+    /*  APPLIED, not merely submitted: a refused write would leave the number
+        where it was and let this case pass for the wrong reason. */
+    REQUIRE (rig.apply (2, "cli", "node.set",
+                        { osc::Value::string ("/godot/list/7K2QM9X4/standby"),
+                          osc::Value::string ("F7HR8TVD") }).applied == 1);
+    CHECK (revisionAt (2) == opened);               // where the operator stands is not the show
+
+    REQUIRE (rig.apply (3, "cli", "node.set",
+                        { osc::Value::string ("/godot/cue/F7HR8TVD/name"),
+                          osc::Value::string ("Renamed") }).applied == 1);
+    CHECK (revisionAt (3) > opened);                // an edit is
 }
 
 //==============================================================================

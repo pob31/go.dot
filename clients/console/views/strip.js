@@ -179,6 +179,7 @@ function renderStrip() {
   el("undo-note").textContent = stack.join(" · ");
 
   el("s-tick").textContent = tree.get("/godot/engine/tick", "—");
+  el("s-revision").textContent = tree.get("/godot/document/revision", "—");
   el("s-audio").textContent = tree.get("/godot/audio/status", "—");
 
   const rate = tree.get("/godot/engine/sampleRate", 0);

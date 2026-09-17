@@ -2884,6 +2884,16 @@ namespace
                                     - cheaper than the test that would skip it. */
                                 state.documentDirty = wfg::doc::isDirty (document, session);
 
+                                /*  AND THE COUNT THAT DOT IS DERIVED FROM, published
+                                    as `/godot/document/revision` so a client can key
+                                    a cached picture of the show on it rather than on
+                                    a snapshot that `markStale` below rebuilds at
+                                    every applied command, GO included. Read once
+                                    here and shared with the observation that
+                                    follows. */
+                                const auto showRevisionNow = document.showRevision();
+                                state.documentRevision = showRevisionNow;
+
                                 /*  WHEN THE SHOW LAST MOVED, for the autosave's
                                     two seconds of quiet (§14.10). Stamped here
                                     because this is the one place that sees the
@@ -2892,8 +2902,7 @@ namespace
                                     where the decision is taken. The two halves
                                     split by what they are: this one observes,
                                     that one decides and submits. */
-                                if (const auto showRevisionNow = document.showRevision();
-                                    showRevisionNow != showRevisionSeen)
+                                if (showRevisionNow != showRevisionSeen)
                                 {
                                     showRevisionSeen = showRevisionNow;
                                     session.lastChangeTick = outcome.tick;

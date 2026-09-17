@@ -4810,6 +4810,18 @@ that is followed except where nobody would notice is a rule that has stopped mea
 §14.10, which owns the arithmetic, cites this paragraph rather than making the correction a
 second time.
 
+**And a seventh readout, added 2026-09-17 for the compiled client's first milestone (M0 of its
+plan):** `/godot/document/revision` publishes `ShowDocument::showRevision()` from the same after-tick
+line that derives `dirty` from it. What moves it is what `show.xml` would record - an edit, an undo,
+a revert, a recovery, a load; what leaves it alone is the point: a GO, a standby move, a focus change
+and every run, because none of them is a change to the show. The desktop's cue list keys its cached
+rows on it, and needed a key because the snapshot's own document half is the wrong one - `markStale`
+at `Console.cpp:2987` fires on ANY applied command, so a chain of runs mints a fresh document half
+several times a second for a show nobody edited. Not `revision()`: that counter (`ShowDocument.h:466`)
+bumps on state rows too, so an arrow key would have rebuilt the list. It reads from 1 and never 0, so
+a client can keep 0 for "no picture built yet". The page shows it on the tech line beside the tick,
+which is §14.13's rule and nothing more - the page has no cache to key.
+
 The submit takes the form the serve wiring already uses, `engine.submit ({ "engine",
 "document.autosave", {} })` — `origin::engine` is the literal `"engine"` (`command/Event.h:56`)
 — and it inherits its justification from `audio.editBuilt`, whose comment at

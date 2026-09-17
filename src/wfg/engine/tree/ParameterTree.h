@@ -142,6 +142,20 @@ namespace wfg::tree
         std::string documentUndoName;
         std::string documentRedoName;
 
+        /*  HOW MANY TIMES THE SHOW HALF HAS CHANGED since the bundle was
+            opened - `ShowDocument::showRevision()`, copied here each tick so
+            the tree publishes it beside the dot that is derived from the same
+            counter. A GO, a standby move, a focus change and every run leave
+            it alone; an edit, an undo, a revert and a recovery move it. Its
+            first reader is the desktop client's cue list, which rebuilds its
+            rows when this moves and not otherwise: the document half of a
+            snapshot is rebuilt whenever ANY command applies (`markStale`), so
+            a chain of runs would otherwise have a 500-row model rebuilt
+            several times a second for a show nobody edited. Never zero once
+            published - the counter starts at 1 - so a client can keep 0 for
+            "no picture built yet". */
+        std::uint64_t documentRevision = 0;
+
         /*  WHETHER A PREVIOUS SESSION LEFT WORK BEHIND: a `recovery/show.xml`,
             or failing that a `recovery.previous.N/`, found when this bundle was
             opened, and neither adopted nor discarded since (namespace draft
