@@ -881,17 +881,61 @@ back on if nobody feels strongly by then.
 
 | # | Question | Forced by | Fallback if undecided |
 |---|---|---|---|
-| ~~E~~ | *(still open, and §14.16 says why that is not an accident — see below)* **Does the Phase 5 desktop UI run in-process or as a separate client?** | Phase 5, but it shapes Phase 2's plugin-parameter handover | assume separate, because that is the stricter assumption and the one PRD §3.2 reads most naturally |
+| ~~E~~ | *(settled 2026-09-17, against this table's own fallback — see below)* **Does the Phase 5 desktop UI run in-process or as a separate client?** | Phase 5, but it shapes Phase 2's plugin-parameter handover | ~~assume separate, because that is the stricter assumption and the one PRD §3.2 reads most naturally~~ — the author chose **in-process**, and the law is kept by a rule about ACCESS rather than about processes |
 | J | **Should PRD §4.2 record what Tracktion does inside the callback?** Its device callback takes one uncontended `std::shared_lock` per block and its node-player pool uses semaphores; the lipogram can be *enforced* on Go.dot's code and only *measured* on Tracktion's (§11.5). A PRD amendment is the author's to make. | the lipogram test (PR 2.2) | enforce on Go.dot's scopes, report Tracktion's count separately, never hide it |
 | ~~K~~ | *(settled 2026-09-06, in PR 2.6, the way this table recommended — see below)* **How does a mount declare what it can do?** `transport` says how to *send* and nothing says whether the target can be *asked*, so `wait: verified` against a write-only device is a cue that cannot succeed and nothing notices until the show. Chataigne carries two booleans per module, `hasInput` and `hasOutput`, for exactly this. Also: whether the answer names the *mechanism* (`oscquery` \| `poll` \| `subscribe` \| `none`) or only the capability. | `verified` (PR 2.6) | a mount-level `readback` enum defaulting to `none`, and a `verified` cue against `none` refused at load — the strictest reading, and the one that cannot fail silently |
 
-**E — not answered, and deliberately so** (2026-09-09). Decision T builds the engine half of
-Phase 5 first and leaves the desktop client an outline, which means E does not have to be answered
-this phase and would only be answered *by accident* if a compiled client were started now. What has
-arrived instead is evidence: the web client of decision V is a separate client by construction, it
-holds nothing the engine owns (§14.1), and it has driven every gesture Phase 4 built over a socket
-without once needing to be inside the process. That is the fallback this table recorded, earning
-itself rather than being assumed. §14.16 writes the outline against it and says so.
+**E — SETTLED 2026-09-17: IN PROCESS, AND A CLIENT ALL THE SAME.** The author was asked before a
+line of the client was compiled - which was the whole point of asking, since §14.16 had recorded
+that a compiled client started without an answer would answer E *by accident*, by whatever was
+convenient in its first week. The answer is **in-process**, for two reasons they gave: media, which
+is the one thing a browser cannot do at all (decision Y) and which a local process handles without
+an import route existing first; and less code, since a second networked model is a second model to
+keep in step. The web page and a remote app *complement* it, for the cases where somebody is not
+sitting at the machine.
+
+**AND THE LAW IS KEPT, BY A RULE ABOUT ACCESS RATHER THAN ABOUT PROCESSES.** The fallback this
+table recorded assumed the two were the same question. They are not. PRD §3.2 says *"nothing the UI
+can do that the API cannot. The UI is built as a client"* - which is a statement about what the UI
+may DO, not about where it runs. So the second half of the decision, taken with the first:
+
+> **The desktop UI reaches the engine through `Engine::submit` and
+> `ParameterTree::snapshot()` and through nothing else.** It does not hold a
+> `ShowDocument&`, a `Runner&` or a mount table. It submits named commands and
+> it reads published snapshots, exactly as the page does over a socket.
+
+This costs almost nothing, which is why it is worth having. Both doors already exist and are
+already the ones OSC comes through: `submit (origin, command, args)` puts an event on a queue that
+never blocks its caller and is applied on the tick thread in arrival order, logged and replayable;
+`snapshot()` hands back a `shared_ptr<const TreeSnapshot>`, so a read is a pointer copy that cannot
+tear and cannot see a half-applied tick. What the rule gives up is the shortcut - and the shortcut
+is the whole hazard, because it is never taken on the day the client is designed. It is taken on
+the day a datagram round trip is inconvenient and the document is right there on the same heap, and
+from that day the desktop client can do something no tablet, no surface bridge, no MCP client and
+no script can do.
+
+**IT IS ALSO THE THREADING THE AUTHOR ASKED FOR** (*"a threaded client would be preferable"*), and
+not by coincidence: JUCE requires its components on the message thread, the engine requires its
+document on the tick thread, and those two facts already force exactly this shape. The UI runs on
+the message thread, never blocks the tick thread and is never blocked by it. The queue and the
+snapshot are the seam, which is the same seam `HostPlayer` and the OSCQuery server already sit
+behind.
+
+**WHAT THE EVIDENCE SAID, AND WHY IT DID NOT DECIDE IT.** The web client of decision V is a
+separate client by construction, holds nothing the engine owns (§14.1) and has driven every gesture
+Phase 4 built over a socket without one hole being opened for it. That is a strong argument that
+the API is complete enough to be built against - and it stays true, since the rule above means the
+compiled client is built against the same API. What it was never an argument for is a second
+PROCESS, which buys serialisation and a round trip and no law that the access rule does not already
+buy.
+
+**WHAT TO WATCH, since a decision recorded without its failure mode is half recorded.** The rule is
+a discipline and not a compiler error: the UI will be linked against `wfg_engine`, so nothing stops
+somebody taking a reference. Two things make it visible rather than trusted - the client's own
+tests use a fake link and assert the BYTES a gesture produces (§14.16), which a direct call would
+fail to produce at all; and a gesture that reaches the document directly writes no record, so
+`wfg replay` of a session driven from the desktop client would not reproduce it. A divergent replay
+is the alarm, and it is the same alarm every other part of this engine already rings.
 
 **K — settled 2026-09-06, in PR 2.6, exactly as the fallback drew it.** A mount declares
 `readback` (`none | oscquery`, default `none`) and `queryPort`, and a `verified` cue aimed at a
@@ -3588,7 +3632,11 @@ JUCE at all; only the devplan does, and §9's open question E — in-process or 
 is still open, so building the JUCE client now would answer E by accident. **This section does
 not answer E either**, and that is the convention it keeps throughout: E stays in §9's open
 table with the fallback recorded there, *assume separate*, and §14.16's outline is drawn on that
-fallback rather than on a decision nobody has taken. Everything Half B could draw is a node or a
+fallback rather than on a decision nobody has taken. *(Dated note, 2026-09-17: E is now settled —
+the author was asked directly, before a line of the client was compiled, and chose IN PROCESS with
+an access rule that keeps §3.2's law: commands and snapshots, nothing else. The reasoning above is
+left standing because it was the reason the question survived to be asked deliberately rather than
+answered by accident, which is exactly what it was for. §9's E and §14.16 carry the answer.)* Everything Half B could draw is a node or a
 command the engine does not have yet. And the author designs by looking: a page that reloads
 while a show runs closes the loop in seconds, and a compiled client closes it in a build.
 
@@ -6292,20 +6340,32 @@ Whatever is built, `media/@file` stays relative to the bundle, so an import is a
 reached — which means the engine will need an import path in the end regardless, and the desktop
 client is simply where the gesture can begin. §9's decision Y lists what is open about it.
 
-**§9's question E is not answered here, and this outline assumes E's own recorded fallback: a
-separate client.** The question — the desktop UI in process or a client of its own — has been
-open since Phase 2, §9 files it with the fallback *assume separate, because that is the stricter
-assumption*, and nothing in T, U, V or W settles it. What has changed is that evidence has begun
-to arrive, and it points the same way. PRD §3.2 states the law — *"nothing the UI can do that
-the API cannot. The UI is built as a client"* — and an in-process UI is a client with a shortcut
-available to it; the shortcut erodes the law not on the day it is taken but on the day somebody
-takes it because a datagram round trip was inconvenient and the document was right there on the
-same heap. The page is that evidence and not the verdict: it holds selection, fold state and a
-slider under a finger and nothing else (§14.1), and has driven this engine since Phase 3 without
-one hole opened for it. What would settle E is the day a second client needs a hole the first
-did not — and by then the second client exists, which is why decision T defers the question
-rather than this subsection answering it. If the author wants E closed it becomes a lettered
-decision in §9, not a sentence here.
+**§9's QUESTION E IS ANSWERED, AND NOT THE WAY THIS SUBSECTION USED TO ASSUME** (settled
+2026-09-17; the argument is in §9 under E, and what follows is written against it). The client runs
+**IN PROCESS**, for the author's own two reasons - media, which decision Y established a browser
+cannot do at all, and less code than a second networked model - with the page and a remote app
+complementing it for the times somebody is not at the machine.
+
+**What this subsection had wrong was not its answer but its question.** It argued that an
+in-process UI is *"a client with a shortcut available to it"*, and that the shortcut erodes PRD
+§3.2's law on the day somebody takes it because a round trip was inconvenient and the document was
+right there on the same heap. Every word of that hazard is still true. What does not follow is that
+a second PROCESS is the only guard against it, because §3.2's law - *"nothing the UI can do that
+the API cannot. The UI is built as a client"* - is about what the UI may DO. A process boundary
+enforces that by making the shortcut impossible; a rule about ACCESS enforces the same thing by
+making it forbidden and visible, and costs neither serialisation nor a round trip:
+
+> **The desktop UI reaches the engine through `Engine::submit` and
+> `ParameterTree::snapshot()` and through nothing else.** No `ShowDocument&`, no
+> `Runner&`, no mount table. It submits named commands and reads published
+> snapshots, exactly as the page does over a socket.
+
+Both doors already exist and are already the ones OSC arrives through, so the client layer below is
+the same shape it was drawn as - only its transport changes, and the transport was never the part
+that kept the law. The evidence the old paragraph gathered still stands and still counts: the page
+holds selection, fold state and a slider under a finger and nothing else (§14.1), and has driven
+this engine since Phase 3 without one hole opened for it. It was an argument that the API is
+complete enough to build a client against, which the rule above keeps true of the compiled one too.
 
 Decision T makes what follows an outline and not a plan: the client starts when the layout has
 stopped moving. Decision U leaves the done-when's own judgement — *the author runs a simple show
@@ -6323,19 +6383,42 @@ flip and `juce_add_gui_app` for a real bundle, at roughly sixteen seconds more p
 every job in every matrix. The first for the phase, the second as the one-line change the
 comment already names, taken when the client ships to somebody who is not the author.
 
-**The client layer, and the rule it would set aside in the open.** `wfg::client::EngineClient`
-polls `GET /godot` on a client thread through Go.dot's **own** `oscquery::OscQueryClient`, which
-says in capitals what it is — *"IT BLOCKS, AND IT MUST NEVER RUN ON THE TICK THREAD… MountProbe
-is what owns the thread this runs on; nothing else may call it"* (`OscQueryClient.h:46-51`).
-That second sentence forbids the reuse and has to be answered rather than stepped over: it is a
-rule about the **engine** process, where `MountProbe` owns the one thread allowed to block
-against a device that has gone away. A client process has no tick thread and no deadline of its
-own, so `wfg-client` would be a sanctioned second owner — and the honest form of that is the
-header sentence gaining the words *inside the engine* in the pull request that adds the caller.
-The WebSocket half comes from juce_simpleweb's client side, as WFS-DIY's
-`Plugin/Source/Shared/OscQueryClient.h` already does it; a snapshot model reaches the message
-thread and every write is a datagram. That is §14.2's contract unchanged: two clients, one
-contract, neither with a door the other lacks.
+**The client layer, which E's answer makes smaller rather than larger.** *(Rewritten 2026-09-17.
+What stood here drew a SECOND PROCESS: `wfg::client::EngineClient` polling `GET /godot` on a
+client thread through Go.dot's own `oscquery::OscQueryClient`, a WebSocket from juce_simpleweb's
+client side, and a page of argument about `OscQueryClient.h:46-51` — "IT BLOCKS, AND IT MUST NEVER
+RUN ON THE TICK THREAD… MountProbe is what owns the thread this runs on" — and how `wfg-client`
+would have to become a sanctioned second owner of that rule. **None of that is needed now, and
+saying so is the point: an in-process client is the SMALLER thing.** No HTTP poll, no WebSocket, no
+second copy of the tree, no blocking client thread and no rule to set aside. The paragraph is kept
+in this form because a reader who finds `wfg-client` in an older draft should know it was
+considered and why it went.)*
+
+What replaces it is two calls, both already there and both already what OSC arrives through:
+
+- **Reading** is `ParameterTree::snapshot()`, a `shared_ptr<const TreeSnapshot>`. The UI takes a
+  copy per repaint - a pointer copy, no lock held while it draws, and no possibility of seeing a
+  half-applied tick, because the snapshot is only ever swapped whole. This is the same object the
+  HTTP server answers `GET /godot` out of, so the two clients are reading the same thing and the
+  page's is merely a serialised copy of it.
+- **Writing** is `Engine::submit (origin, command, args)`, which puts an event on a queue that
+  never blocks its caller and is applied on the tick thread in arrival order, logged and replayable.
+  The `origin` a desktop gesture carries is what a log reader needs to tell it from a datagram, and
+  it costs a string.
+
+**The thread shape is forced rather than chosen**, which is why the author's *"a threaded client
+would be preferable"* and JUCE's own requirements do not have to be reconciled: a JUCE component
+may only be touched on the message thread, the document may only be written on the tick thread, and
+the queue and the snapshot are exactly the seam between those two. The UI never blocks the tick
+thread and is never blocked by it. `HostPlayer` and the OSCQuery server already sit behind the same
+seam, so this adds no new threading rule to the engine at all - which is the strongest argument for
+it and was invisible while E was assumed the other way.
+
+**§14.2's contract is unchanged, and that is the whole of the law here**: two clients, one contract,
+neither with a door the other lacks. What kept it before was a process boundary; what keeps it now
+is the access rule under E — commands and snapshots, nothing else — and the rule is checkable,
+because a gesture that reached the document directly would write no record and `wfg replay` of that
+session would not reproduce it.
 
 **The component tree, and the reuse named rather than assumed.** `MainWindow` → `Transport` /
 `Didi` (a `juce::ListBox` keyed by cue id, standby and selection drawn as distinctly from each
