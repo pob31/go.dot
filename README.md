@@ -265,6 +265,18 @@ view per pull request with no build step; the JUCE desktop client is an outline
 because every value on that page was already exposed over OSCQuery and already
 driven by a headless test before the page existed.
 
+**And since 2026-09-17 there is a window.** `wfg serve <bundle> … --window` opens
+the compiled client over the engine it runs inside — question E, open since Phase
+2, settled in process (namespace draft §9 and §14.16) — beside the page, not
+instead of it: the page stays the redundancy path, and the window is off by
+default so nothing headless changes. It starts as one transport strip and a GO
+button and grows one milestone at a time, each opened and judged before the next
+is begun. `--theme=clients/desktop/theme.json` lays the page's palette over it and
+F5 re-reads the file, so a change to the look costs a keypress rather than a
+build. It reads the engine through `ParameterTree::snapshot()` and changes the
+show only through `Engine::submit`, with the origin `window` on every record —
+and `ctest client.boundary` reads its source to hold it to that.
+
 The documents come first, and they are the thing to read before the code:
 
 - **[`docs/godot-namespace-draft-0.1.md`](docs/godot-namespace-draft-0.1.md)** — the

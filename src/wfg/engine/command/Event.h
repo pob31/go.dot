@@ -38,6 +38,8 @@
         cli                the command line
         replay             the replay tool
         engine             the engine itself (startup, internal)
+        window             the compiled client, in the same process (namespace
+                           draft 14.16) - what tells a click from a datagram
 */
 
 #include <wfg/engine/osc/OscValue.h>
@@ -54,6 +56,11 @@ namespace wfg
         inline constexpr const char* cli    = "cli";
         inline constexpr const char* replay = "replay";
         inline constexpr const char* engine = "engine";
+
+        /*  Neither `udp:` nor `ws:` in front of it, on purpose: EngineNamespace
+            and OscQueryServer route echo suppression on those two prefixes,
+            and a window reads the snapshot rather than a push. */
+        inline constexpr const char* window = "window";
     }
 
     struct Event

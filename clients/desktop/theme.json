@@ -1,0 +1,26 @@
+{
+  "about": "The desktop client's look, read by `wfg serve --window --theme=<this file>` at start and again on F5. The tokens are the ones clients/console/styles.css declares, with the same values, so the window opens looking like the page and every difference from then on is one somebody made. Colours are #rrggbb; `type` scales every font; `refreshHz` is how often the window reads the engine; `row` is a row's height in pixels before `type` scales it. A token left out keeps its default; one misspelled is refused by name; a file that does not parse changes nothing, and the window says why on its status line.",
+
+  "type": 1.25,
+  "refreshHz": 25,
+  "row": 26,
+
+  "ink": "#e8e6e1",
+  "ink-dim": "#b4afa7",
+  "ink-faint": "#8f8a83",
+  "ink-off": "#625f5b",
+
+  "ground": "#16161a",
+  "panel": "#1d1d22",
+  "panel-inspect": "#21212a",
+  "panel-high": "#24242b",
+  "panel-in": "#191920",
+  "rule": "#3a3a45",
+
+  "standby": "#e8b04b",
+  "live": "#4bc38a",
+  "stopping": "#d98b4b",
+  "failed": "#e0685d",
+  "waiting": "#86a3db",
+  "picked": "#9a95e4"
+}

@@ -96,7 +96,8 @@ add_executable(wfg_tests
     SpatcoreToolchainTests.cpp
     UndoTests.cpp
     TimbreTests.cpp
-    OscQueryTests.cpp)
+    OscQueryTests.cpp
+    ClientTests.cpp)
 
 # Where the hand-authored fixtures live. Passed as a definition rather than
 # copied next to the binary: the fixtures are inputs to read, not artefacts to
@@ -108,7 +109,9 @@ target_compile_definitions(wfg_tests PRIVATE
     # will look for it rather than where the tests keep their input.
     WFG_REPO_ROOT="${CMAKE_SOURCE_DIR}")
 
-target_link_libraries(wfg_tests PRIVATE wfg::engine wfg::warnings)
+# wfg::client_model and not wfg::client_ui: the model half is what a test can
+# hold (ClientTests.cpp); the window is tested by opening it.
+target_link_libraries(wfg_tests PRIVATE wfg::engine wfg::client_model wfg::warnings)
 
 # -----------------------------------------------------------------------------
 # The unit suite, run once per locale.
@@ -448,6 +451,22 @@ add_test(NAME wfg.replay.undo.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/minimal
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The first session recorded from the compiled client (M1, 2026-09-17): the
+# author's own first look at the window over the phase4 show, GO pressed from
+# it, the window closed and the engine stopped by the close button's dialogue.
+# What it proves is narrow and worth having: a record whose origin is `window`
+# replays with no window in the room, because a click and a datagram reach the
+# engine through the same door and leave the same record (namespace draft
+# section 14.16, rule 1). The window itself is tested by opening it.
+add_test(NAME wfg.replay.window.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/window-go.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/phase4
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.window.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/window-go.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/phase4
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # `wfg canon` over the hand-authored fixture. It writes to stdout, so ctest is
 # checking the exit code and the unit suite checks the bytes; what this adds is
 # that the PRODUCT BINARY can read a show document under either locale, which a
@@ -569,6 +588,18 @@ add_test(NAME schema.fixtures
 add_test(NAME deps.no-openssl
          COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/check-no-openssl.py"
                  $<TARGET_FILE:wfg>)
+
+# -----------------------------------------------------------------------------
+# The compiled client reads one door and names nothing behind it.
+#
+# Namespace draft section 14.16 gives the desktop client three rules, and the
+# second - it reads only ParameterTree::snapshot() - is the one an afternoon
+# breaks without noticing: the document is on the same heap and a reach past
+# the door compiles. This reads src/wfg/client and says so: no childrenOf(),
+# nothing the tick thread owns named, exactly one snapshot() call site, and no
+# JUCE at all in the model half. Once, not per locale - it reads source.
+add_test(NAME client.boundary
+         COMMAND ${WFG_PYTHON} "${CMAKE_SOURCE_DIR}/scripts/check-client-boundary.py")
 
 # -----------------------------------------------------------------------------
 # No comment delimiter hidden inside a comment.

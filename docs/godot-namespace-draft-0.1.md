@@ -6565,6 +6565,33 @@ are. Until then a compiled client is an argument that takes a rebuild to have an
 argument that takes a refresh. A client may start before the done-when is met and it may never
 start at all; what it must not do is start while the layout is still being designed.
 
+**What M1 built (2026-09-17).** `wfg serve <bundle> --window [--theme=<file>]` opens the compiled
+client over the engine it runs inside: one transport strip - the show and the word *unsaved* beside
+its dot, the tick, the clock and the rate, the focused list and the cue its standby stands on, the
+audio status, the last refusal in words - a GO button, and Space. Off by default, so nothing
+headless changed. Three things the outline above did not have and the tree forced. **The engine
+does not link the client**: `Console.h` takes the window as a vendor-free factory handed in by
+`main()`, because the client library links the engine and the arrow cannot point both ways, and a
+build that hands over no factory answers `--window` with a sentence. **JUCE is initialised first in
+`runServe`** - a `ScopedJuceInitialiser_GUI` as the verb's first declaration - because the message
+thread is whichever thread first reaches `MessageManager::getInstance()`, and until then that was
+the loop helper at the bottom of the verb, after the point where a window would be built; the macOS
+`initialiseNSApplication()` moved out of that helper for the same reason. Headless is untouched, as
+the selftest verb has shown since Phase 0. **The look is not compiled in**: `clients/desktop/theme.json`
+carries the page's tokens with the page's values, `--theme` lays it over the defaults and F5 re-reads
+it, with a refusal landing on the window's own status line - the author's rule, that a visible thing
+is editable or it earns one round. The split is two static libraries, `wfg_client_model` (std-only:
+what a cell shows, the transport reading, the theme, each gesture's Event - asserted under both
+locales with no window, in `ClientTests.cpp`) and `wfg_client_ui` (built by every job, run by none),
+held apart by `scripts/check-client-boundary.py`: no `childrenOf`, nothing the tick thread owns,
+exactly one `snapshot()` call site, no `juce` in the model - rule 2 as a ctest. The origin is
+`window`, beside `cli`, `replay` and `engine`, and `window-go.wfglog` is the first fixture carrying
+it. The close button asks before stopping the engine and refuses while the show is locked, which is
+the price of E's answer paid at the one gesture that incurs it. What could not be tested is written
+into `ui/Client.cpp` as such - that the window opens, layout, colour, hit-testing, focus, the
+dialogue, timing, the shutdown order - and the first person to find a broken window was the author,
+on this build.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

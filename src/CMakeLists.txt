@@ -237,6 +237,50 @@ target_link_libraries(wfg_engine
     PRIVATE wfg::warnings)
 
 # -----------------------------------------------------------------------------
+# The compiled client, in two halves (namespace draft §14.16).
+#
+# wfg_client_model names no JUCE type at all: what a label shows, the theme's
+# tokens and the Event each gesture submits, all std-only so that wfg_tests can
+# assert them with no window. wfg_client_ui is the JUCE half - the window, the
+# look, the components - built by every CI job so the strict preset reads it,
+# executed by none of them, because the only test of a window is a person.
+#
+# Neither is linked by wfg_engine. The engine is handed the window as a factory
+# from main() (Console.h), so the dependency arrow points one way: ui -> model
+# -> engine. The boundary gate (scripts/check-client-boundary.py, ctest
+# client.boundary) reads the client's source and holds the split.
+# -----------------------------------------------------------------------------
+add_library(wfg_client_model STATIC
+    wfg/client/model/Gestures.h
+    wfg/client/model/Gestures.cpp
+    wfg/client/model/Text.h
+    wfg/client/model/Text.cpp
+    wfg/client/model/Theme.h
+    wfg/client/model/Theme.cpp
+    wfg/client/model/Transport.h
+    wfg/client/model/Transport.cpp)
+add_library(wfg::client_model ALIAS wfg_client_model)
+
+target_link_libraries(wfg_client_model
+    PUBLIC  wfg::engine
+    PRIVATE wfg::warnings)
+
+add_library(wfg_client_ui STATIC
+    wfg/client/Client.h
+    wfg/client/ui/Client.cpp
+    wfg/client/ui/Look.h
+    wfg/client/ui/Look.cpp
+    wfg/client/ui/MainWindow.h
+    wfg/client/ui/MainWindow.cpp
+    wfg/client/ui/TransportComponent.h
+    wfg/client/ui/TransportComponent.cpp)
+add_library(wfg::client_ui ALIAS wfg_client_ui)
+
+target_link_libraries(wfg_client_ui
+    PUBLIC  wfg::client_model
+    PRIVATE wfg::warnings)
+
+# -----------------------------------------------------------------------------
 # wfg — the product binary.
 #
 # Plain add_executable, deliberately NOT juce_add_console_app. That helper needs
@@ -255,10 +299,11 @@ target_link_libraries(wfg_engine
 # -----------------------------------------------------------------------------
 add_executable(wfg wfg/app/Main.cpp)
 
-# wfg::engine is enough — it carries wfg::thirdparty PUBLIC. wfg::warnings is
-# named again because it is PRIVATE on wfg_engine and so does not propagate;
-# that is deliberate, not an oversight.
-target_link_libraries(wfg PRIVATE wfg::engine wfg::warnings)
+# wfg::engine carries wfg::thirdparty PUBLIC; wfg::client_ui is the window
+# main() hands the console. wfg::warnings is named again because it is PRIVATE
+# on every library and so does not propagate; that is deliberate, not an
+# oversight.
+target_link_libraries(wfg PRIVATE wfg::engine wfg::client_ui wfg::warnings)
 
 # NOTE: there is no add_test() in this file. Every add_test() in the project
 # lives in tests/CMakeLists.txt, including the ones that run THIS binary, so

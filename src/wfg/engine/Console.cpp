@@ -1510,9 +1510,9 @@ namespace
         for. */
     void runMessageLoopUntilInterrupted()
     {
-       #if JUCE_MAC
-        juce::initialiseNSApplication();
-       #endif
+        /*  initialiseNSApplication() used to be called here. It is called at
+            the top of runServe now, so that it precedes a window rather than
+            following one; the declaration above says why it is needed at all. */
 
         std::signal (SIGINT, onInterrupt);
         std::signal (SIGTERM, onInterrupt);
@@ -1692,8 +1692,35 @@ namespace
         work - and standing it up now means Phase 2 does not restructure this
         verb. The model belongs to the tick thread; this one waits.
     */
-    int runServe (const juce::ArgumentList& args)
+    int runServe (const juce::ArgumentList& args, const wfg::ClientFactory& makeClient)
     {
+        /*  JUCE FIRST, so that it is the last thing to go. Two reasons, and
+            the window brought both.
+
+            The message thread is whichever thread first reaches
+            MessageManager::getInstance(), and until this line that was the
+            loop helper at the bottom of this verb - AFTER the point where a
+            window would be constructed, and a Component built off the
+            message thread is an assertion. This pins it to the main thread
+            before anything else runs.
+
+            And a scoped initialiser is destroyed in reverse order of
+            declaration: declared first, it is destroyed last, after every
+            Tracktion object, every driver and every component below it - none
+            of which may outlive the MessageManager. tests/TestMain.cpp:77
+            holds one for the whole suite for the same reason.
+
+            Headless is untouched: this reaches MessageManager::getInstance()
+            and nothing else, opens no display, and the Linux job runs it with
+            no xvfb - the selftest verb has done exactly this since Phase 0. */
+        const juce::ScopedJuceInitialiser_GUI juceForTheVerb;
+
+       #if JUCE_MAC
+        /*  Before the window can exist, not inside the loop helper where it
+            used to be: a Component on macOS wants NSApp already there. */
+        juce::initialiseNSApplication();
+       #endif
+
         const auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
 
         if (path.isEmpty())
@@ -1714,6 +1741,21 @@ namespace
         const auto sampleRate = args.getValueForOption ("--sample-rate").getIntValue();
         const auto blockSize = args.getValueForOption ("--buffer").getIntValue();
         const auto hosted = args.containsOption ("--hosted");
+
+        /*  `--window`: the compiled client, in this process (namespace draft
+            §14.16). OFF BY DEFAULT, and that is the design rather than a
+            caution: every black-box driver, every headless deployment and a
+            suspect client on show night are all unchanged by its existence,
+            and the page stays live as the redundancy path a crashed window
+            would need. A build whose main() handed over no factory answers
+            with a sentence now rather than a blank at the end. */
+        const auto wantWindow = args.containsOption ("--window");
+
+        if (wantWindow && ! makeClient)
+        {
+            std::cerr << "wfg serve: this build has no window" << std::endl;
+            return 2;
+        }
 
         /*  `--midi-in=<device>`, repeatable, because a rig has a surface and a
             foot switch and they are two devices.
@@ -1795,6 +1837,33 @@ namespace
                           << clientDirectory.getFullPathName() << std::endl;
                 return 2;
             }
+        }
+
+        /*  `--theme=<file>`: the window's look, read at start and again on
+            F5, so that a change to it costs a keypress and not a build. The
+            same eager check as `--ui`, for the same reason: a mistyped path
+            is a sentence now, not a default palette twenty minutes later. */
+        std::string themePath;
+
+        if (args.containsOption ("--theme"))
+        {
+            if (! wantWindow)
+            {
+                std::cerr << "wfg serve: --theme is the window's; give --window too" << std::endl;
+                return 2;
+            }
+
+            const juce::File themeFile { juce::File::getCurrentWorkingDirectory()
+                                           .getChildFile (args.getValueForOption ("--theme")) };
+
+            if (! themeFile.existsAsFile())
+            {
+                std::cerr << "wfg serve: --theme wants a file, and "
+                          << themeFile.getFullPathName() << " is not one" << std::endl;
+                return 2;
+            }
+
+            themePath = themeFile.getFullPathName().toStdString();
         }
 
         const juce::File target { juce::File::getCurrentWorkingDirectory().getChildFile (path) };
@@ -3056,14 +3125,38 @@ namespace
             dummy->start();
         }
 
-        ticks.start();
+        {
+            /*  THE WINDOW, IF ASKED FOR, and this scope is its whole life.
+                Built before the clock starts, so a window that cannot open
+                fails before any audio has begun; destroyed after the clock
+                has stopped and the loop has returned, so no timer can fire
+                and no tick can be in flight while it goes - and before the
+                session is finished and the servers stopped below, which is
+                everything it ever read out of a snapshot still standing.
 
-        /*  The main thread from here on is JUCE's, and only JUCE's. Phase 2
-            needs a message thread for plugin scanning and device callbacks, so
-            it is stood up now rather than retrofitted around a loop of our own. */
-        runMessageLoopUntilInterrupted();
+                The two doors it is handed are the only two it has (§14.16):
+                the engine to submit to, the tree to read. `quit` is the flag
+                SIGINT sets, so the watchdog ends the loop the one way it
+                already knows, inside fifty milliseconds. */
+            std::unique_ptr<wfg::Client> client;
 
-        ticks.stop();
+            if (wantWindow)
+            {
+                client = makeClient ({ engine, parameters, [] { interrupted = 1; }, themePath });
+
+                if (client == nullptr)
+                    return 2;   // the factory has already said why
+            }
+
+            ticks.start();
+
+            /*  The main thread from here on is JUCE's, and only JUCE's. Phase 2
+                needs a message thread for plugin scanning and device callbacks, so
+                it is stood up now rather than retrofitted around a loop of our own. */
+            runMessageLoopUntilInterrupted();
+
+            ticks.stop();
+        }
 
         /*  A CLEAN EXIT TIDIES `recovery/` AWAY ONLY WHEN THERE IS NOTHING IN IT
             ANYBODY COULD WANT (§14.10).
@@ -3116,7 +3209,7 @@ namespace
     }
 
 //==============================================================================
-int wfg::runConsole (int argc, char** argv)
+int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
 {
     if (const auto localeFailure = applyLocaleAndStrip (argc, argv); localeFailure != 0)
         return localeFailure;
@@ -3224,12 +3317,13 @@ int wfg::runConsole (int argc, char** argv)
                       "serve <bundle> --sample-rate=N --buffer=N"
                       " [--hosted [--render=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
-                      " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]",
+                      " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
+                      " [--window [--theme=<file>]]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
-                      [] (const juce::ArgumentList& args)
+                      [&makeClient] (const juce::ArgumentList& args)
                       {
-                          if (const auto code = runServe (args); code != 0)
+                          if (const auto code = runServe (args, makeClient); code != 0)
                               juce::ConsoleApplication::fail ({}, code);
                       } });
 

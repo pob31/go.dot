@@ -27,10 +27,44 @@
     and the results compared (the cross-cutting rule in the development plan).
 
     Vendor-free, like Engine.h, and for the same reason.
+
+    THE WINDOW IS HANDED IN, NOT LINKED. `wfg serve <bundle> --window` opens
+    the compiled client over the engine it runs inside (namespace draft
+    §14.16), and the client library links this one - so this one cannot link
+    the client back without the arrow pointing both ways. Instead main() hands
+    runConsole a factory, and a build that hands none answers `--window` with
+    a sentence. The factory gets the two doors the client is allowed - the
+    engine to submit to, the tree to read snapshots from - and a way to end
+    the loop; nothing it is not.
 */
+
+#include <functional>
+#include <memory>
+#include <string>
 
 namespace wfg
 {
+    class Engine;
+    namespace tree { class ParameterTree; }
+
+    /** What a compiled client is, seen from here: something alive while the loop runs. */
+    struct Client
+    {
+        virtual ~Client() = default;
+    };
+
+    /** What the console hands the client: both doors, and the way out. */
+    struct ClientHost
+    {
+        Engine& engine;                         ///< the write door: submit (origin::window, …)
+        const tree::ParameterTree& parameters;  ///< the read door: snapshot()
+        std::function<void()> quit;             ///< ends the loop the way SIGINT does
+        std::string themePath;                  ///< `--theme=<file>`, resolved; empty when not given
+    };
+
+    /** Builds the client, or returns nullptr having said why on stderr. */
+    using ClientFactory = std::function<std::unique_ptr<Client> (const ClientHost&)>;
+
     /** Runs the Go.dot console front end. Returns the process exit code. */
-    int runConsole (int argc, char** argv);
+    int runConsole (int argc, char** argv, ClientFactory makeClient = {});
 }
