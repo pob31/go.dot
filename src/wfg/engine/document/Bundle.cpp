@@ -73,9 +73,11 @@ namespace wfg::doc
                  + std::to_string (Schema::formatVersion()) + "\"/>\n";
         }
 
-        /*  One tick at 50 Hz. See the retry in `writeBytesAtomically` for what
-            it costs and why it is this short. */
-        constexpr int replaceRetryPauseMs = 20;
+        /*  THE PAUSES BETWEEN REPLACE ATTEMPTS - one tick, three, ten: about a
+            third of a second in all before a write is refused. See the retries
+            in `writeBytesAtomically` for what they cost and why they are on the
+            writer thread. */
+        constexpr int replaceRetryPausesMs[] = { 20, 60, 200 };
 
         std::string processIdText()
         {
@@ -277,7 +279,7 @@ namespace wfg::doc
             if (temp.replaceFileIn (target))
                 return true;
 
-            /*  ONE BLIND RETRY, because the API will not say what went wrong.
+            /*  BLIND RETRIES, because the API will not say what went wrong.
                 `replaceFileIn` returns a bool and swallows GetLastError, so
                 "retry on a sharing violation" is a distinction nothing here can
                 make.
@@ -287,17 +289,23 @@ namespace wfg::doc
                 above; `ReplaceFile` fails while ANOTHER process holds show.xml
                 open without FILE_SHARE_DELETE - an editor somebody left it open
                 in, a search indexer, a sync client uploading the previous save.
-                Those hold on for milliseconds and let go, which is why one
-                retry is worth having and a loop is not: a failure that survives
-                a pause is not a transient one, and the honest thing to do with
-                it is refuse.
+                Those hold on for milliseconds and let go - and a virus scanner
+                holds a freshly written file for longer than one tick, which a
+                shared Windows runner showed on 2026-09-17 (be46383's run: the
+                Phase 1 driver's save never landed, and the dot never went out).
+                So three pauses, a third of a second in all, rather than the one
+                tick this had until then. Not a loop: a failure that survives
+                that long is not a transient one, and the honest thing to do
+                with it is refuse. The author's rule, the same day: "Save can
+                have some lag so it doesn't interfere with the live show" - the
+                lag is allowed because it is paid where the next paragraph says.
 
-                THE PAUSE IS ON THE WRITER THREAD, and not - any longer - on the
-                thread GO shares. It is one tick long per write, and
-                `Bundle::save` makes three, so a save whose every replace needs
-                its retry costs three ticks of pause on top of its writes - the
-                worst case, and a rare one, since each retry answers a different
-                file being held. Until PR 5.5's second half that was paid on the
+                THE PAUSES ARE ON THE WRITER THREAD, and not - any longer - on
+                the thread GO shares. They add up to a third of a second per
+                write, and `Bundle::save` makes three, so a save whose every
+                replace needs every retry costs about a second of pause on top
+                of its writes - the worst case, and a rare one, since each
+                retry answers a different file being held. Until PR 5.5's second half that was paid on the
                 tick thread and argued as lateness rather than a block; M23 then
                 measured the writes themselves at a full tick without a single
                 retry (§14.14), and every write a session makes now happens on
@@ -305,10 +313,13 @@ namespace wfg::doc
                 and nothing else. What still writes on the thread that asked is
                 what has no clock to protect: `wfg replay`, seeding its `--out`
                 and performing its synchronous writer's jobs, and the tests. */
-            juce::Thread::sleep (replaceRetryPauseMs);
+            for (const auto pauseMs : replaceRetryPausesMs)
+            {
+                juce::Thread::sleep (pauseMs);
 
-            if (temp.replaceFileIn (target))
-                return true;
+                if (temp.replaceFileIn (target))
+                    return true;
+            }
 
             error = "could not replace " + target.getFullPathName().toStdString()
                   + " with " + temp.getFullPathName().toStdString()

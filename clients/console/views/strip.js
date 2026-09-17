@@ -114,6 +114,20 @@ function renderStrip() {
   lockButton.setAttribute("aria-pressed", isLocked ? "true" : "false");
   lockButton.disabled = !isLocked && !isOpen;
 
+  /*  SHOW MODE DOES NOT OFFER A SAVE (namespace draft §9, decision W, reaffirmed
+      2026-09-17). The ENGINE keeps saving under the lock - lock first so nothing
+      moves, then save, so the file on disk is the final show - and it is the
+      client that goes quiet, because "usually we try not to save a show mid
+      performance". Disabled rather than hidden, so the reader sees the button
+      exists and reads why it will not press; ctrl/⌘-S follows it
+      (gestures/keys.js). A script can still save: this is one client's manners,
+      not a rule, and the rule lives where every client meets it. */
+  const saveButton = el("save");
+  saveButton.disabled = isLocked;
+  saveButton.title = isLocked
+    ? "show mode: saving is not offered while the show is locked - unlock to save"
+    : "writes the show into its bundle — ctrl/⌘-S";
+
   /*  AND WHERE THE INSPECTOR SITS, in the same shape as the lock: the button
       says what it would DO, not what is true, so nobody has to work out which
       of two states they are looking at from a word that could be either. The

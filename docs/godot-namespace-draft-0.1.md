@@ -844,6 +844,14 @@ back on if nobody feels strongly by then.
   the save itself, and `node.set` on a **mounted** address — because §3.17 has the operator walking
   the house adjusting parameters while the show runs, and locking that would mean locking the
   mixing. §14.11 draws the predicate and the doors.
+  *Reaffirmed 2026-09-17, when a Windows runner's virus scanner made a save miss the driver's
+  window and the question was put to the author: the ENGINE keeps saving under the lock - lock
+  first so nothing moves, then save, so the file on disk is the final show - and what changes is
+  the CLIENTS. Show mode does not OFFER a save: the page's Save button and Ctrl-S go quiet while
+  `locked` reads true, and the desktop's show mode (M9) does the same, because "usually we try not
+  to save a show mid performance". A script still can. And a save may lag - "Save can have some
+  lag so it doesn't interfere with the live show" - so the writer thread's one blind retry became
+  three pauses, a third of a second in all; §14.10 carries the correction.*
 
 - **X — The pointer may stand inside every group** (settled 2026-09-16, with the page open): asked
   directly whether a cue inside an automatic or a timeline group is a place the standby may be put,
@@ -5215,6 +5223,18 @@ here can make; 5.2 will write one blind retry after a short pause. And the file 
 `ReplaceFile` fails while another process holds `show.xml` open without `FILE_SHARE_DELETE` — an
 editor, an indexer, a sync client. One retry, because the failure JUCE will not name is almost
 always transient and held on the far side.
+
+*Corrected 2026-09-17.* One tick was too short for one holder of the far side: a virus scanner. On
+a shared Windows runner (`be46383`'s run) the Phase 1 driver's save never landed - `ReplaceFile`
+failed, the one retry after 20 ms failed, the write was refused as designed, and the dirty dot
+stayed lit for the fifteen seconds the driver waited. A booth PC with its scanner on is the same
+machine. The author's rule, put to them that day: *"Save can have some lag so it doesn't interfere
+with the live show"* - and since PR 5.5's second half the pause is on the writer thread, where lag
+delays the next write and nothing an operator can feel. So the retry is now three pauses - 20, 60
+and 200 ms, a third of a second in all - before the same honest refusal; a failure that survives
+that long is still not a transient one. Not a loop, for the reason above. The same conversation
+reaffirmed that the lock does not touch the save (§9, decision W); what changes is that show mode
+on either client does not OFFER one.
 
 **The reason gets its word in 5.1 and does not get its sentence.** `reason::writeFailed`
 replaces `document.save`'s `reason::badAddress` (`Bundle.cpp:307`) with the debt rather than

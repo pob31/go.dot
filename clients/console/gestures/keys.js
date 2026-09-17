@@ -194,7 +194,16 @@ document.addEventListener("keydown", (event) => {
       press(event.shiftKey ? "Mod+Shift+Z" : "Mod+Z");
     } else if (letter === "s" && !event.shiftKey) {
       event.preventDefault();
-      press("Mod+S");
+
+      /*  THE KEY FOLLOWS THE BUTTON. In show mode the Save button is disabled
+          (views/strip.js: the engine keeps saving under the lock, it is the
+          client that stops offering one - §9, decision W), and the accelerator
+          over it goes quiet with it rather than being a second route to a save
+          nobody offered. preventDefault regardless, or the browser offers to
+          save this page as a web page. */
+      const saveButton = document.getElementById("save");
+
+      if (!saveButton || !saveButton.disabled) press("Mod+S");
     }
 
     return;
