@@ -64,15 +64,22 @@ namespace wfg::client::model
         return text (snapshot.find (address));
     }
 
-    bool flag (const tree::TreeSnapshot& snapshot, std::string_view address)
+    Flag flag (const tree::TreeSnapshot& snapshot, std::string_view address)
     {
         const auto* node = snapshot.find (address);
 
         if (node == nullptr)
-            return false;
+            return Flag::unsaid;
 
         const auto sole = node->soleValue();
-        return sole.has_value() && sole->isBool() && sole->getBool();
+
+        /*  A `T` ROW THAT IS NOT A BOOLEAN HAS NOT ANSWERED, rather than
+            answering no: the engine publishes these as T or F and anything
+            else means the node is not the one this caller thinks it is. */
+        if (! sole.has_value() || ! sole->isBool())
+            return Flag::unsaid;
+
+        return sole->getBool() ? Flag::yes : Flag::no;
     }
 
     std::vector<std::string> words (std::string_view line)

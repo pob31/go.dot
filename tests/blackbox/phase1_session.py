@@ -91,6 +91,15 @@ def settle(server: Server, address: str, expected, report: Report,
     return report.equal(actual, expected, description)
 
 
+def locked(server: Server):
+    """`/godot/document/locked` as the engine last published it. Same shape as
+    `dirty` below, and the same three answers: True, False, or None when the
+    node is not there at all."""
+    reply = common.http_json(server.http_port, "/godot/document/locked?VALUE")
+    values = reply.get("VALUE") if isinstance(reply, dict) else None
+    return values[0] if isinstance(values, list) and values else None
+
+
 def dirty(server: Server):
     """`/godot/document/dirty` as the engine last published it: True, False,
     or None when the node could not be read at all.
@@ -151,6 +160,19 @@ def run(locale: "str | None") -> int:
             # the port opens, and nothing has written the show since.
             report.equal(dirty(server), False,
                          "document/dirty is false for a show that has just been opened")
+
+            #  AND IT IS NOT IN SHOW MODE EITHER. The pair to the `locked`
+            #  fixture, which asserts the other direction: that one carries
+            #  <Show locked="true"/> and must come back locked, and this one
+            #  carries no lock at all and must come back open. Between them
+            #  they pin both readings of a persist=state boolean at open,
+            #  which nothing else does - and a show that came up locked by
+            #  accident would refuse every edit from every client and, since
+            #  2026-09-17, stop both clients offering a save (namespace draft
+            #  section 9, decision W), so an operator would meet it as
+            #  "nothing works and nobody said why".
+            report.equal(locked(server), False,
+                         "document/locked is false for a show that nothing locked")
 
             # -- 2. a cue to work with ---------------------------------------
             lists = common.http_json(server.http_port, "/godot/list")

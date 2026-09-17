@@ -5670,6 +5670,30 @@ costs the least to understand is the one that arrives first. And the gesture tha
 is a plain datagram rather than a command (§14.7), with §14.2's answer for the client that sends
 the integer `1` instead of `true`.
 
+**THE LOCK'S FIRST END-TO-END CONFIRMATION, and how it nearly became a bug report (2026-09-17).** A
+`wfg serve --window` of a freshly copied, unlocked `phase4` published `/godot/document/locked` as
+true. `wfg tree` over the same folder said false, so did a serve without `--window`, so did four
+later runs of the same command - and the one run that was logging recorded no write at all. It was
+written up here as unexplained and a check was added to `phase1_session.py` against a race nobody
+had found. **The author then said what it was: they had pressed the window's lock button.** The
+engine was right, the window was right, and the node said exactly what somebody had just told it to
+say.
+
+It is kept here because of what it cost to not know. **Every reading in that paragraph was
+consistent with a human hand and I never considered one**, because the session was a smoke test and
+I was thinking of the window as a thing I had started rather than a thing on somebody's screen. The
+one run that could have answered it in a second was the one I gave `--log` to - the wrong one - and
+the session that showed the reading wrote no record, so the origin that would have read `window`
+was never written down. **The rule that follows: a `--window` session is an INTERACTIVE session and
+always gets `--log`.** A window is reachable by whoever is sitting there, the log is what tells a
+click from a datagram (§14.16, rule 1), and a measurement taken without one cannot say which it
+was.
+
+The check in `phase1_session.py` stays, on its own merits rather than as a net: a show whose
+`state.xml` names no lock must open unlocked, the `locked` fixture asserts the other direction
+already, and between them the pair pins both readings of a `persist=state` boolean at open. What it
+is no longer is evidence of anything.
+
 ### 14.12 Spectral colour — a cache, a pyramid, and a test before anything is drawn
 
 **The colour says what the sound is made of, the brightness says how high it is, and the numbers
@@ -6611,6 +6635,23 @@ the price of E's answer paid at the one gesture that incurs it. What could not b
 into `ui/Client.cpp` as such - that the window opens, layout, colour, hit-testing, focus, the
 dialogue, timing, the shutdown order - and the first person to find a broken window was the author,
 on this build.
+
+**What M2 and M3 built (2026-09-17, overnight).** M2 gave the window the rest of the transport -
+undo and redo under the engine's own name for what they would take back, save, revert, the lock,
+and the recovery offer as a banner that is itself the question - and M3 gave it the cue list. Three
+things came out of building them that were not in the plan. **A flag has three answers.** A node the
+engine has not published is not a node reading false, so `Flag::unsaid` sits beside `no` and `yes`,
+every gesture asks `isYes`, and every sentence has a word for the third - the page's rule, moved to
+where both clients' readings are made. **Every gesture is checked against the real registry**, which
+is `ClientTests`' version of what `client_page.py` does for `commands.json`: each one names a command
+`wfg commands` lists and sends arguments its signature accepts, asserted against a registry built the
+way serve builds one. **And the cue list needed a gesture the plan had put in M5.** `standby.next`
+stays put *"from nowhere"* - the engine's own wording and its own decision - so a show whose
+`state.xml` names no standby has no keyboard route into it at all; the page answers that with a click
+on a row, and until M5 gives a click its second meaning, so does the window. The list is a `ListBox`
+over `model::ShowModel`, which walks the show only when `/godot/document/revision` moves or the
+focused list changes, and the rule M0 exists for is now a counted test: a hundred publishes with
+nothing applied rebuild once, a standby move rebuilds nothing, an edit rebuilds once more.
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 

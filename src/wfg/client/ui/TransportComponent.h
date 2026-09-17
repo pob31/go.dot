@@ -19,18 +19,26 @@
 /*
     The transport: the strip the operator's eye rests on between cues.
 
-    Which show, whether it is saved, where the clock is, which list is focused
-    and which cue GO would fire, whether the audio is running, and the last
-    thing the engine refused - one label each, a GO button, and Space.
+    Which show and whether the file holds it, where the clock is, which cue GO
+    would fire, what undo would take back, whether the audio is running, and
+    the last thing the engine refused - with the gestures that answer each:
+    GO, save, revert, undo, redo, the lock, and the recovery offer.
 
     It is handed a TransportReading and never a snapshot: the model decides
     what the words are, this decides where they go. A label's setText repaints
-    only when the text changed, so at 25 passes a second the only thing that
-    redraws is the tick.
+    only when the text changed, so at twenty-five passes a second the only
+    thing that redraws is the tick.
 
-    Colour is never the sole carrier (PRD §4.8): the dirty dot comes with the
-    word "unsaved", the standby's yellow with the word "standby", and a
-    refusal's red with "error:".
+    COLOUR IS NEVER THE SOLE CARRIER (PRD §4.8). The dirty dot comes with the
+    words "unsaved changes", the standby's yellow with "standby in <list>", a
+    refusal's red with "error:", the lock's state with the word "locked" - and
+    every disabled button has a sentence beside it saying which thing is
+    unavailable, because a greyed control reports only THAT something is.
+
+    WHAT THIS DOES NOT OFFER. While the show is locked there is no save
+    gesture here - not the button and not the accelerator (§9, decision W, as
+    reaffirmed 2026-09-17). The engine would accept one; this client does not
+    ask, because usually nobody saves a show mid-performance.
 */
 
 #include <wfg/client/model/Theme.h>
@@ -45,10 +53,21 @@ namespace wfg::client::ui
     class TransportComponent final : public juce::Component
     {
     public:
+        /*  One per gesture, each ending in exactly one engine command - which
+            is what makes §4.11 structural here rather than aspirational: a
+            button that wanted two would have to be two buttons, or one
+            command that does not exist yet. */
         struct Actions
         {
-            std::function<void()> go;            ///< the button, and Space
-            std::function<void()> reloadTheme;   ///< F5
+            std::function<void()> go;
+            std::function<void()> undo;
+            std::function<void()> redo;
+            std::function<void()> save;
+            std::function<void()> revert;
+            std::function<void()> recover;
+            std::function<void()> discardRecovery;
+            std::function<void (bool)> setLocked;
+            std::function<void()> reloadTheme;
         };
 
         TransportComponent (const model::Theme& theme, Actions actions);
@@ -59,8 +78,15 @@ namespace wfg::client::ui
         /** Fonts and colours from the theme; the window's look-and-feel carries the rest. */
         void applyTheme (const model::Theme& theme);
 
-        /** A sentence for the bottom line - a theme file's refusal, mostly. Empty clears it. */
+        /** A sentence for the foot - a theme file's refusal, mostly. Empty clears it. */
         void setNotice (const juce::String& notice);
+
+        /*  How tall this wants to be, which changes by three rows and a half
+            when the recovery banner appears. The shell asks rather than
+            assuming, and `onHeightChanged` tells it when to ask again. */
+        int preferredHeight() const noexcept;
+
+        std::function<void()> onHeightChanged;
 
         void paint (juce::Graphics& g) override;
         void resized() override;
@@ -71,12 +97,17 @@ namespace wfg::client::ui
         model::Theme theme;
         model::TransportReading last;
         bool shownOnce = false;
+        bool bannerShowing = false;
 
-        juce::Label showLabel, tickLabel, clockLabel, rateLabel,
-                    listLabel, standbyLabel, statusLabel, errorLabel, noticeLabel;
-        juce::TextButton goButton { "GO" };
+        juce::Label showLabel, tickLabel, clockLabel, rateLabel, fileLabel,
+                    undoLabel, listLabel, standbyLabel, statusLabel, errorLabel, noticeLabel;
+        juce::TextButton goButton { "GO" }, saveButton { "save" }, revertButton { "revert" },
+                        undoButton { "undo" }, redoButton { "redo" }, lockButton { "lock the show" },
+                        recoverButton { "recover" }, discardButton { "discard" };
 
         int rowHeight() const noexcept;
+        juce::Rectangle<int> bannerArea() const;
+        void askThenRevert();
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransportComponent)
     };

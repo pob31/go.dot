@@ -16,7 +16,6 @@
 
 #include <wfg/client/model/Transport.h>
 
-#include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <cstdint>
@@ -25,6 +24,21 @@
 
 namespace wfg::client::model
 {
+    namespace
+    {
+        /*  THE DASH IS "THE ENGINE HAS NOT SAID", and it is the same dash the
+            page draws, for the same reason: a reading nobody has published yet
+            is not a zero and not a no. */
+        constexpr const char* unsaid = "—";
+
+        std::string join (const std::string& a, const std::string& b)
+        {
+            if (a.empty()) return b;
+            if (b.empty()) return a;
+            return a + " · " + b;
+        }
+    }
+
     std::string TransportReading::standbyLine() const
     {
         if (standbyId.empty())
@@ -36,13 +50,59 @@ namespace wfg::client::model
         return standbyName + "  " + standbyKind;
     }
 
+    std::string TransportReading::fileLine() const
+    {
+        /*  ONE QUESTION, NOT TWO - is everything worth keeping on disk as the
+            show? - because "saved" alone would be true of show.xml and silent
+            about the afternoon beside it (the page's own argument, strip.js). */
+        const auto saved = dirty == Flag::yes ? "unsaved changes"
+                         : dirty == Flag::no  ? "saved"
+                                              : unsaid;
+
+        return join (saved, recovery == Flag::yes ? "recovery waiting" : "");
+    }
+
+    std::string TransportReading::undoLine() const
+    {
+        const auto half = [] (Flag can, const std::string& name,
+                              const char* verb, const char* nothing)
+        {
+            if (can == Flag::unsaid)    return std::string (verb) + ": " + unsaid;
+            if (can == Flag::no)        return std::string (nothing);
+
+            /*  THE ENGINE'S OWN WORD FOR IT, and no table here: `undoName`
+                already reads `node.set`, `cue.create`, `object.delete` - the
+                names §4.11 makes every action carry. A lookup table in this
+                file would go stale the day a command is added by somebody who
+                never opened it. */
+            return std::string (verb) + ": " + (name.empty() ? "the last edit" : name);
+        };
+
+        return join (half (canUndo, undoName, "undo", "nothing to undo"),
+                     half (canRedo, redoName, "redo", "nothing to redo"));
+    }
+
+    std::string TransportReading::statusLine() const
+    {
+        const auto audio = status.empty() ? std::string (unsaid) : "audio " + status;
+
+        /*  SAID IN A WORD, not only drawn in a colour (§4.8) - and `unsaid`
+            gets no word at all here, because "the engine has not told us
+            whether the show is locked" belongs beside the lock's own button
+            and would be noise on the line that says whether sound is coming
+            out. */
+        return join (audio, locked == Flag::yes ? "locked" : "");
+    }
+
     bool TransportReading::operator== (const TransportReading& other) const noexcept
     {
         const auto tie = [] (const TransportReading& r)
         {
-            return std::tie (r.show, r.dirty, r.locked, r.tick, r.clock, r.rate,
+            return std::tie (r.show, r.dirty, r.locked, r.recovery,
+                             r.tick, r.clock, r.rate,
                              r.listId, r.listName, r.standbyId, r.standbyName, r.standbyKind,
-                             r.status, r.lastError, r.revision);
+                             r.canUndo, r.canRedo, r.undoName, r.redoName,
+                             r.status, r.lastError, r.writeError, r.warnings, r.revision);
         };
 
         return tie (*this) == tie (other);
@@ -55,6 +115,7 @@ namespace wfg::client::model
         reading.show = text (snapshot, "/godot/document/name");
         reading.dirty = flag (snapshot, "/godot/document/dirty");
         reading.locked = flag (snapshot, "/godot/document/locked");
+        reading.recovery = flag (snapshot, "/godot/document/recovery");
 
         reading.tick = text (snapshot, "/godot/engine/tick");
         reading.clock = text (snapshot, "/godot/engine/clock");
@@ -84,8 +145,15 @@ namespace wfg::client::model
             reading.standbyKind = text (snapshot, "/godot/cue/" + reading.standbyId + "/kind");
         }
 
+        reading.canUndo = flag (snapshot, "/godot/document/canUndo");
+        reading.canRedo = flag (snapshot, "/godot/document/canRedo");
+        reading.undoName = text (snapshot, "/godot/document/undoName");
+        reading.redoName = text (snapshot, "/godot/document/redoName");
+
         reading.status = text (snapshot, "/godot/audio/status");
         reading.lastError = text (snapshot, "/godot/engine/lastError");
+        reading.writeError = text (snapshot, "/godot/document/writeError");
+        reading.warnings = text (snapshot, "/godot/document/warnings");
 
         if (const auto* node = snapshot.find ("/godot/document/revision"))
             if (const auto sole = node->soleValue(); sole.has_value() && sole->isInt64())

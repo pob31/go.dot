@@ -484,7 +484,8 @@ class Server:
                  locale: "str | None" = None,
                  sample_rate: int = 48000, buffer_size: int = 128,
                  hosted: bool = False, render: "Path | None" = None,
-                 ui: "Path | None" = None, device: "str | None" = None):
+                 ui: "Path | None" = None, device: "str | None" = None,
+                 window: bool = False, theme: "Path | None" = None):
         argv = [str(find_binary()), "serve", str(bundle),
                 f"--sample-rate={sample_rate}", f"--buffer={buffer_size}",
                 "--http-port=0", "--osc-port=0"]
@@ -511,6 +512,17 @@ class Server:
         # neither is any use.
         if device is not None:
             argv.append(f"--device={device}")
+
+        # --window opens the compiled client over this same engine, in this
+        # same process (namespace draft section 14.16). Off by default here as
+        # it is in the verb, and for the same reason: every driver in this
+        # folder runs headless, and a window one of them opened by accident
+        # would be a test that needs a display. What wants it is M25, which
+        # measures what the window costs the tick thread.
+        if window:
+            argv.append("--window")
+        if theme is not None:
+            argv.append(f"--theme={theme}")
 
         if log is not None:
             argv.append(f"--log={log}")

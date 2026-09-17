@@ -41,6 +41,17 @@ namespace wfg::tree { struct Node; class TreeSnapshot; }
 
 namespace wfg::client::model
 {
+    /*  WHAT A `T` NODE SAYS, INCLUDING THAT IT HAS SAID NOTHING. A node the
+        engine has not published is not a node reading false: a show with no
+        answer yet about its lock is not an unlocked show, and drawing it as
+        one would be this client inventing a reading. The page gives three
+        answers wherever this matters and says so in words as well as colour
+        (§4.8); so does the window. */
+    enum class Flag { unsaid, no, yes };
+
+    /** True only for `Flag::yes` - the safe reading for every gesture a client offers. */
+    inline bool isYes (Flag value) noexcept { return value == Flag::yes; }
+
     /** The value as a label shows it. Empty for nil and for an impulse. */
     std::string text (const osc::Value& value);
 
@@ -52,8 +63,8 @@ namespace wfg::client::model
     /** find() and text() in one call; empty when nothing is at the address. */
     std::string text (const tree::TreeSnapshot& snapshot, std::string_view address);
 
-    /** A T/F node read as a bool. False when absent, which is the safe answer for every flag a client reads. */
-    bool flag (const tree::TreeSnapshot& snapshot, std::string_view address);
+    /** A `T` node's three answers: absent, false, true. */
+    Flag flag (const tree::TreeSnapshot& snapshot, std::string_view address);
 
     /*  The words of a space-separated node, which is how every `order` node
         lists identifiers - the page's tree.ids() does the same split. */

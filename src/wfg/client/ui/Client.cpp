@@ -49,11 +49,12 @@
 #include <wfg/client/Client.h>
 
 #include <wfg/client/model/Gestures.h>
+#include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/MainWindow.h>
-#include <wfg/client/ui/TransportComponent.h>
+#include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
@@ -78,22 +79,46 @@ namespace wfg::client
             {
                 juce::Desktop::getInstance().setDefaultLookAndFeel (&look);
 
-                auto content = std::make_unique<ui::TransportComponent> (
-                    theme, ui::TransportComponent::Actions { [this] { go(); },
-                                                             [this] { reloadTheme(); } });
-                transport = content.get();
+                ui::TransportComponent::Actions actions;
+
+                /*  ONE GESTURE, ONE COMMAND, and the command is the model's to
+                    name (model/Gestures.h): this file knows which button was
+                    pressed and nothing about what it means. `submit` takes any
+                    thread and never blocks, so a click returns at once and the
+                    tick thread applies it in arrival order like a datagram. */
+                actions.go              = [this] { send (gesture::go()); };
+                actions.undo            = [this] { send (gesture::undo()); };
+                actions.redo            = [this] { send (gesture::redo()); };
+                actions.save            = [this] { send (gesture::save()); };
+                actions.revert          = [this] { send (gesture::revert()); };
+                actions.recover         = [this] { send (gesture::recover()); };
+                actions.discardRecovery = [this] { send (gesture::discardRecovery()); };
+                actions.setLocked       = [this] (bool locked) { send (gesture::setLocked (locked)); };
+                actions.reloadTheme     = [this] { reloadTheme(); };
+
+                ui::CueListComponent::Actions listActions;
+
+                listActions.standbyNext     = [this] { send (gesture::standbyNext()); };
+                listActions.standbyPrevious = [this] { send (gesture::standbyPrevious()); };
+                listActions.park            = [this] (const std::string& id)
+                                              { send (gesture::park (id)); };
+                listActions.go              = [this] { send (gesture::go()); };
+
+                auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
+                                                            std::move (listActions));
+                shell = content.get();
 
                 window = std::make_unique<ui::MainWindow> (titleFor (""),
                                                             ui::Look::colour (theme, "ground"),
                                                             [this] { closeRequested(); });
                 window->setContentOwned (content.release(), false);
-                window->centreWithSize (juce::roundToInt (30 * theme.row * theme.type),
-                                        juce::roundToInt (7 * theme.row * theme.type));
+                window->centreWithSize (juce::roundToInt (34 * theme.row * theme.type),
+                                        juce::roundToInt (26 * theme.row * theme.type));
 
                 pass();     // the first reading, before the window is seen
 
                 window->setVisible (true);
-                transport->grabKeyboardFocus();
+                shell->grabKeyboardFocus();
 
                 startTimerHz (juce::jmax (1, juce::roundToInt (theme.refreshHz)));
             }
@@ -108,7 +133,7 @@ namespace wfg::client
             /** For the factory, when a theme file was refused at start: shown where the author is looking. */
             void notice (const std::string& sentence)
             {
-                transport->setNotice (juce::String (sentence));
+                shell->transport.setNotice (juce::String (sentence));
             }
 
         private:
@@ -127,7 +152,17 @@ namespace wfg::client
                 if (reading.show != last.show)
                     window->setName (titleFor (reading.show));
 
-                transport->show (reading);
+                shell->transport.show (reading);
+
+                /*  THE TWO RATES OUT OF ONE SNAPSHOT. The model walks the show
+                    only when `/godot/document/revision` has moved or the
+                    focused list has changed (M0); the pointer is read every
+                    pass and costs two rows a repaint. Both from the same
+                    pointer copy, so the list and the strip can never disagree
+                    about which tick they are drawing. */
+                show.refresh (*snapshot, reading.listId);
+                shell->cues.show (show, reading.standbyId);
+
                 last = reading;
             }
 
@@ -136,16 +171,23 @@ namespace wfg::client
                 pass();
             }
 
-            void go()
+            /*  THE ONE WAY OUT OF THIS CLIENT INTO THE SHOW (§14.16, rule 1).
+                `submit` answers false when the queue was full and an older
+                entry was dropped - which is not a rejection and not this
+                window's business: a refused command comes back as
+                `/godot/engine/lastError` on the next pass, where the operator
+                reads it, and a full queue at four thousand entries is a
+                machine in trouble that a dialogue here would not help. */
+            void send (Event event)
             {
-                host.engine.submit (gesture::go());
+                host.engine.submit (std::move (event));
             }
 
             void reloadTheme()
             {
                 if (themeFile == juce::File())
                 {
-                    transport->setNotice ("no theme file: start with --theme=<file> to edit the look");
+                    shell->transport.setNotice ("no theme file: start with --theme=<file> to edit the look");
                     return;
                 }
 
@@ -154,14 +196,14 @@ namespace wfg::client
                 if (const auto refused = next.apply (themeFile.loadFileAsString().toStdString());
                     ! refused.empty())
                 {
-                    transport->setNotice (juce::String (refused));
+                    shell->transport.setNotice (juce::String (refused));
                     return;
                 }
 
                 theme = next;
                 look.apply (theme);
-                transport->applyTheme (theme);
-                transport->setNotice ("theme read from " + themeFile.getFileName());
+                shell->applyTheme (theme);
+                shell->transport.setNotice ("theme read from " + themeFile.getFileName());
                 window->setBackgroundColour (ui::Look::colour (theme, "ground"));
                 window->sendLookAndFeelChange();
                 window->repaint();
@@ -180,7 +222,12 @@ namespace wfg::client
             {
                 using Options = juce::MessageBoxOptions;
 
-                if (last.locked)
+                /*  `isYes`, not "not no": a show whose lock the engine has not
+                    published yet is not an unlocked show, and the safe reading
+                    for a gesture is the one that offers less. Here that means
+                    a window whose engine has said nothing still closes - the
+                    refusal is for a show KNOWN to be in show mode. */
+                if (model::isYes (last.locked))
                 {
                     juce::AlertWindow::showAsync (Options()
                                                     .withIconType (juce::MessageBoxIconType::InfoIcon)
@@ -215,8 +262,17 @@ namespace wfg::client
             model::TransportReading last;
 
             ui::Look look;                                  // before the window: destroyed after it
+
+            /*  So that a disabled button can say WHICH thing is unavailable
+                (§4.8): without one, setTooltip is a value nothing reads. */
+            juce::TooltipWindow tooltips { nullptr, 700 };
             std::unique_ptr<ui::MainWindow> window;
-            ui::TransportComponent* transport = nullptr;    // owned by the window
+            ui::Shell* shell = nullptr;                     // owned by the window
+
+            /*  The rows, cached against the show's revision. Declared after the
+                window only because nothing in it points back: it is plain data
+                the timer hands to the list. */
+            model::ShowModel show;
         };
     }
 

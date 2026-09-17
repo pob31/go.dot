@@ -253,6 +253,8 @@ target_link_libraries(wfg_engine
 add_library(wfg_client_model STATIC
     wfg/client/model/Gestures.h
     wfg/client/model/Gestures.cpp
+    wfg/client/model/ShowModel.h
+    wfg/client/model/ShowModel.cpp
     wfg/client/model/Text.h
     wfg/client/model/Text.cpp
     wfg/client/model/Theme.h
@@ -270,8 +272,12 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/Client.cpp
     wfg/client/ui/Look.h
     wfg/client/ui/Look.cpp
+    wfg/client/ui/CueListComponent.h
+    wfg/client/ui/CueListComponent.cpp
     wfg/client/ui/MainWindow.h
     wfg/client/ui/MainWindow.cpp
+    wfg/client/ui/Shell.h
+    wfg/client/ui/Shell.cpp
     wfg/client/ui/TransportComponent.h
     wfg/client/ui/TransportComponent.cpp)
 add_library(wfg::client_ui ALIAS wfg_client_ui)
