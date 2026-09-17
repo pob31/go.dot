@@ -6465,6 +6465,21 @@ thread and is never blocked by it. `HostPlayer` and the OSCQuery server already 
 seam, so this adds no new threading rule to the engine at all - which is the strongest argument for
 it and was invisible while E was assumed the other way.
 
+**The cost of the answer, which nobody had written down while E was open.** A separate process can
+crash without taking the show with it: a page that throws is a page that gets refreshed while the
+cues keep running, and that has happened during this phase's own development more than once. **In
+process, a client crash takes the engine down** — the audio stops, the runs die, and the operator
+is left with a dead machine mid-cue. That is not an argument against the answer, because the
+answer was taken on media and on code size and both still hold; it is the thing the answer costs,
+and it is written here so that it is a known price rather than a discovery. Two mitigations are
+adopted with it: **the window is off by default**, a flag on `serve` rather than the shape of the
+binary, so every black-box driver and every headless deployment is unchanged and a suspect client
+can be left out of a show entirely; and **the page stays live**, which makes it the redundancy
+path PRD §3.17 already says it is, on the night the compiled client is the thing that failed. What
+this buys is a real choice at the desk — if the window is what broke, close it and run from a
+browser — and it is only a choice for as long as the page can still run a show, which is a
+standing obligation on this project and not a temporary one.
+
 **§14.2's contract is unchanged, and it is narrower than it has been read as.** Two clients, one
 contract, neither with a door into the SHOW that the other lacks - which is not the same as two
 clients with the same controls, and never was. The desktop will have views the page never grows,
@@ -6473,6 +6488,21 @@ that leaves no record. What kept that before was a process boundary. What keeps 
 third of E's three points - the show changes only through named commands - and it is checkable
 rather than trusted, because a gesture that reached the document directly would write nothing to
 the log and `wfg replay` of that session would not reproduce it.
+
+**And the contract needs one rule it did not need while E was open, because the slack above would
+otherwise quietly end the page's redundancy.** *Every command the desktop sends stays reachable
+from the page's generic inspector.* The desktop is free to have views the page never grows — that
+is settled above — but a view is a way of producing an argument, and the argument has to remain
+producible by somebody who only has a browser. The case that shows why is the smallest one:
+*mark as preset* is a select of ancestor groups on the desktop and an ordinary `node.set
+…/preset <group>` underneath, so the page reaches it through the inspector it already builds out
+of `TYPE`, `ACCESS` and `RANGE` (§14.2) and nothing has to be written for it. That is the shape to
+keep. A desktop-only view that is the ONLY route to a command is the failure, and it fails PRD
+§3.17's *"the redundancy path (§3.5), and a redundancy path that requires an installed app is not
+one"* rather than §3.2 — which is why this rule sits here and not with §3.2's three points above.
+It costs nothing today because the generic inspector is generic. It stops costing nothing on the
+day a command is added whose arguments the inspector cannot express, and the answer then is to fix
+the inspector or to reconsider the command, not to let the page fall behind.
 
 **The component tree, and the reuse named rather than assumed.** `MainWindow` → `Transport` /
 `Didi` (a `juce::ListBox` keyed by cue id, standby and selection drawn as distinctly from each
@@ -6525,7 +6555,147 @@ start at all; what it must not do is start while the layout is still being desig
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 
-*Owed at close-out and written by PR 5.19, as §11.9, §12.15 and §13.16 were — a heading here
-rather than an obligation to remember, because §13.16's own closing argument is that a
-retrospective written a phase late is written from the commit messages rather than from the
-week.*
+*Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is
+the whole of §13.16's argument for writing a close-out while the week is still legible.*
+
+**The draft held for the engine and gave way for the client, and the giving way is the more useful
+half.** §14 was drawn before a line of Phase 5 code existed, which was PR 5.0's entire claim on the
+schedule. Half A vindicated it: eight pull requests landed close enough to what was drawn that every
+departure fitted as a dated correction inside the subsection that had drawn it — the `armMedia`
+early return that would have replayed an empty `kind` (§14.5), the autosave decision moving from the
+after hook to the before one because a submit from the after hook is drained a tick late (§14.8),
+the undo seam that turned out not to be pre-cut at all, its `nullptr` a literal rather than a
+threaded parameter (§14.9), the blind retry that exists because `replaceFileIn` swallows the
+platform error (§14.10), the colour ramp whose hue is *not* monotonic in frequency, which cost the
+sweep test its obvious assertion (§14.12), and the CSV → generator → binary order the fixtures
+insist on (§14.13). A draft wrong in a dozen particulars, each corrected where a reader would look
+for it rather than in an errata list at the end, is this method working rather than failing.
+
+**Half B's drawing did not survive contact with the author, and no amount of care in the drawing
+could have saved it.** §14.3 drew seven views, one per pull request, each *"sized to earn one round
+of the author's feedback rather than to be finished"*. The sizing was right. The contents were not,
+and the reason is recorded here because it will recur in every phase that ends in a surface: **what
+the author asked for after looking was never the next view on the list.**
+
+**The evidence is a file list, and it is not close.** Half B's plan named `model/layout.js`,
+`views/header.js` and `views/curve.js`; none of the three exists. What the console grew instead —
+`model/remember.js`, `gestures/drag.js`, `gestures/fields.js`, `gestures/table.js`, `views/view.js`,
+`views/common.js`, `views/values.js`, `views/reconcile.js` — is eight modules, not one of which any
+plan drew. The four numbered pull requests that did land as drawn (5.9's rehearsal blockers, 5.10's
+module split, 5.16a's fade points, 5.18's tests) are precisely the four with no layout in them. The
+moment a pull request's subject was *how something looks*, the number stopped predicting the work.
+
+**So the numbering was abandoned rather than defended.** From `90c20bd` onward the console's commits
+carry no PR number, because attaching one would have been a fiction — a round that moves the
+inspector to the foot of the window is not 5.13, and calling it 5.13 would have made the plan look
+met while the author was asking for something else entirely. Eleven commits, in the order the author
+asked:
+
+1. **`90c20bd` — bigger type, readable greys, time columns, marks.** The first thing asked for after
+   looking at the finished page was not a missing view: it was that the type was too small, the
+   greys too close together, that Didi should carry preWait, duration and postWait as *editable*
+   columns, and that Gogo's *Armed* and *Playing* words should be the yellow and green marks alone.
+   A 25 % type scale became `--type`, a single token every size is derived from.
+2. **`a6f29f1` — the inspector folds away what the engine says back.** UIDs, hashes and the rest of
+   the machine's own bookkeeping into a collapsible *details* section, because *"these are not
+   really necessary for the user"*. §14.2's generic inspector survived intact: the fold is a rule
+   over `ACCESS` and name, not a list of fields.
+3. **`26881a7` — the inspector reads in the order somebody works.** preWait before duration before
+   postWait; cue types and subtypes grouped by what they do rather than alphabetically. The
+   alphabet was never a decision, only a default nobody had questioned.
+4. **`6748dd4` — the inspector can sit at the foot.** The author raised QLab, where the inspector is
+   at the bottom, and asked for *both* arrangements rather than a choice — so labels move onto the
+   parameter row in the foot orientation, to keep the scrolling down.
+5. **`3115b10` — and it can sit between the panes, only when something is picked.** Didi and Gogo
+   shrink to make room; nothing picked, nothing shown.
+6. **`d6f70fe` — the panes move rather than jump.** The author asked for the contraction to be
+   animated rather than an instant redraw, and for the panels to be told apart by tone. This is the
+   round that produced `--panel`, `--panel-in`, `--panel-inspect` and `--panel-high`.
+7. **`e592ac0` — a section is a frame that shuts, and the page remembers what the reader shut.**
+   Asked for in three parts: a header line should be able to reveal its cue; the header and footer
+   sections need a clearer delimiter, *"something like a collapsible frame"*; and the open/closed
+   state has to persist. The third part is `model/remember.js` and `localStorage`, which is where
+   §14.1's line falls — fold state is the client's, and the engine is never told.
+8. **`2a5b436` — a move's index is a member's position, and many cues can be chosen.** Below.
+9. **`09747f7` — the pointer may stand on any cue of its list.** Below.
+10. **`f2989a0` / `5d3a171` — a cue can be dragged where it goes.** Explicitly excluded by the Phase
+    5 plan (*"the console's own comment declines it; ▲/▼ and `object.move` stay the gesture until
+    the author asks"*) — and the author asked, which is exactly the condition that exclusion named.
+    The drop says what it will cost before it happens: a drag that would break a `preset` or carry
+    marks with it says so in words at the insertion line.
+
+**Two defects surfaced that no green test could have shown, and both were found the same way.**
+Before building drag-and-drop on `object.move`, the engine was driven by hand and watched. The
+index it takes counted *every* child element — `<Header>`, `<Footer>`, `<Persistent>`, `<Trigger>`
+included — while every client counts members, because members are all the tree publishes. In a
+group whose children are `[Header, Media, Osc, Group, Footer]`, the inspector's ▼ on the Osc made it
+trade places with the `<Header>` element and moved no member at all. The button had done nothing
+since the day it was written, under 73 green tests, because every test asserted through the same
+member-blind arithmetic the door used. The fix is one rule in one place, `doc::isSequenceChild` and
+`doc::rawIndexForPosition` (`document/Sequence.h`), asked by both the publisher and the door so they
+cannot drift, and verified by exhaustive simulation over every arrangement of up to five children.
+Chasing it turned up the second: `remove`'s standby repair asked for *"the next sibling with an
+id"*, which in a group with a footer answers with the `<Footer>` element — a standby the write door
+then refuses, so the repair silently did nothing and left the list parked on the cue just deleted.
+That is the frozen-GO failure `remove`'s own comment exists to prevent. **The lesson is cheap and
+general: probe the running engine before building on it.** A test suite written against an
+implementation shares its blind spots by construction; a hand on the gesture does not.
+
+**A third defect came from a decision instead, and is the better story.** The author reported that
+the arrows would not let them stand on a cue *inside* a group to start from there. The fix was one
+removed guard in `cue::CueList::findOnPath`, and the test written to pin the author's decision then
+failed on GO — because a GO from inside a machine-parented group started the whole scene rather than
+the cue the pointer was on. `Runner::descentTo` now stops at the first non-manual group, and
+`ShowWalk`'s `mayLandHere` is deliberately narrower than `cue::mayStandOn`: a jump must not leave
+the pointer inside a scene that is about to fire it. A decision, written down as a test, found a bug
+the decision was not about.
+
+**Three questions were settled, and one of them had been open since Phase 2.**
+
+- **X — the cursor.** The standby pointer may stand on any cue of its list, including inside a
+  group, and GO fires the one it is on. PRD §3.5 and §3.6 were amended; §3.27's sampler sentence
+  contradicts it and is **flagged, not amended** — it is the author's.
+- **Y — media arrives through the desktop client**, because a browser is never told a dropped file's
+  path. Not a scheduling call: a capability the first client cannot have (§14.16).
+- **E — the desktop client runs in process**, settled on 2026-09-17 after four phases of being
+  deferred. §14.16 is rewritten against the answer, and the rewrite made that subsection *smaller*:
+  no HTTP poll, no WebSocket, no second copy of the tree, no blocking client thread, no rule set
+  aside. Settling it before a line was compiled was the point — §14.16 had recorded that a client
+  started without an answer would answer E by accident.
+
+**The author's own reading of §3.2 was corrected, and the correction is theirs, not a concession.**
+This draft had been quoting the slogan — *"nothing the UI can do that the API cannot"* — as though
+it bound controls. Read whole, §3.2's binding word is **action**: *"Every gesture-reachable action
+also exists as a named command… Modifiers and gestures are an accelerator layer over a complete
+command set, never the only route."* The page has had sliders, number boxes, keyboard shortcuts and
+now a drag-to-reorder since Phase 3, not one of which exists in the API and not one of which broke
+anything, because each of them ends in a named command. The desktop client accordingly *"gets as
+much slack as it needs"*; the tablet is a subset of controls, never of powers (§14.16).
+
+**What the page is, at the close.** Rows keyed by id and reconciled in place, so a 500-cue show
+renders in 6.5 ms where it took 560 (M24, and the trigger scan was 97 % of it). Nine ES modules over
+four directories, no build step, edited while a show runs. Frames that shut and are remembered per
+show. Multi-selection with anchor-and-range, bulk edit across the selection through the same generic
+inspector. Drag-to-reorder with a refusal that speaks. The standby on any cue of its list. Undo,
+save, the dirty dot, the lock, recovery. A running pane with round pills and prune. Timbre numbers
+on a run row. 115 console cases under `node --test` plus 73 ctest tests plus two Phase 5 black-box
+drivers, on three platforms in six CI jobs.
+
+**What §14 drew for the page and nobody built — deliberately, and now the desktop's.** The display
+presets and show mode (5.14), the fade-curve editor (5.16b) and the spectral bar (5.17), joined by
+the one piece of the header pane the frames round did not absorb — *mark as preset*, which is an
+inspector control. These are the four views the author assigned to the desktop only on 2026-09-17.
+Three of them could not have been sketched on the page in any case; the fourth is a visibility rule
+over panes that already exist. The header pane as a *pane* no longer exists as work at all: the
+frames round built its written-and-derived lines inside the group's own header frame, which is
+where they belong.
+
+**What is still open at the close**, none of it blocking: the 8.6 MB full-tree poll against LISTEN
+or a values-only read; the ramp's non-monotonic hue and §3.30's *(proposed)* idle-colour policy;
+5.16a's two hazards (bus re-point, N-argument datagrams) and its proposed leave-from-the-run's-level
+rule; the PRD amendment backlog, group D, plus §3.27's flagged sampler sentence; the Mac mini's
+M22/M23/M24; the `WFG_SKIP_SMALL_BLOCKS` experiment; a narrowing conversion at `cue/Runner.cpp:1181`
+that MSVC warns on; the ▲-then-▼ that does not round-trip out of a non-manual group; and
+`siblingAfter`'s remaining hole, where a `<Trigger>` or a disabled cue is a member by the sequence
+rule and refused as a standby — whose honest repair is for that walk to ask the cursor rather than
+the children, a decision about the standby and not about the index.
