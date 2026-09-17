@@ -885,57 +885,87 @@ back on if nobody feels strongly by then.
 | J | **Should PRD §4.2 record what Tracktion does inside the callback?** Its device callback takes one uncontended `std::shared_lock` per block and its node-player pool uses semaphores; the lipogram can be *enforced* on Go.dot's code and only *measured* on Tracktion's (§11.5). A PRD amendment is the author's to make. | the lipogram test (PR 2.2) | enforce on Go.dot's scopes, report Tracktion's count separately, never hide it |
 | ~~K~~ | *(settled 2026-09-06, in PR 2.6, the way this table recommended — see below)* **How does a mount declare what it can do?** `transport` says how to *send* and nothing says whether the target can be *asked*, so `wait: verified` against a write-only device is a cue that cannot succeed and nothing notices until the show. Chataigne carries two booleans per module, `hasInput` and `hasOutput`, for exactly this. Also: whether the answer names the *mechanism* (`oscquery` \| `poll` \| `subscribe` \| `none`) or only the capability. | `verified` (PR 2.6) | a mount-level `readback` enum defaulting to `none`, and a `verified` cue against `none` refused at load — the strictest reading, and the one that cannot fail silently |
 
-**E — SETTLED 2026-09-17: IN PROCESS, AND A CLIENT ALL THE SAME.** The author was asked before a
-line of the client was compiled - which was the whole point of asking, since §14.16 had recorded
-that a compiled client started without an answer would answer E *by accident*, by whatever was
-convenient in its first week. The answer is **in-process**, for two reasons they gave: media, which
-is the one thing a browser cannot do at all (decision Y) and which a local process handles without
-an import route existing first; and less code, since a second networked model is a second model to
-keep in step. The web page and a remote app *complement* it, for the cases where somebody is not
-sitting at the machine.
+**E — SETTLED 2026-09-17: IN PROCESS, AND THE DESKTOP CLIENT GETS AS MUCH SLACK AS IT NEEDS.**
+The author was asked before a line of the client was compiled - which was the whole point of
+asking, since this subsection had recorded that a compiled client started without an answer would
+answer E *by accident*, by whatever was convenient in its first week.
 
-**AND THE LAW IS KEPT, BY A RULE ABOUT ACCESS RATHER THAN ABOUT PROCESSES.** The fallback this
-table recorded assumed the two were the same question. They are not. PRD §3.2 says *"nothing the UI
-can do that the API cannot. The UI is built as a client"* - which is a statement about what the UI
-may DO, not about where it runs. So the second half of the decision, taken with the first:
+**The answer is in process**, for two reasons they gave. Media, which decision Y established a
+browser cannot do at all - a page is never told the path of a file dropped on it - and which a
+local process handles without an import route having to exist first. And less code: a second
+networked model is a second model to keep in step with the engine's. The page and a remote app
+*complement* it, for when somebody is not at the machine.
 
-> **The desktop UI reaches the engine through `Engine::submit` and
-> `ParameterTree::snapshot()` and through nothing else.** It does not hold a
-> `ShowDocument&`, a `Runner&` or a mount table. It submits named commands and
-> it reads published snapshots, exactly as the page does over a socket.
+**THE RANKING IS THE POINT, AND IT IS THE AUTHOR'S OWN PRACTICE RATHER THAN A CONCESSION.**
+WFS-DIY already runs this shape: its Android remote drives sixty-four inputs and ten arrays over
+bi-directional OSC at fifty hertz, and the desktop plugin has far more than the tablet does. The
+tablet is a subset of CONTROLS and not a subset of POWERS. Go.dot is the same: the desktop client
+is the richest surface, the page is a useful subset, and neither is a compromise for the other.
+Nothing here holds the compiled client down to what a browser can draw, and the page lacking
+something is never a reason for the engine to lack it.
 
-This costs almost nothing, which is why it is worth having. Both doors already exist and are
-already the ones OSC comes through: `submit (origin, command, args)` puts an event on a queue that
-never blocks its caller and is applied on the tick thread in arrival order, logged and replayable;
-`snapshot()` hands back a `shared_ptr<const TreeSnapshot>`, so a read is a pointer copy that cannot
-tear and cannot see a half-applied tick. What the rule gives up is the shortcut - and the shortcut
-is the whole hazard, because it is never taken on the day the client is designed. It is taken on
-the day a datagram round trip is inconvenient and the document is right there on the same heap, and
-from that day the desktop client can do something no tablet, no surface bridge, no MCP client and
-no script can do.
+**WHAT BELONGS TO A MACHINE STAYS WITH THAT MACHINE.** WFS-DIY's remote has *Find Device* - flash
+the screen and sound an alarm so somebody can locate the tablet in a dark venue - and a
+finger-pressure calibration, and neither exists anywhere else. Nobody has ever thought that broke
+anything, because neither touches the audio. A native file dialog is Go.dot's *Find Device*: the
+desktop doing something with its own hardware, which ends in an argument to an ordinary command
+that the tablet could have sent had it had the path.
+
+**AND COPYING MEDIA INTO THE BUNDLE IS NOT A CHANGE TO THE SHOW**, which is the reading decision Y
+left open and §4.10 settles. The *decision* is the cue naming the file; the bytes landing in
+`media/` are a fact about the disk, exactly like the timbre cache the analyser thread already
+writes with no command, no record and nobody's undo history disturbed. So the desktop client may
+open a dialog, copy the file in itself, and then send one ordinary `node.set` so the cue names it -
+logged, undoable, and reachable by any client that ever has a path.
+
+**THE ONE LINE, AND IT PAYS THE AUTHOR BACK RATHER THAN CONSTRAINING THEM: the show changes only
+through named commands.** Not for parity's sake. Because that is what puts a change in the undo
+history, in the event log, and in a replay of the night it went wrong. A client that edited the
+document directly would be taking cues out of an operator's ctrl-Z without telling them, and
+`wfg replay` of that session would not reproduce it.
+
+PRD §3.2's law is not bent by any of this, and reading it whole is what shows why. Its slogan -
+*"nothing the UI can do that the API cannot"* - is followed immediately by the sentence that
+carries the content: *"Every gesture-reachable **action** also exists as a named command… Modifiers
+and gestures are an accelerator layer over a complete command set, never the only route."* The
+binding word is ACTION. A file dialog is not an action on the show; it is how an operator produces
+an argument, exactly as the page's sliders, number boxes and drag-to-reorder are, none of which
+exist in the API either and none of which anybody thought broke the law.
+
+**HOW IT REACHES THE ENGINE, WHICH IS A SMALLER QUESTION THAN IT LOOKED.** Both doors already exist
+and are already the ones OSC arrives through. `Engine::submit (origin, command, args)` puts an
+event on a queue that never blocks its caller and is applied on the tick thread in arrival order,
+logged and replayable. `ParameterTree::snapshot()` hands back a `shared_ptr<const TreeSnapshot>`,
+so a read is a pointer copy that can neither tear nor show a half-applied tick - the same object
+`GET /godot` is answered from. Those two cover reading the show and changing it; the file work
+above touches neither, since the bundle's path is published like anything else.
+
+So the client has no need of a `ShowDocument&` that anybody can presently name - and that is
+recorded as an observation rather than as a prohibition. **If a day comes when it does need one,
+that is worth stopping over**, because it means the API is missing something the tablet is missing
+too, and the honest repair is to add the command rather than to reach past it.
 
 **IT IS ALSO THE THREADING THE AUTHOR ASKED FOR** (*"a threaded client would be preferable"*), and
-not by coincidence: JUCE requires its components on the message thread, the engine requires its
-document on the tick thread, and those two facts already force exactly this shape. The UI runs on
-the message thread, never blocks the tick thread and is never blocked by it. The queue and the
-snapshot are the seam, which is the same seam `HostPlayer` and the OSCQuery server already sit
-behind.
+not by coincidence. JUCE requires its components on the message thread and the engine requires its
+document on the tick thread, so those two can never touch each other's data directly; the queue and
+the snapshot are exactly the hand-off between them, and they are the same hand-off `HostPlayer` and
+the OSCQuery server already sit behind. The client therefore adds no new threading rule to this
+engine at all, and the interface can never stall GO.
 
 **WHAT THE EVIDENCE SAID, AND WHY IT DID NOT DECIDE IT.** The web client of decision V is a
 separate client by construction, holds nothing the engine owns (§14.1) and has driven every gesture
 Phase 4 built over a socket without one hole being opened for it. That is a strong argument that
-the API is complete enough to be built against - and it stays true, since the rule above means the
-compiled client is built against the same API. What it was never an argument for is a second
-PROCESS, which buys serialisation and a round trip and no law that the access rule does not already
-buy.
+the API is complete enough to build a client against, and it stays true. What it was never an
+argument for is a second PROCESS, which buys serialisation and a round trip and nothing the reading
+above does not already buy.
 
-**WHAT TO WATCH, since a decision recorded without its failure mode is half recorded.** The rule is
-a discipline and not a compiler error: the UI will be linked against `wfg_engine`, so nothing stops
-somebody taking a reference. Two things make it visible rather than trusted - the client's own
-tests use a fake link and assert the BYTES a gesture produces (§14.16), which a direct call would
-fail to produce at all; and a gesture that reaches the document directly writes no record, so
-`wfg replay` of a session driven from the desktop client would not reproduce it. A divergent replay
-is the alarm, and it is the same alarm every other part of this engine already rings.
+**WHAT TO WATCH, since a decision recorded without its failure mode is half recorded.** The one
+line is a discipline and not a compiler error: the UI is linked against `wfg_engine`, so nothing
+stops somebody reaching for the document. What makes that visible rather than trusted is the log -
+a gesture that changed the show without a command writes no record, so `wfg replay` of that session
+would not reproduce it. A divergent replay is the alarm, and it is the same alarm every other part
+of this engine already rings. The client's own tests help too: a fake link and assertions on the
+BYTES a gesture produces (§14.16), which a direct call would not produce at all.
 
 **K — settled 2026-09-06, in PR 2.6, exactly as the fallback drew it.** A mount declares
 `readback` (`none | oscquery`, default `none`) and `queryPort`, and a `verified` cue aimed at a
@@ -3633,8 +3663,9 @@ is still open, so building the JUCE client now would answer E by accident. **Thi
 not answer E either**, and that is the convention it keeps throughout: E stays in §9's open
 table with the fallback recorded there, *assume separate*, and §14.16's outline is drawn on that
 fallback rather than on a decision nobody has taken. *(Dated note, 2026-09-17: E is now settled —
-the author was asked directly, before a line of the client was compiled, and chose IN PROCESS with
-an access rule that keeps §3.2's law: commands and snapshots, nothing else. The reasoning above is
+the author was asked directly, before a line of the client was compiled, and chose IN PROCESS -
+with the desktop client given as much slack as it needs, and one line kept: the show changes only
+through named commands. The reasoning above is
 left standing because it was the reason the question survived to be asked deliberately rather than
 answered by accident, which is exactly what it was for. §9's E and §14.16 carry the answer.)* Everything Half B could draw is a node or a
 command the engine does not have yet. And the author designs by looking: a page that reloads
@@ -6340,37 +6371,57 @@ Whatever is built, `media/@file` stays relative to the bundle, so an import is a
 reached — which means the engine will need an import path in the end regardless, and the desktop
 client is simply where the gesture can begin. §9's decision Y lists what is open about it.
 
-**§9's QUESTION E IS ANSWERED, AND NOT THE WAY THIS SUBSECTION USED TO ASSUME** (settled
-2026-09-17; the argument is in §9 under E, and what follows is written against it). The client runs
-**IN PROCESS**, for the author's own two reasons - media, which decision Y established a browser
-cannot do at all, and less code than a second networked model - with the page and a remote app
-complementing it for the times somebody is not at the machine.
+**§9's QUESTION E IS ANSWERED, AND THIS OUTLINE IS WRITTEN AGAINST THE ANSWER** (settled
+2026-09-17; the argument is in §9 under E). The client runs **IN PROCESS**, for the author's two
+reasons - media, which decision Y established a browser cannot do at all, and less code than a
+second networked model - with the page and a remote app complementing it for the times somebody is
+not at the machine.
+
+**AND IT GETS AS MUCH SLACK AS IT NEEDS.** The desktop client is the richest surface this project
+will have; the page is a useful subset of it. That is not a compromise struck between them, it is
+the shape the author already runs: WFS-DIY's Android remote drives sixty-four inputs and ten arrays
+over bi-directional OSC at fifty hertz, and its desktop plugin has far more than the tablet does.
+The tablet is a subset of CONTROLS, never of POWERS. So nothing in this outline holds the compiled
+client down to what a browser can draw, and the page lacking a view is never a reason for the
+engine to lack a command.
 
 **What this subsection had wrong was not its answer but its question.** It argued that an
 in-process UI is *"a client with a shortcut available to it"*, and that the shortcut erodes PRD
 §3.2's law on the day somebody takes it because a round trip was inconvenient and the document was
-right there on the same heap. Every word of that hazard is still true. What does not follow is that
-a second PROCESS is the only guard against it, because §3.2's law - *"nothing the UI can do that
-the API cannot. The UI is built as a client"* - is about what the UI may DO. A process boundary
-enforces that by making the shortcut impossible; a rule about ACCESS enforces the same thing by
-making it forbidden and visible, and costs neither serialisation nor a round trip:
+right there on the same heap. That hazard is still real and is watched for below. What does not
+follow is that a second PROCESS is the only guard - nor, as the same paragraph implied, that every
+client must be able to do everything every other client can.
 
-> **The desktop UI reaches the engine through `Engine::submit` and
-> `ParameterTree::snapshot()` and through nothing else.** No `ShowDocument&`, no
-> `Runner&`, no mount table. It submits named commands and reads published
-> snapshots, exactly as the page does over a socket.
+Read whole, §3.2 says so itself. The slogan - *"nothing the UI can do that the API cannot"* - is
+followed at once by the sentence carrying the content: *"Every gesture-reachable **action** also
+exists as a named command… Modifiers and gestures are an accelerator layer over a complete command
+set, never the only route."* The binding word is ACTION, and the page has been proving the reading
+since Phase 3: it has sliders, number boxes, keyboard shortcuts and a drag-to-reorder, not one of
+which exists in the API, and not one of which anybody thought broke anything. They are ways of
+producing an argument, and they end in a named command.
 
-Both doors already exist and are already the ones OSC arrives through, so the client layer below is
-the same shape it was drawn as - only its transport changes, and the transport was never the part
-that kept the law. The evidence the old paragraph gathered still stands and still counts: the page
-holds selection, fold state and a slider under a finger and nothing else (§14.1), and has driven
-this engine since Phase 3 without one hole opened for it. It was an argument that the API is
-complete enough to build a client against, which the rule above keeps true of the compiled one too.
+**So three things, and the third is the only one that binds:**
 
-Decision T makes what follows an outline and not a plan: the client starts when the layout has
-stopped moving. Decision U leaves the done-when's own judgement — *the author runs a simple show
-from the desktop build in a rehearsal room* — to the room. They are two judgements and the
-outline should not blur them.
+1. **What belongs to a machine stays with that machine.** WFS-DIY's remote has *Find Device* -
+   flash the screen, sound an alarm, locate the tablet in a dark venue - and a finger-pressure
+   calibration, neither of which exists anywhere else and neither of which touches the audio. A
+   native file dialog is this client's *Find Device*.
+2. **Copying media into the bundle is not a change to the show.** The decision is the cue naming
+   the file (§4.10); the bytes arriving in `media/` are a fact about the disk, like the timbre
+   cache the analyser thread already writes with no command and no record. So the client may open a
+   dialog, copy the file in itself, and send one ordinary `node.set` for the cue to name it.
+3. **The show changes only through named commands** - which is what puts a change in the undo
+   history, in the event log, and in a replay of the night it went wrong.
+
+**How it reaches the engine, which E's answer makes a smaller question than it looked.** Both doors
+already exist and are already the ones OSC arrives through: `Engine::submit (origin, command,
+args)` and `ParameterTree::snapshot()`. Those cover changing the show and reading it; the file work
+above touches neither, since the bundle's path is published like anything else. The client
+therefore needs no `ShowDocument&` that anybody can presently name - recorded as an observation,
+not a prohibition. If a day comes when it does, that is worth stopping over: it means the API is
+missing something the tablet is missing too, and the repair is a new command rather than a reach
+past the door.
+
 
 **The CMake target, and what it costs.** `JUCE_MODULES_ONLY` is `ON` globally at
 `cmake/WfgThirdParty.cmake:62-63` and cannot be enabled for one target: it is read before the
@@ -6414,11 +6465,14 @@ thread and is never blocked by it. `HostPlayer` and the OSCQuery server already 
 seam, so this adds no new threading rule to the engine at all - which is the strongest argument for
 it and was invisible while E was assumed the other way.
 
-**§14.2's contract is unchanged, and that is the whole of the law here**: two clients, one contract,
-neither with a door the other lacks. What kept it before was a process boundary; what keeps it now
-is the access rule under E — commands and snapshots, nothing else — and the rule is checkable,
-because a gesture that reached the document directly would write no record and `wfg replay` of that
-session would not reproduce it.
+**§14.2's contract is unchanged, and it is narrower than it has been read as.** Two clients, one
+contract, neither with a door into the SHOW that the other lacks - which is not the same as two
+clients with the same controls, and never was. The desktop will have views the page never grows,
+and a file dialog the page cannot have at all; what it will not have is a way to change the show
+that leaves no record. What kept that before was a process boundary. What keeps it now is the
+third of E's three points - the show changes only through named commands - and it is checkable
+rather than trusted, because a gesture that reached the document directly would write nothing to
+the log and `wfg replay` of that session would not reproduce it.
 
 **The component tree, and the reuse named rather than assumed.** `MainWindow` → `Transport` /
 `Didi` (a `juce::ListBox` keyed by cue id, standby and selection drawn as distinctly from each
