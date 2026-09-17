@@ -19,6 +19,7 @@
 #include <wfg/engine/json/JsonValue.h>
 
 #include <cstdint>
+#include <cstring>
 #include <map>
 #include <optional>
 #include <string>
@@ -164,12 +165,12 @@ namespace wfg::client::model
             if (! value.isString())
                 return "theme: '" + key + "' wants a colour written like \"#e8b04b\"";
 
-            const auto colour = parseColour (value.asString());
+            const auto argb = parseColour (value.asString());   // not `colour`, which is the member function's name
 
-            if (! colour.has_value())
+            if (! argb.has_value())
                 return "theme: '" + key + "' is not a colour: " + value.asString();
 
-            next.colours[key] = *colour;
+            next.colours[key] = *argb;
         }
 
         *this = std::move (next);
@@ -178,7 +179,19 @@ namespace wfg::client::model
 
     bool Theme::operator== (const Theme& other) const noexcept
     {
-        return type == other.type && refreshHz == other.refreshHz && row == other.row
-            && colours == other.colours;
+        /*  BIT FOR BIT, as OscValue compares its floats: "the same theme" means
+            the same tokens, and a number that read back from the file the author
+            wrote is the same bits, not nearly the same. It is also what keeps
+            -Wfloat-equal quiet without pretending there is a tolerance. */
+        const auto sameBits = [] (double a, double b) noexcept
+        {
+            std::uint64_t x = 0, y = 0;
+            std::memcpy (&x, &a, sizeof x);
+            std::memcpy (&y, &b, sizeof y);
+            return x == y;
+        };
+
+        return sameBits (type, other.type) && sameBits (refreshHz, other.refreshHz)
+            && sameBits (row, other.row) && colours == other.colours;
     }
 }
