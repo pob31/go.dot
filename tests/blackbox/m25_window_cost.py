@@ -249,7 +249,11 @@ def verdict(a, b):
     for key, name in (("median", "median lateness"), ("p95", "p95 lateness"),
                       ("latenessMax", "worst lateness")):
         delta = b[key] - a[key]
-        print(f"  {name:<18} A {a[key]:>7.0f}   B {b[key]:>7.0f}   "
+        #  The conditions' own labels, not a hardcoded A and B: this compares
+        #  A' against C on a second pass, and a table that said "A" and "B"
+        #  there would be reporting the wrong pair by name.
+        print(f"  {name:<18} {a['label'].split()[0]:>3} {a[key]:>7.0f}   "
+              f"{b['label'].split()[0]:>3} {b[key]:>7.0f}   "
               f"delta {delta:>+8.0f} samples ({ms(delta):+.2f} ms, {delta / tick:+.2f} ticks)")
 
     worst = b["latenessMax"] - a["latenessMax"]

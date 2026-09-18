@@ -6302,6 +6302,33 @@ and C, and the client's own repaint times, which want an instrumented build. A t
 is the one to quote; this is a hosted clock, because the device is the author's to choose and a take
 at night should not make a sound.
 
+**AND THE BUSY CASE, which is the one a show cares about (same take, `--firing`: a GO every two
+seconds).** It could not be taken until M3 gave the window a list to draw, and it is half of the
+plan's condition C - nobody is scrolling.
+
+| | A' no window, firing | C window, firing |
+|---|---|---|
+| median lateness | 64 samples | 0 samples |
+| p95 | 128 samples | 128 samples |
+| worst sample | 1984 (41.3 ms) | 2048 (42.7 ms) |
+| `latenessMax` | 1984 (41.3 ms) | 2816 (58.7 ms) |
+| samples over one tick | 45 of 1200 | 50 of 1200 |
+| `rtViolations` | 0 | 0 |
+
+**GREEN again** - the window's worst case is 832 samples (17 ms, 0.87 of a tick) above the baseline's,
+inside the threshold, and its median is lower, which is noise. **But the finding here is not about
+the window at all.** The spikes arrive every two seconds in BOTH conditions, which is the GO cadence
+exactly: **a GO on a five-hundred-cue show costs about twenty-five milliseconds of tick lateness**,
+and roughly four percent of samples exceed one tick while cues are firing, with or without a client
+attached. That is the engine's own cost of spawning and ending runs on a show that size, it predates
+every line of the compiled client, and it is what the window's contribution has to be read against:
+seventeen milliseconds of client beside twenty-five of engine. It is not a violation - `rtViolations`
+is nought throughout, lateness is not a glitch, and a launch is scheduled `launchLatencyTicks` ahead
+precisely so that being late by a tick does not make a cue late - but it is the number to watch, and
+the one a real-device take should quote. **Recorded as an engine observation for the author rather
+than acted on:** nothing in Phase 5 asked for it, and a number nobody has decided is a problem is not
+a problem to fix at five in the morning.
+
 **The first two takes were both wrong, and how they were wrong is the useful part.** Take one read a
 flawless zero for every reading in B and printed GREEN - because the window had hung before the
 clock started (§14.16's 233 kB of warnings) and every sample was a failed HTTP read falling back to
