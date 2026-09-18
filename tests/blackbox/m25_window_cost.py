@@ -31,13 +31,16 @@ competes with a GUI for a core.
 
 THE CONDITIONS, as the plan draws them:
 
-  A  no window          the baseline: serve as every driver runs it
-  B  window, idle       the window open, nothing touched
-  C  window, working    a run playing and the list scrolled   (not yet: M6/M4)
-  D  C, cache defeated  the model rebuilt every pass          (not yet: M4)
+  A   no window          the baseline: serve as every driver runs it
+  B   window, idle       the window open, nothing touched
+  A'  no window, firing  a GO every two seconds, for C to be read against
+  C   window, firing     the same, with the window open      (--firing)
+  D   C, cache defeated  the model rebuilt every pass        (not yet: M4)
 
-C and D want views this client does not have, so a take before M4 runs A and B
-and says so rather than pretending to four conditions.
+C arrived with M3, which gave the window a list to draw; it is half of the
+plan's condition C, since nobody is scrolling. D wants a way to defeat the
+model's cache and comes with M4. A take says which conditions it ran rather
+than pretending to all of them.
 
 THE THRESHOLDS, which are the whole point of taking it early:
 
