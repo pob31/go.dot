@@ -27,12 +27,14 @@ namespace wfg::client::ui
                   CueListComponent::Actions listActions,
                   RunPaneComponent::Actions runActions,
                   InspectorComponent::Actions inspectorActions,
-                  NewCueBarComponent::Actions newCueActions)
+                  NewCueBarComponent::Actions newCueActions,
+                  HistoryPanelComponent::Actions historyActions)
         : transport (themeToUse, std::move (transportActions)),
           cues (themeToUse, std::move (listActions)),
           runs (themeToUse, std::move (runActions)),
           inspector (themeToUse, std::move (inspectorActions)),
           newCues (themeToUse, std::move (newCueActions)),
+          history (themeToUse, std::move (historyActions)),
           theme (themeToUse)
     {
         /*  NEITHER PANE TAKES THE FOCUS: it rests here, and `keyPressed` below
@@ -51,6 +53,8 @@ namespace wfg::client::ui
 
         inspector.setVisible (false);
         addChildComponent (inspector);
+        history.setVisible (false);
+        addChildComponent (history);
 
         setWantsKeyboardFocus (true);
     }
@@ -63,6 +67,7 @@ namespace wfg::client::ui
         cues.applyTheme (theme);
         runs.applyTheme (theme);
         inspector.applyTheme (theme);
+        history.applyTheme (theme);
         resized();
         repaint();
     }
@@ -115,12 +120,18 @@ namespace wfg::client::ui
             newCues.setBounds (area.removeFromTop (juce::jmin (newCues.preferredHeight(),
                                                                area.getHeight())));
 
-        if (inspecting)
+        if (shown != Panel::none)
         {
             const auto inspectorWidth = juce::jlimit (juce::jmin (240, area.getWidth()),
                                                       juce::jmax (240, area.getWidth() - listFloor),
                                                       area.getWidth() / 3);
-            inspector.setBounds (area.removeFromRight (inspectorWidth));
+            const auto slot = area.removeFromRight (inspectorWidth);
+
+            if (shown == Panel::inspector)
+                inspector.setBounds (slot);
+            else
+                history.setBounds (slot);
+
             area.removeFromRight (gap);
         }
 
@@ -138,13 +149,14 @@ namespace wfg::client::ui
         resized();
     }
 
-    void Shell::setInspecting (bool showing)
+    void Shell::setPanel (Panel showing)
     {
-        if (showing == inspecting)
+        if (showing == shown)
             return;
 
-        inspecting = showing;
-        inspector.setVisible (showing);
+        shown = showing;
+        inspector.setVisible (shown == Panel::inspector);
+        history.setVisible (shown == Panel::history);
         resized();
     }
 

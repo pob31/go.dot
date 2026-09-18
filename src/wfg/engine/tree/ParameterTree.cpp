@@ -1569,16 +1569,27 @@ namespace wfg::tree
 
             if (const auto* row = rowNamed ("list", "solve"))
             {
+                /*  THE HISTORY IS PART OF THE QUESTION (2026-09-19): the
+                    answer is read from the steps when the aimed cue has one,
+                    so a GO, or a jump moving the steps, is a new question. */
+                std::string history;
+
+                if (lists != nullptr)
+                    for (const auto& step : lists->historyOf (listId))
+                        history += cue::spellStep (step) + " ";
+
                 const auto question = std::to_string (document.revision()) + " "
-                                        + cue::spellAim (aim);
+                                        + cue::spellAim (aim) + " " + history;
 
                 if (solvedFor[listId] != question)
                 {
                     solvedFor[listId] = question;
 
                     solves[listId] = aim.isSet()
-                                       ? cue::solve (document, durations, &mounts,
-                                                     { listId, aim.cue, aim.offset }).toJson()
+                                       ? cue::solveAim (document, durations, &mounts,
+                                                        { listId, aim.cue, aim.offset },
+                                                        lists != nullptr ? &lists->historyOf (listId)
+                                                                         : nullptr).toJson()
                                        : std::string {};
                 }
 

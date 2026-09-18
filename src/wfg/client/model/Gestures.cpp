@@ -124,6 +124,18 @@ namespace wfg::client::gesture
                  { osc::Value::string (runId), osc::Value::float64 (seconds) } };
     }
 
+    Event aim (const std::string& listId, const std::string& cueId, double offset)
+    {
+        return { origin::window, "list.aim",
+                 { osc::Value::string (listId), osc::Value::string (cueId),
+                   osc::Value::float64 (offset) } };
+    }
+
+    Event loadToTime (const std::string& listId)
+    {
+        return { origin::window, "list.loadToTime", { osc::Value::string (listId) } };
+    }
+
     Event setLocked (bool locked)
     {
         /*  A BOOLEAN, not the word "true": `node.set` takes its value as a

@@ -34,6 +34,7 @@
 
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CueListComponent.h>
+#include <wfg/client/ui/HistoryPanelComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/ui/NewCueBarComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
@@ -57,7 +58,8 @@ namespace wfg::client::ui
                CueListComponent::Actions listActions,
                RunPaneComponent::Actions runActions,
                InspectorComponent::Actions inspectorActions,
-               NewCueBarComponent::Actions newCueActions);
+               NewCueBarComponent::Actions newCueActions,
+               HistoryPanelComponent::Actions historyActions);
 
         void applyTheme (const model::Theme& theme);
 
@@ -74,6 +76,7 @@ namespace wfg::client::ui
         RunPaneComponent runs;
         InspectorComponent inspector;
         NewCueBarComponent newCues;
+        HistoryPanelComponent history;
 
         /*  THE NEW-CUE ROW STANDS WHILE THE SHOW MAY BE EDITED and goes when
             it is locked (author, 2026-09-18: "Lock makes them disappear"). A
@@ -81,14 +84,21 @@ namespace wfg::client::ui
             show mode reads as one: the list takes the row back. */
         void setEditing (bool editable);
 
-        /*  THE INSPECTOR STANDS DOWN WHEN NOTHING IS PICKED, which is the
-            arrangement the author settled on the page: the two list panes have
-            the width to themselves until somebody asks about one cue. */
-        void setInspecting (bool showing);
+        /*  ONE SLOT BESIDE THE LIST, THREE THINGS THAT CAN STAND IN IT: nothing,
+            which is the arrangement the author settled on the page - the two
+            list panes have the width to themselves until somebody asks about
+            one cue; the inspector, when something is picked; or the load to
+            time panel, which takes the inspector's place for as long as the
+            operator is looking before they leap (author, 2026-09-18: "The
+            Inspector panel turns into a history vertical stack"). */
+        enum class Panel { none, inspector, history };
+
+        void setPanel (Panel showing);
+        Panel panel() const noexcept { return shown; }
 
     private:
         model::Theme theme;
-        bool inspecting = false;
+        Panel shown = Panel::none;
         bool editing = true;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Shell)

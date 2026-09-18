@@ -46,6 +46,7 @@
 
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/Panic.h>
@@ -526,6 +527,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::stopAll(), gesture::killAll(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
         gesture::seek ("R4NID001", 12.5),
+        gesture::aim ("7K2QM9X4", "B3N8R5TW", 12.5), gesture::loadToTime ("7K2QM9X4"),
         gesture::setNode ("/godot/cue/B3N8R5TW/name", "Renamed"),
         gesture::createCue ("7K2QM9X4", 0, "media", "Thunder"),
         gesture::moveObject ("B3N8R5TW", "7K2QM9X4", 0),
@@ -1887,6 +1889,118 @@ TEST_CASE ("client: a group run says whether it can be scrubbed, from its cue's 
 
     CHECK (sawTimed);
     CHECK (sawManual);
+}
+
+//==============================================================================
+TEST_CASE ("client: the list's history is read newest first, and the steps after the aimed cue sit under it")
+{
+    /*  As `list/history` spells it: newest first, tick:cue:origin. */
+    const auto steps = model::readHistory ("900:C3:t 600:B2:g 100:A1:g junk 50:A1");
+    REQUIRE (steps.size() == 3u);
+    CHECK (steps[0].cue == "C3");
+    CHECK (steps[0].tick == 900);
+    CHECK (steps[0].origin == 't');
+    CHECK (steps[2].cue == "A1");
+    CHECK (model::originWord ('g') == "GO");
+    CHECK (model::originWord ('f') == "by name");
+
+    /*  Aimed at A1, ten seconds in: the instant is tick 600, so B2 (at +10 s)
+        is in force and C3 (at +16 s) is one a load would undo. */
+    const auto lines = model::stepsUnder (steps, "A1", 600);
+    REQUIRE (lines.size() == 2u);
+    CHECK (lines[0].cue == "B2");
+    CHECK (lines[0].offset == doctest::Approx (10.0));
+    CHECK_FALSE (lines[0].undone);
+    CHECK (lines[1].cue == "C3");
+    CHECK (lines[1].offset == doctest::Approx (16.0));
+    CHECK (lines[1].undone);
+
+    //  A cue never fired has no clock to place the others on.
+    CHECK (model::stepsUnder (steps, "Z9", 600).empty());
+
+    /*  The rows under the cue: the pointer among the steps where its offset
+        falls, first when the aim is "before". */
+    const std::map<std::string, std::string> names { { "B2", "Rain" }, { "C3", "Thunder" } };
+    const auto rows = model::stepRows (lines, 12.0, names, 1);
+    REQUIRE (rows.size() == 3u);
+    CHECK (rows[0].rowKind == model::RowKind::step);
+    CHECK (rows[0].id == "B2");
+    CHECK (rows[0].name == "Rain");
+    CHECK (rows[0].number == "GO");
+    CHECK (rows[1].pointer);
+    CHECK (rows[1].name == "+0:12.0");
+    CHECK (rows[2].id == "C3");
+    CHECK (rows[2].undone);
+    CHECK_FALSE (rows[2].enabled);
+
+    const auto before = model::stepRows (lines, -1.0, names, 0);
+    REQUIRE (before.size() == 3u);
+    CHECK (before[0].pointer);
+    CHECK (before[0].name == "before");
+
+    CHECK (model::agoText (100, 600) == "10 s ago");
+    CHECK (model::agoText (0, 50 * 130) == "2 min ago");
+}
+
+TEST_CASE ("client: the load-to-time reading is the engine's answer, names and all")
+{
+    Rig rig;
+    cue::Focus focus;
+    doc::IdRegistry runIds { doc::IdRegistry::withSeed (5) };
+    cue::Runner runner { rig.document, rig.runs, runIds, focus };
+    cue::registerCueCommands (rig.engine.commands(), rig.document, focus);
+    cue::registerRunCommands (rig.engine.commands(), rig.runs);
+    cue::registerGoCommands (rig.engine.commands(), rig.engine, runner, rig.document, focus, runIds);
+    rig.parameters.setListState (&runner.listState());
+
+    const auto listId = rig.document.createList ("Sound").id;
+    const auto thunder = rig.document.createCue (listId, 0, "media", "Thunder").id;
+    const auto rain = rig.document.createCue (listId, 1, "media", "Rain").id;
+    rig.document.setAttribute (cue::standbyAddressOf (listId), thunder);
+
+    //  Two GOs two seconds apart, then an aim one second into the rain. The
+    //  bundle has a list of its own, so the new one is focused first.
+    rig.apply (5, "window", "list.focus", { osc::Value::string (listId) });
+    rig.apply (10, "window", "go");
+    rig.apply (110, "window", "go");
+    rig.apply (120, "window", "list.aim",
+               { osc::Value::string (listId), osc::Value::string (rain), osc::Value::float64 (1.0) });
+
+    const auto reading = model::readLoadToTime (*rig.publish (130), listId);
+    CHECK (reading.listName == "Sound");
+    CHECK (reading.tick == 130);
+    REQUIRE (reading.steps.size() == 2u);
+    CHECK (reading.steps[0].cue == rain);
+    CHECK (reading.steps[0].tick == 110);
+    CHECK (reading.aimed);
+    CHECK (reading.aimCue == rain);
+    CHECK (reading.aimOffset == doctest::Approx (1.0));
+    CHECK (reading.ok);
+    CHECK (reading.how == "history");
+    CHECK (reading.instant == 160);
+    CHECK (reading.nameOf (thunder) == "Thunder");
+    CHECK (reading.nameOf (rain) == "Rain");
+
+    //  The thunder is three seconds in, by the clock the steps kept.
+    auto sawThunder = false;
+
+    for (const auto& line : reading.runs)
+        if (line.cue == thunder)
+        {
+            sawThunder = true;
+            CHECK (line.when == "sounding");
+            CHECK (line.offset == doctest::Approx (3.0));
+        }
+
+    CHECK (sawThunder);
+
+    //  Nothing aimed: nothing answered, and the steps still read.
+    rig.apply (140, "window", "list.aim", { osc::Value::string (listId), osc::Value::string (""),
+                                            osc::Value::float64 (-1.0) });
+    const auto cleared = model::readLoadToTime (*rig.publish (150), listId);
+    CHECK_FALSE (cleared.aimed);
+    CHECK_FALSE (cleared.ok);
+    CHECK (cleared.steps.size() == 2u);
 }
 
 TEST_CASE ("client: the running pane reads the way the show happened, not the way runs were made")

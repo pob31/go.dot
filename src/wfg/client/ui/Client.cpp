@@ -50,6 +50,7 @@
 
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/Panic.h>
@@ -88,7 +89,7 @@ namespace wfg::client
         {
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
-            menuLock
+            menuLock, menuLoadToTime
         };
 
         class Window final : public wfg::Client,
@@ -109,7 +110,7 @@ namespace wfg::client
                     pressed and nothing about what it means. `submit` takes any
                     thread and never blocks, so a click returns at once and the
                     tick thread applies it in arrival order like a datagram. */
-                actions.go              = [this] { send (gesture::go()); };
+                actions.go              = [this] { send (gesture::go()); leaveLoadToTime(); };
                 actions.panic           = [this] { panic(); };
                 actions.undo            = [this] { send (gesture::undo()); };
                 actions.redo            = [this] { send (gesture::redo()); };
@@ -133,7 +134,7 @@ namespace wfg::client
                     warnings. One place to look is the point. */
                 listActions.say             = [this] (const juce::String& sentence)
                                               { shell->transport.setNotice (sentence); };
-                listActions.go              = [this] { send (gesture::go()); };
+                listActions.go              = [this] { send (gesture::go()); leaveLoadToTime(); };
 
                 /*  A FOLD IS THIS CLIENT'S AND NEVER THE ENGINE'S (§14.1): what
                     somebody collapsed on their screen is not something the show
@@ -177,6 +178,11 @@ namespace wfg::client
                                                   else
                                                       selection.click (id, extend, toggle, show.rows());
 
+                                                  /*  LOADING TO TIME, THE PICK IS THE AIM (author,
+                                                      2026-09-18: "cue or group can be changed and
+                                                      the load to time readjusts to it"). */
+                                                  aimAtPick();
+
                                                   /*  THE INSPECTOR WAITS OUT THE DOUBLE-CLICK on a plain
                                                       click (author, 2026-09-18: "don't open the inspector
                                                       on a double click"): the row is picked at once, and
@@ -214,6 +220,15 @@ namespace wfg::client
                                               {
                                                   if (! refusedWhileLocked())
                                                       send (gesture::setNode ("/godot/cue/" + aimed + "/target", at));
+                                              };
+
+                /*  A CLICK ON A STEP ROW under the aimed cue re-aims at that
+                    moment; only while the panel is up, since the rows exist
+                    only then. */
+                listActions.reaim           = [this] (double offset)
+                                              {
+                                                  if (loadingToTime && ! aimCue.empty())
+                                                      send (gesture::aim (last.listId, aimCue, offset));
                                               };
 
                 ui::RunPaneComponent::Actions runActions;
@@ -271,11 +286,21 @@ namespace wfg::client
 
                 newCueActions.create = [this] (const std::string& kind) { createCue (kind); };
 
+                /*  LOAD TO TIME'S OWN TWO GESTURES: the aim, asked on every
+                    change, and the jump. Both go to the focused list, which
+                    is the list the history and the answer are read from. */
+                ui::HistoryPanelComponent::Actions historyActions;
+
+                historyActions.aim  = [this] (const std::string& cueId, double offset)
+                                      { send (gesture::aim (last.listId, cueId, offset)); };
+                historyActions.load = [this] { send (gesture::loadToTime (last.listId)); };
+
                 auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
                                                             std::move (listActions),
                                                             std::move (runActions),
                                                             std::move (inspectorActions),
-                                                            std::move (newCueActions));
+                                                            std::move (newCueActions),
+                                                            std::move (historyActions));
                 shell = content.get();
 
                 window = std::make_unique<ui::MainWindow> (titleFor (""),
@@ -358,6 +383,7 @@ namespace wfg::client
                     case menuSelectAll: return { 'a', mod, 0 };
                     case menuDeleteCue: return { juce::KeyPress::backspaceKey, mod, 0 };
                     case menuLock:      return { 'l', mod, 0 };
+                    case menuLoadToTime: return { 't', mod, 0 };
                     case menuRevert:    break;
                 }
 
@@ -366,7 +392,8 @@ namespace wfg::client
 
             static int menuItemForKey (const juce::KeyPress& key)
             {
-                for (const auto item : { menuNew, menuOpen, menuSaveAs, menuCut, menuCopy, menuPaste, menuLock })
+                for (const auto item : { menuNew, menuOpen, menuSaveAs, menuCut, menuCopy, menuPaste, menuLock,
+                                         menuLoadToTime })
                     if (key == keyFor (item))
                         return item;
 
@@ -398,6 +425,7 @@ namespace wfg::client
                     case menuSelectAll: return true;
                     case menuDeleteCue: return unlocked && ! selection.empty();
                     case menuLock:      return last.locked != model::Flag::unsaid;
+                    case menuLoadToTime: return ! last.listId.empty();
                 }
 
                 return false;
@@ -450,6 +478,9 @@ namespace wfg::client
                 {
                     addMenuItem (menu, menuLock, model::isYes (last.locked) ? "Unlock the show"
                                                                             : "Lock the show");
+                    menu.addSeparator();
+                    addMenuItem (menu, menuLoadToTime, loadingToTime ? "Stop loading to time"
+                                                                     : "Load to time...");
                 }
 
                 return menu;
@@ -472,6 +503,7 @@ namespace wfg::client
                     case menuSelectAll: selection.all (show.rows()); inspectNow(); break;
                     case menuDeleteCue: removeChosen(); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
+                    case menuLoadToTime: toggleLoadToTime(); break;
                     default: break;
                 }
             }
@@ -736,6 +768,35 @@ namespace wfg::client
 
                 //  What the show no longer has cannot stay picked.
                 selection.retain (show.rows());
+
+                /*  LOAD TO TIME, READ EVERY PASS WHILE THE PANEL IS UP: the
+                    history, the aim and the engine's answer, and the steps
+                    laid under the aimed cue's row as rows of their own. */
+                if (loadingToTime)
+                {
+                    const auto ltt = model::readLoadToTime (*snapshot, reading.listId);
+                    aimCue = ltt.aimCue;
+                    aimOffset = ltt.aimOffset;
+                    shell->history.show (ltt);
+
+                    auto depth = 0;
+
+                    for (const auto& row : show.rows())
+                        if (row.rowKind == model::RowKind::cue && row.id == ltt.aimCue && ! row.derived)
+                        {
+                            depth = row.depth + 1;
+                            break;
+                        }
+
+                    shell->cues.setSteps (ltt.aimCue,
+                                          ltt.aimed ? model::stepRows (model::stepsUnder (ltt.steps, ltt.aimCue,
+                                                                                          ltt.instant),
+                                                                       ltt.aimOffset, ltt.names, depth)
+                                                    : std::vector<model::Row> {});
+                }
+                else
+                    shell->cues.setSteps ({}, {});
+
                 shell->cues.show (show, reading.standbyId, selection.ids());
 
                 /*  And the present tense, read fresh: runs have no revision to
@@ -769,9 +830,14 @@ namespace wfg::client
                 const auto inspecting = ! selection.empty() && ! inspectorHeld
                                      && juce::Time::getMillisecondCounter() >= inspectorDueAt;
 
-                shell->setInspecting (inspecting);
+                /*  THE SLOT BESIDE THE LIST: the history panel while loading
+                    to time, the inspector when something is picked, nothing
+                    otherwise. */
+                shell->setPanel (loadingToTime ? ui::Shell::Panel::history
+                                 : inspecting  ? ui::Shell::Panel::inspector
+                                               : ui::Shell::Panel::none);
 
-                if (inspecting)
+                if (inspecting && ! loadingToTime)
                     shell->inspector.show (model::inspectMany (*snapshot, selection.ids()));
 
                 last = reading;
@@ -1452,6 +1518,58 @@ namespace wfg::client
             {
                 inspectorHeld = false;
                 inspectorDueAt = 0;
+            }
+
+            /*  LOAD TO TIME (PRD §3.13; author, 2026-09-18). While it is on,
+                the history panel stands where the inspector would, the steps
+                the list took after the aimed cue sit under its row, a pick
+                moves the aim, and only a GO takes it down - the menu item is
+                the other way out, for the hand that changed its mind. */
+            bool loadingToTime = false;
+            std::string aimCue;
+            double aimOffset = -1.0;
+
+            void toggleLoadToTime()
+            {
+                if (loadingToTime)
+                {
+                    leaveLoadToTime();
+                    return;
+                }
+
+                if (last.listId.empty())
+                    return;
+
+                loadingToTime = true;
+                menuItemsChanged();
+
+                /*  Opened on the picked cue, else the standby: the aim has to
+                    name something for the panel to have anything to say. */
+                const auto cue = ! selection.empty() ? selection.anchor() : last.standbyId;
+
+                if (! cue.empty())
+                    send (gesture::aim (last.listId, cue, -1.0));
+            }
+
+            void leaveLoadToTime()
+            {
+                if (! loadingToTime)
+                    return;
+
+                loadingToTime = false;
+                aimCue.clear();
+                menuItemsChanged();
+            }
+
+            void aimAtPick()
+            {
+                if (! loadingToTime || selection.empty())
+                    return;
+
+                const auto cue = selection.anchor();
+
+                if (! cue.empty() && cue != aimCue)
+                    send (gesture::aim (last.listId, cue, aimOffset));
             }
 
             /** Moves into a footer that did not exist yet, waiting for the tree to name it. */

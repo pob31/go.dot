@@ -3001,6 +3001,34 @@ sweep is over the written set, and a desk's other five hundred faders are its ow
 step inside the cap is not queued for later — the next step gets a fresh sweep, because an
 observation of a moment that has passed is worth less than the cost of asking for it.
 
+#### What the desktop's load to time changed (2026-09-19): the history is the clock
+
+The author, on seeing scrubbing (§14.16) beside the load to time he was about to ask for: *"1 is like
+scrubbing through the load to time history. 4 [a live recorder] is like dumping the load to time
+history to a group for replay. We might need to adapt the original design of the load to time
+history for this."* The adaptation is that **the solver reads the steps when it can.** `solveHistory`
+takes the aim and the list's steps: the aimed cue's most recent step plus the offset is an INSTANT on
+the wall clock, and every step at or before it is a cue that had been going for (instant − step)
+seconds then — sounding if its material lasts that long, over otherwise, a scene with its members
+placed by the same clock through the same `planTarget` the order reading uses; a stop step ends its
+target from then on, a fire after a stop is a new run, a fade step's trim is whole past its duration
+and proportional inside it, an osc step is a value with the last writer by time. The pointer lands
+after the last GO in the instant's past. So a bed started three GOs ago is three GOs of real time in,
+which is what the room hears, rather than "over" because it comes earlier in the list, which is what
+§3.13's step 1 had to assume of a manual list with no clock. A cue never fired this session has no
+step and gets the order reading; the plan says which in `how` (`history` | `order`) and carries the
+`instant` (−1 for the order), and `list/solve` publishes both. `solveAim` is the one door: the tree's
+`solve` node and `list.loadToTime` both go through it with the list's history.
+
+**And the jump retimes the history.** The steps are on the wall clock, and a jump puts the show where
+it was at the instant: from then on every kept step moves forward by (now − instant), so the sound it
+describes and the step agree again, and every step after the instant — the ones the jump undid — is
+dropped. A second aim after a jump therefore reads right, which it could not have with the wall
+ticks left alone (a cue fired after the instant would have read as still sounding). A scene
+re-seated by `run.seek` moves its own step to where the second says it was fired. The history is not
+a log of the evening any more; it is the list of what is in force, on the clock the show is on —
+which is exactly what a live recorder will dump into a group.
+
 ### 13.11 The persistent section — checked, not fired (decision S)
 
 §3.29: a persistent cue is the thing that should be running at all times and is relaunched if it is
@@ -7324,6 +7352,32 @@ a jump into a scene inside a scene built both as top-level runs, because the pla
 carried no ancestors of their own. On the page a running cue's or scene's row gets a seek box instead
 of a drag - the same record, typed - which is rule 3 kept. The author's second thought - that a scrub is
 "scrubbing through the load to time history" - is the next round's, with load to time itself.
+
+**LOAD TO TIME (2026-09-19).** *"Load to time is opened with an item of the Show menu. The Inspector
+panel turns into a history vertical stack. The cue list items can be spaced vertically to show the
+various intermediary steps recorded with the focus on the selected cue or group. Cue or group can be
+changed and the load to time readjusts to it. The panel is only closed when the user triggers Go. A
+numerical time value appears so the value can be set from the keyboard and a pointer shows when this is
+in the history."* And the reframing that changed the engine under it: *"1 [scrubbing] is like scrubbing
+through the load to time history … We might need to adapt the original design of the load to time
+history."* The adaptation is §13.10's: the solver reads the steps when the aimed cue has one, and the
+jump retimes them. The window: *Show → Load to time…* (ctrl/⌘-T) opens the aim on the picked cue, else
+the standby, before it fired; the slot beside the list - one slot, three things that can stand in it -
+takes the history panel in the inspector's place. The panel is the list's steps newest at the top, each
+with how long ago and how it was fired, the aimed cue's own step lit, the steps past the instant dim
+since a load would take them back, and the pointer drawn as a line among them where the instant falls;
+a click on a step aims before it, as the page's chips do. Above the stack: the aimed cue's name, the
+offset as a number that can be typed (Enter commits; `before` or nothing is -1) with a *before* button
+and the *Load* button, and the engine's answer in words - read from what happened or from the list's
+order, what would be sounding and how far in, what is due, where the pointer would land, what it could
+not know. Under the aimed cue's own row in the list, the steps the list took after it fired are laid as
+rows of a new kind, `step` - one per step at its offset into the cue, italic, with the aim's own pointer
+row among them at its offset - so the intermediary steps are the spacing; a click on a step row re-aims
+at that offset. A pick moves the aim to the picked cue at the same offset. Every change is one
+`list.aim`; the button is one `list.loadToTime`; and only a GO - the button, Space, the list - takes the
+panel down, the menu item being the other way out. `model/LoadToTime` reads the three nodes through the
+engine's own JSON reader, which is the one place in this window that parses JSON, for the reason the
+engine gives.
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 

@@ -4914,6 +4914,192 @@ TEST_CASE ("seek: what has no material to seek in is refused, and a run that is 
     CHECK (rig.audio.arms.size() == armsBefore);
 }
 
+//==============================================================================
+/*  THE HISTORY READING (2026-09-19): a load to time as a position in what the
+    list actually did. The author's reframing - "scrubbing through the load to
+    time history" - is what makes the solver read the steps: a cue fired three
+    GOs ago is three GOs of real time in, not "over" because it comes earlier in
+    the list. */
+namespace
+{
+    struct ClockRig : Rig
+    {
+        ClockRig()
+        {
+            //  Thunder is the base rig's first cue; a second sound after it, a
+            //  stop aimed at the first, and a memo to land on.
+            rain = document.createCue (listId, 1, "media", "Rain").id;
+            document.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav");
+            stopThunder = document.createCue (listId, 2, "stop", "Cut the thunder").id;
+            document.setAttribute ("/godot/cue/" + stopThunder + "/target", mediaId);
+            after = document.createCue (listId, 3, "memo", "After").id;
+
+            durations["thunder.wav"] = 10.0;
+            durations["rain.wav"] = 10.0;
+            runner.setMediaDurations (&durations);
+        }
+
+        /** GO on the pointer, then let the arm settle a tick. */
+        std::int64_t goNow()
+        {
+            const auto at = tick;
+            submitAndTick ("go");
+            audio.completeArms (engine);
+            tickOnce();
+            return at;
+        }
+
+        void ticks (int count)
+        {
+            for (int n = 0; n < count; ++n)
+                tickOnce();
+        }
+
+        cue::Plan planFor (const std::string& cueId, double offset) const
+        {
+            return cue::solveAim (document, &durations, nullptr, { listId, cueId, offset },
+                                  &runner.listState().historyOf (listId));
+        }
+
+        const cue::PlannedRun* planned (const cue::Plan& plan, const std::string& cueId) const
+        {
+            for (const auto& run : plan.runs)
+                if (run.cue == cueId)
+                    return &run;
+
+            return nullptr;
+        }
+
+        std::map<std::string, double> durations;
+        std::string rain, stopThunder, after;
+    };
+}
+
+TEST_CASE ("history: a cue fired earlier is placed by the clock, not read as over")
+{
+    ClockRig rig;
+    rig.setStandby (rig.mediaId);
+
+    const auto thunderAt = rig.goNow();          // thunder, standby moves to rain
+    rig.ticks (100 - static_cast<int> (rig.tick - thunderAt));
+    const auto rainAt = rig.goNow();             // two seconds later
+    CHECK (rainAt - thunderAt == 100);
+
+    //  One second into the rain: the thunder is three seconds in and sounding.
+    const auto plan = rig.planFor (rig.rain, 1.0);
+    REQUIRE (plan.ok);
+    CHECK (plan.how == "history");
+    CHECK (plan.instant == rainAt + 50);
+
+    const auto* thunder = rig.planned (plan, rig.mediaId);
+    REQUIRE (thunder != nullptr);
+    CHECK (thunder->when == cue::planned::sounding);
+    CHECK (thunder->offset == doctest::Approx (3.0));
+
+    const auto* rainRun = rig.planned (plan, rig.rain);
+    REQUIRE (rainRun != nullptr);
+    CHECK (rainRun->offset == doctest::Approx (1.0));
+
+    //  The pointer lands after the last GO, which was the rain.
+    CHECK (plan.standby == rig.stopThunder);
+
+    //  Nine seconds into the rain the thunder has run out.
+    const auto later = rig.planFor (rig.rain, 9.0);
+    CHECK (rig.planned (later, rig.mediaId) == nullptr);
+    REQUIRE (rig.planned (later, rig.rain) != nullptr);
+
+    //  Before the rain fired: only the thunder, two seconds in.
+    const auto before = rig.planFor (rig.rain, -1.0);
+    CHECK (before.instant == rainAt - 1);
+    REQUIRE (rig.planned (before, rig.mediaId) != nullptr);
+    CHECK (rig.planned (before, rig.mediaId)->offset == doctest::Approx ((rainAt - 1 - thunderAt) / 50.0));
+    CHECK (rig.planned (before, rig.rain) == nullptr);
+
+    //  The order reading is what a cue with no step gets, and says so.
+    const auto never = rig.planFor (rig.after, -1.0);
+    CHECK (never.how == "order");
+    CHECK (never.instant == -1);
+}
+
+TEST_CASE ("history: a stop step ends its target from then on, and a fire after it is a new one")
+{
+    ClockRig rig;
+    rig.setStandby (rig.mediaId);
+    rig.goNow();                                 // thunder
+    rig.ticks (40);
+    rig.setStandby (rig.stopThunder);
+    rig.goNow();                                 // the stop, one second in
+    rig.ticks (40);
+    rig.setStandby (rig.rain);
+    const auto rainAt = rig.goNow();
+
+    const auto plan = rig.planFor (rig.rain, 1.0);
+    CHECK (plan.how == "history");
+    CHECK (plan.instant == rainAt + 50);
+    CHECK (rig.planned (plan, rig.mediaId) == nullptr);
+    REQUIRE (rig.planned (plan, rig.rain) != nullptr);
+
+    //  Fired again after the stop, the thunder is back.
+    rig.ticks (40);
+    rig.setStandby (rig.mediaId);
+    const auto again = rig.goNow();
+    CHECK (again > rainAt);
+
+    const auto replan = rig.planFor (rig.mediaId, 0.5);
+    REQUIRE (rig.planned (replan, rig.mediaId) != nullptr);
+    CHECK (rig.planned (replan, rig.mediaId)->offset == doctest::Approx (0.5));
+}
+
+TEST_CASE ("history: the jump retimes the steps, and drops the ones it undid")
+{
+    ClockRig rig;
+    rig.setStandby (rig.mediaId);
+    const auto thunderAt = rig.goNow();
+    rig.ticks (100 - static_cast<int> (rig.tick - thunderAt));
+    rig.goNow();                                 // the rain, two seconds later
+    rig.ticks (100);
+    rig.setStandby (rig.after);
+    const auto afterAt = rig.goNow();            // a step the jump will undo
+
+    REQUIRE (rig.runner.listState().historyOf (rig.listId).size() == 3u);
+
+    //  Aim one second into the rain and make it true.
+    REQUIRE (rig.engine.submit ("cli", "list.aim",
+                                { osc::Value::string (rig.listId), osc::Value::string (rig.rain),
+                                  osc::Value::float64 (1.0) }));
+    rig.tickOnce();
+    const auto jumpAt = rig.tick;
+    CHECK (rig.submitAndTick ("list.loadToTime", { osc::Value::string (rig.listId) }).applied == 1);
+
+    //  Both sounds are rebuilt where the clock put them.
+    const auto* thunder = rig.runs.liveRunOf (rig.mediaId);
+    REQUIRE (thunder != nullptr);
+    CHECK (thunder->startOffset == doctest::Approx (3.0));
+    const auto* rainRun = rig.runs.liveRunOf (rig.rain);
+    REQUIRE (rainRun != nullptr);
+    CHECK (rainRun->startOffset == doctest::Approx (1.0));
+
+    /*  The history is on the new clock: the thunder reads as fired 150 ticks
+        before the jump, the rain 50 - and the memo, fired after the instant,
+        is gone. */
+    const auto& steps = rig.runner.listState().historyOf (rig.listId);
+    REQUIRE (steps.size() == 2u);
+    CHECK (steps[0].cue == rig.mediaId);
+    CHECK (steps[0].tick == jumpAt - 150);
+    CHECK (steps[1].cue == rig.rain);
+    CHECK (steps[1].tick == jumpAt - 50);
+    juce::ignoreUnused (afterAt);
+
+    //  So a later aim reads right: three seconds into the rain, thunder at five.
+    const auto replan = rig.planFor (rig.rain, 3.0);
+    REQUIRE (rig.planned (replan, rig.mediaId) != nullptr);
+    CHECK (rig.planned (replan, rig.mediaId)->offset == doctest::Approx (5.0));
+    CHECK (rig.planned (replan, rig.after) == nullptr);
+
+    //  And the published solve says which reading it is.
+    CHECK (replan.toJson().find ("\"how\": \"history\"") != std::string::npos);
+}
+
 TEST_CASE ("M19: what the horizon costs, in ticks from the pointer landing")
 {
     /*  MEASUREMENT M19 (§13.14), the half of it this PR can take.

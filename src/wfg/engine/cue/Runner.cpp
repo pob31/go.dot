@@ -1080,8 +1080,11 @@ namespace wfg::cue
         if (! aim.isSet())
             return used;
 
-        const auto plan = solve (document, durations, mounts,
-                                 { listId, aim.cue, aim.offset });
+        /*  READ FROM THE HISTORY WHEN THERE IS ONE (2026-09-19): a cue the
+            list has fired is placed, with everything fired before it, by the
+            clock the steps kept; a cue never fired is read from the order. */
+        const auto plan = solveAim (document, durations, mounts,
+                                    { listId, aim.cue, aim.offset }, &lists.historyOf (listId));
 
         if (! plan.ok)
             return used;
@@ -1192,6 +1195,12 @@ namespace wfg::cue
             agrees with the aim; after the next GO it does not, and that
             divergence is what a running view shows. */
         lists.landedAt (listId, { aim.cue, aim.offset });
+
+        /*  AND THE HISTORY FOLLOWS THE JUMP: the steps the plan was read from
+            move to the clock the rebuilt runs are on, and the steps after the
+            instant - the ones the jump has undone - go. */
+        if (plan.how == "history")
+            lists.retimed (listId, plan.instant, tick);
 
         /*  AND A KILLED PERSISTENT CUE COMES BACK (decision S). A suspension is
             run-local and for the session, and a load-to-time is the operator
@@ -1601,6 +1610,10 @@ namespace wfg::cue
         }
 
         seatPlan (engine, tick, wanted, runFor, nextId);
+
+        /*  The scene's step follows it: fired, as far as the history is now
+            concerned, `seconds` ago. */
+        lists.refired (listId, run->cue, tick - ticksFor (seconds));
 
         return used;
     }

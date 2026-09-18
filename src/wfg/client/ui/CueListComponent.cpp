@@ -16,6 +16,8 @@
 
 #include <wfg/client/ui/CueListComponent.h>
 
+#include <wfg/client/model/LoadToTime.h>
+
 #include <wfg/client/ui/Look.h>
 
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -504,13 +506,40 @@ namespace wfg::client::ui
             `rebuilds()` counts walks, so it moves for every reason the rows
             can change - an edit, a different list, a fold - and asks this view
             one question instead of three. */
-        const auto structureMoved = model.rebuilds() != drawnWalk || model.list() != drawnList;
+        const auto structureMoved = model.rebuilds() != drawnWalk || model.list() != drawnList
+                                 || stepsVersion != drawnSteps;
 
         if (structureMoved)
         {
             rows = model.rows();
             drawnWalk = model.rebuilds();
             drawnList = model.list();
+            drawnSteps = stepsVersion;
+
+            /*  THE STEPS GO UNDER THE AIMED CUE'S OWN ROW - after its members
+                and bands when it is a group, so they read as what happened
+                after the scene fired rather than as members of it. */
+            if (! steps.empty() && ! stepsUnder.empty())
+            {
+                auto at = rows.size();
+
+                for (std::size_t n = 0; n < rows.size(); ++n)
+                    if (rows[n].rowKind == model::RowKind::cue && rows[n].id == stepsUnder
+                         && ! rows[n].derived)
+                    {
+                        at = n + 1;
+
+                        while (at < rows.size() && rows[at].depth > rows[n].depth
+                                 && rows[at].rowKind != model::RowKind::step)
+                            ++at;
+
+                        break;
+                    }
+
+                if (at <= rows.size())
+                    rows.insert (rows.begin() + static_cast<long> (at), steps.begin(), steps.end());
+            }
+
             list.updateContent();
 
             /*  AND EVERY ROW IS ASKED TO PAINT, because `updateContent` alone
@@ -600,6 +629,12 @@ namespace wfg::client::ui
             return;
 
         const auto& entry = rows[static_cast<std::size_t> (row)];
+
+        if (entry.rowKind == model::RowKind::step)
+        {
+            paintStep (entry, g, width, height);
+            return;
+        }
 
         if (entry.rowKind == model::RowKind::band)
         {
@@ -936,6 +971,16 @@ namespace wfg::client::ui
         {
             if (actions.fold)
                 actions.fold (entry.bandKey);
+
+            return;
+        }
+
+        /*  A STEP ROW RE-AIMS at its moment; the pointer's own row is where
+            the aim already is and takes nothing. */
+        if (entry.rowKind == model::RowKind::step)
+        {
+            if (! entry.pointer && actions.reaim)
+                actions.reaim (entry.offset);
 
             return;
         }
@@ -1288,6 +1333,9 @@ namespace wfg::client::ui
         if (mods.isAltDown())
             return model::presetDropFor (rows[static_cast<std::size_t> (rowOut)], *dragged, rows);
 
+        if (rows[static_cast<std::size_t> (rowOut)].rowKind == model::RowKind::step)
+            return {};
+
         return model::dropFor (rows[static_cast<std::size_t> (rowOut)], *dragged, fraction);
     }
 
@@ -1450,6 +1498,79 @@ namespace wfg::client::ui
 
         g.drawFittedText ("CUE", row.removeFromLeft (numberChars * unit),
                           juce::Justification::centredLeft, 1, 0.6f);
+    }
+
+    void CueListComponent::setSteps (const std::string& underCue, std::vector<model::Row> stepsToShow)
+    {
+        const auto same = underCue == stepsUnder && stepsToShow.size() == steps.size()
+                       && std::equal (stepsToShow.begin(), stepsToShow.end(), steps.begin(),
+                                      [] (const model::Row& a, const model::Row& b)
+                                      {
+                                          return a.id == b.id && a.pointer == b.pointer
+                                              && a.undone == b.undone && a.name == b.name
+                                              && std::abs (a.offset - b.offset) < 1.0e-9;
+                                      });
+
+        if (same)
+            return;
+
+        stepsUnder = underCue;
+        steps = std::move (stepsToShow);
+        ++stepsVersion;
+    }
+
+    void CueListComponent::paintStep (const model::Row& entry, juce::Graphics& g,
+                                      int width, int height)
+    {
+        /*  A READING UNDER A CUE: recessed like anything inside something,
+            a step's offset into the cue where a number would be, then its
+            name and how it was fired; the pointer in the picked colour with a
+            line across, since it is the one row that is a position and not
+            an event. Past the instant, a step is dim: a load would take it
+            back. */
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+        const auto indent = unit * 2;
+        const auto picked = Look::colour (theme, "picked");
+
+        g.fillAll (Look::colour (theme, "panel-in"));
+
+        auto area = juce::Rectangle<int> (0, 0, width, height).reduced (unit / 2, 0);
+        area.removeFromLeft (unit * 2 + entry.depth * indent);
+
+        if (entry.pointer)
+        {
+            g.setColour (picked);
+            g.fillRect (area.getX(), height / 2 - 1, area.getWidth(), 2);
+            g.setFont (Look::font (theme, 12.0f));
+
+            const auto words = juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb6 ")) + "aim  "
+                                 + juce::String (entry.name);
+            const auto box = area.removeFromLeft (juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), words) + unit);
+            g.setColour (Look::colour (theme, "panel-in"));
+            g.fillRect (box);
+            g.setColour (picked);
+            g.drawText (words, box, juce::Justification::centredLeft, false);
+            return;
+        }
+
+        const auto ink = Look::colour (theme, entry.undone ? "ink-off" : "ink-dim");
+        const auto faint = Look::colour (theme, entry.undone ? "ink-off" : "ink-faint");
+
+        g.setColour (faint);
+        g.setFont (Look::font (theme, 12.0f));
+        g.drawText (juce::String (juce::CharPointer_UTF8 ("\xe2\x86\xb3 ")) + juce::String (model::offsetText (entry.offset)),
+                    area.removeFromLeft (unit * 9), juce::Justification::centredLeft, false);
+
+        g.setColour (faint);
+        g.drawText (juce::String (entry.number) + (entry.undone ? "  (a load undoes this)" : ""),
+                    area.removeFromRight (unit * 16), juce::Justification::centredRight, false);
+
+        g.setColour (ink);
+        g.setFont (Look::font (theme, 13.0f).italicised());
+        g.drawText (juce::String (entry.name), area, juce::Justification::centredLeft, true);
+
+        g.setColour (Look::colour (theme, "rule").withAlpha (0.3f));
+        g.fillRect (0, height - 1, width, 1);
     }
 
     void CueListComponent::paint (juce::Graphics& g)

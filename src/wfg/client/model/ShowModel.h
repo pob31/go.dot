@@ -77,7 +77,13 @@ namespace wfg::client::model
         carries the word, the count and the twist; §4.8 wants all three, because
         a shape, a word and a number are three tellings and none of them is a
         colour. */
-    enum class RowKind { cue, band };
+    /*  A STEP ROW IS A READING UNDER A CUE (2026-09-19): while the window is
+        loading to time, the steps the list took after the aimed cue fired are
+        drawn under its row, spaced as rows, each at its offset into the cue -
+        and the aim itself is one of them, the pointer. Neither is a cue: no
+        drop lands on one, no pick takes one, and the model never builds one;
+        the list inserts them (`CueListComponent::setSteps`). */
+    enum class RowKind { cue, band, step };
 
     struct Row
     {
@@ -114,6 +120,14 @@ namespace wfg::client::model
 
         int depth = 0;           ///< 0 at the top of the list; a group's members are one deeper
         bool isGroup = false;
+
+        /*  A STEP ROW'S OWN FIELDS: seconds into the aimed cue, whether it is
+            the aim's pointer rather than a step, and whether the step lies
+            past the instant - one a load would undo. `id` names the step's
+            cue and `name` its name; `number` carries the origin's word. */
+        double offset = 0.0;
+        bool pointer = false;
+        bool undone = false;
 
         /*  A HEADER LINE THAT IS A READING, NOT A MEMBER (§13.7): a cue whose
             `preset` names this group, drawn in the header band so the header

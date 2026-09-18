@@ -158,6 +158,196 @@ namespace wfg::cue
         }
     }
 
+        /*  THE TARGET'S OWN PART OF A PLAN: its groups, outermost first, the
+            members sounding beside it in its chain, and itself at the offset.
+            One function for the two readings - the order's target and every
+            step of the history's - so a scene is built the same way whichever
+            clock placed it. `offset` is seconds into the target; the caller
+            has decided it has fired. */
+        void planTarget (const Reader& read, const doc::ShowDocument& document,
+                         const std::map<std::string, double>* durations,
+                         const Walk& walk, const Placed& target, double offset,
+                         const std::vector<std::string>& stopped, Plan& plan)
+        {
+            const auto wasStopped = [&stopped] (const std::string& cueId)
+            {
+                return std::find (stopped.begin(), stopped.end(), cueId) != stopped.end();
+            };
+
+            /*  A GROUP ALREADY IN THE PLAN IS NOT PUSHED AGAIN: two members of
+                one manual scene fired at two GOs share it, and the builder
+                would otherwise make the scene twice. */
+            const auto planned = [&plan] (const std::string& cueId)
+            {
+                return std::any_of (plan.runs.begin(), plan.runs.end(),
+                                    [&cueId] (const PlannedRun& run) { return run.cue == cueId; });
+            };
+
+            //----------------------------------------------------------------------
+            /*  AND THE TARGET, if it has fired at all. Its groups come with it,
+                outermost first, because a member sounds as part of its scene. */
+            {
+                for (const auto& groupId : target.ancestors)
+                {
+                    if (planned (groupId))
+                        continue;
+
+                    PlannedRun group;
+                    group.cue = groupId;
+
+                    /*  ITS OWN GROUPS, the ones before it in the chain, so that a
+                        jump into a scene inside a scene builds the inner group
+                        UNDER the outer one. Empty, the builder made every
+                        ancestor a top-level run and the scheduler saw two scenes
+                        where the show had one inside the other. Found on the way
+                        to seating a group at an offset (2026-09-18). */
+                    group.ancestors.assign (target.ancestors.begin(),
+                                            std::find (target.ancestors.begin(),
+                                                       target.ancestors.end(), groupId));
+                    plan.runs.push_back (group);
+
+                    const auto node = document.findById (groupId);
+
+                    if (node.isValid() && read.text (node, "group", "selection") == "shuffle"
+                         && read.integer (node, "group", "seed") == 0)
+                        plan.confused.push_back ({ groupId, confusion::drawnOrder,
+                                                   "the order the show is written in" });
+
+                    if (node.isValid() && read.integer (node, "group", "loops") != 1)
+                        plan.confused.push_back ({ groupId, confusion::unknownRound,
+                                                   "round one" });
+                }
+
+                /*  AND THE MEMBERS SOUNDING BESIDE IT.
+
+                    Inside a timeline group or an automatic sequence there is no
+                    person between the members - the second starts when the first
+                    completes, or at its own offset from the group's entry - so the
+                    document knows exactly what else is going when the target is
+                    `offset` seconds in. That is the one place where "everything
+                    before the target is at its end state" is FALSE, and it is false
+                    because there was no GO in between to make it true.
+
+                    A load-to-time into the middle of a scene depends on this
+                    entirely: without it the jump would land the cue somebody asked
+                    for and silence everything it was playing against.
+
+                    The walk has already done the arithmetic - every cue in a timed
+                    chain carries its seconds from that chain's entry - so this is a
+                    comparison rather than a second calculation, which is the whole
+                    reason that walk is shared with the slot analysis. */
+                /*  AND THE TARGET MAY BE THE SCENE ITSELF (2026-09-18). A member
+                    is placed inside its chain; a group that IS the chain's origin
+                    is not timed - nothing placed it - but its members are, and
+                    they are counted from its entry. So "the scene, `offset`
+                    seconds in" reads the same members against the same clock,
+                    with the offset itself as the instant. This is what lets a
+                    running group be re-seated at another second of its own
+                    timeline, which is what scrubbing a group in the running pane
+                    asks for. */
+                const auto chain = target.timed ? target.chain
+                                 : target.element == "Group" ? target.id
+                                                              : std::string {};
+
+                if (! chain.empty())
+                {
+                    const auto at = target.timed ? target.from + offset : offset;
+
+                    /*  WHAT EACH INNER GROUP WAS FOUND TO BE, by identifier, so
+                        that its members can follow it: a group that is DUE will
+                        spawn its own members when it fires, so planning them too
+                        would have each of them twice; one that is FINISHED has
+                        had them, whatever their own seconds say. Groups are placed
+                        before their members, so the answer is always there. */
+                    std::map<std::string, std::string> innerWhen;
+
+                    for (const auto& entry : walk.placed)
+                    {
+                        if (entry.id == target.id || ! entry.timed || entry.chain != chain)
+                            continue;
+
+                        if (! read.flag (entry.node, "cue", "enabled"))
+                            continue;
+
+                        /*  Its own groups are already in the plan, above. */
+                        if (std::find (target.ancestors.begin(), target.ancestors.end(),
+                                       entry.id) != target.ancestors.end())
+                            continue;
+
+                        if (entry.element == "Media" && wasStopped (entry.id))
+                            continue;
+
+                        std::string inner;
+
+                        for (const auto& groupId : entry.ancestors)
+                            if (const auto seen = innerWhen.find (groupId); seen != innerWhen.end())
+                                if (seen->second != planned::sounding)
+                                    inner = seen->second;
+
+                        if (inner == planned::due)
+                            continue;
+
+                        PlannedRun beside;
+                        beside.cue = entry.id;
+                        beside.ancestors = entry.ancestors;
+
+                        /*  THE WHOLE CHAIN AND NOT ONLY THE NOISY PART. A jump has
+                            to build the scene the scheduler is about to take over,
+                            and a member missing from it is one the group will spawn
+                            a second time - or, missing from the finished end, a
+                            group that thinks it has not started.
+
+                            EVERY KIND, not media alone (2026-09-18): a fade due
+                            four seconds after the jump has to be waiting there, or
+                            the scene the scheduler takes over never fires it. A
+                            fade or a message the instant has already passed is
+                            over - what it wrote is in the values and the trims. */
+                        if (inner == planned::finished || entry.to <= at)
+                            beside.when = planned::finished;
+                        else if (at < entry.from)
+                        {
+                            beside.when = planned::due;
+                            beside.startsIn = entry.from - at;
+                        }
+                        else if (entry.element == "Media")
+                            placeInRanges (read, entry.node, at - entry.from, beside, plan.confused);
+                        else if (entry.element == "Group")
+                            beside.offset = at - entry.from;
+                        else
+                            beside.when = planned::finished;
+
+                        if (entry.element == "Group")
+                            innerWhen[entry.id] = beside.when;
+
+                        plan.runs.push_back (beside);
+                    }
+                }
+
+                if (target.element == "Media")
+                {
+                    PlannedRun run;
+                    run.cue = target.id;
+                    run.ancestors = target.ancestors;
+
+                    if (! materialOf (read, target.node, durations).has_value()
+                         && ! target.node.getChildWithName (juce::Identifier ("Range")).isValid())
+                        plan.confused.push_back ({ target.id, confusion::unknownLength,
+                                                  "the offset asked for, played from the top" });
+
+                    placeInRanges (read, target.node, offset, run, plan.confused);
+                    plan.runs.push_back (run);
+                }
+                else
+                {
+                    PlannedRun run;
+                    run.cue = target.id;
+                    run.ancestors = target.ancestors;
+                    run.offset = offset;
+                    plan.runs.push_back (run);
+                }
+            }
+
+        }
     //==============================================================================
     Plan solve (const doc::ShowDocument& document,
                 const std::map<std::string, double>* durations,
@@ -356,169 +546,274 @@ namespace wfg::cue
             plan.runs.push_back (run);
         }
 
-        //----------------------------------------------------------------------
-        /*  AND THE TARGET, if it has fired at all. Its groups come with it,
-            outermost first, because a member sounds as part of its scene. */
         if (fired && read.flag (target->node, "cue", "enabled"))
+            planTarget (read, document, durations, walk, *target, aim.offset, stopped, plan);
+
+        return plan;
+    }
+
+    //==============================================================================
+    Plan solveHistory (const doc::ShowDocument& document,
+                       const std::map<std::string, double>* durations,
+                       const tree::MountTable* mounts,
+                       const Aim& aim,
+                       const std::vector<Step>& steps)
+    {
+        /*  WHEN THE AIMED CUE WAS FIRED, most recently. Without that there is
+            no clock to read the rest against, and the order is the answer. */
+        std::int64_t firedAt = -1;
+
+        for (const auto& step : steps)
+            if (step.cue == aim.cue)
+                firedAt = step.tick;
+
+        if (firedAt < 0)
+            return solve (document, durations, mounts, aim);
+
+        Plan plan;
+        plan.aim = aim;
+        plan.how = "history";
+
+        const Reader read;
+        Walk walk { read, durations };
+
+        const auto lists = document.root().getChildWithName (juce::Identifier ("Lists"));
+        auto list = juce::ValueTree {};
+
+        for (const auto& candidate : lists)
+            if (candidate.getType().toString() == "List"
+                 && candidate[idProperty].toString().toStdString() == aim.list)
+                list = candidate;
+
+        if (! list.isValid())
+            return plan;
+
+        walk.visitList (list);
+
+        const auto placedOf = [&walk] (const std::string& cueId) -> const Placed*
         {
-            for (const auto& groupId : target->ancestors)
+            for (const auto& entry : walk.placed)
+                if (entry.id == cueId)
+                    return &entry;
+
+            return nullptr;
+        };
+
+        const auto* target = placedOf (aim.cue);
+
+        if (target == nullptr)
+            return plan;
+
+        plan.ok = true;
+
+        /** Whether a cue never ends on its own: a bed, a loop for ever. */
+        const auto endless = [&walk] (const std::string& cueId)
+        {
+            const auto found = walk.unbounded.find (cueId);
+            return found != walk.unbounded.end() && found->second;
+        };
+
+        /*  THE INSTANT: the aimed cue's step plus the offset, in ticks. "Before
+            it fired" is the tick before its step, so its own step - and every
+            other step on the same tick - is in the future. */
+        const auto ticksIn = aim.offset >= 0.0
+                               ? static_cast<std::int64_t> (std::llround (aim.offset * 50.0))
+                               : -1;
+        plan.instant = firedAt + ticksIn;
+
+        /*  EVERYTHING THAT HAD HAPPENED BY THEN, oldest first, which is the
+            order values and stops resolve in: a stop after a fire ends the
+            run, a fire after a stop is a new one. */
+        std::vector<Step> past;
+
+        for (const auto& step : steps)
+            if (step.tick <= plan.instant)
+                past.push_back (step);
+
+        std::stable_sort (past.begin(), past.end(),
+                          [] (const Step& a, const Step& b) { return a.tick < b.tick; });
+
+        std::vector<std::string> stopped;
+        std::map<std::string, std::size_t> writtenAt;
+        std::map<std::string, std::size_t> trimmedAt;
+        std::string lastGo;
+
+        /*  A CUE FIRED AGAIN REPLACES ITS EARLIER SELF: the runs its earlier
+            step planned - itself, and a scene's members - go before the later
+            step plans them, so one cue is one run whatever the night did. */
+        const auto unplan = [&plan] (const std::string& cueId)
+        {
+            plan.runs.erase (std::remove_if (plan.runs.begin(), plan.runs.end(),
+                                             [&cueId] (const PlannedRun& run)
+                                             {
+                                                 return run.cue == cueId
+                                                     || std::find (run.ancestors.begin(),
+                                                                   run.ancestors.end(), cueId)
+                                                          != run.ancestors.end();
+                                             }),
+                             plan.runs.end());
+        };
+
+        for (const auto& step : past)
+        {
+            const auto* entry = placedOf (step.cue);
+
+            if (entry == nullptr || ! read.flag (entry->node, "cue", "enabled"))
+                continue;
+
+            const auto seconds = static_cast<double> (plan.instant - step.tick) / 50.0;
+
+            if (step.origin == 'g')
+                lastGo = step.cue;
+
+            if (entry->element == "Stop")
             {
-                PlannedRun group;
-                group.cue = groupId;
+                const auto targetCue = read.text (entry->node, "stop", "target");
 
-                /*  ITS OWN GROUPS, the ones before it in the chain, so that a
-                    jump into a scene inside a scene builds the inner group
-                    UNDER the outer one. Empty, the builder made every
-                    ancestor a top-level run and the scheduler saw two scenes
-                    where the show had one inside the other. Found on the way
-                    to seating a group at an offset (2026-09-18). */
-                group.ancestors.assign (target->ancestors.begin(),
-                                        std::find (target->ancestors.begin(),
-                                                   target->ancestors.end(), groupId));
-                plan.runs.push_back (group);
+                if (! targetCue.empty())
+                {
+                    stopped.push_back (targetCue);
+                    unplan (targetCue);
+                }
 
-                const auto node = document.findById (groupId);
-
-                if (node.isValid() && read.text (node, "group", "selection") == "shuffle"
-                     && read.integer (node, "group", "seed") == 0)
-                    plan.confused.push_back ({ groupId, confusion::drawnOrder,
-                                               "the order the show is written in" });
-
-                if (node.isValid() && read.integer (node, "group", "loops") != 1)
-                    plan.confused.push_back ({ groupId, confusion::unknownRound,
-                                               "round one" });
+                continue;
             }
 
-            /*  AND THE MEMBERS SOUNDING BESIDE IT.
-
-                Inside a timeline group or an automatic sequence there is no
-                person between the members - the second starts when the first
-                completes, or at its own offset from the group's entry - so the
-                document knows exactly what else is going when the target is
-                `offset` seconds in. That is the one place where "everything
-                before the target is at its end state" is FALSE, and it is false
-                because there was no GO in between to make it true.
-
-                A load-to-time into the middle of a scene depends on this
-                entirely: without it the jump would land the cue somebody asked
-                for and silence everything it was playing against.
-
-                The walk has already done the arithmetic - every cue in a timed
-                chain carries its seconds from that chain's entry - so this is a
-                comparison rather than a second calculation, which is the whole
-                reason that walk is shared with the slot analysis. */
-            /*  AND THE TARGET MAY BE THE SCENE ITSELF (2026-09-18). A member
-                is placed inside its chain; a group that IS the chain's origin
-                is not timed - nothing placed it - but its members are, and
-                they are counted from its entry. So "the scene, `offset`
-                seconds in" reads the same members against the same clock,
-                with the offset itself as the instant. This is what lets a
-                running group be re-seated at another second of its own
-                timeline, which is what scrubbing a group in the running pane
-                asks for. */
-            const auto chain = target->timed ? target->chain
-                             : target->element == "Group" ? target->id
-                                                          : std::string {};
-
-            if (! chain.empty())
+            if (entry->element == "Osc")
             {
-                const auto at = target->timed ? target->from + aim.offset : aim.offset;
+                const auto address = read.text (entry->node, "osc", "address");
 
-                /*  WHAT EACH INNER GROUP WAS FOUND TO BE, by identifier, so
-                    that its members can follow it: a group that is DUE will
-                    spawn its own members when it fires, so planning them too
-                    would have each of them twice; one that is FINISHED has
-                    had them, whatever their own seconds say. Groups are placed
-                    before their members, so the answer is always there. */
-                std::map<std::string, std::string> innerWhen;
+                if (address.empty())
+                    continue;
 
-                for (const auto& entry : walk.placed)
+                if (mounts != nullptr)
+                    if (const auto* node = mounts->nodeAt (address);
+                        node != nullptr && node->kind == tree::Kind::event)
+                        continue;
+
+                const auto value = osc::Value::fromAtom (read.text (entry->node, "osc", "value"));
+
+                if (! value.has_value())
+                    continue;
+
+                if (const auto seen = writtenAt.find (address); seen != writtenAt.end())
+                    plan.values[seen->second] = { address, *value, entry->id };
+                else
                 {
-                    if (entry.id == target->id || ! entry.timed || entry.chain != chain)
-                        continue;
+                    writtenAt[address] = plan.values.size();
+                    plan.values.push_back ({ address, *value, entry->id });
+                }
 
-                    if (! read.flag (entry.node, "cue", "enabled"))
-                        continue;
+                continue;
+            }
 
-                    /*  Its own groups are already in the plan, above. */
-                    if (std::find (target->ancestors.begin(), target->ancestors.end(),
-                                   entry.id) != target->ancestors.end())
-                        continue;
+            if (entry->element == "Fade")
+            {
+                /*  WHOLE ONCE ITS TIME HAS PASSED, and the part of it that had
+                    happened inside it: a fade three seconds into six has moved
+                    its target half of the way. Linear, which is the shape a
+                    reading can promise without the curve; the run that is
+                    built from this plays the real one. */
+                const auto targetCue = read.text (entry->node, "fade", "target");
+                const auto cue = document.findById (targetCue);
 
-                    if (entry.element == "Media" && wasStopped (entry.id))
-                        continue;
+                if (targetCue.empty() || ! cue.isValid())
+                    continue;
 
-                    std::string inner;
+                const auto whole = read.number (entry->node, "fade", "level")
+                                     - read.number (cue, "media", "level");
+                const auto duration = read.number (entry->node, "fade", "duration");
+                const auto part = duration > 0.0 && seconds < duration ? seconds / duration : 1.0;
+                const auto trim = whole * part;
 
-                    for (const auto& groupId : entry.ancestors)
-                        if (const auto seen = innerWhen.find (groupId); seen != innerWhen.end())
-                            if (seen->second != planned::sounding)
-                                inner = seen->second;
+                if (const auto seen = trimmedAt.find (targetCue); seen != trimmedAt.end())
+                    plan.trims[seen->second].decibels = trim;
+                else
+                {
+                    trimmedAt[targetCue] = plan.trims.size();
+                    plan.trims.push_back ({ targetCue, trim });
+                }
 
-                    if (inner == planned::due)
-                        continue;
+                continue;
+            }
 
-                    PlannedRun beside;
-                    beside.cue = entry.id;
-                    beside.ancestors = entry.ancestors;
+            if (entry->element != "Media" && entry->element != "Group")
+                continue;
 
-                    /*  THE WHOLE CHAIN AND NOT ONLY THE NOISY PART. A jump has
-                        to build the scene the scheduler is about to take over,
-                        and a member missing from it is one the group will spawn
-                        a second time - or, missing from the finished end, a
-                        group that thinks it has not started.
+            /*  A SOUND THAT HAS RUN OUT BY THE INSTANT IS OVER, and is left
+                out rather than planned at its last instant: the order reading
+                plans a target the operator has DECLARED live, and the history
+                reading knows better. A file whose length this build cannot
+                read is planned at the offset and said to be a guess, which is
+                what the order does for the same case. */
+            if (entry->element == "Media")
+            {
+                const auto material = materialOf (read, entry->node, durations);
+                const auto ranged = entry->node.getChildWithName (juce::Identifier ("Range")).isValid();
 
-                        EVERY KIND, not media alone (2026-09-18): a fade due
-                        four seconds after the jump has to be waiting there, or
-                        the scene the scheduler takes over never fires it. A
-                        fade or a message the instant has already passed is
-                        over - what it wrote is in the values and the trims. */
-                    if (inner == planned::finished || entry.to <= at)
-                        beside.when = planned::finished;
-                    else if (at < entry.from)
+                if (material.has_value() && seconds >= *material)
+                {
+                    unplan (entry->id);
+                    continue;
+                }
+
+                if (! material.has_value() && ! ranged && ! endless (entry->id))
+                    plan.confused.push_back ({ entry->id, confusion::unknownLength,
+                                              "the seconds since it was fired, played from there" });
+            }
+
+            /*  A TIMED SCENE THAT IS WHOLLY OVER is left out too, by the
+                same rule; a manual one, or one the walk cannot time, is
+                planned at the offset and its members read as the order would. */
+            if (entry->element == "Group")
+            {
+                auto lastEnd = -1.0;
+                auto timed = false;
+
+                for (const auto& member : walk.placed)
+                    if (member.timed && member.chain == entry->id)
                     {
-                        beside.when = planned::due;
-                        beside.startsIn = entry.from - at;
+                        timed = true;
+                        lastEnd = std::max (lastEnd, member.to);
                     }
-                    else if (entry.element == "Media")
-                        placeInRanges (read, entry.node, at - entry.from, beside, plan.confused);
-                    else if (entry.element == "Group")
-                        beside.offset = at - entry.from;
-                    else
-                        beside.when = planned::finished;
 
-                    if (entry.element == "Group")
-                        innerWhen[entry.id] = beside.when;
-
-                    plan.runs.push_back (beside);
+                if (timed && seconds >= lastEnd && ! endless (entry->id))
+                {
+                    unplan (entry->id);
+                    continue;
                 }
             }
 
-            if (target->element == "Media")
-            {
-                PlannedRun run;
-                run.cue = target->id;
-                run.ancestors = target->ancestors;
-
-                if (! materialOf (read, target->node, durations).has_value()
-                     && ! target->node.getChildWithName (juce::Identifier ("Range")).isValid())
-                    plan.confused.push_back ({ target->id, confusion::unknownLength,
-                                              "the offset asked for, played from the top" });
-
-                placeInRanges (read, target->node, aim.offset, run, plan.confused);
-                plan.runs.push_back (run);
-            }
-            else
-            {
-                PlannedRun run;
-                run.cue = target->id;
-                run.ancestors = target->ancestors;
-                run.offset = aim.offset;
-                plan.runs.push_back (run);
-            }
+            unplan (entry->id);
+            planTarget (read, document, durations, walk, *entry, seconds, stopped, plan);
         }
 
+        /*  THE POINTER, where the last GO in the instant's past left it:
+            positionally after the cue it fired (§3.5), or after the aimed cue
+            when nothing in the past was a GO. */
+        const auto* after = placedOf (lastGo.empty() ? aim.cue : lastGo);
+
+        if (after != nullptr)
+            for (const auto& entry : walk.placed)
+                if (entry.row > after->row && entry.mayLandHere)
+                {
+                    plan.standby = entry.id;
+                    break;
+                }
+
         return plan;
+    }
+
+    Plan solveAim (const doc::ShowDocument& document,
+                   const std::map<std::string, double>* durations,
+                   const tree::MountTable* mounts,
+                   const Aim& aim,
+                   const std::vector<Step>* steps)
+    {
+        if (steps != nullptr)
+            return solveHistory (document, durations, mounts, aim, *steps);
+
+        return solve (document, durations, mounts, aim);
     }
 
     //==============================================================================
@@ -658,6 +953,7 @@ namespace wfg::cue
             subscribe to. */
         std::string out = "{\"ok\": ";
         out += ok ? "true" : "false";
+        out += ", \"how\": " + quoted (how) + ", \"instant\": " + std::to_string (instant);
         out += ", \"aim\": {\"cue\": " + quoted (aim.cue)
                  + ", \"offset\": " + osc::formatDouble (aim.offset) + "}";
         out += ", \"standby\": " + quoted (standby);

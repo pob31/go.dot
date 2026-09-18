@@ -67,8 +67,10 @@
     test with no engine anywhere.
 */
 
+#include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <cstdint>
 #include <map>
 #include <string>
 #include <vector>
@@ -201,6 +203,22 @@ namespace wfg::cue
         /** Whether the aim named anything this list holds. */
         bool ok = false;
 
+        /*  HOW IT WAS ANSWERED (2026-09-19). `order` is the reading above:
+            everything before the target at its end state, the target's own
+            chain at the offset. `history` is the reading from what happened:
+            the list's steps place every cue fired before the instant at the
+            second it had reached, so a bed started three GOs ago is three GOs
+            of real time in, not "over" - the author's own reframing, that a
+            load to time is a position in the list's HISTORY. Chosen by whether
+            the aimed cue has a step; a cue never fired this session has no
+            history to read and gets the order. */
+        std::string how = "order";
+
+        /*  The wall tick the plan describes, when it was read from history:
+            the aimed cue's step plus the offset. -1 for the order reading,
+            which has no clock. The jump retimes the history against it. */
+        std::int64_t instant = -1;
+
         /** The plan as JSON, for `/godot/list/<id>/solve`. */
         std::string toJson() const;
     };
@@ -219,6 +237,33 @@ namespace wfg::cue
                 const std::map<std::string, double>* durations,
                 const tree::MountTable* mounts,
                 const Aim& aim);
+
+    /*  THE SAME QUESTION READ FROM WHAT HAPPENED (2026-09-19).
+
+        The list's steps, newest last, say when every cue was fired. The aimed
+        cue's most recent step plus the offset is an INSTANT; every step at or
+        before it is a cue that had been going for (instant - step) seconds
+        then - sounding if its material lasts that long, over otherwise, a
+        scene with its members placed by the same clock - and every step after
+        it had not happened. A stop step ends its target's run from then on; a
+        fade step's trim is whole once its duration has passed and
+        proportional inside it; an osc step's value is written, last writer
+        by time. The pointer lands after the last GO step in the instant's
+        past, as a GO would have left it.
+
+        A cue with no step falls back to `solve`, and says so in `how`. */
+    Plan solveHistory (const doc::ShowDocument& document,
+                       const std::map<std::string, double>* durations,
+                       const tree::MountTable* mounts,
+                       const Aim& aim,
+                       const std::vector<Step>& steps);
+
+    /** History when the aim's cue has a step in `steps`, the order otherwise; `steps` may be null. */
+    Plan solveAim (const doc::ShowDocument& document,
+                   const std::map<std::string, double>* durations,
+                   const tree::MountTable* mounts,
+                   const Aim& aim,
+                   const std::vector<Step>* steps);
 
     //==============================================================================
     /*  THE PERSISTENT MODE (§3.29, §13.11): what a list's persistent section

@@ -120,6 +120,12 @@ namespace wfg::client::ui
             /*  A BOX OPENED, so the window holds the inspector shut (author,
                 2026-09-18: "don't open the inspector on a double click"). */
             std::function<void()> editingBegan;
+
+            /*  A CLICK ON A STEP ROW re-aims at that step's offset into the
+                aimed cue (load to time, 2026-09-19): the rows under the cue
+                are the moments the list took, and pointing at one is the
+                quickest way to say "as it was when that fired". */
+            std::function<void (double offset)> reaim;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);
@@ -133,6 +139,14 @@ namespace wfg::client::ui
 
         /** Whether a double-click may open a cell for editing: not while the show is locked. */
         void setEditable (bool editable);
+
+        /*  THE STEPS UNDER THE AIMED CUE, while the window is loading to time
+            (author, 2026-09-18: "the cue list items can be spaced vertically
+            to show the various intermediary steps"). Rows the model never
+            built, inserted under `underCue`'s own row at the next `show`;
+            an empty vector takes them out. They are readings, not cues: no
+            pick, no drop, no box opens on one. */
+        void setSteps (const std::string& underCue, std::vector<model::Row> stepsToShow);
 
         void paint (juce::Graphics& g) override;
         void resized() override;
@@ -243,6 +257,14 @@ namespace wfg::client::ui
             rows happens at show-change rate, which is when somebody typed - so
             the cost is paid where nobody can feel it. */
         std::vector<model::Row> rows;
+
+        /** The step rows to insert, and under which cue; a counter so `show` notices a change. */
+        std::string stepsUnder;
+        std::vector<model::Row> steps;
+        std::uint64_t stepsVersion = 0;
+        std::uint64_t drawnSteps = 0;
+
+        void paintStep (const model::Row& entry, juce::Graphics& g, int width, int height);
         std::string standby;
         int standbyRow = -1;
         std::vector<std::string> chosen;     ///< the picked cues, as the selection holds them

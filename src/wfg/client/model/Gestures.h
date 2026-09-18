@@ -135,4 +135,11 @@ namespace wfg::client::gesture
         along a running cue's strip, or along a running scene's row. One per
         position the hand settles on, and one when it lets go. */
     Event seek (const std::string& runId, double seconds);
+
+    /*  Load to time (§3.13): where the operator is pointing - a cue and how
+        far into it, -1 for before it fired - and the jump that makes the aim
+        true. The aim is asked on every change, since asking is free and the
+        answer is what the panel shows; the load is the one button. */
+    Event aim (const std::string& listId, const std::string& cueId, double offset);
+    Event loadToTime (const std::string& listId);
 }

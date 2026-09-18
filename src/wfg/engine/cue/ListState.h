@@ -42,6 +42,7 @@
     parameter tree reads it while publishing, on that same thread.
 */
 
+#include <algorithm>
 #include <cstdint>
 #include <map>
 #include <string>
@@ -106,6 +107,40 @@ namespace wfg::cue
 
             while (steps.size() > kept)
                 steps.erase (steps.begin());
+        }
+
+        /*  A JUMP RETIMES THE HISTORY (2026-09-19). The steps are on the wall
+            clock, and a load to time puts the show where it was at `landedAt`:
+            from now on a cue fired at tick t before that instant has been
+            going for (now - landedAt) + (landedAt - t) ticks, so its step
+            moves forward by (now - landedAt); and a step after the instant
+            did not happen in the show the jump made, so it goes. Without this
+            a second aim after a jump would read the abandoned steps as still
+            in force, and the kept ones as older than the sound they describe. */
+        void retimed (const std::string& list, std::int64_t landedAt, std::int64_t now)
+        {
+            auto& steps = histories[list];
+
+            steps.erase (std::remove_if (steps.begin(), steps.end(),
+                                         [landedAt] (const Step& step) { return step.tick > landedAt; }),
+                         steps.end());
+
+            for (auto& step : steps)
+                step.tick += now - landedAt;
+        }
+
+        /*  A SCENE RE-SEATED AT A SECOND OF ITSELF (`run.seek` on a group)
+            moves its most recent step to where that second says it was fired. */
+        void refired (const std::string& list, const std::string& cue, std::int64_t firedAt)
+        {
+            auto& steps = histories[list];
+
+            for (auto step = steps.rbegin(); step != steps.rend(); ++step)
+                if (step->cue == cue)
+                {
+                    step->tick = firedAt;
+                    return;
+                }
         }
 
         /** Newest last. */
