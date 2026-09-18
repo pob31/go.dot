@@ -15,7 +15,10 @@
   "panel-inspect": "#1c2433",
   "panel-high": "#24242b",
   "panel-in": "#191920",
-  "panel-section": "#1b1e26",
+  "panel-cue": "#000000",
+  "panel-section": "#202838",
+  "panel-section-cue": "#202838",
+  "panel-runs": "#000000",
   "rule": "#3a3a45",
 
   "standby": "#e8b04b",

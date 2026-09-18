@@ -1712,11 +1712,7 @@ namespace wfg::tree
                 /*  WHEN IT STARTED, as the tick a GO was applied on - which is
                     what the runner already keeps in order to measure lateness,
                     handed out so a client can order a pane by it. */
-                else if (name == "started")   text = std::to_string (run.launchRequested
-                                                                       || run.launchedAtSample > 0
-                                                                       || run.launchRequestedAtTick > 0
-                                                                         ? run.launchRequestedAtTick
-                                                                         : 0);
+                else if (name == "started")   text = std::to_string (run.launchRequestedAtTick);
 
                 /*  HOW LONG UNTIL IT DOES THE NEXT THING, and nought whenever
                     it is not in a wait - so a reader never has to ask the state

@@ -6943,9 +6943,12 @@ of them was a fault the others made visible.
 - **A section's rows sit one level in**, like a group's, which is what gives a header and a footer
   the bracket they lacked and the band a rail to open. They had shared their band's depth, so
   nothing drew them as contained.
-- **A header, a footer and a persistent cue have their own tone**, cooler than the recessed ground
-  rather than darker, so the difference reads as a different KIND of row and not as another level of
-  nesting.
+- **A header, a footer and a persistent cue have their own tone**, and it took four tries to land:
+  a hair cooler than the panel, which read as nothing; lighter, which the author turned down; black,
+  which they then asked to invert. The final word is **the list's own rows black and a section dark
+  blue-grey**, band and rows alike — black is where the eye rests, and a section is the thing that
+  differs. The running pane is black too, which is also where a waveform's colours have most to stand
+  against. Three theme tokens carry it, so the next change is a line in a file.
 - **Nothing alternates.** A zebra is for following a row across a wide table, and it was fighting the
   two distinctions above — which carry meaning, where a stripe carries only parity.
 - **A group's name is larger and carries its behaviour as shapes**: a loop mark with its round count,
@@ -6957,6 +6960,69 @@ of them was a fault the others made visible.
 
 **And GO moved to the left, with the cue it will fire beside it** — the hand goes to one place and
 the eye reads outward from it, rather than reading a name and travelling back across the window.
+
+**A FADE'S PLAYHEAD NEVER MOVED, AND IT MADE AN EDIT LOOK IGNORED (2026-09-18, afternoon).** The
+author changed a fade's duration in the inspector, ran it, and reported that the duration had not
+changed. Their own log said otherwise — the `node.set` was applied and the fade's run lasted exactly
+the 150 ticks asked for — so what they had been reading was the bar under the run, and the bar had
+not moved because `run/position` had never been computed for a fade. `Runner::updatePositions`
+measured every playhead from the SAMPLE a launch was placed at, and a fade holds no voice, so
+`launchedAtSample` was nought for it for ever. **Two reports, one cause**: "the fade's progress bar
+isn't moving" and "changing the duration doesn't change the fade" were the same fact seen twice.
+
+**The repair widened what `position` means, and the parameter table says so.** A run with no voice is
+measured in ticks from the GO that started it; a run with one keeps the sample clock, which is the
+finer answer and the only one a range can wrap. `run,position` reads *how far into the RUN*, which is
+the file only when there is one. The stamp it measures from — `launchRequestedAtTick`, which the
+runner already kept to measure lateness — had been set on the media path alone, and the first repair
+put a second stamp in `fireNow`, which is only the path a cue with a pre-wait takes; a cue without one
+is fired straight from the GO and never goes near it. It lives in `fireKind` now, the one place every
+kind passes. A test pins that a fade's playhead advances.
+
+**And a second engine reading, because the running pane needed it.** `run,started` is that same
+launch tick handed out, so a pane can be ordered the way the show happened rather than the way the
+run table holds it: a cue the anticipation window prepared is CREATED before the things already
+sounding, so engine order put the next cue above them.
+
+**WHAT PARKING THE POINTER DOES, restated because it was reported four times.** `phase4`'s "Position
+the input" is a header-derived preset line — `preset="P4GRP001"` — on a mount declared
+`anticipatable` with an OSCQuery readback, and it waits for verification. Parking on the group is
+§3.12's prepare: the write is pre-sent so GO commits only the perceptible part, and a readback is
+awaited for the cue's own `timeout`. The fixture declares a desk at a port nothing is on, so the
+pre-sent write fails `timeout` five seconds later, every time, correctly. The author's model —
+parking *"shouldn't do more than place the pointer [and] run the contents of the preset
+container(s)"* — is exactly what the engine does; what they objected to was a preset line FAILING,
+and that is the fixture's missing desk. Two things learned making the fixture quiet for them: the
+cue's own `wait` does not govern a pre-sent write (`wait="sent"` alone still verified and still timed
+out), and `wfg validate` refuses `readback="none"` beside a cue that waits for verification — *"a cue
+that cannot succeed is worse than one that fails"* — so both have to change together. Nothing in the
+engine changed for this, and nothing should: a pre-sent write that is failing is what an operator
+needs to see.
+
+**A SAVED SHOW REFUSED EVERY FEED IN IT (2026-09-18, afternoon), and the author found it by parking
+on a cue.** *"When the standby pointer lands on 2 it shows in the active cues as an error bad
+route."* Cue 2 feeds a processor input. The window had been restarted with `--recover` to keep the
+edits made that hour, and the recovered show — written by the autosave — had no `width` on either
+slot: the canonical writer omits an attribute that equals its default, and a slot one channel wide
+IS the default. `ShowDocument::getAttribute` knows this — *"an absent attribute IS its default; that
+equivalence is what lets the writer omit defaults and still round-trip"* — and every cue attribute the
+runner reads goes through it. `resolveRouting` did not: it read a bus's and a slot's `width` and
+`firstChannel` straight off the tree, where an absent width is nought and nought is *"the slot does
+not fit in its bus"*. **The autosave and `document.save` are one writer**, so this was not a recovery
+bug: any show saved since PR 4.2 and reopened would have refused every feed in it, and the fixtures
+never showed it because every one of them writes its widths out by hand.
+
+**The repair is the one the rest of the runner already made.** The schema `Reader` in `ShowWalk.h`,
+which applies the parameter table's defaults for the cue-side owners, learned `bus`, `processorInput`
+and `rackChannel`, and the four reads go through it; the runner's own file-local `idProperty` went at
+the same time, since the reader's header carries the one there is. A regression test builds a slot
+and a bus exactly as the writer would have left them — the bus named, nothing else — and routes a
+feed and a route through them. **Recorded as a rule for the reader of this file: a raw
+`node[juce::Identifier (...)]` on a document attribute is a latent bug wherever that attribute has a
+default**, because the writer will drop it and the tree will not put it back.
+
+**The pane draws armed runs.** They were hidden for one build on a misreading of that report, and
+the author's words put them back: *"I don't mind seeing the armed, preloaded cues ready to fire."*
 
 **WHAT M7 BUILT, AND IT IS THE ONE THING THE PAGE CANNOT BE GIVEN LATER (2026-09-18).** Decision Y,
 in a gesture: a file dragged onto the window. A browser is handed a dropped file's NAME and BYTES and

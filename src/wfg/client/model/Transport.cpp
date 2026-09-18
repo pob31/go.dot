@@ -33,12 +33,12 @@ namespace wfg::client::model
             is not a zero and not a no. */
         constexpr const char* unsaid = "—";
 
-        std::string join (const std::string& a, const std::string& b)
-        {
-            if (a.empty()) return b;
-            if (b.empty()) return a;
-            return a + " · " + b;
-        }
+        /*  `join`, which put a middle dot between two half-sentences, went with
+            the last line that had two halves to put together: the transport
+            lost its saved/unsaved line and its audio word on 2026-09-18, and
+            what is left says one thing each. Kept out rather than kept unused -
+            GCC's -Werror=unused-function is right that a helper nothing calls
+            is a claim about a shape the file no longer has. */
     }
 
     std::string TransportReading::standbyLine() const

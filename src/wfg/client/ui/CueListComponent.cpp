@@ -32,6 +32,14 @@ namespace wfg::client::ui
             here, in the same order - "something logical time wise", their
             words, and the order somebody works in rather than the alphabet. */
         constexpr int numberChars = 6;
+
+        /*  TWICE THE SIZE THEY WERE (author, 2026-09-18: "you can enlarge these
+            triangles two fold"). A twist is the one control on a row and it was
+            drawn at the size of a word beside it. The glyph's ink is about half
+            its em, so a cell one indent wide still holds it - and the number
+            lives here rather than at three call sites so the three twists in
+            this window cannot come to differ. */
+        constexpr float twistHeight = 22.0f;
         constexpr int timeChars = 6;
         constexpr int kindChars = 8;
 
@@ -158,7 +166,7 @@ namespace wfg::client::ui
         theme = themeToUse;
 
         list.setRowHeight (rowHeight());
-        list.setColour (juce::ListBox::backgroundColourId, Look::colour (theme, "panel"));
+        list.setColour (juce::ListBox::backgroundColourId, Look::colour (theme, "panel-cue"));
         list.setColour (juce::ListBox::outlineColourId, Look::colour (theme, "rule"));
 
         resized();
@@ -282,10 +290,8 @@ namespace wfg::client::ui
             following a row across a wide table, and it was fighting the two
             distinctions above - which carry meaning, where the stripe carried
             only parity. */
-        g.fillAll (entry.section != model::Section::member
-                     ? Look::colour (theme, "panel-section")
-                     : entry.depth > 0 ? Look::colour (theme, "panel-in")
-                                       : Look::colour (theme, "panel"));
+        g.fillAll (Look::colour (theme, entry.section != model::Section::member
+                                          ? "panel-section-cue" : "panel-cue"));
 
         if (isPicked)
         {
@@ -407,7 +413,7 @@ namespace wfg::client::ui
             its rail (§4.8): three tellings, not one, and none of them colour. */
         auto markCell = area.removeFromLeft (indent);
         g.setColour (faint);
-        g.setFont (Look::font (theme, 13.0f));
+        g.setFont (Look::font (theme, twistHeight));
         /*  A GROUP'S TWIST POINTS DOWN WHEN IT IS OPEN AND RIGHT WHEN IT IS
             SHUT, which is the one convention a file tree has taught everybody
             already - and the same shape a section's band uses, so the two kinds
@@ -495,36 +501,48 @@ namespace wfg::client::ui
 
         paintRails (entry, row, g, height);
 
-        /*  From the enclosing rail when there is one, and from the row's own
-            left edge at the top level, where nothing encloses the section. */
-        const auto left = entry.depth > 0 ? railAt (entry.depth) : area.getX();
+        /*  A RAIL AND A CORNER, which is the shape every container in this
+            list is drawn with. The corner is where the section's own rail
+            stands - the one its rows come down, since they sit one level in -
+            so the top edge starts exactly there and the rail drops from it.
+
+            FULL HEIGHT AND NOT FROM THE MIDDLE, which is what a group's row
+            does: a group's members begin BELOW it, so its rail starts halfway
+            down, but a band IS the top of its section and the frame has to
+            read as starting at its own top edge. Half a rail and a nearly
+            invisible fill is what made these disappear. */
+        const auto corner = railAt (entry.depth + 1);
 
         g.setColour (Look::colour (theme, "rule"));
-        g.fillRect (left, 0, width - left - pad, 1);
+        g.fillRect (corner, 0, width - corner - pad, 1);
 
-        /*  AND THE SECTION'S OWN RAIL, opened under this head exactly as a
-            group opens its children's - which is what a section's rows now
-            come down, since they sit one level in. */
         if (! entry.shut)
-            g.fillRect (railAt (entry.depth + 1), height / 2, 1, height - height / 2);
+            g.fillRect (corner, 0, 1, height);
 
         auto text = area.withTrimmedLeft (entry.depth * indent);
 
         /*  THE TWIST IS A SHAPE: pointing down when the section is open and
             right when it is shut, which is the one convention every file tree
             has taught everybody already. */
-        //  Centred on the rail, for the reason a cue row's twist is.
+        /*  Centred on the rail, for the reason a cue row's twist is - and on
+            its own patch of ground, so the rail it stands on runs behind it
+            rather than through the glyph. */
         auto twist = text.removeFromLeft (indent);
+
+        g.setColour (Look::colour (theme, "panel-section"));
+        g.fillRect (twist.reduced (0, 1));
+
         g.setColour (Look::colour (theme, "ink-dim"));
-        g.setFont (Look::font (theme, 11.0f));
+        g.setFont (Look::font (theme, twistHeight));
         g.drawText (juce::String (juce::CharPointer_UTF8 (entry.shut ? "\xe2\x96\xb8" : "\xe2\x96\xbe")),
                     twist, juce::Justification::centred, false);
 
         text.removeFromLeft (pad);
 
+        //  The word reads at a glance or the band is a stripe nobody can name.
         auto word = juce::String (entry.name).toUpperCase();
-        g.setColour (Look::colour (theme, "ink-dim"));
-        g.setFont (Look::font (theme, 10.0f));
+        g.setColour (Look::colour (theme, "ink"));
+        g.setFont (Look::font (theme, 11.0f));
         const auto wordWidth = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), word) + pad;
         g.drawText (word, text.removeFromLeft (wordWidth), juce::Justification::centredLeft, false);
 
@@ -807,22 +825,28 @@ namespace wfg::client::ui
         /*  THE SAME THREE WIDTHS AND THE SAME ORDER the rows take them off in,
             which is what keeps a label over its own column: post, duration,
             pre from the right, then the kind. */
+        /*  FITTED AND NOT CLIPPED. A heading has to fit its column or it is
+            not a heading: "DURATION" came out as "DURATIO" at the width the
+            time columns are, and a word with its last letter missing reads as
+            a fault rather than as a label (author's screenshot, 2026-09-18).
+            Squeezed rather than shortened, because the author asked for these
+            words and the abbreviation would be mine. */
         for (const auto* label : { "POST", "DURATION", "PRE" })
         {
-            auto cell = row.removeFromRight (timeChars * unit);
-            g.drawText (label, cell.reduced (pad / 2, 0), juce::Justification::centredRight, false);
+            auto cell = row.removeFromRight (timeChars * unit).reduced (pad / 2, 0);
+            g.drawFittedText (label, cell, juce::Justification::centredRight, 1, 0.6f);
         }
 
-        g.drawText ("KIND", row.removeFromRight (kindChars * unit),
-                    juce::Justification::centredRight, true);
+        g.drawFittedText ("KIND", row.removeFromRight (kindChars * unit),
+                          juce::Justification::centredRight, 1, 0.6f);
 
-        g.drawText ("CUE", row.removeFromLeft (numberChars * unit),
-                    juce::Justification::centredLeft, false);
+        g.drawFittedText ("CUE", row.removeFromLeft (numberChars * unit),
+                          juce::Justification::centredLeft, 1, 0.6f);
     }
 
     void CueListComponent::paint (juce::Graphics& g)
     {
-        g.fillAll (Look::colour (theme, "panel"));
+        g.fillAll (Look::colour (theme, "panel-cue"));
         paintHeadings (g, getLocalBounds().removeFromTop (headingHeight()));
     }
 

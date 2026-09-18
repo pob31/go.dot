@@ -15,6 +15,8 @@
 */
 
 #include <wfg/engine/cue/Runner.h>
+
+#include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Solver.h>
 
 #include <wfg/engine/midi/MidiMessages.h>
@@ -37,7 +39,10 @@ namespace wfg::cue
 {
     namespace
     {
-        const juce::Identifier idProperty { "id" };
+        /*  `idProperty` is ShowWalk.h's since 2026-09-18, when this file began
+            reading routing through the schema `Reader` that lives there; a
+            second copy of the same identifier here made every use of it
+            ambiguous, and one definition is the right number anyway. */
 
         /*  Silence, spelled as the parameter table spells it. Written here
             rather than included from CueMatrix because this is the cue layer
@@ -1753,6 +1758,28 @@ namespace wfg::cue
     void Runner::fireKind (Engine& engine, std::int64_t tick, const juce::ValueTree& cue,
                            const std::string& kind, const std::string& runId)
     {
+        /*  WHEN IT STARTED, FOR EVERY KIND, and HERE because this is the one
+            place all of them pass: a cue with a pre-wait arrives through
+            `fireNow`, and a cue without one is fired straight from the GO
+            without going near it.
+
+            `launchRequestedAtTick` was stamped on the media path alone,
+            because that is where lateness is measured and lateness is
+            something only a PLACED launch can have - so a fade, an OSC cue or
+            a memo carried a nought for ever, and anything drawing a playhead
+            over one had nothing to measure from. A fade is the case that
+            showed it: its bar sat at the start however long the fade was,
+            which reads as a duration that does not take (author, 2026-09-18).
+
+            Guarded, so the arming paths keep the stamp they already made:
+            theirs is the tick lateness is measured against, and it is the same
+            tick anyway. */
+        if (auto* starting = runs.find (runId);
+            starting != nullptr && starting->launchRequestedAtTick <= 0)
+        {
+            starting->launchRequestedAtTick = tick;
+        }
+
         if (kind == "fade")
         {
             fireFade (cue, runId);
@@ -2145,6 +2172,22 @@ namespace wfg::cue
         std::vector<Coefficient> out;
         problem.clear();
 
+        /*  READ THROUGH THE SCHEMA AND NEVER OFF THE TREE. The canonical
+            writer omits an attribute that equals its default - a slot one
+            channel wide is written with no width at all - and the document's
+            own getter gives the default back, which is the round trip that
+            omission depends on. Read raw, an absent width is nought, and a
+            show that had been SAVED and reopened refused every feed in it as
+            `bad-route` (author, 2026-09-18: "when the standby pointer lands
+            on 2 it shows in the active cues as an error bad route"). It was
+            found on a RECOVERED show, which is the same writer; every cue
+            attribute here already went through `numberOf`, and these four
+            were the only reads that did not.
+
+            Built once: the defaults are the parameter table's and do not
+            change under a running show. */
+        static const Reader schema;
+
         const auto audioNode = document.root().getChildWithName ("Audio");
 
         /*  ONE PIECE OF ARITHMETIC, TWO KINDS OF DESTINATION.
@@ -2247,8 +2290,8 @@ namespace wfg::cue
                     return {};
                 }
 
-                if (! emit (static_cast<int> (bus[juce::Identifier ("firstChannel")]),
-                            static_cast<int> (bus[juce::Identifier ("width")]),
+                if (! emit (schema.integer (bus, "bus", "firstChannel"),
+                            schema.integer (bus, "bus", "width"),
                             gainsOf (destination)))
                     return {};
 
@@ -2280,10 +2323,10 @@ namespace wfg::cue
                     return {};
                 }
 
-                const auto slotFirst = static_cast<int> (slot[juce::Identifier ("firstChannel")]);
-                const auto slotWidth = static_cast<int> (slot[juce::Identifier ("width")]);
-                const auto busFirst = static_cast<int> (bus[juce::Identifier ("firstChannel")]);
-                const auto busWidth = static_cast<int> (bus[juce::Identifier ("width")]);
+                const auto slotFirst = schema.integer (slot, "processorInput", "firstChannel");
+                const auto slotWidth = schema.integer (slot, "processorInput", "width");
+                const auto busFirst = schema.integer (bus, "bus", "firstChannel");
+                const auto busWidth = schema.integer (bus, "bus", "width");
 
                 /*  Checked at load too, and again here for the reason every
                     arm-time check exists: this is the moment the thing is

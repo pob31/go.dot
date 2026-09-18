@@ -65,12 +65,42 @@ namespace wfg::client::model
                 { "panel-in",      0xFF191920 },
 
                 /*  A HEADER, A FOOTER AND A PERSISTENT SECTION ARE NOT MEMBERS
-                    and now do not look like them (author, 2026-09-18: "the
-                    header and footer sections can have a slightly different
-                    shade"). Cooler than `panel-in` by a hair rather than
-                    darker, so the difference reads as a different KIND of row
-                    and not as another level of nesting. */
-                { "panel-section", 0xFF1B1E26 },
+                    and do not look like them (author, 2026-09-18: "the header
+                    and footer sections can have a slightly different shade").
+                    COOLER rather than darker, so the difference reads as a
+                    different KIND of row and not as another level of nesting.
+
+                    IT WAS A HAIR COOLER AND THAT WAS NOT A SHADE, it was
+                    nothing: at #1B1E26 against a #1D1D22 panel the bands
+                    vanished, and the author's next word on them was "I can't
+                    see header and footers anymore". A difference nobody can
+                    see is not a subtle difference. Then it was lighter, and
+                    the author asked for darker, and then for BLACK (2026-09-18:
+                    "can you make them black instead?"): a section is a recess,
+                    not a highlight, and the deepest recess there is says so
+                    without a hue at all. */
+                /*  THE ROWS OF THE LIST ITSELF ARE BLACK and a section is the
+                    dark blue-grey - the author's final word after we had it
+                    the other way round (2026-09-18: "the normal cues should be
+                    black and header and footer dark grey, blueish tint"). Black
+                    is where the eye rests; a section is the thing that differs. */
+                { "panel-cue",     0xFF000000 },
+                { "panel-section", 0xFF202838 },
+
+                /*  THE ROWS INSIDE A SECTION ARE NOT ITS BAND (author,
+                    2026-09-18: "invert the colour of the footers, headers
+                    (black) and the colour of the cues (greyish blue)"): the
+                    band is the frame and the rows are what it holds, and one
+                    tone for both had made a section a black block. The rows
+                    take the greyish blue the sections wore for an hour. */
+                { "panel-section-cue", 0xFF202838 },
+
+                /*  THE RUNNING PANE IS BLACK (author, 2026-09-18: "can you also
+                    make the running cue backgrounds black?"), which is also
+                    where a waveform's colours have most to stand against. One
+                    tone for every row: the stripe the cue list lost is gone
+                    from here too. */
+                { "panel-runs",    0xFF000000 },
                 { "rule",          0xFF3A3A45 },
                 { "standby",       0xFFE8B04B },
                 { "live",          0xFF4BC38A },

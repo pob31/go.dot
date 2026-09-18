@@ -90,6 +90,7 @@ namespace wfg::client::ui
         addAndMakeVisible (closeButton);
 
         detailsButton.setWantsKeyboardFocus (false);
+        detailsButton.getProperties().set (Look::glyphButton(), true);
         detailsButton.onClick = [this]
         {
             detailsOpen = ! detailsOpen;
@@ -120,8 +121,16 @@ namespace wfg::client::ui
         one idea. A SHAPE and not a colour (§4.8), like theirs. */
     void InspectorComponent::sayWhetherDetailsAreOpen()
     {
-        detailsButton.setButtonText (juce::String (juce::CharPointer_UTF8 (detailsOpen ? "â¾"
-                                                                                      : "â¸"))
+        /*  IT POINTS THE WAY THE PANEL OPENS, and this fold is at the FOOT of
+            the panel - so open is UP, towards the rows it revealed, and shut is
+            down (author, 2026-09-18: "details is at the bottom and should be
+            pointing up when expanded").
+
+            The bands in the cue list point the other way for the same reason:
+            they head their section, so their rows appear BELOW them. One rule,
+            two directions, and the rule is where the content goes. */
+        detailsButton.setButtonText (juce::String (juce::CharPointer_UTF8 (detailsOpen ? "\xe2\x96\xb4"
+                                                                                      : "\xe2\x96\xbe"))
                                        + "  details");
     }
 

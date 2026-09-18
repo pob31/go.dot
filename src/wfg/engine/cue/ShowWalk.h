@@ -100,8 +100,17 @@ namespace wfg::cue
     public:
         Reader()
         {
+            /*  AND THE ROUTING'S OWNERS, since 2026-09-18. `resolveRouting` read
+                a bus's and a slot's width and first channel straight off the
+                tree, and the canonical writer omits an attribute that equals
+                its default - a slot one channel wide is written with no width
+                at all - so a show that had been SAVED and reopened refused
+                every feed in it as `bad-route`. Found on a recovered show,
+                which is the same writer. The defaults come from here now, as
+                every cue's do. */
             for (const auto* owner : { "cue", "group", "media", "range", "fade",
-                                       "stop", "feed", "insert" })
+                                       "stop", "feed", "insert",
+                                       "bus", "processorInput", "rackChannel" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))
                     defaults[std::string (owner) + "/" + std::string (row->name)]
                         = std::string (row->defaultText);

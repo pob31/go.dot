@@ -44,5 +44,25 @@ namespace wfg::client::ui
 
         /** A font at `height` pixels before the theme's type scale is applied. */
         static juce::Font font (const model::Theme& theme, float height);
+
+        /*  A BUTTON THAT BEGINS WITH A SHAPE draws the shape large and the
+            word after it at a word's size (author, 2026-09-18: "only the
+            triangle needed to be enlarged, the text itself in its previous
+            size was correct"). A button draws one string in one font, so this
+            is the look-and-feel drawing it in two. Marked with this property
+            rather than by its name, so the rule is a thing a button declares
+            about itself and this class does not have to know which buttons
+            exist. */
+        static const juce::Identifier& glyphButton();
+
+        void drawButtonText (juce::Graphics& g, juce::TextButton& button,
+                             bool shouldDrawButtonAsHighlighted,
+                             bool shouldDrawButtonAsDown) override;
+
+    private:
+        /*  The type scale, kept because a look-and-feel is asked for a font
+            long after the theme that set it has gone out of scope. Everything
+            else this class needs it reads once, in `apply`. */
+        float type = 1.0f;
     };
 }

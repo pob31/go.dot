@@ -431,7 +431,13 @@ TEST_CASE ("client: a theme is complete from construction, and a file changes on
     for (const auto& name : model::Theme::colourNames())
     {
         CHECK_MESSAGE (theme.colour (name) != 0xFFFF00FFu, name << " is undeclared");
-        CHECK_MESSAGE ((theme.colour (name) & 0xFFFFFFu) != 0u, name << " is black");
+
+        /*  OPAQUE, not "not black": black is a colour somebody chose - the
+            sections and the running pane are black since 2026-09-18, at the
+            author's word - while a token nobody set would be nought, which has
+            no alpha at all. That is the forgotten default this check exists to
+            catch, and it catches it still. */
+        CHECK_MESSAGE ((theme.colour (name) & 0xFF000000u) == 0xFF000000u, name << " is transparent");
     }
 
     CHECK (theme.colour ("nobody-declared-this") == 0xFFFF00FFu);
@@ -1135,4 +1141,64 @@ TEST_CASE ("client: the running pane reads the way the show happened, not the wa
     CHECK (model::inShowOrder (orphaned).size() == 1u);
 
     CHECK (model::inShowOrder ({}).empty());
+}
+
+//==============================================================================
+TEST_CASE ("client: a section is a band and its rows sit one level inside it")
+{
+    /*  The rule the bracket is drawn from (author, 2026-09-18: "I think the
+        header and footer need to have more definition visually"). A section's
+        rows used to share their band's depth, so nothing drew them as
+        contained and the band had no level to open a rail on. */
+    Rig rig { "phase4" };
+    const auto snapshot = rig.publish (0);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, "P4ACT001"));
+
+    const model::Row* footerBand = nullptr;
+    const model::Row* persistentBand = nullptr;
+
+    for (const auto& row : show.rows())
+        if (row.rowKind == model::RowKind::band)
+        {
+            if (row.section == model::Section::footer)     footerBand = &row;
+            if (row.section == model::Section::persistent) persistentBand = &row;
+        }
+
+    //  Both sections of this show are drawn, and drawn as bands.
+    REQUIRE_MESSAGE (persistentBand != nullptr, "no persistent band in " << show.rows().size()
+                                                  << " rows");
+    REQUIRE_MESSAGE (footerBand != nullptr, "no footer band in " << show.rows().size() << " rows");
+
+    CHECK (persistentBand->count == 1u);
+    CHECK (footerBand->count == 1u);
+
+    //  The persistent section heads the list itself, so its band is outermost.
+    CHECK (persistentBand->depth == 0);
+
+    //  The footer belongs to a group one level in, so its band is there too.
+    CHECK (footerBand->depth == 1);
+
+    /*  AND EVERY ROW OF A SECTION IS ONE DEEPER THAN ITS BAND, which is what
+        gives the band a rail to open and the rows a bracket to hang from. */
+    const auto rowsOf = [&show] (model::Section which)
+    {
+        std::vector<const model::Row*> found;
+
+        for (const auto& row : show.rows())
+            if (row.section == which && row.rowKind == model::RowKind::cue)
+                found.push_back (&row);
+
+        return found;
+    };
+
+    for (const auto* row : rowsOf (model::Section::persistent))
+        CHECK (row->depth == persistentBand->depth + 1);
+
+    for (const auto* row : rowsOf (model::Section::footer))
+        CHECK (row->depth == footerBand->depth + 1);
+
+    CHECK_FALSE (rowsOf (model::Section::persistent).empty());
+    CHECK_FALSE (rowsOf (model::Section::footer).empty());
 }

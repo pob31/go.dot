@@ -28,6 +28,52 @@ namespace wfg::client::ui
         return juce::Colour (static_cast<juce::uint32> (theme.colour (name)));
     }
 
+    const juce::Identifier& Look::glyphButton()
+    {
+        static const juce::Identifier id { "wfgGlyphButton" };
+        return id;
+    }
+
+    void Look::drawButtonText (juce::Graphics& g, juce::TextButton& button,
+                               bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown)
+    {
+        if (! button.getProperties().contains (glyphButton()))
+        {
+            LookAndFeel_V4::drawButtonText (g, button, shouldDrawButtonAsHighlighted,
+                                            shouldDrawButtonAsDown);
+            return;
+        }
+
+        /*  THE FIRST CHARACTER IS THE SHAPE and everything after it is the
+            word: the twist, then "details". Two fonts, one colour, centred as a
+            pair so the button still reads as one thing. */
+        const auto text = button.getButtonText();
+        const auto glyph = text.substring (0, 1);
+        const auto word = text.substring (1).trimStart();
+
+        const auto large = juce::Font (juce::FontOptions{}.withHeight (22.0f * type));
+        const auto small = LookAndFeel_V4::getTextButtonFont (button, button.getHeight());
+
+        const auto gap = juce::roundToInt (4.0f * type);
+        const auto glyphWidth = juce::GlyphArrangement::getStringWidthInt (large, glyph);
+        const auto wordWidth = juce::GlyphArrangement::getStringWidthInt (small, word);
+
+        auto area = button.getLocalBounds();
+        area = area.withSizeKeepingCentre (glyphWidth + gap + wordWidth, area.getHeight());
+
+        g.setColour (button.findColour (button.getToggleState() ? juce::TextButton::textColourOnId
+                                                                : juce::TextButton::textColourOffId)
+                        .withMultipliedAlpha (button.isEnabled() ? 1.0f : 0.5f));
+
+        g.setFont (large);
+        g.drawText (glyph, area.removeFromLeft (glyphWidth), juce::Justification::centred, false);
+
+        area.removeFromLeft (gap);
+
+        g.setFont (small);
+        g.drawText (word, area, juce::Justification::centredLeft, false);
+    }
+
     juce::Font Look::font (const model::Theme& theme, float height)
     {
         return juce::Font (juce::FontOptions{}.withHeight (height * static_cast<float> (theme.type)));
@@ -35,6 +81,8 @@ namespace wfg::client::ui
 
     void Look::apply (const model::Theme& theme)
     {
+        type = static_cast<float> (theme.type);
+
         const auto ink = colour (theme, "ink");
         const auto ground = colour (theme, "ground");
         const auto panel = colour (theme, "panel");

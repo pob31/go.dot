@@ -49,8 +49,15 @@
 
 namespace wfg::client::ui
 {
-    class RunPaneComponent final : public juce::Component,
-                                   private juce::ListBoxModel
+    /*  NOT A ListBox ANY MORE, and for one reason: a ListBox has one row
+        height for every row, and this pane wants two. A run with a waveform
+        is tall so the picture can be read; a wait, a fade, an OSC cue is one
+        line (author, 2026-09-18: "only the active cues with the waveform
+        should be taller, not the OSC, MIDI, fade cues - these can stay low
+        profile"). So the rows are painted by hand on a canvas inside a
+        viewport, each at its own height, which is cheap for the dozen rows a
+        busy pane holds and repaints whole every pass by design. */
+    class RunPaneComponent final : public juce::Component
     {
     public:
         struct Actions
@@ -77,10 +84,28 @@ namespace wfg::client::ui
         void resized() override;
 
     private:
-        int getNumRows() override;
-        void paintListBoxItem (int row, juce::Graphics& g, int width, int height,
-                               bool rowIsSelected) override;
-        void listBoxItemClicked (int row, const juce::MouseEvent& event) override;
+        /*  The rows' surface: paints each row at its own top and height by
+            asking its owner, and hands clicks back the same way. */
+        class Canvas final : public juce::Component
+        {
+        public:
+            explicit Canvas (RunPaneComponent& ownerToUse) : owner (ownerToUse) {}
+
+            void paint (juce::Graphics& g) override;
+            void mouseUp (const juce::MouseEvent& event) override;
+
+        private:
+            RunPaneComponent& owner;
+        };
+
+        void paintRow (int index, juce::Graphics& g, int width, int height);
+        void clicked (const juce::MouseEvent& event);
+
+        /** A row's height: the words, plus a band for a waveform when it has one. */
+        int heightOf (const model::RunRow& entry) const;
+        int topOf (int index) const;
+        int rowAt (int y) const;
+        void layOutRows();
 
         /*  UNDER THE WORDS, A PICTURE OF WHAT IS SOUNDING (author,
             2026-09-18). A media run gets its file's waveform with a playhead
@@ -99,7 +124,6 @@ namespace wfg::client::ui
         /*  Whether this run has a picture to draw, which is what decides
             between a band of its own and a mark behind the words. */
         bool hasWaveform (const model::RunRow& entry) const;
-        bool anyWaveform() const;
         bool paintWaveform (const model::RunRow& entry, juce::Graphics& g,
                             juce::Rectangle<int> strip);
         void paintCountdown (const model::RunRow& entry, juce::Graphics& g,
@@ -110,15 +134,13 @@ namespace wfg::client::ui
 
         Actions actions;
         model::Theme theme;
-        juce::ListBox list { "runs", this };
+        juce::Viewport viewport;
+        Canvas canvas { *this };
         std::vector<model::RunRow> rows;
 
         std::shared_ptr<const audio::MediaRecords> media;
         std::map<std::string, std::vector<model::Column>> bars;
         int barsWidth = 0;
-
-        /** Whether anything in this pane wants a band of its own. */
-        bool tallRows = false;
 
         int rowHeight() const noexcept;
         int stripHeight() const noexcept;

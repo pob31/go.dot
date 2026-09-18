@@ -96,18 +96,27 @@ namespace wfg::client::model
         order the engine made them in - which is the order their cues are
         written in, and the only tie-break that is not arbitrary. */
     std::vector<RunRow> inShowOrder (const std::vector<RunRow>& rows)
-{
+    {
         std::unordered_map<std::string, std::vector<std::size_t>> childrenOfRun;
         std::vector<std::size_t> roots;
 
-        for (auto at = std::size_t { 0 }; at < rows.size(); ++at)
-        {
-            const auto parent = rows[at].parentRun;
+        std::unordered_map<std::string, std::size_t> place;
 
-            if (parent.empty())
-                roots.push_back (at);
+        for (auto index = std::size_t { 0 }; index < rows.size(); ++index)
+            place.emplace (rows[index].id, index);
+
+        for (auto index = std::size_t { 0 }; index < rows.size(); ++index)
+        {
+            const auto parent = rows[index].parentRun;
+
+            /*  A PARENT THAT IS NOT HERE MAKES THIS ROW A ROOT, rather than a
+                row nobody walks to. It happens whenever a preparation is
+                dropped and something under it is not - and a run left out of
+                this pane is a run nobody can kill. */
+            if (parent.empty() || place.count (parent) == 0)
+                roots.push_back (index);
             else
-                childrenOfRun[parent].push_back (at);
+                childrenOfRun[parent].push_back (index);
         }
 
         const auto byStart = [&rows] (std::size_t a, std::size_t b)
@@ -115,10 +124,10 @@ namespace wfg::client::model
             /*  Nought is "not started", which sorts LAST rather than first
                 - the whole point of the ordering, since that is the next
                 cue and the operator's eye goes to the bottom for it. */
-            const auto when = [&rows] (std::size_t at)
+            const auto when = [&rows] (std::size_t index)
             {
-                return rows[at].started > 0 ? rows[at].started
-                                            : std::numeric_limits<std::int64_t>::max();
+                return rows[index].started > 0 ? rows[index].started
+                                               : std::numeric_limits<std::int64_t>::max();
             };
 
             return when (a) < when (b);
@@ -135,14 +144,14 @@ namespace wfg::client::model
         /*  Depth-first, and capped by the row count rather than trusted to
             terminate: a parent chain the engine never makes cyclic is
             still not something a client gets to ASSUME. */
-        const auto walk = [&] (auto&& self, std::size_t at) -> void
+        const auto walk = [&] (auto&& self, std::size_t index) -> void
         {
             if (out.size() >= rows.size())
                 return;
 
-            out.push_back (rows[at]);
+            out.push_back (rows[index]);
 
-            if (const auto kids = childrenOfRun.find (rows[at].id); kids != childrenOfRun.end())
+            if (const auto kids = childrenOfRun.find (rows[index].id); kids != childrenOfRun.end())
                 for (const auto child : kids->second)
                     self (self, child);
         };
@@ -150,7 +159,7 @@ namespace wfg::client::model
         for (const auto root : roots)
             walk (walk, root);
 
-        //  Anything a broken chain left out still gets drawn, at the end.
+        //  Anything a broken chain left out still gets drawn, index the end.
         return out.size() == rows.size() ? out : rows;
     }
 
@@ -239,6 +248,11 @@ namespace wfg::client::model
                 ++row.depth;
             }
 
+            /*  A PREPARATION IS DRAWN, ring and all. It was hidden for one
+                build and the author asked for it back (2026-09-18: "I don't
+                mind seeing the armed, preloaded cues ready to fire"): a voice
+                reserved for the next cue is something an operator wants to
+                see is there. */
             rows.push_back (std::move (row));
         }
 

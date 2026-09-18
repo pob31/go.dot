@@ -745,6 +745,64 @@ TEST_CASE ("routing: a bus is a place on the rig, and the cue never names a chan
     CHECK (routing[1].gain == doctest::Approx (1.0f));
 }
 
+TEST_CASE ("feed: a slot and a bus written without their default widths still route")
+{
+    /*  A SAVED SHOW IS WRITTEN WITHOUT ITS DEFAULTS. The canonical writer
+        omits an attribute that equals its default - a slot one channel wide
+        carries no `width` at all, a bus starting at channel nought no
+        `firstChannel` - and the document's getter hands the default back,
+        which is the round trip the omission depends on. `resolveRouting` read
+        those four attributes straight off the tree, where an absent width is
+        nought, so every feed in a show that had been saved and reopened was
+        refused `bad-route`. The author found it on a recovered show, which is
+        the same writer (2026-09-18). This is that show, made by hand: the
+        attributes the writer would have dropped are never set. */
+    RoutedRig rig;
+
+    const auto wide = rig.addBus ("WFS send", 8, 12);
+
+    const auto mountEdit = rig.document.createMount ("/wfs", "namespaces/wfs.json");
+    REQUIRE (mountEdit.ok);
+
+    const auto slot = rig.document.createSlot (mountEdit.id, "/wfs/input/1");
+    REQUIRE (slot.ok);
+
+    //  The bus, and nothing else: no width, no first channel - as written.
+    rig.document.findById (slot.id).setProperty (juce::Identifier ("bus"), juce::String (wide), nullptr);
+
+    const auto feed = rig.document.createFeed (rig.mediaId, slot.id);
+    REQUIRE (feed.ok);
+    rig.document.findById (feed.id).setProperty (juce::Identifier ("gains"), "1", nullptr);
+
+    std::string problem;
+    auto routing = rig.routingOf (rig.mediaId, problem);
+
+    INFO (problem);
+    CHECK (problem.empty());
+    REQUIRE (routing.size() == 1u);
+
+    //  One channel wide at the first input of the bus: the two defaults, applied.
+    CHECK (routing[0].output == 8);
+
+    /*  AND A BUS THE SAME WAY. Its width is the one attribute a bus always
+        carries in the fixtures, so the case has to be made: a one-wide bus
+        whose width the writer dropped. */
+    const auto mono = rig.addBus ("Mono send", 20, 1);
+    rig.document.findById (mono).removeProperty (juce::Identifier ("width"), nullptr);
+
+    const auto route = rig.document.createRoute (rig.mediaId, mono);
+    REQUIRE (route.ok);
+    rig.document.findById (route.id).setProperty (juce::Identifier ("gains"), "1", nullptr);
+
+    problem.clear();
+    routing = rig.routingOf (rig.mediaId, problem);
+
+    INFO (problem);
+    CHECK (problem.empty());
+    REQUIRE (routing.size() == 2u);
+    CHECK (routing[1].output == 20);
+}
+
 TEST_CASE ("feed: a slot is a routing and a claim in one object")
 {
     /*  PR 4.2. A `Route` sends a cue to a bus; a `Feed` sends it to a PROCESSOR
@@ -1679,6 +1737,44 @@ TEST_CASE ("fade: the fade's own run finishes when the fade does")
         rig.tickOnce();
 
     CHECK (rig.runs.find (fadeRun)->state == cue::runState::done);
+}
+
+TEST_CASE ("fade: its own playhead moves, so a bar drawn over it has something to draw")
+{
+    /*  A FADE HOLDS NO VOICE, and `updatePositions` measured every playhead
+        from the SAMPLE a launch was placed at - so a fade's position was the
+        literal nought for its whole life and a client drawing a bar over one
+        had nothing to measure from. The author found it by looking: the bar
+        sat at the start however long the fade was, which reads as a duration
+        that does not take (2026-09-18).
+
+        The stamp it is measured from is set in `fireKind`, which is the one
+        place EVERY kind passes: a cue with a pre-wait arrives through
+        `fireNow`, and a cue without one is fired straight from the GO without
+        going near it. */
+    FadeRig rig;
+
+    rig.startMedia();
+    rig.fire (rig.fadeId);
+
+    REQUIRE (rig.runs.all().size() == 2u);
+    const auto fadeRun = rig.runs.all().back().id;
+
+    REQUIRE (rig.runs.find (fadeRun)->kind == "fade");
+    CHECK (rig.runs.find (fadeRun)->launchRequestedAtTick > 0);
+
+    const auto atStart = rig.runs.find (fadeRun)->position;
+
+    for (int i = 0; i < 10; ++i)
+        rig.tickOnce();
+
+    const auto later = rig.runs.find (fadeRun)->position;
+
+    CHECK (later > atStart);
+
+    //  And it is measured in seconds, so ten ticks is a fifth of one.
+    CHECK (later - atStart > 0.15);
+    CHECK (later - atStart < 0.25);
 }
 
 TEST_CASE ("fade: a target that is not running is a no-op, applied rather than refused")
