@@ -278,7 +278,12 @@ namespace wfg::client::ui
         if (entry.rowKind != model::RowKind::cue || entry.derived)
             return;
 
-        openCell (row, cellAt (entry, event.x, list.getWidth(), rowHeight()));
+        //  The first click's cell when it was this cue's, for the same reason as above.
+        const auto aimed = lastClickId == entry.id && lastClickCell != model::EditCell::none
+                             ? lastClickCell
+                             : cellAt (entry, event.x, list.getWidth(), rowHeight());
+
+        openCell (row, aimed);
     }
 
     void CueListComponent::openCell (int row, model::EditCell cell)
@@ -956,20 +961,26 @@ namespace wfg::client::ui
                 cues in the cue list than the first one" - the first was
                 already picked, and nothing moved). Two plain clicks on the
                 same cell inside the system's double-click time open it. */
+            /*  AND THE CELL IS THE FIRST CLICK'S. The inspector opening on that
+                click narrows the list, and the columns - carved from the right
+                - shift under a pointer that has not moved; the second click
+                then reads as another column, or none. What the hand aimed at
+                is what it aimed at first. */
             const auto now = juce::Time::getMillisecondCounter();
             const auto cell = cellAt (entry, event.x, list.getWidth(), rowHeight());
             const auto plain = ! event.mods.isShiftDown() && ! event.mods.isCommandDown();
-            const auto second = plain && lastClickId == entry.id && lastClickCell == cell
+            const auto second = plain && lastClickId == entry.id
                              && now - lastClickAt <= static_cast<juce::uint32> (juce::MouseEvent::getDoubleClickTimeout());
+            const auto aimed = second ? lastClickCell : cell;
 
             lastClickId = entry.id;
-            lastClickCell = cell;
+            lastClickCell = aimed;
             lastClickAt = now;
 
-            if (second && editable && ! entry.derived && cell != model::EditCell::none)
+            if (second && editable && ! entry.derived && aimed != model::EditCell::none)
             {
                 lastClickAt = 0;    // a third click is a first again
-                openCell (row, cell);
+                openCell (row, aimed);
                 return;
             }
 
