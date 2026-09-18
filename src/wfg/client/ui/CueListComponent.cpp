@@ -208,6 +208,17 @@ namespace wfg::client::ui
             drawnWalk = model.rebuilds();
             drawnList = model.list();
             list.updateContent();
+
+            /*  AND EVERY ROW IS ASKED TO PAINT, because `updateContent` alone
+                repaints only the rows whose INDEX or selection changed - and
+                a move keeps both: the same number of rows, at the same
+                indices, with different cues in them. The author dragged a cue
+                and saw nothing until a click on another row repainted that
+                one (2026-09-18: "the display only updates after clicking on
+                another cue"). A whole repaint here is at show-change rate,
+                which is when somebody edited; the rule against `repaint()`
+                is for the tick-rate branch below. */
+            list.repaint();
         }
 
         /*  AND THE POINTER, at tick rate: two rows change decoration and two
