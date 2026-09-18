@@ -66,7 +66,8 @@ namespace wfg::client::model
         after,      ///< `object.move` into `container` at `index`
         into,       ///< `object.move` into the group `container`, at its end
         target,     ///< `node.set <cueId>/target <dragged>`
-        preset      ///< `node.set <dragged>/preset <cueId>`: prepared by that group's header
+        preset,     ///< `node.set <dragged>/preset <cueId>`: prepared by that group's header
+        footer      ///< move into the footer of the group `cueId`, made first if it has none
     };
 
     struct Drop
@@ -76,6 +77,18 @@ namespace wfg::client::model
         int index = -1;          ///< for after: the member position; -1 is the end
         std::string cueId;       ///< for target: the fade or stop being aimed
     };
+
+    /*  THE CONTAINER A ROW IS IN, as `object.move` names it: a member's is its
+        parent; a row inside a header, a footer or a persistent section is in
+        that section, whose own identifier the row carries. */
+    std::string containerOf (const Row& row);
+
+    /*  SHIFT+ALT ONTO A GROUP TITLE MOVES THE CUE INTO ITS FOOTER (author,
+        2026-09-18: "the footer items are moved to the footer with shift+alt
+        drag and drop on the group title, or drag and drop directly in the
+        footer if it already exists"). A group's footer takes any cue; the
+        window makes the footer first when the group has none. */
+    Drop footerDropFor (const Row& over, const Row& dragged);
 
     /*  What letting go of `dragged` over `over` would do, `fraction` being how
         far down the row the pointer is (0 at the top, 1 at the bottom). */

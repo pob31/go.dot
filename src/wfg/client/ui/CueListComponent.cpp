@@ -53,8 +53,11 @@ namespace wfg::client::ui
             failure the feedback exists to prevent. */
         bool insertAfter (const model::Row& row)
         {
-            return row.rowKind == model::RowKind::cue
-                && row.section == model::Section::member;
+            /*  ANY CUE ROW THAT IS ITS OWN, since 2026-09-18: a header, footer
+                or persistent row is in a section the tree now names, so a
+                drop after it has a container to go into. A derived header
+                line is a reading of a cue elsewhere and is not a place. */
+            return row.rowKind == model::RowKind::cue && ! row.derived;
         }
 
         /*  HOW A GROUP BEHAVES, AS SHAPES. Two questions and two marks,
@@ -291,6 +294,16 @@ namespace wfg::client::ui
         if (entry.rowKind == model::RowKind::band)
         {
             paintBand (entry, row, g, width, height);
+
+            //  A drop INTO the section lights its band, as a drop onto a group lights the group.
+            if (row == dropRow && dropWouldLink)
+            {
+                g.setColour (Look::colour (theme, "live").withAlpha (0.22f));
+                g.fillRect (0, 0, width, height);
+                g.setColour (Look::colour (theme, "live"));
+                g.drawRect (0, 0, width, height, 1);
+            }
+
             return;
         }
 
@@ -885,7 +898,13 @@ namespace wfg::client::ui
             and drop with alt onto a group label adds this cue to the header").
             Read from the keyboard's current state, since a drag carries no
             modifiers of its own. */
-        if (juce::ModifierKeys::getCurrentModifiers().isAltDown())
+        const auto mods = juce::ModifierKeys::getCurrentModifiers();
+
+        //  Shift with alt on a group title: into its footer (made first if it has none).
+        if (mods.isAltDown() && mods.isShiftDown())
+            return model::footerDropFor (rows[static_cast<std::size_t> (rowOut)], *dragged);
+
+        if (mods.isAltDown())
             return model::presetDropFor (rows[static_cast<std::size_t> (rowOut)], *dragged, rows);
 
         return model::dropFor (rows[static_cast<std::size_t> (rowOut)], *dragged, fraction);
@@ -910,7 +929,7 @@ namespace wfg::client::ui
         dropRow = drop.kind == model::DropKind::none ? -1 : at;
         dropWouldInsert = drop.kind == model::DropKind::after;
         dropWouldLink = drop.kind == model::DropKind::into || drop.kind == model::DropKind::target
-                     || drop.kind == model::DropKind::preset;
+                     || drop.kind == model::DropKind::preset || drop.kind == model::DropKind::footer;
 
         if (dropRow != was || dropWouldLink != wasLink || dropWouldInsert != wasInsert)
         {
@@ -979,6 +998,11 @@ namespace wfg::client::ui
             case model::DropKind::preset:
                 if (actions.setPreset)
                     actions.setPreset (dragged, drop.cueId);
+                return;
+
+            case model::DropKind::footer:
+                if (actions.moveToFooter)
+                    actions.moveToFooter (dragged, drop.cueId);
                 return;
         }
     }

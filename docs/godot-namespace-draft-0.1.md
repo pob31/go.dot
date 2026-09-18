@@ -7246,6 +7246,22 @@ model now appends them after the written lines, marked derived - not walked into
 the pointer and the pick land on the cue's own row - and the list draws them dimmed and italic with the
 word *preset*.
 
+**THE FOOTER AS A PLACE, AND THE LADDER (2026-09-18).** *"The footer items are moved to the footer
+with shift+alt drag and drop on the group title, or drag and drop directly in the footer if it already
+exists. Ctrl/⌘+ArrowDown puts the selected cue in the footer ... while ctrl/⌘ is not released the cue
+will point to either a header or, if down past the deepest nested group, will end up in the footer."*
+A footer is a container and not a mark, so this is `object.move` - and a move needs a name the tree
+did not give: `group/header` and `group/footer` now publish the sections' identities as `list/persistent`
+always has, and a band and every row inside a section carry it. **Shift+alt on a group title** moves the
+cue into that group's footer, `group.role` making the footer first when there is none and the move
+following on the pass that sees its name (the import's own shape). **A drop on a section's band** puts
+the cue into that section at its end; **after a section row** puts it after that row inside the section.
+**The ladder** is one gesture over the whole of where a group can hold a cue: ctrl/⌘-up walks outward
+through the headers, ctrl/⌘-down inward to none and then one step further into the innermost group's
+footer; from the footer, up is back among the members. Each step is one command and the foot says what
+happened - "prepared in Scene's header", "into Scene's footer", "back among Scene's members" - which is
+the arrow the author asked for, in words.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

@@ -528,6 +528,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::createCue ("7K2QM9X4", 0, "media", "Thunder"),
         gesture::moveObject ("B3N8R5TW", "7K2QM9X4", 0),
         gesture::deleteObject ("B3N8R5TW"),
+        gesture::groupRole ("B3N8R5TW", "footer"),
         gesture::undo(), gesture::redo(), gesture::save(), gesture::revert(),
         gesture::saveAs ("C:/shows/copy"),
         gesture::copyCues ({ "B3N8R5TW", "F7HR8TVD" }),
@@ -1076,11 +1077,42 @@ TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be name
         CHECK (model::dropFor (a, c, 0.5).kind == model::DropKind::after);   // a memo has no "on"
     }
 
-    //  A band cannot be dropped on.
+    //  A band takes the cue INTO its section when the tree names one, and nothing otherwise.
     {
         model::Row band;
         band.rowKind = model::RowKind::band;
+        band.section = model::Section::footer;
+        band.parent = "G";
         CHECK (model::dropFor (band, a, 0.5).kind == model::DropKind::none);
+
+        band.sectionId = "FOOT";
+        const auto into = model::dropFor (band, a, 0.5);
+        CHECK (into.kind == model::DropKind::into);
+        CHECK (into.container == "FOOT");
+        CHECK (into.index == -1);
+    }
+
+    //  A row inside a footer is after-able within the footer, and a derived line is not a place.
+    {
+        auto inFooter = cue ("F1", "memo", "G", 0);
+        inFooter.section = model::Section::footer;
+        inFooter.sectionId = "FOOT";
+
+        const auto after = model::dropFor (inFooter, a, 0.9);
+        CHECK (after.kind == model::DropKind::after);
+        CHECK (after.container == "FOOT");
+        CHECK (after.index == 1);
+        CHECK (model::containerOf (inFooter) == "FOOT");
+        CHECK (model::containerOf (a) == "L");
+
+        auto reading = cue ("A", "memo", "G", 0);
+        reading.derived = true;
+        CHECK (model::dropFor (reading, c, 0.9).kind == model::DropKind::none);
+
+        //  Shift+alt on a group title: into its footer; on a memo: nothing.
+        CHECK (model::footerDropFor (g, a).kind == model::DropKind::footer);
+        CHECK (model::footerDropFor (g, a).cueId == "G");
+        CHECK (model::footerDropFor (a, c).kind == model::DropKind::none);
     }
 
     //  Said while the hand is in the air, and a timeline group is named as one.
@@ -1511,6 +1543,61 @@ TEST_CASE ("client: a cue marked as a group's preset appears in that group's hea
     const auto at = show.indexOf (member);
     REQUIRE (at >= 0);
     CHECK_FALSE (show.rows()[static_cast<std::size_t> (at)].derived);
+}
+
+//==============================================================================
+TEST_CASE ("client: a group names its header and footer in the tree, and a cue moved into the footer says so")
+{
+    /*  The footer as a PLACE (author, 2026-09-18): the tree now publishes a
+        group's `header` and `footer` identities, so a window can hand
+        `object.move` a container it can see. Made with group.role, filled with
+        a move, read back through the model as a footer row with its section's
+        own identifier. */
+    Rig rig;
+
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    auto tick = std::int64_t { 1 };
+
+    const auto create = [&] (const std::string& parent, int index, const char* kind, const char* name)
+    {
+        REQUIRE (rig.apply (tick++, "window", "cue.create",
+                            { osc::Value::string (parent), osc::Value::int32 (index),
+                              osc::Value::string (kind), osc::Value::string (name) }).applied == 1);
+        return model::createdAt (model::text (*rig.publish (tick),
+                                              (parent == listId ? "/godot/list/" : "/godot/cue/")
+                                                + parent + "/order"), index);
+    };
+
+    const auto group = create (listId, 0, "group", "Scene");
+    const auto cue = create (group, 0, "memo", "Release");
+
+    CHECK (model::text (*rig.publish (tick), "/godot/cue/" + group + "/footer").empty());
+
+    REQUIRE (rig.apply (tick++, "window", "group.role",
+                        { osc::Value::string (group), osc::Value::string ("footer") }).applied == 1);
+
+    const auto footer = model::text (*rig.publish (tick), "/godot/cue/" + group + "/footer");
+    REQUIRE_FALSE (footer.empty());
+
+    REQUIRE (rig.apply (tick++, "window", "object.move",
+                        { osc::Value::string (cue), osc::Value::string (footer), osc::Value::int32 (0) }).applied == 1);
+
+    const auto snapshot = rig.publish (tick);
+    CHECK (model::text (*snapshot, "/godot/cue/" + group + "/footerOrder") == cue);
+
+    //  `parent` names the GROUP that holds the footer, as the table says; the section is `footer`'s.
+    CHECK (model::text (*snapshot, "/godot/cue/" + cue + "/parent") == group);
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, listId));
+
+    const auto at = show.indexOf (cue);
+    REQUIRE (at >= 0);
+    const auto& row = show.rows()[static_cast<std::size_t> (at)];
+    CHECK (row.section == model::Section::footer);
+    CHECK (row.sectionId == footer);
+    CHECK (row.parent == group);
+    CHECK (model::containerOf (row) == footer);
 }
 
 //==============================================================================

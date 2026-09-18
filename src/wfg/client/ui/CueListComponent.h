@@ -109,6 +109,10 @@ namespace wfg::client::ui
                 step the mark outward and inward through the ancestors. */
             std::function<void (const std::string& cueId, const std::string& group)> setPreset;
             std::function<void (int direction)> presetStep;
+
+            /*  Into the group's footer, made first if it has none: shift+alt
+                drop on the group title. */
+            std::function<void (const std::string& cueId, const std::string& group)> moveToFooter;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);

@@ -158,21 +158,9 @@ namespace wfg::client
                                                   if (! refusedWhileLocked())
                                                       send (gesture::setNode ("/godot/cue/" + cueId + "/preset", group));
                                               };
-                listActions.presetStep      = [this] (int direction)
-                                              {
-                                                  if (selection.empty() || refusedWhileLocked())
-                                                      return;
-
-                                                  for (const auto& id : selection.ids())
-                                                  {
-                                                      const auto current = latest != nullptr
-                                                          ? model::text (*latest, "/godot/cue/" + id + "/preset")
-                                                          : std::string {};
-
-                                                      if (const auto next = model::presetStep (id, current, direction, show.rows()))
-                                                          send (gesture::setNode ("/godot/cue/" + id + "/preset", *next));
-                                                  }
-                                              };
+                listActions.presetStep      = [this] (int direction) { ladderStep (direction); };
+                listActions.moveToFooter    = [this] (const std::string& cueId, const std::string& group)
+                                              { moveToFooter (cueId, group); };
                 /*  WHAT IS PICKED IS THIS CLIENT'S (model/Selection.h): a
                     click, with shift or ctrl/⌘, over the rows as drawn. */
                 listActions.pick            = [this] (const std::string& id, bool extend, bool toggle)
@@ -464,6 +452,127 @@ namespace wfg::client
             /*  ONE `object.delete`, from the key and from the menu alike. It does
                 not ask, since undo is one keystroke; and it unpicks, so the
                 panel is not left describing a cue that is gone. */
+            //======================================================================
+            /*  THE LADDER (author, 2026-09-18): ctrl/⌘-up and -down walk a cue
+                through where a group can hold it, from the outermost header
+                down to the footer. Outward from none: prepared in the
+                innermost group's header, then each group further out. Inward:
+                back to none, and one step further puts the cue IN the
+                innermost group's footer - a move, since a footer is a place
+                and not a mark. From the footer, up is back among the members.
+                Each step is one command and the foot says what happened. */
+            void ladderStep (int direction)
+            {
+                if (selection.empty() || refusedWhileLocked() || latest == nullptr)
+                    return;
+
+                for (const auto& id : selection.ids())
+                {
+                    const model::Row* own = nullptr;
+
+                    for (const auto& row : show.rows())
+                        if (row.rowKind == model::RowKind::cue && row.id == id && ! row.derived)
+                            own = &row;
+
+                    if (own == nullptr)
+                        continue;
+
+                    //  In a footer: up is back among the group's members; down is the end.
+                    if (own->section == model::Section::footer)
+                    {
+                        if (direction > 0 && ! own->parent.empty())
+                        {
+                            //  At the end of the group's members.
+                            send (gesture::moveObject (id, own->parent,
+                                                       static_cast<int> (model::words (orderOf (own->parent)).size())));
+                            shell->transport.setNotice ("back among " + nameOf (own->parent) + "'s members");
+                        }
+
+                        continue;
+                    }
+
+                    const auto current = model::text (*latest, "/godot/cue/" + id + "/preset");
+
+                    if (const auto next = model::presetStep (id, current, direction, show.rows()))
+                    {
+                        send (gesture::setNode ("/godot/cue/" + id + "/preset", *next));
+                        shell->transport.setNotice (next->empty() ? juce::String ("no longer prepared ahead")
+                                                                  : "prepared in " + nameOf (*next) + "'s header");
+                        continue;
+                    }
+
+                    //  Down past none, inside a group: into that group's footer.
+                    const auto ancestors = model::ancestorsOf (id, show.rows());
+
+                    if (direction < 0 && current.empty() && ! ancestors.empty())
+                        moveToFooter (id, ancestors.front());
+                }
+            }
+
+            juce::String nameOf (const std::string& cueId) const
+            {
+                const auto name = latest != nullptr ? model::text (*latest, "/godot/cue/" + cueId + "/name")
+                                                    : std::string {};
+                return juce::String (name.empty() ? cueId : name);
+            }
+
+            /*  INTO A GROUP'S FOOTER: one `object.move` when the footer exists,
+                and when it does not, `group.role` to make it and the move on
+                a later pass once the tree names it (the import's own shape). */
+            void moveToFooter (const std::string& cueId, const std::string& group)
+            {
+                if (refusedWhileLocked() || latest == nullptr)
+                    return;
+
+                const auto footer = model::text (*latest, "/godot/cue/" + group + "/footer");
+
+                if (! footer.empty())
+                {
+                    const auto members = static_cast<int> (model::words (model::text (*latest, "/godot/cue/" + group + "/footerOrder")).size());
+                    send (gesture::moveObject (cueId, footer, members));
+                    shell->transport.setNotice ("into " + nameOf (group) + "'s footer");
+                    return;
+                }
+
+                send (gesture::groupRole (group, "footer"));
+                footerMoves.push_back ({ cueId, group, 0 });
+                shell->transport.setNotice ("making " + nameOf (group) + "'s footer");
+            }
+
+            struct FooterMove
+            {
+                std::string cueId, group;
+                int waited = 0;
+            };
+
+            void finishFooterMoves (const tree::TreeSnapshot& snapshot)
+            {
+                if (footerMoves.empty())
+                    return;
+
+                std::vector<FooterMove> waiting;
+
+                for (auto& job : footerMoves)
+                {
+                    const auto footer = model::text (snapshot, "/godot/cue/" + job.group + "/footer");
+
+                    if (! footer.empty())
+                    {
+                        const auto members = static_cast<int> (model::words (model::text (snapshot, "/godot/cue/" + job.group + "/footerOrder")).size());
+                        send (gesture::moveObject (job.cueId, footer, members));
+                        shell->transport.setNotice ("into " + nameOf (job.group) + "'s footer");
+                        continue;
+                    }
+
+                    if (++job.waited < model::importPatience)
+                        waiting.push_back (job);
+                    else
+                        shell->transport.setNotice ("the footer for " + nameOf (job.group) + " was refused");
+                }
+
+                footerMoves = std::move (waiting);
+            }
+
             /*  COPY AND PASTE, ACROSS WINDOWS. Copy asks the engine for the
                 fragment (one `document.copy`); the fragment comes back through
                 the tree on a later pass and `pass` puts it on the operating
@@ -619,6 +728,7 @@ namespace wfg::client
                 //  And any import or create still waiting for the cue it made.
                 finishImports (*snapshot, reading.revision);
                 finishCreations (*snapshot, reading.revision);
+                finishFooterMoves (*snapshot);
                 mirrorClipboard (*snapshot);
 
                 //  Where the next new cue would land, said on the buttons.
@@ -1300,6 +1410,9 @@ namespace wfg::client
 
             /** The engine's clipboard as last mirrored to the system's. */
             std::string clipboardSeen;
+
+            /** Moves into a footer that did not exist yet, waiting for the tree to name it. */
+            std::vector<FooterMove> footerMoves;
 
             /** The open file dialogue, which must outlive the call that launched it. */
             std::unique_ptr<juce::FileChooser> chooser;

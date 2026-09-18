@@ -694,6 +694,14 @@ namespace wfg::tree
                     text = orderOf (node.getChildWithName ("Header"));
                 else if (name == "footerOrder")
                     text = orderOf (node.getChildWithName ("Footer"));
+                /*  THE SECTIONS' OWN NAMES, as the list's `persistent` is: what
+                    a client hands `object.move` to put a cue in one. Empty
+                    until `group.role` has made the section. */
+                else if (name == "header" || name == "footer")
+                {
+                    const auto section = node.getChildWithName (name == "header" ? "Header" : "Footer");
+                    text = section.isValid() ? section[idProperty].toString().toStdString() : std::string {};
+                }
                 else                       text = storedText (attribute, node);
 
                 out.push_back (makeLeaf (base + "/" + name, *row, text));

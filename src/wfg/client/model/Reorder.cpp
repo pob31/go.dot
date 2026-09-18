@@ -40,11 +40,43 @@ namespace wfg::client::model
         }
     }
 
+    std::string containerOf (const Row& row)
+    {
+        return row.section == Section::member || row.sectionId.empty() ? row.parent : row.sectionId;
+    }
+
+    Drop footerDropFor (const Row& over, const Row& dragged)
+    {
+        Drop drop;
+
+        if (over.rowKind != RowKind::cue || ! over.isGroup || over.id == dragged.id)
+            return drop;
+
+        drop.kind = DropKind::footer;
+        drop.cueId = over.id;
+        return drop;
+    }
+
     Drop dropFor (const Row& over, const Row& dragged, double fraction)
     {
         Drop drop;
 
-        if (over.rowKind != RowKind::cue || over.id.empty() || over.id == dragged.id)
+        /*  A SECTION'S BAND TAKES THE CUE INTO THAT SECTION (author,
+            2026-09-18: "drag and drop directly in the footer if it already
+            exists"): the header, the footer or the persistent section, at
+            its end. A band with no section yet - none exists - takes nothing. */
+        if (over.rowKind == RowKind::band)
+        {
+            if (over.sectionId.empty())
+                return drop;
+
+            drop.kind = DropKind::into;
+            drop.container = over.sectionId;
+            drop.index = -1;
+            return drop;
+        }
+
+        if (over.rowKind != RowKind::cue || over.id.empty() || over.id == dragged.id || over.derived)
             return drop;
 
         if (inOnBand (fraction))
@@ -65,13 +97,15 @@ namespace wfg::client::model
             }
         }
 
-        /*  AFTER, in the row's own container - or at the end of it when the
-            row is a header, a footer or a persistent cue, which have no member
-            position to be after (the dropped-file rule, CueListComponent). */
+        /*  AFTER, in the row's own container: a member's parent, or the
+            section a header, footer or persistent row is in - which is a
+            container `object.move` names like any other, now that the tree
+            says what each section is called. A section row whose section is
+            not published takes the cue to the end of the group's members. */
         drop.kind = DropKind::after;
-        drop.container = over.parent;
+        drop.container = containerOf (over);
 
-        if (over.section != Section::member)
+        if (over.section != Section::member && over.sectionId.empty())
         {
             drop.index = -1;
             return drop;
@@ -82,7 +116,7 @@ namespace wfg::client::model
             asking for that member's own position lands the cue directly after
             it; after a member above it, or from elsewhere, the position after
             the member is the one. */
-        const auto sameContainer = dragged.parent == over.parent;
+        const auto sameContainer = containerOf (dragged) == containerOf (over);
         const auto movingLater = sameContainer && dragged.indexInParent < over.indexInParent;
 
         drop.index = movingLater ? over.indexInParent : over.indexInParent + 1;
@@ -226,6 +260,7 @@ namespace wfg::client::model
             case DropKind::into:    return "into " + name + timelineNote;
             case DropKind::target:  return "aim " + name + " at it";
             case DropKind::preset:  return "prepare it in " + name + "'s header";
+            case DropKind::footer:  return "into " + name + "'s footer";
         }
 
         return {};

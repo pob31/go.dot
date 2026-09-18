@@ -150,17 +150,21 @@ namespace wfg::client::model
             to the page, made when they first saw it drawn at the bottom. A
             group has no persistent section; a list has no header or footer of
             its own. */
+        /*  Each section's own identifier rides with its rows, so a drop into
+            the section has a container to name (`group/header`, `group/footer`,
+            `list/persistent`; empty until the section exists). */
         if (isList)
-            section (snapshot, container, members ("persistentOrder"),
-                     Section::persistent, "persistent", depth);
+            section (snapshot, container, text (snapshot, address + "persistent"),
+                     members ("persistentOrder"), Section::persistent, "persistent", depth);
         else
             /*  WRITTEN LINES, THEN DERIVED ONES: the header's own cues, and
                 after them every cue whose `preset` names this group, which
                 the engine publishes as `headerDerived` (author, 2026-09-18:
                 "the headers are not updated when adding an element to them
                 for preloading" - they were not read at all). */
-            section (snapshot, container, members ("headerOrder"),
-                     Section::header, "header", depth, members ("headerDerived"));
+            section (snapshot, container, text (snapshot, address + "header"),
+                     members ("headerOrder"), Section::header, "header", depth,
+                     members ("headerDerived"));
 
         auto at = 0;
 
@@ -168,11 +172,12 @@ namespace wfg::client::model
             append (snapshot, id, Section::member, depth, container, at++);
 
         if (! isList)
-            section (snapshot, container, members ("footerOrder"),
-                     Section::footer, "footer", depth);
+            section (snapshot, container, text (snapshot, address + "footer"),
+                     members ("footerOrder"), Section::footer, "footer", depth);
     }
 
     void ShowModel::section (const tree::TreeSnapshot& snapshot, const std::string& container,
+                             const std::string& sectionId,
                              const std::vector<std::string>& ids, Section which,
                              const char* word, int depth,
                              const std::vector<std::string>& derivedIds)
@@ -189,6 +194,7 @@ namespace wfg::client::model
         head.depth = depth;
         head.parent = container;
         head.name = word;
+        head.sectionId = sectionId;
         head.count = ids.size() + derivedIds.size();
         head.bandKey = container + "/" + word;
 
@@ -215,11 +221,13 @@ namespace wfg::client::model
             with no rail under its tip, because there was no level for one.
             Indenting them gives the section the same bracket a group has, and
             the same shape means the two read as one idea rather than two. */
+        auto at = 0;
+
         for (const auto& id : ids)
-            append (snapshot, id, which, depth + 1, container);
+            append (snapshot, id, which, depth + 1, container, at++, false, sectionId);
 
         for (const auto& id : derivedIds)
-            append (snapshot, id, which, depth + 1, container, 0, true);
+            append (snapshot, id, which, depth + 1, container, 0, true, sectionId);
     }
 
     void ShowModel::toggle (const std::string& bandKey)
@@ -268,7 +276,7 @@ namespace wfg::client::model
 
     void ShowModel::append (const tree::TreeSnapshot& snapshot, const std::string& cueId,
                             Section section, int depth, const std::string& parent,
-                            int indexInParent, bool derived)
+                            int indexInParent, bool derived, const std::string& sectionId)
     {
         /*  A CUE DRAWN TWICE IS A DOCUMENT THAT DISAGREES WITH ITSELF, and a
             client that followed it would walk forever. The first placement
@@ -330,6 +338,7 @@ namespace wfg::client::model
             walked into when it is a group, and not in the index, so the
             pointer and the pick land on the cue's own row. */
         row.derived = derived;
+        row.sectionId = sectionId;
 
         const auto walkInto = row.isGroup && ! row.shut && ! derived;
 

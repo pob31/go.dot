@@ -127,6 +127,13 @@ namespace wfg::client::model
         /** The group this row sits in, or empty at the top of the list. */
         std::string parent;
 
+        /*  THE SECTION'S OWN IDENTIFIER for a band and for the rows inside a
+            header, a footer or a persistent section: the container a move
+            into that section names (`group/header`, `group/footer`,
+            `list/persistent`). Empty for a member row, whose container is
+            its parent. */
+        std::string sectionId;
+
         /*  Where this row stands among its parent's MEMBERS, which is the
             index `cue.create` and `object.move` speak in - not its position
             in the drawn list, which counts bands and nested rows too. A drop
@@ -197,12 +204,14 @@ namespace wfg::client::model
         void walk (const tree::TreeSnapshot& snapshot, const std::string& container,
                    bool isList, int depth);
         void section (const tree::TreeSnapshot& snapshot, const std::string& container,
+                      const std::string& sectionId,
                       const std::vector<std::string>& ids, Section which,
                       const char* word, int depth,
                       const std::vector<std::string>& derivedIds = {});
         void append (const tree::TreeSnapshot& snapshot, const std::string& cueId,
                      Section section, int depth, const std::string& parent,
-                     int indexInParent = 0, bool derived = false);
+                     int indexInParent = 0, bool derived = false,
+                     const std::string& sectionId = {});
 
         std::vector<Row> drawn;
         std::unordered_map<std::string, int> indexOfCue;

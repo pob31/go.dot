@@ -92,6 +92,11 @@ namespace wfg::client::gesture
                  { osc::Value::string (parent), osc::Value::int32 (index), osc::Value::string (fragment) } };
     }
 
+    Event groupRole (const std::string& group, const std::string& role)
+    {
+        return { origin::window, "group.role", { osc::Value::string (group), osc::Value::string (role) } };
+    }
+
     Event deleteObject (const std::string& id)
     {
         return { origin::window, "object.delete", { osc::Value::string (id) } };

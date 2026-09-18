@@ -109,6 +109,10 @@ namespace wfg::client::gesture
     /** Deletes a cue or a group: ctrl/⌘-Backspace on the picked one. Undo brings it back with its ids. */
     Event deleteObject (const std::string& id);
 
+    /*  Gives a group its header or its footer, so a cue can be moved into it:
+        the engine answers with the one that exists, so asking twice is safe. */
+    Event groupRole (const std::string& group, const std::string& role);
+
     /*  COPY AND PASTE. Copy asks the engine for a fragment of these cues,
         which the tree then publishes and the window carries to the
         operating system's clipboard; paste hands a fragment back, to land in
