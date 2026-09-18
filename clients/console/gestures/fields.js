@@ -20,6 +20,8 @@
     gestures/keys.js, which reads and clears it. */
 
 import { setNode } from "../plumbing/link.js";
+import { dbl, str } from "../plumbing/osc.js";
+import { gesture } from "./table.js";
 import { commitText } from "../views/values.js";
 import { aimHere } from "../views/aim.js";
 
@@ -126,6 +128,20 @@ document.addEventListener("change", (event) => {
       those keys: they stay the standby's, as §14.3 asks. */
   if (target && target.id === "aim-offset") {
     if (pointer.aimKeyStep) { pointer.aimKeyStep = false; return; }
+
+    target.blur();
+    return;
+  }
+
+  /*  A SEEK BOX COMMITTED (author, 2026-09-18: scrubbing). The desktop
+      drags a head; the page, which has no strip to drag along, types the
+      second and commits it - the same `run.seek` record either way, which is
+      what keeps the desktop's gesture reachable from here (14.16, rule 3). */
+  if (target && target.dataset && target.dataset.seek) {
+    const seconds = Number(target.value);
+
+    if (Number.isFinite(seconds) && seconds >= 0)
+      gesture("seek", [str(target.dataset.seek), dbl(seconds)]);
 
     target.blur();
     return;

@@ -1150,165 +1150,11 @@ namespace wfg::cue
         editable.setAttribute (standbyAddressOf (listId), plan.standby);
 
         //----------------------------------------------------------------------
-        /*  AND THE TREE, OUTERMOST FIRST.
-
-            `RunTable::create` links a run into its parent's children only if
-            the parent already exists, so a group made after its member would
-            have a member it never heard of. The plan lists the target's
-            ancestors outermost first for exactly this reason. */
+        /*  AND THE TREE, OUTERMOST FIRST - shared with a group re-seated at a
+            second of its own timeline, which is the same building with the
+            scene's run already standing. */
         std::map<std::string, std::string> runFor;
-
-        for (const auto& wants : plan.runs)
-        {
-            const auto cue = document.findById (wants.cue);
-
-            if (! cue.isValid() || cue.getType().toString() != "Group")
-                continue;
-
-            const auto id = nextId();
-            const auto parent = wants.ancestors.empty()
-                                  ? std::string {}
-                                  : runFor[wants.ancestors.back()];
-
-            runs.create (id, wants.cue, "group", parent);
-            runFor[wants.cue] = id;
-
-            auto* run = runs.find (id);
-
-            if (run == nullptr)
-                continue;
-
-            run->state = runState::playing;
-            run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
-            run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
-
-            /*  TWO OF THESE HAVE TO BE WRITTEN BY HAND AND IT IS NOT OBVIOUS
-                WHICH. A run made by `create` leaves `iterations` at one and
-                `seed` at nought; `iterations` is otherwise set when a group is
-                FIRED and `seed` and `round` when a round is DRAWN, and a jump
-                does neither. A group adopted without them ends after one round,
-                or draws its next shuffle from a seed the show never used. */
-            run->iterations = static_cast<int> (numberOf (cue, "loops"));
-            run->seed = static_cast<std::uint64_t> (numberOf (cue, "seed"));
-            run->iteration = 0;
-            run->round = membersOf (cue);
-        }
-
-        //----------------------------------------------------------------------
-        /*  THEN THE CUES THAT MAKE A SOUND, each under the group it belongs to. */
-        for (const auto& wants : plan.runs)
-        {
-            const auto cue = document.findById (wants.cue);
-
-            if (! cue.isValid() || cue.getType().toString() == "Group")
-                continue;
-
-            const auto id = nextId();
-            const auto parent = wants.ancestors.empty()
-                                  ? std::string {}
-                                  : runFor[wants.ancestors.back()];
-
-            runs.create (id, wants.cue, kindOfCue (cue), parent);
-            runFor[wants.cue] = id;
-
-            auto* run = runs.find (id);
-
-            if (run == nullptr)
-                continue;
-
-            run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
-            run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
-
-            /*  ALREADY OVER. Its run exists and is `done` so that its group
-                knows it has been played - a member missing from the finished
-                end is a group that thinks it has not started. */
-            if (wants.when == planned::finished)
-            {
-                run->state = runState::done;
-                run->endedAtTick = tick;
-                continue;
-            }
-
-            /*  STILL TO COME, at its remaining offset. A timeline schedules
-                everything at entry, so the members after the aim are waiting
-                with a due tick rather than absent - absent, the group would
-                spawn them a second time. */
-            if (wants.when == planned::due)
-            {
-                run->state = runState::waiting;
-                run->dueTick = tick + ticksFor (wants.startsIn);
-                continue;
-            }
-
-            /*  AND THE ONES MAKING A NOISE. Armed with their launch asked for
-                and their offset on them: the arm applies it as the clip's own
-                offset, which M17 measured landing on the sample. */
-            run->startOffset = wants.offset;
-            run->startRange = std::max (wants.range, 0);
-            run->launchRequested = true;
-            run->launchRequestedAtTick = tick;
-
-            armMedia (engine, cue, id);
-        }
-
-        //----------------------------------------------------------------------
-        /*  AND THE JOBS THAT WILL CARRY IT ON.
-
-            The scheduler continues from here on the next tick, because a group
-            job re-reads the round from the run every tick rather than keeping a
-            copy - PR 3.5's finding, built so a prune could reach the round in
-            progress, and paying again here.
-
-            The job's own list of runs it has taken charge of is filled at this
-            moment too, because the loop that claims a child on sight does not
-            run on a job's first tick. */
-        for (const auto& wants : plan.runs)
-        {
-            const auto found = runFor.find (wants.cue);
-
-            if (found == runFor.end())
-                continue;
-
-            const auto cue = document.findById (wants.cue);
-
-            if (! cue.isValid() || cue.getType().toString() != "Group")
-                continue;
-
-            GroupJob job;
-            job.run = found->second;
-            job.phase = groupPhase::members;
-            job.phaseCues = membersOf (cue);
-            job.nextMember = job.phaseCues.size();
-
-            for (const auto* child : runs.childrenOf (job.run))
-            {
-                job.taken.push_back (child->id);
-                job.phaseRuns.push_back (child->id);
-
-                if (! child->isFinished() && child->state != runState::waiting)
-                    job.awaiting = child->id;
-            }
-
-            job.launched = job.phaseRuns.size();
-
-            /*  A SEQUENCE ADVANCES ON THE MEMBER IT IS WAITING FOR, so
-                `nextMember` is where the plan left off rather than the end of
-                the list - otherwise the chain would stop at the jump. */
-            if (textOf (cue, "mode") != "timeline")
-            {
-                const auto* awaited = runs.find (job.awaiting);
-                const auto at = awaited != nullptr
-                                  ? std::find (job.phaseCues.begin(), job.phaseCues.end(),
-                                               awaited->cue)
-                                  : job.phaseCues.end();
-
-                job.nextMember = at != job.phaseCues.end()
-                                   ? static_cast<std::size_t> (at - job.phaseCues.begin()) + 1
-                                   : job.phaseCues.size();
-            }
-
-            scheduled.push_back (job);
-        }
+        seatPlan (engine, tick, plan.runs, runFor, nextId);
 
         //----------------------------------------------------------------------
         /*  AND THE VALUES: A MINIMAL CORRECTION, NOT A SHOTGUN BLAST (§3.13).
@@ -1355,6 +1201,489 @@ namespace wfg::cue
         liftedAt = tick;
 
         return used;
+    }
+
+    void Runner::seatPlan (Engine& engine, std::int64_t tick,
+                           const std::vector<PlannedRun>& wanted,
+                           std::map<std::string, std::string>& runFor,
+                           const std::function<std::string()>& nextId)
+    {
+        /*  THE TREE, OUTERMOST FIRST.
+
+            `RunTable::create` links a run into its parent's children only if
+            the parent already exists, so a group made after its member would
+            have a member it never heard of. The plan lists the target's
+            ancestors outermost first for exactly this reason.
+
+            A GROUP ALREADY IN `runFor` IS KEPT, NOT MADE AGAIN (2026-09-18):
+            that is how a scene is re-seated at another second of itself - the
+            scene's own run stands, its members are rebuilt under it - and how
+            the groups above it are left alone. A jump hands in an empty map
+            and every group is new, which is what it always did. */
+        for (const auto& wants : wanted)
+        {
+            const auto cue = document.findById (wants.cue);
+
+            if (! cue.isValid() || cue.getType().toString() != "Group")
+                continue;
+
+            const auto standing = runFor.find (wants.cue);
+            const auto id = standing != runFor.end() ? standing->second : nextId();
+
+            if (standing == runFor.end())
+            {
+                const auto parent = wants.ancestors.empty()
+                                      ? std::string {}
+                                      : runFor[wants.ancestors.back()];
+
+                runs.create (id, wants.cue, "group", parent);
+                runFor[wants.cue] = id;
+            }
+
+            auto* run = runs.find (id);
+
+            if (run == nullptr)
+                continue;
+
+            run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
+            run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
+
+            /*  A GROUP THE INSTANT HAS PASSED, OR NOT REACHED (2026-09-18).
+                An inner scene the plan found over is a done run, so the group
+                above knows it has been played; one still to come waits with
+                its due tick, and spawns its own members when it fires - which
+                is why the solver planned none of them. */
+            if (wants.when == planned::finished)
+            {
+                run->state = runState::done;
+                run->endedAtTick = tick - retentionTicks - 1;
+                continue;
+            }
+
+            if (wants.when == planned::due)
+            {
+                run->state = runState::waiting;
+                run->dueTick = tick + ticksFor (wants.startsIn);
+                continue;
+            }
+
+            run->state = runState::playing;
+
+            /*  WHEN IT STARTED, AS IF IT HAD. `started` publishes this tick
+                and `position` counts from it, so a scene seated `offset`
+                seconds in reads `offset` seconds in - and a client scrubbing
+                it sees the head land where the hand put it. */
+            run->launchRequestedAtTick = tick - ticksFor (wants.offset);
+
+            /*  TWO OF THESE HAVE TO BE WRITTEN BY HAND AND IT IS NOT OBVIOUS
+                WHICH. A run made by `create` leaves `iterations` at one and
+                `seed` at nought; `iterations` is otherwise set when a group is
+                FIRED and `seed` and `round` when a round is DRAWN, and a jump
+                does neither. A group adopted without them ends after one round,
+                or draws its next shuffle from a seed the show never used. */
+            run->iterations = static_cast<int> (numberOf (cue, "loops"));
+            run->seed = static_cast<std::int32_t> (numberOf (cue, "seed"));
+            run->iteration = 0;
+            run->round = membersOf (cue);
+        }
+
+        //----------------------------------------------------------------------
+        /*  THEN THE CUES THAT MAKE A SOUND, each under the group it belongs to. */
+        for (const auto& wants : wanted)
+        {
+            const auto cue = document.findById (wants.cue);
+
+            if (! cue.isValid() || cue.getType().toString() == "Group")
+                continue;
+
+            const auto id = nextId();
+            const auto parent = wants.ancestors.empty()
+                                  ? std::string {}
+                                  : runFor[wants.ancestors.back()];
+
+            runs.create (id, wants.cue, kindOfCue (cue), parent);
+            runFor[wants.cue] = id;
+
+            auto* run = runs.find (id);
+
+            if (run == nullptr)
+                continue;
+
+            run->preWaitTicks = ticksFor (numberOf (cue, "preWait"));
+            run->postWaitTicks = ticksFor (numberOf (cue, "postWait"));
+
+            /*  ALREADY OVER. Its run exists and is `done` so that its group
+                knows it has been played - a member missing from the finished
+                end is a group that thinks it has not started. */
+            if (wants.when == planned::finished)
+            {
+                /*  AND NEVER PUBLISHED: it exists for its group's bookkeeping
+                    and nothing sounded here, so the seconds a finished run is
+                    kept on the tree for reading would show a row of "done"
+                    for every member behind every step of a scrub (the first
+                    live one, 2026-09-18). The table keeps it; the tree does
+                    not say it. */
+                run->state = runState::done;
+                run->endedAtTick = tick - retentionTicks - 1;
+                continue;
+            }
+
+            /*  STILL TO COME, at its remaining offset. A timeline schedules
+                everything at entry, so the members after the aim are waiting
+                with a due tick rather than absent - absent, the group would
+                spawn them a second time. */
+            if (wants.when == planned::due)
+            {
+                run->state = runState::waiting;
+                run->dueTick = tick + ticksFor (wants.startsIn);
+                continue;
+            }
+
+            /*  AND THE ONES MAKING A NOISE. Armed with their launch asked for
+                and their offset on them: the arm applies it as the clip's own
+                offset, which M17 measured landing on the sample. */
+            run->startOffset = wants.offset;
+            run->startRange = std::max (wants.range, 0);
+            run->launchRequested = true;
+            run->launchRequestedAtTick = tick;
+
+            armMedia (engine, cue, id);
+        }
+
+        //----------------------------------------------------------------------
+        /*  AND THE JOBS THAT WILL CARRY IT ON.
+
+            The scheduler continues from here on the next tick, because a group
+            job re-reads the round from the run every tick rather than keeping a
+            copy - PR 3.5's finding, built so a prune could reach the round in
+            progress, and paying again here.
+
+            The job's own list of runs it has taken charge of is filled at this
+            moment too, because the loop that claims a child on sight does not
+            run on a job's first tick.
+
+            ONLY FOR A GROUP THAT IS PLAYING: a scene found over has nothing to
+            carry on, and one still to come is fired by its due tick, which
+            makes its job then. */
+        for (const auto& wants : wanted)
+        {
+            if (wants.when != planned::sounding)
+                continue;
+
+            const auto found = runFor.find (wants.cue);
+
+            if (found == runFor.end())
+                continue;
+
+            const auto cue = document.findById (wants.cue);
+
+            if (! cue.isValid() || cue.getType().toString() != "Group")
+                continue;
+
+            GroupJob job;
+            job.run = found->second;
+            job.phase = groupPhase::members;
+            job.phaseCues = membersOf (cue);
+            job.nextMember = job.phaseCues.size();
+
+            for (const auto* child : runs.childrenOf (job.run))
+            {
+                job.taken.push_back (child->id);
+                job.phaseRuns.push_back (child->id);
+
+                if (! child->isFinished() && child->state != runState::waiting)
+                    job.awaiting = child->id;
+            }
+
+            job.launched = job.phaseRuns.size();
+
+            /*  A SEQUENCE ADVANCES ON THE MEMBER IT IS WAITING FOR, so
+                `nextMember` is where the plan left off rather than the end of
+                the list - otherwise the chain would stop at the jump. */
+            if (textOf (cue, "mode") != "timeline")
+            {
+                const auto* awaited = runs.find (job.awaiting);
+                const auto at = awaited != nullptr
+                                  ? std::find (job.phaseCues.begin(), job.phaseCues.end(),
+                                               awaited->cue)
+                                  : job.phaseCues.end();
+
+                job.nextMember = at != job.phaseCues.end()
+                                   ? static_cast<std::size_t> (at - job.phaseCues.begin()) + 1
+                                   : job.phaseCues.size();
+            }
+
+            scheduled.push_back (job);
+        }
+    }
+
+    //==============================================================================
+    bool Runner::seekMedia (Engine& engine, std::int64_t tick, const std::string& runId,
+                            double seconds)
+    {
+        auto* run = runs.find (runId);
+
+        if (run == nullptr || run->isFinished() || run->kind != "media")
+            return false;
+
+        const auto cue = document.findById (run->cue);
+
+        if (! cue.isValid())
+            return false;
+
+        /*  A CUE WITH RANGES IS A PLAYLIST OVER ONE FILE (§3.24), and the
+            second asked for lands in whichever range holds it - at that
+            range's own start, since the audio side takes an offset for a
+            whole file and a slot for a range, and not both. A second no range
+            holds is the last range's start. */
+        auto range = -1;
+        auto origin = seconds;
+        auto index = 0;
+
+        for (const auto& spec : rangesOf (cue))
+        {
+            if (range < 0 || (seconds >= spec.in && seconds < spec.out))
+            {
+                range = index;
+                origin = spec.in;
+            }
+
+            if (seconds >= spec.in && seconds < spec.out)
+                break;
+
+            ++index;
+        }
+
+        /*  THE VOICE IS STOPPED AND ASKED FOR AGAIN AT THE NEW SECOND, on the
+            same track, at the level it was playing at - a fade that has
+            brought it down stays down. The edge watcher would read the stop
+            as the cue ending, so what it remembers is cleared: a run that
+            has not been seen sounding gives no falling edge, and the launch
+            that follows the arm is what it sees next.
+
+            THE FLOOR IS A MILLISECOND, because nought is what "wherever the
+            cue says" is spelled as on a run, and a scrub to the very top of
+            the file is a decision about this run and not a return to the
+            cue's own offset. */
+        if (audio != nullptr && run->track >= 0)
+            audio->stop (run->track);
+
+        run->startOffset = range >= 0 ? 0.0 : std::max (seconds, 0.001);
+        run->startRange = std::max (range, 0);
+        run->positionOrigin = origin;
+        run->position = origin;
+        run->range = range;
+        run->rangeIteration = range >= 0 ? 1 : 0;
+        run->rangeStartedAtSample = 0;
+        run->rangesFinished = false;
+        run->boundaryPlacedAt = -1;
+        run->advanceRequested = false;
+        run->sawPlaying = false;
+        run->stopIssued = false;
+        run->armConfirmed = false;
+        run->launchedAtSample = 0;
+        run->launchRequested = true;
+        run->launchRequestedAtTick = tick;
+
+        if (run->state == runState::stopping)
+            run->state = runState::playing;
+
+        if (audio != nullptr && run->track >= 0)
+            requestArmOn (engine, cue, *run, run->ownLevel);
+
+        return true;
+    }
+
+    std::vector<std::string> Runner::seekGroup (Engine& engine, std::int64_t tick,
+                                                const std::string& runId, double seconds,
+                                                const std::vector<std::string>& supplied)
+    {
+        std::vector<std::string> used;
+        std::size_t taken = 0;
+
+        const auto nextId = [&]
+        {
+            auto id = taken < supplied.size() ? supplied[taken] : std::string {};
+            ++taken;
+
+            if (id.empty())
+                id = ids.generate();
+
+            used.push_back (id);
+            return id;
+        };
+
+        auto* run = runs.find (runId);
+
+        if (run == nullptr || run->isFinished() || run->kind != "group")
+            return used;
+
+        const auto listId = listOfCue (run->cue);
+
+        if (listId.empty())
+            return used;
+
+        /*  THE SCENE AT THAT SECOND, asked of the solver exactly as a jump asks
+            it, and only the part under the scene is taken: what it found for
+            the rest of the list is the jump's business, and a scrub on one
+            group leaves everything beside it sounding as it was. */
+        const auto plan = solve (document, durations, mounts, { listId, run->cue, seconds });
+
+        if (! plan.ok)
+            return used;
+
+        std::vector<PlannedRun> wanted;
+
+        for (const auto& wants : plan.runs)
+            if (wants.cue == run->cue
+                 || std::find (wants.ancestors.begin(), wants.ancestors.end(), run->cue)
+                      != wants.ancestors.end())
+                wanted.push_back (wants);
+
+        /*  WHAT IT HELD IS ENDED FIRST, the way a jump ends what it abandons:
+            every descendant, no footer, its jobs retired and its voices and
+            slots given back in this same drain. The scene's own run stands. */
+        std::vector<std::string> below;
+
+        const auto gather = [this, &below] (const std::string& parent, auto&& self) -> void
+        {
+            for (const auto* child : runs.childrenOf (parent))
+            {
+                below.push_back (child->id);
+                self (child->id, self);
+            }
+        };
+
+        gather (runId, gather);
+
+        for (const auto& id : below)
+        {
+            if (auto* child = runs.find (id); child != nullptr && ! child->isFinished())
+            {
+                /*  GONE AT ONCE, not kept for reading: the seconds a finished
+                    run stays published are for reading what happened, and
+                    what happened here is the seek - a scrub that left five
+                    rows of ended members behind at every step was a pane
+                    nobody could read. */
+                child->state = runState::done;
+                child->endedAtTick = tick - retentionTicks - 1;
+                child->prepare.clear();
+                runs.releaseSlotsOf (child->id);
+
+                if (child->track >= 0 && audio != nullptr)
+                    audio->stop (child->track);
+            }
+
+            for (auto& job : scheduled)
+                if (job.run == id)
+                    job.retired = true;
+        }
+
+        for (auto& job : scheduled)
+            if (job.run == runId)
+                job.retired = true;
+
+        //----------------------------------------------------------------------
+        /*  THE GROUPS ABOVE IT ARE THE RUNS IT ALREADY HAS, and it is its own:
+            `seatPlan` keeps what the map names and builds the rest under it. */
+        std::map<std::string, std::string> runFor;
+        runFor[run->cue] = runId;
+
+        for (auto parent = run->parent; ! parent.empty();)
+        {
+            const auto* above = runs.find (parent);
+
+            if (above == nullptr)
+                break;
+
+            runFor[above->cue] = above->id;
+            parent = above->parent;
+        }
+
+        seatPlan (engine, tick, wanted, runFor, nextId);
+
+        return used;
+    }
+
+    void Runner::requestArmOn (Engine& engine, const juce::ValueTree& cue, Run& run,
+                               double levelDb)
+    {
+        /*  Where it goes, resolved through the buses the show declares, so the
+            audio side never has to know what a bus is. */
+        std::string problem;
+        const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem);
+
+        if (! problem.empty())
+        {
+            engine.submit (origin::engine, "run.failed",
+                           { osc::Value::string (run.id),
+                             osc::Value::string (runError::badRoute) });
+            return;
+        }
+
+        /*  A run holding a voice is `armed`, whatever it was before. A cue in
+            its pre-wait keeps `waiting` - the operator's answer to "what is that
+            cue doing" is the wait, not the plumbing underneath it. A run that
+            is being SEEKED keeps `playing` for the same reason: it is sounding
+            as far as anybody in the room is concerned. */
+        if (! run.isWaiting() && run.state != runState::playing)
+            run.state = runState::armed;
+
+        ArmRequest request;
+        request.runId = run.id;
+        request.track = run.track;
+        request.mediaFile = mediaPathOf (run.media);
+        request.levelDb = levelDb;
+        request.routing = routing;
+        request.ranges = rangesOf (cue);
+
+        /*  READ THE SAME WAY THE LEVEL IS, and the reason it is worth a line of
+            its own: this row has existed since Phase 2, the grammar has always
+            accepted it, `validate()` has always refused it beside a range - and
+            nothing has ever read it, so a show that asked to start two seconds
+            in has always started at the top. Found by auditing §13's claims
+            against the code rather than by anybody hearing it. */
+        /*  WHERE SOMEBODY JUMPED TO WINS OVER WHERE THE CUE SAYS IT STARTS,
+            and only because a jump is the more recent statement about this
+            particular run. The document's `startOffset` is a decision about
+            every performance; the run's is a decision about this rehearsal, and
+            §4.10 keeps them in different places for exactly that reason. */
+        request.startOffset = run.startOffset > 0.0 ? run.startOffset
+                                                    : numberOf (cue, "startOffset");
+
+        /*  AND THE PLAYHEAD'S ORIGIN IS THAT SAME NUMBER, copied here because
+            here is where it is decided. What `updatePositions` has to publish
+            is the offset the voice was ACTUALLY armed with; a playhead that
+            re-read the document per tick would draw itself wherever the cue was
+            last edited to, which §4.10 says changes the NEXT run and not this
+            one. A cue with ranges leaves it at nought and the launch overwrites
+            it with the range's `in`, the document refusing an offset beside a
+            range list for exactly that reason. */
+        run.positionOrigin = request.startOffset;
+
+        /*  NO SLOT, and it is a refusal rather than a truncation. The graph is
+            built with as many launcher slots as the show's widest cue has
+            ranges, once, when the show loads (§3.25) - so a range added during
+            the show has nowhere to be armed. Arming the first S of them would
+            be a cue that plays most of what it says, which is worse than one
+            that says it cannot. */
+        if (static_cast<int> (request.ranges.size()) > audio->slotCount())
+        {
+            engine.submit (origin::engine, "run.failed",
+                           { osc::Value::string (run.id),
+                             osc::Value::string (runError::noSlot) });
+            return;
+        }
+
+        /*  THE CUE'S AUTHORED LEVEL IS THE RUN'S OWN, which is what a fade
+            aimed at this cue moves and what a trim from a group above it is
+            added TO. `level` itself is left for applyLevels to compute on the
+            next tick, so there is one place that decides what a run is heard
+            at rather than two that could disagree. */
+        run.ownLevel = request.levelDb;
+        run.level = request.levelDb;
+
+        audio->requestArm (request);
     }
 
     std::vector<std::string> Runner::prepareStandby (Engine& engine, std::int64_t tick,
@@ -2055,11 +2384,7 @@ namespace wfg::cue
             show somebody has to run tonight - and finding out at the arm rather
             than at the launch means the failure is reported while the operator
             is still reading the next line. */
-        const auto file = named.empty() || mediaFolder.empty()
-                            ? named
-                            : juce::File (juce::String (mediaFolder))
-                                  .getChildFile (juce::String (named))
-                                  .getFullPathName().toStdString();
+        const auto file = mediaPathOf (named);
 
         if (named.empty()
               || (! mediaFolder.empty() && ! juce::File (juce::String (file)).existsAsFile()))
@@ -2083,85 +2408,26 @@ namespace wfg::cue
             return;
         }
 
-        /*  Where it goes, resolved through the buses the show declares, so the
-            audio side never has to know what a bus is. */
-        std::string problem;
-        const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem);
-
-        if (! problem.empty())
-        {
-            engine.submit (origin::engine, "run.failed",
-                           { osc::Value::string (runId),
-                             osc::Value::string (runError::badRoute) });
-            return;
-        }
-
         /*  Reserved from here, so a second arm on the same tick cannot pick the
             same voice. The audio side confirms with audio.armed once the graph
             and the disk are ready; until then the run is armed and silent. */
         run->track = track;
 
-        /*  A run holding a voice is `armed`, whatever it was before. A cue in
-            its pre-wait keeps `waiting` - the operator's answer to "what is that
-            cue doing" is the wait, not the plumbing underneath it. */
-        if (! run->isWaiting())
-            run->state = runState::armed;
+        requestArmOn (engine, cue, *run, numberOf (cue, "level"));
+    }
 
-        ArmRequest request;
-        request.runId = runId;
-        request.track = track;
-        request.mediaFile = file;
-        request.levelDb = numberOf (cue, "level");
-        request.routing = routing;
-        request.ranges = rangesOf (cue);
+    std::string Runner::mediaPathOf (const std::string& named) const
+    {
+        /*  RESOLVED AGAINST THE BUNDLE. A run's copy of the file name is
+            bundle-relative, which is how the document writes it and the key
+            the analyser files its records under; the audio side wants the
+            path on disk. */
+        if (named.empty() || mediaFolder.empty())
+            return named;
 
-        /*  READ THE SAME WAY THE LEVEL IS, and the reason it is worth a line of
-            its own: this row has existed since Phase 2, the grammar has always
-            accepted it, `validate()` has always refused it beside a range - and
-            nothing has ever read it, so a show that asked to start two seconds
-            in has always started at the top. Found by auditing §13's claims
-            against the code rather than by anybody hearing it. */
-        /*  WHERE SOMEBODY JUMPED TO WINS OVER WHERE THE CUE SAYS IT STARTS,
-            and only because a jump is the more recent statement about this
-            particular run. The document's `startOffset` is a decision about
-            every performance; the run's is a decision about this rehearsal, and
-            §4.10 keeps them in different places for exactly that reason. */
-        request.startOffset = run->startOffset > 0.0 ? run->startOffset
-                                                     : numberOf (cue, "startOffset");
-
-        /*  AND THE PLAYHEAD'S ORIGIN IS THAT SAME NUMBER, copied here because
-            here is where it is decided. What `updatePositions` has to publish
-            is the offset the voice was ACTUALLY armed with; a playhead that
-            re-read the document per tick would draw itself wherever the cue was
-            last edited to, which §4.10 says changes the NEXT run and not this
-            one. A cue with ranges leaves it at nought and the launch overwrites
-            it with the range's `in`, the document refusing an offset beside a
-            range list for exactly that reason. */
-        run->positionOrigin = request.startOffset;
-
-        /*  NO SLOT, and it is a refusal rather than a truncation. The graph is
-            built with as many launcher slots as the show's widest cue has
-            ranges, once, when the show loads (§3.25) - so a range added during
-            the show has nowhere to be armed. Arming the first S of them would
-            be a cue that plays most of what it says, which is worse than one
-            that says it cannot. */
-        if (static_cast<int> (request.ranges.size()) > audio->slotCount())
-        {
-            engine.submit (origin::engine, "run.failed",
-                           { osc::Value::string (runId),
-                             osc::Value::string (runError::noSlot) });
-            return;
-        }
-
-        /*  THE CUE'S AUTHORED LEVEL IS THE RUN'S OWN, which is what a fade
-            aimed at this cue moves and what a trim from a group above it is
-            added TO. `level` itself is left for applyLevels to compute on the
-            next tick, so there is one place that decides what a run is heard
-            at rather than two that could disagree. */
-        run->ownLevel = request.levelDb;
-        run->level = request.levelDb;
-
-        audio->requestArm (request);
+        return juce::File (juce::String (mediaFolder))
+                   .getChildFile (juce::String (named))
+                   .getFullPathName().toStdString();
     }
 
     //==============================================================================
@@ -3677,6 +3943,15 @@ namespace wfg::cue
             three copies that could come to disagree about what "done" means. */
         for (auto& job : scheduled)
         {
+            /*  A RETIRED JOB IS OVER, whatever its run is doing. A re-seat
+                (`seekGroup`) retires the scene's job and pushes a fresh one
+                for the same run in one drain, and the old one - still in the
+                list until the sweep below - would otherwise take the members
+                the fresh one just made and launch them a second time, which
+                is what the first live scrub did (2026-09-18). */
+            if (job.retired)
+                continue;
+
             auto* run = runs.find (job.run);
 
             if (run == nullptr || run->isFinished())
@@ -5377,6 +5652,75 @@ namespace wfg::cue
                                                                  listId, supplied);
 
                             std::vector<osc::Value> applied { osc::Value::string (listId) };
+
+                            for (const auto& id : made)
+                                applied.push_back (osc::Value::string (id));
+
+                            return Outcome::ok (applied);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  A SEEK (author, 2026-09-18: "I'd like to be able to scrub active
+            cues and groups"). One record per position the hand settles on -
+            a client scrubbing sends a handful of these a second and one when
+            it lets go - and the same record for both kinds: a media run
+            moves to that second of its file, a group run to that second of
+            its own timeline with its members re-seated around it, which is
+            what brings a member already over back when the hand goes before
+            it. The identifiers a group seek draws ride on the applied
+            arguments as a jump's do, because a replay never draws its own.
+
+            A fade, a wait, a message have no material to seek in: refused
+            `bad-value`, since the row was never one to scrub. */
+        registry.add ({ "run.seek",
+                        "Moves a run to a second of its own material: a media run to that second"
+                        " of its file, a group run to that second of its timeline, its members"
+                        " re-seated around it.",
+                        { { "run", 's', false }, { "seconds", 'd', false },
+                          { "made", 's', true, true } },
+                        true,
+                        [&engine, &runner] (CommandContext& context,
+                                            const std::vector<osc::Value>& args)
+                        {
+                            const auto runId = args[0].getString();
+                            const auto seconds = args[1].asDouble();
+
+                            if (! runner.knowsRun (runId))
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (! (seconds >= 0.0))
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto* run = runner.runTable().find (runId);
+
+                            if (run == nullptr)
+                                return Outcome::rejected (reason::unknownId);
+
+                            std::vector<osc::Value> applied { osc::Value::string (runId),
+                                                              osc::Value::float64 (seconds) };
+
+                            /*  Applied and nothing, once it is over: a hand
+                                still dragging when the sound ends is not a
+                                mistake worth a rejection. */
+                            if (run->isFinished())
+                                return Outcome::ok (applied);
+
+                            if (run->kind == "media")
+                            {
+                                runner.seekMedia (engine, context.tick, runId, seconds);
+                                return Outcome::ok (applied);
+                            }
+
+                            if (run->kind != "group")
+                                return Outcome::rejected (reason::badValue);
+
+                            std::vector<std::string> supplied;
+
+                            for (std::size_t n = 2; n < args.size(); ++n)
+                                supplied.push_back (args[n].getString());
+
+                            const auto made = runner.seekGroup (engine, context.tick, runId,
+                                                                seconds, supplied);
 
                             for (const auto& id : made)
                                 applied.push_back (osc::Value::string (id));

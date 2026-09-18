@@ -220,6 +220,12 @@ namespace wfg::client
 
                 runActions.kill = [this] (const std::string& id) { send (gesture::kill (id)); };
 
+                /*  A SCRUB IS A HANDFUL OF SEEKS A SECOND AND ONE ON RELEASE,
+                    each a record; the pane decides when the hand has settled
+                    (model/Scrub.h), and this only sends. */
+                runActions.seek = [this] (const std::string& id, double seconds)
+                                  { send (gesture::seek (id, seconds)); };
+
                 ui::InspectorComponent::Actions inspectorActions;
 
                 /*  ONE COMMITTED FIELD IS ONE `node.set`, carrying the address

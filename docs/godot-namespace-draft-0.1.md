@@ -874,7 +874,8 @@ back on if nobody feels strongly by then.
   (§14.16) and that nothing is built on the page in the meantime. What forced the question is a
   fact about browsers rather than a preference: **a page is never told a dropped file's path.** It
   is given the name and the bytes, deliberately, so the web client cannot say *"the file is at
-  D:udioain.wav"* — it can only offer to COPY one into the show. And `media/@file` is
+  D:udio
+ain.wav"* — it can only offer to COPY one into the show. And `media/@file` is
   deliberately relative to the bundle's `media/` folder, for the reason the parameter table gives
   in as many words: *"a show travels between machines and an absolute path is a fact about the
   machine it was authored on."* So the page's only honest route is an import, and the engine has
@@ -1355,6 +1356,7 @@ Registered commands, replay-idempotent handlers, origin `engine`, as §11.4's ar
 | `run.kill` | unchanged | `s` run | **now kills a run with no track** — a fade, an osc wait, a group and every descendant — immediately, and runs no footer |
 | `run.stopAll` | `/godot/cmd/run/stopAll` | — | *(2026-09-18)* §4.4's **Esc**: `run.stop hard` applied to every root run, so members come down in order and every footer runs. An empty table is applied and does nothing |
 | `run.killAll` | `/godot/cmd/run/killAll` | — | *(2026-09-18)* §4.4's **double Esc**: `run.kill` applied to every root run; no footer runs. Which of the two a press means is the client's reading of a hand, and each reading is one of these two records |
+| `run.seek` | `/godot/cmd/run/seek` | `s` run, `d` seconds, `[s made…]` | *(2026-09-18)* a scrub settling: a **media** run is moved to that second of its file - the voice stopped and asked for again on the same track, at the level a fade had brought it to, the run keeping its identifier - and a **group** run is re-seated at that second of its own timeline under the same group run, its members built again from the solver's answer for the scene at that second (over, sounding at their offset, or waiting for their due tick), which is what brings a member already over back. Nothing beside the group is touched. The identifiers a group seek draws ride on the applied arguments as a jump's do. A ranged media run lands at the start of the range holding the second. A fade, a wait, a message: `bad-value`; a run that is over: applied and nothing |
 | `trigger.fire` | `/godot/cmd/trigger/fire` | `s` trigger, `[s run]` | what a matched trigger submits (§12.8); fires the trigger's cue as `cue.fire` does and never moves standby or focus |
 | `go`, `cue.fire`, `audio.arm` | unchanged | | `audio.arm` stays the explicit form and still accepts only media |
 
@@ -7292,6 +7294,36 @@ a width it can be edited at; and, the author's own instruction - "don't open the
 click" - the row is picked at once but the inspector opens only after the system's double-click time has
 passed without a second click, and never when a box opened. A pick that is not a click - all, or a cue
 just made - opens it at once.
+
+**SCRUBBING THE RUNNING PANE (2026-09-18).** *"I'd like to be able to scrub active cues and groups.
+Scrubbing within the bounds of the strip is 1:1 but dragging with the cursor going above or below
+increases the precision of the increments for fine tuning. This is especially important on long media
+files. Pushing against the window edge in precision mode will keep sliding the cursor in the given
+direction. For groups this slides by the same amount all cues of the group. We'll see if we can
+'resurrect' past cues this way."* One command, `run.seek` (§12.4), and one model, `model/Scrub`: a press
+on a sounding media run's strip, or on a running scene's row, takes the head where it is - a grab, not a
+jump to the pixel under the finger - and every pixel of travel moves it, 1:1 inside the strip, halving
+every strip-height above or below it down to one part in 256, integrated step by step so a hand coming
+back down for coarse travel does not make the head jump; a pointer against the WINDOW's edge keeps the
+head sliding at ninety pixels' worth a second at the gearing its height sets, on the pane's own
+twenty-five-hertz pass. The pane sends one record per position the hand settles on - at most five a
+second, since each seek stops and re-asks a voice - and one when it lets go; a grab that never moved
+sends nothing. The ghost head is drawn in the picked colour with its clock and gearing in a box beside
+it, the engine's own head staying where the sound is until the seek lands; the cursor says which strips
+scrub before any press. A scene is scrubbed by the same drag on its row, geared to the longest thing it
+is playing, and the engine RE-SEATS it: the members are ended and built again under the same group run
+from the solver's answer for the scene at that second, which is the load-to-time's own machinery
+(§3.13) turned on one group - and the author's "resurrect past cues" is exactly what that gives, a member
+already over coming back when the hand goes before it, at the cost of a member's run being a new one. A
+manual sequence has no second to seek to and offers no drag. What the solver learned for it: a group
+that IS a chain's origin is not itself timed, so the aim on the group reads its members against the
+offset directly; every kind of member is placed, not media alone, since a fade due four seconds after
+the instant has to be waiting there or the scene never fires it; and an inner scene's members follow
+their group - none planned under one still due, all over under one that is over. Also found and fixed:
+a jump into a scene inside a scene built both as top-level runs, because the plan's ancestor groups
+carried no ancestors of their own. On the page a running cue's or scene's row gets a seek box instead
+of a drag - the same record, typed - which is rule 3 kept. The author's second thought - that a scrub is
+"scrubbing through the load to time history" - is the next round's, with load to time itself.
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 

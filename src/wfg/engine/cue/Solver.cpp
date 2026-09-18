@@ -365,6 +365,16 @@ namespace wfg::cue
             {
                 PlannedRun group;
                 group.cue = groupId;
+
+                /*  ITS OWN GROUPS, the ones before it in the chain, so that a
+                    jump into a scene inside a scene builds the inner group
+                    UNDER the outer one. Empty, the builder made every
+                    ancestor a top-level run and the scheduler saw two scenes
+                    where the show had one inside the other. Found on the way
+                    to seating a group at an offset (2026-09-18). */
+                group.ancestors.assign (target->ancestors.begin(),
+                                        std::find (target->ancestors.begin(),
+                                                   target->ancestors.end(), groupId));
                 plan.runs.push_back (group);
 
                 const auto node = document.findById (groupId);
@@ -397,21 +407,55 @@ namespace wfg::cue
                 chain carries its seconds from that chain's entry - so this is a
                 comparison rather than a second calculation, which is the whole
                 reason that walk is shared with the slot analysis. */
-            if (target->timed)
+            /*  AND THE TARGET MAY BE THE SCENE ITSELF (2026-09-18). A member
+                is placed inside its chain; a group that IS the chain's origin
+                is not timed - nothing placed it - but its members are, and
+                they are counted from its entry. So "the scene, `offset`
+                seconds in" reads the same members against the same clock,
+                with the offset itself as the instant. This is what lets a
+                running group be re-seated at another second of its own
+                timeline, which is what scrubbing a group in the running pane
+                asks for. */
+            const auto chain = target->timed ? target->chain
+                             : target->element == "Group" ? target->id
+                                                          : std::string {};
+
+            if (! chain.empty())
             {
-                const auto at = target->from + aim.offset;
+                const auto at = target->timed ? target->from + aim.offset : aim.offset;
+
+                /*  WHAT EACH INNER GROUP WAS FOUND TO BE, by identifier, so
+                    that its members can follow it: a group that is DUE will
+                    spawn its own members when it fires, so planning them too
+                    would have each of them twice; one that is FINISHED has
+                    had them, whatever their own seconds say. Groups are placed
+                    before their members, so the answer is always there. */
+                std::map<std::string, std::string> innerWhen;
 
                 for (const auto& entry : walk.placed)
                 {
-                    if (entry.id == target->id || ! entry.timed
-                         || entry.chain != target->chain)
+                    if (entry.id == target->id || ! entry.timed || entry.chain != chain)
                         continue;
 
-                    if (entry.element != "Media"
-                         || ! read.flag (entry.node, "cue", "enabled"))
+                    if (! read.flag (entry.node, "cue", "enabled"))
                         continue;
 
-                    if (wasStopped (entry.id))
+                    /*  Its own groups are already in the plan, above. */
+                    if (std::find (target->ancestors.begin(), target->ancestors.end(),
+                                   entry.id) != target->ancestors.end())
+                        continue;
+
+                    if (entry.element == "Media" && wasStopped (entry.id))
+                        continue;
+
+                    std::string inner;
+
+                    for (const auto& groupId : entry.ancestors)
+                        if (const auto seen = innerWhen.find (groupId); seen != innerWhen.end())
+                            if (seen->second != planned::sounding)
+                                inner = seen->second;
+
+                    if (inner == planned::due)
                         continue;
 
                     PlannedRun beside;
@@ -422,23 +466,30 @@ namespace wfg::cue
                         to build the scene the scheduler is about to take over,
                         and a member missing from it is one the group will spawn
                         a second time - or, missing from the finished end, a
-                        group that thinks it has not started. */
-                    if (entry.to <= at)
-                    {
-                        beside.when = planned::finished;
-                        plan.runs.push_back (beside);
-                        continue;
-                    }
+                        group that thinks it has not started.
 
-                    if (at < entry.from)
+                        EVERY KIND, not media alone (2026-09-18): a fade due
+                        four seconds after the jump has to be waiting there, or
+                        the scene the scheduler takes over never fires it. A
+                        fade or a message the instant has already passed is
+                        over - what it wrote is in the values and the trims. */
+                    if (inner == planned::finished || entry.to <= at)
+                        beside.when = planned::finished;
+                    else if (at < entry.from)
                     {
                         beside.when = planned::due;
                         beside.startsIn = entry.from - at;
-                        plan.runs.push_back (beside);
-                        continue;
                     }
+                    else if (entry.element == "Media")
+                        placeInRanges (read, entry.node, at - entry.from, beside, plan.confused);
+                    else if (entry.element == "Group")
+                        beside.offset = at - entry.from;
+                    else
+                        beside.when = planned::finished;
 
-                    placeInRanges (read, entry.node, at - entry.from, beside, plan.confused);
+                    if (entry.element == "Group")
+                        innerWhen[entry.id] = beside.when;
+
                     plan.runs.push_back (beside);
                 }
             }

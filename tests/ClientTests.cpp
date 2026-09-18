@@ -51,6 +51,7 @@
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
+#include <wfg/client/model/Scrub.h>
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
@@ -524,6 +525,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
         gesture::stopAll(), gesture::killAll(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
+        gesture::seek ("R4NID001", 12.5),
         gesture::setNode ("/godot/cue/B3N8R5TW/name", "Renamed"),
         gesture::createCue ("7K2QM9X4", 0, "media", "Thunder"),
         gesture::moveObject ("B3N8R5TW", "7K2QM9X4", 0),
@@ -1782,6 +1784,111 @@ TEST_CASE ("client: a playhead needs a length, and a countdown empties")
 }
 
 //==============================================================================
+//==============================================================================
+TEST_CASE ("client: a scrub is 1:1 in the strip, finer above it, and keeps going at an edge")
+{
+    /*  The author's design (2026-09-18): 1:1 inside the strip, finer the
+        further the pointer goes above or below it, and a pointer pushed
+        against the window edge keeps the head sliding. A ninety-minute track
+        four hundred pixels wide: 13.5 seconds a pixel. */
+    model::Scrub scrub;
+    scrub.begin ({ 600.0, 5400.0, 13.5, 40.0, 100.0 });
+    REQUIRE (scrub.active());
+
+    //  Ten pixels right inside the strip is ten pixels of the bar.
+    CHECK (scrub.moveTo (110.0, 0.0) == doctest::Approx (735.0));
+    CHECK (scrub.rate() == doctest::Approx (1.0));
+
+    //  Forty pixels above the strip halves the gearing; eighty quarters it.
+    CHECK (scrub.moveTo (120.0, 40.0) == doctest::Approx (735.0 + 67.5));
+    CHECK (scrub.rate() == doctest::Approx (0.5));
+    CHECK (scrub.moveTo (130.0, 80.0) == doctest::Approx (735.0 + 67.5 + 33.75));
+    CHECK (model::rateText (scrub.rate()) == "1/4");
+
+    //  Coming back down is coarse again, and nothing jumped on the way.
+    CHECK (scrub.moveTo (120.0, 0.0) == doctest::Approx (735.0 + 67.5 + 33.75 - 135.0));
+
+    //  The floor: a hand at the top of a tall window still moves the head.
+    CHECK (model::Scrub::rateFor (10000.0, 40.0) == doctest::Approx (1.0 / 256.0));
+    CHECK (model::rateText (1.0 / 256.0) == "1/256");
+    CHECK (model::rateText (1.0).empty());
+
+    //  Pushed against the right edge for a second at 1/4: ninety pixels' worth.
+    const auto before = scrub.target();
+    CHECK (scrub.push (1, 1.0, 80.0) == doctest::Approx (before + 90.0 * 13.5 * 0.25));
+
+    //  Never past the end, never before the start.
+    scrub.moveTo (100000.0, 0.0);
+    CHECK (scrub.target() == doctest::Approx (5400.0));
+    scrub.moveTo (-100000.0, 0.0);
+    CHECK (scrub.target() == doctest::Approx (0.0));
+
+    //  A group has no file to run out of.
+    model::Scrub open;
+    open.begin ({ 10.0, 0.0, 0.1, 26.0, 0.0 });
+    CHECK (open.moveTo (100000.0, 0.0) > 5400.0);
+}
+
+TEST_CASE ("client: a scrub sends one record per position it settles on, and one on release")
+{
+    model::Scrub scrub;
+    scrub.begin ({ 0.0, 100.0, 1.0, 40.0, 0.0 });
+
+    //  Nothing moved: nothing to send.
+    CHECK_FALSE (scrub.due (0.0));
+
+    scrub.moveTo (10.0, 0.0);
+    CHECK (scrub.due (0.0));                 // the first move sends at once
+    CHECK_FALSE (scrub.due (50.0));          // the same position is not sent twice
+
+    scrub.moveTo (20.0, 0.0);
+    CHECK_FALSE (scrub.due (100.0));         // moved, but the interval has not passed
+    CHECK (scrub.due (250.0));
+
+    //  Letting go sends what is unsent, and only that.
+    CHECK_FALSE (scrub.settle());
+    scrub.moveTo (30.0, 0.0);
+    CHECK (scrub.settle());
+
+    scrub.end();
+    CHECK_FALSE (scrub.active());
+    CHECK_FALSE (scrub.due (10000.0));
+
+    //  The clock beside the head.
+    CHECK (model::clockText (0.0) == "0:00.0");
+    CHECK (model::clockText (75.25) == "1:15.2");
+    CHECK (model::clockText (3725.0) == "1:02:05.0");
+}
+
+//==============================================================================
+TEST_CASE ("client: a group run says whether it can be scrubbed, from its cue's mode")
+{
+    Rig rig;
+
+    /*  A timeline and a manual sequence side by side, and a run of each read
+        back through the rows: the pane offers a scrub on the first alone. */
+    const auto listId = rig.document.createList ("Sound").id;
+    const auto timeline = rig.document.createCue (listId, 0, "group", "Scene").id;
+    const auto manual = rig.document.createCue (listId, 1, "group", "Act").id;
+    rig.document.setAttribute ("/godot/cue/" + timeline + "/mode", "timeline");
+
+    rig.runs.create ("RUNTIME1", timeline, "group");
+    rig.runs.create ("RUNMANU1", manual, "group");
+
+    const auto rows = model::readRuns (*rig.publish (1));
+
+    auto sawTimed = false, sawManual = false;
+
+    for (const auto& row : rows)
+    {
+        if (row.id == "RUNTIME1") { sawTimed = true; CHECK (row.timedGroup); }
+        if (row.id == "RUNMANU1") { sawManual = true; CHECK_FALSE (row.timedGroup); }
+    }
+
+    CHECK (sawTimed);
+    CHECK (sawManual);
+}
+
 TEST_CASE ("client: the running pane reads the way the show happened, not the way runs were made")
 {
     /*  THE ENGINE'S ORDER IS THE ORDER RUNS WERE CREATED, and the two differ

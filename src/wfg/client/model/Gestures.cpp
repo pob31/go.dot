@@ -118,6 +118,12 @@ namespace wfg::client::gesture
         return { origin::window, "run.kill", { osc::Value::string (runId) } };
     }
 
+    Event seek (const std::string& runId, double seconds)
+    {
+        return { origin::window, "run.seek",
+                 { osc::Value::string (runId), osc::Value::float64 (seconds) } };
+    }
+
     Event setLocked (bool locked)
     {
         /*  A BOOLEAN, not the word "true": `node.set` takes its value as a

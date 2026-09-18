@@ -197,6 +197,15 @@ function runRow(id, depth, out) {
 
   const finished = state === "done" || state === "failed";
 
+  /*  WHAT CAN BE SEEKED: a sounding file, or a running scene the engine can
+      time - a timeline, or a sequence that advances on its own. The desktop
+      scrubs these by dragging; here a second is typed (gestures/fields.js). */
+  const cueOf = tree.run(id, "cue", "");
+  const timed = kind === "group"
+    && (tree.get("/godot/cue/" + cueOf + "/mode", "") === "timeline"
+        || tree.get("/godot/cue/" + cueOf + "/advance", "") === "auto");
+  const seekable = state === "playing" && (kind === "media" || timed);
+
   out.push({ key: "run:" + id, html:
     '<div class="run" data-s="' + esc(state) + '"' +
       ' style="padding-left:' + (12 + depth * 14) + 'px">' +
@@ -210,6 +219,11 @@ function runRow(id, depth, out) {
       "</div>" +
       '<div class="meta">' +
         bits.map((b) => "<span>" + esc(b) + "</span>").join("") +
+        (seekable
+           ? '<input type="number" class="seek" data-seek="' + id + '" min="0" step="0.1"' +
+             ' placeholder="s" title="seek: type a second of this ' +
+             (kind === "group" ? "scene" : "file") + ' and press Enter">'
+           : "") +
         (finished ? ""
                   : '<button data-kill="' + id + '" title="immediate: no footer">kill</button>') +
       "</div>" +

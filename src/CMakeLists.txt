@@ -266,6 +266,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Inspector.cpp
     wfg/client/model/RunModel.h
     wfg/client/model/RunModel.cpp
+    wfg/client/model/Scrub.h
+    wfg/client/model/Scrub.cpp
     wfg/client/model/ShowModel.h
     wfg/client/model/ShowModel.cpp
     wfg/client/model/Text.h

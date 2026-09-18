@@ -19,6 +19,7 @@
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/audio/Timbre.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace wfg::client::ui
@@ -146,9 +147,19 @@ namespace wfg::client::ui
         }
     }
 
+    void RunPaneComponent::Canvas::mouseDown (const juce::MouseEvent& event)
+    {
+        owner.pressed (event);
+    }
+
+    void RunPaneComponent::Canvas::mouseDrag (const juce::MouseEvent& event)
+    {
+        owner.dragged (event);
+    }
+
     void RunPaneComponent::Canvas::mouseUp (const juce::MouseEvent& event)
     {
-        owner.clicked (event);
+        owner.released (event);
     }
 
     void RunPaneComponent::Canvas::mouseMove (const juce::MouseEvent& event)
@@ -174,22 +185,45 @@ namespace wfg::client::ui
                             ? rows[static_cast<std::size_t> (index)].id
                             : std::string {};
 
-        if (over == hoverKill)
+        /*  AND WHETHER THE HEAD UNDER THE POINTER CAN BE TAKEN, said with
+            the cursor before the press: a strip that scrubs shows the
+            left-right arrows, so nobody finds out by dragging a row that
+            does nothing. The strip and not the whole row, since the cross
+            at its right end is the other gesture. */
+        std::string strip;
+
+        if (index >= 0 && over.empty())
+        {
+            const auto& entry = rows[static_cast<std::size_t> (index)];
+
+            if (scrubbable (entry)
+                 && stripFor (entry, canvas.getWidth(), heightOf (entry))
+                        .translated (0, topOf (index)).contains (event.getPosition()))
+                strip = entry.id;
+        }
+
+        if (over == hoverKill && strip == hoverScrub)
             return;
 
         hoverKill = over;
-        canvas.setMouseCursor (hoverKill.empty() ? juce::MouseCursor::NormalCursor
-                                                 : juce::MouseCursor::PointingHandCursor);
+        hoverScrub = strip;
+        canvas.setMouseCursor (! hoverKill.empty() ? juce::MouseCursor::PointingHandCursor
+                               : ! hoverScrub.empty() ? juce::MouseCursor::LeftRightResizeCursor
+                                                      : juce::MouseCursor::NormalCursor);
         canvas.repaint();
     }
 
     void RunPaneComponent::unhovered()
     {
-        if (hoverKill.empty())
+        if (hoverKill.empty() && hoverScrub.empty())
             return;
 
         hoverKill.clear();
-        canvas.setMouseCursor (juce::MouseCursor::NormalCursor);
+        hoverScrub.clear();
+
+        if (! scrub.active())
+            canvas.setMouseCursor (juce::MouseCursor::NormalCursor);
+
         canvas.repaint();
     }
 
@@ -504,6 +538,25 @@ namespace wfg::client::ui
     {
         media = std::move (mediaToUse);
 
+        /*  A SCRUB IN PROGRESS RIDES THE PASS. The pointer against an edge of
+            the window keeps the head sliding, and this - twenty-five times a
+            second by the theme - is the clock it slides on; a run that has
+            ended under the hand, or gone from the pane, lets the head go. */
+        if (scrub.active())
+        {
+            const auto still = std::find_if (runs.begin(), runs.end(),
+                                             [this] (const model::RunRow& row)
+                                             { return row.id == scrubRun; });
+
+            if (still == runs.end() || ! scrubbable (*still))
+                endScrub();
+            else if (scrubPush != 0)
+            {
+                scrub.push (scrubPush, 1.0 / juce::jmax (1.0, theme.refreshHz), scrubDistance);
+                sendScrub (false);
+            }
+        }
+
         /*  THE WHOLE LIST OR NOTHING. A run's position moves every tick, so
             comparing row by row to find what changed would cost more than
             redrawing the dozen rows a busy pane holds - which is the opposite
@@ -547,12 +600,7 @@ namespace wfg::client::ui
             Both stop short of the kill cross, so nothing runs under the one
             control in this pane. */
         const auto layered = ! hasWaveform (entry);
-
-        const auto strip = layered
-                             ? juce::Rectangle<int> (0, 0, width, height)
-                                 .reduced (pad, 1).withTrimmedRight (unit * 3)
-                             : juce::Rectangle<int> (0, height - stripHeight(), width,
-                                                     stripHeight()).reduced (pad + unit, 1);
+        const auto strip = stripFor (entry, width, height);
 
         if (! layered)
             height -= stripHeight();
@@ -578,6 +626,9 @@ namespace wfg::client::ui
                                                : colourFor (entry.state);
 
         paintStrip (entry, g, strip, tint, layered);
+
+        if (scrub.active() && entry.id == scrubRun)
+            paintScrub (entry, g, strip);
 
         /*  WHAT THE HOVERED CROSS WOULD STOP is washed in the stopping colour
             and outlined, this row and every descendant: the answer to "what
@@ -669,6 +720,254 @@ namespace wfg::client::ui
 
         if (event.x >= canvas.getWidth() - unit * 3)
             actions.kill (rows[static_cast<std::size_t> (index)].id);
+    }
+
+    juce::Rectangle<int> RunPaneComponent::stripFor (const model::RunRow& entry, int width,
+                                                     int height) const
+    {
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+        const auto pad = unit / 2;
+
+        /*  WHERE THE STRIP GOES, and there are two answers. A WAVEFORM takes
+            a band of its own under the words, which is what the taller row
+            exists for. Anything else lies BEHIND them across the whole row -
+            drawn before them, so the name reads over it - and costs no height.
+
+            Both stop short of the kill cross, so nothing runs under the one
+            control in this pane. One function for the painter and the hit
+            test, so a scrub lands on the pixels the head is drawn over. */
+        if (! hasWaveform (entry))
+            return juce::Rectangle<int> (0, 0, width, height).reduced (pad, 1)
+                       .withTrimmedRight (unit * 3);
+
+        return juce::Rectangle<int> (0, height - stripHeight(), width, stripHeight())
+                   .reduced (pad + unit, 1);
+    }
+
+    //==============================================================================
+    bool RunPaneComponent::scrubbable (const model::RunRow& entry) const
+    {
+        /*  A SOUND WITH A KNOWN LENGTH, OR A SCENE THE ENGINE CAN TIME. A
+            media run in its pre-wait, or armed and not let go, has no head
+            to move; a fade, a wait or a message has no material; a manual
+            sequence has an operator between its members and no second to
+            seek to. What is left is what `run.seek` accepts. */
+        if (entry.state != "playing")
+            return false;
+
+        if (entry.kind == "media")
+            return entry.launched() && lengthOf (entry) > 0.0;
+
+        return entry.kind == "group" && entry.timedGroup;
+    }
+
+    double RunPaneComponent::extentOf (const model::RunRow& entry) const
+    {
+        /*  HOW LONG A SCENE IS, FOR THE GEARING: the longest thing it is
+            playing, since a scene has no file of its own to measure. A minute
+            when nothing under it is known, which is a scale rather than a
+            claim - the head is not clamped to it. */
+        auto longest = 0.0;
+
+        for (const auto& row : rows)
+        {
+            const auto* at = &row;
+
+            for (std::size_t steps = 0; at != nullptr && steps <= rows.size(); ++steps)
+            {
+                if (at->parentRun.empty())
+                {
+                    at = nullptr;
+                    break;
+                }
+
+                if (at->parentRun == entry.id)
+                    break;
+
+                const auto parent = at->parentRun;
+                at = nullptr;
+
+                for (const auto& candidate : rows)
+                    if (candidate.id == parent)
+                    {
+                        at = &candidate;
+                        break;
+                    }
+            }
+
+            if (at != nullptr)
+                longest = juce::jmax (longest, lengthOf (row));
+        }
+
+        return longest > 0.0 ? longest : 60.0;
+    }
+
+    double RunPaneComponent::secondsPerPixel (const model::RunRow& entry, int stripWidth) const
+    {
+        const auto span = entry.kind == "media" ? lengthOf (entry) : extentOf (entry);
+        return span / static_cast<double> (juce::jmax (1, stripWidth - 1));
+    }
+
+    void RunPaneComponent::pressed (const juce::MouseEvent& event)
+    {
+        const auto index = rowAt (event.y);
+
+        if (index < 0 || overCross (event.x) || ! actions.seek)
+            return;
+
+        const auto& entry = rows[static_cast<std::size_t> (index)];
+        const auto strip = stripFor (entry, canvas.getWidth(), heightOf (entry))
+                               .translated (0, topOf (index));
+
+        if (! scrubbable (entry) || ! strip.contains (event.getPosition()))
+            return;
+
+        /*  THE HAND TAKES THE HEAD WHERE IT IS, not where the pointer landed:
+            a press is a grab, and a grab that jumped the sound to the pixel
+            under the finger would be a seek nobody meant. From here every
+            pixel of travel moves it. The gearing halves every strip height
+            above or below the strip - a band for a waveform, a line for a
+            row - so the same reach means the same precision on both. */
+        model::Scrub::Setup setup;
+        setup.position = entry.seconds;
+        setup.length = entry.kind == "media" ? lengthOf (entry) : 0.0;
+        setup.secondsPerPixel = secondsPerPixel (entry, strip.getWidth());
+        setup.unit = hasWaveform (entry) ? stripHeight() : rowHeight();
+        setup.x = event.position.x;
+
+        scrub.begin (setup);
+        scrubRun = entry.id;
+        scrubStrip = strip;
+        scrubDistance = 0.0;
+        scrubPush = 0;
+
+        canvas.setMouseCursor (juce::MouseCursor::LeftRightResizeCursor);
+        canvas.repaint();
+    }
+
+    void RunPaneComponent::dragged (const juce::MouseEvent& event)
+    {
+        if (! scrub.active())
+            return;
+
+        /*  ABOVE OR BELOW THE STRIP, in pixels, is the gearing; inside it is
+            nought and 1:1. Measured from the strip the head was taken from,
+            not from whatever row the pointer is over now. */
+        const auto y = event.position.y;
+        scrubDistance = juce::jmax (0.0f,
+                                    static_cast<float> (scrubStrip.getY()) - y,
+                                    y - static_cast<float> (scrubStrip.getBottom()));
+
+        scrub.moveTo (event.position.x, scrubDistance);
+
+        /*  AGAINST THE WINDOW'S EDGE, the head keeps sliding that way until
+            the pointer comes back. The WINDOW's edge and not the pane's: the
+            pane's left edge is the middle of the window, and a drag that
+            crossed it would be a hand reaching for coarse travel, not one
+            asking for more. */
+        scrubPush = 0;
+
+        if (auto* top = getTopLevelComponent())
+        {
+            const auto inWindow = event.getEventRelativeTo (top).position.x;
+
+            if (inWindow <= 0.0f)
+                scrubPush = -1;
+            else if (inWindow >= static_cast<float> (top->getWidth() - 1))
+                scrubPush = 1;
+        }
+
+        sendScrub (false);
+        canvas.repaint();
+    }
+
+    void RunPaneComponent::released (const juce::MouseEvent& event)
+    {
+        if (! scrub.active())
+        {
+            clicked (event);
+            return;
+        }
+
+        /*  Letting go sends where the head settled - once, whether or not the
+            throttle would have - and a press that never moved sends nothing:
+            a grab is not a seek. */
+        sendScrub (true);
+        endScrub();
+    }
+
+    void RunPaneComponent::sendScrub (bool letGo)
+    {
+        if (! scrub.active() || ! actions.seek)
+            return;
+
+        const auto send = letGo ? scrub.settle()
+                                : scrub.due (juce::Time::getMillisecondCounterHiRes());
+
+        if (send)
+            actions.seek (scrubRun, scrub.target());
+    }
+
+    void RunPaneComponent::endScrub()
+    {
+        scrub.end();
+        scrubRun.clear();
+        scrubPush = 0;
+        canvas.setMouseCursor (! hoverScrub.empty() ? juce::MouseCursor::LeftRightResizeCursor
+                                                    : juce::MouseCursor::NormalCursor);
+        canvas.repaint();
+    }
+
+    void RunPaneComponent::paintScrub (const model::RunRow& entry, juce::Graphics& g,
+                                       juce::Rectangle<int> strip)
+    {
+        /*  THE GHOST HEAD: where the hand has put it, drawn in the picked
+            colour between two pixels of black so it reads over any frame of
+            the waveform, beside the engine's own head, which stays where the
+            sound is until the seek lands. Its clock and gearing sit in a
+            small box next to it, on the strip's own ground, so a long track
+            can be read to the tenth while it is being scrubbed. */
+        const auto target = scrub.target();
+        const auto span = entry.kind == "media" ? lengthOf (entry) : extentOf (entry);
+        const auto through = span > 0.0 ? juce::jlimit (0.0, 1.0, target / span) : 0.0;
+        const auto x = strip.getX() + juce::roundToInt (through * (strip.getWidth() - 3));
+
+        const auto picked = Look::colour (theme, "picked");
+
+        g.setColour (juce::Colours::black);
+        g.fillRect (x, strip.getY(), 4, strip.getHeight());
+        g.setColour (picked);
+        g.fillRect (x + 1, strip.getY(), 2, strip.getHeight());
+
+        auto words = juce::String (model::clockText (target));
+        const auto gearing = model::rateText (scrub.rate());
+
+        if (! gearing.empty())
+            words += "  " + juce::String (juce::CharPointer_UTF8 ("\xc3\x97")) + juce::String (gearing);
+
+        g.setFont (Look::font (theme, 12.0f));
+
+        const auto textWidth = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), words) + 8;
+        const auto boxHeight = juce::jmin (strip.getHeight(), 16);
+        auto box = juce::Rectangle<int> (x + 6, strip.getY(), textWidth, boxHeight);
+
+        if (box.getRight() > strip.getRight())
+            box.setX (juce::jmax (strip.getX(), x - 6 - textWidth));
+
+        /*  A ROW WITH NO BAND has its words where the box would go, so the
+            box sits at the strip's right end instead, beside the position
+            the engine publishes - the two numbers a scrubbing hand compares. */
+        if (! hasWaveform (entry))
+        {
+            const auto unit = juce::roundToInt (theme.type * 7.0);
+            box = juce::Rectangle<int> (strip.getRight() - unit * 5 - 4 - textWidth, strip.getY(),
+                                        textWidth, strip.getHeight());
+        }
+
+        g.setColour (Look::colour (theme, "panel-runs").withAlpha (0.85f));
+        g.fillRect (box);
+        g.setColour (picked);
+        g.drawText (words, box, juce::Justification::centred, false);
     }
 
     void RunPaneComponent::paint (juce::Graphics& g)

@@ -18,6 +18,7 @@
     "aim":          { "command": "list.aim",         "args": ["s", "s", "d"],        "where": "a row, a step chip, or the aim slider" },
     "load-to-time": { "command": "list.loadToTime",  "args": ["s"],                  "where": "the aim's load button" },
     "kill":         { "command": "run.kill",         "args": ["s"],                  "where": "a run's kill button" },
+    "seek":         { "command": "run.seek",         "args": ["s", "d"],             "where": "a running cue's or scene's seek box, committed" },
     "add-cue":      { "command": "cue.create",       "args": ["s", "i", "s", "s"],   "where": "the inspector's add buttons" },
     "add-trigger":  { "command": "trigger.create",   "args": ["s", "s"],             "where": "the inspector's trigger buttons" },
     "add-role":     { "command": "group.role",       "args": ["s", "s"],             "where": "the inspector's header and footer buttons" },

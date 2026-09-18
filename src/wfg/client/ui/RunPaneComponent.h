@@ -35,6 +35,7 @@
 */
 
 #include <wfg/client/model/RunModel.h>
+#include <wfg/client/model/Scrub.h>
 #include <wfg/client/model/Waveform.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/client/model/Theme.h>
@@ -63,6 +64,9 @@ namespace wfg::client::ui
         struct Actions
         {
             std::function<void (const std::string&)> kill;
+
+            /** A scrub settling on a second of a run: one per position the hand rests at, one on release. */
+            std::function<void (const std::string&, double)> seek;
         };
 
         RunPaneComponent (const model::Theme& theme, Actions actions);
@@ -92,6 +96,8 @@ namespace wfg::client::ui
             explicit Canvas (RunPaneComponent& ownerToUse) : owner (ownerToUse) {}
 
             void paint (juce::Graphics& g) override;
+            void mouseDown (const juce::MouseEvent& event) override;
+            void mouseDrag (const juce::MouseEvent& event) override;
             void mouseUp (const juce::MouseEvent& event) override;
             void mouseMove (const juce::MouseEvent& event) override;
             void mouseExit (const juce::MouseEvent& event) override;
@@ -102,6 +108,29 @@ namespace wfg::client::ui
 
         void paintRow (int index, juce::Graphics& g, int width, int height);
         void clicked (const juce::MouseEvent& event);
+
+        /*  SCRUBBING (author, 2026-09-18: "I'd like to be able to scrub
+            active cues and groups"). A press on a sounding media run's strip,
+            or on a running scene's row, takes the head; the drag moves it -
+            1:1 inside the strip, finer above and below, sliding on at an edge
+            of the window - and the arithmetic is `model::Scrub`'s, so it is
+            tested with numbers. The pane sends `run.seek` for each position
+            the hand settles on and once when it lets go, and draws the ghost
+            head with its clock and gearing until then. The engine's own head
+            keeps drawing where the sound actually is. */
+        void pressed (const juce::MouseEvent& event);
+        void dragged (const juce::MouseEvent& event);
+        void released (const juce::MouseEvent& event);
+        bool scrubbable (const model::RunRow& entry) const;
+        double secondsPerPixel (const model::RunRow& entry, int stripWidth) const;
+        double extentOf (const model::RunRow& entry) const;
+        void sendScrub (bool letGo);
+        void endScrub();
+        void paintScrub (const model::RunRow& entry, juce::Graphics& g,
+                         juce::Rectangle<int> strip);
+
+        /** Where a row's strip is, in the row's own coordinates: the painter and the hit test agree. */
+        juce::Rectangle<int> stripFor (const model::RunRow& entry, int width, int height) const;
 
         /*  THE CROSS SAYS WHAT IT WOULD STOP BEFORE IT IS PRESSED (author,
             2026-09-18: "hovering over the X of a group should highlight the
@@ -160,6 +189,15 @@ namespace wfg::client::ui
 
         /** The run whose cross the pointer rests on; empty when none. */
         std::string hoverKill;
+
+        /** The run whose strip the pointer rests on and could scrub; empty when none. */
+        std::string hoverScrub;
+
+        model::Scrub scrub;
+        std::string scrubRun;
+        juce::Rectangle<int> scrubStrip;   ///< on the canvas
+        double scrubDistance = 0.0;
+        int scrubPush = 0;                 ///< -1, 0 or +1: which edge the pointer is against
 
         std::shared_ptr<const audio::MediaRecords> media;
         std::map<std::string, std::vector<model::Column>> bars;

@@ -54,6 +54,7 @@
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/OscJob.h>
 #include <wfg/engine/cue/Run.h>
+#include <wfg/engine/cue/Solver.h>
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/ShowDocument.h>
 
@@ -428,6 +429,31 @@ namespace wfg::cue
                                              std::int64_t tick, const std::string& listId,
                                              const std::vector<std::string>& supplied);
 
+        /*  A SEEK: what `run.seek` calls (author, 2026-09-18: "I'd like to be
+            able to scrub active cues and groups").
+
+            A MEDIA RUN moves to that second of its file: the voice is stopped
+            and asked for again at the new offset, on the same track, at the
+            level it was playing at, and the run stays the run it was - same
+            identifier, same row, same fade aimed at it. Answers false for a
+            run that is not media or is over.
+
+            A GROUP RUN is re-seated at that second of its own timeline: what
+            it held is ended the way a jump ends what it abandons - no footer -
+            and its members are built again under the SAME group run, each
+            over, sounding at its offset or waiting for its due tick, from the
+            solver's own answer for the scene at that second. That is how a
+            member already finished comes back when the hand scrubs to before
+            it. Nothing beside the group is touched: a bed the operator started
+            earlier keeps sounding as it was. Returns every identifier it drew,
+            in order, for the record. A group the walk cannot time - a manual
+            sequence, a loop, a shuffle - returns nothing and changes nothing. */
+        bool seekMedia (Engine& engine, std::int64_t tick, const std::string& runId,
+                        double seconds);
+        std::vector<std::string> seekGroup (Engine& engine, std::int64_t tick,
+                                            const std::string& runId, double seconds,
+                                            const std::vector<std::string>& supplied);
+
         /*  Where the media lengths live, for the solve behind a jump.
 
             Held by pointer and not owned, exactly as the parameter tree holds
@@ -781,6 +807,28 @@ namespace wfg::cue
             no audio side - see the note in armInternal. */
         void armMedia (Engine& engine, const juce::ValueTree& cue,
                        const std::string& runId);
+
+        /*  The half of an arm below the track: the routing, the offset, the
+            ranges and the request itself, for a run that already holds its
+            voice. `armMedia` reaches it after choosing a track; a seek reaches
+            it for the track the run has. The level is handed in because the
+            two disagree about it: an arm plays the cue's authored level, a
+            seek keeps the one a fade had brought the run to. */
+        void requestArmOn (Engine& engine, const juce::ValueTree& cue, Run& run,
+                           double levelDb);
+
+        /** A bundle-relative file name as the path the audio side opens. */
+        std::string mediaPathOf (const std::string& named) const;
+
+        /*  Builds the runs a plan names, outermost first, under the groups
+            `runFor` already holds, and the jobs that carry them on. A jump
+            hands in an empty map; a group seek hands in the scene's own run
+            and the runs above it, so they stand and only what is inside is
+            made again. */
+        void seatPlan (Engine& engine, std::int64_t tick,
+                       const std::vector<PlannedRun>& wanted,
+                       std::map<std::string, std::string>& runFor,
+                       const std::function<std::string()>& nextId);
 
         /*  The slots a cue's `Feed` and `Insert` children name, claimed for its
             run (PRD §3.9b, §3.9e).

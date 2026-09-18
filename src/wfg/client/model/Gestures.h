@@ -130,4 +130,9 @@ namespace wfg::client::gesture
         only the cross: a cue stopped by a click that landed anywhere on a row
         is a cue nobody meant to stop. */
     Event kill (const std::string& runId);
+
+    /*  A scrub settling on a second of a run's material: the head dragged
+        along a running cue's strip, or along a running scene's row. One per
+        position the hand settles on, and one when it lets go. */
+    Event seek (const std::string& runId, double seconds);
 }

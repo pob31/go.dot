@@ -189,6 +189,13 @@ namespace wfg::client::model
                       && at (snapshot, id, "pruned") != "false";
             row.asserted = flag (snapshot, "/godot/run/" + id + "/asserted") == Flag::yes;
 
+            if (row.kind == "group" && ! row.cueId.empty())
+            {
+                const auto group = "/godot/cue/" + row.cueId + "/";
+                row.timedGroup = text (snapshot, group + "mode") == "timeline"
+                              || text (snapshot, group + "advance") == "auto";
+            }
+
             if (const auto late = osc::parseDouble (at (snapshot, id, "late")); late.has_value())
                 row.late = static_cast<int> (*late);
 

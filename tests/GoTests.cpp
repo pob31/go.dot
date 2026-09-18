@@ -4701,6 +4701,219 @@ TEST_CASE ("jump: with no aim there is nothing to make true")
     CHECK (rig.runs.all().empty());
 }
 
+//==============================================================================
+/*  THE SEEK: scrubbing a running cue or a running scene (author, 2026-09-18).
+
+    `run.seek` is one record per position the hand settles on. For a media run
+    it is the voice stopped and asked for again at the new second - the SAME
+    run, so the row, the identifier and any fade aimed at it are untouched. For
+    a group it is the scene re-seated at a second of its own timeline under the
+    same group run, which is what brings a member already over back.
+*/
+TEST_CASE ("seek: a media run moves to a second of its file and stays the run it was")
+{
+    Rig rig;
+    rig.setStandby (rig.mediaId);
+    rig.submitAndTick ("go");
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto id = rig.runs.all().front().id;
+    auto* run = rig.runs.find (id);
+    REQUIRE (run != nullptr);
+    REQUIRE (run->state == cue::runState::playing);
+    REQUIRE (rig.audio.launches.size() == 1u);
+
+    const auto track = run->track;
+    rig.audio.playing.insert (track);
+    rig.tickOnce();
+
+    /*  A fade has brought it down to -12 dB; the seek must keep that. */
+    run->ownLevel = -12.0;
+    run->level = -12.0;
+
+    const auto result = rig.submitAndTick ("run.seek", { osc::Value::string (id),
+                                                         osc::Value::float64 (12.5) });
+    CHECK (result.applied == 1);
+
+    /*  The voice was stopped and asked for again at the second, on the same
+        track, at the faded level - and the run is still playing, still the
+        same identifier, with its head where the hand put it. */
+    REQUIRE (rig.audio.stopped.size() == 1u);
+    CHECK (rig.audio.stopped.front() == track);
+    REQUIRE (rig.audio.arms.size() == 1u);
+    CHECK (rig.audio.arms.front().track == track);
+    CHECK (rig.audio.arms.front().startOffset == doctest::Approx (12.5));
+    CHECK (rig.audio.arms.front().levelDb == doctest::Approx (-12.0));
+
+    run = rig.runs.find (id);
+    REQUIRE (run != nullptr);
+    CHECK (run->state == cue::runState::playing);
+    CHECK (run->positionOrigin == doctest::Approx (12.5));
+    CHECK (run->launchRequested);
+    CHECK (rig.runs.all().size() == 1u);
+
+    /*  The silence between the stop and the new launch is not the cue ending:
+        the edge watcher was told to forget it had heard the sound. */
+    rig.tickOnce();
+    CHECK (rig.runs.find (id)->state == cue::runState::playing);
+
+    /*  The disk answers, the launch is placed again, and the sound resumes. */
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+    CHECK (rig.audio.launches.size() == 2u);
+
+    rig.audio.playing.insert (track);
+    rig.tickOnce();
+    CHECK (rig.runs.find (id)->state == cue::runState::playing);
+
+    /*  And from there the ordinary end still ends it. */
+    rig.audio.playing.erase (track);
+    rig.tickOnce();
+    CHECK (rig.runs.find (id)->state == cue::runState::done);
+}
+
+TEST_CASE ("seek: a scene is re-seated at a second of itself, under the run it already has")
+{
+    /*  The scene's three members sound at nought, two and ten seconds and last
+        four each. Fired, and then scrubbed to three seconds in: the first is
+        three seconds in, the second one second in, the third due in seven -
+        all under the group run GO made, which keeps its identifier. */
+    JumpRig rig;
+    rig.setStandby (rig.scene);
+    rig.submitAndTick ("go");
+    rig.tickOnce();
+
+    const auto* group = rig.liveRunOf (rig.scene);
+    REQUIRE (group != nullptr);
+    const auto groupId = group->id;
+
+    /*  Let the scene get going: the first member launches, the others wait. */
+    rig.audio.completeArms (rig.engine);
+    rig.tickOnce();
+    rig.tickOnce();
+
+    std::vector<std::string> before;
+
+    for (const auto& run : rig.runs.all())
+        if (run.id != groupId)
+            before.push_back (run.id);
+
+    REQUIRE (! before.empty());
+
+    const auto at = rig.tick;
+    const auto result = rig.submitAndTick ("run.seek", { osc::Value::string (groupId),
+                                                         osc::Value::float64 (3.0) });
+    CHECK (result.applied == 1);
+
+    /*  The same group run, playing, and reading three seconds in. */
+    group = rig.liveRunOf (rig.scene);
+    REQUIRE (group != nullptr);
+    CHECK (group->id == groupId);
+    CHECK (group->state == cue::runState::playing);
+    CHECK (group->launchRequestedAtTick == at - 150);
+
+    /*  What it held before is over. */
+    for (const auto& id : before)
+    {
+        const auto* old = rig.runs.find (id);
+        REQUIRE (old != nullptr);
+        CHECK (old->isFinished());
+    }
+
+    const auto* first = rig.liveRunOf (rig.early);
+    REQUIRE (first != nullptr);
+    CHECK (first->launchRequested);
+    CHECK (first->startOffset == doctest::Approx (3.0));
+
+    const auto* second = rig.liveRunOf (rig.middle);
+    REQUIRE (second != nullptr);
+    CHECK (second->launchRequested);
+    CHECK (second->startOffset == doctest::Approx (1.0));
+
+    const auto* third = rig.liveRunOf (rig.late);
+    REQUIRE (third != nullptr);
+    CHECK (third->state == cue::runState::waiting);
+    CHECK (third->dueTick == at + 350);
+
+    for (const auto* run : { first, second, third })
+        CHECK (run->parent == groupId);
+
+    /*  One job carries the scene on, and it is the group's. */
+    auto jobs = 0;
+
+    for (const auto& job : rig.runner.groups())
+        if (job.run == groupId && ! job.retired)
+            ++jobs;
+
+    CHECK (jobs == 1);
+
+    /*  AND NOTHING LAUNCHES THEM A SECOND TIME. The first live scrub had the
+        retired job take the fresh members and launch them again, which for
+        the waiting one began its wait afresh: its due tick is the test. */
+    rig.tickOnce();
+    rig.tickOnce();
+    REQUIRE (rig.liveRunOf (rig.late) != nullptr);
+    CHECK (rig.liveRunOf (rig.late)->dueTick == at + 350);
+    CHECK (rig.liveRunOf (rig.late)->state == cue::runState::waiting);
+
+    /*  And scrubbing back before the first member is over brings a finished
+        one back: at eleven seconds the first two are over and the third is
+        one second in; at nought all three are ahead again. */
+    rig.submitAndTick ("run.seek", { osc::Value::string (groupId), osc::Value::float64 (11.0) });
+    REQUIRE (rig.liveRunOf (rig.late) != nullptr);
+    CHECK (rig.liveRunOf (rig.late)->startOffset == doctest::Approx (1.0));
+    CHECK (rig.liveRunOf (rig.early) == nullptr);
+
+    rig.submitAndTick ("run.seek", { osc::Value::string (groupId), osc::Value::float64 (0.0) });
+    REQUIRE (rig.liveRunOf (rig.early) != nullptr);
+    CHECK (rig.liveRunOf (rig.early)->launchRequested);
+    REQUIRE (rig.liveRunOf (rig.middle) != nullptr);
+    CHECK (rig.liveRunOf (rig.middle)->state == cue::runState::waiting);
+}
+
+TEST_CASE ("seek: what has no material to seek in is refused, and a run that is over is left")
+{
+    Rig rig;
+    rig.setStandby (rig.memoId);
+    rig.submitAndTick ("go");
+
+    const auto memoRun = rig.runOf (rig.memoId);
+    REQUIRE (! memoRun.empty());
+
+    /*  A memo has nothing to seek in. */
+    auto result = rig.submitAndTick ("run.seek", { osc::Value::string (memoRun),
+                                                   osc::Value::float64 (1.0) });
+    CHECK (result.rejected == 1);
+
+    result = rig.submitAndTick ("run.seek", { osc::Value::string ("NOTARUN1"),
+                                              osc::Value::float64 (1.0) });
+    CHECK (result.rejected == 1);
+
+    rig.setStandby (rig.mediaId);
+    rig.submitAndTick ("go");
+    const auto mediaRun = rig.runOf (rig.mediaId);
+
+    result = rig.submitAndTick ("run.seek", { osc::Value::string (mediaRun),
+                                              osc::Value::float64 (-1.0) });
+    CHECK (result.rejected == 1);
+
+    /*  Over: applied and nothing, since a hand still dragging when the sound
+        ends is not a mistake. */
+    rig.submitAndTick ("run.kill", { osc::Value::string (mediaRun) });
+    rig.tickOnce();
+    rig.tickOnce();
+    REQUIRE (rig.runs.find (mediaRun)->isFinished());
+
+    const auto armsBefore = rig.audio.arms.size();
+    result = rig.submitAndTick ("run.seek", { osc::Value::string (mediaRun),
+                                              osc::Value::float64 (2.0) });
+    CHECK (result.applied == 1);
+    CHECK (rig.audio.arms.size() == armsBefore);
+}
+
 TEST_CASE ("M19: what the horizon costs, in ticks from the pointer landing")
 {
     /*  MEASUREMENT M19 (§13.14), the half of it this PR can take.

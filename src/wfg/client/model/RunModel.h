@@ -61,6 +61,12 @@ namespace wfg::client::model
         std::string round;       ///< which round of a group, when it is in one
         bool pruned = false;
         bool asserted = false;
+
+        /*  WHETHER A GROUP RUN CAN BE SCRUBBED: its cue is a timeline, or a
+            sequence that advances on its own, so the engine can say where
+            every member is at a second of it. A manual sequence has an
+            operator between its members and no second to seek to. */
+        bool timedGroup = false;
         int late = 0;            ///< samples, when the engine had to place a launch in the past
         int depth = 0;
 
