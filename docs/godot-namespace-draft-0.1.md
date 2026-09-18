@@ -7136,6 +7136,19 @@ resolves it to the identifier before the write: the number is the operator's and
 breaks nothing. Two cues with one name resolve to nothing, and the foot says so. Rule 3 holds: the
 page's inspector writes the same `target` by identifier, and its ▲/▼ send the same `object.move`.
 
+*The first hour with it (2026-09-18): "Reordering was a bit messy. Moving stuff might have caused
+some discrepancies between the displayed order and the playing order."* The log showed five moves,
+every one landing where its line was drawn - the arithmetic is now pinned from the client's side by a
+test that hands the model's indices to the real `object.move`, in a group with a header so raw and
+member positions differ, and reads the order back. The discrepancy was real and was not a fault: the
+group was a **timeline** ("Two at once"), whose members start together at entry, each after its own
+pre-wait, so their order on screen is not their order in time and a reorder there changes the reading
+and nothing else. What was missing was the window saying so. It does now, twice: a timeline group
+carries the mark **∥** beside ↻ and ⇄ (the word is the inspector's `mode`), and a drop that would land
+in one says on the foot, while the hand is in the air, that its members start together whatever their
+order. **Ctrl/⌘-Backspace deletes the picked cue** in the same round, without asking, since undo is
+one keystroke.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

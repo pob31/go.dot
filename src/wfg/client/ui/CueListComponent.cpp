@@ -80,6 +80,14 @@ namespace wfg::client::ui
                 marks << (marks.isEmpty() ? "" : "  ")
                       << juce::String (juce::CharPointer_UTF8 ("\xe2\x87\x84"));
 
+            /*  ∥  a TIMELINE: its members start together, each after its own
+                pre-wait, so their order on screen is not their order in time.
+                Added when the author reordered one and read the result as a
+                fault (2026-09-18); the word is in the inspector's `mode`. */
+            if (row.mode == "timeline")
+                marks << (marks.isEmpty() ? "" : "  ")
+                      << juce::String (juce::CharPointer_UTF8 ("\xe2\x88\xa5"));
+
             return marks;
         }
 
@@ -874,7 +882,16 @@ namespace wfg::client::ui
             if (dropRow >= 0)  list.repaintRow (dropRow);
 
             if (actions.say && dropRow >= 0)
-                actions.say (juce::String (model::describe (drop, rows[static_cast<std::size_t> (at)])));
+            {
+                /*  Whether the cue would land in a TIMELINE group, whose order
+                    on screen is not its order in time - said now, because the
+                    author reordered one and read the result as a fault. */
+                const auto* container = rowById (drop.container);
+                const auto intoTimeline = container != nullptr && container->mode == "timeline";
+
+                actions.say (juce::String (model::describe (drop, rows[static_cast<std::size_t> (at)],
+                                                            intoTimeline)));
+            }
         }
     }
 
@@ -1015,6 +1032,20 @@ namespace wfg::client::ui
         if (key == juce::KeyPress (juce::KeyPress::spaceKey))
         {
             if (actions.go) actions.go();
+            return true;
+        }
+
+        /*  CTRL/⌘-BACKSPACE DELETES THE PICKED CUE (author, 2026-09-18). With
+            the modifier, so a Backspace meant for a field that has just lost
+            the focus does not take a cue with it; and only when something is
+            picked, since a delete aimed at nothing is nothing. Undo is one
+            keystroke, so it does not ask. */
+        if (key == juce::KeyPress (juce::KeyPress::backspaceKey,
+                                   juce::ModifierKeys::commandModifier, 0))
+        {
+            if (! picked.empty() && actions.remove)
+                actions.remove (picked);
+
             return true;
         }
 

@@ -94,6 +94,9 @@ namespace wfg::client::ui
                 the one command each means. */
             std::function<void (const std::string& id, const std::string& parent, int index)> move;
             std::function<void (const std::string& aimedCue, const std::string& atCue)> setTarget;
+
+            /** Deletes the picked cue: ctrl/⌘-Backspace. One `object.delete`; undo brings it back. */
+            std::function<void (const std::string& id)> remove;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);

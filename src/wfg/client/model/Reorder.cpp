@@ -130,15 +130,19 @@ namespace wfg::client::model
         return found;
     }
 
-    std::string describe (const Drop& drop, const Row& over)
+    std::string describe (const Drop& drop, const Row& over, bool intoTimeline)
     {
         const auto name = over.name.empty() ? over.id : over.name;
+        const auto timelineNote = intoTimeline
+            ? std::string (" - a timeline group: its members start together, each after its own "
+                           "pre-wait, whatever their order")
+            : std::string {};
 
         switch (drop.kind)
         {
             case DropKind::none:    return {};
-            case DropKind::after:   return "after " + name;
-            case DropKind::into:    return "into " + name;
+            case DropKind::after:   return "after " + name + timelineNote;
+            case DropKind::into:    return "into " + name + timelineNote;
             case DropKind::target:  return "aim " + name + " at it";
         }
 

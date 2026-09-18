@@ -83,6 +83,14 @@ namespace wfg::client::model
         number, else by name. Empty when none does, or more than one. */
     std::string resolveCueRef (const std::string& text, const std::vector<Row>& rows);
 
-    /** The words a drop is announced with, for the reader; empty for none. */
-    std::string describe (const Drop& drop, const Row& over);
+    /*  The words a drop is announced with, for the reader; empty for none.
+
+        `intoTimeline` says the container the cue would land in is a TIMELINE
+        group, whose members start together at entry, each offset by its own
+        pre-wait - so their order on screen is not the order they play in,
+        and a reorder there changes the reading and nothing else. The author
+        moved cues about in one and found "discrepancies between the displayed
+        order and the playing order" (2026-09-18); this is where the window
+        says so, before the hand lets go. */
+    std::string describe (const Drop& drop, const Row& over, bool intoTimeline);
 }

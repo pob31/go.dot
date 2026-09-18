@@ -524,6 +524,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::setNode ("/godot/cue/B3N8R5TW/name", "Renamed"),
         gesture::createCue ("7K2QM9X4", 0, "media", "Thunder"),
         gesture::moveObject ("B3N8R5TW", "7K2QM9X4", 0),
+        gesture::deleteObject ("B3N8R5TW"),
         gesture::undo(), gesture::redo(), gesture::save(), gesture::revert(),
         gesture::recover(), gesture::discardRecovery(),
         gesture::setLocked (true), gesture::setLocked (false),
@@ -1074,6 +1075,86 @@ TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be name
         model::Row band;
         band.rowKind = model::RowKind::band;
         CHECK (model::dropFor (band, a, 0.5).kind == model::DropKind::none);
+    }
+
+    //  Said while the hand is in the air, and a timeline group is named as one.
+    CHECK (model::describe (model::dropFor (c, a, 0.9), c, false) == "after Thunder");
+    CHECK (model::describe (model::dropFor (g, a, 0.5), g, true).rfind ("into Scene - a timeline", 0) == 0);
+    CHECK (model::describe (model::dropFor (b, a, 0.5), b, true) == "aim Fade it at it");
+    CHECK (model::describe (model::dropFor (a, a, 0.5), a, false).empty());
+
+    /*  AND THE ENGINE LANDS THE CUE WHERE THE LINE WAS DRAWN. The index the
+        model computes is handed to the real `object.move`, in a group with a
+        header so that raw child indices and member positions differ, and the
+        published order is read back: this is the contract between the
+        arithmetic above and ShowDocument::move, pinned from the client's side. */
+    {
+        Rig rig;
+
+        const auto listId = model::readTransport (*rig.publish (0)).listId;
+        auto tick = std::int64_t { 1 };
+
+        const auto create = [&] (const std::string& parent, int index, const char* kind, const char* name)
+        {
+            REQUIRE (rig.apply (tick++, "window", "cue.create",
+                                { osc::Value::string (parent), osc::Value::int32 (index),
+                                  osc::Value::string (kind), osc::Value::string (name) }).applied == 1);
+            return model::createdAt (model::text (*rig.publish (tick),
+                                                  (parent == listId ? "/godot/list/" : "/godot/cue/")
+                                                    + parent + "/order"), index);
+        };
+
+        const auto group = create (listId, 0, "group", "Scene");
+        REQUIRE_FALSE (group.empty());
+        REQUIRE (rig.apply (tick++, "window", "group.role",
+                            { osc::Value::string (group), osc::Value::string ("header") }).applied == 1);
+
+        const auto one = create (group, 0, "memo", "One");
+        const auto two = create (group, 1, "memo", "Two");
+        const auto three = create (group, 2, "memo", "Three");
+        const auto four = create (group, 3, "memo", "Four");
+        REQUIRE (model::text (*rig.publish (tick), "/godot/cue/" + group + "/order")
+                   == one + " " + two + " " + three + " " + four);
+
+        //  Rows as the list would hold them, from the published order.
+        const auto rowsOf = [&]
+        {
+            std::vector<model::Row> built;
+            const auto members = model::words (model::text (*rig.publish (tick), "/godot/cue/" + group + "/order"));
+
+            for (std::size_t at = 0; at < members.size(); ++at)
+                built.push_back (cue (members[at].c_str(), "memo", group.c_str(), static_cast<int> (at)));
+
+            return built;
+        };
+
+        const auto moveBy = [&] (const model::Drop& drop, const std::string& id)
+        {
+            REQUIRE (drop.kind == model::DropKind::after);
+            REQUIRE (rig.apply (tick++, "window", "object.move",
+                                { osc::Value::string (id), osc::Value::string (drop.container),
+                                  osc::Value::int32 (drop.index) }).applied == 1);
+            return model::text (*rig.publish (tick), "/godot/cue/" + group + "/order");
+        };
+
+        //  One dropped after Three: moving later lands directly after Three.
+        {
+            const auto built = rowsOf();
+            CHECK (moveBy (model::dropFor (built[2], built[0], 0.9), one) == two + " " + three + " " + one + " " + four);
+        }
+
+        //  Four dropped after Two: moving earlier lands directly after Two.
+        {
+            const auto built = rowsOf();     // two three one four
+            CHECK (moveBy (model::dropFor (built[0], built[3], 0.9), four) == two + " " + four + " " + three + " " + one);
+        }
+
+        //  One dropped after the last: the end.
+        {
+            const auto built = rowsOf();     // two four three one -> one is already last: after three is none
+            CHECK (model::dropFor (built[2], built[3], 0.9).kind == model::DropKind::none);
+            CHECK (moveBy (model::dropFor (built[3], built[0], 0.9), two) == four + " " + three + " " + one + " " + two);
+        }
     }
 
     /*  NAMING A CUE: identifier first, then number, then name - and two cues

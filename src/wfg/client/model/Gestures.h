@@ -98,6 +98,9 @@ namespace wfg::client::gesture
         `index` is a member position in `parent`, or -1 for the end. */
     Event moveObject (const std::string& id, const std::string& parent, int index);
 
+    /** Deletes a cue or a group: ctrl/⌘-Backspace on the picked one. Undo brings it back with its ids. */
+    Event deleteObject (const std::string& id);
+
     /*  ONE FIELD, COMMITTED. The address is the NODE's own, never one this
         client assembled: a generic inspector writes back to what it read,
         which is the whole reason it needs no table of field names. */

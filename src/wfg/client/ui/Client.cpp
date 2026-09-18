@@ -144,6 +144,17 @@ namespace wfg::client
                                                   if (! refusedWhileLocked())
                                                       send (gesture::moveObject (id, parent, index));
                                               };
+                /*  A DELETE UNPICKS: the panel about a cue that is gone would
+                    be about nothing, and the tree stops publishing it a tick
+                    later anyway. */
+                listActions.remove          = [this] (const std::string& id)
+                                              {
+                                                  if (refusedWhileLocked())
+                                                      return;
+
+                                                  send (gesture::deleteObject (id));
+                                                  picked.clear();
+                                              };
                 listActions.setTarget       = [this] (const std::string& aimed, const std::string& at)
                                               {
                                                   if (! refusedWhileLocked())

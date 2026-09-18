@@ -69,6 +69,11 @@ namespace wfg::client::gesture
                    osc::Value::int32 (index) } };
     }
 
+    Event deleteObject (const std::string& id)
+    {
+        return { origin::window, "object.delete", { osc::Value::string (id) } };
+    }
+
     Event setNode (const std::string& address, const std::string& text)
     {
         /*  A STRING, WHATEVER THE ROW'S TYPE IS. `node.set` declares its value
