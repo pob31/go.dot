@@ -7270,6 +7270,21 @@ stranger group or no row at all, and the mark is cleared. The drag carries the c
 id prefers the cue's own row to a derived line of it, since reasoning from the line's place would put
 the cue in the wrong container.
 
+**EDITING IN THE LIST (2026-09-18).** *"It would be nice to be able to edit the userID, name, prewait,
+duration and postwait right in the cue list by double clicking. Once the data is typed, Enter or a click
+outside the edited field validates and dismisses, or Esc to cancel the modification (in this case don't
+panic). Arrows allow to navigate in neighbouring fields while validating any edits."* One box, moved
+about, living on the list's own scrolling surface so it rides with the rows. A double-click on the
+number, the name or one of the three times opens it over that cell - the cells carved exactly as the
+painter carves them, so the box lands on the words; a column the cue may not write says so instead of
+opening (a media cue's duration is its file's). Enter and the focus leaving commit, and only when the
+text changed, since leaving a box as it was is not a decision; Esc cancels INSIDE the box, so the shell
+never sees it and PANIC never hears it; the arrows commit and move - up and down through the cues in
+the same column, skipping bands, derived lines and cues that lack the column; left and right along the
+row - and Tab goes along the row too. A box open over a cue follows it through a rebuild and shuts when
+the cue is gone; a locked show opens none. Every commit is the same `node.set` the inspector's field
+sends.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

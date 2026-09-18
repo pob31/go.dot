@@ -1240,6 +1240,18 @@ TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be name
         CHECK (model::presetLineDropFor (nullptr, "X", "I", nested).cueId == "X");
     }
 
+    /*  EDITING IN THE LIST: which attribute a column writes, and which column
+        is not this cue's to write - a media cue's duration is its file's. */
+    CHECK (model::editAttributeFor (model::EditCell::number, "memo") == "number");
+    CHECK (model::editAttributeFor (model::EditCell::name, "media") == "name");
+    CHECK (model::editAttributeFor (model::EditCell::preWait, "osc") == "preWait");
+    CHECK (model::editAttributeFor (model::EditCell::postWait, "group") == "postWait");
+    CHECK (model::editAttributeFor (model::EditCell::duration, "fade") == "duration");
+    CHECK (model::editAttributeFor (model::EditCell::duration, "stop") == "duration");
+    CHECK (model::editAttributeFor (model::EditCell::duration, "media").empty());
+    CHECK (model::editAttributeFor (model::EditCell::duration, "memo").empty());
+    CHECK (model::editAttributeFor (model::EditCell::none, "memo").empty());
+
     /*  NAMING A CUE: identifier first, then number, then name - and two cues
         with one name answer nothing rather than one of them. */
     const std::vector<model::Row> rows { a, b, c, g, inner };

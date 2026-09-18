@@ -285,6 +285,21 @@ namespace wfg::client::model
         return ancestors[static_cast<std::size_t> (at - 1)];
     }
 
+    std::string editAttributeFor (EditCell cell, const std::string& kind)
+    {
+        switch (cell)
+        {
+            case EditCell::number:   return "number";
+            case EditCell::name:     return "name";
+            case EditCell::preWait:  return "preWait";
+            case EditCell::postWait: return "postWait";
+            case EditCell::duration: return kind == "fade" || kind == "stop" ? "duration" : "";
+            case EditCell::none:     break;
+        }
+
+        return {};
+    }
+
     std::string describe (const Drop& drop, const Row& over, bool intoTimeline)
     {
         const auto name = over.name.empty() ? over.id : over.name;

@@ -102,6 +102,15 @@ namespace wfg::client::model
     Drop presetLineDropFor (const Row* over, const std::string& cueId, const std::string& current,
                             const std::vector<Row>& rows);
 
+    /*  EDITING IN THE LIST (author, 2026-09-18: "edit the userID, name,
+        prewait, duration and postwait right in the cue list by double
+        clicking"). Which attribute a column writes, or nothing when that
+        column is not the cue's to write: a media cue's duration is its
+        file's and a memo has none, so only a fade's or a stop's is a box. */
+    enum class EditCell { none, number, name, preWait, duration, postWait };
+
+    std::string editAttributeFor (EditCell cell, const std::string& kind);
+
     /*  What letting go of `dragged` over `over` would do, `fraction` being how
         far down the row the pointer is (0 at the top, 1 at the bottom). */
     Drop dropFor (const Row& over, const Row& dragged, double fraction);

@@ -117,6 +117,20 @@ namespace wfg::client::ui
         list.getViewport()->setScrollBarsShown (true, false);
         addAndMakeVisible (list);
 
+        /*  THE CELL EDITOR rides on the list's own scrolling surface, so a
+            box opened over a row stays over it when the list scrolls. Enter
+            commits, Esc cancels - both inside the box, so neither reaches the
+            shell and Esc is never PANIC - and the focus leaving commits too,
+            which is what a click elsewhere does. */
+        editor.setSelectAllWhenFocused (true);
+        editor.setMultiLine (false);
+        editor.onReturnKey = [this] { commitEdit(); };
+        editor.onEscapeKey = [this] { cancelEdit(); };
+        editor.onFocusLost = [this] { if (editing()) commitEdit(); };
+
+        if (auto* surface = list.getViewport()->getViewedComponent())
+            surface->addChildComponent (editor);
+
         setWantsKeyboardFocus (true);
         applyTheme (theme);
     }
@@ -190,6 +204,255 @@ namespace wfg::client::ui
         return ! id.empty() && std::find (chosen.begin(), chosen.end(), id) != chosen.end();
     }
 
+    //==========================================================================
+    //  Editing in place
+    void CueListComponent::setEditable (bool editableToUse)
+    {
+        editable = editableToUse;
+
+        if (! editable && editing())
+            cancelEdit();
+    }
+
+    CueListComponent::Cells CueListComponent::cellsFor (const model::Row& entry, int width, int height) const
+    {
+        /*  THE SAME CARVING THE PAINTER DOES, in the same order, so the box
+            lands on the words: the gutter, the three times from the right,
+            the kind, the number from the left, the depth's indent and the
+            group's mark, and the name is what is left. */
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+        const auto pad = unit / 2;
+        const auto indent = unit * 2;
+
+        auto area = juce::Rectangle<int> (0, 0, width, height).reduced (pad, 0);
+        area.removeFromLeft (unit * 2);
+
+        Cells cells;
+        cells.postWait = area.removeFromRight (timeChars * unit);
+        cells.duration = area.removeFromRight (timeChars * unit);
+        cells.preWait = area.removeFromRight (timeChars * unit);
+        area.removeFromRight (kindChars * unit);
+        cells.number = area.removeFromLeft (numberChars * unit);
+        area.removeFromLeft (entry.depth * indent);
+        area.removeFromLeft (indent);
+        cells.name = area;
+        return cells;
+    }
+
+    juce::Rectangle<int> CueListComponent::rectOf (const Cells& cells, model::EditCell cell) const
+    {
+        switch (cell)
+        {
+            case model::EditCell::number:   return cells.number;
+            case model::EditCell::name:     return cells.name;
+            case model::EditCell::preWait:  return cells.preWait;
+            case model::EditCell::duration: return cells.duration;
+            case model::EditCell::postWait: return cells.postWait;
+            case model::EditCell::none:     break;
+        }
+
+        return {};
+    }
+
+    model::EditCell CueListComponent::cellAt (const model::Row& entry, int x, int width, int height) const
+    {
+        const auto cells = cellsFor (entry, width, height);
+
+        for (const auto cell : { model::EditCell::number, model::EditCell::name, model::EditCell::preWait,
+                                 model::EditCell::duration, model::EditCell::postWait })
+            if (rectOf (cells, cell).getHorizontalRange().contains (x))
+                return cell;
+
+        return model::EditCell::none;
+    }
+
+    void CueListComponent::listBoxItemDoubleClicked (int row, const juce::MouseEvent& event)
+    {
+        if (! editable || row < 0 || row >= static_cast<int> (rows.size()))
+            return;
+
+        const auto& entry = rows[static_cast<std::size_t> (row)];
+
+        if (entry.rowKind != model::RowKind::cue || entry.derived)
+            return;
+
+        const auto cell = cellAt (entry, event.x, list.getWidth(), rowHeight());
+
+        if (cell == model::EditCell::none)
+            return;
+
+        /*  A COLUMN THAT IS NOT THIS CUE'S TO WRITE says so rather than opening
+            a box that would be refused: a media cue's duration is its file's. */
+        if (model::editAttributeFor (cell, entry.kind).empty())
+        {
+            if (actions.say)
+                actions.say (cell == model::EditCell::duration
+                               ? (entry.kind == "media" ? juce::String ("a media cue's duration is its file's")
+                                                        : juce::String ("a ") + entry.kind + " has no duration to set")
+                               : juce::String ("not a value this cue has"));
+            return;
+        }
+
+        beginEdit (row, cell);
+    }
+
+    void CueListComponent::beginEdit (int row, model::EditCell cell)
+    {
+        if (editing())
+            commitEdit();
+
+        const auto& entry = rows[static_cast<std::size_t> (row)];
+        const auto attribute = model::editAttributeFor (cell, entry.kind);
+
+        if (attribute.empty())
+            return;
+
+        editRow = row;
+        editCell = cell;
+        editId = entry.id;
+        editAttribute = attribute;
+
+        const auto text = cell == model::EditCell::number   ? entry.number
+                        : cell == model::EditCell::name     ? entry.name
+                        : cell == model::EditCell::preWait  ? entry.preWait
+                        : cell == model::EditCell::duration ? entry.duration
+                                                            : entry.postWait;
+
+        editor.setFont (Look::font (theme, 13.0f));
+        editor.setColour (juce::TextEditor::backgroundColourId, Look::colour (theme, "panel-in"));
+        editor.setColour (juce::TextEditor::textColourId, Look::colour (theme, "ink"));
+        editor.setColour (juce::TextEditor::outlineColourId, Look::colour (theme, "picked"));
+        editor.setColour (juce::TextEditor::focusedOutlineColourId, Look::colour (theme, "picked"));
+        editor.setJustification (cell == model::EditCell::name || cell == model::EditCell::number
+                                   ? juce::Justification::centredLeft : juce::Justification::centredRight);
+        editor.setText (juce::String (text), juce::dontSendNotification);
+
+        placeEditor();
+        editor.setVisible (true);
+        editor.grabKeyboardFocus();
+        editor.selectAll();
+    }
+
+    void CueListComponent::placeEditor()
+    {
+        if (! editing())
+            return;
+
+        //  Relative to the list's scrolling surface, which is where the box lives.
+        const auto rowArea = list.getRowPosition (editRow, false);
+        const auto cells = cellsFor (rows[static_cast<std::size_t> (editRow)], rowArea.getWidth(), rowArea.getHeight());
+        editor.setBounds (rectOf (cells, editCell).translated (rowArea.getX(), rowArea.getY()).reduced (0, 1));
+    }
+
+    void CueListComponent::commitEdit()
+    {
+        if (! editing())
+            return;
+
+        const auto id = editId;
+        const auto attribute = editAttribute;
+        const auto text = editor.getText().toStdString();
+        const auto row = editRow;
+
+        editRow = -1;
+        editCell = model::EditCell::none;
+        editor.setVisible (false);
+
+        /*  Written only when it changed: leaving a box as it was is not a
+            decision, and a `node.set` that says nothing new is a record for
+            the undo stack to hold for nobody. */
+        const auto& entry = rows[static_cast<std::size_t> (juce::jlimit (0, static_cast<int> (rows.size()) - 1, row))];
+        const auto was = attribute == "number"   ? entry.number
+                       : attribute == "name"     ? entry.name
+                       : attribute == "preWait"  ? entry.preWait
+                       : attribute == "duration" ? entry.duration
+                                                 : entry.postWait;
+
+        if (text != was && actions.setValue)
+            actions.setValue ("/godot/cue/" + id + "/" + attribute, text);
+
+        grabKeyboardFocus();   // the arrows and Space are the shell's again
+    }
+
+    void CueListComponent::cancelEdit()
+    {
+        editRow = -1;
+        editCell = model::EditCell::none;
+        editor.setVisible (false);
+        grabKeyboardFocus();
+    }
+
+    void CueListComponent::moveEdit (int rowStep, int cellStep)
+    {
+        if (! editing())
+            return;
+
+        auto row = editRow;
+        auto cell = editCell;
+
+        commitEdit();
+
+        /*  ALONG THE ROW: the next cell this cue may write, skipping one it
+            may not (a memo's duration). DOWN THE LIST: the next cue row,
+            skipping bands and derived lines, in the same column. */
+        static constexpr model::EditCell order[] { model::EditCell::number, model::EditCell::name,
+                                                   model::EditCell::preWait, model::EditCell::duration,
+                                                   model::EditCell::postWait };
+
+        if (cellStep != 0)
+        {
+            auto at = 0;
+
+            for (; at < 5; ++at)
+                if (order[at] == cell)
+                    break;
+
+            const auto& entry = rows[static_cast<std::size_t> (row)];
+
+            for (at += cellStep; at >= 0 && at < 5; at += cellStep)
+            {
+                if (! model::editAttributeFor (order[at], entry.kind).empty())
+                {
+                    beginEdit (row, order[at]);
+                    return;
+                }
+            }
+
+            return;
+        }
+
+        for (row += rowStep; row >= 0 && row < static_cast<int> (rows.size()); row += rowStep)
+        {
+            const auto& entry = rows[static_cast<std::size_t> (row)];
+
+            if (entry.rowKind != model::RowKind::cue || entry.derived)
+                continue;
+
+            if (model::editAttributeFor (cell, entry.kind).empty())
+                continue;
+
+            list.scrollToEnsureRowIsOnscreen (row);
+            beginEdit (row, cell);
+            return;
+        }
+    }
+
+    bool CueListComponent::CellEditor::keyPressed (const juce::KeyPress& key)
+    {
+        /*  THE ARROWS MOVE BETWEEN CELLS, committing as they go (author,
+            2026-09-18: "arrows allow to navigate in neighbouring fields while
+            validating any edits"); Tab and shift-Tab go along the row too. */
+        if (key == juce::KeyPress (juce::KeyPress::upKey))    { owner.moveEdit (-1, 0); return true; }
+        if (key == juce::KeyPress (juce::KeyPress::downKey))  { owner.moveEdit (+1, 0); return true; }
+        if (key == juce::KeyPress (juce::KeyPress::leftKey))  { owner.moveEdit (0, -1); return true; }
+        if (key == juce::KeyPress (juce::KeyPress::rightKey)) { owner.moveEdit (0, +1); return true; }
+        if (key == juce::KeyPress (juce::KeyPress::tabKey))   { owner.moveEdit (0, +1); return true; }
+        if (key == juce::KeyPress (juce::KeyPress::tabKey, juce::ModifierKeys::shiftModifier, 0))
+                                                              { owner.moveEdit (0, -1); return true; }
+
+        return juce::TextEditor::keyPressed (key);
+    }
+
     void CueListComponent::show (const model::ShowModel& model, const std::string& standbyId,
                                  const std::vector<std::string>& chosenIds)
     {
@@ -228,6 +491,21 @@ namespace wfg::client::ui
                 which is when somebody edited; the rule against `repaint()`
                 is for the tick-rate branch below. */
             list.repaint();
+
+            /*  A BOX OPEN OVER A ROW FOLLOWS ITS CUE through a rebuild, and
+                shuts if the cue is gone. */
+            if (editing())
+            {
+                const auto at = model.indexOf (editId);
+
+                if (at < 0)
+                    cancelEdit();
+                else
+                {
+                    editRow = at;
+                    placeEditor();
+                }
+            }
         }
 
         /*  AND THE POINTER, at tick rate: two rows change decoration and two
@@ -1119,6 +1397,7 @@ namespace wfg::client::ui
         auto area = getLocalBounds();
         area.removeFromTop (headingHeight());   // the labels, which never scroll
         list.setBounds (area);
+        placeEditor();
     }
 
     bool CueListComponent::keyPressed (const juce::KeyPress& key)

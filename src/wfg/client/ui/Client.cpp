@@ -161,6 +161,13 @@ namespace wfg::client
                 listActions.presetStep      = [this] (int direction) { ladderStep (direction); };
                 listActions.moveToFooter    = [this] (const std::string& cueId, const std::string& group)
                                               { moveToFooter (cueId, group); };
+
+                //  A cell edited in place is one `node.set`, as a field in the inspector is.
+                listActions.setValue        = [this] (const std::string& address, const std::string& text)
+                                              {
+                                                  if (! refusedWhileLocked())
+                                                      send (gesture::setNode (address, text));
+                                              };
                 /*  WHAT IS PICKED IS THIS CLIENT'S (model/Selection.h): a
                     click, with shift or ctrl/⌘, over the rows as drawn. */
                 listActions.pick            = [this] (const std::string& id, bool extend, bool toggle)

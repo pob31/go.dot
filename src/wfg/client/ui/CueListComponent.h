@@ -113,6 +113,9 @@ namespace wfg::client::ui
             /*  Into the group's footer, made first if it has none: shift+alt
                 drop on the group title. */
             std::function<void (const std::string& cueId, const std::string& group)> moveToFooter;
+
+            /** One value edited in place: the node's address and the text typed. */
+            std::function<void (const std::string& address, const std::string& text)> setValue;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);
@@ -124,6 +127,9 @@ namespace wfg::client::ui
 
         void applyTheme (const model::Theme& theme);
 
+        /** Whether a double-click may open a cell for editing: not while the show is locked. */
+        void setEditable (bool editable);
+
         void paint (juce::Graphics& g) override;
         void resized() override;
         bool keyPressed (const juce::KeyPress& key) override;
@@ -133,7 +139,41 @@ namespace wfg::client::ui
         void paintListBoxItem (int row, juce::Graphics& g, int width, int height,
                                bool rowIsSelected) override;
         void listBoxItemClicked (int row, const juce::MouseEvent& event) override;
+        void listBoxItemDoubleClicked (int row, const juce::MouseEvent& event) override;
         void backgroundClicked (const juce::MouseEvent& event) override;
+
+        /*  EDITING IN PLACE (author, 2026-09-18): a double-click on the
+            number, the name or one of the three times opens a box over that
+            cell. Enter or a click elsewhere commits and dismisses; Esc
+            cancels - inside the box, so PANIC never hears it; the arrows
+            commit and move to the neighbouring cell, up and down through the
+            cues, left and right along the row. One box, moved about, added to
+            the list's own scrolling surface so it rides with the rows. */
+        struct Cells
+        {
+            juce::Rectangle<int> number, name, preWait, duration, postWait;
+        };
+
+        Cells cellsFor (const model::Row& entry, int width, int height) const;
+        model::EditCell cellAt (const model::Row& entry, int x, int width, int height) const;
+        juce::Rectangle<int> rectOf (const Cells& cells, model::EditCell cell) const;
+
+        void beginEdit (int row, model::EditCell cell);
+        void placeEditor();
+        void commitEdit();
+        void cancelEdit();
+        void moveEdit (int rowStep, int cellStep);
+        bool editing() const noexcept { return editRow >= 0; }
+
+        class CellEditor final : public juce::TextEditor
+        {
+        public:
+            explicit CellEditor (CueListComponent& ownerToUse) : owner (ownerToUse) {}
+            bool keyPressed (const juce::KeyPress& key) override;
+
+        private:
+            CueListComponent& owner;
+        };
 
         bool isInterestedInFileDrag (const juce::StringArray& files) override;
         void fileDragEnter (const juce::StringArray& files, int x, int y) override;
@@ -201,6 +241,13 @@ namespace wfg::client::ui
         int standbyRow = -1;
         std::vector<std::string> chosen;     ///< the picked cues, as the selection holds them
         bool isChosen (const std::string& id) const;
+
+        CellEditor editor { *this };
+        int editRow = -1;
+        model::EditCell editCell = model::EditCell::none;
+        std::string editId;                  ///< the cue the open box is about, so a rebuild can follow it
+        std::string editAttribute;
+        bool editable = true;
         int dropRow = -1;            ///< the row a file drag is over, or -1
         bool dropWouldInsert = false;   ///< whether letting go really inserts after that row
         bool dropWouldLink = false;  ///< whether letting go there names a cue's file, or lands ON the row
