@@ -1415,6 +1415,9 @@ namespace wfg::tree
             else if (name == "undoName") text = state.documentUndoName;
             else if (name == "redoName") text = state.documentRedoName;
 
+            //  What was last copied, for a client to carry to its clipboard or paste back.
+            else if (name == "clipboard") text = state.documentClipboard;
+
             /*  Whether a previous session left work in `recovery/`. It changes
                 at most twice in a session - once when the bundle opens and once
                 when the operator answers it - which is why the table caps it at

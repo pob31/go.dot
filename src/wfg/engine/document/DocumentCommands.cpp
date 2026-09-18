@@ -20,6 +20,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace wfg::doc
 {
@@ -33,6 +34,29 @@ namespace wfg::doc
 
             So a handler's job is: do the work, then hand back the arguments as
             they were actually applied. */
+        /** Space-separated words, as `order` and the paste's ids are spelled. */
+        std::vector<std::string> splitWords (const std::string& text)
+        {
+            std::vector<std::string> words;
+            std::string word;
+
+            for (const auto c : text)
+            {
+                if (c == ' ' || c == '\n' || c == '\t' || c == '\r')
+                {
+                    if (! word.empty()) { words.push_back (word); word.clear(); }
+                    continue;
+                }
+
+                word += c;
+            }
+
+            if (! word.empty())
+                words.push_back (word);
+
+            return words;
+        }
+
         std::vector<osc::Value> withId (std::vector<osc::Value> args,
                                         std::size_t idIndex,
                                         const std::string& id)
@@ -305,6 +329,41 @@ namespace wfg::doc
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             return fromEdit (document.remove (args[0].getString()), args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  COPY AND PASTE (author, 2026-09-18). Copy is a read that leaves a
+            fragment where the tree publishes it (`document/clipboard`); paste
+            is the write, one transaction however many cues, its record
+            carrying the names it drew so a replay draws none. The fragment
+            travels between two windows on the operating system's clipboard,
+            which is why it is text and why paste takes it as an argument
+            rather than reading the engine's own copy. */
+        registry.add ({ "document.copy",
+                        "Copies cues, by id, into the clipboard the tree publishes as canonical XML.",
+                        { { "ids", 's', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            document.copyToClipboard (splitWords (args[0].getString()));
+                            return Outcome::ok (args);
+                        } });
+
+        registry.add ({ "document.paste",
+                        "Pastes a fragment's cues into a list or group at a member position, under"
+                        " new ids; the record carries the ids drawn.",
+                        { { "parent", 's', false }, { "index", 'i', false },
+                          { "fragment", 's', false }, { "ids", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto ids = args.size() > 3 ? splitWords (args[3].getString())
+                                                             : std::vector<std::string> {};
+
+                            const auto edit = document.paste (args[0].getString(), args[1].getInt32(),
+                                                              args[2].getString(), ids);
+
+                            return fromEdit (edit, withId (args, 3, edit.id));
                         } });
 
         //----------------------------------------------------------------------

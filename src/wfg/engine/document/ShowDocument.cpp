@@ -18,6 +18,7 @@
 
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/command/Command.h>
+#include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/FadePoints.h>
 #include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/osc/OscValue.h>
@@ -1604,6 +1605,94 @@ namespace wfg::doc
             setAttribute ("/godot/list/" + vacatedList + "/standby", "");
 
         return EditResult::succeeded (id);
+    }
+
+    //==============================================================================
+    std::string ShowDocument::fragmentOf (const std::vector<std::string>& ids) const
+    {
+        /*  COPIES OF CUES, AND ONLY CUES: a list, a header or a footer is a
+            place cues live and not a thing to paste somewhere else, so an id
+            that names one of those is passed over. Copies, because the writer
+            reads the node and the fragment must not hold a handle on the show. */
+        std::vector<juce::ValueTree> nodes;
+
+        for (const auto& id : ids)
+        {
+            const auto node = findById (id);
+
+            if (! node.isValid())
+                continue;
+
+            const auto* element = Schema::instance().element (node.getType().toString().toStdString());
+            const auto* holder = Schema::instance().element (std::string (Schema::rootElement));
+
+            //  A cue is what a list may hold; a list is what the root may.
+            const auto* list = Schema::instance().element ("List");
+
+            if (element == nullptr || list == nullptr || holder == nullptr
+                  || ! list->mayContain (node.getType().toString().toStdString()))
+                continue;
+
+            nodes.push_back (node.createCopy());
+        }
+
+        return nodes.empty() ? std::string {} : CanonicalXml::writeFragment (nodes);
+    }
+
+    void ShowDocument::copyToClipboard (const std::vector<std::string>& ids)
+    {
+        clipboard = fragmentOf (ids);
+    }
+
+    EditResult ShowDocument::paste (const std::string& parentId, int index, const std::string& fragment,
+                                    const std::vector<std::string>& ids)
+    {
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        auto parent = findById (parentId);
+
+        if (! parent.isValid() || index < 0)
+            return EditResult::failed (reason::badAddress);
+
+        const auto* parentElement = Schema::instance().element (parent.getType().toString().toStdString());
+
+        if (parentElement == nullptr)
+            return EditResult::failed (reason::badAddress);
+
+        /*  READ UNDER NEW NAMES FIRST, INTO NOTHING: the fragment is built
+            whole, its identities reserved, before the show is touched, so a
+            fragment that is refused leaves the document as it was. */
+        auto read = CanonicalXml::readFragment (fragment, registry, ids);
+
+        if (! read.ok)
+            return EditResult::failed (reason::badValue);
+
+        for (const auto& node : read.nodes)
+        {
+            if (! parentElement->mayContain (node.getType().toString().toStdString()))
+            {
+                for (const auto& id : read.ids)
+                    registry.release (id);
+
+                return EditResult::failed (reason::badAddress);
+            }
+        }
+
+        /*  IN ORDER, EACH ONE FURTHER ALONG, under the structural history so
+            the whole paste is one step of undo. The position is a member
+            position, translated as every insert's is. */
+        auto at = index;
+
+        for (auto& node : read.nodes)
+            parent.addChild (node, rawIndexForPosition (parent, at++), structuralHistory());
+
+        std::string drawn;
+
+        for (std::size_t n = 0; n < read.ids.size(); ++n)
+            drawn += (n == 0 ? "" : " ") + read.ids[n];
+
+        return EditResult::succeeded (drawn);
     }
 
     //==============================================================================

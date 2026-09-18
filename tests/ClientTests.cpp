@@ -528,6 +528,8 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::deleteObject ("B3N8R5TW"),
         gesture::undo(), gesture::redo(), gesture::save(), gesture::revert(),
         gesture::saveAs ("C:/shows/copy"),
+        gesture::copyCues ({ "B3N8R5TW", "F7HR8TVD" }),
+        gesture::pasteCues ("7K2QM9X4", 0, "<Fragment/>"),
         gesture::recover(), gesture::discardRecovery(),
         gesture::setLocked (true), gesture::setLocked (false),
     };
@@ -1294,6 +1296,73 @@ TEST_CASE ("client: several cues inspected together show what they share, and sa
     CHECK (mixedKinds.kind == "memo + group");
     CHECK (fieldNamed (mixedKinds, "name") != nullptr);
     CHECK (fieldNamed (mixedKinds, "mode") == nullptr);
+}
+
+//==============================================================================
+TEST_CASE ("client: copied cues come back as a fragment, and paste under new names with their references re-pointed")
+{
+    /*  Copy and paste, end to end through the two commands (author,
+        2026-09-18). A memo and a fade aimed at it are copied; the fragment is
+        canonical XML; pasting it makes two NEW cues, the fade aimed at the new
+        memo and not the old, and the record carries the names drawn. */
+    Rig rig;
+
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    auto tick = std::int64_t { 1 };
+
+    const auto create = [&] (const char* kind, const char* name)
+    {
+        REQUIRE (rig.apply (tick++, "window", "cue.create",
+                            { osc::Value::string (listId), osc::Value::int32 (0),
+                              osc::Value::string (kind), osc::Value::string (name) }).applied == 1);
+        return model::createdAt (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order"), 0);
+    };
+
+    const auto memo = create ("memo", "Thunder");
+    const auto fade = create ("fade", "Fade it");
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + fade + "/target"),
+                          osc::Value::string (memo) }).applied == 1);
+
+    //  Copy: the fragment is where the tree would publish it.
+    REQUIRE (rig.apply (tick++, "window", "document.copy",
+                        { osc::Value::string (memo + " " + fade) }).applied == 1);
+
+    const auto fragment = rig.document.clipboardText();
+    CHECK (fragment.rfind ("<Fragment>", 0) == 0);
+    CHECK (fragment.find ("name=\"Thunder\"") != std::string::npos);
+    CHECK (fragment.find ("target=\"" + memo + "\"") != std::string::npos);
+
+    const auto before = model::words (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order"));
+
+    //  Paste at the end: two new cues, new names, the fade aimed at the new memo.
+    const auto outcome = rig.apply (tick++, "window", "document.paste",
+                                    { osc::Value::string (listId),
+                                      osc::Value::int32 (static_cast<int> (before.size())),
+                                      osc::Value::string (fragment) });
+    REQUIRE (outcome.applied == 1);
+
+    const auto snapshot = rig.publish (tick);
+    const auto after = model::words (model::text (*snapshot, "/godot/list/" + listId + "/order"));
+    REQUIRE (after.size() == before.size() + 2);
+
+    const auto newMemo = after[before.size()];
+    const auto newFade = after[before.size() + 1];
+    CHECK (newMemo != memo);
+    CHECK (newFade != fade);
+    CHECK (model::text (*snapshot, "/godot/cue/" + newMemo + "/name") == "Thunder");
+    CHECK (model::text (*snapshot, "/godot/cue/" + newFade + "/kind") == "fade");
+    CHECK (model::text (*snapshot, "/godot/cue/" + newFade + "/target") == newMemo);
+
+    //  The originals are untouched.
+    CHECK (model::text (*snapshot, "/godot/cue/" + fade + "/target") == memo);
+
+    //  Text that is not a fragment is refused, and the show does not move.
+    CHECK (rig.apply (tick++, "window", "document.paste",
+                      { osc::Value::string (listId), osc::Value::int32 (0),
+                        osc::Value::string ("hello") }).applied == 0);
+    CHECK (model::words (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order")).size()
+             == after.size());
 }
 
 //==============================================================================

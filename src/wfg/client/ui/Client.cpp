@@ -87,7 +87,7 @@ namespace wfg::client
         enum MenuItem
         {
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
-            menuUndo, menuRedo, menuSelectAll, menuDeleteCue,
+            menuUndo, menuRedo, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock
         };
 
@@ -304,6 +304,8 @@ namespace wfg::client
                     case menuSaveAs:    return { 's', mod | shift, 0 };
                     case menuUndo:      return { 'z', mod, 0 };
                     case menuRedo:      return { 'z', mod | shift, 0 };
+                    case menuCopy:      return { 'c', mod, 0 };
+                    case menuPaste:     return { 'v', mod, 0 };
                     case menuSelectAll: return { 'a', mod, 0 };
                     case menuDeleteCue: return { juce::KeyPress::backspaceKey, mod, 0 };
                     case menuLock:      return { 'l', mod, 0 };
@@ -315,7 +317,7 @@ namespace wfg::client
 
             static int menuItemForKey (const juce::KeyPress& key)
             {
-                for (const auto item : { menuNew, menuOpen, menuSaveAs, menuLock })
+                for (const auto item : { menuNew, menuOpen, menuSaveAs, menuCopy, menuPaste, menuLock })
                     if (key == keyFor (item))
                         return item;
 
@@ -341,6 +343,8 @@ namespace wfg::client
                     case menuRevert:    return last.mayOfferSave();
                     case menuUndo:      return unlocked && last.canUndo == model::Flag::yes;
                     case menuRedo:      return unlocked && last.canRedo == model::Flag::yes;
+                    case menuCopy:      return ! selection.empty();
+                    case menuPaste:     return unlocked && ! last.listId.empty();
                     case menuSelectAll: return true;
                     case menuDeleteCue: return unlocked && ! selection.empty();
                     case menuLock:      return last.locked != model::Flag::unsaid;
@@ -379,6 +383,11 @@ namespace wfg::client
                     addMenuItem (menu, menuUndo, "Undo");
                     addMenuItem (menu, menuRedo, "Redo");
                     menu.addSeparator();
+                    addMenuItem (menu, menuCopy, selection.size() > 1
+                                                   ? "Copy " + juce::String (static_cast<int> (selection.size())) + " cues"
+                                                   : "Copy cue");
+                    addMenuItem (menu, menuPaste, "Paste");
+                    menu.addSeparator();
                     addMenuItem (menu, menuSelectAll, "Select all cues");
                     addMenuItem (menu, menuDeleteCue, selection.size() > 1
                                                         ? "Delete " + juce::String (static_cast<int> (selection.size())) + " cues"
@@ -404,6 +413,8 @@ namespace wfg::client
                     case menuRevert:    shell->transport.askThenRevert(); break;
                     case menuUndo:      send (gesture::undo()); break;
                     case menuRedo:      send (gesture::redo()); break;
+                    case menuCopy:      copyChosen(); break;
+                    case menuPaste:     pasteFromClipboard(); break;
                     case menuSelectAll: selection.all (show.rows()); break;
                     case menuDeleteCue: removeChosen(); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
@@ -414,6 +425,64 @@ namespace wfg::client
             /*  ONE `object.delete`, from the key and from the menu alike. It does
                 not ask, since undo is one keystroke; and it unpicks, so the
                 panel is not left describing a cue that is gone. */
+            /*  COPY AND PASTE, ACROSS WINDOWS. Copy asks the engine for the
+                fragment (one `document.copy`); the fragment comes back through
+                the tree on a later pass and `pass` puts it on the operating
+                system's clipboard, which is the only thing two processes
+                share. Paste reads that clipboard and hands what it finds to
+                `document.paste`, landing where a new cue would - after the
+                anchor, or at the end of the list. Text that is not a fragment
+                is not pasted, and the foot says so. */
+            void copyChosen()
+            {
+                if (selection.empty())
+                    return;
+
+                send (gesture::copyCues (selection.ids()));
+                shell->transport.setNotice (juce::String (static_cast<int> (selection.size()))
+                                              + (selection.size() == 1 ? " cue copied" : " cues copied"));
+            }
+
+            void pasteFromClipboard()
+            {
+                if (refusedWhileLocked())
+                    return;
+
+                const auto text = juce::SystemClipboard::getTextFromClipboard();
+
+                if (! text.trimStart().startsWith ("<Fragment"))
+                {
+                    shell->transport.setNotice ("the clipboard holds no cues");
+                    return;
+                }
+
+                const auto [parent, index] = destination();
+
+                if (parent.empty())
+                {
+                    shell->transport.setNotice ("no list to paste into");
+                    return;
+                }
+
+                const auto members = static_cast<int> (model::words (orderOf (parent)).size());
+                const auto at = index < 0 ? members : juce::jlimit (0, members, index);
+
+                send (gesture::pasteCues (parent, at, text.toStdString()));
+            }
+
+            /*  The engine's clipboard, mirrored to the system's when it moves:
+                what `document.copy` made is what ctrl/⌘-V in any window reads. */
+            void mirrorClipboard (const tree::TreeSnapshot& snapshot)
+            {
+                const auto fragment = model::text (snapshot, "/godot/document/clipboard");
+
+                if (fragment.empty() || fragment == clipboardSeen)
+                    return;
+
+                clipboardSeen = fragment;
+                juce::SystemClipboard::copyTextToClipboard (juce::String (fragment));
+            }
+
             void removeChosen()
             {
                 if (selection.empty() || refusedWhileLocked())
@@ -507,6 +576,7 @@ namespace wfg::client
                 //  And any import or create still waiting for the cue it made.
                 finishImports (*snapshot, reading.revision);
                 finishCreations (*snapshot, reading.revision);
+                mirrorClipboard (*snapshot);
 
                 //  Where the next new cue would land, said on the buttons.
                 shell->newCues.setDestination (destinationSentence());
@@ -1184,6 +1254,9 @@ namespace wfg::client
 
             /** How many were picked when the menu was last rebuilt, so it rebuilds when that moves. */
             std::size_t chosenAtLastMenu = 0;
+
+            /** The engine's clipboard as last mirrored to the system's. */
+            std::string clipboardSeen;
 
             /** The open file dialogue, which must outlive the call that launched it. */
             std::unique_ptr<juce::FileChooser> chooser;

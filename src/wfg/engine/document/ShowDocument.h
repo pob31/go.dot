@@ -278,6 +278,28 @@ namespace wfg::doc
             reading the two numbers as one cost. */
         EditResult move (const std::string& id, const std::string& newParentId, int newIndex);
 
+        /*  COPY AND PASTE (author, 2026-09-18), as two halves that never
+            touch: `fragmentOf` is a READ - copies of these cues as canonical
+            XML, nothing in the show moved - and `paste` is the write, the
+            fragment's cues entering `parentId` at member position `index`
+            under new names, in one transaction. The names are drawn here
+            unless `ids` hands them back from a log; the result's `id` is
+            every name drawn, space-separated, which is what the log records
+            so a replay draws none.
+
+            A fragment from ANOTHER show pastes the same way: its cues are
+            cues, its file names are names the other bundle may not have, and
+            its references to cues it did not bring stay as written and are
+            validate()'s to name. The clipboard between two windows is the
+            operating system's; what this class holds is the last thing copied
+            HERE, for the tree to publish (`document/clipboard`). */
+        std::string fragmentOf (const std::vector<std::string>& ids) const;
+        EditResult paste (const std::string& parentId, int index, const std::string& fragment,
+                          const std::vector<std::string>& ids);
+
+        void copyToClipboard (const std::vector<std::string>& ids);
+        const std::string& clipboardText() const noexcept { return clipboard; }
+
         //======================================================================
         // Values
         //======================================================================
@@ -662,6 +684,9 @@ namespace wfg::doc
 
         juce::ValueTree showNode;
         IdRegistry registry;
+
+        /** The last fragment `copyToClipboard` made; engine state, never saved. */
+        std::string clipboard;
 
         /*  Starts at 1 so that nought means "no cache has ever been built".
             See `revision()`. */

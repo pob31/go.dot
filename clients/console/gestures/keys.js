@@ -18,7 +18,9 @@
     (commands.json) names a command for. Wired when this module is loaded. */
 
 import { pointer, SLIDER_STEPS } from "./fields.js";
-import { press } from "./table.js";
+import { gesture, press } from "./table.js";
+import { selection } from "../model/selection.js";
+import { tree } from "../plumbing/tree.js";
 
 /*  GO ON SPACE (§3.5, which calls it a sacred convention), and the standby on
     the arrows. Refused while the focus is in a control whose keys are what
@@ -212,6 +214,38 @@ document.addEventListener("keydown", (event) => {
     if (letter === "z") {
       event.preventDefault();
       press(event.shiftKey ? "Mod+Shift+Z" : "Mod+Z");
+    } else if (letter === "c" && !event.shiftKey) {
+      /*  COPY AND PASTE (2026-09-18) are the engine's two commands, and this
+          page reaches both so the desktop is not their only route (§14.16,
+          rule 3). Copy asks for a fragment of what is picked; the engine
+          publishes it as /godot/document/clipboard. Paste hands that
+          fragment straight back, after the anchor in its own container or
+          at the end of the focused list - this page has no way onto the
+          operating system's clipboard that does not ask the person first,
+          so between two windows the desktop carries it. */
+      if (selection.chosen.length) {
+        event.preventDefault();
+        gesture("copy", [selection.chosen.join(" ")]);
+      }
+    } else if (letter === "v" && !event.shiftKey) {
+      const fragment = tree.get("/godot/document/clipboard", "");
+
+      if (fragment) {
+        event.preventDefault();
+
+        const anchor = selection.picked;
+        const parent = anchor ? tree.cue(anchor, "parent", "") : "";
+        const list = tree.get("/godot/list/focus", "") || tree.ids("/godot/list/order")[0] || "";
+        const into = parent || list;
+
+        if (into) {
+          const siblings = tree.ids((tree.node("/godot/list/" + into + "/order")
+                                       ? "/godot/list/" : "/godot/cue/") + into + "/order");
+          const at = anchor && siblings.indexOf(anchor) >= 0 ? siblings.indexOf(anchor) + 1
+                                                             : siblings.length;
+          gesture("paste", [into, at, fragment]);
+        }
+      }
     } else if (letter === "s" && !event.shiftKey) {
       event.preventDefault();
 

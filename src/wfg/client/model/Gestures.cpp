@@ -16,7 +16,9 @@
 
 #include <wfg/client/model/Gestures.h>
 
+#include <cstddef>
 #include <string>
+#include <vector>
 
 namespace wfg::client::gesture
 {
@@ -72,6 +74,22 @@ namespace wfg::client::gesture
     Event saveAs (const std::string& folder)
     {
         return { origin::window, "document.saveAs", { osc::Value::string (folder) } };
+    }
+
+    Event copyCues (const std::vector<std::string>& ids)
+    {
+        std::string joined;
+
+        for (std::size_t at = 0; at < ids.size(); ++at)
+            joined += (at == 0 ? "" : " ") + ids[at];
+
+        return { origin::window, "document.copy", { osc::Value::string (joined) } };
+    }
+
+    Event pasteCues (const std::string& parent, int index, const std::string& fragment)
+    {
+        return { origin::window, "document.paste",
+                 { osc::Value::string (parent), osc::Value::int32 (index), osc::Value::string (fragment) } };
     }
 
     Event deleteObject (const std::string& id)

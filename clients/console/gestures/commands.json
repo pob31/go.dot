@@ -23,6 +23,8 @@
     "add-role":     { "command": "group.role",       "args": ["s", "s"],             "where": "the inspector's header and footer buttons" },
     "move":         { "command": "object.move",      "args": ["s", "s", "i"],        "where": "a row dragged in the cue list, and the inspector's up and down buttons - which stay, because a drag does not exist under a finger" },
     "delete":       { "command": "object.delete",    "args": ["s"],                  "where": "the inspector's delete button" },
+    "copy":         { "command": "document.copy",    "args": ["s"],                  "where": "Mod+C over what is picked" },
+    "paste":        { "command": "document.paste",   "args": ["s", "i", "s"],        "where": "Mod+V, after the anchor or at the end of the list" },
     "revert":       { "command": "document.revert",  "args": [],                     "where": "the revert button, after it asks" }
   },
   "buttons": ["standby.previous", "standby.next", "standby.clear", "undo", "redo",

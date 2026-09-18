@@ -41,6 +41,9 @@
 
 #include <wfg/engine/command/Event.h>
 
+#include <string>
+#include <vector>
+
 namespace wfg::client::gesture
 {
     /** GO: the button, and Space. */
@@ -105,6 +108,14 @@ namespace wfg::client::gesture
 
     /** Deletes a cue or a group: ctrl/⌘-Backspace on the picked one. Undo brings it back with its ids. */
     Event deleteObject (const std::string& id);
+
+    /*  COPY AND PASTE. Copy asks the engine for a fragment of these cues,
+        which the tree then publishes and the window carries to the
+        operating system's clipboard; paste hands a fragment back, to land in
+        `parent` at member position `index`. The engine draws the new names
+        and records them, so a replay draws none (§14.16). */
+    Event copyCues (const std::vector<std::string>& ids);
+    Event pasteCues (const std::string& parent, int index, const std::string& fragment);
 
     /*  ONE FIELD, COMMITTED. The address is the NODE's own, never one this
         client assembled: a generic inspector writes back to what it read,

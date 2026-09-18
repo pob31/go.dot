@@ -74,6 +74,35 @@ namespace wfg::doc
         /** The document as canonical XML, ending in a newline. */
         std::string write (const ShowDocument& document);
 
+        /*  A FRAGMENT: copies of some cues as one `<Fragment>` holding them,
+            written by the same node writer show.xml is, so a pasted cue is
+            exactly the cue that was copied and the format is the one people
+            already read (author, 2026-09-18: "copy and paste of a selection
+            of cues from one project to another should be possible"). It is
+            what `document.copy` publishes and `document.paste` takes, and it
+            is text so the operating system's clipboard can carry it between
+            two windows that are two processes. */
+        std::string writeFragment (const std::vector<juce::ValueTree>& nodes);
+
+        struct FragmentResult
+        {
+            bool ok = false;
+            std::string problem;              ///< the first thing wrong, when not ok
+
+            std::vector<juce::ValueTree> nodes;   ///< the fragment's cues, typed, with their new ids
+            std::vector<std::string> ids;         ///< every identity drawn, in walk order, for the log
+        };
+
+        /*  Reads a fragment INTO NEW IDENTITIES: every element with an id gets
+            one drawn from `registry` - the supplied `ids` in walk order when a
+            replay hands them back, fresh ones otherwise - and every attribute
+            that refers to a cue inside the fragment is re-pointed to the new
+            name. A reference to a cue outside it is kept as written, which in
+            the same show is the cue it meant and in another show is a target
+            validate() will name. Nothing is reserved when the answer is not ok. */
+        FragmentResult readFragment (std::string_view text, IdRegistry& registry,
+                                     const std::vector<std::string>& ids);
+
         /*  Parses `text` into `document`, replacing whatever it held.
 
             Refuses rather than repairs. An unknown element, an unparseable

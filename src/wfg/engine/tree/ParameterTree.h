@@ -142,6 +142,13 @@ namespace wfg::tree
         std::string documentUndoName;
         std::string documentRedoName;
 
+        /*  THE LAST THING `document.copy` COPIED, as the fragment text a paste
+            takes. A client puts it on the operating system's clipboard when it
+            changes, which is how two windows that are two processes hand cues
+            to each other; the page pastes it straight back. Empty until a
+            copy. */
+        std::string documentClipboard;
+
         /*  HOW MANY TIMES THE SHOW HALF HAS CHANGED since the bundle was
             opened - `ShowDocument::showRevision()`, copied here each tick so
             the tree publishes it beside the dot that is derived from the same

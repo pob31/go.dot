@@ -3029,6 +3029,7 @@ namespace
                                 state.documentCanRedo = undoHistory.canRedo();
                                 state.documentUndoName = undoHistory.getUndoDescription().toStdString();
                                 state.documentRedoName = undoHistory.getRedoDescription().toStdString();
+                                state.documentClipboard = document.clipboardText();
 
                                 /*  Published every tick, from the tick thread,
                                     like the lateness beside it. The audio

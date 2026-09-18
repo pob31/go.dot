@@ -276,6 +276,8 @@ to the node invokes the command; the same names are what the CLI and the event l
 | `document.load` | `/godot/cmd/document/load` | `s` bundle path | logs the loaded bundle's SHA-256 |
 | `document.save` | `/godot/cmd/document/save` | — | |
 | `document.saveAs` | `/godot/cmd/document/saveAs` | `s` bundle path | |
+| `document.copy` | `/godot/cmd/document/copy` | `s` ids, space-separated | *(2026-09-18)* a read: copies of the cues as one canonical `<Fragment>`, published at `document/clipboard` |
+| `document.paste` | `/godot/cmd/document/paste` | `s` parent, `i` member index, `s` fragment, `[s ids]` | *(2026-09-18)* the fragment's cues enter under NEW ids, intra-fragment references re-pointed, one undo step; the record carries the ids drawn so a replay draws none |
 | `list.create` | `/godot/cmd/list/create` | `s` name `[s id]` | the id is optional; the engine generates one and **logs the event with it** |
 | `list.delete` | `/godot/cmd/list/delete` | `s` id | |
 | `list.focus` | `/godot/cmd/list/focus` | `s` id | |
@@ -7201,6 +7203,25 @@ reported rows are left out, since a run position is one cue's. **A commit is N `
 cue's own address, which is what §4.11 makes a batch edit: N decisions and N records, and N presses of
 undo. Delete acts on the whole selection the same way, and the menu says how many. A new cue still
 lands after the ANCHOR, the cue somebody clicked last on purpose.
+
+**COPY AND PASTE, BETWEEN WINDOWS (2026-09-18).** *"Copy and paste of a selection of cues from one
+project to another should be possible."* Two engine commands, drawn so that neither client has to know
+what a cue looks like on disk. **`document.copy <ids>` is a read**: copies of the cues as one canonical
+`<Fragment>`, written by the node writer show.xml is written by, and published at `document/clipboard` -
+in the tree and not handed to a caller, because the document is the tick thread's and a client reads
+the tree (§14.16, rule 2). **`document.paste <parent> <index> <fragment> [ids]` is the write**: the
+fragment is read INTO NEW IDENTITIES before the show is touched - the builder that reads show.xml, fed
+new names in a pre-pass - every attribute the schema says refers to a cue and whose value was one of the
+copied cues is re-pointed to the new name, and the cues enter at the member position in one undo step.
+The names drawn ride on the record, so a replay draws none: the same rule `cue.create`'s optional id
+follows. A reference to a cue the fragment did not bring stays as written, which in the same show is the
+cue it meant and in another is a target `validate()` names; a media cue's `file` is a name the other
+bundle may not have, and the window says so as it does for any missing file. **Between two windows the
+carrier is the operating system's clipboard**: the desktop mirrors the published fragment onto it when
+it changes and pastes from it, so ctrl/⌘-C in one process and ctrl/⌘-V in another is exactly one copy
+and one paste. The page reaches both too - copy of what is picked, paste of the published fragment
+after the anchor - so the desktop is not their only route (rule 3); what the page cannot do is cross
+a process, since it has no way onto the system clipboard that does not ask the person first.
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 

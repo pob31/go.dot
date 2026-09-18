@@ -489,6 +489,168 @@ namespace wfg::doc
         return result;
     }
 
+    std::string CanonicalXml::writeFragment (const std::vector<juce::ValueTree>& nodes)
+    {
+        std::string out;
+        out.reserve (1024);
+        out += "<Fragment>\n";
+
+        for (const auto& node : nodes)
+            if (node.isValid())
+                writeNode (node, 1, out);
+
+        out += "</Fragment>\n";
+        return out;
+    }
+
+    namespace
+    {
+        /*  THE PRE-PASS: new names into the XML before it is built, so the
+            builder - which insists on an id and reserves it - sees the names
+            the pasted cues will carry. What each element was called is kept
+            beside what it is called now, in walk order, for the references. */
+        void renameIdentities (juce::XmlElement& xml, IdRegistry& registry,
+                               const std::vector<std::string>& supplied, std::size_t& drawn,
+                               std::map<std::string, std::string>& oldToNew,
+                               std::vector<std::string>& newIds, std::string& problem)
+        {
+            const auto* element = Schema::instance().element (xml.getTagName().toStdString());
+
+            if (element != nullptr && element->hasIdentity)
+            {
+                const auto old = xml.getStringAttribute ("id").toStdString();
+                std::string fresh;
+
+                if (drawn < supplied.size())
+                {
+                    fresh = supplied[drawn];
+
+                    if (! Id::isValid (fresh))
+                        problem = "malformed id \"" + fresh + "\" supplied for the paste";
+                }
+                else if (! supplied.empty())
+                {
+                    problem = "the paste was handed fewer ids than the fragment has cues";
+                }
+                else
+                {
+                    /*  Drawn, then let go of: the builder reserves it again a
+                        moment later, and a name reserved twice reads as a
+                        duplicate. Nothing else draws in between. */
+                    fresh = registry.generate();
+                    registry.release (fresh);
+                }
+
+                ++drawn;
+                xml.setAttribute ("id", juce::String (fresh));
+                newIds.push_back (fresh);
+
+                if (! old.empty())
+                    oldToNew[old] = fresh;
+            }
+
+            for (auto* child : xml.getChildIterator())
+                if (! child->isTextElement())
+                    renameIdentities (*child, registry, supplied, drawn, oldToNew, newIds, problem);
+        }
+
+        /*  THE REFERENCES: an attribute the schema says refers to a cue, whose
+            value was one of the copied cues' old names, now says the new one. */
+        void repointReferences (juce::ValueTree node, const std::map<std::string, std::string>& oldToNew)
+        {
+            const auto* element = Schema::instance().element (node.getType().toString().toStdString());
+
+            if (element != nullptr)
+            {
+                for (const auto& attribute : element->attributes)
+                {
+                    if (attribute.refers() != "cue")
+                        continue;
+
+                    const juce::Identifier property { juce::String (std::string (attribute.name())) };
+
+                    if (! node.hasProperty (property))
+                        continue;
+
+                    const auto found = oldToNew.find (node[property].toString().toStdString());
+
+                    if (found != oldToNew.end())
+                        node.setProperty (property, juce::String (found->second), nullptr);
+                }
+            }
+
+            for (auto child : node)
+                repointReferences (child, oldToNew);
+        }
+    }
+
+    CanonicalXml::FragmentResult CanonicalXml::readFragment (std::string_view text, IdRegistry& registry,
+                                                             const std::vector<std::string>& ids)
+    {
+        FragmentResult result;
+
+        juce::XmlDocument parser { juce::String (std::string (text)) };
+        auto xml = parser.getDocumentElement();
+
+        if (xml == nullptr)
+        {
+            result.problem = "not a fragment: " + parser.getLastParseError().toStdString();
+            return result;
+        }
+
+        if (xml->getTagName() != "Fragment")
+        {
+            result.problem = "not a fragment: the root is <" + xml->getTagName().toStdString() + ">";
+            return result;
+        }
+
+        std::map<std::string, std::string> oldToNew;
+        std::size_t drawn = 0;
+
+        for (auto* child : xml->getChildIterator())
+            if (! child->isTextElement())
+                renameIdentities (*child, registry, ids, drawn, oldToNew, result.ids, result.problem);
+
+        if (! result.problem.empty())
+        {
+            result.ids.clear();
+            return result;
+        }
+
+        /*  Built with the document's own registry, so the new names are
+            reserved as they are read - and released again if anything in the
+            fragment is refused, since a paste that did not happen must leave
+            the registry as it found it. */
+        std::vector<std::string> problems;
+        Builder builder { registry, problems };
+
+        for (auto* child : xml->getChildIterator())
+        {
+            if (child->isTextElement())
+                continue;
+
+            if (auto built = builder.build (*child, ""); built.isValid())
+                result.nodes.push_back (built);
+        }
+
+        if (! problems.empty())
+        {
+            for (const auto& id : result.ids)
+                registry.release (id);
+
+            result.problem = problems.front();
+            result.nodes.clear();
+            result.ids.clear();
+            return result;
+        }
+
+        for (auto& node : result.nodes)
+            repointReferences (node, oldToNew);
+
+        result.ok = true;
+        return result;
+    }
+
     std::string CanonicalXml::canonicalise (std::string_view text, ReadResult& result)
     {
         ShowDocument document;
