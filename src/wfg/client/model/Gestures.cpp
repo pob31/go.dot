@@ -51,6 +51,11 @@ namespace wfg::client::gesture
     Event recover()         { return plain ("document.recover"); }
     Event discardRecovery() { return plain ("document.discardRecovery"); }
 
+    Event kill (const std::string& runId)
+    {
+        return { origin::window, "run.kill", { osc::Value::string (runId) } };
+    }
+
     Event setLocked (bool locked)
     {
         /*  A BOOLEAN, not the word "true": `node.set` takes its value as a

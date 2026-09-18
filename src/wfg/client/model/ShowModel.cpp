@@ -111,9 +111,13 @@ namespace wfg::client::model
             deliberately does not move it (M0). A model keyed on the revision
             alone would keep drawing the list somebody had just navigated away
             from. */
-        if (built && now == revision && listIdToDraw == listId)
+        /*  A FOLD IS A REASON TO REBUILD that the revision cannot express, for
+            the same reason the focused list is: neither is a change to the
+            show. */
+        if (built && now == revision && listIdToDraw == listId && ! foldsMoved)
             return false;
 
+        foldsMoved = false;
         revision = now;
         listId = std::string (listIdToDraw);
         built = true;
@@ -123,12 +127,7 @@ namespace wfg::client::model
         indexOfCue.clear();
 
         if (! listId.empty())
-        {
-            /*  THE PERSISTENT BAND FIRST, at the top, because it is what runs
-                as soon as the show starts - the author's own correction to the
-                page, made when they first saw it drawn at the bottom. */
             walk (snapshot, listId, true, 0);
-        }
 
         return true;
     }
@@ -146,19 +145,68 @@ namespace wfg::client::model
             return words (text (snapshot, address + name));
         };
 
+        /*  THE PERSISTENT BAND FIRST, at the top of the list, because it is
+            what runs as soon as the show starts - the author's own correction
+            to the page, made when they first saw it drawn at the bottom. A
+            group has no persistent section; a list has no header or footer of
+            its own. */
         if (isList)
-            for (const auto& id : members ("persistentOrder"))
-                append (snapshot, id, Section::persistent, depth, container);
+            section (snapshot, container, members ("persistentOrder"),
+                     Section::persistent, "persistent", depth);
         else
-            for (const auto& id : members ("headerOrder"))
-                append (snapshot, id, Section::header, depth, container);
+            section (snapshot, container, members ("headerOrder"),
+                     Section::header, "header", depth);
 
         for (const auto& id : members ("order"))
             append (snapshot, id, Section::member, depth, container);
 
         if (! isList)
-            for (const auto& id : members ("footerOrder"))
-                append (snapshot, id, Section::footer, depth, container);
+            section (snapshot, container, members ("footerOrder"),
+                     Section::footer, "footer", depth);
+    }
+
+    void ShowModel::section (const tree::TreeSnapshot& snapshot, const std::string& container,
+                             const std::vector<std::string>& ids, Section which,
+                             const char* word, int depth)
+    {
+        /*  NOTHING IS FRAMED WHEN THERE IS NOTHING TO FRAME. An empty section
+            is not a thing an operator needs told about; the page drops its band
+            for the same reason. */
+        if (ids.empty())
+            return;
+
+        Row head;
+        head.rowKind = RowKind::band;
+        head.section = which;
+        head.depth = depth;
+        head.parent = container;
+        head.name = word;
+        head.count = ids.size();
+        head.bandKey = container + "/" + word;
+        head.shut = folded.count (head.bandKey) != 0;
+
+        drawn.push_back (std::move (head));
+
+        if (drawn.back().shut)
+            return;
+
+        for (const auto& id : ids)
+            append (snapshot, id, which, depth, container);
+    }
+
+    void ShowModel::toggle (const std::string& bandKey)
+    {
+        if (folded.count (bandKey) != 0)
+            folded.erase (bandKey);
+        else
+            folded.insert (bandKey);
+
+        foldsMoved = true;
+    }
+
+    bool ShowModel::isShut (const std::string& bandKey) const
+    {
+        return folded.count (bandKey) != 0;
     }
 
     void ShowModel::append (const tree::TreeSnapshot& snapshot, const std::string& cueId,

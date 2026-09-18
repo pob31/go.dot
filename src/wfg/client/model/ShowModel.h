@@ -53,6 +53,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace wfg::tree { class TreeSnapshot; }
@@ -66,8 +67,29 @@ namespace wfg::client::model
         reading `order` is reading the cue list. */
     enum class Section { persistent, header, member, footer };
 
+    /*  A ROW IS A CUE OR IT IS A SECTION'S HEAD, and the list holds both in one
+        flat sequence - the page's own answer, and for the page's own reason:
+        there is no element around a section to put a border on, so the frame is
+        drawn by the rows themselves and a head is just another row.
+
+        A HEAD IS WHAT FOLDS (author, 2026-09-18: "I think we need a special
+        container for the persistent cues that can be folded or expanded"). It
+        carries the word, the count and the twist; §4.8 wants all three, because
+        a shape, a word and a number are three tellings and none of them is a
+        colour. */
+    enum class RowKind { cue, band };
+
     struct Row
     {
+        RowKind rowKind = RowKind::cue;
+
+        /*  A BAND'S OWN KEY, stable across rebuilds so a fold survives an edit:
+            the container's identifier and the section's word. A cue row leaves
+            it empty. */
+        std::string bandKey;
+        std::size_t count = 0;      ///< for a band: how many rows it heads
+        bool shut = false;          ///< for a band: whether those rows are hidden
+
         std::string id;
         std::string name;
         std::string kind;        ///< memo, media, fade, stop, group, osc, midi, …
@@ -104,7 +126,10 @@ namespace wfg::client::model
             offered a click on them, so the first thing the author did with the
             cue list was press two rows that could never take the pointer and
             get a log record where an answer should have been. */
-        bool mayPark() const noexcept { return section == Section::member; }
+        bool mayPark() const noexcept
+        {
+            return rowKind == RowKind::cue && section == Section::member;
+        }
     };
 
     class ShowModel
@@ -129,17 +154,34 @@ namespace wfg::client::model
         /** How many times a walk has actually run, for the counting test. */
         std::size_t rebuilds() const noexcept { return walks; }
 
+        /*  OPENS OR SHUTS A SECTION, by the key its head carries. The fold is
+            the CLIENT's and never the engine's (§14.1): what somebody has
+            collapsed on their screen is not something the show decided, and
+            writing it to the document would put one operator's screen into
+            everybody else's. It outlives a rebuild - an edit does not reopen
+            what you folded - which is why the set is keyed on the container
+            rather than on a row's position. */
+        void toggle (const std::string& bandKey);
+
+        /** Whether that section is currently shut. */
+        bool isShut (const std::string& bandKey) const;
+
     private:
         void walk (const tree::TreeSnapshot& snapshot, const std::string& container,
                    bool isList, int depth);
+        void section (const tree::TreeSnapshot& snapshot, const std::string& container,
+                      const std::vector<std::string>& ids, Section which,
+                      const char* word, int depth);
         void append (const tree::TreeSnapshot& snapshot, const std::string& cueId,
                      Section section, int depth, const std::string& parent);
 
         std::vector<Row> drawn;
         std::unordered_map<std::string, int> indexOfCue;
+        std::unordered_set<std::string> folded;
         std::string listId;
         std::uint64_t revision = 0;
         std::size_t walks = 0;
         bool built = false;
+        bool foldsMoved = false;
     };
 }

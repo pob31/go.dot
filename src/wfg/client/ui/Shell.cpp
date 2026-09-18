@@ -24,9 +24,11 @@ namespace wfg::client::ui
 {
     Shell::Shell (const model::Theme& theme,
                   TransportComponent::Actions transportActions,
-                  CueListComponent::Actions listActions)
+                  CueListComponent::Actions listActions,
+                  RunPaneComponent::Actions runActions)
         : transport (theme, std::move (transportActions)),
-          cues (theme, std::move (listActions))
+          cues (theme, std::move (listActions)),
+          runs (theme, std::move (runActions))
     {
         /*  NEITHER PANE TAKES THE FOCUS: it rests here, and `keyPressed` below
             offers each key to both. */
@@ -39,6 +41,7 @@ namespace wfg::client::ui
 
         addAndMakeVisible (transport);
         addAndMakeVisible (cues);
+        addAndMakeVisible (runs);
 
         setWantsKeyboardFocus (true);
     }
@@ -47,6 +50,7 @@ namespace wfg::client::ui
     {
         transport.applyTheme (theme);
         cues.applyTheme (theme);
+        runs.applyTheme (theme);
         resized();
         repaint();
     }
@@ -57,6 +61,14 @@ namespace wfg::client::ui
 
         transport.setBounds (area.removeFromTop (juce::jmin (transport.preferredHeight(),
                                                              area.getHeight())));
+
+        /*  WHAT THE SHOW WILL DO ON THE LEFT, WHAT IT IS DOING ON THE RIGHT.
+            The page keeps Didi and Gogo apart for the same reason and the
+            author reads them that way; the inspector arrives between them
+            when something is picked, which is the arrangement they settled on
+            the page (§14.3) and the space this split leaves room for. */
+        runs.setBounds (area.removeFromRight (juce::jmax (area.getWidth() * 2 / 5,
+                                                          juce::jmin (area.getWidth(), 220))));
         cues.setBounds (area);
     }
 

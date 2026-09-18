@@ -34,6 +34,7 @@
 
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CueListComponent.h>
+#include <wfg/client/ui/RunPaneComponent.h>
 #include <wfg/client/ui/TransportComponent.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -45,7 +46,8 @@ namespace wfg::client::ui
     public:
         Shell (const model::Theme& theme,
                TransportComponent::Actions transportActions,
-               CueListComponent::Actions listActions);
+               CueListComponent::Actions listActions,
+               RunPaneComponent::Actions runActions);
 
         void applyTheme (const model::Theme& theme);
 
@@ -54,6 +56,7 @@ namespace wfg::client::ui
 
         TransportComponent transport;
         CueListComponent cues;
+        RunPaneComponent runs;
 
     private:
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Shell)

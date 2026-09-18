@@ -130,17 +130,26 @@ namespace wfg::client::ui
             return;
 
         const auto& entry = rows[static_cast<std::size_t> (row)];
+
+        if (entry.rowKind == model::RowKind::band)
+        {
+            paintBand (entry, row, g, width, height);
+            return;
+        }
+
         const auto isStandby = row == standbyRow;
 
         const auto ink = Look::colour (theme, entry.enabled ? "ink" : "ink-off");
         const auto faint = Look::colour (theme, "ink-faint");
         const auto standbyColour = Look::colour (theme, "standby");
 
-        /*  A SECTION READS AS A BAND, and a member of a group reads as indented
-            under it: two different questions, drawn two different ways, because
-            a header IS not a member and drawing them alike is what made the
-            page's own header lines ambiguous until they got a frame. */
-        g.fillAll (entry.section != model::Section::member
+        /*  A SECTION READS AS A BAND AND ANYTHING INSIDE SOMETHING READS AS
+            RECESSED - the page's `.row[data-in]` ground, which is the other
+            half of what makes a container legible there. Two different
+            questions drawn two different ways: a header is not a member, and
+            drawing them alike is what made the page's own header lines
+            ambiguous until they got a frame. */
+        g.fillAll (entry.section != model::Section::member || entry.depth > 0
                      ? Look::colour (theme, "panel-in")
                      : Look::colour (theme, row % 2 == 0 ? "panel" : "panel-high"));
 
@@ -156,6 +165,27 @@ namespace wfg::client::ui
         const auto pad = unit / 2;
 
         auto area = juce::Rectangle<int> (0, 0, width, height).reduced (pad, 0);
+
+        /*  THE GUTTER, WHICH IS THE ONLY PLACE A CLICK PARKS (author,
+            2026-09-18: "so far selection on the full line sets the stand-by and
+            not the far left of each row"). The page has had it this way since
+            Didi was drawn - `commands.json` says park is "a row's left edge" -
+            because the rest of the row is going to mean SELECT the moment the
+            inspector exists, and a gesture that has to be taken back from the
+            whole row later is one people will have learned by then.
+
+            The pointer's own mark lives here too, at the far left where the
+            eye runs down looking for it, rather than beside the name where it
+            moved with the indent. */
+        const auto gutter = area.removeFromLeft (unit * 2);
+
+        if (isStandby)
+        {
+            g.setColour (standbyColour);
+            g.setFont (Look::font (theme, 13.0f));
+            g.drawText (juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb6")),
+                        gutter, juce::Justification::centred, false);
+        }
 
         //  The times, on the right, in the order somebody works in.
         g.setFont (Look::font (theme, 12.0f));
@@ -178,17 +208,56 @@ namespace wfg::client::ui
         g.setFont (Look::font (theme, 12.0f));
         g.drawText (entry.number, numberCell, juce::Justification::centredLeft, false);
 
-        area.removeFromLeft (entry.depth * unit * 2);
+        /*  WHAT HOLDS WHAT, DRAWN AS THE PAGE DRAWS IT (author, 2026-09-18:
+            "containers are not as clear as on the webview"). Indentation alone
+            says a row is further right; it does not say what it is inside.
 
-        /*  THE POINTER IS A GLYPH AS WELL AS A COLOUR (§4.8), and a group is a
-            triangle, so neither of the two things this column says is said by
-            colour alone. */
-        auto markCell = area.removeFromLeft (unit * 2);
-        g.setColour (isStandby ? standbyColour : faint);
+            THE FRAME IS A RAIL AND TWO CORNERS AND NEVER A BOX - styles.css's
+            own words, and for the same reason here as there: this is one flat
+            list of rows and there is nothing around a group to put a border
+            on. So each contained row draws the same one-pixel rule down its
+            left; the container's own row starts that rule under itself; and
+            the last row inside turns it right and stops it. Three rows drawing
+            one shape, which holds together only because all three measure the
+            rail from the same left edge. */
+        const auto indent = unit * 2;
+        const auto railsFrom = area.getX();
+
+        const auto railX = [railsFrom, indent] (int level)
+        { return railsFrom + (level - 1) * indent + indent / 2; };
+
+        const auto middle = height / 2;
+
+        g.setColour (Look::colour (theme, "rule"));
+
+        for (int level = 1; level <= entry.depth; ++level)
+        {
+            /*  Does this level's run end on this row? The walk lays a
+                container's rows out contiguously, so the next row shallower
+                than the level is where that level closes. */
+            const auto next = static_cast<std::size_t> (row) + 1;
+            const auto closes = next >= rows.size() || rows[next].depth < level;
+
+            g.fillRect (railX (level), 0, 1, closes ? middle : height);
+
+            if (closes)
+                g.fillRect (railX (level), middle, indent / 2, 1);
+        }
+
+        /*  And a container opens its children's rail under itself, so the eye
+            can follow one line from the group to the last thing inside it. */
+        if (entry.isGroup)
+            g.fillRect (railX (entry.depth + 1), middle, 1, height - middle);
+
+        area.removeFromLeft (entry.depth * indent);
+
+        /*  A GROUP SAYS SO WITH A SHAPE as well as with its mode in words and
+            its rail (§4.8): three tellings, not one, and none of them colour. */
+        auto markCell = area.removeFromLeft (indent);
+        g.setColour (faint);
         g.setFont (Look::font (theme, 13.0f));
-        g.drawText (isStandby ? juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xb6"))
-                              : entry.isGroup ? juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"))
-                                              : juce::String(),
+        g.drawText (entry.isGroup ? juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"))
+                                  : juce::String(),
                     markCell, juce::Justification::centredLeft, false);
 
         g.setColour (ink);
@@ -205,19 +274,96 @@ namespace wfg::client::ui
         g.fillRect (0, height - 1, width, 1);
     }
 
-    void CueListComponent::listBoxItemClicked (int row, const juce::MouseEvent&)
+    void CueListComponent::paintBand (const model::Row& entry, int row, juce::Graphics& g,
+                                      int width, int height)
     {
-        /*  A CLICK PARKS THE POINTER, and at M3 that is the only way into a
-            list whose standby is clear: `standby.next` stays put from nowhere,
-            which is the engine's decision and a reasonable one - an arrow key
-            should not invent a starting point. Selection, which is what a
-            click will ALSO mean once the inspector exists, is M5's; when it
-            arrives this becomes a click on the row's left edge, as the page
-            already draws it. */
+        /*  A SECTION'S HEAD: the word, how many lines it holds, and a twist -
+            three tellings, and not one of them a colour (§4.8). The page's
+            band, in a list box rather than a stylesheet.
+
+            THE FRAME IS ITS TOP EDGE. The head draws the rule over the word and
+            the corner the rail comes down from; the rows inside draw that rail;
+            the last of them turns it right. A shut section keeps the rule -
+            that is what parts it from the rows above, open or shut - and loses
+            the rail, which would otherwise hang off the bottom with nothing to
+            enclose. */
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+        const auto pad = unit / 2;
+        const auto indent = unit * 2;
+
+        g.fillAll (Look::colour (theme, "panel-in"));
+
+        auto area = juce::Rectangle<int> (0, 0, width, height).reduced (pad, 0);
+        area.removeFromLeft (unit * 2 + numberChars * unit);
+
+        const auto left = area.getX() + entry.depth * indent;
+
+        g.setColour (Look::colour (theme, "rule"));
+        g.fillRect (left, 0, width - left - pad, 1);
+
+        if (! entry.shut)
+            g.fillRect (left, 0, 1, height);
+
+        auto text = area.withTrimmedLeft (entry.depth * indent + pad);
+
+        /*  THE TWIST IS A SHAPE: pointing down when the section is open and
+            right when it is shut, which is the one convention every file tree
+            has taught everybody already. */
+        auto twist = text.removeFromLeft (indent);
+        g.setColour (Look::colour (theme, "ink-dim"));
+        g.setFont (Look::font (theme, 11.0f));
+        g.drawText (juce::String (juce::CharPointer_UTF8 (entry.shut ? "\xe2\x96\xb8" : "\xe2\x96\xbe")),
+                    twist, juce::Justification::centredLeft, false);
+
+        auto word = juce::String (entry.name).toUpperCase();
+        g.setColour (Look::colour (theme, "ink-dim"));
+        g.setFont (Look::font (theme, 10.0f));
+        const auto wordWidth = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), word) + pad;
+        g.drawText (word, text.removeFromLeft (wordWidth), juce::Justification::centredLeft, false);
+
+        /*  AND THE COUNT SAYS HOW MUCH: how many lines the section holds, or
+            how many are hidden while it is shut. The dimmer grey, which is the
+            only thing in a head that ranks the two. */
+        g.setColour (Look::colour (theme, "ink-faint"));
+        g.drawText (juce::String (static_cast<int> (entry.count))
+                      + (entry.shut ? " hidden" : ""),
+                    text, juce::Justification::centredLeft, false);
+
+        juce::ignoreUnused (row);
+    }
+
+    void CueListComponent::listBoxItemClicked (int row, const juce::MouseEvent& event)
+    {
+        /*  A CLICK IN THE GUTTER PARKS THE POINTER, and only there. At M3 this
+            is the only way into a list whose standby is clear - `standby.next`
+            stays put from nowhere, which is the engine's decision and a
+            reasonable one, since an arrow should not invent a starting point.
+
+            THE REST OF THE ROW IS LEFT ALONE ON PURPOSE. It will mean SELECT
+            when the inspector arrives, and a gesture taken back from the whole
+            row later is one somebody will have learned by then; the page has
+            parked from the left edge since Didi was drawn, and
+            `commands.json` says so in as many words. */
         if (row < 0 || row >= static_cast<int> (rows.size()))
             return;
 
         const auto& entry = rows[static_cast<std::size_t> (row)];
+
+        /*  A BAND IS ALL TARGET. The head is small and the twist smaller, and
+            a word missed by a pixel should still open the section - which is
+            the page's own reasoning about its `[data-fold]` head. */
+        if (entry.rowKind == model::RowKind::band)
+        {
+            if (actions.fold)
+                actions.fold (entry.bandKey);
+
+            return;
+        }
+
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+
+        if (event.x > unit * 2 + unit / 2)
+            return;
 
         /*  AND A ROW THAT CANNOT TAKE THE POINTER SAYS SO rather than being
             sent and refused. The engine answers `standby.set` on a header, a

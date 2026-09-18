@@ -52,6 +52,7 @@
 #include <wfg/engine/command/Event.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/document/Bundle.h>
@@ -65,6 +66,7 @@
 #include <juce_core/juce_core.h>
 
 #include <cstdint>
+#include <algorithm>
 #include <memory>
 #include <set>
 #include <string>
@@ -491,13 +493,14 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     cue::Runner runner { rig.document, rig.runs, runIds, focus };
 
     cue::registerCueCommands (rig.engine.commands(), rig.document, focus);
+    cue::registerRunCommands (rig.engine.commands(), rig.runs);
     doc::registerBundleCommands (rig.engine.commands(), rig.document, session, writer);
     cue::registerGoCommands (rig.engine.commands(), rig.engine, runner, rig.document, focus, runIds);
 
     const std::vector<Event> gestures
     {
         gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
-        gesture::park ("B3N8R5TW"),
+        gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
         gesture::undo(), gesture::redo(), gesture::save(), gesture::revert(),
         gesture::recover(), gesture::discardRecovery(),
         gesture::setLocked (true), gesture::setLocked (false),
@@ -570,9 +573,12 @@ TEST_CASE ("client: the cue list is the show's own order, with groups nested ins
     const auto& rows = show.rows();
     REQUIRE_FALSE (rows.empty());
 
-    //  Every row is findable by id, and the index agrees with the position.
+    /*  Every CUE row is findable by id, and the index agrees with its
+        position. A band is not a cue and is in no index: it names a section,
+        not a thing the show can act on. */
     for (std::size_t i = 0; i < rows.size(); ++i)
-        CHECK (show.indexOf (rows[i].id) == static_cast<int> (i));
+        if (rows[i].rowKind == model::RowKind::cue)
+            CHECK (show.indexOf (rows[i].id) == static_cast<int> (i));
 
     CHECK (show.indexOf ("ZZZZZZZZ") == -1);
 
@@ -602,9 +608,13 @@ TEST_CASE ("client: the cue list is the show's own order, with groups nested ins
 
     for (const auto& row : rows)
     {
-        CHECK (seen.insert (row.id).second);
         CHECK (row.depth >= 0);
         CHECK (row.depth <= 64);
+
+        if (row.rowKind != model::RowKind::cue)
+            continue;
+
+        CHECK (seen.insert (row.id).second);
         CHECK_FALSE (row.kind.empty());
     }
 }
@@ -661,4 +671,86 @@ TEST_CASE ("client: the cue list is rebuilt when the show moves, and not when th
     CHECK (show.rebuilds() == 3);
     CHECK (show.rows().empty());                      // a list that is not there draws nothing
     CHECK (show.list() == "SOMEOTHERLIST");
+}
+
+//==============================================================================
+TEST_CASE ("client: a section is a band that folds, and the fold is the client's alone")
+{
+    /*  The author, 2026-09-18, having asked whether the header and footer
+        sections were present at all: "I think we need a special container for
+        the persistent cues that can be folded or expanded". They were present
+        as rows and not as frames, which is why they did not read as sections.
+
+        A BAND IS A ROW, in the same flat list as the cues - the page's answer,
+        and for the page's reason: there is nothing around a section to put a
+        border on, so the frame is drawn by the rows themselves. */
+    Rig rig { "phase4" };
+    const auto snapshot = rig.publish (0);
+
+    const auto listId = model::readTransport (*snapshot).listId;
+    REQUIRE_FALSE (listId.empty());
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*snapshot, listId));
+
+    const auto bandsIn = [] (const model::ShowModel& model)
+    {
+        std::vector<model::Row> found;
+
+        for (const auto& row : model.rows())
+            if (row.rowKind == model::RowKind::band)
+                found.push_back (row);
+
+        return found;
+    };
+
+    const auto bands = bandsIn (show);
+    REQUIRE_FALSE (bands.empty());
+
+    //  phase4 has a footer inside its group and a persistent section on the list.
+    bool sawPersistent = false, sawFooter = false;
+
+    for (const auto& band : bands)
+    {
+        CHECK (band.count > 0);                       // an empty section is not framed at all
+        CHECK_FALSE (band.bandKey.empty());
+        CHECK_FALSE (band.mayPark());                 // a band is not a cue and takes no pointer
+
+        if (band.section == model::Section::persistent) sawPersistent = true;
+        if (band.section == model::Section::footer)     sawFooter = true;
+    }
+
+    CHECK (sawPersistent);
+    CHECK (sawFooter);
+
+    /*  SHUTTING ONE HIDES ITS ROWS AND KEEPS ITS HEAD, so the count is still
+        there to say how much is hidden. */
+    const auto persistent = std::find_if (bands.begin(), bands.end(),
+                                          [] (const model::Row& b)
+                                          { return b.section == model::Section::persistent; });
+    REQUIRE (persistent != bands.end());
+
+    const auto before = show.rows().size();
+
+    show.toggle (persistent->bandKey);
+    CHECK (show.isShut (persistent->bandKey));
+
+    //  A fold is a reason to rebuild that the revision cannot express.
+    CHECK (show.refresh (*snapshot, listId));
+    CHECK (show.rows().size() == before - persistent->count);
+
+    const auto shutBands = bandsIn (show);
+    const auto stillThere = std::find_if (shutBands.begin(), shutBands.end(),
+                                          [&] (const model::Row& b)
+                                          { return b.bandKey == persistent->bandKey; });
+
+    REQUIRE (stillThere != shutBands.end());
+    CHECK (stillThere->shut);
+    CHECK (stillThere->count == persistent->count);   // it still says how much is hidden
+
+    //  And opening it again puts them back.
+    show.toggle (persistent->bandKey);
+    CHECK_FALSE (show.isShut (persistent->bandKey));
+    CHECK (show.refresh (*snapshot, listId));
+    CHECK (show.rows().size() == before);
 }

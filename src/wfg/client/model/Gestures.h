@@ -75,4 +75,9 @@ namespace wfg::client::gesture
 
     /** Show mode, written as the node it is. */
     Event setLocked (bool locked);
+
+    /*  Stops one run and everything under it. The running pane's cross, and
+        only the cross: a cue stopped by a click that landed anywhere on a row
+        is a cue nobody meant to stop. */
+    Event kill (const std::string& runId);
 }

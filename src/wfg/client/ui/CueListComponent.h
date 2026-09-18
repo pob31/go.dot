@@ -65,6 +65,9 @@ namespace wfg::client::ui
 
             /** A sentence for the reader, when a gesture is declined before it is sent. */
             std::function<void (const juce::String&)> say;
+
+            /** Opens or shuts a section, by the key its head carries. */
+            std::function<void (const std::string&)> fold;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);
@@ -83,6 +86,7 @@ namespace wfg::client::ui
         void paintListBoxItem (int row, juce::Graphics& g, int width, int height,
                                bool rowIsSelected) override;
         void listBoxItemClicked (int row, const juce::MouseEvent& event) override;
+        void paintBand (const model::Row& entry, int row, juce::Graphics& g, int width, int height);
 
         Actions actions;
         model::Theme theme;

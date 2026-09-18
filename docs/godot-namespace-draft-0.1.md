@@ -6770,6 +6770,39 @@ opened that file, which is the argument `undoName` already makes. Anything that 
 five fields is shown whole, so a format change is visible rather than swallowed. Whether the reason
 codes themselves should read as English is the author's, and is open.
 
+**WHAT THE AUTHOR'S FIRST HOUR WITH THE WINDOW CHANGED (2026-09-18).** They opened it, used it, and
+said four things; all four are built and three of them were the plan's later milestones brought
+forward, because a layout cannot be judged one pane at a time.
+
+- ***"Selection on the full line sets the stand-by and not the far left of each row."*** Park is the
+  left gutter now, where the pointer's own mark also moved. The rest of the row is deliberately
+  inert: it becomes SELECT when the inspector arrives, and a gesture taken back from a whole row
+  later is one somebody will have learned by then. `commands.json` has said *"a row's left edge"*
+  since Didi was drawn.
+- ***"Containers are not as clear as on the webview."*** They were indented and nothing else.
+  `styles.css`'s shape is now the window's: **a rail and two corners and never a box** - a recessed
+  ground, a one-pixel rule down every contained row, a container starting that rule under itself,
+  and the last row inside turning it right and stopping it. The author's word for the result was
+  *"filetree view"*, which is the shape a file tree has taught everybody already.
+- ***"We're missing the running cues and the Inspector."*** The running pane is built, beside the
+  cue list: the state as a mark for the two an operator recognises and a word for the six they read,
+  the CUE's name rather than a run identifier nobody knows, the position, and a failure's reason in
+  place of the name. A cross at the right edge kills one run - the mirror of the park gutter, and
+  for the same reason. **It is read fresh every pass and the cue list is not**, which is the whole
+  of the two-rate design in one sentence: runs have no revision to key on, because a run is not a
+  decision anybody recorded (§4.10).
+- ***"Are the header and footer sections already present? I think we need a special container for
+  the persistent cues that can be folded or expanded."*** They were present as ROWS and not as
+  FRAMES, which is exactly why the question arose. All three sections are bands now, and they fold:
+  a twist, the word and a count - three tellings and not one a colour (§4.8) - with the count
+  becoming *"N hidden"* when shut, so a folded section still says how much is behind it. **The fold
+  is the client's and never the engine's** (§14.1): it never reaches `submit`, and it survives an
+  edit because the set is keyed on the container rather than a row's position. It does not yet
+  survive a restart; the page keeps that in `localStorage` and the window will want a small file.
+
+**And the inspector is what M5's selection is for**, which is why the rest of the row stays inert
+until it exists. That is the next thing the author asked for and the next thing to build.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

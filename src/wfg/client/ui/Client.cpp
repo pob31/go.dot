@@ -49,6 +49,7 @@
 #include <wfg/client/Client.h>
 
 #include <wfg/client/model/Gestures.h>
+#include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
@@ -111,8 +112,19 @@ namespace wfg::client
                                               { shell->transport.setNotice (sentence); };
                 listActions.go              = [this] { send (gesture::go()); };
 
+                /*  A FOLD IS THIS CLIENT'S AND NEVER THE ENGINE'S (§14.1): what
+                    somebody collapsed on their screen is not something the show
+                    decided, so it goes to the model and nowhere near `submit`. */
+                listActions.fold            = [this] (const std::string& key)
+                                              { show.toggle (key); };
+
+                ui::RunPaneComponent::Actions runActions;
+
+                runActions.kill = [this] (const std::string& id) { send (gesture::kill (id)); };
+
                 auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
-                                                            std::move (listActions));
+                                                            std::move (listActions),
+                                                            std::move (runActions));
                 shell = content.get();
 
                 window = std::make_unique<ui::MainWindow> (titleFor (""),
@@ -169,6 +181,10 @@ namespace wfg::client
                     about which tick they are drawing. */
                 show.refresh (*snapshot, reading.listId);
                 shell->cues.show (show, reading.standbyId);
+
+                /*  And the present tense, read fresh: runs have no revision to
+                    key on, because a run is not a decision anybody recorded. */
+                shell->runs.show (model::readRuns (*snapshot));
 
                 last = reading;
             }
