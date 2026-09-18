@@ -126,7 +126,19 @@ namespace wfg::client::ui
         editor.setMultiLine (false);
         editor.onReturnKey = [this] { commitEdit(); };
         editor.onEscapeKey = [this] { cancelEdit(); };
-        editor.onFocusLost = [this] { if (editing()) commitEdit(); };
+        /*  A FOCUS LOSS THAT ARRIVES LATE IS NOT ONE. The editor's callback is
+            posted, not called: it lands on the next pass of the message
+            loop. An arrow moving the edit hides the box (posting the loss),
+            opens it again on the next row with the focus, and only then is
+            the stale loss delivered - and it used to commit and shut the new
+            box, which is why the arrows seemed to do nothing (traced
+            2026-09-18). A loss reported while the box has the focus is
+            that stale one, and is ignored. */
+        editor.onFocusLost = [this]
+        {
+            if (editing() && ! editor.hasKeyboardFocus (true))
+                commitEdit();
+        };
 
         if (auto* surface = list.getViewport()->getViewedComponent())
             surface->addChildComponent (editor);
@@ -279,9 +291,10 @@ namespace wfg::client::ui
             return;
 
         //  The first click's cell when it was this cue's, for the same reason as above.
+        const auto rowWidth = event.eventComponent != nullptr ? event.eventComponent->getWidth() : list.getWidth();
         const auto aimed = lastClickId == entry.id && lastClickCell != model::EditCell::none
                              ? lastClickCell
-                             : cellAt (entry, event.x, list.getWidth(), rowHeight());
+                             : cellAt (entry, event.x, rowWidth, rowHeight());
 
         openCell (row, aimed);
     }
@@ -969,8 +982,11 @@ namespace wfg::client::ui
                 - shift under a pointer that has not moved; the second click
                 then reads as another column, or none. What the hand aimed at
                 is what it aimed at first. */
+            /*  The row component's own width, not the list's: the list is a
+                scrollbar wider, and the cells are carved from the right. */
+            const auto rowWidth = event.eventComponent != nullptr ? event.eventComponent->getWidth() : list.getWidth();
             const auto now = juce::Time::getMillisecondCounter();
-            const auto cell = cellAt (entry, event.x, list.getWidth(), rowHeight());
+            const auto cell = cellAt (entry, event.x, rowWidth, rowHeight());
             const auto plain = ! event.mods.isShiftDown() && ! event.mods.isCommandDown();
             const auto second = plain && lastClickId == entry.id
                              && now - lastClickAt <= static_cast<juce::uint32> (juce::MouseEvent::getDoubleClickTimeout());
