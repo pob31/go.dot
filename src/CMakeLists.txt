@@ -255,6 +255,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Gestures.cpp
     wfg/client/model/Media.h
     wfg/client/model/Media.cpp
+    wfg/client/model/NewCue.h
+    wfg/client/model/NewCue.cpp
     wfg/client/model/Inspector.h
     wfg/client/model/Inspector.cpp
     wfg/client/model/RunModel.h
@@ -286,6 +288,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/MainWindow.cpp
     wfg/client/ui/InspectorComponent.h
     wfg/client/ui/InspectorComponent.cpp
+    wfg/client/ui/NewCueBarComponent.h
+    wfg/client/ui/NewCueBarComponent.cpp
     wfg/client/ui/RunPaneComponent.h
     wfg/client/ui/RunPaneComponent.cpp
     wfg/client/ui/Shell.h

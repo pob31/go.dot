@@ -26,11 +26,13 @@ namespace wfg::client::ui
                   TransportComponent::Actions transportActions,
                   CueListComponent::Actions listActions,
                   RunPaneComponent::Actions runActions,
-                  InspectorComponent::Actions inspectorActions)
+                  InspectorComponent::Actions inspectorActions,
+                  NewCueBarComponent::Actions newCueActions)
         : transport (theme, std::move (transportActions)),
           cues (theme, std::move (listActions)),
           runs (theme, std::move (runActions)),
-          inspector (theme, std::move (inspectorActions))
+          inspector (theme, std::move (inspectorActions)),
+          newCues (theme, std::move (newCueActions))
     {
         /*  NEITHER PANE TAKES THE FOCUS: it rests here, and `keyPressed` below
             offers each key to both. */
@@ -42,6 +44,7 @@ namespace wfg::client::ui
         transport.onHeightChanged = [this] { resized(); };
 
         addAndMakeVisible (transport);
+        addAndMakeVisible (newCues);
         addAndMakeVisible (cues);
         addAndMakeVisible (runs);
 
@@ -54,6 +57,7 @@ namespace wfg::client::ui
     void Shell::applyTheme (const model::Theme& theme)
     {
         transport.applyTheme (theme);
+        newCues.applyTheme (theme);
         cues.applyTheme (theme);
         runs.applyTheme (theme);
         inspector.applyTheme (theme);
@@ -84,7 +88,25 @@ namespace wfg::client::ui
             inspector.setBounds (area.removeFromRight (juce::jmax (area.getWidth() * 2 / 5,
                                                                    juce::jmin (area.getWidth(), 240))));
 
+        /*  THE NEW-CUE ROW OVER THE LIST, in the list's own column and only
+            while the show may be edited: a row that never moves is the point
+            of it, so it is above the list rather than in the inspector, which
+            comes and goes with the pick. */
+        if (editing)
+            newCues.setBounds (area.removeFromTop (juce::jmin (newCues.preferredHeight(),
+                                                               area.getHeight())));
+
         cues.setBounds (area);
+    }
+
+    void Shell::setEditing (bool editable)
+    {
+        if (editable == editing)
+            return;
+
+        editing = editable;
+        newCues.setVisible (editable);
+        resized();
     }
 
     void Shell::setInspecting (bool showing)

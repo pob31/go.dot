@@ -98,7 +98,11 @@ namespace wfg::client::ui
             layOut();
         };
         sayWhetherDetailsAreOpen();
-        addAndMakeVisible (detailsButton);
+        /*  THE FOLD'S HEAD LIVES AMONG THE LINES, not at the foot of the
+            pane: the author found it "sitting at the bottom of the window"
+            (2026-09-18), a screen away from the fields it folds. It stands
+            where the details begin, so opening it puts them right under it. */
+        content.addAndMakeVisible (detailsButton);
 
         viewport.setViewedComponent (&content, false);
         viewport.setScrollBarsShown (true, false);
@@ -468,9 +472,19 @@ namespace wfg::client::ui
         const auto nameWidth = juce::jmax (60, width * 2 / 5);
 
         auto y = pad;
+        auto detailsPlaced = false;
 
         for (auto& line : lines)
         {
+            /*  The details button heads the first detail line, open or shut,
+                so it is always just under the last ordinary field. */
+            if (line->isDetail && ! detailsPlaced && detailsButton.isVisible())
+            {
+                detailsButton.setBounds (pad, y + pad / 2, juce::jmin (width, row * 4), row);
+                y += row + pad;
+                detailsPlaced = true;
+            }
+
             const auto hidden = line->isDetail && ! detailsOpen;
 
             line->name.setVisible (! hidden);
@@ -556,9 +570,6 @@ namespace wfg::client::ui
         auto top = area.removeFromTop (row + row / 3).withTrimmedTop (row / 3);
         closeButton.setBounds (top.removeFromRight (row).reduced (2));
         heading.setBounds (top);
-
-        if (detailsButton.isVisible())
-            detailsButton.setBounds (area.removeFromBottom (row).reduced (2));
 
         viewport.setBounds (area);
         layOut();

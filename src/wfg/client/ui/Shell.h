@@ -35,6 +35,7 @@
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CueListComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
+#include <wfg/client/ui/NewCueBarComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
 #include <wfg/client/ui/TransportComponent.h>
 
@@ -49,7 +50,8 @@ namespace wfg::client::ui
                TransportComponent::Actions transportActions,
                CueListComponent::Actions listActions,
                RunPaneComponent::Actions runActions,
-               InspectorComponent::Actions inspectorActions);
+               InspectorComponent::Actions inspectorActions,
+               NewCueBarComponent::Actions newCueActions);
 
         void applyTheme (const model::Theme& theme);
 
@@ -60,6 +62,13 @@ namespace wfg::client::ui
         CueListComponent cues;
         RunPaneComponent runs;
         InspectorComponent inspector;
+        NewCueBarComponent newCues;
+
+        /*  THE NEW-CUE ROW STANDS WHILE THE SHOW MAY BE EDITED and goes when
+            it is locked (author, 2026-09-18: "Lock makes them disappear"). A
+            button that would only be refused is not offered, and a show in
+            show mode reads as one: the list takes the row back. */
+        void setEditing (bool editable);
 
         /*  THE INSPECTOR STANDS DOWN WHEN NOTHING IS PICKED, which is the
             arrangement the author settled on the page: the two list panes have
@@ -68,6 +77,7 @@ namespace wfg::client::ui
 
     private:
         bool inspecting = false;
+        bool editing = true;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Shell)
     };

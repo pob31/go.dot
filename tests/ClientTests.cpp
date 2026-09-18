@@ -45,6 +45,7 @@
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Media.h>
+#include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
@@ -996,6 +997,50 @@ TEST_CASE ("client: an import names its cue after the file, and finds what the c
     CHECK_FALSE (model::madeByImport (job, "group", "Thunder", ""));     // not a media cue
     CHECK_FALSE (model::madeByImport (job, "media", "Rain", ""));        // somebody else's
     CHECK_FALSE (model::madeByImport (job, "media", "Thunder", "Rain.wav"));  // already named
+}
+
+//==============================================================================
+TEST_CASE ("client: the new-cue row offers every kind the engine makes, and lands after the pick")
+{
+    /*  The author's row of buttons (2026-09-18): "a stable UI for this. Lock
+        makes them disappear. It also helps getting started." What can be
+        asserted without a window is that every button is a word `cue.create`
+        accepts - the list and the engine held together here, so a kind the
+        engine grows or drops shows up as a failing case and not as a button
+        that is always refused - and where the cue goes. */
+    Rig rig;
+
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    REQUIRE_FALSE (listId.empty());
+
+    auto tick = std::int64_t { 1 };
+
+    for (const auto& kind : model::cueKinds())
+    {
+        const auto outcome = rig.apply (tick++, "window", "cue.create",
+                                        { osc::Value::string (listId), osc::Value::int32 (0),
+                                          osc::Value::string (kind), osc::Value::string ("") });
+        CHECK_MESSAGE (outcome.applied == 1, kind);
+        CHECK_MESSAGE (rig.engine.lastError().empty(), kind << ": " << rig.engine.lastError());
+    }
+
+    /*  AFTER THE PICKED CUE, in member positions - which is index + 1, and
+        the end when the pick is not among those members: a cue deleted from
+        the page a moment ago, or a picture a pass behind. */
+    CHECK (model::positionAfter ("A B C", "A") == 1);
+    CHECK (model::positionAfter ("A B C", "C") == 3);
+    CHECK (model::positionAfter ("A B C", "Z") == -1);
+    CHECK (model::positionAfter ("", "A") == -1);
+    CHECK (model::positionAfter ("A B C", "") == -1);
+
+    /*  And the guard on finding what the create made: the kind and no name
+        yet, because a new cue is made unnamed so that naming it is the next
+        thing typed. */
+    const model::Creation job { "L1", 2, "fade", 7, 0 };
+
+    CHECK (model::madeByCreate (job, "fade", ""));
+    CHECK_FALSE (model::madeByCreate (job, "stop", ""));       // another kind
+    CHECK_FALSE (model::madeByCreate (job, "fade", "Lights"));  // somebody else's, named already
 }
 
 //==============================================================================

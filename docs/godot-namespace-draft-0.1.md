@@ -7077,6 +7077,25 @@ difference between this and the lock: **a client does not offer a gesture it cou
 refused**, and a drop into a locked show is refused here, before anything is copied, because bytes
 left in `media/` for a cue that was never made are litter nobody asked for.
 
+**A ROW OF NEW-CUE BUTTONS THAT DOES NOT MOVE (2026-09-18).** Until this round the window could make a
+cue only by being handed a file. The page's add buttons live in its inspector and follow the pick;
+asked whether the desktop should copy them, the author chose otherwise: *"I would place buttons so
+people have a stable UI for this. Lock makes them disappear. It also helps getting started."* So the
+window has one row over the cue list, one button per kind - memo, media, fade, stop, OSC, MIDI, group -
+that is the same row whatever is picked, and that the lock removes rather than dims: a show in show
+mode has no way to grow, and reads as one. **Where the cue lands is the page's rule**, after the picked
+cue in the picked cue's own parent (a group is a cue, so a new cue lands after the group as a whole),
+or at the end of the focused list when nothing is picked; the tooltip says which. **`+ media` is the
+native Open followed by the import**, so a media cue made here is never left without its file, which
+is the one thing the page's own `+ media` cannot do (decision Y). **The cue is made unnamed and then
+picked**: the create is followed by finding what it made, as an import is, and the inspector opens on
+it so the name is the next thing typed. Picking is the client's own state, so the guard on that finding
+(the kind, and no name yet) costs nothing when a stranger passes it. Rule 3 holds by construction:
+every button is `cue.create`, reachable from the page - and building the row from one list of kinds
+found that the page's list had stopped at OSC, so MIDI was added there in the same commit. The
+inspector's details fold moved in the same round: its button sat at the foot of the pane, a screen
+away from the fields it folds, and now heads the detail lines themselves.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

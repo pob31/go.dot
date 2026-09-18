@@ -51,6 +51,7 @@
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Media.h>
+#include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
@@ -151,10 +152,18 @@ namespace wfg::client
                 inspectorActions.chooseFile = [this] (const std::string& cueId)
                                               { chooseFile (cueId); };
 
+                /*  THE NEW-CUE ROW: one button per kind, one `cue.create` each,
+                    landing where the pick says (model/NewCue.h). The bar
+                    knows the kind; this knows the place. */
+                ui::NewCueBarComponent::Actions newCueActions;
+
+                newCueActions.create = [this] (const std::string& kind) { createCue (kind); };
+
                 auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
                                                             std::move (listActions),
                                                             std::move (runActions),
-                                                            std::move (inspectorActions));
+                                                            std::move (inspectorActions),
+                                                            std::move (newCueActions));
                 shell = content.get();
 
                 window = std::make_unique<ui::MainWindow> (titleFor (""),
@@ -210,6 +219,12 @@ namespace wfg::client
 
                 shell->transport.show (reading);
 
+                /*  THE NEW-CUE ROW STANDS UNLESS THE SHOW SAID IT IS LOCKED.
+                    `isYes`, not a truth test: before the node is published
+                    the show has not answered, and a row that vanished for a
+                    tick at start would be a flicker with no meaning. */
+                shell->setEditing (! model::isYes (reading.locked));
+
                 /*  THE TWO RATES OUT OF ONE SNAPSHOT. The model walks the show
                     only when `/godot/document/revision` has moved or the
                     focused list has changed (M0); the pointer is read every
@@ -233,8 +248,12 @@ namespace wfg::client
                                   host.media != nullptr ? host.media->snapshot()
                                                         : nullptr);
 
-                //  And any import still waiting for the cue its create made.
+                //  And any import or create still waiting for the cue it made.
                 finishImports (*snapshot, reading.revision);
+                finishCreations (*snapshot, reading.revision);
+
+                //  Where the next new cue would land, said on the buttons.
+                shell->newCues.setDestination (destinationSentence());
 
                 /*  AND THE ONE CUE SOMEBODY ASKED ABOUT. The panel is built
                     from the tree when the picked cue changes and its values
@@ -572,8 +591,138 @@ namespace wfg::client
                 if (! model::isYes (last.locked))
                     return false;
 
-                shell->transport.setNotice ("the show is locked: unlock it to bring media in");
+                shell->transport.setNotice ("the show is locked: unlock it to edit it");
                 return true;
+            }
+
+            //======================================================================
+            /*  A NEW CUE FROM THE ROW OF BUTTONS. Where it lands is the page's
+                rule (model/NewCue.h): after the picked cue in the picked cue's
+                parent, or at the end of the focused list when nothing is
+                picked. `+ media` is the native Open followed by the import,
+                so a media cue made here is never left without its file - the
+                one thing the page's "+ media" cannot do (decision Y). */
+
+            /** The container and member position the next new cue takes. Empty parent when there is no list. */
+            std::pair<std::string, int> destination() const
+            {
+                if (latest != nullptr && ! picked.empty())
+                {
+                    const auto parent = model::text (*latest, "/godot/cue/" + picked + "/parent");
+
+                    if (! parent.empty())
+                        return { parent, model::positionAfter (orderOf (parent), picked) };
+                }
+
+                return { last.listId, -1 };
+            }
+
+            juce::String destinationSentence() const
+            {
+                if (latest == nullptr || picked.empty())
+                    return "at the end of the list";
+
+                const auto name = model::text (*latest, "/godot/cue/" + picked + "/name");
+
+                return "after " + (name.empty() ? juce::String ("the picked cue") : juce::String (name));
+            }
+
+            void createCue (const std::string& kind)
+            {
+                if (refusedWhileLocked())
+                    return;
+
+                const auto [parent, index] = destination();
+
+                if (parent.empty())
+                {
+                    shell->transport.setNotice ("no list to add a cue to");
+                    return;
+                }
+
+                if (kind == "media")
+                {
+                    chooseMedia (parent, index);
+                    return;
+                }
+
+                /*  The index is pinned to the member count here, as an
+                    import's is, so what is asked for is what `createdAt`
+                    will look at. */
+                const auto members = static_cast<int> (model::words (orderOf (parent)).size());
+                const auto at = index < 0 ? members : juce::jlimit (0, members, index);
+
+                send (gesture::createCue (parent, at, kind, ""));
+                creations.push_back ({ parent, at, kind, last.revision, 0 });
+            }
+
+            /*  `+ media` asks for the files first and imports them where the
+                cue would have gone; nothing is made when the dialogue is
+                cancelled. Several files make several cues, in the order
+                chosen, exactly as a drop of several does. */
+            void chooseMedia (const std::string& parent, int index)
+            {
+                juce::AudioFormatManager formats;
+                formats.registerBasicFormats();
+
+                chooser = std::make_unique<juce::FileChooser> (
+                            "Choose the media for the new cue",
+                            mediaFolder(), formats.getWildcardForAllFormats());
+
+                chooser->launchAsync (juce::FileBrowserComponent::openMode
+                                        | juce::FileBrowserComponent::canSelectFiles
+                                        | juce::FileBrowserComponent::canSelectMultipleItems,
+                                      [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
+                                       this, parent, index] (const juce::FileChooser& answered)
+                                      {
+                                          if (safe == nullptr)
+                                              return;
+
+                                          juce::StringArray files;
+
+                                          for (const auto& file : answered.getResults())
+                                              if (file.existsAsFile())
+                                                  files.add (file.getFullPathName());
+
+                                          if (! files.isEmpty())
+                                              importMedia (parent, index, files);
+                                      });
+            }
+
+            /*  THE OTHER HALF OF A CREATE, run every pass: find the cue and
+                pick it, so the inspector opens on it and the name is the next
+                thing typed. Picking is this client's own state, so a create
+                that is never found costs nothing but a sentence. */
+            void finishCreations (const tree::TreeSnapshot& snapshot, std::uint64_t revision)
+            {
+                if (creations.empty())
+                    return;
+
+                std::vector<model::Creation> waiting;
+
+                for (auto& job : creations)
+                {
+                    const auto id = revision > job.askedAt
+                                      ? model::createdAt (orderOf (job.parent), job.index)
+                                      : std::string {};
+
+                    if (! id.empty()
+                          && model::madeByCreate (job,
+                                                  model::text (snapshot, "/godot/cue/" + id + "/kind"),
+                                                  model::text (snapshot, "/godot/cue/" + id + "/name")))
+                    {
+                        picked = id;
+                        continue;
+                    }
+
+                    if (++job.waited < model::importPatience)
+                        waiting.push_back (job);
+                    else
+                        shell->transport.setNotice ("the new " + juce::String (job.kind)
+                                                      + " cue was refused");
+                }
+
+                creations = std::move (waiting);
             }
 
             void reloadTheme()
@@ -678,6 +827,9 @@ namespace wfg::client
 
             /** Files copied in, cues asked for, and the naming still to do. */
             std::vector<model::Import> pending;
+
+            /** Creates sent from the new-cue row and not yet found, to be picked when they are. */
+            std::vector<model::Creation> creations;
 
             /** The open file dialogue, which must outlive the call that launched it. */
             std::unique_ptr<juce::FileChooser> chooser;
