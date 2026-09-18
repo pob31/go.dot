@@ -148,6 +148,12 @@ namespace wfg::client::ui
             pick, no drop, no box opens on one. */
         void setSteps (const std::string& underCue, std::vector<model::Row> stepsToShow);
 
+        /*  WHAT STANDING ELSEWHERE IN THE UNDO HISTORY CHANGED (2026-09-19):
+            the cues that read differently from when the panel opened, and
+            the ones that were not there. Marked on their rows while the
+            panel is up; empty takes the marks off. */
+        void setDiff (std::vector<std::string> changedIds, std::vector<std::string> addedIds);
+
         void paint (juce::Graphics& g) override;
         void resized() override;
         bool keyPressed (const juce::KeyPress& key) override;
@@ -265,6 +271,9 @@ namespace wfg::client::ui
         std::uint64_t drawnSteps = 0;
 
         void paintStep (const model::Row& entry, juce::Graphics& g, int width, int height);
+
+        std::vector<std::string> changedIds;
+        std::vector<std::string> addedIds;
         std::string standby;
         int standbyRow = -1;
         std::vector<std::string> chosen;     ///< the picked cues, as the selection holds them

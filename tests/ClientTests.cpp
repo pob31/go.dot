@@ -58,6 +58,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
+#include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Waveform.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/Engine.h>
@@ -2001,6 +2002,83 @@ TEST_CASE ("client: the load-to-time reading is the engine's answer, names and a
     CHECK_FALSE (cleared.aimed);
     CHECK_FALSE (cleared.ok);
     CHECK (cleared.steps.size() == 2u);
+}
+
+//==============================================================================
+TEST_CASE ("client: the undo history is a place to stand in, and the diff is what standing elsewhere changed")
+{
+    /*  As the engine publishes it: Undo's list newest first, Redo's nearest
+        first. Three applied, two undone. */
+    model::UndoReading reading;
+    reading.undo = { "object.move", "cue.create", "node.set" };
+    reading.redo = { "object.delete", "node.set" };
+    CHECK (reading.position() == 3);
+
+    /*  Newest at the top: the two Redo would put back, furthest first, then
+        the three Undo would unmake, then the show as opened. Each says where
+        standing after it is. */
+    const auto stack = model::standings (reading);
+    REQUIRE (stack.size() == 6u);
+    CHECK (stack[0].name == "node.set");      CHECK (stack[0].index == 5); CHECK_FALSE (stack[0].applied);
+    CHECK (stack[1].name == "object.delete"); CHECK (stack[1].index == 4); CHECK_FALSE (stack[1].applied);
+    CHECK (stack[2].name == "object.move");   CHECK (stack[2].index == 3); CHECK (stack[2].applied);
+    CHECK (stack[3].name == "cue.create");    CHECK (stack[3].index == 2);
+    CHECK (stack[4].name == "node.set");      CHECK (stack[4].index == 1);
+    CHECK (stack[5].opening);                 CHECK (stack[5].index == 0);
+
+    /*  The picture and the diff: a rename is a change, a cue that is not in
+        the picture is new, one that is gone is named. Bands and step rows
+        are not cues and are not in it. */
+    model::Row a; a.id = "A1"; a.name = "Thunder"; a.kind = "media"; a.number = "1";
+    model::Row b; b.id = "B2"; b.name = "Rain"; b.kind = "media"; b.number = "2";
+    model::Row band; band.rowKind = model::RowKind::band; band.bandKey = "x";
+    model::Row step; step.rowKind = model::RowKind::step; step.id = "A1";
+
+    const auto before = model::pictureOf ({ band, a, b, step });
+    CHECK (before.saying.size() == 2u);
+
+    auto a2 = a; a2.name = "Thunder, louder";
+    model::Row c; c.id = "C3"; c.name = "Wind"; c.kind = "media";
+
+    const auto now = model::pictureOf ({ a2, c });
+    const auto changes = model::diff (before, now);
+    CHECK (changes.changed == std::vector<std::string> { "A1" });
+    CHECK (changes.added == std::vector<std::string> { "C3" });
+    CHECK (changes.removed == std::vector<std::string> { "Rain" });
+    CHECK_FALSE (changes.empty());
+    CHECK (model::diff (before, before).empty());
+
+    //  A move is a change too: the picture holds where a cue stands.
+    auto moved = b; moved.indexInParent = 4;
+    CHECK (model::diff (before, model::pictureOf ({ a, moved })).changed
+             == std::vector<std::string> { "B2" });
+}
+
+TEST_CASE ("client: the undo history is read from the two nodes the engine publishes")
+{
+    Rig rig;
+
+    EngineState state;
+    state.version = "test";
+    state.tick = 7;
+    state.sampleRate = 48000;
+    state.blockSize = 256;
+    state.clock = "dummy";
+    state.audioStatus = "running";
+    state.documentName = "minimal";
+    state.documentRevision = rig.document.showRevision();
+    state.documentUndoHistory = "object.move cue.create";
+    state.documentRedoHistory = "node.set";
+
+    const auto reading = model::readUndoHistory (*rig.parameters.publish (7, state));
+    CHECK (reading.undo == std::vector<std::string> { "object.move", "cue.create" });
+    CHECK (reading.redo == std::vector<std::string> { "node.set" });
+    CHECK (reading.position() == 2);
+
+    //  Nothing published reads as nothing applied.
+    const auto none = model::readUndoHistory (*rig.publish (8));
+    CHECK (none.undo.empty());
+    CHECK (none.redo.empty());
 }
 
 TEST_CASE ("client: the running pane reads the way the show happened, not the way runs were made")

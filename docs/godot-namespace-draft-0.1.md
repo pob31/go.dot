@@ -7379,6 +7379,25 @@ panel down, the menu item being the other way out. `model/LoadToTime` reads the 
 engine's own JSON reader, which is the one place in this window that parses JSON, for the reason the
 engine gives.
 
+**THE UNDO HISTORY (2026-09-19).** *"We also need an undo/redo history. This is an item in the show
+menu. This also opens in place of the Inspector and shows a diff overlay on the cues as the user drags a
+pointer. This is only applied with an OK button or dismissed with a Cancel button. Both will also close
+the undo/redo history panel."* Two nodes the engine did not have: `document/undoHistory`, what Undo
+would unmake newest first, and `document/redoHistory`, what Redo would put back nearest first - the
+manager's own two lists, read in the after-tick beside `undoName` and never pushed (§14.9) - so that
+where the show stands is a NUMBER, the count of transactions applied, and standing elsewhere is that
+many `undo` or `redo` records, each one the log already replays; no new command. *Show → Undo history…*
+(ctrl/⌘-shift-U) takes the slot beside the list: the stack newest at the top - the transactions Redo
+would put back, dim; the pointer, "standing here"; the ones Undo would unmake; the show as opened at the
+bottom, with the row the panel opened at washed in the standby colour. A click or a drag over a row
+moves the pointer at once and sends the undos or redos when the hand settles, since every row passed
+would otherwise be a flurry the log would keep. The diff is the window's own reading: when the panel
+opens it takes a picture of the rows - every column the list draws and where each cue stands, by id -
+and every pass compares the rows now against it: a cue that reads differently is washed and marked Δ,
+one that was not there +, and one that is gone is named in the panel, since a row that is not in the
+list cannot be marked in it. OK keeps where the show stands and closes; Cancel stands back where the
+panel opened and closes. A locked show offers neither, as it offers no undo.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

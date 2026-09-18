@@ -1422,6 +1422,8 @@ namespace wfg::tree
             else if (name == "canRedo")  text = state.documentCanRedo ? "true" : "false";
             else if (name == "undoName") text = state.documentUndoName;
             else if (name == "redoName") text = state.documentRedoName;
+            else if (name == "undoHistory") text = state.documentUndoHistory;
+            else if (name == "redoHistory") text = state.documentRedoHistory;
 
             //  What was last copied, for a client to carry to its clipboard or paste back.
             else if (name == "clipboard") text = state.documentClipboard;

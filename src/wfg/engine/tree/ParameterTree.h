@@ -142,6 +142,14 @@ namespace wfg::tree
         std::string documentUndoName;
         std::string documentRedoName;
 
+        /*  THE WHOLE STACK, as names (2026-09-19): what Undo would unmake
+            newest first, and what Redo would put back nearest first, each
+            space-separated - a transaction is named after its command, and
+            no command has a space in it. Read from the manager in the
+            after-tick like the four above, for the same reason. */
+        std::string documentUndoHistory;
+        std::string documentRedoHistory;
+
         /*  THE LAST THING `document.copy` COPIED, as the fragment text a paste
             takes. A client puts it on the operating system's clipboard when it
             changes, which is how two windows that are two processes hand cues

@@ -51,6 +51,7 @@
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/LoadToTime.h>
+#include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/Panic.h>
@@ -89,7 +90,7 @@ namespace wfg::client
         {
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
-            menuLock, menuLoadToTime
+            menuLock, menuLoadToTime, menuUndoHistory
         };
 
         class Window final : public wfg::Client,
@@ -295,12 +296,24 @@ namespace wfg::client
                                       { send (gesture::aim (last.listId, cueId, offset)); };
                 historyActions.load = [this] { send (gesture::loadToTime (last.listId)); };
 
+                /*  THE UNDO HISTORY'S THREE GESTURES: stand after that many
+                    transactions - which is that many `undo` or `redo`
+                    records, each one the log replays - and the two buttons
+                    that close the panel, OK keeping where it stands, Cancel
+                    going back to where it was opened. */
+                ui::UndoPanelComponent::Actions undoActions;
+
+                undoActions.moveTo = [this] (int index) { standAt (index); };
+                undoActions.ok     = [this] { leaveUndoHistory(); };
+                undoActions.cancel = [this] { standAt (undoOpenedAt); leaveUndoHistory(); };
+
                 auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
                                                             std::move (listActions),
                                                             std::move (runActions),
                                                             std::move (inspectorActions),
                                                             std::move (newCueActions),
-                                                            std::move (historyActions));
+                                                            std::move (historyActions),
+                                                            std::move (undoActions));
                 shell = content.get();
 
                 window = std::make_unique<ui::MainWindow> (titleFor (""),
@@ -384,6 +397,7 @@ namespace wfg::client
                     case menuDeleteCue: return { juce::KeyPress::backspaceKey, mod, 0 };
                     case menuLock:      return { 'l', mod, 0 };
                     case menuLoadToTime: return { 't', mod, 0 };
+                    case menuUndoHistory: return { 'u', mod | shift, 0 };
                     case menuRevert:    break;
                 }
 
@@ -393,7 +407,7 @@ namespace wfg::client
             static int menuItemForKey (const juce::KeyPress& key)
             {
                 for (const auto item : { menuNew, menuOpen, menuSaveAs, menuCut, menuCopy, menuPaste, menuLock,
-                                         menuLoadToTime })
+                                         menuLoadToTime, menuUndoHistory })
                     if (key == keyFor (item))
                         return item;
 
@@ -426,6 +440,7 @@ namespace wfg::client
                     case menuDeleteCue: return unlocked && ! selection.empty();
                     case menuLock:      return last.locked != model::Flag::unsaid;
                     case menuLoadToTime: return ! last.listId.empty();
+                    case menuUndoHistory: return unlocked;
                 }
 
                 return false;
@@ -481,6 +496,8 @@ namespace wfg::client
                     menu.addSeparator();
                     addMenuItem (menu, menuLoadToTime, loadingToTime ? "Stop loading to time"
                                                                      : "Load to time...");
+                    addMenuItem (menu, menuUndoHistory, browsingUndo ? "Close the undo history"
+                                                                     : "Undo history...");
                 }
 
                 return menu;
@@ -504,6 +521,7 @@ namespace wfg::client
                     case menuDeleteCue: removeChosen(); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     case menuLoadToTime: toggleLoadToTime(); break;
+                    case menuUndoHistory: toggleUndoHistory(); break;
                     default: break;
                 }
             }
@@ -797,6 +815,19 @@ namespace wfg::client
                 else
                     shell->cues.setSteps ({}, {});
 
+                /*  THE UNDO HISTORY, while its panel is up: where the show
+                    stands, and what standing there changed against the
+                    picture taken when the panel opened. */
+                if (browsingUndo)
+                {
+                    lastUndo = model::readUndoHistory (*snapshot);
+                    const auto changes = model::diff (undoPictureAtOpen, model::pictureOf (show.rows()));
+                    shell->undoPanel.show (lastUndo, changes, undoOpenedAt);
+                    shell->cues.setDiff (changes.changed, changes.added);
+                }
+                else
+                    shell->cues.setDiff ({}, {});
+
                 shell->cues.show (show, reading.standbyId, selection.ids());
 
                 /*  And the present tense, read fresh: runs have no revision to
@@ -833,11 +864,12 @@ namespace wfg::client
                 /*  THE SLOT BESIDE THE LIST: the history panel while loading
                     to time, the inspector when something is picked, nothing
                     otherwise. */
-                shell->setPanel (loadingToTime ? ui::Shell::Panel::history
-                                 : inspecting  ? ui::Shell::Panel::inspector
-                                               : ui::Shell::Panel::none);
+                shell->setPanel (browsingUndo  ? ui::Shell::Panel::undo
+                                 : loadingToTime ? ui::Shell::Panel::history
+                                 : inspecting    ? ui::Shell::Panel::inspector
+                                                 : ui::Shell::Panel::none);
 
-                if (inspecting && ! loadingToTime)
+                if (inspecting && ! loadingToTime && ! browsingUndo)
                     shell->inspector.show (model::inspectMany (*snapshot, selection.ids()));
 
                 last = reading;
@@ -1559,6 +1591,62 @@ namespace wfg::client
                 loadingToTime = false;
                 aimCue.clear();
                 menuItemsChanged();
+            }
+
+            /*  THE UNDO HISTORY (author, 2026-09-18). While the panel is up
+                the show can be stood anywhere in its history - each move is
+                that many undo or redo records - and the list shows what
+                standing there changed against the picture taken when the
+                panel opened. OK keeps where it stands; Cancel goes back. */
+            bool browsingUndo = false;
+            int undoOpenedAt = 0;
+            model::Picture undoPictureAtOpen;
+            model::UndoReading lastUndo;
+
+            void toggleUndoHistory()
+            {
+                if (browsingUndo)
+                {
+                    leaveUndoHistory();
+                    return;
+                }
+
+                if (latest == nullptr)
+                    return;
+
+                leaveLoadToTime();
+                lastUndo = model::readUndoHistory (*latest);
+                undoOpenedAt = lastUndo.position();
+                undoPictureAtOpen = model::pictureOf (show.rows());
+                browsingUndo = true;
+                menuItemsChanged();
+            }
+
+            void leaveUndoHistory()
+            {
+                if (! browsingUndo)
+                    return;
+
+                browsingUndo = false;
+                menuItemsChanged();
+            }
+
+            /*  Stand after `index` transactions: undo down to it, or redo up
+                to it, one record each, in one drain. The reading the count
+                is taken from is the last pass's, which is what the panel
+                showed the hand. */
+            void standAt (int index)
+            {
+                if (refusedWhileLocked())
+                    return;
+
+                const auto at = lastUndo.position();
+
+                for (auto n = at; n > index; --n)
+                    send (gesture::undo());
+
+                for (auto n = at; n < index; ++n)
+                    send (gesture::redo());
             }
 
             void aimAtPick()

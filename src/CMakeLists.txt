@@ -266,6 +266,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Inspector.cpp
     wfg/client/model/LoadToTime.h
     wfg/client/model/LoadToTime.cpp
+    wfg/client/model/UndoHistory.h
+    wfg/client/model/UndoHistory.cpp
     wfg/client/model/RunModel.h
     wfg/client/model/RunModel.cpp
     wfg/client/model/Scrub.h
@@ -299,6 +301,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/InspectorComponent.cpp
     wfg/client/ui/HistoryPanelComponent.h
     wfg/client/ui/HistoryPanelComponent.cpp
+    wfg/client/ui/UndoPanelComponent.h
+    wfg/client/ui/UndoPanelComponent.cpp
     wfg/client/ui/NewCueBarComponent.h
     wfg/client/ui/NewCueBarComponent.cpp
     wfg/client/ui/RunPaneComponent.h

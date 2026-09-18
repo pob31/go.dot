@@ -3029,6 +3029,10 @@ namespace
                                 state.documentCanRedo = undoHistory.canRedo();
                                 state.documentUndoName = undoHistory.getUndoDescription().toStdString();
                                 state.documentRedoName = undoHistory.getRedoDescription().toStdString();
+                                state.documentUndoHistory =
+                                    undoHistory.getUndoDescriptions().joinIntoString (" ").toStdString();
+                                state.documentRedoHistory =
+                                    undoHistory.getRedoDescriptions().joinIntoString (" ").toStdString();
                                 state.documentClipboard = document.clipboardText();
 
                                 /*  Published every tick, from the tick thread,

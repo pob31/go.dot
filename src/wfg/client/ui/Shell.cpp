@@ -28,13 +28,15 @@ namespace wfg::client::ui
                   RunPaneComponent::Actions runActions,
                   InspectorComponent::Actions inspectorActions,
                   NewCueBarComponent::Actions newCueActions,
-                  HistoryPanelComponent::Actions historyActions)
+                  HistoryPanelComponent::Actions historyActions,
+                  UndoPanelComponent::Actions undoActions)
         : transport (themeToUse, std::move (transportActions)),
           cues (themeToUse, std::move (listActions)),
           runs (themeToUse, std::move (runActions)),
           inspector (themeToUse, std::move (inspectorActions)),
           newCues (themeToUse, std::move (newCueActions)),
           history (themeToUse, std::move (historyActions)),
+          undoPanel (themeToUse, std::move (undoActions)),
           theme (themeToUse)
     {
         /*  NEITHER PANE TAKES THE FOCUS: it rests here, and `keyPressed` below
@@ -55,6 +57,8 @@ namespace wfg::client::ui
         addChildComponent (inspector);
         history.setVisible (false);
         addChildComponent (history);
+        undoPanel.setVisible (false);
+        addChildComponent (undoPanel);
 
         setWantsKeyboardFocus (true);
     }
@@ -68,6 +72,7 @@ namespace wfg::client::ui
         runs.applyTheme (theme);
         inspector.applyTheme (theme);
         history.applyTheme (theme);
+        undoPanel.applyTheme (theme);
         resized();
         repaint();
     }
@@ -129,8 +134,10 @@ namespace wfg::client::ui
 
             if (shown == Panel::inspector)
                 inspector.setBounds (slot);
-            else
+            else if (shown == Panel::history)
                 history.setBounds (slot);
+            else
+                undoPanel.setBounds (slot);
 
             area.removeFromRight (gap);
         }
@@ -157,6 +164,7 @@ namespace wfg::client::ui
         shown = showing;
         inspector.setVisible (shown == Panel::inspector);
         history.setVisible (shown == Panel::history);
+        undoPanel.setVisible (shown == Panel::undo);
         resized();
     }
 

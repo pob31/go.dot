@@ -39,6 +39,7 @@
 #include <wfg/client/ui/NewCueBarComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
 #include <wfg/client/ui/TransportComponent.h>
+#include <wfg/client/ui/UndoPanelComponent.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
@@ -59,7 +60,8 @@ namespace wfg::client::ui
                RunPaneComponent::Actions runActions,
                InspectorComponent::Actions inspectorActions,
                NewCueBarComponent::Actions newCueActions,
-               HistoryPanelComponent::Actions historyActions);
+               HistoryPanelComponent::Actions historyActions,
+               UndoPanelComponent::Actions undoActions);
 
         void applyTheme (const model::Theme& theme);
 
@@ -77,6 +79,7 @@ namespace wfg::client::ui
         InspectorComponent inspector;
         NewCueBarComponent newCues;
         HistoryPanelComponent history;
+        UndoPanelComponent undoPanel;
 
         /*  THE NEW-CUE ROW STANDS WHILE THE SHOW MAY BE EDITED and goes when
             it is locked (author, 2026-09-18: "Lock makes them disappear"). A
@@ -91,7 +94,7 @@ namespace wfg::client::ui
             time panel, which takes the inspector's place for as long as the
             operator is looking before they leap (author, 2026-09-18: "The
             Inspector panel turns into a history vertical stack"). */
-        enum class Panel { none, inspector, history };
+        enum class Panel { none, inspector, history, undo };
 
         void setPanel (Panel showing);
         Panel panel() const noexcept { return shown; }

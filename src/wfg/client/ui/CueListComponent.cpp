@@ -684,6 +684,26 @@ namespace wfg::client::ui
             g.fillRect (0, 0, width, height);
         }
 
+        /*  THE DIFF, while the undo panel is up: a cue that reads differently
+            from when it opened is washed and marked with a delta, one that
+            was not there with a plus - a shape beside the colour (§4.8), in
+            the gutter where nothing else is drawn but the park. */
+        const auto changed = std::find (changedIds.begin(), changedIds.end(), entry.id) != changedIds.end();
+        const auto added = ! changed && std::find (addedIds.begin(), addedIds.end(), entry.id) != addedIds.end();
+
+        if (changed || added)
+        {
+            const auto mark = Look::colour (theme, added ? "live" : "waiting");
+            g.setColour (mark.withAlpha (0.14f));
+            g.fillRect (0, 0, width, height);
+            g.setColour (mark);
+            g.setFont (Look::font (theme, 13.0f));
+            g.drawText (juce::String (juce::CharPointer_UTF8 (added ? "+" : "\xce\x94")),
+                        juce::Rectangle<int> (juce::roundToInt (theme.type * 7.0) / 2, 0,
+                                              juce::roundToInt (theme.type * 7.0) * 2, height),
+                        juce::Justification::centred, false);
+        }
+
         /*  WHERE A FILE WOULD LAND, SAID WHILE THE HAND IS STILL IN THE AIR.
             Two answers and two shapes: letting go ON a media cue names that
             cue's file, so the whole row lights; letting go on a member makes
@@ -1517,6 +1537,16 @@ namespace wfg::client::ui
         stepsUnder = underCue;
         steps = std::move (stepsToShow);
         ++stepsVersion;
+    }
+
+    void CueListComponent::setDiff (std::vector<std::string> changed, std::vector<std::string> added)
+    {
+        if (changed == changedIds && added == addedIds)
+            return;
+
+        changedIds = std::move (changed);
+        addedIds = std::move (added);
+        list.repaint();
     }
 
     void CueListComponent::paintStep (const model::Row& entry, juce::Graphics& g,
