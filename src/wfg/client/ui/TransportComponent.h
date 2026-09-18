@@ -114,9 +114,10 @@ namespace wfg::client::ui
             looking. `statusLabel` carries only the lock word now. */
         juce::Label showLabel, tickLabel, clockLabel, rateLabel,
                     listLabel, standbyLabel, statusLabel, errorLabel, noticeLabel;
+        /*  GO and PANIC, and the banner's two. Save, revert, undo, redo and
+            the lock left for the menu (author, 2026-09-18: "we can remove the
+            redundant buttons"); their keys stay, and ask the reading. */
         juce::TextButton goButton { "GO" }, panicButton { "PANIC" },
-                        saveButton { "save" }, revertButton { "revert" },
-                        undoButton { "undo" }, redoButton { "redo" }, lockButton { "lock the show" },
                         recoverButton { "recover" }, discardButton { "discard" };
 
         int rowHeight() const noexcept;

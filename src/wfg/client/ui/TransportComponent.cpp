@@ -64,9 +64,6 @@ namespace wfg::client::ui
         {
             { &goButton,      &actions.go },
             { &panicButton,   &actions.panic },
-            { &saveButton,    &actions.save },
-            { &undoButton,    &actions.undo },
-            { &redoButton,    &actions.redo },
             { &recoverButton, &actions.recover },
             { &discardButton, &actions.discardRecovery },
         };
@@ -83,22 +80,6 @@ namespace wfg::client::ui
             a half. */
         goButton.getProperties().set (Look::fontScale(), 2.0);
         panicButton.getProperties().set (Look::fontScale(), 1.5);
-
-        revertButton.setWantsKeyboardFocus (false);
-        revertButton.onClick = [this] { askThenRevert(); };
-        addAndMakeVisible (revertButton);
-
-        /*  THE LOCK DECIDES FROM WHAT THE ENGINE LAST SAID, not from what this
-            button last did, so two clients in two hands cannot argue it into
-            the wrong state - the page's own rule, and the reason the toggle
-            carries the boolean it wants rather than a "flip me". */
-        lockButton.setWantsKeyboardFocus (false);
-        lockButton.onClick = [this]
-        {
-            if (actions.setLocked && last.locked != model::Flag::unsaid)
-                actions.setLocked (last.locked != model::Flag::yes);
-        };
-        addAndMakeVisible (lockButton);
 
         setWantsKeyboardFocus (true);
         applyTheme (theme);
@@ -188,27 +169,6 @@ namespace wfg::client::ui
             thing does not need and a reader of the log does. */
         errorLabel.setTooltip (text (reading.lastError));
 
-        /*  DIMMED IS THE ONLY PLACE THIS IS SAID NOW, so the two reasons a
-            save is not on offer have to be told apart by the tooltip: a locked
-            show refuses one, and a saved show has nothing to write. */
-        saveButton.setEnabled (reading.mayOfferSave() && reading.hasSomethingToSave());
-        saveButton.setTooltip (! reading.mayOfferSave()
-                                 ? "show mode: saving is not offered while the show is locked"
-                                 : ! reading.hasSomethingToSave()
-                                     ? "no changes to save"
-                                     : "writes the show into its bundle — ctrl/⌘-S");
-
-        undoButton.setEnabled (model::isYes (reading.canUndo));
-        redoButton.setEnabled (model::isYes (reading.canRedo));
-
-        //  What each would take back, one hover away rather than on a line.
-        undoButton.setTooltip (text (reading.undoTip()));
-        redoButton.setTooltip (text (reading.redoTip()));
-
-        lockButton.setButtonText (reading.locked == model::Flag::yes ? "unlock the show"
-                                                                     : "lock the show");
-        lockButton.setEnabled (reading.locked != model::Flag::unsaid);
-
         /*  WARNINGS SIT ON THE FOOT LINE, where a theme's refusal also lands:
             both are things the engine or the file said about this session that
             no other line has a place for. A notice set by hand wins until the
@@ -266,7 +226,6 @@ namespace wfg::client::ui
         const auto rows = row                       // padding, top and bottom
                         + row                       // show, tick, clock, rate
                         + row / 2
-                        + row                       // the buttons
                         + (bannerShowing ? row * 3 + row / 2 : 0)
                         + row / 2
                         + row * 2                   // the standby, and GO
@@ -285,7 +244,8 @@ namespace wfg::client::ui
         const auto row = rowHeight();
         const auto pad = row / 2;
 
-        return { pad, pad + row * 3 + row / 2, getWidth() - 2 * pad, row * 3 };
+        //  Under the title line and its half-row of air, as `resized` places it.
+        return { pad, pad + row * 2, getWidth() - 2 * pad, row * 3 };
     }
 
     void TransportComponent::paint (juce::Graphics& g)
@@ -331,18 +291,10 @@ namespace wfg::client::ui
         tickLabel.setBounds (top.removeFromRight (row * 4));
         showLabel.setBounds (top);
 
+        /*  The row of show-wide buttons that stood here went to the menu
+            (2026-09-18); the half-row of air it left stays, so the banner and
+            GO keep their distance from the title line. */
         area.removeFromTop (row / 2);
-
-        /*  THE BUTTONS THAT ACT ON THE SHOW AS A WHOLE, left to right in the
-            order somebody reaches for them, with the lock apart on the right:
-            it is the only one that changes what the others may do. */
-        auto buttons = area.removeFromTop (row);
-        lockButton.setBounds (buttons.removeFromRight (row * 5).reduced (1));
-        saveButton.setBounds (buttons.removeFromLeft (row * 3).reduced (1));
-        revertButton.setBounds (buttons.removeFromLeft (row * 3).reduced (1));
-        buttons.removeFromLeft (pad);
-        undoButton.setBounds (buttons.removeFromLeft (row * 3).reduced (1));
-        redoButton.setBounds (buttons.removeFromLeft (row * 3).reduced (1));
 
         if (bannerShowing)
         {
@@ -444,25 +396,25 @@ namespace wfg::client::ui
             that fired a gesture the strip is not offering would be a second
             route to something this client has decided not to ask for - which
             is exactly what "show mode does not offer a save" must not mean in
-            practice. So each one asks its own button whether it is enabled,
+            practice. So each one asks the reading what its menu item asks,
             and that keeps the two in step with no second rule to maintain. */
         const auto mod = juce::ModifierKeys::commandModifier;
 
         if (key == juce::KeyPress ('z', mod, 0))
         {
-            if (undoButton.isEnabled() && actions.undo) actions.undo();
+            if (model::isYes (last.canUndo) && actions.undo) actions.undo();
             return true;
         }
 
         if (key == juce::KeyPress ('z', mod | juce::ModifierKeys::shiftModifier, 0))
         {
-            if (redoButton.isEnabled() && actions.redo) actions.redo();
+            if (model::isYes (last.canRedo) && actions.redo) actions.redo();
             return true;
         }
 
         if (key == juce::KeyPress ('s', mod, 0))
         {
-            if (saveButton.isEnabled() && actions.save) actions.save();
+            if (last.mayOfferSave() && last.hasSomethingToSave() && actions.save) actions.save();
             return true;
         }
 
