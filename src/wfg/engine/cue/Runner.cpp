@@ -2365,13 +2365,19 @@ namespace wfg::cue
         const auto toDb = drawn.points.empty() ? numberOf (cue, "level")
                                                : drawn.points.back().levelDb;
 
+        /*  AND WHETHER ARRIVING IS STOPPING (author, 2026-09-18: "a tick box
+            to stop a media file once a fade has completed"). Until then a
+            fade never stopped anything, even at silence: the run played on,
+            silently, until it ended by itself - right for a fade that will
+            come back up, and a surprise for the common fade-out. `false`
+            reads as the default the writer omits, so an unsaid box is off. */
         beginFade (cue[idProperty].toString().toStdString(),
                           textOf (cue, "target"),
                           runId, "fade",
                           toDb,
                           numberOf (cue, "duration"),
                           fadeCurveFrom (textOf (cue, "curve")),
-                          false,
+                          textOf (cue, "stopWhenDone") == "true",
                           std::move (drawn.points));
     }
 

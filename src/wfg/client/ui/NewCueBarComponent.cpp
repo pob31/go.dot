@@ -98,7 +98,10 @@ namespace wfg::client::ui
         const auto count = static_cast<int> (buttons.size());
         const auto each = juce::jmin (row * 4, juce::jmax (row, area.getWidth() / juce::jmax (1, count)));
 
+        /*  A QUARTER-ROW OF AIR EACH SIDE (author, 2026-09-18: "more padding
+            between the add buttons"): seven targets in a row read as seven,
+            not as one bar with words on it. */
         for (auto& button : buttons)
-            button->setBounds (area.removeFromLeft (each).reduced (1, 0));
+            button->setBounds (area.removeFromLeft (each).reduced (row / 4, 0));
     }
 }

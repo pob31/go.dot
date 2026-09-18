@@ -1739,6 +1739,27 @@ TEST_CASE ("fade: the fade's own run finishes when the fade does")
     CHECK (rig.runs.find (fadeRun)->state == cue::runState::done);
 }
 
+TEST_CASE ("fade: stopWhenDone stops the target when the fade arrives, and its default does not")
+{
+    /*  The author's tick box (2026-09-18: "a tick box to stop a media file
+        once a fade has completed"). Until it existed a fade never stopped
+        anything, even at silence: the case above pins that a fade to -20
+        leaves the run PLAYING, and this one pins the box. The path is the stop
+        cue's own fade verb, so nothing new can drift from it. */
+    FadeRig rig;
+
+    const auto mediaRun = rig.startMedia();
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + rig.fadeId + "/stopWhenDone", "true").ok);
+
+    rig.fire (rig.fadeId);
+
+    for (int i = 0; i < 60; ++i)
+        rig.tickOnce();
+
+    //  Arrived, and the arrival was the stop.
+    CHECK (rig.runs.find (mediaRun)->state != cue::runState::playing);
+}
+
 TEST_CASE ("fade: its own playhead moves, so a bar drawn over it has something to draw")
 {
     /*  A FADE HOLDS NO VOICE, and `updatePositions` measured every playhead

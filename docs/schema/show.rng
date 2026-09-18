@@ -680,6 +680,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="stopWhenDone">
+          <a:documentation>Whether the target&apos;s run is stopped when the fade arrives, at whatever level it arrives at. Off, a fade to silence leaves the run playing silently until it ends by itself, which is what a fade that will come back up wants; on, the arrival is the stop, the same path a stop cue&apos;s fade verb takes.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="target">
           <a:documentation>The cue whose sound this fade moves. It targets the CUE and finds its live run when it fires, because a cue is what somebody wrote down and a run is what happens to be playing - and the show has to say the first without knowing the second.</a:documentation>
           <data type="string"/>

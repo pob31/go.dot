@@ -103,7 +103,7 @@ const SAID_LAST = ["enabled", "preset"];
 
 const KIND_ORDER = {
   media:   ["file", "level", "startOffset"],
-  fade:    ["target", "level", "curve", "points"],
+  fade:    ["target", "level", "curve", "points", "stopWhenDone"],
   stop:    ["target", "verb", "curve"],
   osc:     ["address", "value", "wait", "timeout"],
   midi:    ["port", "channel", "type", "number", "data", "sysex", "wait"],

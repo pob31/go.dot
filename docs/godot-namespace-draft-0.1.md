@@ -1049,7 +1049,7 @@ under `/godot/cue/<id>/`, `rw`, `persist = show`:
 | Kind | Attributes (type, default) |
 |---|---|
 | `media` | `file` string, bundle-relative under `media/`; `level` double dB (0, −120..12); `startOffset` double s (0); `Route*` children: `bus` id, `gains` = `C_in × width` doubles, row-major (`/godot/cue/<id>/route/<busId>/gains`, the first list-typed node) |
-| `fade` | `target` cue id; `level` double dB; `duration` double s; `curve` enum `linear \| sCurve` |
+| `fade` | `target` cue id; `level` double dB; `duration` double s; `curve` enum `linear \| sCurve`; `stopWhenDone` bool (false) *(2026-09-18: arriving is stopping, the stop cue's own fade path)* |
 | `stop` | `target` cue id; `verb` enum `hard \| fade`; `duration`; `curve` |
 | `osc` | `address` string, a mounted node; `value` string, one typed atom as the log writes it (`f:0.5`, `s:"…"`, `T`); `wait` enum `none \| sent \| verified`; `timeout` double s |
 
@@ -7177,6 +7177,18 @@ chosen folder; and the menu's keys are the classical ones - ctrl/⌘-N, -O, -S, 
 -shift-Z (and -Y), -Backspace, -L - printed beside each item from the one table the window answers
 them from, so the menu cannot show a key the window ignores, and a key for an item the reading
 disables does nothing, exactly as the item would.
+
+**A FADE THAT STOPS WHEN IT ARRIVES (2026-09-18).** *"Something else I think I haven't seen, a tick box to
+stop a media file once a fade has completed."* There was none, and reading the code for it found the
+fade cue passing `false` to the one flag that would have done it: a fade never stopped anything, even at
+silence - the run played on, silently, until it ended by itself. Right for a fade that will come back
+up; a surprise for the common fade-out, whose author then reaches for a stop cue with a fade verb and
+finds it is the same ramp under another name. So `Fade/@stopWhenDone` (T, default false, §12) is the
+box, read by the fade cue into the flag the stop cue's fade verb already sets - one path, and nothing
+new to drift. The inspector shows it on both clients as "stop when done". *Also asked, and noted for the
+running pane's next round:* buttons to skip to the next loop or slice of a media run (`run.advance`
+exists), and pause and resume (no command yet, and a pause of a run is a design question §3.29 has only
+begun to ask).
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 

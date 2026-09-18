@@ -40,7 +40,7 @@ namespace wfg::client::model
             static const std::map<std::string, std::vector<std::string>> table
             {
                 { "media",   { "file", "level", "startOffset" } },
-                { "fade",    { "target", "level", "curve", "points" } },
+                { "fade",    { "target", "level", "curve", "points", "stopWhenDone" } },
                 { "stop",    { "target", "verb", "curve" } },
                 { "osc",     { "address", "value", "wait", "timeout" } },
                 { "midi",    { "port", "channel", "type", "number", "data", "sysex", "wait" } },
@@ -65,6 +65,7 @@ namespace wfg::client::model
             static const std::map<std::string, std::string> table
             {
                 { "play", "items to play" },
+                { "stopWhenDone", "stop when done" },
             };
 
             return table;
