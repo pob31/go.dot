@@ -118,6 +118,7 @@ namespace wfg::client::model
             else if (name == "loops")      field.control = Control::loopCount;
             else if (name == "file")       field.control = Control::file;
             else if (name == "target")     field.control = Control::cueRef;
+            else if (name == "notes")      field.control = Control::longText;
             else                           field.control = Control::text;
 
             return field;

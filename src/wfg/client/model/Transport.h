@@ -70,6 +70,12 @@ namespace wfg::client::model
         std::string standbyName;
         std::string standbyKind;
 
+        /*  THE STANDBY CUE'S NOTES, beside its name (author, 2026-09-18:
+            "notes should appear next to the cue name at the standby - this
+            field can be long since it's usually where you put what to look
+            out for to launch the cue"). The line an operator reads before GO. */
+        std::string standbyNotes;
+
         Flag canUndo = Flag::unsaid;  ///< `/godot/document/canUndo`
         Flag canRedo = Flag::unsaid;
         std::string undoName;         ///< the command that opened the transaction: `node.set`, `cue.create`

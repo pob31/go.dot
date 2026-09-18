@@ -82,7 +82,11 @@ namespace wfg::client::model
         target - and takes the cue's number or name as well as its identifier
         (author, 2026-09-18); the window resolves what was typed to the
         identifier before it is written (model/Reorder.h). */
-    enum class Control { text, toggle, choice, loopCount, file, cueRef };
+    /*  `longText` is a field written at length - a cue's notes, what to look
+        out for before GO - and gets a box of several lines rather than one
+        (author, 2026-09-18: "the edit field in the Inspector is too limited
+        for this"). */
+    enum class Control { text, toggle, choice, loopCount, file, cueRef, longText };
 
     struct Field
     {

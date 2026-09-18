@@ -153,6 +153,7 @@ namespace wfg::client::model
             return std::tie (r.show, r.dirty, r.locked, r.recovery,
                              r.tick, r.clock, r.rate,
                              r.listId, r.listName, r.standbyId, r.standbyName, r.standbyKind,
+                             r.standbyNotes,
                              r.canUndo, r.canRedo, r.undoName, r.redoName,
                              r.status, r.lastError, r.writeError,
                              r.warningCount, r.warningFirst, r.revision);
@@ -196,6 +197,7 @@ namespace wfg::client::model
         {
             reading.standbyName = text (snapshot, "/godot/cue/" + reading.standbyId + "/name");
             reading.standbyKind = text (snapshot, "/godot/cue/" + reading.standbyId + "/kind");
+            reading.standbyNotes = text (snapshot, "/godot/cue/" + reading.standbyId + "/notes");
         }
 
         reading.canUndo = flag (snapshot, "/godot/document/canUndo");

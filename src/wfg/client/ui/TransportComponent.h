@@ -113,7 +113,7 @@ namespace wfg::client::ui
             button and a tooltip say the same things where somebody is already
             looking. `statusLabel` carries only the lock word now. */
         juce::Label showLabel, tickLabel, clockLabel, rateLabel,
-                    listLabel, standbyLabel, statusLabel, errorLabel, noticeLabel;
+                    listLabel, standbyLabel, notesLabel, statusLabel, errorLabel, noticeLabel;
         /*  GO and PANIC, and the banner's two. Save, revert, undo, redo and
             the lock left for the menu (author, 2026-09-18: "we can remove the
             redundant buttons"); their keys stay, and ask the reading. */

@@ -1291,6 +1291,11 @@ TEST_CASE ("client: several cues inspected together show what they share, and sa
     CHECK_FALSE (enabled->mixed);
     CHECK (enabled->value == "true");
 
+    //  And notes are the one field written at length, so they get the tall box.
+    const auto* notes = fieldNamed (twoMemos, "notes");
+    REQUIRE (notes != nullptr);
+    CHECK (notes->control == model::Control::longText);
+
     //  A memo and a group share the cue rows and not the group's own.
     const auto mixedKinds = model::inspectMany (*snapshot, { one, group });
     CHECK (mixedKinds.kind == "memo + group");

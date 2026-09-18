@@ -45,7 +45,7 @@ namespace wfg::client::ui
         : actions (std::move (actionsToUse)), theme (themeToUse)
     {
         for (auto* label : { &showLabel, &tickLabel, &clockLabel, &rateLabel,
-                             &listLabel, &standbyLabel, &statusLabel, &errorLabel,
+                             &listLabel, &standbyLabel, &notesLabel, &statusLabel, &errorLabel,
                              &noticeLabel })
         {
             label->setJustificationType (juce::Justification::centredLeft);
@@ -113,6 +113,14 @@ namespace wfg::client::ui
         standbyLabel.setFont (Look::font (theme, 22.0f));
         standbyLabel.setColour (juce::Label::textColourId, Look::colour (theme, "standby"));
 
+        /*  THE NOTES BESIDE THE NAME, in the reading colour and not the
+            standby's: what to look out for before GO, wrapped over the two
+            rows the name has, since this is the field that is written long. */
+        notesLabel.setFont (Look::font (theme, 13.0f));
+        notesLabel.setColour (juce::Label::textColourId, Look::colour (theme, "ink-dim"));
+        notesLabel.setJustificationType (juce::Justification::topLeft);
+        notesLabel.setMinimumHorizontalScale (1.0f);
+
         /*  PANIC IN THE REFUSAL'S RED, and the word on it carries the meaning
             (§4.8): the colour is for the hand that already knows. The tooltip
             says both levels, because the second is the one nobody reads about
@@ -153,6 +161,7 @@ namespace wfg::client::ui
                                                   : "standby in " + text (reading.listName),
                            juce::dontSendNotification);
         standbyLabel.setText (text (reading.standbyLine()), juce::dontSendNotification);
+        notesLabel.setText (text (reading.standbyNotes), juce::dontSendNotification);
 
         statusLabel.setText (text (reading.lockLine()), juce::dontSendNotification);
 
@@ -323,8 +332,15 @@ namespace wfg::client::ui
             by a hand reaching for the other. */
         panicButton.setBounds (middle.removeFromRight (row * 3).reduced (2));
         middle.removeFromRight (pad);
-        listLabel.setBounds (middle.removeFromTop (row * 3 / 4));
-        standbyLabel.setBounds (middle);
+
+        /*  THE NAME ON THE LEFT HALF, THE NOTES ON THE RIGHT: the eye reads
+            outward from GO through the name into what to look out for. The
+            notes take what the name does not need, and both rows of it. */
+        auto names = middle.removeFromLeft (juce::jmax (row * 8, middle.getWidth() / 2));
+        listLabel.setBounds (names.removeFromTop (row * 3 / 4));
+        standbyLabel.setBounds (names);
+        middle.removeFromLeft (pad);
+        notesLabel.setBounds (middle);
 
         area.removeFromTop (row / 2);
 

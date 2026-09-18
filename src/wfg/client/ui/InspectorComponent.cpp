@@ -46,6 +46,12 @@ namespace wfg::client::ui
 
         /** The file control's other half: the box takes a name, this goes looking. */
         juce::TextButton browse { "..." };
+
+        /*  THE TALL BOX for a field written at length - notes - several
+            lines, wrapped, Return starting a new one, committed when the
+            focus leaves (author, 2026-09-18: "the edit field in the
+            inspector is too limited for this"). */
+        juce::TextEditor editor;
     };
 
     namespace
@@ -241,6 +247,17 @@ namespace wfg::client::ui
                     break;
                 }
 
+                case model::Control::longText:
+                    /*  NOT WHILE SOMEBODY IS TYPING IN IT: the poll arrives up
+                        to twenty-five times a second, and a note half-written
+                        put back to what the tree says is the one thing this
+                        panel must not do. */
+                    if (! line.editor.hasKeyboardFocus (true))
+                        line.editor.setText (shown (field), juce::dontSendNotification);
+
+                    line.box.setText (shown (field), juce::dontSendNotification);
+                    break;
+
                 case model::Control::file:
                 case model::Control::cueRef:
                 case model::Control::text:
@@ -426,6 +443,34 @@ namespace wfg::client::ui
             {
                 line->box.setText (shown (field), juce::dontSendNotification);
 
+                if (field.control == model::Control::longText && field.writable)
+                {
+                    auto* raw = line.get();
+
+                    line->editor.setMultiLine (true, true);
+                    line->editor.setReturnKeyStartsNewLine (true);
+                    line->editor.setScrollbarsShown (true);
+                    line->editor.setText (shown (field), juce::dontSendNotification);
+                    line->editor.setTooltip (juce::String (field.description));
+
+                    /*  COMMITTED WHEN THE FOCUS LEAVES, which is when a note is
+                        finished: a note is prose, and a write per line would be
+                        a record per sentence down the log. Leaving "(mixed)"
+                        as it was writes nothing. */
+                    line->editor.onFocusLost = [this, raw]
+                    {
+                        const auto text = raw->editor.getText().toStdString();
+
+                        if (raw->field.mixed && text == "(mixed)")
+                            return;
+
+                        if (text != raw->field.value)
+                            commitField (raw->field, text);
+                    };
+
+                    content.addAndMakeVisible (line->editor);
+                }
+
                 /*  AND A WAY TO GO LOOKING, beside the box and never instead of
                     it. `JUCE_MODAL_LOOPS_PERMITTED` is 0 here, so the chooser
                     is launched and answered later; the window owns it, because
@@ -561,6 +606,15 @@ namespace wfg::client::ui
             line->browse.setVisible (! hidden && line->browse.getParentComponent() != nullptr
                                        && line->field.control == model::Control::file);
 
+            /*  The tall box stands in for the one-line box when it exists. */
+            const auto tall = line->field.control == model::Control::longText
+                                && line->editor.getParentComponent() != nullptr;
+
+            line->editor.setVisible (! hidden && tall);
+
+            if (tall)
+                line->box.setVisible (false);
+
             if (hidden)
                 continue;
 
@@ -598,6 +652,13 @@ namespace wfg::client::ui
                 line->box.setBounds (boxArea);
                 line->toggle.setBounds (boxArea);
                 line->choice.setBounds (boxArea);
+
+                //  Three rows for a note, the name staying on the first.
+                if (line->editor.isVisible())
+                {
+                    line->editor.setBounds (boxArea.withHeight (row * 3 - 2));
+                    y += row * 2;
+                }
             }
 
             y += row;
