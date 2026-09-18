@@ -125,26 +125,39 @@ def measure(bundle: Path, seconds: float, window: bool, label: str):
             start_revision = read_int(server, "/godot/document/revision")
             start_locked = read_int(server, "/godot/document/locked", -1)
 
+            #  THE SERIES, NOT ONLY ITS SUMMARY. A median and a maximum cannot
+            #  tell a stall at startup from a stall in the middle of a show,
+            #  and that difference is the difference between a wrinkle and a
+            #  reason to stop: the first take read 2.57 s of worst-case
+            #  lateness with the window open and 16 ms without, which no amount
+            #  of thread priority explains. When it happened is the question.
             samples = []
-            deadline = time.monotonic() + seconds
-            next_at = time.monotonic()
+            began = time.monotonic()
+            deadline = began + seconds
+            next_at = began
 
             while time.monotonic() < deadline:
-                samples.append(read_int(server, "/godot/engine/lateness"))
+                samples.append((time.monotonic() - began,
+                                read_int(server, "/godot/engine/lateness")))
                 next_at += 1.0 / SAMPLE_HZ
                 pause = next_at - time.monotonic()
                 if pause > 0:
                     time.sleep(pause)
+
+            values = [v for _, v in samples]
 
             reading = {
                 "label": label,
                 "rate": rate,
                 "tick_samples": tick_samples,
                 "n": len(samples),
-                "median": statistics.median(samples) if samples else 0,
-                "p95": (statistics.quantiles(samples, n=20)[-1]
-                        if len(samples) >= 20 else max(samples or [0])),
-                "max": max(samples) if samples else 0,
+                "series": samples,
+                "median": statistics.median(values) if values else 0,
+                "p95": (statistics.quantiles(values, n=20)[-1]
+                        if len(values) >= 20 else max(values or [0])),
+                "max": max(values) if values else 0,
+                "at_max": (max(samples, key=lambda pair: pair[1])[0] if samples else 0.0),
+                "over_tick": sum(1 for v in values if v > tick_samples),
                 "latenessMax": read_int(server, "/godot/engine/latenessMax"),
                 "errors": read_int(server, "/godot/engine/errorCount") - start_errors,
                 "violations": read_int(server, "/godot/engine/rtViolations") - start_violations,
@@ -163,6 +176,18 @@ def measure(bundle: Path, seconds: float, window: bool, label: str):
     print(f"              max    {reading['max']:>7.0f} samples ({ms(reading['max']):.2f} ms)")
     print(f"   latenessMax       {reading['latenessMax']:>7.0f} samples "
           f"({ms(reading['latenessMax']):.2f} ms)")
+    print(f"   the worst sample came {reading['at_max']:.1f} s into the run; "
+          f"{reading['over_tick']} of {reading['n']} samples exceeded one tick")
+
+    #  Every sample over a tick, with its time, because a handful of stalls
+    #  with their timestamps says more than any statistic of them.
+    spikes = [(at, v) for at, v in reading["series"] if v > reading["tick_samples"]]
+
+    for at, v in spikes[:12]:
+        print(f"      t+{at:6.1f}s  {v:>8.0f} samples ({ms(v):8.1f} ms)")
+
+    if len(spikes) > 12:
+        print(f"      … and {len(spikes) - 12} more")
     print(f"   errors {reading['errors']}, rtViolations {reading['violations']}")
 
     #  AND WHETHER THE CLOCK RAN AT ALL, which is the check this instrument

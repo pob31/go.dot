@@ -3089,50 +3089,33 @@ namespace
                                 previous = std::move (current);
                             });
 
-        /*  THREE CLOCKS, AND ALL THREE ANSWERED FOR.
-
-            `--device` opens a real interface, `--hosted` builds a Tracktion
-            graph under a dummy clock, and neither means a plain dummy. This was
-            written as a pair - hosted, or else the dummy - and the device path
-            fell down the `else`, where `dummy` is a null unique_ptr and
-            `dummy->start()` is a segmentation fault.
-
-            It was invisible because of WHERE it lands: the whole banner has
-            already been printed by then, ports, client URL and the granted
-            device settings, so the terminal says the engine is up and the
-            engine is gone. A browser opening the address it was just handed
-            gets a refused connection, and the only clue is an exit code nobody
-            was looking at.
-
-            The device driver starts its own callback inside `open()` - which is
-            why there is nothing to start here - and that asymmetry is exactly
-            what made a two-branch decision look complete. */
-        if (deviceDriver != nullptr)
-        {
-            //  Already running: `open()` built the graph and started the
-            //  callback, and its failure was reported where it happened.
-        }
-        else if (driver != nullptr)
-        {
-            if (! driver->start())
-            {
-                std::cerr << "wfg serve --hosted: " << driver->lastError() << std::endl;
-                return 2;
-            }
-        }
-        else
-        {
-            dummy->start();
-        }
-
         {
             /*  THE WINDOW, IF ASKED FOR, and this scope is its whole life.
-                Built before the clock starts, so a window that cannot open
-                fails before any audio has begun; destroyed after the clock
-                has stopped and the loop has returned, so no timer can fire
-                and no tick can be in flight while it goes - and before the
-                session is finished and the servers stopped below, which is
-                everything it ever read out of a snapshot still standing.
+                Built BEFORE THE CLOCK RUNS, and that ordering is a measurement
+                rather than a preference.
+
+                M25 put it after the audio start and before `ticks.start()`,
+                which read as two and a half seconds of worst-case lateness on
+                a five-hundred-cue show - against sixteen milliseconds with no
+                window - and the instrument dutifully called it RED. It was not
+                the GUI competing with the tick thread: the median and the 95th
+                percentile were bit-identical with the window open. It was
+                CATCH-UP. The sample clock had been running for as long as the
+                window took to build - peer, fonts, five hundred rows - and the
+                tick thread, started afterwards, inherited a hundred and
+                twenty-five ticks of backlog and reported exactly that while it
+                worked through them in four hundred milliseconds.
+
+                So the window is built while nothing is counting samples, and
+                the clock and the thread that consumes it start together. A
+                window that cannot open still fails before any audio has begun,
+                which is the other reason this is early.
+
+                Destroyed after the clock has stopped and the loop has
+                returned, so no timer can fire and no tick can be in flight
+                while it goes - and before the session is finished and the
+                servers stopped below, which is everything it ever read out of
+                a snapshot still standing.
 
                 The two doors it is handed are the only two it has (§14.16):
                 the engine to submit to, the tree to read. `quit` is the flag
@@ -3146,6 +3129,42 @@ namespace
 
                 if (client == nullptr)
                     return 2;   // the factory has already said why
+            }
+
+            /*  THREE CLOCKS, AND ALL THREE ANSWERED FOR.
+
+                `--device` opens a real interface, `--hosted` builds a Tracktion
+                graph under a dummy clock, and neither means a plain dummy. This
+                was written as a pair - hosted, or else the dummy - and the
+                device path fell down the `else`, where `dummy` is a null
+                unique_ptr and `dummy->start()` is a segmentation fault.
+
+                It was invisible because of WHERE it lands: the whole banner has
+                already been printed by then, ports, client URL and the granted
+                device settings, so the terminal says the engine is up and the
+                engine is gone. A browser opening the address it was just handed
+                gets a refused connection, and the only clue is an exit code
+                nobody was looking at.
+
+                The device driver starts its own callback inside `open()` -
+                which is why there is nothing to start here - and that asymmetry
+                is exactly what made a two-branch decision look complete. */
+            if (deviceDriver != nullptr)
+            {
+                //  Already running: `open()` built the graph and started the
+                //  callback, and its failure was reported where it happened.
+            }
+            else if (driver != nullptr)
+            {
+                if (! driver->start())
+                {
+                    std::cerr << "wfg serve --hosted: " << driver->lastError() << std::endl;
+                    return 2;
+                }
+            }
+            else
+            {
+                dummy->start();
             }
 
             ticks.start();

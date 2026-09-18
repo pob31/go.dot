@@ -6280,6 +6280,45 @@ around taking M22 early. And none of them gates a test: a wall clock on a shared
 flaky test that teaches people to re-run the suite — Phase 4's own sentence — so what ctest
 asserts is counts, as M18's rebuild count is, and what is written down here is milliseconds.
 
+**M25 — WHAT AN OPEN WINDOW COSTS THE THREAD THE SHOW RUNS ON (taken 2026-09-18, and it took three
+takes to be worth reading).** Release build, 500-cue generated show, hosted clock, 120 s per
+condition, `/godot/engine/lateness` sampled at 10 Hz. Conditions C and D want a running pane and a
+scrolled list and arrive with M4; this is A against B.
+
+| | A no window | B window, idle |
+|---|---|---|
+| median lateness | 0 samples | 64 samples (1.33 ms) |
+| p95 | 64 samples | 64 samples |
+| worst sample | 192 samples | 192 samples |
+| `latenessMax` | 832 (17.3 ms) | 768 (16.0 ms) |
+| samples over one tick | 0 of 1200 | 0 of 1200 |
+| `rtViolations` | 0 | 0 |
+
+**GREEN on the plan's own threshold** - B within one tick of A - with room to spare: the only
+difference is 1.33 ms of median lateness, seven hundredths of a tick, and the worst case is
+marginally *better* with the window open, which is noise. An idle window costs the tick thread
+nothing measurable. **What is NOT measured here:** `go → sound`, which wants `first_sound.py` in A
+and C, and the client's own repaint times, which want an instrumented build. A take on a real device
+is the one to quote; this is a hosted clock, because the device is the author's to choose and a take
+at night should not make a sound.
+
+**The first two takes were both wrong, and how they were wrong is the useful part.** Take one read a
+flawless zero for every reading in B and printed GREEN - because the window had hung before the
+clock started (§14.16's 233 kB of warnings) and every sample was a failed HTTP read falling back to
+a default of nought. An instrument that cannot tell *nothing went wrong* from *nothing happened*
+says the thing you hoped for; it now refuses to grade a condition whose clock never ran. Take two,
+with the hang fixed, read **2.5 seconds** of worst-case lateness against 16 ms and printed RED - and
+the plan's remedy for RED is to make `elevateCurrentThreadForTicking()` real. **Acting on that would
+have been correct work on the wrong fault.** The median and the p95 were bit-identical with the
+window open, and once the instrument printed WHEN each stall happened the shape was plain: four
+samples at t+0.1 to t+0.4 s, decaying 2254 → 1686 → 1137 → 496 ms, then nothing for 119.6 seconds.
+That is a tick thread working through a backlog, not one being starved. The audio clock was started,
+then the window took two and a half seconds to build, and only then did `ticks.start()` run - so the
+thread inherited a hundred and twenty-five ticks it had never consumed and reported exactly that.
+The window is now built before anything counts samples (`Console.cpp`, and the comment there is this
+paragraph in short). **A red that a statistic cannot explain is a red to look at, not to act on;
+and a measurement has to be able to say when, not only how much.**
+
 ### 14.15 The direction this phase does not build
 
 **Undo of a GO.** Constraint 5 makes it *revert*, not undo: restore standby, release bindings,
