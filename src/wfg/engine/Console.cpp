@@ -3172,14 +3172,14 @@ namespace
 
                 auto freeTcpPort = []
                 {
-                    juce::StreamingSocket probe;
-                    return probe.createListener (0) ? probe.getBoundPort() : 0;
+                    juce::StreamingSocket tcpProbe;
+                    return tcpProbe.createListener (0) ? tcpProbe.getBoundPort() : 0;
                 };
 
                 auto freeUdpPort = []
                 {
-                    juce::DatagramSocket probe;
-                    return probe.bindToPort (0) ? probe.getBoundPort() : 0;
+                    juce::DatagramSocket udpProbe;
+                    return udpProbe.bindToPort (0) ? udpProbe.getBoundPort() : 0;
                 };
 
                 const auto httpPort = freeTcpPort();
