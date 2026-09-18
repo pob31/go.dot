@@ -188,6 +188,7 @@ namespace wfg::client::ui
 
         last = reading;
         shownOnce = true;
+        settleFoot();
 
         if (bannerShowing != wasShowing)
         {
@@ -221,6 +222,17 @@ namespace wfg::client::ui
                                ? notice.substring (0, longest) + "..."
                                : notice,
                              juce::dontSendNotification);
+        settleFoot();
+    }
+
+    void TransportComponent::settleFoot()
+    {
+        //  The notice in front of the error while there is one; the lock word only while locked.
+        const auto noticing = noticeLabel.getText().isNotEmpty();
+
+        noticeLabel.setVisible (noticing);
+        errorLabel.setVisible (! noticing);
+        resized();
     }
 
     int TransportComponent::preferredHeight() const noexcept
@@ -239,8 +251,7 @@ namespace wfg::client::ui
                         + row / 2
                         + row * 2                   // the standby, and GO
                         + row / 2
-                        + row                       // the lock word and the error
-                        + row;                      // the notice
+                        + row;                      // the foot: the lock word, and the error or the notice
 
         return rows;
     }
@@ -344,11 +355,20 @@ namespace wfg::client::ui
 
         area.removeFromTop (row / 2);
 
+        /*  ONE FOOT ROW, NOT TWO (author, 2026-09-18: "what is the gap beneath
+            the GO button row for? Can we remove it?"): the lock word takes its
+            width only while there is one, and the error and the notice share
+            the rest - a notice, when there is one, stands in front of the
+            error, as it always did in meaning and now does in pixels. */
         auto bottom = area.removeFromTop (row);
-        statusLabel.setBounds (bottom.removeFromLeft (row * 4));
-        errorLabel.setBounds (bottom);
 
-        noticeLabel.setBounds (area.removeFromTop (row));
+        if (statusLabel.getText().isNotEmpty())
+            statusLabel.setBounds (bottom.removeFromLeft (row * 4));
+        else
+            statusLabel.setBounds ({});
+
+        errorLabel.setBounds (bottom);
+        noticeLabel.setBounds (bottom);
     }
 
     void TransportComponent::askThenRevert()

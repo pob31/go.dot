@@ -123,6 +123,9 @@ namespace wfg::client::ui
         int rowHeight() const noexcept;
         juce::Rectangle<int> bannerArea() const;
 
+        /** Which of the foot's labels shows: the notice in front of the error while there is one. */
+        void settleFoot();
+
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransportComponent)
     };
 }

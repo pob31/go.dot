@@ -32,7 +32,8 @@ namespace wfg::client::ui
           cues (theme, std::move (listActions)),
           runs (theme, std::move (runActions)),
           inspector (theme, std::move (inspectorActions)),
-          newCues (theme, std::move (newCueActions))
+          newCues (theme, std::move (newCueActions)),
+          theme (theme)
     {
         /*  NEITHER PANE TAKES THE FOCUS: it rests here, and `keyPressed` below
             offers each key to both. */
@@ -54,8 +55,9 @@ namespace wfg::client::ui
         setWantsKeyboardFocus (true);
     }
 
-    void Shell::applyTheme (const model::Theme& theme)
+    void Shell::applyTheme (const model::Theme& themeToUse)
     {
+        theme = themeToUse;
         transport.applyTheme (theme);
         newCues.applyTheme (theme);
         cues.applyTheme (theme);
@@ -77,8 +79,14 @@ namespace wfg::client::ui
             author reads them that way; the inspector arrives between them
             when something is picked, which is the arrangement they settled on
             the page (§14.3) and the space this split leaves room for. */
+        /*  A LITTLE AIR BETWEEN THE PANES (author, 2026-09-18: "can we pad a
+            little between the different panels?"): a third of a row, in the
+            ground colour, so each pane reads as its own surface. */
+        const auto gap = juce::roundToInt (theme.row * theme.type / 3.0);
+
         runs.setBounds (area.removeFromRight (juce::jmax (area.getWidth() * 2 / 5,
                                                           juce::jmin (area.getWidth(), 220))));
+        area.removeFromRight (gap);
 
         /*  AND THE INSPECTOR BETWEEN THEM, only when something is picked -
             the arrangement the author chose on the page (`3115b10`), where
@@ -95,8 +103,11 @@ namespace wfg::client::ui
                                                                area.getHeight())));
 
         if (inspecting)
+        {
             inspector.setBounds (area.removeFromRight (juce::jmax (area.getWidth() * 2 / 5,
                                                                    juce::jmin (area.getWidth(), 240))));
+            area.removeFromRight (gap);
+        }
 
         cues.setBounds (area);
     }

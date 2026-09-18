@@ -87,7 +87,7 @@ namespace wfg::client
         enum MenuItem
         {
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
-            menuUndo, menuRedo, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
+            menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock
         };
 
@@ -304,6 +304,7 @@ namespace wfg::client
                     case menuSaveAs:    return { 's', mod | shift, 0 };
                     case menuUndo:      return { 'z', mod, 0 };
                     case menuRedo:      return { 'z', mod | shift, 0 };
+                    case menuCut:       return { 'x', mod, 0 };
                     case menuCopy:      return { 'c', mod, 0 };
                     case menuPaste:     return { 'v', mod, 0 };
                     case menuSelectAll: return { 'a', mod, 0 };
@@ -317,7 +318,7 @@ namespace wfg::client
 
             static int menuItemForKey (const juce::KeyPress& key)
             {
-                for (const auto item : { menuNew, menuOpen, menuSaveAs, menuCopy, menuPaste, menuLock })
+                for (const auto item : { menuNew, menuOpen, menuSaveAs, menuCut, menuCopy, menuPaste, menuLock })
                     if (key == keyFor (item))
                         return item;
 
@@ -343,6 +344,7 @@ namespace wfg::client
                     case menuRevert:    return last.mayOfferSave();
                     case menuUndo:      return unlocked && last.canUndo == model::Flag::yes;
                     case menuRedo:      return unlocked && last.canRedo == model::Flag::yes;
+                    case menuCut:       return unlocked && ! selection.empty();
                     case menuCopy:      return ! selection.empty();
                     case menuPaste:     return unlocked && ! last.listId.empty();
                     case menuSelectAll: return true;
@@ -383,6 +385,9 @@ namespace wfg::client
                     addMenuItem (menu, menuUndo, "Undo");
                     addMenuItem (menu, menuRedo, "Redo");
                     menu.addSeparator();
+                    addMenuItem (menu, menuCut, selection.size() > 1
+                                                  ? "Cut " + juce::String (static_cast<int> (selection.size())) + " cues"
+                                                  : "Cut cue");
                     addMenuItem (menu, menuCopy, selection.size() > 1
                                                    ? "Copy " + juce::String (static_cast<int> (selection.size())) + " cues"
                                                    : "Copy cue");
@@ -413,6 +418,7 @@ namespace wfg::client
                     case menuRevert:    shell->transport.askThenRevert(); break;
                     case menuUndo:      send (gesture::undo()); break;
                     case menuRedo:      send (gesture::redo()); break;
+                    case menuCut:       copyChosen(); removeChosen(); break;
                     case menuCopy:      copyChosen(); break;
                     case menuPaste:     pasteFromClipboard(); break;
                     case menuSelectAll: selection.all (show.rows()); break;
@@ -509,7 +515,11 @@ namespace wfg::client
         private:
             static juce::String titleFor (const std::string& show)
             {
-                return show.empty() ? juce::String ("Go.dot") : "Go.dot — " + juce::String (show);
+                /*  The dash as UTF-8 bytes, not a narrow literal: the title bar
+                    showed "â□□" for it once the frame was the window's own. */
+                return show.empty() ? juce::String ("Go.dot")
+                                    : juce::String (juce::CharPointer_UTF8 ("Go.dot \xe2\x80\x94 "))
+                                        + juce::String (show);
             }
 
             /*  RULE 2's ONE CALL SITE. A pointer copy, never null, and the

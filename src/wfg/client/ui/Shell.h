@@ -87,6 +87,7 @@ namespace wfg::client::ui
         void setInspecting (bool showing);
 
     private:
+        model::Theme theme;
         bool inspecting = false;
         bool editing = true;
 
