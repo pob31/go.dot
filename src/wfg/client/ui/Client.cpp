@@ -78,7 +78,20 @@ namespace wfg::client
 {
     namespace
     {
+        /*  THE MENU'S ITEMS, one number each. A menu item is a gesture like a
+            button, and ends in the same one command; the menu exists because
+            some gestures are about which show is on screen at all rather than
+            about this one (author, 2026-09-18: "I would put these in a menu
+            in the top bar"). */
+        enum MenuItem
+        {
+            menuNew = 1, menuOpen, menuSave, menuRevert,
+            menuUndo, menuRedo, menuDeleteCue,
+            menuLock
+        };
+
         class Window final : public wfg::Client,
+                             public juce::MenuBarModel,
                              private juce::Timer
         {
         public:
@@ -147,14 +160,7 @@ namespace wfg::client
                 /*  A DELETE UNPICKS: the panel about a cue that is gone would
                     be about nothing, and the tree stops publishing it a tick
                     later anyway. */
-                listActions.remove          = [this] (const std::string& id)
-                                              {
-                                                  if (refusedWhileLocked())
-                                                      return;
-
-                                                  send (gesture::deleteObject (id));
-                                                  picked.clear();
-                                              };
+                listActions.remove          = [this] (const std::string& id) { removeCue (id); };
                 listActions.setTarget       = [this] (const std::string& aimed, const std::string& at)
                                               {
                                                   if (! refusedWhileLocked())
@@ -221,6 +227,14 @@ namespace wfg::client
                                                             ui::Look::colour (theme, "ground"),
                                                             [this] { closeRequested(); });
                 window->setContentOwned (content.release(), false);
+
+                /*  THE MENU, in the window's own bar under its title - and on
+                    the Mac at the top of the screen, where a menu lives. */
+                window->setMenuBar (this);
+               #if JUCE_MAC
+                juce::MenuBarModel::setMacMainMenu (this);
+               #endif
+
                 window->centreWithSize (juce::roundToInt (34 * theme.row * theme.type),
                                         juce::roundToInt (26 * theme.row * theme.type));
 
@@ -235,8 +249,103 @@ namespace wfg::client
             ~Window() override
             {
                 stopTimer();
+               #if JUCE_MAC
+                juce::MenuBarModel::setMacMainMenu (nullptr);
+               #endif
+                if (window != nullptr)
+                    window->setMenuBar (nullptr);
                 juce::Desktop::getInstance().setDefaultLookAndFeel (nullptr);
                 window.reset();
+            }
+
+            //======================================================================
+            //  The menu (juce::MenuBarModel)
+            juce::StringArray getMenuBarNames() override
+            {
+                return { "File", "Edit", "Show" };
+            }
+
+            juce::PopupMenu getMenuForIndex (int index, const juce::String&) override
+            {
+                juce::PopupMenu menu;
+                const auto mod = juce::ModifierKeys::commandModifier;
+
+                if (index == 0)
+                {
+                    menu.addItem (menuNew, "New show...", true);
+                    menu.addItem (menuOpen, "Open show...", true);
+                    menu.addSeparator();
+
+                    /*  THE MENU FOLLOWS THE BUTTONS, as the keys do: what the
+                        strip does not offer, the menu does not offer either. */
+                    juce::PopupMenu::Item save { "Save" };
+                    save.itemID = menuSave;
+                    save.isEnabled = last.mayOfferSave() && last.hasSomethingToSave();
+                    save.shortcutKeyDescription = juce::KeyPress ('s', mod, 0).getTextDescription();
+                    menu.addItem (save);
+
+                    menu.addItem (menuRevert, "Revert to saved...", last.mayOfferSave());
+                }
+                else if (index == 1)
+                {
+                    juce::PopupMenu::Item undo { "Undo" };
+                    undo.itemID = menuUndo;
+                    undo.isEnabled = ! model::isYes (last.locked) && last.canUndo == model::Flag::yes;
+                    undo.shortcutKeyDescription = juce::KeyPress ('z', mod, 0).getTextDescription();
+                    menu.addItem (undo);
+
+                    juce::PopupMenu::Item redo { "Redo" };
+                    redo.itemID = menuRedo;
+                    redo.isEnabled = ! model::isYes (last.locked) && last.canRedo == model::Flag::yes;
+                    redo.shortcutKeyDescription = juce::KeyPress ('z', mod | juce::ModifierKeys::shiftModifier, 0)
+                                                    .getTextDescription();
+                    menu.addItem (redo);
+
+                    menu.addSeparator();
+
+                    juce::PopupMenu::Item remove { "Delete cue" };
+                    remove.itemID = menuDeleteCue;
+                    remove.isEnabled = ! picked.empty() && ! model::isYes (last.locked);
+                    remove.shortcutKeyDescription = juce::KeyPress (juce::KeyPress::backspaceKey, mod, 0)
+                                                      .getTextDescription();
+                    menu.addItem (remove);
+                }
+                else if (index == 2)
+                {
+                    menu.addItem (menuLock,
+                                  model::isYes (last.locked) ? "Unlock the show" : "Lock the show",
+                                  last.locked != model::Flag::unsaid);
+                }
+
+                return menu;
+            }
+
+            void menuItemSelected (int itemId, int) override
+            {
+                switch (itemId)
+                {
+                    case menuNew:       chooseShowFolder (true); break;
+                    case menuOpen:      chooseShowFolder (false); break;
+                    case menuSave:      send (gesture::save()); break;
+                    case menuRevert:    shell->transport.askThenRevert(); break;
+                    case menuUndo:      send (gesture::undo()); break;
+                    case menuRedo:      send (gesture::redo()); break;
+                    case menuDeleteCue: removeCue (picked); break;
+                    case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
+                    default: break;
+                }
+            }
+
+            /*  ONE `object.delete`, from the key and from the menu alike. It does
+                not ask, since undo is one keystroke; and it unpicks, so the
+                panel is not left describing a cue that is gone. */
+            void removeCue (const std::string& id)
+            {
+                if (id.empty() || refusedWhileLocked())
+                    return;
+
+                send (gesture::deleteObject (id));
+                picked.clear();
             }
 
             /** For the factory, when a theme file was refused at start: shown where the author is looking. */
@@ -269,6 +378,16 @@ namespace wfg::client
                     window->setName (titleFor (reading.show));
 
                 shell->transport.show (reading);
+
+                /*  THE MENU'S ENABLED STATES FOLLOW THE READING, rebuilt only
+                    when one of the things they read has moved. */
+                if (reading.locked != last.locked || reading.canUndo != last.canUndo
+                      || reading.canRedo != last.canRedo || reading.dirty != last.dirty
+                      || picked != pickedAtLastMenu)
+                {
+                    pickedAtLastMenu = picked;
+                    menuItemsChanged();
+                }
 
                 /*  THE NEW-CUE ROW STANDS UNLESS THE SHOW SAID IT IS LOCKED.
                     `isYes`, not a truth test: before the node is published
@@ -652,6 +771,44 @@ namespace wfg::client
                                       });
             }
 
+            /*  ANOTHER SHOW, IN ANOTHER WINDOW. New and Open both ask for a
+                folder and hand it to the console, which starts a second
+                process on it with this one's flags (Console.h, `openWindow`):
+                one engine holds one document, and a window per show is what
+                the author asked for. This window is untouched either way, so
+                neither asks anything else. */
+            void chooseShowFolder (bool createNew)
+            {
+                if (! host.openWindow)
+                {
+                    shell->transport.setNotice ("this build cannot open another window");
+                    return;
+                }
+
+                chooser = std::make_unique<juce::FileChooser> (
+                            createNew ? "Choose an empty folder for the new show"
+                                      : "Choose a show's folder",
+                            mediaFolder().getParentDirectory().getParentDirectory());
+
+                chooser->launchAsync (juce::FileBrowserComponent::openMode
+                                        | juce::FileBrowserComponent::canSelectDirectories,
+                                      [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
+                                       this, createNew] (const juce::FileChooser& answered)
+                                      {
+                                          const auto folder = answered.getResult();
+
+                                          if (safe == nullptr || folder == juce::File())
+                                              return;
+
+                                          const auto refused = host.openWindow (folder.getFullPathName().toStdString(),
+                                                                                createNew);
+
+                                          shell->transport.setNotice (refused.empty()
+                                                                        ? "opening " + folder.getFileName() + " in a new window"
+                                                                        : juce::String (refused));
+                                      });
+            }
+
             /*  A CLIENT DOES NOT OFFER A GESTURE IT COULD HAVE KNOWN WOULD BE
                 REFUSED. Under the lock the engine turns down a create and a
                 write to a show value alike, so a drop is answered here - and
@@ -907,6 +1064,9 @@ namespace wfg::client
 
             /** Which level of stop the next Esc means. */
             model::Panic panicPresses;
+
+            /** What was picked when the menu was last rebuilt, so it rebuilds when that moves. */
+            std::string pickedAtLastMenu;
 
             /** The open file dialogue, which must outlive the call that launched it. */
             std::unique_ptr<juce::FileChooser> chooser;

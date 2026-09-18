@@ -265,6 +265,12 @@ namespace wfg::client::ui
         lines.clear();
         content.removeAllChildren();
 
+        /*  The fold's head lives among the lines (above), so clearing them
+            took it too - and it vanished the first time a cue was picked
+            (author, 2026-09-18: "the detail button has disappeared"). Put
+            back before the lines are, so it is there for `layOut` to place. */
+        content.addAndMakeVisible (detailsButton);
+
         drawnCue = inspection.cueId;
         drawnFields = inspection.details.size();
 

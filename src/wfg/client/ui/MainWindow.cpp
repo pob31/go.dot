@@ -25,8 +25,18 @@ namespace wfg::client::ui
         : juce::DocumentWindow (title, background, juce::DocumentWindow::allButtons),
           closeRequested (std::move (onCloseRequested))
     {
-        setUsingNativeTitleBar (true);
-        setResizable (true, false);
+        /*  THE FRAME IS THE THEME'S, NOT THE SYSTEM'S (author, 2026-09-18:
+            "remove the white window frame for a colour themed one"). JUCE
+            draws the title bar in the window's background colour, which is
+            the theme's `ground`, and the look-and-feel draws its buttons - so
+            the one light rectangle on a dark booth screen goes. The price is
+            the system's own frame gestures, so the resize corner is drawn
+            and the window keeps a minimum it can still be read at. */
+        setUsingNativeTitleBar (false);
+        setTitleBarHeight (28);
+        setTitleBarTextCentred (false);
+        setResizable (true, true);
+        setResizeLimits (640, 400, 8192, 8192);
     }
 
     void MainWindow::closeButtonPressed()

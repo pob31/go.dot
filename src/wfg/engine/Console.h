@@ -83,6 +83,19 @@ namespace wfg
 
         std::function<void()> quit;             ///< ends the loop the way SIGINT does
         std::string themePath;                  ///< `--theme=<file>`, resolved; empty when not given
+
+        /*  ANOTHER SHOW IN ANOTHER WINDOW (author, 2026-09-18: "there can be
+            several windows, each one for an individual project at the same
+            time"). One engine holds one document, and `document.load` was
+            ruled out in Phase 5 as a process restart - so a second show is a
+            second PROCESS, started with this one's own flags and its own
+            ports, and this is the console's to do: it has the flags, and a
+            client should not know what a command line looks like.
+
+            `createNew` makes an empty show in the folder first, which must
+            then be empty or absent. Answers a sentence for the reader when it
+            could not, and nothing when the window is on its way. */
+        std::function<std::string (const std::string& folder, bool createNew)> openWindow;
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */

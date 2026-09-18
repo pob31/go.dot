@@ -3126,10 +3126,119 @@ namespace
                 the one way it already knows, inside fifty milliseconds. */
             std::unique_ptr<wfg::Client> client;
 
+            /*  ANOTHER SHOW IN ANOTHER WINDOW (Console.h, `openWindow`): a
+                second PROCESS on the folder asked for, started with THIS
+                serve's own arguments - the same clock, buffer, theme and
+                client directory - and its own ports and log. One engine holds
+                one document, and `document.load` was ruled out in Phase 5 as
+                a process restart; a window per show is that restart, beside
+                this one rather than instead of it.
+
+                THE PORTS ARE FOUND, NOT GUESSED: a listener bound to nought
+                is given a free one by the system, and that number is what the
+                child is told. The log goes where the operating system keeps a
+                user's application data, named after the show and the moment,
+                because every window session gets a log and a log inside the
+                bundle would be a file the bundle never declared.
+
+                `--recover` is not carried: the child finds any recovery for
+                itself and offers it, as this one did. */
+            const auto launchAnother = [&args] (const std::string& folderPath, bool createNew) -> std::string
+            {
+                const juce::File folder { juce::String (folderPath) };
+
+                if (createNew)
+                {
+                    if (folder.existsAsFile())
+                        return folderPath + " is a file, not a folder";
+
+                    if (folder.isDirectory() && folder.getNumberOfChildFiles (juce::File::findFilesAndDirectories) > 0)
+                        return "a new show wants an empty folder, and " + folder.getFileName().toStdString()
+                                 + " is not empty";
+
+                    wfg::doc::ShowDocument fresh;
+
+                    if (const auto made = fresh.createList ("Main"); ! made.ok)
+                        return "could not start the new show: " + made.reason;
+
+                    if (const auto saved = wfg::doc::Bundle::save (folder, fresh); ! saved.ok)
+                        return "could not write the new show: "
+                                 + (saved.problems.empty() ? std::string ("unknown") : saved.problems.front());
+                }
+                else if (! wfg::doc::Bundle::manifestFile (folder).existsAsFile())
+                {
+                    return folder.getFileName().toStdString() + " is not a show: no manifest in it";
+                }
+
+                auto freeTcpPort = []
+                {
+                    juce::StreamingSocket probe;
+                    return probe.createListener (0) ? probe.getBoundPort() : 0;
+                };
+
+                auto freeUdpPort = []
+                {
+                    juce::DatagramSocket probe;
+                    return probe.bindToPort (0) ? probe.getBoundPort() : 0;
+                };
+
+                const auto httpPort = freeTcpPort();
+                const auto oscPort = freeUdpPort();
+
+                if (httpPort <= 0 || oscPort <= 0)
+                    return std::string ("could not find free ports for another window");
+
+                const auto logs = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                                    .getChildFile ("Go.dot").getChildFile ("logs");
+                logs.createDirectory();
+
+                const auto stamp = juce::Time::getCurrentTime().formatted ("%Y%m%d-%H%M%S");
+                const auto log = logs.getChildFile (folder.getFileName() + "-" + stamp + ".wfglog");
+
+                juce::StringArray command;
+                command.add (juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName());
+                command.add ("serve");
+                command.add (folder.getFullPathName());
+
+                /*  Every flag this serve was given, except the ones that name
+                    THIS session: its bundle, its ports, its log, its recovery. */
+                auto bundleSeen = false;
+
+                for (const auto& argument : args.arguments)
+                {
+                    const auto& text = argument.text;
+
+                    if (text == "serve")
+                        continue;
+
+                    if (! text.startsWith ("-"))
+                    {
+                        if (! bundleSeen) { bundleSeen = true; continue; }   // the bundle positional
+                    }
+
+                    if (text.startsWith ("--http-port") || text.startsWith ("--osc-port")
+                          || text.startsWith ("--log") || text == "--recover")
+                        continue;
+
+                    command.add (text);
+                }
+
+                command.add ("--http-port=" + juce::String (httpPort));
+                command.add ("--osc-port=" + juce::String (oscPort));
+                command.add ("--log=" + log.getFullPathName());
+
+                juce::ChildProcess child;
+
+                if (! child.start (command, 0))
+                    return std::string ("could not start another window");
+
+                return {};
+            };
+
             if (wantWindow)
             {
                 client = makeClient ({ engine, parameters, &mediaInfo,
-                                       [] { interrupted = 1; }, themePath });
+                                       [] { interrupted = 1; }, themePath, launchAnother });
 
                 if (client == nullptr)
                     return 2;   // the factory has already said why

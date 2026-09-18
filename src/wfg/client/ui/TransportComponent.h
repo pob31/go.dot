@@ -87,6 +87,9 @@ namespace wfg::client::ui
         /** A sentence for the foot - a theme file's refusal, mostly. Empty clears it. */
         void setNotice (const juce::String& notice);
 
+        /** Revert's question, asked before the revert; the button and the menu both come here. */
+        void askThenRevert();
+
         /*  How tall this wants to be, which changes by three rows and a half
             when the recovery banner appears. The shell asks rather than
             assuming, and `onHeightChanged` tells it when to ask again. */
@@ -118,7 +121,6 @@ namespace wfg::client::ui
 
         int rowHeight() const noexcept;
         juce::Rectangle<int> bannerArea() const;
-        void askThenRevert();
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransportComponent)
     };

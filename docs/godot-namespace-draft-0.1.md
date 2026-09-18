@@ -7149,6 +7149,28 @@ in one says on the foot, while the hand is in the air, that its members start to
 order. **Ctrl/⌘-Backspace deletes the picked cue** in the same round, without asking, since undo is
 one keystroke.
 
+**A MENU, A FRAME OF ITS OWN, AND A WINDOW PER SHOW (2026-09-18).** *"We need an Open button to
+load a project. There can be several windows, each one for an individual project at the same time.
+We also need a New button to start a new project. I would put these in a menu in the top bar. Can we
+also remove the white window frame for a colour themed one?"* Three things, one of them the engine's.
+**The window draws its own frame** in the theme's ground rather than the system's white, with the
+resize corner drawn and a floor on its size; the price is the system's frame gestures. **A menu bar
+under the title** - File (New show, Open show, Save, Revert), Edit (Undo, Redo, Delete cue), Show
+(Lock or Unlock) - with every item a gesture that already existed as a button or a key and ends in
+the same one command; its enabled states follow the reading exactly as the buttons do, so show mode
+offers no Save from the menu either. On the Mac the same model is the screen's menu. **New and Open
+start another PROCESS.** One engine holds one document, and `document.load` was ruled out in Phase 5
+as a process restart (§14.10); a window per show is that restart beside this one rather than instead
+of it. The console does it, not the client - it has the flags, and a client should not know what a
+command line looks like: `ClientHost::openWindow (folder, createNew)` starts `wfg serve <folder>`
+with this serve's own arguments less its bundle, ports, log and `--recover`, plus ports the system
+handed a probe bound to nought and a log under the user's application data named after the show and
+the moment. New writes an empty show first - one list called Main - and wants an empty or absent
+folder. **Copy and paste of cues between windows is not built**, and needs a word from the engine
+before it can be: a paste is a fragment of one document entering another, which is either N
+`cue.create`s and N×M `node.set`s from the client, or one command that takes the fragment - the
+second is the one §4.11 would have, and it is not drawn yet.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is
