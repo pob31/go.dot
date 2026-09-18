@@ -113,7 +113,7 @@ namespace wfg::client::ui
                 somewhere the operator cannot see is worse than no pointer: the
                 list scrolls itself only when the standby moves, never while
                 somebody is reading. */
-            if (standbyRow >= 0)
+            if (standbyRow >= 0 && list.getHeight() > 0)
                 list.scrollToEnsureRowIsOnscreen (standbyRow);
         }
     }

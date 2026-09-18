@@ -298,6 +298,66 @@ TEST_CASE ("client: the strip says in words what it also says in colour")
     CHECK (reading.statusLine() == "audio running");
 }
 
+TEST_CASE ("client: a show with everything wrong with it is summarised, never carried whole")
+{
+    /*  THE CASE A HUNG WINDOW BOUGHT. `/godot/document/warnings` is one line
+        per thing wrong with the show that did not stop it opening, and on a
+        generated three-hundred-cue show it measured 233,471 characters over
+        1,824 lines. The transport carried it whole and handed it to a label
+        one row high; laying that much text into that little space is work
+        without end, and the window spun - at a hundred percent of a core,
+        before it was ever visible, with the tick stuck at zero because the
+        clock starts after the client is built.
+
+        So the reading carries a count and a first line, both bounded, and
+        these two functions are where that happens. The numbers below are the
+        real ones from that show. */
+    std::string many;
+
+    for (int i = 0; i < 1824; ++i)
+        many += "/Show/.../Slot[SA00000" + std::to_string (i) + "]: cues MA1 and MA2 can both be "
+                "holding it; mark either Feed or Insert shared if that is meant\n";
+
+    /*  160 CHARACTERS AND AN ELLIPSIS, which is three bytes in UTF-8 - so the
+        bound is 163, and it is written out rather than rounded up because a
+        bound nobody can derive is a bound nobody will notice moving. */
+    constexpr std::size_t clipped = 160 + 3;
+
+    CHECK (many.size() > 200000);
+    CHECK (model::countWarnings (many) == 1824);          // a trailing newline invents no last one
+
+    /*  BOUNDED IS THE INVARIANT, and these warnings are the real shape: each
+        line is about 120 characters, so the first comes back WHOLE and it is
+        the count that does the work of not carrying 233 kB into a label. The
+        per-line clip below is for the other shape - one enormous warning -
+        which hangs a text layout just as well. */
+    CHECK (model::firstWarning (many).size() <= clipped);
+    CHECK (model::firstWarning (many).size() > 100);
+
+    CHECK (model::countWarnings ("") == 0);
+    CHECK (model::firstWarning ("").empty());
+    CHECK (model::countWarnings ("one") == 1);
+    CHECK (model::countWarnings ("one\ntwo") == 2);
+    CHECK (model::countWarnings ("one\ntwo\n") == 2);
+    CHECK (model::firstWarning ("one\ntwo") == "one");
+
+    /*  ONE WARNING A QUARTER OF A MEGABYTE LONG is as able to hang a text
+        layout as eighteen hundred short ones, so the clip is on length and not
+        only on the line count. */
+    CHECK (model::firstWarning (std::string (250000, 'x')).size() == clipped);
+
+    model::TransportReading reading;
+    CHECK (reading.warningLine().empty());
+
+    reading.warningCount = 1;
+    reading.warningFirst = "a slot is held twice";
+    CHECK (reading.warningLine() == "1 warning · a slot is held twice");
+
+    reading.warningCount = 1824;
+    CHECK (reading.warningLine().rfind ("1824 warnings", 0) == 0);
+    CHECK (reading.warningLine().size() < 250);
+}
+
 TEST_CASE ("client: show mode does not offer a save, and nothing else is withdrawn")
 {
     /*  §9, decision W, as the author reaffirmed it on 2026-09-17: the ENGINE
@@ -555,7 +615,9 @@ TEST_CASE ("client: the cue list is rebuilt when the show moves, and not when th
 
     CHECK (show.refresh (*rig.publish (102), listId));
     CHECK (show.rebuilds() == 2);
-    CHECK (show.rows()[show.indexOf ("B3N8R5TW")].name == "Renamed");
+    const auto renamedAt = show.indexOf ("B3N8R5TW");
+    REQUIRE (renamedAt >= 0);
+    CHECK (show.rows()[static_cast<std::size_t> (renamedAt)].name == "Renamed");
 
     //  And so is looking at another list, which the revision cannot say.
     CHECK (show.refresh (*rig.publish (103), "SOMEOTHERLIST"));

@@ -114,6 +114,17 @@ def measure(bundle: Path, seconds: float, window: bool, label: str):
             start_errors = read_int(server, "/godot/engine/errorCount")
             start_violations = read_int(server, "/godot/engine/rtViolations")
 
+            #  WHETHER A HAND ARRIVED. Condition B puts a window on somebody's
+            #  screen, and on 2026-09-17 a reading this harness could not
+            #  explain turned out to be the author pressing the lock button
+            #  (namespace draft section 14.11). A click during a measurement
+            #  does not corrupt the lateness much, but it does mean the run was
+            #  not the idle one it claims to be - so the show's revision and
+            #  its lock are read at both ends, and a difference is reported
+            #  rather than silently averaged in.
+            start_revision = read_int(server, "/godot/document/revision")
+            start_locked = read_int(server, "/godot/document/locked", -1)
+
             samples = []
             deadline = time.monotonic() + seconds
             next_at = time.monotonic()
@@ -138,6 +149,8 @@ def measure(bundle: Path, seconds: float, window: bool, label: str):
                 "errors": read_int(server, "/godot/engine/errorCount") - start_errors,
                 "violations": read_int(server, "/godot/engine/rtViolations") - start_violations,
                 "ticks": read_int(server, "/godot/engine/tick"),
+                "touched": (read_int(server, "/godot/document/revision") != start_revision
+                            or read_int(server, "/godot/document/locked", -1) != start_locked),
             }
     except Exception as exc:
         print(f"   failed while running: {exc}")
@@ -151,6 +164,26 @@ def measure(bundle: Path, seconds: float, window: bool, label: str):
     print(f"   latenessMax       {reading['latenessMax']:>7.0f} samples "
           f"({ms(reading['latenessMax']):.2f} ms)")
     print(f"   errors {reading['errors']}, rtViolations {reading['violations']}")
+
+    #  AND WHETHER THE CLOCK RAN AT ALL, which is the check this instrument
+    #  did not have and needed most. On its first take, condition B reported a
+    #  flawless zero for every reading and the script called the whole thing
+    #  GREEN - because the window had HUNG before the clock was started, so
+    #  every sample was a failed HTTP read falling back to a default of 0. A
+    #  measurement that cannot tell "nothing went wrong" from "nothing
+    #  happened" is worse than no measurement: it says the thing you hoped for.
+    if reading["ticks"] <= 1:
+        print("   *** THE CLOCK DID NOT RUN. Every reading above is a default, not a")
+        print("       measurement - the engine never ticked, so this condition measured")
+        print("       nothing. Do not read the numbers; find out why it did not start.")
+        reading["dead"] = True
+    else:
+        reading["dead"] = False
+
+    if reading["touched"]:
+        print("   *** THE SHOW CHANGED DURING THIS CONDITION - somebody used the window, or")
+        print("       something else wrote to the engine. This is not an idle run; take it again.")
+
     return reading
 
 
@@ -162,6 +195,12 @@ def verdict(a, b):
 
     if a is None or b is None:
         print("  one condition did not run; there is nothing to compare.")
+        return
+
+    if a.get("dead") or b.get("dead"):
+        print("  ONE CONDITION'S CLOCK NEVER RAN, so there is nothing to compare and no")
+        print("  verdict to give. A B that reads zero everywhere is a hung window, not a")
+        print("  free one.")
         return
 
     tick = a["tick_samples"] or 960

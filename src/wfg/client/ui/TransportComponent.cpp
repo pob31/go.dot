@@ -191,8 +191,8 @@ namespace wfg::client::ui
             no other line has a place for. A notice set by hand wins until the
             next reading changes them, which is the same rule the page's strip
             follows for its own hint. */
-        if (reading.warnings != last.warnings || ! shownOnce)
-            noticeLabel.setText (text (reading.warnings), juce::dontSendNotification);
+        if (reading.warningLine() != last.warningLine() || ! shownOnce)
+            noticeLabel.setText (text (reading.warningLine()), juce::dontSendNotification);
 
         last = reading;
         shownOnce = true;
@@ -215,7 +215,20 @@ namespace wfg::client::ui
 
     void TransportComponent::setNotice (const juce::String& notice)
     {
-        noticeLabel.setText (notice, juce::dontSendNotification);
+        /*  CLIPPED, WHATEVER THE CALLER THINKS IT IS SENDING. This label is one
+            row high, and laying a quarter of a megabyte of text into one row
+            is work without end - which is not a guess: the window spun exactly
+            there the first time a show with eighteen hundred warnings was
+            opened in it. The model summarises before this is reached
+            (TransportReading::warningLine), and this is the second wall, for
+            the day a sentence arrives from somewhere that has not thought
+            about it. */
+        constexpr int longest = 300;
+
+        noticeLabel.setText (notice.length() > longest
+                               ? notice.substring (0, longest) + "..."
+                               : notice,
+                             juce::dontSendNotification);
     }
 
     int TransportComponent::preferredHeight() const noexcept

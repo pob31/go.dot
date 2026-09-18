@@ -6653,6 +6653,33 @@ over `model::ShowModel`, which walks the show only when `/godot/document/revisio
 focused list changes, and the rule M0 exists for is now a counted test: a hundred publishes with
 nothing applied rebuild once, a standby move rebuilds nothing, an edit rebuilds once more.
 
+**THE WINDOW HUNG ON A SHOW WITH 1,824 THINGS WRONG WITH IT, and the instrument called it GREEN
+(2026-09-18).** M25's first take opened `--window` on a generated 500-cue show, reported a flawless
+zero for every reading in condition B, and declared the window free. It was not free: it had hung
+before the clock was ever started, every sample was a failed HTTP read falling back to a default of
+nought, and the tick read zero because `ticks.start()` comes after the client is built.
+
+**The cause was mine and it is a rule worth stating.** `/godot/document/warnings` is one line per
+thing wrong with the show that did not stop it opening; on that bundle it measured **233,471
+characters over 1,824 lines**, because a generated show names media files that are not there. The
+transport carried that string whole in its reading, compared it field-wise twenty-five times a
+second, and handed it to a `juce::Label` one row high. Laying a quarter of a megabyte of text into
+thirty-two pixels is work without end - a spin at a hundred percent of a core, before the window was
+ever visible. `phase4` has almost no warnings, which is why every earlier session was fine.
+**A client never hands an unbounded engine string to a fixed-size control.** The reading now carries
+a count and a first line, both bounded (`countWarnings`, `firstWarning`, declared so a test can hand
+them a quarter of a megabyte), the label clips whatever reaches it, and a view with room can read
+the node itself.
+
+**And the second fault is the one to keep.** The instrument could not tell *nothing went wrong* from
+*nothing happened*, so it printed the answer somebody hoped for. It now refuses to grade a condition
+whose clock never ran, and says every reading is a default rather than a measurement. §14.14's idiom
+is that a measurement asserts nothing; what this adds is that it must still be able to say it
+measured nothing. The diagnosis took four experiments - bisecting by cue count, which misled,
+stubbing the row count, which cleared the cue list, and finally switching the two panes off one at a
+time, which named the transport in one run. The switches were scaffolding and are gone; the
+technique is the part worth keeping.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

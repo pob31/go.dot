@@ -18,8 +18,10 @@
 
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <tuple>
 
 namespace wfg::client::model
@@ -82,6 +84,50 @@ namespace wfg::client::model
                      half (canRedo, redoName, "redo", "nothing to redo"));
     }
 
+    std::size_t countWarnings (std::string_view all)
+    {
+        if (all.empty())
+            return 0;
+
+        /*  ONE PER LINE, so the count is the lines - and a trailing newline
+            does not invent a last empty warning. */
+        auto lines = std::size_t { 1 };
+
+        for (std::size_t at = 0; at < all.size(); ++at)
+            if (all[at] == '\n' && at + 1 < all.size())
+                ++lines;
+
+        return lines;
+    }
+
+    std::string firstWarning (std::string_view all)
+    {
+        const auto end = all.find ('\n');
+        const auto first = all.substr (0, end == std::string_view::npos ? all.size() : end);
+
+        /*  CLIPPED HERE, not by whatever draws it. One warning of a quarter of
+            a megabyte is as able to hang a text layout as eighteen hundred
+            short ones, and the place that knows this is a foot-of-window
+            summary is here. */
+        constexpr std::size_t longest = 160;
+
+        if (first.size() > longest)
+            return std::string (first.substr (0, longest)) + "…";
+
+        return std::string (first);
+    }
+
+    std::string TransportReading::warningLine() const
+    {
+        if (warningCount == 0)
+            return {};
+
+        const auto count = std::to_string (warningCount)
+                         + (warningCount == 1 ? " warning" : " warnings");
+
+        return warningFirst.empty() ? count : count + " · " + warningFirst;
+    }
+
     std::string TransportReading::statusLine() const
     {
         const auto audio = status.empty() ? std::string (unsaid) : "audio " + status;
@@ -102,7 +148,8 @@ namespace wfg::client::model
                              r.tick, r.clock, r.rate,
                              r.listId, r.listName, r.standbyId, r.standbyName, r.standbyKind,
                              r.canUndo, r.canRedo, r.undoName, r.redoName,
-                             r.status, r.lastError, r.writeError, r.warnings, r.revision);
+                             r.status, r.lastError, r.writeError,
+                             r.warningCount, r.warningFirst, r.revision);
         };
 
         return tie (*this) == tie (other);
@@ -153,7 +200,12 @@ namespace wfg::client::model
         reading.status = text (snapshot, "/godot/audio/status");
         reading.lastError = text (snapshot, "/godot/engine/lastError");
         reading.writeError = text (snapshot, "/godot/document/writeError");
-        reading.warnings = text (snapshot, "/godot/document/warnings");
+        /*  READ, SUMMARISED, AND THE LONG STRING DROPPED on the spot: nothing
+            downstream of here ever holds it, so nothing downstream can be hung
+            by a show with eighteen hundred things wrong with it. */
+        const auto warnings = text (snapshot, "/godot/document/warnings");
+        reading.warningCount = countWarnings (warnings);
+        reading.warningFirst = firstWarning (warnings);
 
         if (const auto* node = snapshot.find ("/godot/document/revision"))
             if (const auto sole = node->soleValue(); sole.has_value() && sole->isInt64())

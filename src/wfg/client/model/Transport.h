@@ -44,8 +44,10 @@
 
 #include <wfg/client/model/Text.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
+#include <string_view>
 
 namespace wfg::tree { class TreeSnapshot; }
 
@@ -76,7 +78,19 @@ namespace wfg::client::model
         std::string status;           ///< `/godot/audio/status`
         std::string lastError;        ///< `/godot/engine/lastError`; empty when nothing was refused
         std::string writeError;       ///< `/godot/document/writeError`; empty when no write is outstanding
-        std::string warnings;         ///< `/godot/document/warnings`, one per line
+
+        /*  `/godot/document/warnings` IS NOT CARRIED WHOLE, and that is a
+            fix rather than a saving. It is one line per thing wrong with the
+            show that did not stop it opening, and on a generated 300-cue show
+            it measured 233,471 characters over 1,824 lines. A reading is
+            compared field by field twenty-five times a second, and its text
+            reaches a label: this window hung - spinning, not crashing - the
+            first time it was handed the whole of it, because laying 233 kB of
+            text into a one-row box is work without end. So the reading carries
+            the COUNT and the FIRST ONE, clipped, and a view with room to show
+            them all can read the node itself. */
+        std::size_t warningCount = 0;
+        std::string warningFirst;
 
         /** `/godot/document/revision`: 0 before the first publish, never 0 after it. */
         std::uint64_t revision = 0;
@@ -101,6 +115,9 @@ namespace wfg::client::model
         /** "audio running · locked", the lock said in a word beside its colour. */
         std::string statusLine() const;
 
+        /** "3 warnings · <the first>", or empty. Bounded, whatever the show says. */
+        std::string warningLine() const;
+
         /** Whether this client should OFFER a save: not while the show is locked (§9, decision W). */
         bool mayOfferSave() const noexcept { return locked != Flag::yes; }
 
@@ -110,4 +127,11 @@ namespace wfg::client::model
 
     /** One pass over the snapshot. Any thread that holds a snapshot may call it. */
     TransportReading readTransport (const tree::TreeSnapshot& snapshot);
+
+    /*  How many warnings a `/godot/document/warnings` node holds, and the
+        first of them, clipped. Declared rather than kept private because they
+        are where a window once hung: a test that hands them a quarter of a
+        megabyte is the one that says it cannot happen again. */
+    std::size_t countWarnings (std::string_view all);
+    std::string firstWarning (std::string_view all);
 }
