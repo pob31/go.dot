@@ -526,6 +526,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::moveObject ("B3N8R5TW", "7K2QM9X4", 0),
         gesture::deleteObject ("B3N8R5TW"),
         gesture::undo(), gesture::redo(), gesture::save(), gesture::revert(),
+        gesture::saveAs ("C:/shows/copy"),
         gesture::recover(), gesture::discardRecovery(),
         gesture::setLocked (true), gesture::setLocked (false),
     };

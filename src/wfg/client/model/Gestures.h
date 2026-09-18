@@ -72,8 +72,13 @@ namespace wfg::client::gesture
     Event undo();
     Event redo();
 
-    /** Writes the show into its bundle: the button, and ctrl/⌘-S. */
+    /** Writes the show into its bundle: the menu, and ctrl/⌘-S. */
     Event save();
+
+    /*  Writes a COPY of the show into another folder - manifest, show, state
+        and namespaces, not media - and keeps working on this one: the menu's
+        Save as, and ctrl/⌘-shift-S. The engine's `document.saveAs`. */
+    Event saveAs (const std::string& folder);
 
     /** Reloads the show from disk, throwing away everything since the last save. Asks first. */
     Event revert();

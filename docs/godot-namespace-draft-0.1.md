@@ -7171,6 +7171,13 @@ before it can be: a paste is a fragment of one document entering another, which 
 `cue.create`s and N×M `node.set`s from the client, or one command that takes the fragment - the
 second is the one §4.11 would have, and it is not drawn yet.
 
+*Same evening:* the transport's save, revert, undo, redo and lock buttons went, the menu carrying
+every one ("we can remove the redundant buttons"); **Save as** joined File, one `document.saveAs` on a
+chosen folder; and the menu's keys are the classical ones - ctrl/⌘-N, -O, -S, -shift-S, -Z,
+-shift-Z (and -Y), -Backspace, -L - printed beside each item from the one table the window answers
+them from, so the menu cannot show a key the window ignores, and a key for an item the reading
+disables does nothing, exactly as the item would.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

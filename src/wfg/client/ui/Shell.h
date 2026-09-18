@@ -41,6 +41,8 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <functional>
+
 namespace wfg::client::ui
 {
     /*  A DragAndDropContainer as well, because a row dragged in the cue list
@@ -61,6 +63,11 @@ namespace wfg::client::ui
 
         void resized() override;
         bool keyPressed (const juce::KeyPress& key) override;
+
+        /*  THE MENU'S OWN KEYS, asked last: what neither pane claims is
+            offered to the window that owns the menu, so ctrl/⌘-N, -O and
+            -shift-S reach the items they are printed beside. */
+        std::function<bool (const juce::KeyPress&)> menuKeys;
 
         TransportComponent transport;
         CueListComponent cues;

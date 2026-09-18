@@ -85,7 +85,7 @@ namespace wfg::client
             in the top bar"). */
         enum MenuItem
         {
-            menuNew = 1, menuOpen, menuSave, menuRevert,
+            menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuDeleteCue,
             menuLock
         };
@@ -229,8 +229,22 @@ namespace wfg::client
                 window->setContentOwned (content.release(), false);
 
                 /*  THE MENU, in the window's own bar under its title - and on
-                    the Mac at the top of the screen, where a menu lives. */
+                    the Mac at the top of the screen, where a menu lives. Its
+                    keys are the classical ones (author, 2026-09-18), and each
+                    key does exactly what its item does, enabled or not. */
                 window->setMenuBar (this);
+                shell->menuKeys = [this] (const juce::KeyPress& key)
+                {
+                    const auto item = menuItemForKey (key);
+
+                    if (item == 0)
+                        return false;
+
+                    if (menuItemEnabled (static_cast<MenuItem> (item)))
+                        menuItemSelected (item, 0);
+
+                    return true;
+                };
                #if JUCE_MAC
                 juce::MenuBarModel::setMacMainMenu (this);
                #endif
@@ -265,56 +279,103 @@ namespace wfg::client
                 return { "File", "Edit", "Show" };
             }
 
+            /*  THE KEY EACH ITEM IS PRINTED BESIDE, and the one it answers to:
+                one table, so the menu cannot show a key the window ignores.
+                Ctrl/⌘-S, -Z, -shift-Z and -Backspace are the two panes' first
+                (Shell::keyPressed asks them before this), so they are printed
+                here and answered there; the rest are answered here. */
+            static juce::KeyPress keyFor (MenuItem item)
+            {
+                const auto mod = juce::ModifierKeys::commandModifier;
+                const auto shift = juce::ModifierKeys::shiftModifier;
+
+                switch (item)
+                {
+                    case menuNew:       return { 'n', mod, 0 };
+                    case menuOpen:      return { 'o', mod, 0 };
+                    case menuSave:      return { 's', mod, 0 };
+                    case menuSaveAs:    return { 's', mod | shift, 0 };
+                    case menuUndo:      return { 'z', mod, 0 };
+                    case menuRedo:      return { 'z', mod | shift, 0 };
+                    case menuDeleteCue: return { juce::KeyPress::backspaceKey, mod, 0 };
+                    case menuLock:      return { 'l', mod, 0 };
+                    case menuRevert:    break;
+                }
+
+                return {};
+            }
+
+            static int menuItemForKey (const juce::KeyPress& key)
+            {
+                for (const auto item : { menuNew, menuOpen, menuSaveAs, menuLock })
+                    if (key == keyFor (item))
+                        return item;
+
+                //  Ctrl/⌘-Y is redo everywhere but the Mac, and costs nothing to honour.
+                if (key == juce::KeyPress ('y', juce::ModifierKeys::commandModifier, 0))
+                    return menuRedo;
+
+                return 0;
+            }
+
+            /*  THE MENU FOLLOWS THE READING, as the keys do: what the show does
+                not allow, the menu does not offer, and a key for it does nothing. */
+            bool menuItemEnabled (MenuItem item) const
+            {
+                const auto unlocked = ! model::isYes (last.locked);
+
+                switch (item)
+                {
+                    case menuNew:
+                    case menuOpen:      return host.openWindow != nullptr;
+                    case menuSave:      return last.mayOfferSave() && last.hasSomethingToSave();
+                    case menuSaveAs:    return last.mayOfferSave();
+                    case menuRevert:    return last.mayOfferSave();
+                    case menuUndo:      return unlocked && last.canUndo == model::Flag::yes;
+                    case menuRedo:      return unlocked && last.canRedo == model::Flag::yes;
+                    case menuDeleteCue: return unlocked && ! picked.empty();
+                    case menuLock:      return last.locked != model::Flag::unsaid;
+                }
+
+                return false;
+            }
+
+            void addMenuItem (juce::PopupMenu& menu, MenuItem item, const juce::String& words) const
+            {
+                juce::PopupMenu::Item entry { words };
+                entry.itemID = item;
+                entry.isEnabled = menuItemEnabled (item);
+
+                if (const auto key = keyFor (item); key.isValid())
+                    entry.shortcutKeyDescription = key.getTextDescription();
+
+                menu.addItem (entry);
+            }
+
             juce::PopupMenu getMenuForIndex (int index, const juce::String&) override
             {
                 juce::PopupMenu menu;
-                const auto mod = juce::ModifierKeys::commandModifier;
 
                 if (index == 0)
                 {
-                    menu.addItem (menuNew, "New show...", true);
-                    menu.addItem (menuOpen, "Open show...", true);
+                    addMenuItem (menu, menuNew, "New show...");
+                    addMenuItem (menu, menuOpen, "Open show...");
                     menu.addSeparator();
-
-                    /*  THE MENU FOLLOWS THE BUTTONS, as the keys do: what the
-                        strip does not offer, the menu does not offer either. */
-                    juce::PopupMenu::Item save { "Save" };
-                    save.itemID = menuSave;
-                    save.isEnabled = last.mayOfferSave() && last.hasSomethingToSave();
-                    save.shortcutKeyDescription = juce::KeyPress ('s', mod, 0).getTextDescription();
-                    menu.addItem (save);
-
-                    menu.addItem (menuRevert, "Revert to saved...", last.mayOfferSave());
+                    addMenuItem (menu, menuSave, "Save");
+                    addMenuItem (menu, menuSaveAs, "Save as...");
+                    addMenuItem (menu, menuRevert, "Revert to saved...");
                 }
                 else if (index == 1)
                 {
-                    juce::PopupMenu::Item undo { "Undo" };
-                    undo.itemID = menuUndo;
-                    undo.isEnabled = ! model::isYes (last.locked) && last.canUndo == model::Flag::yes;
-                    undo.shortcutKeyDescription = juce::KeyPress ('z', mod, 0).getTextDescription();
-                    menu.addItem (undo);
-
-                    juce::PopupMenu::Item redo { "Redo" };
-                    redo.itemID = menuRedo;
-                    redo.isEnabled = ! model::isYes (last.locked) && last.canRedo == model::Flag::yes;
-                    redo.shortcutKeyDescription = juce::KeyPress ('z', mod | juce::ModifierKeys::shiftModifier, 0)
-                                                    .getTextDescription();
-                    menu.addItem (redo);
-
+                    addMenuItem (menu, menuUndo, "Undo");
+                    addMenuItem (menu, menuRedo, "Redo");
                     menu.addSeparator();
-
-                    juce::PopupMenu::Item remove { "Delete cue" };
-                    remove.itemID = menuDeleteCue;
-                    remove.isEnabled = ! picked.empty() && ! model::isYes (last.locked);
-                    remove.shortcutKeyDescription = juce::KeyPress (juce::KeyPress::backspaceKey, mod, 0)
-                                                      .getTextDescription();
-                    menu.addItem (remove);
+                    addMenuItem (menu, menuDeleteCue, "Delete cue");
                 }
                 else if (index == 2)
                 {
-                    menu.addItem (menuLock,
-                                  model::isYes (last.locked) ? "Unlock the show" : "Lock the show",
-                                  last.locked != model::Flag::unsaid);
+                    addMenuItem (menu, menuLock, model::isYes (last.locked) ? "Unlock the show"
+                                                                            : "Lock the show");
                 }
 
                 return menu;
@@ -327,6 +388,7 @@ namespace wfg::client
                     case menuNew:       chooseShowFolder (true); break;
                     case menuOpen:      chooseShowFolder (false); break;
                     case menuSave:      send (gesture::save()); break;
+                    case menuSaveAs:    chooseSaveAsFolder(); break;
                     case menuRevert:    shell->transport.askThenRevert(); break;
                     case menuUndo:      send (gesture::undo()); break;
                     case menuRedo:      send (gesture::redo()); break;
@@ -806,6 +868,33 @@ namespace wfg::client
                                           shell->transport.setNotice (refused.empty()
                                                                         ? "opening " + folder.getFileName() + " in a new window"
                                                                         : juce::String (refused));
+                                      });
+            }
+
+            /*  SAVE AS: a folder, and one `document.saveAs` on it. The engine
+                writes the copy and keeps this session on the show it opened,
+                which is what the command was drawn to do (§14.10); the foot
+                says where the copy went. */
+            void chooseSaveAsFolder()
+            {
+                chooser = std::make_unique<juce::FileChooser> (
+                            "Choose an empty folder for the copy",
+                            mediaFolder().getParentDirectory().getParentDirectory());
+
+                chooser->launchAsync (juce::FileBrowserComponent::saveMode
+                                        | juce::FileBrowserComponent::canSelectDirectories
+                                        | juce::FileBrowserComponent::warnAboutOverwriting,
+                                      [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
+                                       this] (const juce::FileChooser& answered)
+                                      {
+                                          const auto folder = answered.getResult();
+
+                                          if (safe == nullptr || folder == juce::File())
+                                              return;
+
+                                          send (gesture::saveAs (folder.getFullPathName().toStdString()));
+                                          shell->transport.setNotice ("copy of the show written to "
+                                                                        + folder.getFileName());
                                       });
             }
 

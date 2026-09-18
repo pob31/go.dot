@@ -125,6 +125,7 @@ namespace wfg::client::ui
             without looking - the arrows and Space - and the transport's are
             the ones they press deliberately. Neither set overlaps except
             Space, which both would send to GO. */
-        return cues.keyPressed (key) || transport.keyPressed (key);
+        return cues.keyPressed (key) || transport.keyPressed (key)
+            || (menuKeys != nullptr && menuKeys (key));
     }
 }

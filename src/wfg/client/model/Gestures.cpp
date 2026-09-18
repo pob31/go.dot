@@ -69,6 +69,11 @@ namespace wfg::client::gesture
                    osc::Value::int32 (index) } };
     }
 
+    Event saveAs (const std::string& folder)
+    {
+        return { origin::window, "document.saveAs", { osc::Value::string (folder) } };
+    }
+
     Event deleteObject (const std::string& id)
     {
         return { origin::window, "object.delete", { osc::Value::string (id) } };
