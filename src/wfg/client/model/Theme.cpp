@@ -85,7 +85,7 @@ namespace wfg::client::model
                     black and header and footer dark grey, blueish tint"). Black
                     is where the eye rests; a section is the thing that differs. */
                 { "panel-cue",     0xFF000000 },
-                { "panel-section", 0xFF202838 },
+                { "panel-section", 0xFF10141C },
 
                 /*  THE ROWS INSIDE A SECTION ARE NOT ITS BAND (author,
                     2026-09-18: "invert the colour of the footers, headers
@@ -93,7 +93,7 @@ namespace wfg::client::model
                     band is the frame and the rows are what it holds, and one
                     tone for both had made a section a black block. The rows
                     take the greyish blue the sections wore for an hour. */
-                { "panel-section-cue", 0xFF202838 },
+                { "panel-section-cue", 0xFF10141C },
 
                 /*  THE RUNNING PANE IS BLACK (author, 2026-09-18: "can you also
                     make the running cue backgrounds black?"), which is also
