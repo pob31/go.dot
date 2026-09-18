@@ -126,7 +126,22 @@ namespace wfg::client::ui
             juce::Graphics::ScopedSaveState state (g);
             g.setOrigin (0, top);
             g.reduceClipRegion (0, 0, getWidth(), height);
+
+            /*  A RUN THAT IS DONE IS DRAWN DIMMED for the seconds the engine
+                keeps publishing it (author, 2026-09-18: "done cues in the
+                active cues list can be greyed/dimmed"), so what is still
+                sounding stands out from what has just stopped without
+                anybody reading the state word. A failure is not dimmed: it
+                is the row somebody needs to read. */
+            const auto done = owner.rows[static_cast<std::size_t> (at)].state == "done";
+
+            if (done)
+                g.beginTransparencyLayer (0.4f);
+
             owner.paintRow (at, g, getWidth(), height);
+
+            if (done)
+                g.endTransparencyLayer();
         }
     }
 
@@ -437,6 +452,7 @@ namespace wfg::client::ui
             if (state == "armed")    return Look::colour (theme, "standby");
             if (state == "stopping") return Look::colour (theme, "stopping");
             if (state == "failed")   return Look::colour (theme, "failed");
+            if (state == "done")     return Look::colour (theme, "ink-off");
 
             return Look::colour (theme, "waiting");
         };

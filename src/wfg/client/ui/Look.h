@@ -55,9 +55,18 @@ namespace wfg::client::ui
             exist. */
         static const juce::Identifier& glyphButton();
 
+        /*  A BUTTON THAT WANTS LARGER TYPE says by how much (author,
+            2026-09-18: "make the font for PANIC 1.5x larger and for GO 2.0x
+            larger"): a double property on the button, read when the font is
+            asked for. The two buttons pressed without looking are the two
+            read from furthest away. */
+        static const juce::Identifier& fontScale();
+
         void drawButtonText (juce::Graphics& g, juce::TextButton& button,
                              bool shouldDrawButtonAsHighlighted,
                              bool shouldDrawButtonAsDown) override;
+
+        juce::Font getTextButtonFont (juce::TextButton& button, int buttonHeight) override;
 
     private:
         /*  The type scale, kept because a look-and-feel is asked for a font

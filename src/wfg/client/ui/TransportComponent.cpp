@@ -78,6 +78,12 @@ namespace wfg::client::ui
             addAndMakeVisible (button);
         }
 
+        /*  THE TWO PRESSED WITHOUT LOOKING ARE READ FROM FURTHEST AWAY
+            (author, 2026-09-18): GO at twice the button type, PANIC at one and
+            a half. */
+        goButton.getProperties().set (Look::fontScale(), 2.0);
+        panicButton.getProperties().set (Look::fontScale(), 1.5);
+
         revertButton.setWantsKeyboardFocus (false);
         revertButton.onClick = [this] { askThenRevert(); };
         addAndMakeVisible (revertButton);

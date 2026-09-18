@@ -34,6 +34,23 @@ namespace wfg::client::ui
         return id;
     }
 
+    const juce::Identifier& Look::fontScale()
+    {
+        static const juce::Identifier id { "wfgFontScale" };
+        return id;
+    }
+
+    juce::Font Look::getTextButtonFont (juce::TextButton& button, int buttonHeight)
+    {
+        auto font = LookAndFeel_V4::getTextButtonFont (button, buttonHeight);
+
+        if (const auto scale = static_cast<float> (double (button.getProperties()[fontScale()]));
+            scale > 0.0f)
+            font = font.withHeight (font.getHeight() * scale);
+
+        return font;
+    }
+
     void Look::drawButtonText (juce::Graphics& g, juce::TextButton& button,
                                bool shouldDrawButtonAsHighlighted, bool shouldDrawButtonAsDown)
     {
