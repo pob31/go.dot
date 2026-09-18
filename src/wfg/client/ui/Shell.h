@@ -52,7 +52,7 @@ namespace wfg::client::ui
                         public juce::DragAndDropContainer
     {
     public:
-        Shell (const model::Theme& theme,
+        Shell (const model::Theme& themeToUse,
                TransportComponent::Actions transportActions,
                CueListComponent::Actions listActions,
                RunPaneComponent::Actions runActions,

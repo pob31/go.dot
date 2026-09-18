@@ -22,18 +22,18 @@
 
 namespace wfg::client::ui
 {
-    Shell::Shell (const model::Theme& theme,
+    Shell::Shell (const model::Theme& themeToUse,
                   TransportComponent::Actions transportActions,
                   CueListComponent::Actions listActions,
                   RunPaneComponent::Actions runActions,
                   InspectorComponent::Actions inspectorActions,
                   NewCueBarComponent::Actions newCueActions)
-        : transport (theme, std::move (transportActions)),
-          cues (theme, std::move (listActions)),
-          runs (theme, std::move (runActions)),
-          inspector (theme, std::move (inspectorActions)),
-          newCues (theme, std::move (newCueActions)),
-          theme (theme)
+        : transport (themeToUse, std::move (transportActions)),
+          cues (themeToUse, std::move (listActions)),
+          runs (themeToUse, std::move (runActions)),
+          inspector (themeToUse, std::move (inspectorActions)),
+          newCues (themeToUse, std::move (newCueActions)),
+          theme (themeToUse)
     {
         /*  NEITHER PANE TAKES THE FOCUS: it rests here, and `keyPressed` below
             offers each key to both. */
