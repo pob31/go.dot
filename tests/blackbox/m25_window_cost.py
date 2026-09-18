@@ -90,8 +90,16 @@ def read_int(server, address, default=0):
         return default
 
 
-def measure(bundle: Path, seconds: float, window: bool, label: str):
-    """One condition. Returns a dict of readings, or None if it would not start."""
+def measure(bundle: Path, seconds: float, window: bool, label: str, firing: bool = False):
+    """One condition. Returns a dict of readings, or None if it would not start.
+
+    `firing` sends a GO every two seconds, which is what makes a condition the
+    engine's busy case rather than its idle one: runs spawning and ending mean
+    the runtime half of the tree is rebuilt and republished every tick, and
+    every one of those is a snapshot the window reads and rows whose
+    decoration changes. It is half of the plan's condition C - the half that
+    does not need a hand on the scrollbar.
+    """
     print(f"\n-- {label} --", flush=True)
 
     try:
@@ -136,9 +144,16 @@ def measure(bundle: Path, seconds: float, window: bool, label: str):
             deadline = began + seconds
             next_at = began
 
+            fired_at = began
+
             while time.monotonic() < deadline:
                 samples.append((time.monotonic() - began,
                                 read_int(server, "/godot/engine/lateness")))
+
+                if firing and time.monotonic() - fired_at >= 2.0:
+                    common.send_udp(server.osc_port, common.osc_encode("/godot/cmd/go"))
+                    fired_at = time.monotonic()
+
                 next_at += 1.0 / SAMPLE_HZ
                 pause = next_at - time.monotonic()
                 if pause > 0:
@@ -266,6 +281,8 @@ def main():
     parser.add_argument("--cues", type=int, default=500)
     parser.add_argument("--keep", action="store_true",
                         help="leave the generated bundle on disk")
+    parser.add_argument("--firing", action="store_true",
+                        help="also take the busy case: a GO every two seconds")
     args = parser.parse_args()
 
     print(f"M25: {args.cues} cues, {args.seconds:.0f} s per condition, hosted clock.")
@@ -282,6 +299,20 @@ def main():
         a = measure(bundle, args.seconds, window=False, label="A  no window")
         b = measure(bundle, args.seconds, window=True, label="B  window, idle")
         verdict(a, b)
+
+        if args.firing:
+            #  THE BUSY CASE, which is the one a show cares about: a GO every
+            #  two seconds, so runs are spawning and ending and the runtime
+            #  half of the tree is rebuilt under the window the whole time.
+            #  Not the plan's full C - nobody is scrolling - but it is the half
+            #  of C that does not need somebody sitting there, and it could not
+            #  be taken at all until M3 gave the window a list to draw.
+            print("\n\nAND AGAIN WITH THE SHOW RUNNING - a GO every two seconds.")
+            a2 = measure(bundle, args.seconds, window=False,
+                         label="A' no window, firing", firing=True)
+            c = measure(bundle, args.seconds, window=True,
+                        label="C  window, firing", firing=True)
+            verdict(a2, c)
     finally:
         if not args.keep:
             import shutil
