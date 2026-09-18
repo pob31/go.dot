@@ -137,6 +137,13 @@ namespace wfg::client::ui
         /*  Whether this run has a picture to draw, which is what decides
             between a band of its own and a mark behind the words. */
         bool hasWaveform (const model::RunRow& entry) const;
+
+        /*  HOW LONG THE FILE IS, for the playhead: the tree's `duration` when
+            the show knew the file at opening, else the analyser's own
+            measurement - a file imported this session has no duration in the
+            tree until the show is next opened, and the author's first long
+            track showed no head at all for that reason (2026-09-18). */
+        double lengthOf (const model::RunRow& entry) const;
         bool paintWaveform (const model::RunRow& entry, juce::Graphics& g,
                             juce::Rectangle<int> strip);
         void paintCountdown (const model::RunRow& entry, juce::Graphics& g,

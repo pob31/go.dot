@@ -17,6 +17,7 @@
 #include <wfg/client/ui/RunPaneComponent.h>
 
 #include <wfg/client/ui/Look.h>
+#include <wfg/engine/audio/Timbre.h>
 
 #include <utility>
 
@@ -249,6 +250,30 @@ namespace wfg::client::ui
         return found != media->end() && found->second.pyramid != nullptr;
     }
 
+    double RunPaneComponent::lengthOf (const model::RunRow& entry) const
+    {
+        if (entry.length > 0.0)
+            return entry.length;
+
+        if (media == nullptr || entry.file.empty())
+            return 0.0;
+
+        const auto found = media->find (entry.file);
+
+        if (found == media->end())
+            return 0.0;
+
+        if (found->second.seconds > 0.0)
+            return found->second.seconds;
+
+        //  Failing that, the pyramid knows how many samples it saw.
+        if (found->second.pyramid != nullptr && found->second.pyramid->sampleRate > 0)
+            return static_cast<double> (found->second.pyramid->samples)
+                     / static_cast<double> (found->second.pyramid->sampleRate);
+
+        return 0.0;
+    }
+
     const std::vector<model::Column>& RunPaneComponent::columnsFor (const std::string& file,
                                                                    int width)
     {
@@ -324,10 +349,12 @@ namespace wfg::client::ui
             g.fillRect (strip);
         }
 
-        if (! (entry.length > 0.0) || ! entry.launched())
+        const auto length = lengthOf (entry);
+
+        if (! (length > 0.0) || ! entry.launched())
             return;
 
-        const auto through = model::playhead (entry.seconds, entry.length);
+        const auto through = model::playhead (entry.seconds, length);
         const auto x = strip.getX() + juce::roundToInt (through * (strip.getWidth() - 1));
 
         /*  What is behind it, faintly, so the cursor reads as having come from
@@ -422,14 +449,23 @@ namespace wfg::client::ui
             is a cue imported in this session - its duration arrives when the
             show is next opened - so the head sits at the left rather than
             sliding across a bar nobody has measured. */
-        const auto through = model::playhead (entry.seconds, entry.length);
+        const auto length = lengthOf (entry);
+        const auto through = model::playhead (entry.seconds, length);
 
-        if (entry.launched() && entry.length > 0.0)
+        if (entry.launched() && length > 0.0)
         {
-            const auto x = strip.getX() + juce::roundToInt (through * (strip.getWidth() - 1));
+            /*  A HEAD THAT READS ON ANY COLOUR: two pixels of ink between one
+                of black each side, since one pixel of ink over a yellow or a
+                green frame vanished (author, 2026-09-18: "the cursor on the
+                active cue waveform doesn't show or gets too slim to stay
+                visible"). Black for the same reason the edge trace is: a job,
+                not a token. */
+            const auto x = strip.getX() + juce::roundToInt (through * (strip.getWidth() - 3));
 
+            g.setColour (juce::Colours::black);
+            g.fillRect (x, strip.getY(), 4, strip.getHeight());
             g.setColour (Look::colour (theme, "ink"));
-            g.fillRect (x, strip.getY(), 1, strip.getHeight());
+            g.fillRect (x + 1, strip.getY(), 2, strip.getHeight());
         }
 
         return true;
