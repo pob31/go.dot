@@ -7283,7 +7283,15 @@ never sees it and PANIC never hears it; the arrows commit and move - up and down
 the same column, skipping bands, derived lines and cues that lack the column; left and right along the
 row - and Tab goes along the row too. A box open over a cue follows it through a rebuild and shuts when
 the cue is gone; a locked show opens none. Every commit is the same `node.set` the inspector's field
-sends.
+sends. *Found in the first hour, by driving double-clicks from a script and tracing every click the list
+received:* the first click of a double-click picked the row and OPENED THE INSPECTOR, which narrowed the
+list and slid the right-carved columns from under a pointer that had not moved, so the second click read
+as another cell or none - and in a default-sized window the name of an indented cue was twelve pixels
+of column once the inspector was open. Two things followed. The panes' shares changed so the list keeps
+a width it can be edited at; and, the author's own instruction - "don't open the inspector on a double
+click" - the row is picked at once but the inspector opens only after the system's double-click time has
+passed without a second click, and never when a box opened. A pick that is not a click - all, or a cue
+just made - opens it at once.
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 

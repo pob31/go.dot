@@ -345,8 +345,11 @@ namespace wfg::client::ui
 
         placeEditor();
         editor.setVisible (true);
-        editor.grabKeyboardFocus();
+        editor.toFront (true);      // above the row components made after it
         editor.selectAll();
+
+        if (actions.editingBegan)
+            actions.editingBegan();
     }
 
     void CueListComponent::placeEditor()

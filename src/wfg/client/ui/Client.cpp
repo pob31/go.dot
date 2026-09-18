@@ -176,8 +176,22 @@ namespace wfg::client
                                                       selection.clear();
                                                   else
                                                       selection.click (id, extend, toggle, show.rows());
+
+                                                  /*  THE INSPECTOR WAITS OUT THE DOUBLE-CLICK on a plain
+                                                      click (author, 2026-09-18: "don't open the inspector
+                                                      on a double click"): the row is picked at once, and
+                                                      the panel opens only if no second click follows in
+                                                      the system's double-click time - so the list is not
+                                                      relaid out under the second click, which was what
+                                                      moved the cells from under the pointer. */
+                                                  inspectorHeld = false;
+                                                  inspectorDueAt = juce::Time::getMillisecondCounter()
+                                                                   + (extend || toggle || id.empty()
+                                                                        ? 0u
+                                                                        : static_cast<juce::uint32> (juce::MouseEvent::getDoubleClickTimeout()));
                                               };
-                listActions.pickAll         = [this] { selection.all (show.rows()); };
+                listActions.editingBegan    = [this] { inspectorHeld = true; };
+                listActions.pickAll         = [this] { selection.all (show.rows()); inspectNow(); };
                 listActions.removeChosen    = [this] { removeChosen(); };
 
                 listActions.importMedia     = [this] (const std::string& parent, int index,
@@ -449,7 +463,7 @@ namespace wfg::client
                     case menuCut:       copyChosen(); removeChosen(); break;
                     case menuCopy:      copyChosen(); break;
                     case menuPaste:     pasteFromClipboard(); break;
-                    case menuSelectAll: selection.all (show.rows()); break;
+                    case menuSelectAll: selection.all (show.rows()); inspectNow(); break;
                     case menuDeleteCue: removeChosen(); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     default: break;
@@ -746,9 +760,12 @@ namespace wfg::client
                     updated otherwise, so typing is never overwritten by a
                     poll - which is the one thing a panel like this must not
                     do. */
-                shell->setInspecting (! selection.empty());
+                const auto inspecting = ! selection.empty() && ! inspectorHeld
+                                     && juce::Time::getMillisecondCounter() >= inspectorDueAt;
 
-                if (! selection.empty())
+                shell->setInspecting (inspecting);
+
+                if (inspecting)
                     shell->inspector.show (model::inspectMany (*snapshot, selection.ids()));
 
                 last = reading;
@@ -1290,6 +1307,7 @@ namespace wfg::client
                                                   model::text (snapshot, "/godot/cue/" + id + "/name")))
                     {
                         selection.set (id);
+                        inspectNow();
                         continue;
                     }
 
@@ -1417,6 +1435,18 @@ namespace wfg::client
 
             /** The engine's clipboard as last mirrored to the system's. */
             std::string clipboardSeen;
+
+            /*  When the inspector may open for the current pick, and whether a
+                box opened in the list holds it shut until the next pick. */
+            juce::uint32 inspectorDueAt = 0;
+            bool inspectorHeld = false;
+
+            /** A pick that is not a click - all, or a cue just made - opens the inspector at once. */
+            void inspectNow()
+            {
+                inspectorHeld = false;
+                inspectorDueAt = 0;
+            }
 
             /** Moves into a footer that did not exist yet, waiting for the tree to name it. */
             std::vector<FooterMove> footerMoves;

@@ -116,6 +116,10 @@ namespace wfg::client::ui
 
             /** One value edited in place: the node's address and the text typed. */
             std::function<void (const std::string& address, const std::string& text)> setValue;
+
+            /*  A BOX OPENED, so the window holds the inspector shut (author,
+                2026-09-18: "don't open the inspector on a double click"). */
+            std::function<void()> editingBegan;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);
