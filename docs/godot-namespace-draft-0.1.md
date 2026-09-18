@@ -6746,6 +6746,30 @@ stubbing the row count, which cleared the cue list, and finally switching the tw
 time, which named the transport in one run. The switches were scaffolding and are gone; the
 technique is the part worth keeping.
 
+**A FOURTH RULE FOR THE CLIENT, bought by the author's first session with the cue list
+(2026-09-18).** They clicked two rows and got `error: 5411 26 window not-a-stop standby.set` where an
+answer should have been. The engine was right: `P4MSG002` is inside a `Footer` and `P4MSG003` inside
+a `Persistent` section, and decision X lets the pointer stand on any cue of its list EXCEPT a header,
+a footer or a persistent one - each of those runs with its group or from the top of the show, and
+none is a place anybody waits.
+
+**What was wrong was the window offering the gesture.** It drew those rows, correctly, and let a
+click reach them. So: **a client does not offer a gesture it could have known would be refused.** The
+rule lives in the model - `Row::mayPark`, where a test reaches it - rather than in a click handler,
+and a row that cannot take the pointer now says which of the three reasons applies, because *nothing
+happened* and *this is not that kind of row* look identical from a chair. The page has the same
+shape available to it and §14.3 should take it when Didi next moves.
+
+**And a refusal is a sentence, not a log line.** `/godot/engine/lastError` is five fields written for
+`grep` at four in the morning - tick, sequence, origin, reason, command - which is right for a log
+and wrong for a strip: somebody who has just pressed a thing needs what and why, and the tick is
+noise because they were there. The window shows `standby.set refused: not-a-stop` and keeps the whole
+record one hover away. **The reason word is not translated**, and that is deliberate: a table of
+friendly sentences in the client would go stale the day a reason is added by somebody who never
+opened that file, which is the argument `undoName` already makes. Anything that does not parse into
+five fields is shown whole, so a format change is visible rather than swallowed. Whether the reason
+codes themselves should read as English is the author's, and is open.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

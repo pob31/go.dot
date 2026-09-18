@@ -128,6 +128,22 @@ namespace wfg::client::model
         return warningFirst.empty() ? count : count + " · " + warningFirst;
     }
 
+    std::string TransportReading::errorLine() const
+    {
+        if (lastError.empty())
+            return {};
+
+        /*  tick, sequence, origin, reason, command - and the command may carry
+            no spaces, so five fields is exactly what a well-formed record has.
+            Anything else is shown as it came. */
+        const auto fields = words (lastError);
+
+        if (fields.size() != 5)
+            return lastError;
+
+        return fields[4] + " refused: " + fields[3];
+    }
+
     std::string TransportReading::statusLine() const
     {
         const auto audio = status.empty() ? std::string (unsaid) : "audio " + status;

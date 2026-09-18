@@ -118,6 +118,22 @@ namespace wfg::client::model
         /** "3 warnings · <the first>", or empty. Bounded, whatever the show says. */
         std::string warningLine() const;
 
+        /*  THE LAST REFUSAL, AS A SENTENCE RATHER THAN A LOG LINE.
+            `/godot/engine/lastError` is five fields - tick, sequence, origin,
+            reason and command - and it is written for `grep` at four in the
+            morning, which is the right shape for a log and the wrong one for a
+            strip. An operator who has just pressed something needs to know
+            WHAT was refused and WHY, and the tick it happened on is noise: they
+            were there.
+
+            So: "standby.set refused: not-a-stop". The reason word is the
+            engine's own and is not translated here - a table of friendly
+            sentences in this file would go stale the day a reason is added by
+            somebody who never opened it, which is the argument `undoLine`
+            makes too. Anything that does not parse into five fields is shown
+            whole, so a format change is visible rather than swallowed. */
+        std::string errorLine() const;
+
         /** Whether this client should OFFER a save: not while the show is locked (§9, decision W). */
         bool mayOfferSave() const noexcept { return locked != Flag::yes; }
 

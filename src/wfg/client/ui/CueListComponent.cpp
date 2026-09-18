@@ -214,8 +214,44 @@ namespace wfg::client::ui
             click will ALSO mean once the inspector exists, is M5's; when it
             arrives this becomes a click on the row's left edge, as the page
             already draws it. */
-        if (row >= 0 && row < static_cast<int> (rows.size()) && actions.park)
-            actions.park (rows[static_cast<std::size_t> (row)].id);
+        if (row < 0 || row >= static_cast<int> (rows.size()))
+            return;
+
+        const auto& entry = rows[static_cast<std::size_t> (row)];
+
+        /*  AND A ROW THAT CANNOT TAKE THE POINTER SAYS SO rather than being
+            sent and refused. The engine answers `standby.set` on a header, a
+            footer or a persistent cue with `not-a-stop`, which is right -
+            those run with their group or from the top of the show, and none is
+            a place anybody waits. What was wrong was this client offering the
+            gesture anyway: the first thing the author did with the cue list
+            was click two such rows and get `error: 5411 26 window not-a-stop
+            standby.set` where an answer should have been.
+
+            A CLIENT THAT KNOWS THE RULE ASKS IT FIRST. `Row::mayPark` is that
+            rule, in the model where a test can reach it, and the sentence
+            below says which of the three reasons applies - because "nothing
+            happened" and "this is not that kind of row" look identical from a
+            chair. */
+        if (! entry.mayPark())
+        {
+            if (actions.say)
+            {
+                const auto why = entry.section == model::Section::persistent
+                                   ? "runs from the moment the show starts"
+                                   : entry.section == model::Section::header
+                                       ? "runs before its group, with it"
+                                       : "runs after its group, with it";
+
+                actions.say (juce::String (entry.name.empty() ? entry.id : entry.name)
+                               + " " + why + ", so the pointer cannot stand there");
+            }
+
+            return;
+        }
+
+        if (actions.park)
+            actions.park (entry.id);
     }
 
     void CueListComponent::paint (juce::Graphics& g)

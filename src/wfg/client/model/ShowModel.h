@@ -91,6 +91,20 @@ namespace wfg::client::model
 
         /** The group this row sits in, or empty at the top of the list. */
         std::string parent;
+
+        /*  WHETHER THE POINTER MAY STAND HERE, which is decision X's rule and
+            not a guess: *any cue of this list that is not in a header, a
+            footer or a persistent section*. A header and a footer run with
+            their group and a persistent cue runs from the moment the show
+            starts; none of the three is a place an operator waits, and the
+            engine refuses `standby.set` on them with `not-a-stop`.
+
+            IT IS HERE SO THAT A CLIENT NEED NOT FIND OUT BY BEING REFUSED. The
+            window drew those rows - correctly, they are part of the show - and
+            offered a click on them, so the first thing the author did with the
+            cue list was press two rows that could never take the pointer and
+            get a log record where an answer should have been. */
+        bool mayPark() const noexcept { return section == Section::member; }
     };
 
     class ShowModel

@@ -358,6 +358,43 @@ TEST_CASE ("client: a show with everything wrong with it is summarised, never ca
     CHECK (reading.warningLine().size() < 250);
 }
 
+TEST_CASE ("client: a row the pointer cannot stand on is not offered, and a refusal is a sentence")
+{
+    /*  WHAT THE AUTHOR'S FIRST SESSION WITH THE CUE LIST FOUND. They clicked
+        two rows and got `error: 5411 26 window not-a-stop standby.set` where
+        an answer should have been. The engine was right - P4MSG002 is inside
+        a Footer and P4MSG003 inside a Persistent section, and decision X lets
+        the pointer stand on any cue of its list EXCEPT those and a header.
+        What was wrong was the window offering a gesture it could have known
+        would be refused. */
+    model::Row row;
+
+    row.section = model::Section::member;
+    CHECK (row.mayPark());
+
+    for (const auto section : { model::Section::header, model::Section::footer,
+                                model::Section::persistent })
+    {
+        row.section = section;
+        CHECK_FALSE (row.mayPark());
+    }
+
+    /*  AND THE REFUSAL READS AS A SENTENCE. The node is five fields written
+        for grep at four in the morning; an operator who just pressed
+        something needs what and why, and the tick is noise - they were
+        there. The reason word stays the engine's own. */
+    model::TransportReading reading;
+    CHECK (reading.errorLine().empty());
+
+    reading.lastError = "5411 26 window not-a-stop standby.set";
+    CHECK (reading.errorLine() == "standby.set refused: not-a-stop");
+
+    /*  Anything that is not five fields is shown whole, so a format change is
+        visible rather than swallowed into a wrong-looking sentence. */
+    reading.lastError = "something else entirely";
+    CHECK (reading.errorLine() == "something else entirely");
+}
+
 TEST_CASE ("client: show mode does not offer a save, and nothing else is withdrawn")
 {
     /*  §9, decision W, as the author reaffirmed it on 2026-09-17: the ENGINE

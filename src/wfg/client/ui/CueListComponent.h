@@ -62,6 +62,9 @@ namespace wfg::client::ui
             std::function<void()> standbyPrevious;
             std::function<void (const std::string&)> park;
             std::function<void()> go;
+
+            /** A sentence for the reader, when a gesture is declined before it is sent. */
+            std::function<void (const juce::String&)> say;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);

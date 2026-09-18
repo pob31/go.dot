@@ -170,9 +170,13 @@ namespace wfg::client::ui
             `lastError` and the operator needs it more - the show they think is
             on disk is not. */
         errorLabel.setText (! reading.writeError.empty() ? "write failed: " + text (reading.writeError)
-                            : ! reading.lastError.empty() ? "error: " + text (reading.lastError)
-                                                          : juce::String(),
+                                                        : text (reading.errorLine()),
                             juce::dontSendNotification);
+
+        /*  The whole record is still one hover away: what the strip drops is
+            the tick and the sequence, which an operator who just pressed the
+            thing does not need and a reader of the log does. */
+        errorLabel.setTooltip (text (reading.lastError));
 
         saveButton.setEnabled (reading.mayOfferSave());
         saveButton.setTooltip (reading.mayOfferSave()

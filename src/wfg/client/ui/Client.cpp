@@ -102,6 +102,13 @@ namespace wfg::client
                 listActions.standbyPrevious = [this] { send (gesture::standbyPrevious()); };
                 listActions.park            = [this] (const std::string& id)
                                               { send (gesture::park (id)); };
+
+                /*  The list has no line of its own to speak on, and the
+                    transport's foot is where every other sentence about this
+                    session already lands - a theme's refusal, the show's
+                    warnings. One place to look is the point. */
+                listActions.say             = [this] (const juce::String& sentence)
+                                              { shell->transport.setNotice (sentence); };
                 listActions.go              = [this] { send (gesture::go()); };
 
                 auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
