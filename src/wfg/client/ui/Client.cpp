@@ -52,6 +52,7 @@
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
+#include <wfg/client/model/Panic.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
@@ -94,6 +95,7 @@ namespace wfg::client
                     thread and never blocks, so a click returns at once and the
                     tick thread applies it in arrival order like a datagram. */
                 actions.go              = [this] { send (gesture::go()); };
+                actions.panic           = [this] { panic(); };
                 actions.undo            = [this] { send (gesture::undo()); };
                 actions.redo            = [this] { send (gesture::redo()); };
                 actions.save            = [this] { send (gesture::save()); };
@@ -283,6 +285,29 @@ namespace wfg::client
             void send (Event event)
             {
                 host.engine.submit (std::move (event));
+            }
+
+            /*  PANIC AND ESC (PRD §4.4). The first press is the graceful
+                abort and the footers run; a second within the window
+                (model/Panic.h) drops everything and no footer runs. Each is
+                one named command, so the log says which level was reached.
+                The sentence on the foot says the same thing in words, since
+                a hand that pressed Esc is not looking at the running pane to
+                find out what it did. */
+            void panic()
+            {
+                const auto now = static_cast<std::int64_t> (juce::Time::getMillisecondCounter());
+
+                if (panicPresses.press (now))
+                {
+                    send (gesture::killAll());
+                    shell->transport.setNotice ("double Esc: everything dropped, no footers");
+                }
+                else
+                {
+                    send (gesture::stopAll());
+                    shell->transport.setNotice ("Esc: every cue stopping, footers run - Esc again drops everything");
+                }
             }
 
             //======================================================================
@@ -830,6 +855,9 @@ namespace wfg::client
 
             /** Creates sent from the new-cue row and not yet found, to be picked when they are. */
             std::vector<model::Creation> creations;
+
+            /** Which level of stop the next Esc means. */
+            model::Panic panicPresses;
 
             /** The open file dialogue, which must outlive the call that launched it. */
             std::unique_ptr<juce::FileChooser> chooser;

@@ -63,6 +63,7 @@ namespace wfg::client::ui
         struct { juce::TextButton* button; std::function<void()>* action; } wiring[]
         {
             { &goButton,      &actions.go },
+            { &panicButton,   &actions.panic },
             { &saveButton,    &actions.save },
             { &undoButton,    &actions.undo },
             { &redoButton,    &actions.redo },
@@ -124,6 +125,15 @@ namespace wfg::client::ui
 
         standbyLabel.setFont (Look::font (theme, 22.0f));
         standbyLabel.setColour (juce::Label::textColourId, Look::colour (theme, "standby"));
+
+        /*  PANIC IN THE REFUSAL'S RED, and the word on it carries the meaning
+            (§4.8): the colour is for the hand that already knows. The tooltip
+            says both levels, because the second is the one nobody reads about
+            first. */
+        panicButton.setColour (juce::TextButton::buttonColourId, Look::colour (theme, "failed"));
+        panicButton.setTooltip ("Esc: every cue stops and the footers run. "
+                                "Esc again within a second: everything is dropped, no footers.");
+        goButton.setTooltip ("Space: fires the standby cue");
 
         statusLabel.setFont (Look::font (theme, 13.0f));
         statusLabel.setColour (juce::Label::textColourId, dim);
@@ -348,6 +358,13 @@ namespace wfg::client::ui
         auto middle = area.removeFromTop (row * 2);
         goButton.setBounds (middle.removeFromLeft (row * 3).reduced (2));
         middle.removeFromLeft (pad);
+
+        /*  PANIC AT THE FAR RIGHT OF THE SAME ROW, as far from GO as the row
+            allows: the two are the same height because both are pressed
+            without looking, and apart because one of them must never be hit
+            by a hand reaching for the other. */
+        panicButton.setBounds (middle.removeFromRight (row * 3).reduced (2));
+        middle.removeFromRight (pad);
         listLabel.setBounds (middle.removeFromTop (row * 3 / 4));
         standbyLabel.setBounds (middle);
 
@@ -405,6 +422,15 @@ namespace wfg::client::ui
         if (key == juce::KeyPress (juce::KeyPress::F5Key))
         {
             if (actions.reloadTheme) actions.reloadTheme();
+            return true;
+        }
+
+        /*  ESC IS PANIC (PRD §4.4), and a second Esc is the second level -
+            the window reads the timing. Unmodified only: an Esc with a
+            modifier held is not the key the law names. */
+        if (key == juce::KeyPress (juce::KeyPress::escapeKey))
+        {
+            if (actions.panic) actions.panic();
             return true;
         }
 

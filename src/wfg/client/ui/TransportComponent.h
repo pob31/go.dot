@@ -60,6 +60,12 @@ namespace wfg::client::ui
         struct Actions
         {
             std::function<void()> go;
+
+            /*  PANIC, and Esc: one press is §4.4's graceful abort, a second
+                within the window is the immediate one. Which of the two is
+                the window's to read (model/Panic.h); this only says a press
+                happened. */
+            std::function<void()> panic;
             std::function<void()> undo;
             std::function<void()> redo;
             std::function<void()> save;
@@ -105,7 +111,8 @@ namespace wfg::client::ui
             looking. `statusLabel` carries only the lock word now. */
         juce::Label showLabel, tickLabel, clockLabel, rateLabel,
                     listLabel, standbyLabel, statusLabel, errorLabel, noticeLabel;
-        juce::TextButton goButton { "GO" }, saveButton { "save" }, revertButton { "revert" },
+        juce::TextButton goButton { "GO" }, panicButton { "PANIC" },
+                        saveButton { "save" }, revertButton { "revert" },
                         undoButton { "undo" }, redoButton { "redo" }, lockButton { "lock the show" },
                         recoverButton { "recover" }, discardButton { "discard" };
 

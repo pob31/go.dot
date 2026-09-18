@@ -6,7 +6,9 @@
     "ArrowUp":     { "command": "standby.previous", "args": [] },
     "Mod+Z":       { "command": "undo",             "args": [] },
     "Mod+Shift+Z": { "command": "redo",             "args": [] },
-    "Mod+S":       { "command": "document.save",    "args": [] }
+    "Mod+S":       { "command": "document.save",    "args": [] },
+    "Escape":      { "command": "run.stopAll",      "args": [] },
+    "Escape Escape": { "command": "run.killAll",    "args": [] }
   },
   "gestures": {
     "go":           { "command": "go",               "args": [],                     "where": "the GO button" },
@@ -24,5 +26,6 @@
     "revert":       { "command": "document.revert",  "args": [],                     "where": "the revert button, after it asks" }
   },
   "buttons": ["standby.previous", "standby.next", "standby.clear", "undo", "redo",
-              "document.save", "document.recover", "document.discardRecovery"]
+              "document.save", "document.recover", "document.discardRecovery",
+              "run.stopAll", "run.killAll"]
 }

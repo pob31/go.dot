@@ -191,6 +191,11 @@
       <header>
         <h2>Gogo</h2>
         <span class="sub">running — present tense</span>
+        <!-- PRD §4.4's first two levels of stop, as the two commands they are
+             (2026-09-18). Esc is the first; Esc again within a second is the
+             second. Wired by the transport's data-cmd loop. -->
+        <button data-cmd="run.stopAll" title="Esc: every cue stops, footers run">stop all</button>
+        <button data-cmd="run.killAll" title="double Esc: everything dropped, no footers">kill all</button>
       </header>
       <div class="scroll" id="runs"></div>
     </section>

@@ -17,6 +17,8 @@
 #include <wfg/engine/cue/RunCommands.h>
 
 #include <algorithm>
+#include <string>
+#include <vector>
 
 namespace wfg::cue
 {
@@ -546,6 +548,72 @@ namespace wfg::cue
                             run->skipFooter = true;
                             run->killed = true;
                             run->state = runState::stopping;
+                            return Outcome::ok (args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  THE FIRST TWO LEVELS OF STOP (PRD §4.4), AS COMMANDS. The author
+            asked for them by their names on the desk (2026-09-18: "Panic is
+            missing and Esc key is not bound"), and §4.11 says a key is a
+            named command or it is nothing - a client looping over the run
+            table sending one `run.stop` per row would be a gesture with no
+            single record, and a replay of that night would reproduce however
+            many rows the client happened to see.
+
+            EACH IS ITS SINGLE-RUN COMMAND APPLIED TO EVERY ROOT RUN. Roots
+            only, on purpose: `run.stop hard` on a group is what brings its
+            members down in order and then runs the footer, and marking the
+            members as well would end them out of that sequence; `run.kill` on
+            a group already kills every descendant. A run whose parent is gone
+            counts as a root, so nothing is left standing because its parent
+            finished first.
+
+            AN EMPTY TABLE IS APPLIED AND DOES NOTHING. Esc on a silent show is
+            not a mistake, and the hand that pressed it needs no error to read.
+            The third level, Go Doh!, stays deferred in the law itself. */
+        const auto rootsOf = [&runs]
+        {
+            std::vector<std::string> roots;
+
+            for (const auto& run : runs.all())
+                if (! run.isFinished()
+                      && (run.parent.empty() || runs.find (run.parent) == nullptr))
+                    roots.push_back (run.id);
+
+            return roots;
+        };
+
+        registry.add ({ "run.stopAll",
+                        "Stops every run now, gracefully: Esc. Members come down in order and"
+                        " every footer runs.",
+                        {},
+                        true,
+                        [&runs, rootsOf] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            for (const auto& id : rootsOf())
+                                if (auto* run = runs.find (id))
+                                    run->state = runState::stopping;
+
+                            return Outcome::ok (args);
+                        } });
+
+        registry.add ({ "run.killAll",
+                        "Drops every run now: double Esc. No footer runs, and the world is left"
+                        " as it was.",
+                        {},
+                        true,
+                        [&runs, rootsOf] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            for (const auto& id : rootsOf())
+                            {
+                                if (auto* run = runs.find (id))
+                                {
+                                    run->skipFooter = true;
+                                    run->killed = true;
+                                    run->state = runState::stopping;
+                                }
+                            }
+
                             return Outcome::ok (args);
                         } });
     }

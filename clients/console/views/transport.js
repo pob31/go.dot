@@ -101,6 +101,6 @@ el("revert").addEventListener("click", () => {
   }
 });
 
-for (const button of document.querySelectorAll("#transport [data-cmd], #recovery [data-cmd]")) {
+for (const button of document.querySelectorAll("#transport [data-cmd], #recovery [data-cmd], #pane-gogo header [data-cmd]")) {
   button.addEventListener("click", () => command(button.dataset.cmd));
 }

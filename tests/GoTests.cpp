@@ -3095,6 +3095,68 @@ TEST_CASE ("group: a stop cue runs the footer, and run.kill does not")
     }
 }
 
+TEST_CASE ("stop levels: run.stopAll runs every footer, run.killAll runs none, and both take every root")
+{
+    /*  §4.4's Esc and double Esc as the commands they became (2026-09-18,
+        "Panic is missing and Esc key is not bound"). Each is its single-run
+        command over every ROOT run: the group is told to stop and brings its
+        members down itself, which is what keeps the footer on the graceful
+        path and off the immediate one. A second, unrelated run is stopped by
+        the same press. */
+    GroupRig rig;
+
+    const auto footer = rig.roleOf (rig.groupId, "footer");
+    const auto closing = rig.document.createCue (footer, 0, "memo", "Release").id;
+    rig.setCue (rig.first, "preWait", "10");             // hold the group in its members
+
+    //  Something else running beside the group: an osc cue waiting on nothing.
+    const auto lone = rig.document.createCue (rig.listId, 3, "memo", "Lone").id;
+    rig.setCue (lone, "preWait", "10");
+
+    const auto start = [&]
+    {
+        rig.setStandby (rig.groupId);
+        REQUIRE (rig.submitAndTick ("go").applied == 1);
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.first).empty(); }));
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string (lone) });
+        REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (lone).empty(); }));
+    };
+
+    SUBCASE ("stopAll is graceful")
+    {
+        start();
+        const auto groupRun = rig.runOf (rig.groupId);
+        const auto loneRun = rig.runOf (lone);
+
+        REQUIRE (rig.submitAndTick ("run.stopAll").applied == 1);
+        CHECK (rig.runToCompletion (groupRun) < 400);
+        CHECK (rig.runToCompletion (loneRun) < 400);
+
+        CHECK (rig.runOf (closing) != "");           // the footer ran on the way out
+    }
+
+    SUBCASE ("killAll is immediate")
+    {
+        start();
+        const auto groupRun = rig.runOf (rig.groupId);
+        const auto loneRun = rig.runOf (lone);
+
+        REQUIRE (rig.submitAndTick ("run.killAll").applied == 1);
+        CHECK (rig.runToCompletion (groupRun) < 400);
+        CHECK (rig.runToCompletion (loneRun) < 400);
+
+        CHECK (rig.runOf (closing) == "");           // and the footer did not
+    }
+
+    SUBCASE ("a silent show is applied and nothing is said")
+    {
+        REQUIRE (rig.submitAndTick ("run.stopAll").applied == 1);
+        REQUIRE (rig.submitAndTick ("run.killAll").applied == 1);
+        CHECK (rig.engine.lastError().empty());
+    }
+}
+
 TEST_CASE ("group: a header's cues are published as cues, and are not members of the group")
 {
     /*  A header is an ordinary cue list, so what is in it is ordinary cues with

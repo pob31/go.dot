@@ -125,6 +125,11 @@ import { press } from "./table.js";
     and neither of them is a second vocabulary for "the UI did it". */
 const PASSES_THE_KEYS = new Set(["range", "checkbox", "color", "button", "submit", "reset"]);
 
+/*  How close two Esc presses are one "double Esc" (§4.4): the desktop's
+    model/Panic.h uses the same number, so the two clients read a hand alike. */
+const DOUBLE_ESCAPE_MS = 750;
+let lastEscape = -Infinity;
+
 function wantsTheKeys(element) {
   if (!element) return false;
   if (element.isContentEditable) return true;
@@ -141,7 +146,22 @@ document.addEventListener("keydown", (event) => {
   pointer.aimKeyStep = !!held && held.id === "aim-offset" && SLIDER_STEPS.has(event.key);
 
   if (event.key === "Escape" && !event.isComposing && event.keyCode !== 229) {
-    if (!held || held === document.body || typeof held.blur !== "function") return;
+    /*  WITH NOTHING HELD, ESC IS PRD §4.4's STOP (2026-09-18) - the engine
+        has the two levels as commands now, so the page no longer has to say
+        nothing about them. One press is the graceful abort, footers run; a
+        second within the window is the immediate one, no footers. The
+        window is counted from the FIRST press, so a hammered key is a stop
+        and then kills, harmlessly. With a field held, Esc still only lets
+        go of it: abandoning a half-typed value must not also stop the show. */
+    if (!held || held === document.body || typeof held.blur !== "function") {
+      const now = Date.now();
+      const second = now - lastEscape <= DOUBLE_ESCAPE_MS;
+
+      lastEscape = now;
+      event.preventDefault();
+      press(second ? "Escape Escape" : "Escape");
+      return;
+    }
 
     if (held.dataset && held.dataset.dirty === "yes") {
       if (held.dataset.before !== undefined) held.value = held.dataset.before;

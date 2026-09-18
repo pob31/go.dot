@@ -46,6 +46,15 @@ namespace wfg::client::gesture
     /** GO: the button, and Space. */
     Event go();
 
+    /*  THE FIRST TWO LEVELS OF STOP (PRD §4.4). Esc, or the PANIC button:
+        every run comes down gracefully and the footers run. Esc again within
+        the double-press window (model/Panic.h), or PANIC again: everything is
+        dropped and no footer runs. The timing is the client's to read - a key
+        pressed twice is a fact about a hand - and each press is still one
+        named command, so the log says which level was reached and when. */
+    Event stopAll();
+    Event killAll();
+
     /*  Where GO would act next, and where it would act before: the cue
         list's arrows. Not a selection - this list has none yet - but the
         pointer itself, which is what the page's arrows move too. */

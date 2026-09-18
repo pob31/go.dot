@@ -46,6 +46,7 @@
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
+#include <wfg/client/model/Panic.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
@@ -517,6 +518,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     const std::vector<Event> gestures
     {
         gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
+        gesture::stopAll(), gesture::killAll(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
         gesture::setNode ("/godot/cue/B3N8R5TW/name", "Renamed"),
         gesture::createCue ("7K2QM9X4", 0, "media", "Thunder"),
@@ -997,6 +999,24 @@ TEST_CASE ("client: an import names its cue after the file, and finds what the c
     CHECK_FALSE (model::madeByImport (job, "group", "Thunder", ""));     // not a media cue
     CHECK_FALSE (model::madeByImport (job, "media", "Rain", ""));        // somebody else's
     CHECK_FALSE (model::madeByImport (job, "media", "Thunder", "Rain.wav"));  // already named
+}
+
+//==============================================================================
+TEST_CASE ("client: Esc is a stop, Esc again within the window is a kill, counted from the first")
+{
+    /*  §4.4 gives Esc two readings and only a hand can be read for which one
+        was meant, so the reading is made here and each reading is one named
+        command. Counted from the FIRST press: three presses inside the window
+        are a stop and two kills, which is what a hammered key means. */
+    model::Panic panic;
+
+    CHECK_FALSE (panic.press (1000));                                   // the first: stop
+    CHECK (panic.press (1000 + model::Panic::doublePressMs));           // just inside: kill
+    CHECK (panic.press (1000 + model::Panic::doublePressMs + 100));     // hammered: kill again
+
+    CHECK_FALSE (panic.press (10000));                                  // long after: a stop again
+    CHECK_FALSE (panic.press (10000 + model::Panic::doublePressMs + 1)); // just outside: a stop
+    CHECK (panic.press (10000 + model::Panic::doublePressMs + 2));       // and now inside the last
 }
 
 //==============================================================================

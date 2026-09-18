@@ -1351,6 +1351,8 @@ Registered commands, replay-idempotent handlers, origin `engine`, as §11.4's ar
 | `run.advance` | `/godot/cmd/run/advance` | `s` run | leave the current range at the end of its current pass (§12.9) |
 | `run.prune`, `run.unprune` | `/godot/cmd/run/prune`, `…/unprune` | `s` run, `s` cue, `s` scope | scope `round` (this round only) or `group` (every round of this run). Run-local; clicking again reinstates if not already passed (§3.6) |
 | `run.kill` | unchanged | `s` run | **now kills a run with no track** — a fade, an osc wait, a group and every descendant — immediately, and runs no footer |
+| `run.stopAll` | `/godot/cmd/run/stopAll` | — | *(2026-09-18)* §4.4's **Esc**: `run.stop hard` applied to every root run, so members come down in order and every footer runs. An empty table is applied and does nothing |
+| `run.killAll` | `/godot/cmd/run/killAll` | — | *(2026-09-18)* §4.4's **double Esc**: `run.kill` applied to every root run; no footer runs. Which of the two a press means is the client's reading of a hand, and each reading is one of these two records |
 | `trigger.fire` | `/godot/cmd/trigger/fire` | `s` trigger, `[s run]` | what a matched trigger submits (§12.8); fires the trigger's cue as `cue.fire` does and never moves standby or focus |
 | `go`, `cue.fire`, `audio.arm` | unchanged | | `audio.arm` stays the explicit form and still accepts only media |
 
@@ -1358,6 +1360,10 @@ Registered commands, replay-idempotent handlers, origin `engine`, as §11.4's ar
 stops its live members per the verb, **then runs the footer**, then the group reports done — the
 same path as normal completion, entered early. **`run.kill`** on a group run kills every
 descendant and runs no footer. Esc and double-Esc in Phase 10 are these two paths bound to keys.
+*(Bound early, 2026-09-18, at the author's asking — "Panic is missing and Esc key is not bound":
+`run.stopAll` and `run.killAll` are those two paths over every root run, and both clients bind Esc
+and a second Esc within 750 ms to them; the desktop has a PANIC button beside GO as well. Go Doh!
+stays deferred, as §4.4 itself says.)*
 
 ### 12.5 Groups — `/godot/cue/<id>` grows, and two children appear
 
@@ -7095,6 +7101,21 @@ every button is `cue.create`, reachable from the page - and building the row fro
 found that the page's list had stopped at OSC, so MIDI was added there in the same commit. The
 inspector's details fold moved in the same round: its button sat at the foot of the pane, a screen
 away from the fields it folds, and now heads the detail lines themselves.
+
+**PANIC, AND ESC (2026-09-18).** *"Panic is missing and Esc key is not bound."* Until then no client
+had an abort key, deliberately (§14.15's "says nothing about the three levels of stop rather than
+implying half of one"), because the engine had only the per-run primitives and a client sending one
+`run.stop` per row would have been a gesture with no single record. So the engine gained the two
+levels as commands, `run.stopAll` and `run.killAll` (§12.4), each its single-run command over every
+root run, and both clients bind them: **Esc** is the graceful abort and the footers run; **Esc again
+within 750 ms** is the immediate one and no footer runs. Which of the two a press means is a fact
+about a hand, so the client reads it (`model/Panic.h`, one place both the key and the button ask) and
+sends one named command for the reading - the log says which level was reached and when, and a
+replay reaches the same one. The window counts the second press from the first, so a hammered key is
+a stop and then kills, each applied harmlessly to a table already stopping. The desktop has a
+**PANIC** button at the far right of GO's row, the same height and as far from it as the row allows;
+the page has *stop all* and *kill all* on its running pane's header. What double Esc does NOT yet do
+is park mounted parameters at their §4.6 panic values - that is the mount table's, and Phase 10's.
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 
