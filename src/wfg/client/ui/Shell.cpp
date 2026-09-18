@@ -84,17 +84,19 @@ namespace wfg::client::ui
             the arrangement the author chose on the page (`3115b10`), where
             the two list panes shrink to make room rather than a third pane
             standing empty whenever nobody is asking about a cue. */
-        if (inspecting)
-            inspector.setBounds (area.removeFromRight (juce::jmax (area.getWidth() * 2 / 5,
-                                                                   juce::jmin (area.getWidth(), 240))));
-
-        /*  THE NEW-CUE ROW OVER THE LIST, in the list's own column and only
+        /*  THE NEW-CUE ROW FIRST, across the whole of what is left, and only
             while the show may be edited: a row that never moves is the point
-            of it, so it is above the list rather than in the inspector, which
-            comes and goes with the pick. */
+            of it (author, 2026-09-18: "leave the strip with the new cue
+            buttons on the same width and start the inspector panel beneath
+            it so the buttons stay in place"). So it is cut before the
+            inspector takes its column, and the inspector opens under it. */
         if (editing)
             newCues.setBounds (area.removeFromTop (juce::jmin (newCues.preferredHeight(),
                                                                area.getHeight())));
+
+        if (inspecting)
+            inspector.setBounds (area.removeFromRight (juce::jmax (area.getWidth() * 2 / 5,
+                                                                   juce::jmin (area.getWidth(), 240))));
 
         cues.setBounds (area);
     }
