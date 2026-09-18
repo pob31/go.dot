@@ -562,6 +562,7 @@ namespace wfg::tree
             const auto isStop = element == "Stop";
             const auto isOsc = element == "Osc";
             const auto isMidi = element == "Midi";
+            const auto isStart = element == "Start";
             const auto id = node[idProperty].toString().toStdString();
 
             if (id.empty())
@@ -612,6 +613,10 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("midi"))
                     rows.push_back (row);
 
+            if (isStart)
+                for (auto* row : doc::Schema::rowsForOwner ("start"))
+                    rows.push_back (row);
+
             for (const auto* row : rows)
             {
                 const doc::Attribute attribute { element, row };
@@ -648,6 +653,7 @@ namespace wfg::tree
                                                   : isStop  ? "stop"
                                                   : isOsc   ? "osc"
                                                   : isMidi  ? "midi"
+                                                  : isStart ? "start"
                                                             : "memo";
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
@@ -1433,6 +1439,7 @@ namespace wfg::tree
                 when the operator answers it - which is why the table caps it at
                 1 rather than at the 5 its livelier neighbours carry. */
             else if (name == "recovery") text = state.documentRecovery ? "true" : "false";
+            else if (name == "recording") text = lists != nullptr && lists->isRecording() ? "true" : "false";
 
             /*  And why the last write handed to the writer thread did not land,
                 beside it: a sentence, because it is the writer's own - which

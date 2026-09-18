@@ -42,6 +42,7 @@ namespace wfg::client::model
                 { "media",   { "file", "level", "startOffset" } },
                 { "fade",    { "target", "level", "curve", "points", "stopWhenDone" } },
                 { "stop",    { "target", "verb", "curve" } },
+                { "start",   { "target" } },
                 { "osc",     { "address", "value", "wait", "timeout" } },
                 { "midi",    { "port", "channel", "type", "number", "data", "sysex", "wait" } },
                 { "group",   { "mode", "advance", "selection", "play", "loops", "seed" } },

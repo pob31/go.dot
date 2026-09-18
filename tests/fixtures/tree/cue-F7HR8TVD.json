@@ -33,7 +33,7 @@
       "TYPE": "s",
       "ACCESS": 1,
       "VALUE": ["memo"],
-      "RANGE": [{"VALS": ["memo", "group", "media", "fade", "stop", "osc", "midi"]}],
+      "RANGE": [{"VALS": ["memo", "group", "media", "fade", "stop", "osc", "midi", "start"]}],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     },
     "name": {

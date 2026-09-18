@@ -150,7 +150,7 @@ namespace wfg::client::model
     {
         const auto tie = [] (const TransportReading& r)
         {
-            return std::tie (r.show, r.dirty, r.locked, r.recovery,
+            return std::tie (r.show, r.dirty, r.locked, r.recovery, r.recording,
                              r.tick, r.clock, r.rate,
                              r.listId, r.listName, r.standbyId, r.standbyName, r.standbyKind,
                              r.standbyNotes,
@@ -170,6 +170,7 @@ namespace wfg::client::model
         reading.dirty = flag (snapshot, "/godot/document/dirty");
         reading.locked = flag (snapshot, "/godot/document/locked");
         reading.recovery = flag (snapshot, "/godot/document/recovery");
+        reading.recording = flag (snapshot, "/godot/document/recording");
 
         reading.tick = text (snapshot, "/godot/engine/tick");
         reading.clock = text (snapshot, "/godot/engine/clock");

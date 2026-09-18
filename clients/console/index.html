@@ -58,6 +58,10 @@
           apart by being written down twice. -->
     <button id="undo" data-cmd="undo" disabled>undo</button>
     <button id="redo" data-cmd="redo" disabled>redo</button>
+    <!-- The live recorder (2026-09-19): every cue start kept from here, and
+         written into a take - a timeline group of start cues - on stop. -->
+    <button data-cmd="record.start" title="keep every cue start from now">record</button>
+    <button data-cmd="record.stop" title="write what was kept into a take">stop recording</button>
     <span class="undo-note" id="undo-note"></span>
 
     <!--  SAVE, AS A BUTTON AND AS CTRL/⌘-S, for the reason undo is both: the

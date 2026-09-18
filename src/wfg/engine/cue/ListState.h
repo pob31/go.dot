@@ -46,6 +46,7 @@
 #include <cstdint>
 #include <map>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::cue
@@ -105,6 +106,12 @@ namespace wfg::cue
             steps.push_back (step);
             ++taken;
 
+            /*  AND THE RECORDER KEEPS IT, unbounded, while it is on: the
+                author's live recorder is the history dumped to a group, and
+                a night is longer than sixty-four steps. */
+            if (recordingSince >= 0)
+                recorded.push_back (step);
+
             while (steps.size() > kept)
                 steps.erase (steps.begin());
         }
@@ -155,8 +162,26 @@ namespace wfg::cue
             to notice a new one without comparing lists. */
         std::uint64_t stepsTaken() const noexcept { return taken; }
 
+        /*  THE LIVE RECORDER (author, 2026-09-18). On from a tick, keeping
+            every step on every list; off with the steps handed back, oldest
+            first, for `record.stop` to write into a take. */
+        void startRecording (std::int64_t tick)
+        {
+            recordingSince = tick;
+            recorded.clear();
+        }
+
+        std::vector<Step> stopRecording()
+        {
+            recordingSince = -1;
+            return std::move (recorded);
+        }
+
+        bool isRecording() const noexcept { return recordingSince >= 0; }
+        std::int64_t recordingSinceTick() const noexcept { return recordingSince; }
+
         /** A show being closed takes all of it with it: it is about a session. */
-        void clear() { aims.clear(); positions.clear(); histories.clear(); }
+        void clear() { aims.clear(); positions.clear(); histories.clear(); recorded.clear(); recordingSince = -1; }
 
         static constexpr std::size_t kept = 64;
 
@@ -171,5 +196,7 @@ namespace wfg::cue
         std::map<std::string, ListAim> aims, positions;
         std::map<std::string, std::vector<Step>> histories;
         std::uint64_t taken = 0;
+        std::int64_t recordingSince = -1;
+        std::vector<Step> recorded;
     };
 }

@@ -125,10 +125,10 @@ namespace wfg::doc
                     about the whole show and not about any bus. */
                 { "Lists",  false, { "List" },             { "lists" } },
                 { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
-                                     "Midi", "Persistent" }, { "list" } },
+                                     "Midi", "Start", "Persistent" }, { "list" } },
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
                 { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
-                                     "Midi", "Header", "Footer", "Trigger" },
+                                     "Midi", "Start", "Header", "Footer", "Trigger" },
                                                                           { "cue", "group" } },
 
                 /*  A HEADER AND A FOOTER ARE ORDINARY CUE LISTS (§3.6), which
@@ -151,9 +151,9 @@ namespace wfg::doc
                     validate() would be paying a great deal for a smaller
                     diagnostic. */
                 { "Header", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
-                                     "Midi" }, {} },
+                                     "Midi", "Start" }, {} },
                 { "Footer", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
-                                     "Midi" }, {} },
+                                     "Midi", "Start" }, {} },
 
                 /*  THE PERSISTENT SECTION IS A LIST'S, not a group's (§3.29,
                     decision S): the thing that should be running at all times
@@ -163,7 +163,7 @@ namespace wfg::doc
                     put there is a validate WARNING that the section ignores
                     rather than a file that refuses to open. */
                 { "Persistent", true, { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
-                                        "Midi" }, {} },
+                                        "Midi", "Start" }, {} },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
                     pattern a Group already set. `kind` stays derived from the
@@ -236,6 +236,13 @@ namespace wfg::doc
                     them and a media cue. */
                 { "Fade",   true,  { "Trigger" },                     { "cue", "fade" } },
                 { "Stop",   true,  { "Trigger" },                     { "cue", "stop" } },
+
+                /*  A START CUE PRESSES A BUTTON (2026-09-19): it fires another
+                    cue by name and is done. Its own element for the reason the
+                    others have one - `kind` stays derived - and it carries a
+                    target and nothing else of its own. What the live recorder
+                    writes into a take. */
+                { "Start",  true,  { "Trigger" },                     { "cue", "start" } },
 
                 /*  And a network cue is one too, for the same reason. It
                     carries no Route either: what it writes is somebody

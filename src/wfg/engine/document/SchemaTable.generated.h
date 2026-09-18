@@ -33,7 +33,7 @@
 namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
-    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi" };
+    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi", "start" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
     inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock" };
@@ -44,7 +44,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_osc_wait[] = { "none", "sent", "verified" };
     inline constexpr std::string_view enum_midi_type[] = { "noteOn", "noteOff", "programChange", "controlChange", "pitchBend", "aftertouch", "channelPressure", "sysex" };
     inline constexpr std::string_view enum_midi_wait[] = { "none", "sent" };
-    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi" };
+    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi", "start" };
     inline constexpr std::string_view enum_run_phase[] = { "entering", "preparing", "prepared", "header", "members", "footer" };
     inline constexpr std::string_view enum_run_state[] = { "preparing", "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
     inline constexpr std::string_view enum_run_warning[] = { "no-channel", "revoked" };
@@ -317,6 +317,14 @@ namespace wfg::doc::generated
           "", 5.0, false, "park",
           "",
           "Why the last write the engine handed to its writer thread did not land, in the writer's own sentence - which command, at which tick, which file and what became of it - and empty when nothing is outstanding. Saves, autosaves, copies and discards of a recovery are written off the tick thread so that GO never waits for a disk, which means a write that fails can no longer refuse the command that asked for it: the command was applied, and its record means taken and handed to the writer. What a failure does instead is leave dirty lit, because the show on disk is still behind - the truthful signal - and say why here. NOT lastError, which quotes a refused record by tick and sequence: this failure has no such record, and counting it there would make errorCount disagree with the log. It goes out when a later write of the same command lands, or when a save lands over an autosave's failure; an autosave landing says nothing about a save that did not." },
+        { "document", "recording",
+          ValueType::boolean, 'T', false, Access::read, Kind::state, Persist::none,
+          true, "false",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 5.0, false, "park",
+          "",
+          "Whether the live recorder is on (author, 2026-09-18: a Live recorder that records all the cue starts, to store timings triggered once by hand and then automated). record.start turns it on; from then every applied go, cue.fire and trigger.fire on any list is kept with its tick; record.stop writes them into a take - a timeline group of start cues in a list named Live recorder, each at the second it was fired - and turns it off. What it keeps is the list-s own step history, unbounded while it records: the author-s reframing that a live recorder dumps the load-to-time history to a group for replay." },
         { "lists", "order",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
@@ -425,7 +433,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           true, "memo",
           false, 0.0, false, 0.0,
-          enum_cue_kind, 7,
+          enum_cue_kind, 8,
           "", 50.0, false, "park",
           "",
           "What kind of cue this is, derived from the element rather than stored: a Group is a group and a Media is media. Deriving it is what stops a client turning one kind into another by writing a word, and what lets the grammar refuse a file attribute on a cue that plays nothing." },
@@ -781,6 +789,14 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "How it stops. Hard stops now and takes Tracktion's own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary." },
+        { "start", "target",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "cue",
+          "The cue this starts when it fires - by name, as cue.fire does, so standby does not move and the target may sit anywhere in any list. A start cue is a memo that presses a button (2026-09-19): it fires, its run is done the next tick, and the target runs on its own. What the live recorder writes into a take: one start cue per cue the operator fired, at the second they fired it, so a night pressed by hand can be played back by a timeline. A target that is a manual group is refused when it fires, as cue.fire refuses it." },
         { "stop", "duration",
           ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
           true, "0",
@@ -913,7 +929,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
           false, 0.0, false, 0.0,
-          enum_run_kind, 7,
+          enum_run_kind, 8,
           "", 50.0, false, "park",
           "",
           "The kind of the cue this run instantiates, copied at launch so a client reading a run does not have to go and look the cue up - and so the answer survives the cue being edited underneath it." },

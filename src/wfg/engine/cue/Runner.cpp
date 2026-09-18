@@ -61,6 +61,7 @@ namespace wfg::cue
             if (element == "Stop")  return "stop";
             if (element == "Osc")   return "osc";
             if (element == "Midi")  return "midi";
+            if (element == "Start") return "start";
 
             return {};
         }
@@ -2215,6 +2216,25 @@ namespace wfg::cue
             job.run = runId;
             job.enterAt = run->enterAt;
             scheduled.push_back (job);
+            return;
+        }
+
+        if (kind == "start")
+        {
+            /*  A START CUE PRESSES A BUTTON (2026-09-19): it names a cue and
+                fires it as a surface would, by name, standby untouched. The
+                fire itself is a record of its own - `cue.fire`, submitted by
+                the next tick's hook and never from here - so the target's
+                runs carry their identifiers in a record a replay re-supplies,
+                and the start cue is a memo in every other respect: playing
+                now, done the next tick, its waits its own. */
+            if (auto* run = runs.find (runId))
+                run->state = runState::playing;
+
+            if (const auto target = textOf (cue, "target"); ! target.empty())
+                startsToFire.push_back (target);
+
+            finishing.push_back (runId);
             return;
         }
 
@@ -4827,6 +4847,13 @@ namespace wfg::cue
             same ticks, or it would not reproduce the session it is replaying. */
         currentTick = tick;
 
+        /*  WHAT THE START CUES ASKED FOR, fired by name now: the hook decides,
+            the handler applies, and the record is `cue.fire`'s own. */
+        for (const auto& target : startsToFire)
+            engine.submit (origin::engine, "cue.fire", one (target));
+
+        startsToFire.clear();
+
         /*  ABOVE THE NULL-PLAYER GATE, all three of them, and that is not an
             ordering detail. `wfg serve` without `--hosted` has no Player at all
             and must still run a show made of memos, network cues and fades -
@@ -5737,6 +5764,146 @@ namespace wfg::cue
 
                             for (const auto& id : made)
                                 applied.push_back (osc::Value::string (id));
+
+                            return Outcome::ok (applied);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  THE LIVE RECORDER (author, 2026-09-18: "a 'Live recorder' ... will
+            create a sequence/sequential group in a new 'Live recorder'
+            playlist that will record all the cue starts ... This can be used
+            to store timings triggered once by hand and then automated"), and
+            the reframing that made it small: "4 is like dumping the load to
+            time history to a group for replay." So it is two commands and no
+            machinery of its own: `record.start` turns the history's keeping
+            on, unbounded; `record.stop` writes what was kept into a take - a
+            TIMELINE group, since a sequence advances on completion and could
+            not hold the seconds between two presses - of one start cue per
+            step, at the second it was pressed, in a list named "Live
+            recorder" that is made the first time. Every identifier the take
+            draws rides on the applied arguments in the order it was drawn,
+            as a jump's do, and a replay hands them back. */
+        registry.add ({ "record.start",
+                        "Turns the live recorder on: from now every cue start on every list is"
+                        " kept, for record.stop to write into a take.",
+                        {},
+                        true,
+                        [&runner] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            runner.listState().startRecording (context.tick);
+                            return Outcome::ok (args);
+                        } });
+
+        registry.add ({ "record.stop",
+                        "Turns the live recorder off and writes what it kept into a take: a"
+                        " timeline group of start cues, one per cue start at the second it"
+                        " was pressed, in a list named Live recorder.",
+                        { { "made", 's', true, true } },
+                        true,
+                        [&runner, &document] (CommandContext&,
+                                              const std::vector<osc::Value>& args)
+                        {
+                            if (! runner.listState().isRecording())
+                                return Outcome::rejected (reason::badValue);
+
+                            if (document.isLocked())
+                                return Outcome::rejected (reason::locked);
+
+                            const auto since = runner.listState().recordingSinceTick();
+                            const auto steps = runner.listState().stopRecording();
+
+                            std::vector<std::string> supplied;
+
+                            for (const auto& value : args)
+                                supplied.push_back (value.getString());
+
+                            std::size_t taken = 0;
+                            std::vector<osc::Value> applied;
+
+                            /*  An identifier the record supplied, or none -
+                                the document draws one - and whichever it was
+                                goes on the applied arguments. */
+                            const auto next = [&]
+                            {
+                                const auto id = taken < supplied.size() ? supplied[taken] : std::string {};
+                                ++taken;
+                                return id;
+                            };
+
+                            //  The list, found by name or made.
+                            std::string listId;
+                            const auto lists = document.root().getChildWithName (juce::Identifier ("Lists"));
+
+                            for (const auto& candidate : lists)
+                            {
+                                if (candidate.getType().toString() != "List")
+                                    continue;
+
+                                const auto id = candidate[idProperty].toString().toStdString();
+
+                                if (document.getAttribute ("/godot/list/" + id + "/name")
+                                        .value_or (std::string {}) == "Live recorder")
+                                {
+                                    listId = id;
+                                    break;
+                                }
+                            }
+
+                            if (listId.empty())
+                            {
+                                const auto made = document.createList ("Live recorder", next());
+
+                                if (! made.ok)
+                                    return Outcome::rejected (made.reason);
+
+                                listId = made.id;
+                                applied.push_back (osc::Value::string (listId));
+                            }
+
+                            //  The take, after the ones there are.
+                            const auto list = document.findById (listId);
+                            auto takes = 0;
+                            auto members = 0;
+
+                            for (const auto& child : list)
+                            {
+                                if (child.getType().toString() == "Group")
+                                    ++takes;
+
+                                if (isCueElement (child.getType().toString()))
+                                    ++members;
+                            }
+
+                            const auto take = document.createCue (listId, members, "group",
+                                                                  "Take " + std::to_string (takes + 1),
+                                                                  next());
+
+                            if (! take.ok)
+                                return Outcome::rejected (take.reason);
+
+                            applied.push_back (osc::Value::string (take.id));
+                            document.setAttribute ("/godot/cue/" + take.id + "/mode", "timeline");
+
+                            //  One start cue per step, at the second it was pressed.
+                            auto at = 0;
+
+                            for (const auto& step : steps)
+                            {
+                                const auto name = document.getAttribute ("/godot/cue/" + step.cue + "/name")
+                                                      .value_or (std::string {});
+                                const auto made = document.createCue (take.id, at++, "start",
+                                                                      "Start " + (name.empty() ? step.cue : name),
+                                                                      next());
+
+                                if (! made.ok)
+                                    return Outcome::rejected (made.reason);
+
+                                applied.push_back (osc::Value::string (made.id));
+                                document.setAttribute ("/godot/cue/" + made.id + "/target", step.cue);
+                                document.setAttribute ("/godot/cue/" + made.id + "/preWait",
+                                                       osc::formatDouble (static_cast<double> (step.tick - since)
+                                                                            / static_cast<double> (TickClock::rateHz)));
+                            }
 
                             return Outcome::ok (applied);
                         } });

@@ -30,5 +30,5 @@
   },
   "buttons": ["standby.previous", "standby.next", "standby.clear", "undo", "redo",
               "document.save", "document.recover", "document.discardRecovery",
-              "run.stopAll", "run.killAll"]
+              "run.stopAll", "run.killAll", "record.start", "record.stop"]
 }

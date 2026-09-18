@@ -136,6 +136,9 @@ namespace wfg::client::gesture
         return { origin::window, "list.loadToTime", { osc::Value::string (listId) } };
     }
 
+    Event recordStart() { return plain ("record.start"); }
+    Event recordStop()  { return plain ("record.stop"); }
+
     Event setLocked (bool locked)
     {
         /*  A BOOLEAN, not the word "true": `node.set` takes its value as a

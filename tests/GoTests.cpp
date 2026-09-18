@@ -5100,6 +5100,152 @@ TEST_CASE ("history: the jump retimes the steps, and drops the ones it undid")
     CHECK (replan.toJson().find ("\"how\": \"history\"") != std::string::npos);
 }
 
+//==============================================================================
+/*  THE START CUE AND THE LIVE RECORDER (author, 2026-09-18; built 2026-09-19).
+
+    A start cue presses a button: it fires another cue by name and is done.
+    The live recorder is the history kept from a tick and written, on stop,
+    into a take - a timeline group of start cues at the seconds they were
+    pressed - which is the author's own reframing: "4 is like dumping the
+    load to time history to a group for replay."
+*/
+TEST_CASE ("start: a start cue fires its target by name on the next tick, and is done")
+{
+    Rig rig;
+
+    const auto starter = rig.document.createCue (rig.listId, 2, "start", "Press thunder").id;
+    REQUIRE (! starter.empty());
+    rig.document.setAttribute ("/godot/cue/" + starter + "/target", rig.mediaId);
+
+    rig.setStandby (starter);
+    const auto at = rig.tick;
+    CHECK (rig.submitAndTick ("go").applied == 1);
+
+    //  Its own run is playing, then done the next tick, as a memo's is.
+    const auto own = rig.runOf (starter);
+    REQUIRE (! own.empty());
+
+    //  The hook fires the target by name on the next tick: a record of its own.
+    rig.tickOnce();
+    rig.tickOnce();
+
+    auto fired = false;
+
+    for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+        if (record.command == "cue.fire" && ! record.args.empty()
+              && record.args.front().getString() == rig.mediaId)
+            fired = true;
+
+    CHECK (fired);
+    CHECK (! rig.runOf (rig.mediaId).empty());
+    CHECK (rig.runs.find (own)->isFinished());
+
+    //  Standby was not moved by the fire: GO moved it past the start cue.
+    CHECK (rig.standby() != starter);
+    juce::ignoreUnused (at);
+}
+
+TEST_CASE ("record: what was pressed between start and stop becomes a take of start cues at their seconds")
+{
+    Rig rig;
+
+    //  Nothing kept: refused.
+    CHECK (rig.submitAndTick ("record.stop").rejected == 1);
+
+    CHECK (rig.submitAndTick ("record.start").applied == 1);
+    const auto since = rig.tick - 1;
+
+    rig.setStandby (rig.mediaId);
+    rig.submitAndTick ("go");                            // thunder, at since + 1
+    const auto thunderAt = rig.tick - 1;
+
+    for (int n = 0; n < 99; ++n)
+        rig.tickOnce();
+
+    rig.submitAndTick ("cue.fire", { osc::Value::string (rig.memoId) });   // two seconds later
+    const auto memoAt = rig.tick - 1;
+
+    //  The stop, and whatever else that tick applied - the memo's own ending.
+    const auto stopped = rig.submitAndTick ("record.stop");
+    CHECK (stopped.applied >= 1);
+    CHECK (stopped.rejected == 0);
+
+    //  A list named Live recorder, with one take: a timeline group.
+    std::string recorder;
+
+    for (const auto& child : rig.document.root().getChildWithName (juce::Identifier ("Lists")))
+        if (child.getType().toString() == "List"
+             && rig.document.getAttribute ("/godot/list/" + child[juce::Identifier ("id")].toString().toStdString()
+                                           + "/name").value_or ("") == "Live recorder")
+            recorder = child[juce::Identifier ("id")].toString().toStdString();
+
+    REQUIRE (! recorder.empty());
+
+    const auto list = rig.document.findById (recorder);
+    REQUIRE (list.getNumChildren() == 1);
+
+    const auto take = list.getChild (0);
+    CHECK (take.getType().toString() == "Group");
+    CHECK (rig.document.getAttribute ("/godot/cue/" + take[juce::Identifier ("id")].toString().toStdString() + "/name").value_or ("") == "Take 1");
+    CHECK (rig.document.getAttribute ("/godot/cue/" + take[juce::Identifier ("id")].toString().toStdString() + "/mode").value_or ("") == "timeline");
+    REQUIRE (take.getNumChildren() == 2);
+
+    const auto first = take.getChild (0);
+    const auto second = take.getChild (1);
+    CHECK (first.getType().toString() == "Start");
+    CHECK (second.getType().toString() == "Start");
+
+    const auto attribute = [&rig] (const juce::ValueTree& node, const char* name)
+    {
+        return rig.document.getAttribute ("/godot/cue/" + node[juce::Identifier ("id")].toString().toStdString()
+                                          + "/" + name).value_or ("");
+    };
+
+    CHECK (attribute (first, "target") == rig.mediaId);
+    CHECK (attribute (first, "name") == "Start Thunder");
+    CHECK (osc::parseDouble (attribute (first, "preWait")).value_or (-1.0)
+             == doctest::Approx ((thunderAt - since) / 50.0));
+    CHECK (attribute (second, "target") == rig.memoId);
+    CHECK (osc::parseDouble (attribute (second, "preWait")).value_or (-1.0)
+             == doctest::Approx ((memoAt - since) / 50.0));
+
+    //  The record carries every identifier the take drew, list first.
+    const auto* command = rig.engine.commands().find ("record.stop");
+    REQUIRE (command != nullptr);
+
+    for (const auto& record : LogFile::parse (rig.engine.log().contents()).records)
+        if (record.command == "record.stop" && record.kind == LogRecord::Kind::applied)
+            CHECK (record.args.size() == 4u);       // the list, the take, two start cues
+
+    //  A second take lands beside the first, and the list is reused.
+    rig.submitAndTick ("record.start");
+    rig.setStandby (rig.mediaId);
+    rig.submitAndTick ("go");
+    CHECK (rig.submitAndTick ("record.stop").applied == 1);
+    CHECK (rig.document.findById (recorder).getNumChildren() == 2);
+    CHECK (rig.document.getAttribute ("/godot/cue/"
+                                      + rig.document.findById (recorder).getChild (1)[juce::Identifier ("id")]
+                                            .toString().toStdString() + "/name").value_or ("") == "Take 2");
+
+    //  And the recorder reads as off.
+    CHECK_FALSE (rig.runner.listState().isRecording());
+}
+
+TEST_CASE ("record: a locked show keeps recording but refuses to write the take")
+{
+    Rig rig;
+    rig.submitAndTick ("record.start");
+    rig.setStandby (rig.mediaId);
+    rig.submitAndTick ("go");
+
+    rig.document.setAttribute ("/godot/document/locked", "true");
+    CHECK (rig.submitAndTick ("record.stop").rejected == 1);
+    CHECK (rig.runner.listState().isRecording());
+
+    rig.document.setAttribute ("/godot/document/locked", "false");
+    CHECK (rig.submitAndTick ("record.stop").applied == 1);
+}
+
 TEST_CASE ("M19: what the horizon costs, in ticks from the pointer landing")
 {
     /*  MEASUREMENT M19 (§13.14), the half of it this PR can take.

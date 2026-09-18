@@ -142,4 +142,8 @@ namespace wfg::client::gesture
         answer is what the panel shows; the load is the one button. */
     Event aim (const std::string& listId, const std::string& cueId, double offset);
     Event loadToTime (const std::string& listId);
+
+    /** The live recorder: keep every cue start from now, and write them into a take. */
+    Event recordStart();
+    Event recordStop();
 }

@@ -529,6 +529,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
         gesture::seek ("R4NID001", 12.5),
         gesture::aim ("7K2QM9X4", "B3N8R5TW", 12.5), gesture::loadToTime ("7K2QM9X4"),
+        gesture::recordStart(), gesture::recordStop(),
         gesture::setNode ("/godot/cue/B3N8R5TW/name", "Renamed"),
         gesture::createCue ("7K2QM9X4", 0, "media", "Thunder"),
         gesture::moveObject ("B3N8R5TW", "7K2QM9X4", 0),

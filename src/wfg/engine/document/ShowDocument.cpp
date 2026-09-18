@@ -283,6 +283,7 @@ namespace wfg::doc
         if (kind == "stop")  return "Stop";
         if (kind == "osc")   return "Osc";
         if (kind == "midi")  return "Midi";
+        if (kind == "start") return "Start";
         return {};
     }
 
@@ -314,7 +315,8 @@ namespace wfg::doc
             and a cue that becomes a group keeps its address. */
         if (element == "Cue" || element == "Group" || element == "Media"
               || element == "Fade" || element == "Stop"
-              || element == "Osc" || element == "Midi")             return "cue";
+              || element == "Osc" || element == "Midi"
+              || element == "Start")                                return "cue";
         if (element == "Lists")                     return "lists";
         /*  A header and a footer are addressed by nothing: they carry no
             attribute but their identifier, and the cues inside them are
@@ -2327,7 +2329,8 @@ namespace wfg::doc
                     {
                         const auto element = child.getType().toString().toStdString();
 
-                        if (element != "Fade" && element != "Stop" && element != "Group")
+                        if (element != "Fade" && element != "Stop" && element != "Group"
+                             && element != "Start")
                             continue;
 
                         problems.push_back (

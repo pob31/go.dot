@@ -105,6 +105,7 @@ const KIND_ORDER = {
   media:   ["file", "level", "startOffset"],
   fade:    ["target", "level", "curve", "points", "stopWhenDone"],
   stop:    ["target", "verb", "curve"],
+  start:   ["target"],
   osc:     ["address", "value", "wait", "timeout"],
   midi:    ["port", "channel", "type", "number", "data", "sysex", "wait"],
   group:   ["mode", "advance", "selection", "play", "loops", "seed"],
@@ -371,7 +372,7 @@ function controlFor(field) {
 /*  Every word `cue.create` takes. `midi` was missing until the desktop's
     new-cue row was built from the same list (2026-09-18) and the two clients
     were held to one answer: the engine has made MIDI cues since Phase 4. */
-const KINDS = ["memo", "media", "fade", "stop", "osc", "midi", "group"];
+const KINDS = ["memo", "media", "fade", "stop", "osc", "midi", "group", "start"];
 
 /*  ─────────────────────────────────────────────── several cues at once ──
 

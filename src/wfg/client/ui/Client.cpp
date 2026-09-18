@@ -90,7 +90,7 @@ namespace wfg::client
         {
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
-            menuLock, menuLoadToTime, menuUndoHistory
+            menuLock, menuLoadToTime, menuUndoHistory, menuRecord
         };
 
         class Window final : public wfg::Client,
@@ -398,6 +398,7 @@ namespace wfg::client
                     case menuLock:      return { 'l', mod, 0 };
                     case menuLoadToTime: return { 't', mod, 0 };
                     case menuUndoHistory: return { 'u', mod | shift, 0 };
+                    case menuRecord:     return { 'r', mod | shift, 0 };
                     case menuRevert:    break;
                 }
 
@@ -407,7 +408,7 @@ namespace wfg::client
             static int menuItemForKey (const juce::KeyPress& key)
             {
                 for (const auto item : { menuNew, menuOpen, menuSaveAs, menuCut, menuCopy, menuPaste, menuLock,
-                                         menuLoadToTime, menuUndoHistory })
+                                         menuLoadToTime, menuUndoHistory, menuRecord })
                     if (key == keyFor (item))
                         return item;
 
@@ -441,6 +442,7 @@ namespace wfg::client
                     case menuLock:      return last.locked != model::Flag::unsaid;
                     case menuLoadToTime: return ! last.listId.empty();
                     case menuUndoHistory: return unlocked;
+                    case menuRecord:     return model::isYes (last.recording) ? unlocked : true;
                 }
 
                 return false;
@@ -498,6 +500,9 @@ namespace wfg::client
                                                                      : "Load to time...");
                     addMenuItem (menu, menuUndoHistory, browsingUndo ? "Close the undo history"
                                                                      : "Undo history...");
+                    menu.addSeparator();
+                    addMenuItem (menu, menuRecord, model::isYes (last.recording) ? "Stop the live recorder"
+                                                                                  : "Start the live recorder");
                 }
 
                 return menu;
@@ -522,6 +527,8 @@ namespace wfg::client
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     case menuLoadToTime: toggleLoadToTime(); break;
                     case menuUndoHistory: toggleUndoHistory(); break;
+                    case menuRecord:     send (model::isYes (last.recording) ? gesture::recordStop()
+                                                                             : gesture::recordStart()); break;
                     default: break;
                 }
             }
@@ -764,6 +771,7 @@ namespace wfg::client
                     when one of the things they read has moved. */
                 if (reading.locked != last.locked || reading.canUndo != last.canUndo
                       || reading.canRedo != last.canRedo || reading.dirty != last.dirty
+                      || reading.recording != last.recording
                       || selection.size() != chosenAtLastMenu)
                 {
                     chosenAtLastMenu = selection.size();

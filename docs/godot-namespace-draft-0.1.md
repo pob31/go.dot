@@ -1054,6 +1054,7 @@ under `/godot/cue/<id>/`, `rw`, `persist = show`:
 | `media` | `file` string, bundle-relative under `media/`; `level` double dB (0, −120..12); `startOffset` double s (0); `Route*` children: `bus` id, `gains` = `C_in × width` doubles, row-major (`/godot/cue/<id>/route/<busId>/gains`, the first list-typed node) |
 | `fade` | `target` cue id; `level` double dB; `duration` double s; `curve` enum `linear \| sCurve`; `stopWhenDone` bool (false) *(2026-09-18: arriving is stopping, the stop cue's own fade path)* |
 | `stop` | `target` cue id; `verb` enum `hard \| fade`; `duration`; `curve` |
+| `start` | `target` cue id *(2026-09-19)*: a memo that presses a button - fired, its run is done the next tick and the target is fired BY NAME as `cue.fire` fires it, standby untouched, through a `cue.fire` record the next tick's hook submits (a replay takes the record). What the live recorder writes into a take |
 | `osc` | `address` string, a mounted node; `value` string, one typed atom as the log writes it (`f:0.5`, `s:"…"`, `T`); `wait` enum `none \| sent \| verified`; `timeout` double s |
 
 **Built in two steps: `none \| sent` in PR 2.5, `verified` and its `timeout` in PR 2.6.** The
@@ -1357,6 +1358,8 @@ Registered commands, replay-idempotent handlers, origin `engine`, as §11.4's ar
 | `run.stopAll` | `/godot/cmd/run/stopAll` | — | *(2026-09-18)* §4.4's **Esc**: `run.stop hard` applied to every root run, so members come down in order and every footer runs. An empty table is applied and does nothing |
 | `run.killAll` | `/godot/cmd/run/killAll` | — | *(2026-09-18)* §4.4's **double Esc**: `run.kill` applied to every root run; no footer runs. Which of the two a press means is the client's reading of a hand, and each reading is one of these two records |
 | `run.seek` | `/godot/cmd/run/seek` | `s` run, `d` seconds, `[s made…]` | *(2026-09-18)* a scrub settling: a **media** run is moved to that second of its file - the voice stopped and asked for again on the same track, at the level a fade had brought it to, the run keeping its identifier - and a **group** run is re-seated at that second of its own timeline under the same group run, its members built again from the solver's answer for the scene at that second (over, sounding at their offset, or waiting for their due tick), which is what brings a member already over back. Nothing beside the group is touched. The identifiers a group seek draws ride on the applied arguments as a jump's do. A ranged media run lands at the start of the range holding the second. A fade, a wait, a message: `bad-value`; a run that is over: applied and nothing |
+| `record.start` | `/godot/cmd/record/start` | — | *(2026-09-19)* the live recorder on: from now every applied `go`, `cue.fire` and `trigger.fire` on any list is kept with its tick, unbounded, beside the sixty-four-step history |
+| `record.stop` | `/godot/cmd/record/stop` | `[s made…]` | *(2026-09-19)* the live recorder off, and what it kept written into a take: a **timeline** group *Take N* in a list named *Live recorder* (made the first time, found by name after), one `start` cue per step with `preWait` the second it was pressed and `target` the cue. Every identifier drawn rides on the applied arguments in order. Refused `bad-value` when nothing is recording, `locked` under the lock |
 | `trigger.fire` | `/godot/cmd/trigger/fire` | `s` trigger, `[s run]` | what a matched trigger submits (§12.8); fires the trigger's cue as `cue.fire` does and never moves standby or focus |
 | `go`, `cue.fire`, `audio.arm` | unchanged | | `audio.arm` stays the explicit form and still accepts only media |
 
@@ -7397,6 +7400,29 @@ and every pass compares the rows now against it: a cue that reads differently is
 one that was not there +, and one that is gone is named in the panel, since a row that is not in the
 list cannot be marked in it. OK keeps where the show stands and closes; Cancel stands back where the
 panel opened and closes. A locked show offers neither, as it offers no undo.
+
+**THE LIVE RECORDER, AND THE START CUE IT WRITES (2026-09-19).** *"I'd also like to have in the show
+menu a 'Live recorder'. This will create a sequence/sequential group in a new 'Live recorder' playlist
+that will record all the cue starts (and controller level changes once this is implemented in the next
+phase). This can be used to store timings triggered once by hand and then automated."* And the
+reframing that made it small: *"4 is like dumping the load to time history to a group for replay."* So
+it is two commands and no machinery of its own. `record.start` turns the history's keeping on -
+`ListState` keeps every step on every list, unbounded, from that tick - and `record.stop` writes what
+was kept into a TAKE: a timeline group named *Take N* in a list named *Live recorder*, made the first
+time and found by name after, holding one start cue per step at the second it was pressed. A timeline
+and not a sequence, deliberately: a sequence advances on completion and could not hold the seconds
+between two presses, which are the whole of what was recorded. Every identifier the take draws rides on
+the applied arguments in the order it was drawn, as a jump's do, and a replay hands them back; a locked
+show keeps recording and refuses the take. `document/recording` says whether it is on. **The start cue is
+new** (§12.4's kinds table): element `Start`, one attribute, `target`, a cue reference; it is a memo that
+presses a button - fired, its run is done the next tick, and its target is fired BY NAME, standby
+untouched, as `cue.fire` fires it. The fire is `cue.fire`'s own record, submitted by the next tick's
+hook and never from the handler, so a replay - which runs no hooks - takes the record the session
+logged and fires nothing twice; the one-tick lag is the record's price. A target that is a manual group
+is refused as `cue.fire` refuses it. Both clients offer the kind: the desktop's new-cue row and
+inspector, the page's kinds and fields; the page gets *record* and *stop recording* beside undo and
+redo, the desktop *Show → Start the live recorder* (ctrl/⌘-shift-R), which reads the node to say which
+of the two it is.
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 

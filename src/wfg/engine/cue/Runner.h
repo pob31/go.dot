@@ -954,6 +954,12 @@ namespace wfg::cue
             allowed to leave and not because anything was waited for. */
         std::vector<std::string> finishing;
 
+        /*  THE TARGETS OF START CUES THAT FIRED THIS TICK, fired by name on
+            the next `beforeTick` - a hook, so a replay, which runs no hooks,
+            fires none of them itself and takes the `cue.fire` records the
+            session logged. The one-tick lag is the cost of the record. */
+        std::vector<std::string> startsToFire;
+
         /*  One per group run in flight. A vector like every other job list
             here, and drained by the same `remove_if` on a retired flag. */
         ListState lists;

@@ -59,6 +59,7 @@ namespace wfg::client::model
         Flag dirty = Flag::unsaid;    ///< `/godot/document/dirty` - the dot
         Flag locked = Flag::unsaid;   ///< `/godot/document/locked` - show mode
         Flag recovery = Flag::unsaid; ///< `/godot/document/recovery` - work found beside the show
+        Flag recording = Flag::unsaid; ///< `/godot/document/recording` - the live recorder is on
 
         std::string tick;             ///< `/godot/engine/tick`, as digits
         std::string clock;            ///< `/godot/engine/clock`: dummy or device

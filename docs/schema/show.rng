@@ -80,6 +80,7 @@
           <ref name="Stop"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
+          <ref name="Start"/>
           <ref name="Persistent"/>
         </choice>
       </zeroOrMore>
@@ -272,6 +273,7 @@
           <ref name="Stop"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
+          <ref name="Start"/>
           <ref name="Header"/>
           <ref name="Footer"/>
           <ref name="Trigger"/>
@@ -294,6 +296,7 @@
           <ref name="Stop"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
+          <ref name="Start"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -313,6 +316,7 @@
           <ref name="Stop"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
+          <ref name="Start"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -332,6 +336,7 @@
           <ref name="Stop"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
+          <ref name="Start"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -793,6 +798,78 @@
             <value>afterIteration</value>
             <value>advance</value>
           </choice>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <ref name="Trigger"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Start">
+    <element name="Start">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="colour">
+          <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>The cue&apos;s name, as the operator reads it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="notes">
+          <a:documentation>Free text for the designer.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="number">
+          <a:documentation>The decimal cue number. A string, because 12.5.1 is one; mutable, renumbered during tech, and never an identity.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="postWait">
+          <a:documentation>How long after completion before this cue reports done to its parent. A group is complete once every member is, its members&apos; own post-waits included; the group&apos;s post-wait then runs on top of that.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preWait">
+          <a:documentation>How long after entry before this cue starts. A group has one of its own, and it runs before its members begin their own pre-waits, so raising it defers the whole group.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="target">
+          <a:documentation>The cue this starts when it fires - by name, as cue.fire does, so standby does not move and the target may sit anywhere in any list. A start cue is a memo that presses a button (2026-09-19): it fires, its run is done the next tick, and the target runs on its own. What the live recorder writes into a take: one start cue per cue the operator fired, at the second they fired it, so a night pressed by hand can be played back by a timeline. A target that is a manual group is refused when it fires, as cue.fire refuses it.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <zeroOrMore>

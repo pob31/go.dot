@@ -78,7 +78,7 @@ namespace wfg::cue
     {
         return element == "Cue"  || element == "Group" || element == "Media"
             || element == "Fade" || element == "Stop"  || element == "Osc"
-            || element == "Midi";
+            || element == "Midi" || element == "Start";
     }
 
     //======================================================================
@@ -481,7 +481,7 @@ namespace wfg::cue
             const auto element = node.getType().toString();
 
             if (element == "Cue" || element == "Osc" || element == "Midi"
-                 || element == "Stop")
+                 || element == "Stop" || element == "Start")
                 return 0.0;
 
             if (element == "Fade")
