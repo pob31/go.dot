@@ -45,6 +45,43 @@ namespace wfg::client::model
         return row.section == Section::member || row.sectionId.empty() ? row.parent : row.sectionId;
     }
 
+    Drop presetLineDropFor (const Row* over, const std::string& cueId, const std::string& current,
+                            const std::vector<Row>& rows)
+    {
+        Drop drop;
+        drop.cueId = cueId;
+
+        //  The group under the hand: a group's own row, or a header band's group.
+        std::string group;
+
+        if (over != nullptr)
+        {
+            if (over->rowKind == RowKind::cue && over->isGroup && ! over->derived)
+                group = over->id;
+            else if (over->rowKind == RowKind::band && over->section == Section::header)
+                group = over->parent;
+        }
+
+        if (! group.empty())
+        {
+            if (group == current)
+                return {};                                   // where it already is
+
+            const auto ancestors = ancestorsOf (cueId, rows);
+
+            if (std::find (ancestors.begin(), ancestors.end(), group) != ancestors.end())
+            {
+                drop.kind = DropKind::preset;
+                drop.cueId = group;
+                return drop;
+            }
+        }
+
+        //  Anywhere else is out of the header: the mark goes.
+        drop.kind = DropKind::clearPreset;
+        return drop;
+    }
+
     Drop footerDropFor (const Row& over, const Row& dragged)
     {
         Drop drop;
@@ -169,10 +206,13 @@ namespace wfg::client::model
 
     std::vector<std::string> ancestorsOf (const std::string& cueId, const std::vector<Row>& rows)
     {
+        /*  THE CUE'S OWN ROW, never a derived line of it: a derived line sits
+            under the header of the group it names, and walking up from there
+            would skip every group between the cue and that header. */
         const auto rowOf = [&rows] (const std::string& id) -> const Row*
         {
             for (const auto& row : rows)
-                if (row.rowKind == RowKind::cue && row.id == id)
+                if (row.rowKind == RowKind::cue && row.id == id && ! row.derived)
                     return &row;
 
             return nullptr;
@@ -261,6 +301,7 @@ namespace wfg::client::model
             case DropKind::target:  return "aim " + name + " at it";
             case DropKind::preset:  return "prepare it in " + name + "'s header";
             case DropKind::footer:  return "into " + name + "'s footer";
+            case DropKind::clearPreset: return "no longer prepared ahead";
         }
 
         return {};

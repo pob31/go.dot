@@ -375,6 +375,66 @@ A sequence of OSC cues can therefore be a chain that waits for each processor to
 confirm before advancing. This composition is the most valuable thing in the
 group model.
 
+#### Joins between members
+
+*Added in 0.8, at the author's direction (2026-09-18).* An automatic sequence
+group carries one **join** setting, chosen once for the group and applied at
+every member boundary the group owns — in `sequential` and in `shuffle` alike,
+the round wrap included. Shuffle qualifies because a round is materialised as a
+list (above), so the incoming member is known before the boundary. Setting it
+once is the point: forty files that need nothing special about their timing
+should not need forty negative offsets and forty fade cues. A member that does
+need something special keeps its own pre-wait and post-wait, and those win at
+its boundary (below).
+
+- **gap** — today's behaviour, and the default *(proposed)*: the scheduler
+  observes the outgoing member's end and launches the next a fixed number of
+  ticks later, published by the engine as `sequenceGapTicks`. The only join
+  every member kind can honour.
+- **gapless** — the boundary is **placed**, not observed. A media member's end
+  is known the moment its launch is: the launch sample plus the file's duration
+  or out-point, frozen at load. The incoming member's launch is placed on that
+  sample, the mechanism §3.24 uses for a range boundary, and the join is
+  sample-accurate.
+- **crossfade** — gapless with a user-defined **overlap** (seconds) and a curve
+  (§3.10). The incoming member launches *overlap* before the outgoing member's
+  end; across the overlap the outgoing fades out and the incoming fades in.
+  Tracktion has no crossfade (§3.24, spike 03), so this is the two-slots-and-
+  two-curves construction spike 03 measured, applied at a member boundary
+  instead of a range boundary. The fades apply to media members; a member of
+  any other kind simply starts *overlap* early.
+
+What a placed join needs, and what it changes:
+
+- **Two members alive at once.** "Members run one after another" becomes one
+  member *audible* at a time, except during an overlap. Completion is
+  unchanged: the group is done when its last member is.
+- **A known end.** Media with a duration, fades, memos, and OSC/MIDI with
+  `wait = none` have one. An OSC cue waiting on a reply, an infinite range, and
+  a nested group ending on one of those do not: that boundary falls back to
+  **gap**, and the row says so. A stop or an advance on the outgoing member
+  re-places the boundary; rate is fixed at arm (§3.24), so it never moves the
+  end.
+- **Pre-wait and post-wait win.** A post-wait is a delay after completion and
+  cannot overlap anything: a boundary whose outgoing member has a post-wait, or
+  whose incoming member has a pre-wait, is a **gap** boundary with that wait.
+  The join setting covers the boundaries that have neither, which in a plain
+  set of files is all of them.
+- **The incoming member is prepared ahead.** Its header, where it is a group,
+  must have completed by *end − overlap − launch latency*: the prepare horizon
+  (§3.12) extends to the incoming member of a placed join, as standby
+  auto-prepare already extends to the next row.
+- **A footer of the outgoing member runs after the incoming member's header.**
+  Where the two touch the same target, **the incoming wins**: the outgoing
+  footer's action on that target is not applied. The same rule holds between
+  the two members' footers. Detecting the clash when the show is checked, and
+  reporting it as a warning on the row, is *(proposed)*. The author's own
+  practice: do not give a footer to a member of a crossfaded group.
+- **Esc during an overlap** stops both members, and the later member's footer
+  is the one applied; the group's own footer runs at group exit as always.
+  Double Esc drops both, footers skipped (§4.4). An edge case rather than a
+  design centre.
+
 #### Header and footer
 
 Independent of each other; the user decides whether to use either.
@@ -1472,6 +1532,15 @@ unusable. The *(proposed)* crossfade is therefore a **cost** decision rather tha
 a capability question: one extra slot and one curve per crossfaded boundary, out
 of §3.9c's allocator budget. Still awaiting a yes or no.
 
+*Answered 2026-09-18, at the author's direction.* **Yes.** A range boundary
+carries the same choice as a member boundary in §3.6: **gapless** — the
+sample-accurate join confirmed above, and the default — or **crossfade**, with
+a user-defined overlap and a curve, built as the two-slot construction spike 03
+measured. Set once per cue, for every boundary of its ranges *(proposed; per
+range is the alternative)*. One mechanism for both owners; only the object that
+places the boundary differs. §3.9c's budget now carries the cost: a crossfaded
+range keeps a second slot alive across each boundary.
+
 #### Running view and solver
 
 - A range-looping cue is **one run pointer** with an internal position: its strip
@@ -2236,9 +2305,8 @@ re-claims strips lost to eviction and cannot conjure strips the layout lacks.
 
 Marked *(proposed)* in the text. The ones worth a decision before they get
 built into something: stereo cue → two mono slots (§3.9b); tag targeting
-(§3.8); crossfaded joins (§3.24); per-destination latency and machine-level
-storage (§3.19c). The infinite-loop load-to-time case (§3.24) is settled as
-solve-in-practice.
+(§3.8); per-destination latency and machine-level storage (§3.19c). The
+infinite-loop load-to-time case (§3.24) is settled as solve-in-practice.
 
 *Answered since* (amended in 0.8, at the author's direction, 2026-09-10; the
 decisions are in `docs/godot-namespace-draft-0.1.md` §9): processor-declared
@@ -2260,6 +2328,14 @@ layout option (§3.30).
 
 Added 2026-09-10: a touch counting as adjusting only once the fader has moved,
 with the value resent on release (§3.16).
+
+*Answered 2026-09-18, at the author's direction:* crossfaded joins (§3.24),
+yes, as a per-cue choice beside gapless; and the same choice — gap, gapless,
+crossfade with an overlap — set once on an automatic sequence group for every
+member boundary it owns (§3.6). Added the same day: the group's default join
+(§3.6, gap); the edit-time warning where an outgoing footer and an incoming
+header touch the same target (§3.6); and where the range join setting lives
+(§3.24, per cue).
 
 ### 6.10 Protocol implementation order (§3.16)
 

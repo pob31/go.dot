@@ -290,6 +290,14 @@ he designs it in; the ramp's colours once the sine / noise / sweep bundle is on
 screen; PRD §3.30's *(proposed)* idle-colour policy; and the twelve decisions
 §14 marks as the implementer's, each taken early so it can be overruled early.
 
+**Queued behind Half B (2026-09-18):** the group join setting and the range
+crossfade of PRD §3.6 and §3.24 — gap, gapless, crossfade with a user-defined
+overlap. Decided, not *(proposed)*; planned and built as its own plan once the
+operator client's layout has stopped moving. It is Phase 3's scheduler and the
+namespace draft's placed boundary (§12.9) reused at a member boundary, plus two
+fade jobs per crossfaded boundary and a prepare horizon that reaches the
+incoming member.
+
 ---
 
 ## Phase 6 — Control surface and bindings · L

@@ -1221,6 +1221,23 @@ TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be name
         CHECK (model::presetStep ("X", "I", -1, nested) == std::optional<std::string> { "" });
         CHECK_FALSE (model::presetStep ("X", "", -1, nested).has_value());
         CHECK_FALSE (model::presetStep ("O", "", +1, nested).has_value());    // nothing above it
+
+        /*  A DERIVED LINE DRAGGED: onto another group the cue is inside, or
+            its header band, moves the mark; onto the group it names, nothing;
+            anywhere else - a member, a stranger group, no row - clears it. */
+        model::Row outerHeader;
+        outerHeader.rowKind = model::RowKind::band;
+        outerHeader.section = model::Section::header;
+        outerHeader.parent = "O";
+
+        CHECK (model::presetLineDropFor (&outer, "X", "I", nested).kind == model::DropKind::preset);
+        CHECK (model::presetLineDropFor (&outer, "X", "I", nested).cueId == "O");
+        CHECK (model::presetLineDropFor (&outerHeader, "X", "I", nested).cueId == "O");
+        CHECK (model::presetLineDropFor (&innerGroup, "X", "I", nested).kind == model::DropKind::none);
+        CHECK (model::presetLineDropFor (&other, "X", "I", nested).kind == model::DropKind::clearPreset);
+        CHECK (model::presetLineDropFor (&leaf, "X", "I", nested).kind == model::DropKind::clearPreset);
+        CHECK (model::presetLineDropFor (nullptr, "X", "I", nested).kind == model::DropKind::clearPreset);
+        CHECK (model::presetLineDropFor (nullptr, "X", "I", nested).cueId == "X");
     }
 
     /*  NAMING A CUE: identifier first, then number, then name - and two cues

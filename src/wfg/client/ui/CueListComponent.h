@@ -156,6 +156,12 @@ namespace wfg::client::ui
         model::Drop dropAt (const SourceDetails& details, int& rowOut) const;
         const model::Row* rowById (const std::string& id) const;
 
+        /*  A dragged DERIVED header line carries the cue's id behind this
+            prefix, so the drop knows it is moving the mark and not the cue. */
+        static constexpr const char* presetLinePrefix = "preset:";
+        static bool isPresetLine (const SourceDetails& details);
+        static std::string draggedIdOf (const SourceDetails& details);
+
         int rowUnder (int y) const;
 
         /*  WHERE THE RAILS STAND, asked in one place because four kinds of row

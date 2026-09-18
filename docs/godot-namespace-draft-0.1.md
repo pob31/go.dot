@@ -7260,7 +7260,15 @@ the cue into that section at its end; **after a section row** puts it after that
 through the headers, ctrl/⌘-down inward to none and then one step further into the innermost group's
 footer; from the footer, up is back among the members. Each step is one command and the foot says what
 happened - "prepared in Scene's header", "into Scene's footer", "back among Scene's members" - which is
-the arrow the author asked for, in words.
+the arrow the author asked for, in words. *And the derived line is a thing that can be picked up:*
+"dragging a preset line out of the header should remove it from the header; if it falls on a
+different group top line or header, then move this preset." The line is the mark, so dragging it
+moves the mark - onto a group the cue is inside, or that group's header band, and the cue is
+prepared there instead; onto the group it already names, nothing; anywhere else, a member row, a
+stranger group or no row at all, and the mark is cleared. The drag carries the cue's id behind a
+`preset:` prefix so the drop knows it is moving the mark and not the cue, and every lookup of a cue by
+id prefers the cue's own row to a derived line of it, since reasoning from the line's place would put
+the cue in the wrong container.
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 

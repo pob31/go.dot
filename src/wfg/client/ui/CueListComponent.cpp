@@ -859,11 +859,37 @@ namespace wfg::client::ui
         if (entry.rowKind != model::RowKind::cue || entry.id.empty())
             return {};
 
+        /*  A DERIVED HEADER LINE IS THE MARK, NOT THE CUE: dragging it moves
+            or clears the preset (model/Reorder.h), so it says so. */
+        if (entry.derived)
+            return juce::var (juce::String (presetLinePrefix) + juce::String (entry.id));
+
         return juce::var (juce::String (entry.id));
+    }
+
+    bool CueListComponent::isPresetLine (const SourceDetails& details)
+    {
+        return details.description.isString()
+            && details.description.toString().startsWith (presetLinePrefix);
+    }
+
+    std::string CueListComponent::draggedIdOf (const SourceDetails& details)
+    {
+        const auto text = details.description.toString();
+        return (isPresetLine (details) ? text.fromFirstOccurrenceOf (presetLinePrefix, false, false) : text)
+                 .toStdString();
     }
 
     const model::Row* CueListComponent::rowById (const std::string& id) const
     {
+        /*  THE CUE'S OWN ROW FIRST: a derived header line carries the same id
+            and is drawn before it, and a drag or a drop reasoning from the
+            line's place would get the cue's container wrong. The line itself
+            answers only when the cue's own row is folded away. */
+        for (const auto& row : rows)
+            if (row.rowKind == model::RowKind::cue && row.id == id && ! row.derived)
+                return &row;
+
         for (const auto& row : rows)
             if (row.rowKind == model::RowKind::cue && row.id == id)
                 return &row;
@@ -875,14 +901,25 @@ namespace wfg::client::ui
     {
         //  One of this list's own rows, and still one of them.
         return details.description.isString()
-            && rowById (details.description.toString().toStdString()) != nullptr;
+            && rowById (draggedIdOf (details)) != nullptr;
     }
 
     model::Drop CueListComponent::dropAt (const SourceDetails& details, int& rowOut) const
     {
         rowOut = rowUnder (details.localPosition.y);
 
-        const auto* dragged = rowById (details.description.toString().toStdString());
+        const auto draggedId = draggedIdOf (details);
+
+        /*  A preset line dragged: the mark moves or goes, and letting go on
+            no row at all is one of the answers. */
+        if (isPresetLine (details))
+        {
+            const auto* own = rowById (draggedId);
+            return model::presetLineDropFor (rowOut >= 0 ? &rows[static_cast<std::size_t> (rowOut)] : nullptr,
+                                             draggedId, own != nullptr ? own->preset : std::string {}, rows);
+        }
+
+        const auto* dragged = rowById (draggedId);
 
         if (rowOut < 0 || dragged == nullptr)
             return {};
@@ -926,10 +963,14 @@ namespace wfg::client::ui
 
         /*  THE SAME TWO SHAPES A FILE GETS: a line under the row for "after",
             the whole row lit for "on" - into a group, or aimed at a fade. */
-        dropRow = drop.kind == model::DropKind::none ? -1 : at;
+        dropRow = drop.kind == model::DropKind::none || drop.kind == model::DropKind::clearPreset ? -1 : at;
         dropWouldInsert = drop.kind == model::DropKind::after;
         dropWouldLink = drop.kind == model::DropKind::into || drop.kind == model::DropKind::target
                      || drop.kind == model::DropKind::preset || drop.kind == model::DropKind::footer;
+
+        //  Out of the header: said even over nothing, since that is where the hand is.
+        if (drop.kind == model::DropKind::clearPreset && actions.say)
+            actions.say (juce::String (model::describe (drop, model::Row {}, false)));
 
         if (dropRow != was || dropWouldLink != wasLink || dropWouldInsert != wasInsert)
         {
@@ -969,7 +1010,7 @@ namespace wfg::client::ui
     {
         auto at = -1;
         const auto drop = dropAt (details, at);
-        const auto dragged = details.description.toString().toStdString();
+        const auto dragged = draggedIdOf (details);
 
         dropRow = -1;
         dropWouldLink = false;
@@ -1003,6 +1044,11 @@ namespace wfg::client::ui
             case model::DropKind::footer:
                 if (actions.moveToFooter)
                     actions.moveToFooter (dragged, drop.cueId);
+                return;
+
+            case model::DropKind::clearPreset:
+                if (actions.setPreset)
+                    actions.setPreset (dragged, {});
                 return;
         }
     }

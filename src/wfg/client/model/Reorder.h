@@ -67,7 +67,8 @@ namespace wfg::client::model
         into,       ///< `object.move` into the group `container`, at its end
         target,     ///< `node.set <cueId>/target <dragged>`
         preset,     ///< `node.set <dragged>/preset <cueId>`: prepared by that group's header
-        footer      ///< move into the footer of the group `cueId`, made first if it has none
+        footer,     ///< move into the footer of the group `cueId`, made first if it has none
+        clearPreset ///< `node.set <dragged>/preset ""`: no longer prepared ahead
     };
 
     struct Drop
@@ -89,6 +90,17 @@ namespace wfg::client::model
         footer if it already exists"). A group's footer takes any cue; the
         window makes the footer first when the group has none. */
     Drop footerDropFor (const Row& over, const Row& dragged);
+
+    /*  A DERIVED HEADER LINE DRAGGED (author, 2026-09-18: "dragging a preset
+        line out of the header should remove it from the header; if it falls
+        on a different group top line or header, then move this preset").
+        The line is the mark, so dragging it moves the mark: onto a group the
+        cue is inside, or that group's header band, and the cue is prepared
+        there instead; onto the group it already names, nothing; anywhere else
+        - another row, or no row at all - and the mark is cleared. `over` is
+        null when the hand let go on nothing. */
+    Drop presetLineDropFor (const Row* over, const std::string& cueId, const std::string& current,
+                            const std::vector<Row>& rows);
 
     /*  What letting go of `dragged` over `over` would do, `fraction` being how
         far down the row the pointer is (0 at the top, 1 at the bottom). */
