@@ -6800,8 +6800,83 @@ forward, because a layout cannot be judged one pane at a time.
   edit because the set is keyed on the container rather than a row's position. It does not yet
   survive a restart; the page keeps that in `localStorage` and the window will want a small file.
 
-**And the inspector is what M5's selection is for**, which is why the rest of the row stays inert
-until it exists. That is the next thing the author asked for and the next thing to build.
+**And the inspector is what M5's selection is for**, which is why the rest of the row stayed inert
+until it existed. It was the next thing the author asked for and the next thing built.
+
+**WHAT THE INSPECTOR ROUND SETTLED (2026-09-18).** The panel is built from the tree and from no table
+of field names: the node's type decides the control, its range the bounds, its closed set of values
+that it is a choice at all, its description the hover. A row added to the parameter table appears
+there with no line written in the window, which is what §14.2 means by generic and what the page
+proved first. The block order is the page's, transcribed as data because the author settled it there
+with the page open, and a window that re-argued where `preWait` goes would be two clients disagreeing
+about one panel. A click now carries two meanings, split the way the page splits them: **the gutter
+parks, the row picks**, drawn apart because they are different questions.
+
+Four things came back from the author using it, and one of them was a real bug with a plain cause.
+The fields wanted a DOUBLE click while the dropdowns opened on one, so a loop count typed into a
+number box was never sent - no editor had opened - and they reported the loop count broken. It was
+not; but a panel whose fields need a different number of clicks depending on their type is a panel
+nobody can learn. **`loops` is three controls now** - loop, for ever, and how many - because one
+integer was carrying three questions and a box showing `0` answered none of them; one `node.set`
+underneath, unchanged. The greys are lighter and the inspector is blue, which diverges from the
+page's hex on purpose and says so in the theme file: a browser and JUCE do not lay type down the same
+way, so identical numbers kept the look identical only on paper. **And the folds did not fold**: the
+model folded correctly and the view keyed its rows on the SHOW's revision, which a fold does not move
+- nor should it, since collapsing a section is not a change to the show. The view keys on the walk
+count now, which moves for every reason the rows can change, and a test counts walks.
+
+**WHAT M7 BUILT, AND IT IS THE ONE THING THE PAGE CANNOT BE GIVEN LATER (2026-09-18).** Decision Y,
+in a gesture: a file dragged onto the window. A browser is handed a dropped file's NAME and BYTES and
+never its path, deliberately and by design, so it can only ever offer to upload one. This is handed
+the path, and that is the whole argument for compiling a client rather than serving it.
+
+**An import is three things and only two of them are the show's** (§14.16). The bytes arrive in the
+bundle's `media/`, which is a fact about a disk - like the timbre cache the analyser writes with no
+command and no record - and the window does that itself. Then a cue is created and the cue names the
+file, which are decisions, and go through the one door as `cue.create` and `node.set`. **The client
+does not draw identifiers**: `cue.create` takes an optional id and that argument is for REPLAY, so a
+create is followed by FINDING what it made, at the member position it was asked for. There is exactly
+one entropy consumer in this project and a window is not going to become the second.
+
+**Two gestures, told apart by what is under the pointer, and said while the hand is still in the
+air.** One file onto a media cue NAMES that cue's file and the whole row lights; anywhere else makes
+cues, one per file, and a line is drawn under the row they will follow. Guessing afterwards which of
+the two happened is the thing the feedback exists to prevent. A replacement asks first, and the
+question says which of two things is at stake - the cue's current choice, or bytes of the same name
+already in the bundle - while a drop with neither at stake asks nothing, because a dialogue nobody
+needs is one people learn to dismiss unread.
+
+**Three faults the building of it found, none of them visible from the drawing.**
+
+- **A display row is not a member.** The first draft took the index from the row the hand was over
+  and, for a drop into empty space, from the number of rows drawn. Those rows are what is DRAWN -
+  bands, and the members of every open group - so the count names a position inside the list rather
+  than its end. For ONE file it would have worked; for two it would have quietly mismatched cue and
+  file, because every create beyond the end lands in the same place. The index is resolved in the
+  window, against the order the show actually has.
+- **A header, a footer and a persistent cue cannot be pointed at.** `cue.create` puts a cue among its
+  parent's MEMBERS, and a group's header and footer are separate orders that a role decides. A drop
+  on one of those rows says which container was meant and nothing about where, so it goes to the end
+  of that container's members - and no line is drawn under a row the cue will not appear under,
+  because the promise and the drop are asked in one place.
+- **A position alone does not identify the cue a create made.** The show has other clients, and
+  somebody inserting from the page inside the same two hundred milliseconds would put a stranger
+  exactly where the import is looking. Three things must agree before a file is written onto a cue -
+  the name the create was given, a media cue, and no file yet - and a stranger passing all three is a
+  cue somebody called the same thing and left empty, where naming it was wanted anyway. Attaching a
+  file to the wrong cue is worse than attaching it to none.
+
+**And two engine facts the drop exposes, neither of them the client's to fix.** `MediaInfo::durations()`
+is frozen at load and **never grows**, so a cue imported mid-session reads a duration of 0 until the
+show is reopened; the file still PLAYS, because the runner resolves it against the bundle at arm from
+the cue's own `file` and not from that map. And **`Audio/@tracks` is authored** - the polyphony
+ceiling, stated and never inferred (PRD §3.9b) - so a show sitting at zero has nowhere to put a
+sound and every run of an imported cue ends `no-track`. That is not a reason to refuse the drop, since
+making the cue is a decision somebody is entitled to take and setting the ceiling is the obvious next
+thing they will do; so the import happens and the window says what is missing. Which is the
+difference between this and the lock: **a client does not offer a gesture it could have known would be
+refused**, and a drop into a locked show is refused here, before anything is copied, because bytes
+left in `media/` for a cue that was never made are litter nobody asked for.
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 

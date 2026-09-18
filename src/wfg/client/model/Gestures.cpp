@@ -51,6 +51,14 @@ namespace wfg::client::gesture
     Event recover()         { return plain ("document.recover"); }
     Event discardRecovery() { return plain ("document.discardRecovery"); }
 
+    Event createCue (const std::string& parent, int index,
+                     const std::string& kind, const std::string& name)
+    {
+        return { origin::window, "cue.create",
+                 { osc::Value::string (parent), osc::Value::int32 (index),
+                   osc::Value::string (kind), osc::Value::string (name) } };
+    }
+
     Event setNode (const std::string& address, const std::string& text)
     {
         /*  A STRING, WHATEVER THE ROW'S TYPE IS. `node.set` declares its value

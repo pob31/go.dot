@@ -76,6 +76,15 @@ namespace wfg::client::gesture
     /** Show mode, written as the node it is. */
     Event setLocked (bool locked);
 
+    /*  Makes a cue. The identifier is NOT supplied: `cue.create` takes one as
+        an optional last argument and that argument is for replay - the engine
+        draws it, the log records the call with it, and a replay supplies it
+        rather than drawing again. There is one entropy consumer in this
+        project and a window is not going to be the second, so a create is
+        followed by finding what it made (model/Media.h). */
+    Event createCue (const std::string& parent, int index,
+                     const std::string& kind, const std::string& name);
+
     /*  ONE FIELD, COMMITTED. The address is the NODE's own, never one this
         client assembled: a generic inspector writes back to what it read,
         which is the whole reason it needs no table of field names. */

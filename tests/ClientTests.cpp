@@ -44,6 +44,7 @@
 
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/Media.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Theme.h>
@@ -503,6 +504,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
         gesture::setNode ("/godot/cue/B3N8R5TW/name", "Renamed"),
+        gesture::createCue ("7K2QM9X4", 0, "media", "Thunder"),
         gesture::undo(), gesture::redo(), gesture::save(), gesture::revert(),
         gesture::recover(), gesture::discardRecovery(),
         gesture::setLocked (true), gesture::setLocked (false),
@@ -895,4 +897,47 @@ TEST_CASE ("client: a group folds like a section does, and a fold is a reason to
     show.toggle (group.id);
     CHECK (show.refresh (*snapshot, listId));
     CHECK (show.rows().size() == openRows);
+}
+
+//==============================================================================
+TEST_CASE ("client: an import names its cue after the file, and finds what the create made")
+{
+    /*  DECISION Y's OWN CASE (§14.16): a browser is never told a dropped
+        file's path, so importing media is the one thing the page cannot be
+        given later - and the reason this client is compiled rather than
+        served. What is testable without a window is the naming and the
+        finding; the copying is the window's and is written down as untestable. */
+    CHECK (model::cueNameFor ("Thunder.wav") == "Thunder");
+    CHECK (model::cueNameFor ("03 Distant road.aiff") == "03 Distant road");
+    CHECK (model::cueNameFor ("no-extension") == "no-extension");
+    CHECK (model::cueNameFor (".hidden") == ".hidden");        // nothing before the dot
+    CHECK (model::cueNameFor ("trailing.") == "trailing.");    // nothing after it
+    CHECK (model::cueNameFor ("two.dots.wav") == "two.dots");  // the LAST dot
+
+    /*  THE NAME, NEVER THE PATH: `media/@file` is relative to the bundle's
+        media folder, because a show travels and an absolute path is a fact
+        about the machine it was authored on. */
+    CHECK (model::mediaNameFor ("C:/sounds/Thunder.wav") == "Thunder.wav");
+    CHECK (model::mediaNameFor ("/home/po/sounds/Thunder.wav") == "Thunder.wav");
+    CHECK (model::mediaNameFor ("Thunder.wav") == "Thunder.wav");
+
+    /*  AND WHICH CUE A CREATE MADE, found by the member position it was asked
+        for rather than by diffing before against after. */
+    CHECK (model::createdAt ("A B C", 0) == "A");
+    CHECK (model::createdAt ("A B C", 2) == "C");
+    CHECK (model::createdAt ("A B C", 9) == "C");      // past the end means the end
+    CHECK (model::createdAt ("A B C", -1).empty());
+    CHECK (model::createdAt ("", 0).empty());          // nothing to answer with
+
+    /*  AND THE GUARD THAT STOPS A FILE LANDING ON A STRANGER. A member
+        position alone does not say the cue standing there is the one this
+        import made: the show has other clients, and somebody inserting from
+        the page in the same two hundred milliseconds would put a stranger
+        exactly where the import is looking. Three things must agree. */
+    const model::Import job { "L1", 3, "Thunder", "Thunder.wav", 7, 0 };
+
+    CHECK (model::madeByImport (job, "media", "Thunder", ""));
+    CHECK_FALSE (model::madeByImport (job, "group", "Thunder", ""));     // not a media cue
+    CHECK_FALSE (model::madeByImport (job, "media", "Rain", ""));        // somebody else's
+    CHECK_FALSE (model::madeByImport (job, "media", "Thunder", "Rain.wav"));  // already named
 }

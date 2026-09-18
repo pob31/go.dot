@@ -253,6 +253,8 @@ target_link_libraries(wfg_engine
 add_library(wfg_client_model STATIC
     wfg/client/model/Gestures.h
     wfg/client/model/Gestures.cpp
+    wfg/client/model/Media.h
+    wfg/client/model/Media.cpp
     wfg/client/model/Inspector.h
     wfg/client/model/Inspector.cpp
     wfg/client/model/RunModel.h

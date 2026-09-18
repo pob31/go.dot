@@ -114,6 +114,13 @@ namespace wfg::client::model
         /** The group this row sits in, or empty at the top of the list. */
         std::string parent;
 
+        /*  Where this row stands among its parent's MEMBERS, which is the
+            index `cue.create` and `object.move` speak in - not its position
+            in the drawn list, which counts bands and nested rows too. A drop
+            that means "after this one" needs the first and would land
+            anywhere with the second. */
+        int indexInParent = 0;
+
         /*  WHETHER THE POINTER MAY STAND HERE, which is decision X's rule and
             not a guess: *any cue of this list that is not in a header, a
             footer or a persistent section*. A header and a footer run with
@@ -173,7 +180,8 @@ namespace wfg::client::model
                       const std::vector<std::string>& ids, Section which,
                       const char* word, int depth);
         void append (const tree::TreeSnapshot& snapshot, const std::string& cueId,
-                     Section section, int depth, const std::string& parent);
+                     Section section, int depth, const std::string& parent,
+                     int indexInParent = 0);
 
         std::vector<Row> drawn;
         std::unordered_map<std::string, int> indexOfCue;

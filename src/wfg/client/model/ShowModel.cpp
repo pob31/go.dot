@@ -157,8 +157,10 @@ namespace wfg::client::model
             section (snapshot, container, members ("headerOrder"),
                      Section::header, "header", depth);
 
+        auto at = 0;
+
         for (const auto& id : members ("order"))
-            append (snapshot, id, Section::member, depth, container);
+            append (snapshot, id, Section::member, depth, container, at++);
 
         if (! isList)
             section (snapshot, container, members ("footerOrder"),
@@ -210,7 +212,8 @@ namespace wfg::client::model
     }
 
     void ShowModel::append (const tree::TreeSnapshot& snapshot, const std::string& cueId,
-                            Section section, int depth, const std::string& parent)
+                            Section section, int depth, const std::string& parent,
+                            int indexInParent)
     {
         /*  A CUE DRAWN TWICE IS A DOCUMENT THAT DISAGREES WITH ITSELF, and a
             client that followed it would walk forever. The first placement
@@ -231,6 +234,7 @@ namespace wfg::client::model
         row.depth = depth;
         row.section = section;
         row.parent = parent;
+        row.indexInParent = indexInParent;
         row.enabled = flag (snapshot, "/godot/cue/" + cueId + "/enabled") != Flag::no;
 
         /*  WHAT MAKES A ROW A GROUP is that it has members to draw, which is

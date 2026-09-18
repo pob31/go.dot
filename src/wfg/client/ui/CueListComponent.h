@@ -53,6 +53,7 @@
 namespace wfg::client::ui
 {
     class CueListComponent final : public juce::Component,
+                                   public juce::FileDragAndDropTarget,
                                    private juce::ListBoxModel
     {
     public:
@@ -71,6 +72,19 @@ namespace wfg::client::ui
 
             /** Which cue the inspector should be about. Empty when none is picked. */
             std::function<void (const std::string&)> pick;
+
+            /*  MEDIA ARRIVING FROM OUTSIDE (decision Y): files dropped to be
+                made into cues at a member position, or one file dropped onto
+                a cue that should name it instead. The window does the copying
+                and the commands; this pane only says where the hand let go.
+
+                `index` is a MEMBER position in `parent`, which is the index a
+                create speaks in, or **-1 for the end** - which this pane
+                cannot name itself, having only the rows it drew. */
+            std::function<void (const std::string& parent, int index,
+                                const juce::StringArray& files)> importMedia;
+            std::function<void (const std::string& cueId,
+                                const juce::String& file)> linkMedia;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);
@@ -92,6 +106,14 @@ namespace wfg::client::ui
                                bool rowIsSelected) override;
         void listBoxItemClicked (int row, const juce::MouseEvent& event) override;
         void backgroundClicked (const juce::MouseEvent& event) override;
+
+        bool isInterestedInFileDrag (const juce::StringArray& files) override;
+        void fileDragEnter (const juce::StringArray& files, int x, int y) override;
+        void fileDragMove (const juce::StringArray& files, int x, int y) override;
+        void fileDragExit (const juce::StringArray& files) override;
+        void filesDropped (const juce::StringArray& files, int x, int y) override;
+
+        int rowUnder (int y) const;
         void paintBand (const model::Row& entry, int row, juce::Graphics& g, int width, int height);
 
         Actions actions;
@@ -108,6 +130,9 @@ namespace wfg::client::ui
         int standbyRow = -1;
         std::string picked;
         int pickedRow = -1;
+        int dropRow = -1;            ///< the row a file drag is over, or -1
+        bool dropWouldInsert = false;   ///< whether letting go really inserts after that row
+        bool dropWouldLink = false;  ///< whether letting go there names a cue's file
         std::size_t drawnWalk = 0;
         std::string drawnList;
 

@@ -18,6 +18,8 @@
 
 #include <wfg/client/ui/Look.h>
 
+#include <juce_audio_formats/juce_audio_formats.h>
+
 #include <utility>
 
 namespace wfg::client::ui
@@ -32,6 +34,19 @@ namespace wfg::client::ui
         constexpr int numberChars = 6;
         constexpr int timeChars = 6;
         constexpr int kindChars = 8;
+
+        /*  WHETHER LETTING GO ON THIS ROW REALLY DOES INSERT AFTER IT. Only a
+            member can be pointed at: `cue.create` speaks in member positions,
+            and a group's header and footer are separate orders that a role
+            decides rather than places an index can reach. Asked in one spot
+            because the answer has to be the same in the drawing and in the
+            dropping, and drawing a promise the drop then breaks is the exact
+            failure the feedback exists to prevent. */
+        bool insertAfter (const model::Row& row)
+        {
+            return row.rowKind == model::RowKind::cue
+                && row.section == model::Section::member;
+        }
 
         juce::String sectionWord (model::Section section)
         {
@@ -191,6 +206,33 @@ namespace wfg::client::ui
         {
             g.setColour (Look::colour (theme, "picked").withAlpha (0.16f));
             g.fillRect (0, 0, width, height);
+        }
+
+        /*  WHERE A FILE WOULD LAND, SAID WHILE THE HAND IS STILL IN THE AIR.
+            Two answers and two shapes: letting go ON a media cue names that
+            cue's file, so the whole row lights; letting go on a member makes
+            new cues after it, so a line is drawn under it. Guessing afterwards
+            which of the two happened is the thing this is here to prevent.
+
+            AND A THIRD CASE DRAWN AS NEITHER. A header, a footer, a persistent
+            cue and a band take the files to the end of their container's
+            members, because that is the only place a create can put them, so
+            no line is drawn under a row the cue will not appear under. */
+        if (row == dropRow)
+        {
+            g.setColour (Look::colour (theme, "live"));
+
+            if (dropWouldLink)
+            {
+                g.setColour (Look::colour (theme, "live").withAlpha (0.22f));
+                g.fillRect (0, 0, width, height);
+                g.setColour (Look::colour (theme, "live"));
+                g.drawRect (0, 0, width, height, 1);
+            }
+            else if (dropWouldInsert)
+            {
+                g.fillRect (0, height - 2, width, 2);
+            }
         }
 
         if (isStandby)
@@ -470,6 +512,144 @@ namespace wfg::client::ui
 
         if (actions.park)
             actions.park (entry.id);
+    }
+
+    //==========================================================================
+    /*  MEDIA ARRIVING FROM OUTSIDE THE WINDOW, which is decision Y and the one
+        thing the page cannot be given later: a browser is handed a dropped
+        file's NAME and BYTES and never its path, so it can only offer to copy
+        one in, while this is handed the path and can do either.
+
+        TWO GESTURES, TOLD APART BY WHAT IS UNDER THE POINTER. On a media cue,
+        letting go NAMES that cue's file - which is what somebody means when
+        they drag a replacement onto a cue that already has one. Anywhere else,
+        it MAKES cues, one per file, after whatever row the hand was over. The
+        difference is drawn while the drag is in the air rather than explained
+        afterwards. */
+    int CueListComponent::rowUnder (int y) const
+    {
+        const auto inList = y - list.getY() + list.getViewport()->getViewPositionY();
+        const auto at = inList / juce::jmax (1, rowHeight());
+
+        return at >= 0 && at < static_cast<int> (rows.size()) ? at : -1;
+    }
+
+    bool CueListComponent::isInterestedInFileDrag (const juce::StringArray& files)
+    {
+        /*  ASKED OF THE SAME FORMAT READERS THE ENGINE USES, so the window
+            cannot come to accept a file the show would then fail on: both
+            sides are `registerBasicFormats`, and a format added to one is
+            added to the other. */
+        juce::AudioFormatManager formats;
+        formats.registerBasicFormats();
+
+        for (const auto& path : files)
+            if (formats.findFormatForFileExtension (juce::File (path).getFileExtension()) != nullptr)
+                return true;
+
+        return false;
+    }
+
+    void CueListComponent::fileDragEnter (const juce::StringArray& files, int x, int y)
+    {
+        fileDragMove (files, x, y);
+    }
+
+    void CueListComponent::fileDragMove (const juce::StringArray& files, int, int y)
+    {
+        const auto was = dropRow;
+        const auto wasLink = dropWouldLink;
+
+        dropRow = rowUnder (y);
+        dropWouldLink = false;
+        dropWouldInsert = false;
+
+        if (dropRow >= 0)
+        {
+            const auto& entry = rows[static_cast<std::size_t> (dropRow)];
+
+            /*  ONE FILE ONTO ONE MEDIA CUE NAMES IT. More than one could not,
+                and a cue of another kind has no file to name. */
+            dropWouldLink = files.size() == 1
+                         && entry.rowKind == model::RowKind::cue
+                         && entry.kind == "media";
+
+            //  Drawn only where letting go really does insert there.
+            dropWouldInsert = ! dropWouldLink && insertAfter (entry);
+        }
+
+        if (dropRow != was || dropWouldLink != wasLink)
+        {
+            if (was >= 0)      list.repaintRow (was);
+            if (dropRow >= 0)  list.repaintRow (dropRow);
+        }
+    }
+
+    void CueListComponent::fileDragExit (const juce::StringArray&)
+    {
+        const auto was = dropRow;
+
+        dropRow = -1;
+        dropWouldLink = false;
+        dropWouldInsert = false;
+
+        if (was >= 0)
+            list.repaintRow (was);
+    }
+
+    void CueListComponent::filesDropped (const juce::StringArray& files, int, int y)
+    {
+        const auto at = rowUnder (y);
+
+        dropRow = -1;
+        dropWouldLink = false;
+        dropWouldInsert = false;
+        repaint();
+
+        if (files.isEmpty())
+            return;
+
+        if (at >= 0)
+        {
+            const auto& entry = rows[static_cast<std::size_t> (at)];
+
+            if (files.size() == 1 && entry.rowKind == model::RowKind::cue
+                  && entry.kind == "media")
+            {
+                if (actions.linkMedia)
+                    actions.linkMedia (entry.id, files[0]);
+
+                return;
+            }
+
+            /*  AFTER THE ROW THE HAND WAS OVER, in that row's own container,
+                by its MEMBER index - which is the only index a create speaks
+                in, and the reason the other rows cannot be pointed at.
+
+                A HEADER, A FOOTER, A PERSISTENT CUE AND A BAND ALL ANSWER THE
+                END INSTEAD. `cue.create` puts a cue among its parent's
+                MEMBERS; the header and footer of a group are separate orders
+                that a role decides, not positions an index can reach. So a
+                drop on one of those rows says which container was meant and
+                nothing about where, and the end of its members is the honest
+                reading of that. The line under the row is not drawn for them,
+                so nothing is promised that will not happen. */
+            if (actions.importMedia)
+                actions.importMedia (entry.parent, insertAfter (entry) ? entry.indexInParent + 1 : -1,
+                                     files);
+
+            return;
+        }
+
+        /*  AND NOTHING UNDER THE POINTER MEANS THE END OF THE LIST, which is
+            where a drop into empty space obviously belongs. It says -1 rather
+            than a row count standing in for the end: these rows are what is
+            DRAWN - bands, and the members of every open group - so their
+            number is not the list's member count and would name a position
+            inside it. The window holds the tree and can name the end exactly;
+            this does not have to guess. */
+        if (actions.importMedia)
+            actions.importMedia (drawnList, -1, files);
     }
 
     void CueListComponent::backgroundClicked (const juce::MouseEvent&)
