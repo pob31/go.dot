@@ -84,8 +84,21 @@ namespace wfg::client::ui
             ground colour, so each pane reads as its own surface. */
         const auto gap = juce::roundToInt (theme.row * theme.type / 3.0);
 
-        runs.setBounds (area.removeFromRight (juce::jmax (area.getWidth() * 2 / 5,
-                                                          juce::jmin (area.getWidth(), 220))));
+        /*  THE LIST KEEPS A WIDTH IT CAN BE READ AND EDITED AT. Driving
+            double-clicks from a script found the failing ones failing on
+            geometry (2026-09-18): with the running pane at two fifths and the
+            inspector at two fifths of the rest, the list in a 1105-pixel window
+            was 380 pixels wide, and after the times and the kind were carved
+            from the right the name of an indented cue was twelve pixels of
+            column - a double-click on the name hit the kind. The running pane
+            takes a third, the inspector a bounded share, and the list is never
+            squeezed under `listFloor` while the window can give it that. */
+        const auto total = area.getWidth();
+        const auto listFloor = juce::roundToInt (theme.row * theme.type * 16);   // ~520 px at the default type
+        const auto runsWidth = juce::jlimit (juce::jmin (220, total), juce::jmax (220, total - listFloor),
+                                             total / 3);
+
+        runs.setBounds (area.removeFromRight (runsWidth));
         area.removeFromRight (gap);
 
         /*  AND THE INSPECTOR BETWEEN THEM, only when something is picked -
@@ -104,8 +117,10 @@ namespace wfg::client::ui
 
         if (inspecting)
         {
-            inspector.setBounds (area.removeFromRight (juce::jmax (area.getWidth() * 2 / 5,
-                                                                   juce::jmin (area.getWidth(), 240))));
+            const auto inspectorWidth = juce::jlimit (juce::jmin (240, area.getWidth()),
+                                                      juce::jmax (240, area.getWidth() - listFloor),
+                                                      area.getWidth() / 3);
+            inspector.setBounds (area.removeFromRight (inspectorWidth));
             area.removeFromRight (gap);
         }
 
