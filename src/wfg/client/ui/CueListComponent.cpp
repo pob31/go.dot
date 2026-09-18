@@ -467,10 +467,15 @@ namespace wfg::client::ui
             word in the kind column, and every one of these is in the inspector
             in full. What they buy is a group whose behaviour can be read
             without picking it. */
-        g.setColour (ink);
-        g.setFont (Look::font (theme, entry.isGroup ? 14.0f : 13.0f));
+        /*  A DERIVED HEADER LINE READS AS A READING: dimmed, italic, and the
+            word "preset" after it rather than "header", because the cue is
+            not in the header - the header will prepare it, which is what the
+            page's italics say too. */
+        g.setColour (entry.derived ? Look::colour (theme, "ink-dim") : ink);
+        g.setFont (entry.derived ? Look::font (theme, 13.0f).italicised()
+                                 : Look::font (theme, entry.isGroup ? 14.0f : 13.0f));
 
-        const auto word = sectionWord (entry.section);
+        const auto word = entry.derived ? juce::String ("preset") : sectionWord (entry.section);
         const auto name = entry.name.empty() ? juce::String ("(unnamed)") : juce::String (entry.name);
 
         g.drawText (word.isEmpty() ? name : name + "   " + word,

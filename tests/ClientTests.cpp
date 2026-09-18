@@ -1447,6 +1447,73 @@ TEST_CASE ("client: a fold is recorded with the show, and a rebuilt list opens f
 }
 
 //==============================================================================
+TEST_CASE ("client: a cue marked as a group's preset appears in that group's header band, as a reading")
+{
+    /*  The author (2026-09-18): "the headers are not updated when adding an
+        element to them for preloading." The engine publishes the cues whose
+        `preset` names a group as `headerDerived`; the model draws them after
+        the header's own lines, marked derived, while the cue's own row keeps
+        its place and the index. */
+    Rig rig { "groups" };
+
+    auto tick = std::int64_t { 1 };
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*rig.publish (0), listId));
+
+    //  A group, and a member inside it.
+    std::string group, member;
+
+    for (const auto& row : show.rows())
+    {
+        if (row.rowKind != model::RowKind::cue)
+            continue;
+
+        if (group.empty() && row.isGroup)
+            group = row.id;
+        else if (! group.empty() && row.parent == group && row.section == model::Section::member)
+        {
+            member = row.id;
+            break;
+        }
+    }
+
+    REQUIRE_FALSE (group.empty());
+    REQUIRE_FALSE (member.empty());
+
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + member + "/preset"),
+                          osc::Value::string (group) }).applied == 1);
+
+    REQUIRE (show.refresh (*rig.publish (tick), listId));
+
+    auto derivedRows = 0, ownRows = 0;
+    auto bandSeen = false;
+
+    for (const auto& row : show.rows())
+    {
+        if (row.rowKind == model::RowKind::band && row.parent == group && row.section == model::Section::header)
+            bandSeen = true;
+
+        if (row.rowKind == model::RowKind::cue && row.id == member)
+        {
+            if (row.derived) ++derivedRows;
+            else             ++ownRows;
+        }
+    }
+
+    CHECK (bandSeen);
+    CHECK (derivedRows == 1);
+    CHECK (ownRows == 1);
+
+    //  The index points at the cue's own row, not the reading of it.
+    const auto at = show.indexOf (member);
+    REQUIRE (at >= 0);
+    CHECK_FALSE (show.rows()[static_cast<std::size_t> (at)].derived);
+}
+
+//==============================================================================
 TEST_CASE ("client: Esc is a stop, Esc again within the window is a kill, counted from the first")
 {
     /*  §4.4 gives Esc two readings and only a hand can be read for which one

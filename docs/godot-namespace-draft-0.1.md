@@ -7238,7 +7238,13 @@ no header will ever prepare it; **ctrl/⌘-up** steps the mark outward through t
 the innermost to the outermost, **ctrl/⌘-down** inward back to none, for every picked cue. Plain arrows
 keep the pointer. Also this round: one foot row under GO instead of two mostly-empty ones, a third of a
 row of ground between the panes, Cut on ctrl/⌘-X as a copy and then the deletes, and the title bar's
-dash as the UTF-8 it is.
+dash as the UTF-8 it is. *And the gesture's first use found the band it aims at was incomplete:* "the
+headers are not updated when adding an element to them for preloading" - the desktop's header band
+drew the header's own cues and never the ones a preset mark derives into it, which the engine has
+published as `headerDerived` since the frames round and the page has drawn in italics since 5.13. The
+model now appends them after the written lines, marked derived - not walked into, not in the index, so
+the pointer and the pick land on the cue's own row - and the list draws them dimmed and italic with the
+word *preset*.
 
 ### 14.17 What Phase 5 built, against what section 14 drew
 

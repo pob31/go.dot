@@ -114,6 +114,13 @@ namespace wfg::client::model
 
         int depth = 0;           ///< 0 at the top of the list; a group's members are one deeper
         bool isGroup = false;
+
+        /*  A HEADER LINE THAT IS A READING, NOT A MEMBER (§13.7): a cue whose
+            `preset` names this group, drawn in the header band so the header
+            reads as what it will prepare - the page draws these in italics.
+            The cue's own row stands where the cue is; this one is not in the
+            index and is not walked into. */
+        bool derived = false;
         bool enabled = true;
         Section section = Section::member;
 
@@ -191,10 +198,11 @@ namespace wfg::client::model
                    bool isList, int depth);
         void section (const tree::TreeSnapshot& snapshot, const std::string& container,
                       const std::vector<std::string>& ids, Section which,
-                      const char* word, int depth);
+                      const char* word, int depth,
+                      const std::vector<std::string>& derivedIds = {});
         void append (const tree::TreeSnapshot& snapshot, const std::string& cueId,
                      Section section, int depth, const std::string& parent,
-                     int indexInParent = 0);
+                     int indexInParent = 0, bool derived = false);
 
         std::vector<Row> drawn;
         std::unordered_map<std::string, int> indexOfCue;

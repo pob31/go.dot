@@ -154,8 +154,13 @@ namespace wfg::client::model
             section (snapshot, container, members ("persistentOrder"),
                      Section::persistent, "persistent", depth);
         else
+            /*  WRITTEN LINES, THEN DERIVED ONES: the header's own cues, and
+                after them every cue whose `preset` names this group, which
+                the engine publishes as `headerDerived` (author, 2026-09-18:
+                "the headers are not updated when adding an element to them
+                for preloading" - they were not read at all). */
             section (snapshot, container, members ("headerOrder"),
-                     Section::header, "header", depth);
+                     Section::header, "header", depth, members ("headerDerived"));
 
         auto at = 0;
 
@@ -169,12 +174,13 @@ namespace wfg::client::model
 
     void ShowModel::section (const tree::TreeSnapshot& snapshot, const std::string& container,
                              const std::vector<std::string>& ids, Section which,
-                             const char* word, int depth)
+                             const char* word, int depth,
+                             const std::vector<std::string>& derivedIds)
     {
         /*  NOTHING IS FRAMED WHEN THERE IS NOTHING TO FRAME. An empty section
             is not a thing an operator needs told about; the page drops its band
             for the same reason. */
-        if (ids.empty())
+        if (ids.empty() && derivedIds.empty())
             return;
 
         Row head;
@@ -183,7 +189,7 @@ namespace wfg::client::model
         head.depth = depth;
         head.parent = container;
         head.name = word;
-        head.count = ids.size();
+        head.count = ids.size() + derivedIds.size();
         head.bandKey = container + "/" + word;
 
         /*  SEEDED FROM THE SHOW'S OWN RECORD when the rows are rebuilt (author,
@@ -211,6 +217,9 @@ namespace wfg::client::model
             the same shape means the two read as one idea rather than two. */
         for (const auto& id : ids)
             append (snapshot, id, which, depth + 1, container);
+
+        for (const auto& id : derivedIds)
+            append (snapshot, id, which, depth + 1, container, 0, true);
     }
 
     void ShowModel::toggle (const std::string& bandKey)
@@ -259,7 +268,7 @@ namespace wfg::client::model
 
     void ShowModel::append (const tree::TreeSnapshot& snapshot, const std::string& cueId,
                             Section section, int depth, const std::string& parent,
-                            int indexInParent)
+                            int indexInParent, bool derived)
     {
         /*  A CUE DRAWN TWICE IS A DOCUMENT THAT DISAGREES WITH ITSELF, and a
             client that followed it would walk forever. The first placement
@@ -317,9 +326,16 @@ namespace wfg::client::model
             row.shut = folded.count (cueId) != 0;
         }
 
-        const auto walkInto = row.isGroup && ! row.shut;
+        /*  A DERIVED LINE IS A READING OF A CUE THAT STANDS ELSEWHERE: not
+            walked into when it is a group, and not in the index, so the
+            pointer and the pick land on the cue's own row. */
+        row.derived = derived;
 
-        indexOfCue.emplace (cueId, static_cast<int> (drawn.size()));
+        const auto walkInto = row.isGroup && ! row.shut && ! derived;
+
+        if (! derived)
+            indexOfCue.emplace (cueId, static_cast<int> (drawn.size()));
+
         drawn.push_back (std::move (row));
 
         if (walkInto)
