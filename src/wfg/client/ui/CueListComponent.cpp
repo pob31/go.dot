@@ -876,6 +876,13 @@ namespace wfg::client::ui
         const auto height = juce::jmax (1, rowHeight());
         const auto fraction = static_cast<double> (inList % height) / static_cast<double> (height);
 
+        /*  ALT HELD MEANS THE PRESET, not a move (author, 2026-09-18: "drag
+            and drop with alt onto a group label adds this cue to the header").
+            Read from the keyboard's current state, since a drag carries no
+            modifiers of its own. */
+        if (juce::ModifierKeys::getCurrentModifiers().isAltDown())
+            return model::presetDropFor (rows[static_cast<std::size_t> (rowOut)], *dragged, rows);
+
         return model::dropFor (rows[static_cast<std::size_t> (rowOut)], *dragged, fraction);
     }
 
@@ -897,7 +904,8 @@ namespace wfg::client::ui
             the whole row lit for "on" - into a group, or aimed at a fade. */
         dropRow = drop.kind == model::DropKind::none ? -1 : at;
         dropWouldInsert = drop.kind == model::DropKind::after;
-        dropWouldLink = drop.kind == model::DropKind::into || drop.kind == model::DropKind::target;
+        dropWouldLink = drop.kind == model::DropKind::into || drop.kind == model::DropKind::target
+                     || drop.kind == model::DropKind::preset;
 
         if (dropRow != was || dropWouldLink != wasLink || dropWouldInsert != wasInsert)
         {
@@ -961,6 +969,11 @@ namespace wfg::client::ui
             case model::DropKind::target:
                 if (actions.setTarget)
                     actions.setTarget (drop.cueId, dragged);
+                return;
+
+            case model::DropKind::preset:
+                if (actions.setPreset)
+                    actions.setPreset (dragged, drop.cueId);
                 return;
         }
     }
@@ -1040,6 +1053,22 @@ namespace wfg::client::ui
             is whether the standby is unmistakable - which cannot be judged
             without moving it. Down is next, up is previous, exactly as the
             page binds them and as gestures/commands.json records. */
+        /*  CTRL/⌘-ARROWS MOVE THE PRESET, plain arrows the pointer (author,
+            2026-09-18: "ctrl+upArrow and downArrow, since this way we can
+            move the preload/preset up or down nested groups"). Asked before
+            the plain arrows, since a plain KeyPress compare ignores nothing. */
+        if (key == juce::KeyPress (juce::KeyPress::upKey, juce::ModifierKeys::commandModifier, 0))
+        {
+            if (actions.presetStep) actions.presetStep (+1);
+            return true;
+        }
+
+        if (key == juce::KeyPress (juce::KeyPress::downKey, juce::ModifierKeys::commandModifier, 0))
+        {
+            if (actions.presetStep) actions.presetStep (-1);
+            return true;
+        }
+
         if (key == juce::KeyPress (juce::KeyPress::downKey))
         {
             if (actions.standbyNext) actions.standbyNext();

@@ -167,14 +167,21 @@ namespace wfg::client::model
         /** How many times a walk has actually run, for the counting test. */
         std::size_t rebuilds() const noexcept { return walks; }
 
-        /*  OPENS OR SHUTS A SECTION, by the key its head carries. The fold is
-            the CLIENT's and never the engine's (§14.1): what somebody has
-            collapsed on their screen is not something the show decided, and
-            writing it to the document would put one operator's screen into
-            everybody else's. It outlives a rebuild - an edit does not reopen
-            what you folded - which is why the set is keyed on the container
-            rather than on a row's position. */
+        /*  OPENS OR SHUTS A SECTION, by the key its head carries. The set is
+            what is DRAWN, and it outlives a rebuild - an edit does not reopen
+            what you folded - which is why it is keyed on the container rather
+            than on a row's position. Since 2026-09-18 the fold is also the
+            SHOW's, as a state row the engine keeps in state.xml (author:
+            "fold state should be recorded in project file"): the window
+            writes the flag when a fold is toggled (`foldAddress`), and the
+            walk seeds this set from the flags when it rebuilds, so a show
+            opens folded the way it was left. State, not show: it does not
+            mark the show unsaved. */
         void toggle (const std::string& bandKey);
+
+        /*  The tree address of the flag a band key stands for: a group's own
+            `folded`, or a container's `<word>Folded`. */
+        std::string foldAddress (const std::string& bandKey) const;
 
         /** Whether that section is currently shut. */
         bool isShut (const std::string& bandKey) const;
@@ -192,6 +199,15 @@ namespace wfg::client::model
         std::vector<Row> drawn;
         std::unordered_map<std::string, int> indexOfCue;
         std::unordered_set<std::string> folded;
+
+        /*  THE FLAG AS THE TREE LAST SAID IT, per key, so a rebuild applies the
+            show's record only when that record MOVED - the first build, or
+            another client's fold - and never over a toggle made here that the
+            engine has not published back yet. Without this a toggle was undone
+            by the very rebuild it caused. */
+        std::unordered_map<std::string, bool> flagSeen;
+        void seedFold (const std::string& bandKey, bool flag);
+
         std::string listId;
         std::uint64_t revision = 0;
         std::size_t walks = 0;

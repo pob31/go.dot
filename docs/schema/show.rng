@@ -1339,6 +1339,7 @@
           <ref name="State.Show"/>
           <ref name="State.Lists"/>
           <ref name="State.List"/>
+          <ref name="State.Group"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -1384,9 +1385,53 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="persistentFolded">
+          <a:documentation>Whether the list&apos;s persistent section is drawn shut. Recorded with the show (author, 2026-09-18: &apos;fold state should be recorded in project file&apos;) as state, since how a list is read is not a decision about what it plays: it lands in state.xml beside the standby and does not mark the show unsaved.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="standby">
           <a:documentation>The cue GO will act on. One per list, and always one of that list&apos;s own top-level children or empty; moved only by a standby command, a write to this node, or the repair when the cue it names is deleted or moved away. Never by selection or scrolling.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Group">
+    <element name="Group">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="folded">
+          <a:documentation>Whether the group is drawn shut, its members hidden under its row. State, not show: how a group is read is not a decision about what it plays, so it lands in state.xml and does not mark the show unsaved.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="footerFolded">
+          <a:documentation>Whether the group&apos;s footer band is drawn shut. State, as `folded` is.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="headerFolded">
+          <a:documentation>Whether the group&apos;s header band is drawn shut. State, as `folded` is.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
     </element>

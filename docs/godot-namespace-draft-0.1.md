@@ -7223,6 +7223,23 @@ and one paste. The page reaches both too - copy of what is picked, paste of the 
 after the anchor - so the desktop is not their only route (rule 3); what the page cannot do is cross
 a process, since it has no way onto the system clipboard that does not ask the person first.
 
+**THE FOLD IS THE SHOW'S NOW, AND THE PRESET HAS A GESTURE (2026-09-18).** *"Fold state should be
+recorded in project file."* §14.1 kept folds out of the document as one operator's screen; the author
+wants a show to open as it was left, and the two are reconciled by WHERE it is kept: four state rows -
+`group/folded`, `group/headerFolded`, `group/footerFolded`, `list/persistentFolded` - written by the
+window when a fold is toggled and landing in state.xml beside the standby, so a fold never marks the
+show unsaved and a locked show still takes it. The model's fold set is still what is drawn between
+rebuilds, so a toggle shows at once; when the rows are rebuilt the set is seeded from the flags, which
+is how the next opening finds them. *"Drag and drop with alt onto a group label adds this cue to the
+header ... ctrl+upArrow and downArrow, since this way we can move the preload/preset up or down nested
+groups."* Both are one write to `preset`, the mark §13.7 made the decision: **alt-drop** on a group the
+cue is inside names that group and is refused for one it is not, since the engine would only warn that
+no header will ever prepare it; **ctrl/⌘-up** steps the mark outward through the ancestors from none to
+the innermost to the outermost, **ctrl/⌘-down** inward back to none, for every picked cue. Plain arrows
+keep the pointer. Also this round: one foot row under GO instead of two mostly-empty ones, a third of a
+row of ground between the panes, Cut on ctrl/⌘-X as a copy and then the deletes, and the title bar's
+dash as the UTF-8 it is.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

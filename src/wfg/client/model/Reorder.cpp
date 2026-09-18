@@ -16,6 +16,9 @@
 
 #include <wfg/client/model/Reorder.h>
 
+#include <algorithm>
+#include <cstddef>
+
 namespace wfg::client::model
 {
     namespace
@@ -130,6 +133,84 @@ namespace wfg::client::model
         return found;
     }
 
+    std::vector<std::string> ancestorsOf (const std::string& cueId, const std::vector<Row>& rows)
+    {
+        const auto rowOf = [&rows] (const std::string& id) -> const Row*
+        {
+            for (const auto& row : rows)
+                if (row.rowKind == RowKind::cue && row.id == id)
+                    return &row;
+
+            return nullptr;
+        };
+
+        std::vector<std::string> out;
+        const auto* at = rowOf (cueId);
+
+        //  Bounded by the row count, so a cycle nothing publishes cannot hang it.
+        for (std::size_t steps = 0; at != nullptr && steps < rows.size(); ++steps)
+        {
+            const auto* parent = rowOf (at->parent);
+
+            if (parent == nullptr || ! parent->isGroup)
+                break;
+
+            out.push_back (parent->id);
+            at = parent;
+        }
+
+        return out;
+    }
+
+    Drop presetDropFor (const Row& over, const Row& dragged, const std::vector<Row>& rows)
+    {
+        Drop drop;
+
+        if (over.rowKind != RowKind::cue || ! over.isGroup || over.id == dragged.id)
+            return drop;
+
+        const auto ancestors = ancestorsOf (dragged.id, rows);
+
+        if (std::find (ancestors.begin(), ancestors.end(), over.id) == ancestors.end())
+            return drop;
+
+        drop.kind = DropKind::preset;
+        drop.cueId = over.id;
+        return drop;
+    }
+
+    std::optional<std::string> presetStep (const std::string& cueId, const std::string& current,
+                                           int direction, const std::vector<Row>& rows)
+    {
+        const auto ancestors = ancestorsOf (cueId, rows);   // innermost first
+
+        if (ancestors.empty() || direction == 0)
+            return std::nullopt;
+
+        const auto found = std::find (ancestors.begin(), ancestors.end(), current);
+        const auto at = current.empty() || found == ancestors.end()
+                          ? -1
+                          : static_cast<int> (found - ancestors.begin());
+
+        if (direction > 0)
+        {
+            //  Outward: from none to the innermost, then further out; the outermost stays.
+            if (at + 1 >= static_cast<int> (ancestors.size()))
+                return std::nullopt;
+
+            return ancestors[static_cast<std::size_t> (at + 1)];
+        }
+
+        //  Inward: from the innermost to none; none stays none.
+        if (at < 0)
+            return std::nullopt;
+
+        if (at == 0)
+            return std::string {};
+
+        return ancestors[static_cast<std::size_t> (at - 1)];
+    }
+
     std::string describe (const Drop& drop, const Row& over, bool intoTimeline)
     {
         const auto name = over.name.empty() ? over.id : over.name;
@@ -144,6 +225,7 @@ namespace wfg::client::model
             case DropKind::after:   return "after " + name + timelineNote;
             case DropKind::into:    return "into " + name + timelineNote;
             case DropKind::target:  return "aim " + name + " at it";
+            case DropKind::preset:  return "prepare it in " + name + "'s header";
         }
 
         return {};

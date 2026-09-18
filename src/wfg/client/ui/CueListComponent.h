@@ -103,6 +103,12 @@ namespace wfg::client::ui
 
             /** Picks every cue the list draws: ctrl/⌘-A. */
             std::function<void()> pickAll;
+
+            /*  THE PRESET: a cue marked as prepared by an ancestor group's
+                header. Alt-drop on the group says which; ctrl/⌘-up and -down
+                step the mark outward and inward through the ancestors. */
+            std::function<void (const std::string& cueId, const std::string& group)> setPreset;
+            std::function<void (int direction)> presetStep;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);

@@ -138,8 +138,41 @@ namespace wfg::client
                 /*  A FOLD IS THIS CLIENT'S AND NEVER THE ENGINE'S (§14.1): what
                     somebody collapsed on their screen is not something the show
                     decided, so it goes to the model and nowhere near `submit`. */
+                /*  A FOLD IS DRAWN AT ONCE AND RECORDED WITH THE SHOW (author,
+                    2026-09-18: "fold state should be recorded in project
+                    file"): the model flips it now, and the flag - a state
+                    row, so a locked show takes it - is written for state.xml
+                    to keep, and for the next opening to seed the model from. */
                 listActions.fold            = [this] (const std::string& key)
-                                              { show.toggle (key); };
+                                              {
+                                                  show.toggle (key);
+                                                  send (gesture::setNode (show.foldAddress (key),
+                                                                          show.isShut (key) ? "true" : "false"));
+                                              };
+
+                /*  THE PRESET GESTURES: alt-drop on an ancestor group, and
+                    ctrl/⌘-arrows stepping through the ancestors. Both are one
+                    write to the cue's `preset` (model/Reorder.h). */
+                listActions.setPreset       = [this] (const std::string& cueId, const std::string& group)
+                                              {
+                                                  if (! refusedWhileLocked())
+                                                      send (gesture::setNode ("/godot/cue/" + cueId + "/preset", group));
+                                              };
+                listActions.presetStep      = [this] (int direction)
+                                              {
+                                                  if (selection.empty() || refusedWhileLocked())
+                                                      return;
+
+                                                  for (const auto& id : selection.ids())
+                                                  {
+                                                      const auto current = latest != nullptr
+                                                          ? model::text (*latest, "/godot/cue/" + id + "/preset")
+                                                          : std::string {};
+
+                                                      if (const auto next = model::presetStep (id, current, direction, show.rows()))
+                                                          send (gesture::setNode ("/godot/cue/" + id + "/preset", *next));
+                                                  }
+                                              };
                 /*  WHAT IS PICKED IS THIS CLIENT'S (model/Selection.h): a
                     click, with shift or ctrl/⌘, over the rows as drawn. */
                 listActions.pick            = [this] (const std::string& id, bool extend, bool toggle)

@@ -54,6 +54,7 @@
 
 #include <wfg/client/model/ShowModel.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -64,7 +65,8 @@ namespace wfg::client::model
         none,       ///< letting go here does nothing: the row itself, or a band
         after,      ///< `object.move` into `container` at `index`
         into,       ///< `object.move` into the group `container`, at its end
-        target      ///< `node.set <cueId>/target <dragged>`
+        target,     ///< `node.set <cueId>/target <dragged>`
+        preset      ///< `node.set <dragged>/preset <cueId>`: prepared by that group's header
     };
 
     struct Drop
@@ -82,6 +84,27 @@ namespace wfg::client::model
     /*  The identifier of the one cue `text` names: by identifier, else by
         number, else by name. Empty when none does, or more than one. */
     std::string resolveCueRef (const std::string& text, const std::vector<Row>& rows);
+
+    /*  THE PRESET GESTURE (author, 2026-09-18: "drag and drop with alt onto
+        a group label adds this cue to the header"): with alt held, letting
+        go on a group the dragged cue is INSIDE marks the cue as prepared by
+        that group's header - one write to the cue's `preset`, which is the
+        decision; the header line is a reading of it (§13.7). A group the cue
+        is not inside is refused here, because the engine would only warn
+        that no header will ever prepare it. */
+    Drop presetDropFor (const Row& over, const Row& dragged, const std::vector<Row>& rows);
+
+    /*  The groups `cueId` is inside, innermost first, by the rows' parent
+        chain; the list itself is not among them. */
+    std::vector<std::string> ancestorsOf (const std::string& cueId, const std::vector<Row>& rows);
+
+    /*  CTRL/⌘-UP AND -DOWN MOVE THE PRESET THROUGH THE ANCESTORS (author:
+        "this way we can move the preload/preset up or down nested groups").
+        Up is outward, towards the list: from no preset to the innermost
+        group, then each group further out, stopping at the outermost. Down
+        is inward, ending at no preset. Nothing to move to answers nothing. */
+    std::optional<std::string> presetStep (const std::string& cueId, const std::string& current,
+                                           int direction, const std::vector<Row>& rows);
 
     /*  The words a drop is announced with, for the reader; empty for none.
 

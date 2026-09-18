@@ -185,6 +185,16 @@ namespace wfg::client::model
         head.name = word;
         head.count = ids.size();
         head.bandKey = container + "/" + word;
+
+        /*  SEEDED FROM THE SHOW'S OWN RECORD when the rows are rebuilt (author,
+            2026-09-18: "fold state should be recorded in project file"): the
+            container's `<word>Folded` flag, a state row the engine keeps in
+            state.xml. The set is still what is drawn between rebuilds, so a
+            toggle shows at once and the flag catches up a tick later. */
+        const auto flagAddress = (container == listId ? "/godot/list/" : "/godot/cue/")
+                                   + container + "/" + word + "Folded";
+
+        seedFold (head.bandKey, text (snapshot, flagAddress) == "true");
         head.shut = folded.count (head.bandKey) != 0;
 
         drawn.push_back (std::move (head));
@@ -216,6 +226,35 @@ namespace wfg::client::model
     bool ShowModel::isShut (const std::string& bandKey) const
     {
         return folded.count (bandKey) != 0;
+    }
+
+    void ShowModel::seedFold (const std::string& bandKey, bool flag)
+    {
+        //  Only when the show's record moved: a toggle made here is not undone by its own rebuild.
+        const auto seen = flagSeen.find (bandKey);
+
+        if (seen != flagSeen.end() && seen->second == flag)
+            return;
+
+        flagSeen[bandKey] = flag;
+
+        if (flag)
+            folded.insert (bandKey);
+        else
+            folded.erase (bandKey);
+    }
+
+    std::string ShowModel::foldAddress (const std::string& bandKey) const
+    {
+        const auto slash = bandKey.find ('/');
+
+        if (slash == std::string::npos)
+            return "/godot/cue/" + bandKey + "/folded";
+
+        const auto container = bandKey.substr (0, slash);
+        const auto word = bandKey.substr (slash + 1);
+
+        return (container == listId ? "/godot/list/" : "/godot/cue/") + container + "/" + word + "Folded";
     }
 
     void ShowModel::append (const tree::TreeSnapshot& snapshot, const std::string& cueId,
@@ -272,6 +311,9 @@ namespace wfg::client::model
         if (row.isGroup)
         {
             row.bandKey = cueId;
+
+            //  Seeded from the group's own `folded` flag, as a band's is above.
+            seedFold (cueId, attribute (snapshot, cueId, "folded") == "true");
             row.shut = folded.count (cueId) != 0;
         }
 

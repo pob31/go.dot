@@ -42,6 +42,8 @@
 
 #include "TestSupport.h"
 
+#include <optional>
+
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Media.h>
@@ -1161,6 +1163,34 @@ TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be name
         }
     }
 
+    /*  THE PRESET: alt-drop on a group the cue is inside marks it; a group it
+        is not inside is refused here; and the arrows step the mark outward
+        and inward through the ancestors, innermost first. */
+    {
+        const auto outer = cue ("O", "group", "L", 0);
+        const auto innerGroup = cue ("I", "group", "O", 0);
+        const auto leaf = cue ("X", "memo", "I", 0);
+        const auto other = cue ("P", "group", "L", 1);
+        const std::vector<model::Row> nested { outer, innerGroup, leaf, other };
+
+        CHECK (model::ancestorsOf ("X", nested) == std::vector<std::string> { "I", "O" });
+        CHECK (model::ancestorsOf ("O", nested).empty());
+
+        CHECK (model::presetDropFor (innerGroup, leaf, nested).kind == model::DropKind::preset);
+        CHECK (model::presetDropFor (outer, leaf, nested).cueId == "O");
+        CHECK (model::presetDropFor (other, leaf, nested).kind == model::DropKind::none);   // not inside it
+        CHECK (model::presetDropFor (leaf, leaf, nested).kind == model::DropKind::none);
+
+        //  Up is outward: none -> I -> O -> stays. Down is inward: O -> I -> none -> stays.
+        CHECK (model::presetStep ("X", "", +1, nested) == std::optional<std::string> { "I" });
+        CHECK (model::presetStep ("X", "I", +1, nested) == std::optional<std::string> { "O" });
+        CHECK_FALSE (model::presetStep ("X", "O", +1, nested).has_value());
+        CHECK (model::presetStep ("X", "O", -1, nested) == std::optional<std::string> { "I" });
+        CHECK (model::presetStep ("X", "I", -1, nested) == std::optional<std::string> { "" });
+        CHECK_FALSE (model::presetStep ("X", "", -1, nested).has_value());
+        CHECK_FALSE (model::presetStep ("O", "", +1, nested).has_value());    // nothing above it
+    }
+
     /*  NAMING A CUE: identifier first, then number, then name - and two cues
         with one name answer nothing rather than one of them. */
     const std::vector<model::Row> rows { a, b, c, g, inner };
@@ -1368,6 +1398,52 @@ TEST_CASE ("client: copied cues come back as a fragment, and paste under new nam
                         osc::Value::string ("hello") }).applied == 0);
     CHECK (model::words (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order")).size()
              == after.size());
+}
+
+//==============================================================================
+TEST_CASE ("client: a fold is recorded with the show, and a rebuilt list opens folded the way it was left")
+{
+    /*  The author (2026-09-18): "fold state should be recorded in project
+        file." The flag is a state row on the group; the model seeds its fold
+        set from it when it rebuilds, so a show opens as it was left. */
+    Rig rig { "groups" };
+
+    auto tick = std::int64_t { 1 };
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+
+    model::ShowModel show;
+    REQUIRE (show.refresh (*rig.publish (0), listId));
+
+    std::string group;
+
+    for (const auto& row : show.rows())
+        if (row.rowKind == model::RowKind::cue && row.isGroup)
+        {
+            group = row.id;
+            break;
+        }
+
+    REQUIRE_FALSE (group.empty());
+    CHECK (show.foldAddress (group) == "/godot/cue/" + group + "/folded");
+    CHECK (show.foldAddress (listId + "/persistent") == "/godot/list/" + listId + "/persistentFolded");
+    CHECK (show.foldAddress (group + "/header") == "/godot/cue/" + group + "/headerFolded");
+
+    const auto drawnOpen = show.rows().size();
+
+    //  The flag is a state row, so it is written like the standby is.
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + group + "/folded"),
+                          osc::Value::boolean (true) }).applied == 1);
+
+    //  A state write moves no revision; an edit does, and the rebuild reads the flag.
+    REQUIRE (rig.apply (tick++, "window", "node.set",
+                        { osc::Value::string ("/godot/cue/" + group + "/name"),
+                          osc::Value::string ("Folded away") }).applied == 1);
+
+    model::ShowModel reopened;
+    REQUIRE (reopened.refresh (*rig.publish (tick), listId));
+    CHECK (reopened.isShut (group));
+    CHECK (reopened.rows().size() < drawnOpen);           // its members are not drawn
 }
 
 //==============================================================================
