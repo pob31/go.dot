@@ -94,6 +94,15 @@ namespace wfg::client::ui
         void sayWhetherDetailsAreOpen();
         void layOut();
 
+        /*  ONE COMMIT, N WRITES: a field over several cues carries every
+            cue's address and each is written, which is what a batch edit is
+            (§4.11: N decisions). One cue is one write. */
+        void commitField (const model::Field& field, const std::string& text);
+        void commitCueRef (const model::Field& field, const std::string& text);
+
+        /** What a box shows for a field: its value, or that the cues disagree. */
+        static juce::String shown (const model::Field& field);
+
         Actions actions;
         model::Theme theme;
 

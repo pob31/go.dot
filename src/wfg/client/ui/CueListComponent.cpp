@@ -20,6 +20,7 @@
 
 #include <juce_audio_formats/juce_audio_formats.h>
 
+#include <algorithm>
 #include <utility>
 
 namespace wfg::client::ui
@@ -181,8 +182,13 @@ namespace wfg::client::ui
         repaint();
     }
 
+    bool CueListComponent::isChosen (const std::string& id) const
+    {
+        return ! id.empty() && std::find (chosen.begin(), chosen.end(), id) != chosen.end();
+    }
+
     void CueListComponent::show (const model::ShowModel& model, const std::string& standbyId,
-                                 const std::string& pickedId)
+                                 const std::vector<std::string>& chosenIds)
     {
         /*  THE STRUCTURE, at show-change rate: while the rows are the same
             objects, `updateContent` - which relays out every one of them - has
@@ -252,18 +258,20 @@ namespace wfg::client::ui
             and §4.8 wants them told apart by more than a hue: one is a mark in
             the gutter and a bar down the left edge, the other is a wash across
             the row. */
-        if (pickedId != picked || structureMoved)
+        if (chosenIds != chosen)
         {
-            const auto wasAt = pickedRow;
+            /*  The rows that were picked and the rows that are, each asked
+                to paint; a selection is a handful of rows and a shift-click
+                over fifty is still fifty repaints at a hand's rate. */
+            for (const auto& id : chosen)
+                if (const auto at = model.indexOf (id); at >= 0 && ! structureMoved)
+                    list.repaintRow (at);
 
-            picked = pickedId;
-            pickedRow = model.indexOf (pickedId);
+            chosen = chosenIds;
 
-            if (! structureMoved)
-            {
-                if (wasAt >= 0)      list.repaintRow (wasAt);
-                if (pickedRow >= 0)  list.repaintRow (pickedRow);
-            }
+            for (const auto& id : chosen)
+                if (const auto at = model.indexOf (id); at >= 0 && ! structureMoved)
+                    list.repaintRow (at);
         }
     }
 
@@ -287,7 +295,7 @@ namespace wfg::client::ui
         }
 
         const auto isStandby = row == standbyRow;
-        const auto isPicked = row == pickedRow;
+        const auto isPicked = isChosen (rows[static_cast<std::size_t> (row)].id);
 
         const auto ink = Look::colour (theme, entry.enabled ? "ink" : "ink-off");
         const auto faint = Look::colour (theme, "ink-faint");
@@ -629,8 +637,12 @@ namespace wfg::client::ui
             was left inert until there was an inspector for it to speak to. */
         if (event.x > unit * 2 + unit / 2)
         {
+            /*  WITH WHAT THE HAND HELD: shift extends from the anchor, ctrl/⌘
+                toggles, and the selection model reads them (model/Selection.h).
+                `isCommandDown` is ctrl here and ⌘ on the Mac, which is the
+                key each platform's lists use. */
             if (actions.pick)
-                actions.pick (entry.id);
+                actions.pick (entry.id, event.mods.isShiftDown(), event.mods.isCommandDown());
 
             return;
         }
@@ -961,7 +973,7 @@ namespace wfg::client::ui
             is the gesture somebody makes without thinking about it, which is
             the one worth having. */
         if (actions.pick)
-            actions.pick ({});
+            actions.pick ({}, false, false);
     }
 
     int CueListComponent::headingHeight() const noexcept
@@ -1054,8 +1066,17 @@ namespace wfg::client::ui
         if (key == juce::KeyPress (juce::KeyPress::backspaceKey,
                                    juce::ModifierKeys::commandModifier, 0))
         {
-            if (! picked.empty() && actions.remove)
-                actions.remove (picked);
+            if (! chosen.empty() && actions.removeChosen)
+                actions.removeChosen();
+
+            return true;
+        }
+
+        //  Ctrl/⌘-A picks every cue the list draws.
+        if (key == juce::KeyPress ('a', juce::ModifierKeys::commandModifier, 0))
+        {
+            if (actions.pickAll)
+                actions.pickAll();
 
             return true;
         }

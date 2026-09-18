@@ -50,6 +50,7 @@
 
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace wfg::client::ui
 {
@@ -72,8 +73,10 @@ namespace wfg::client::ui
             /** Opens or shuts a section, by the key its head carries. */
             std::function<void (const std::string&)> fold;
 
-            /** Which cue the inspector should be about. Empty when none is picked. */
-            std::function<void (const std::string&)> pick;
+            /*  A CLICK ON A ROW'S BODY, with what the hand held: shift extends
+                from the anchor, ctrl/⌘ toggles, neither picks this one alone
+                (model/Selection.h). Empty id with neither means nothing. */
+            std::function<void (const std::string&, bool extend, bool toggle)> pick;
 
             /*  MEDIA ARRIVING FROM OUTSIDE (decision Y): files dropped to be
                 made into cues at a member position, or one file dropped onto
@@ -95,16 +98,19 @@ namespace wfg::client::ui
             std::function<void (const std::string& id, const std::string& parent, int index)> move;
             std::function<void (const std::string& aimedCue, const std::string& atCue)> setTarget;
 
-            /** Deletes the picked cue: ctrl/⌘-Backspace. One `object.delete`; undo brings it back. */
-            std::function<void (const std::string& id)> remove;
+            /** Deletes what is picked: ctrl/⌘-Backspace. One `object.delete` each; undo brings them back. */
+            std::function<void()> removeChosen;
+
+            /** Picks every cue the list draws: ctrl/⌘-A. */
+            std::function<void()> pickAll;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);
 
-        /*  The rows, where the pointer is, and which cue is picked. Cheap
+        /*  The rows, where the pointer is, and which cues are picked. Cheap
             when none of the three has moved. */
         void show (const model::ShowModel& model, const std::string& standbyId,
-                   const std::string& pickedId);
+                   const std::vector<std::string>& chosenIds);
 
         void applyTheme (const model::Theme& theme);
 
@@ -177,8 +183,8 @@ namespace wfg::client::ui
         std::vector<model::Row> rows;
         std::string standby;
         int standbyRow = -1;
-        std::string picked;
-        int pickedRow = -1;
+        std::vector<std::string> chosen;     ///< the picked cues, as the selection holds them
+        bool isChosen (const std::string& id) const;
         int dropRow = -1;            ///< the row a file drag is over, or -1
         bool dropWouldInsert = false;   ///< whether letting go really inserts after that row
         bool dropWouldLink = false;  ///< whether letting go there names a cue's file, or lands ON the row

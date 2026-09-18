@@ -218,6 +218,97 @@ namespace wfg::client::model
 
         sortInto (reported, {});
         out.details = std::move (reported);
+        out.count = 1;
+
+        return out;
+    }
+
+    Inspection inspectMany (const tree::TreeSnapshot& snapshot, const std::vector<std::string>& cueIds)
+    {
+        if (cueIds.empty())
+            return {};
+
+        if (cueIds.size() == 1)
+            return inspect (snapshot, cueIds.front());
+
+        /*  EACH ONE INSPECTED, THEN THE INTERSECTION. A row survives when every
+            cue has it by name and it is writable everywhere; its value is the
+            one they all give or `mixed`. The first cue's blocks give the order,
+            so a selection of two fades reads like one fade with some boxes
+            blank - which is honest, and the page's own rule. */
+        std::vector<Inspection> each;
+
+        for (const auto& id : cueIds)
+            each.push_back (inspect (snapshot, id));
+
+        Inspection out;
+        out.count = cueIds.size();
+        out.cueId = cueIds.front();
+
+        for (std::size_t at = 1; at < cueIds.size(); ++at)
+            out.cueId += " " + cueIds[at];
+
+        out.cueName = std::to_string (cueIds.size()) + " cues";
+
+        std::vector<std::string> kinds;
+
+        for (const auto& one : each)
+            if (! named (kinds, one.kind))
+                kinds.push_back (one.kind);
+
+        for (std::size_t at = 0; at < kinds.size(); ++at)
+            out.kind += (at == 0 ? "" : " + ") + kinds[at];
+
+        const auto findField = [] (const Inspection& in, const std::string& name) -> const Field*
+        {
+            for (const auto& block : in.blocks)
+                for (const auto& field : block.fields)
+                    if (field.name == name)
+                        return &field;
+
+            return nullptr;
+        };
+
+        for (const auto& block : each.front().blocks)
+        {
+            Block shared { block.heading, {} };
+
+            for (const auto& first : block.fields)
+            {
+                auto field = first;
+                field.addresses.clear();
+                field.addresses.push_back (first.address);
+
+                auto everywhere = true;
+
+                for (std::size_t at = 1; at < each.size() && everywhere; ++at)
+                {
+                    const auto* other = findField (each[at], first.name);
+
+                    if (other == nullptr || ! other->writable)
+                    {
+                        everywhere = false;
+                        break;
+                    }
+
+                    field.addresses.push_back (other->address);
+
+                    if (other->value != field.value)
+                        field.mixed = true;
+                }
+
+                if (! everywhere)
+                    continue;
+
+                if (field.mixed)
+                    field.value.clear();
+
+                shared.fields.push_back (std::move (field));
+            }
+
+            if (! shared.fields.empty())
+                out.blocks.push_back (std::move (shared));
+        }
 
         return out;
     }

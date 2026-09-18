@@ -52,6 +52,7 @@
     std only, like the rest of model/.
 */
 
+#include <cstddef>
 #include <string>
 #include <vector>
 
@@ -109,6 +110,16 @@ namespace wfg::client::model
 
         bool hasMinimum = false, hasMaximum = false;
         double minimum = 0.0, maximum = 0.0;
+
+        /*  SEVERAL CUES AT ONCE (author, 2026-09-18: "multiple selection and
+            batch editing of parameters"). `addresses` is every picked cue's
+            own address for this row, and a commit writes each one - N
+            `node.set`s, which is what the page does too and what §4.11 makes
+            a batch edit: N decisions, not one command that means "all of
+            them". Empty for one cue, whose `address` is the whole story.
+            `mixed` says the cues do not agree, and `value` is then empty. */
+        std::vector<std::string> addresses;
+        bool mixed = false;
     };
 
     struct Block
@@ -129,9 +140,19 @@ namespace wfg::client::model
         /** What the engine says back, behind the fold. */
         std::vector<Field> details;
 
+        /** How many cues this is about: 0, 1, or several. */
+        std::size_t count = 0;
+
         bool empty() const noexcept { return blocks.empty() && details.empty(); }
     };
 
     /** Everything published under one cue, sorted into blocks. Empty for no cue. */
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId);
+
+    /*  WHAT SEVERAL CUES HAVE IN COMMON: the writable rows every one of them
+        has, by name, with the value they agree on or `mixed`; the reported
+        rows are left out, since a run position is one cue's. One cue is
+        `inspect`; none is empty. The blocks are ordered by the first cue's
+        kind, and the heading says how many and which kinds. */
+    Inspection inspectMany (const tree::TreeSnapshot& snapshot, const std::vector<std::string>& cueIds);
 }

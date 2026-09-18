@@ -215,7 +215,7 @@ namespace wfg::client::ui
                     break;
 
                 case model::Control::choice:
-                    line.choice.setText (field.value, juce::dontSendNotification);
+                    line.choice.setText (shown (field), juce::dontSendNotification);
                     break;
 
                 case model::Control::loopCount:
@@ -245,11 +245,13 @@ namespace wfg::client::ui
                 case model::Control::cueRef:
                 case model::Control::text:
                 default:
-                    line.box.setText (field.value, juce::dontSendNotification);
+                    line.box.setText (shown (field), juce::dontSendNotification);
                     break;
             }
 
             line.field.value = field.value;
+            line.field.mixed = field.mixed;
+            line.field.addresses = field.addresses;
         };
 
         for (const auto& block : inspection.blocks)
@@ -258,6 +260,44 @@ namespace wfg::client::ui
 
         for (const auto& field : inspection.details)
             update (field);
+    }
+
+    void InspectorComponent::commitField (const model::Field& field, const std::string& text)
+    {
+        if (! actions.set)
+            return;
+
+        if (field.addresses.empty())
+        {
+            actions.set (field.address, text);
+            return;
+        }
+
+        for (const auto& address : field.addresses)
+            actions.set (address, text);
+    }
+
+    void InspectorComponent::commitCueRef (const model::Field& field, const std::string& text)
+    {
+        if (! actions.setCueRef)
+            return;
+
+        if (field.addresses.empty())
+        {
+            actions.setCueRef (field.address, text);
+            return;
+        }
+
+        for (const auto& address : field.addresses)
+            actions.setCueRef (address, text);
+    }
+
+    juce::String InspectorComponent::shown (const model::Field& field)
+    {
+        /*  "(mixed)" IN THE BOX rather than an empty one: an empty box says
+            "nothing", and what is true is that the cues say different things.
+            Typing over it writes the one value to all of them. */
+        return field.mixed ? juce::String ("(mixed)") : juce::String (field.value);
     }
 
     void InspectorComponent::rebuild (const model::Inspection& inspection)
@@ -302,13 +342,11 @@ namespace wfg::client::ui
                 line->toggle.setToggleState (field.value == "true", juce::dontSendNotification);
                 line->toggle.setWantsKeyboardFocus (false);
 
-                const auto address = field.address;
                 auto* raw = line.get();
 
-                line->toggle.onClick = [this, address, raw]
+                line->toggle.onClick = [this, raw]
                 {
-                    if (actions.set)
-                        actions.set (address, raw->toggle.getToggleState() ? "true" : "false");
+                    commitField (raw->field, raw->toggle.getToggleState() ? "true" : "false");
                 };
 
                 content.addAndMakeVisible (line->toggle);
@@ -323,16 +361,14 @@ namespace wfg::client::ui
                 for (const auto& option : field.options)
                     line->choice.addItem (juce::String (option), at++);
 
-                line->choice.setText (juce::String (field.value), juce::dontSendNotification);
+                line->choice.setText (shown (field), juce::dontSendNotification);
                 line->choice.setWantsKeyboardFocus (false);
 
-                const auto address = field.address;
                 auto* raw = line.get();
 
-                line->choice.onChange = [this, address, raw]
+                line->choice.onChange = [this, raw]
                 {
-                    if (actions.set)
-                        actions.set (address, raw->choice.getText().toStdString());
+                    commitField (raw->field, raw->choice.getText().toStdString());
                 };
 
                 content.addAndMakeVisible (line->choice);
@@ -350,7 +386,6 @@ namespace wfg::client::ui
                 for (auto* button : { &line->repeats, &line->forever })
                     button->setWantsKeyboardFocus (false);
 
-                const auto address = field.address;
                 auto* raw = line.get();
 
                 /*  WHAT THE THREE SAY TOGETHER, in one place so that no pair of
@@ -358,7 +393,7 @@ namespace wfg::client::ui
                     is one round, looping for ever is nought, and looping a
                     number of times is that number - never less than two, since
                     "loop once" is what the unchecked box already says. */
-                const auto commit = [this, address, raw]
+                const auto commit = [this, raw]
                 {
                     const auto typed = juce::jmax (2, raw->box.getText().getIntValue());
 
@@ -374,8 +409,7 @@ namespace wfg::client::ui
                     raw->box.setVisible (raw->repeats.getToggleState()
                                            && ! raw->forever.getToggleState());
 
-                    if (actions.set)
-                        actions.set (address, std::to_string (wanted));
+                    commitField (raw->field, std::to_string (wanted));
                 };
 
                 line->repeats.onClick = commit;
@@ -390,7 +424,7 @@ namespace wfg::client::ui
             }
             else
             {
-                line->box.setText (juce::String (field.value), juce::dontSendNotification);
+                line->box.setText (shown (field), juce::dontSendNotification);
 
                 /*  AND A WAY TO GO LOOKING, beside the box and never instead of
                     it. `JUCE_MODAL_LOOPS_PERMITTED` is 0 here, so the chooser
@@ -435,7 +469,6 @@ namespace wfg::client::ui
 
                 if (field.writable)
                 {
-                    const auto address = field.address;
                     const auto namesACue = field.control == model::Control::cueRef;
                     auto* raw = line.get();
 
@@ -446,14 +479,18 @@ namespace wfg::client::ui
 
                         A FIELD THAT NAMES A CUE goes by the other door, where
                         what was typed is resolved to an identifier first. */
-                    line->box.onTextChange = [this, address, raw, namesACue]
+                    line->box.onTextChange = [this, raw, namesACue]
                     {
                         const auto text = raw->box.getText().toStdString();
 
-                        if (namesACue && actions.setCueRef)
-                            actions.setCueRef (address, text);
-                        else if (actions.set)
-                            actions.set (address, text);
+                        //  Leaving "(mixed)" as it was is not a decision, and writes nothing.
+                        if (raw->field.mixed && text == "(mixed)")
+                            return;
+
+                        if (namesACue)
+                            commitCueRef (raw->field, text);
+                        else
+                            commitField (raw->field, text);
                     };
                 }
 

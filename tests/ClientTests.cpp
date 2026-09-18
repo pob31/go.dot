@@ -49,6 +49,7 @@
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
+#include <wfg/client/model/Selection.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Theme.h>
@@ -1169,6 +1170,130 @@ TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be name
     CHECK (model::resolveCueRef ("Thunder", rows).empty());    // two of them
     CHECK (model::resolveCueRef ("Nobody", rows).empty());
     CHECK (model::resolveCueRef ("", rows).empty());
+}
+
+//==============================================================================
+TEST_CASE ("client: a click picks one, shift extends from the anchor, ctrl toggles, and a band is skipped")
+{
+    /*  model/Selection.h: the client's own state, so every rule of it can be
+        pinned with no engine. Rows as the list draws them: four cues with a
+        band between the second and third. */
+    const auto cue = [] (const char* id)
+    {
+        model::Row row;
+        row.rowKind = model::RowKind::cue;
+        row.id = id;
+        return row;
+    };
+
+    model::Row band;
+    band.rowKind = model::RowKind::band;
+    band.bandKey = "G:header";
+
+    const std::vector<model::Row> rows { cue ("A"), cue ("B"), band, cue ("C"), cue ("D") };
+
+    model::Selection picked;
+    CHECK (picked.empty());
+
+    picked.click ("B", false, false, rows);
+    CHECK (picked.ids() == std::vector<std::string> { "B" });
+    CHECK (picked.anchor() == "B");
+
+    //  Shift: everything from the anchor to here, the band not among them.
+    picked.click ("D", true, false, rows);
+    CHECK (picked.ids() == std::vector<std::string> { "B", "C", "D" });
+    CHECK (picked.anchor() == "B");                       // the anchor stays
+
+    //  Ctrl on a picked cue takes it out; the anchor follows what is left.
+    picked.click ("B", false, true, rows);
+    CHECK (picked.ids() == std::vector<std::string> { "C", "D" });
+    CHECK (picked.anchor() == "D");
+
+    //  Ctrl on an unpicked cue adds it and makes it the anchor.
+    picked.click ("A", false, true, rows);
+    CHECK (picked.ids() == std::vector<std::string> { "C", "D", "A" });
+    CHECK (picked.anchor() == "A");
+    CHECK (picked.contains ("C"));
+    CHECK_FALSE (picked.contains ("B"));
+
+    //  A plain click picks that one alone.
+    picked.click ("C", false, false, rows);
+    CHECK (picked.ids() == std::vector<std::string> { "C" });
+
+    //  All, then the show loses one: it is not picked any more.
+    picked.all (rows);
+    CHECK (picked.size() == 4u);
+    picked.retain ({ cue ("A"), cue ("B"), cue ("D") });
+    CHECK (picked.ids() == std::vector<std::string> { "A", "B", "D" });
+
+    picked.set ({});
+    CHECK (picked.empty());
+    CHECK (picked.anchor().empty());
+}
+
+//==============================================================================
+TEST_CASE ("client: several cues inspected together show what they share, and say where they differ")
+{
+    /*  The page's batch-edit rule (§14.3, 5.12), transcribed: the rows every
+        picked cue has and may write, the value they agree on or `mixed`, and
+        an address per cue so a commit is N writes. */
+    Rig rig;
+
+    const auto listId = model::readTransport (*rig.publish (0)).listId;
+    auto tick = std::int64_t { 1 };
+
+    const auto create = [&] (const char* kind, const char* name)
+    {
+        REQUIRE (rig.apply (tick++, "window", "cue.create",
+                            { osc::Value::string (listId), osc::Value::int32 (0),
+                              osc::Value::string (kind), osc::Value::string (name) }).applied == 1);
+        return model::createdAt (model::text (*rig.publish (tick), "/godot/list/" + listId + "/order"), 0);
+    };
+
+    const auto one = create ("memo", "One");
+    const auto two = create ("memo", "Two");
+    const auto group = create ("group", "Scene");
+    const auto snapshot = rig.publish (tick);
+
+    const auto fieldNamed = [] (const model::Inspection& in, const std::string& name) -> const model::Field*
+    {
+        for (const auto& block : in.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == name)
+                    return &field;
+
+        return nullptr;
+    };
+
+    //  One cue is the ordinary inspection.
+    CHECK (model::inspectMany (*snapshot, { one }).count == 1);
+    CHECK (model::inspectMany (*snapshot, {}).empty());
+
+    //  Two memos: names differ, enabled agrees, and every field writes to both.
+    const auto twoMemos = model::inspectMany (*snapshot, { one, two });
+    CHECK (twoMemos.count == 2);
+    CHECK (twoMemos.cueName == "2 cues");
+    CHECK (twoMemos.kind == "memo");
+    CHECK (twoMemos.details.empty());                     // a report is one cue's
+
+    const auto* name = fieldNamed (twoMemos, "name");
+    REQUIRE (name != nullptr);
+    CHECK (name->mixed);
+    CHECK (name->value.empty());
+    REQUIRE (name->addresses.size() == 2u);
+    CHECK (name->addresses[0] == "/godot/cue/" + one + "/name");
+    CHECK (name->addresses[1] == "/godot/cue/" + two + "/name");
+
+    const auto* enabled = fieldNamed (twoMemos, "enabled");
+    REQUIRE (enabled != nullptr);
+    CHECK_FALSE (enabled->mixed);
+    CHECK (enabled->value == "true");
+
+    //  A memo and a group share the cue rows and not the group's own.
+    const auto mixedKinds = model::inspectMany (*snapshot, { one, group });
+    CHECK (mixedKinds.kind == "memo + group");
+    CHECK (fieldNamed (mixedKinds, "name") != nullptr);
+    CHECK (fieldNamed (mixedKinds, "mode") == nullptr);
 }
 
 //==============================================================================

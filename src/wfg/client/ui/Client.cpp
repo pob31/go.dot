@@ -55,6 +55,7 @@
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
+#include <wfg/client/model/Selection.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
@@ -86,7 +87,7 @@ namespace wfg::client
         enum MenuItem
         {
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
-            menuUndo, menuRedo, menuDeleteCue,
+            menuUndo, menuRedo, menuSelectAll, menuDeleteCue,
             menuLock
         };
 
@@ -139,7 +140,17 @@ namespace wfg::client
                     decided, so it goes to the model and nowhere near `submit`. */
                 listActions.fold            = [this] (const std::string& key)
                                               { show.toggle (key); };
-                listActions.pick            = [this] (const std::string& id) { picked = id; };
+                /*  WHAT IS PICKED IS THIS CLIENT'S (model/Selection.h): a
+                    click, with shift or ctrl/⌘, over the rows as drawn. */
+                listActions.pick            = [this] (const std::string& id, bool extend, bool toggle)
+                                              {
+                                                  if (id.empty())
+                                                      selection.clear();
+                                                  else
+                                                      selection.click (id, extend, toggle, show.rows());
+                                              };
+                listActions.pickAll         = [this] { selection.all (show.rows()); };
+                listActions.removeChosen    = [this] { removeChosen(); };
 
                 listActions.importMedia     = [this] (const std::string& parent, int index,
                                                       const juce::StringArray& files)
@@ -157,10 +168,6 @@ namespace wfg::client
                                                   if (! refusedWhileLocked())
                                                       send (gesture::moveObject (id, parent, index));
                                               };
-                /*  A DELETE UNPICKS: the panel about a cue that is gone would
-                    be about nothing, and the tree stops publishing it a tick
-                    later anyway. */
-                listActions.remove          = [this] (const std::string& id) { removeCue (id); };
                 listActions.setTarget       = [this] (const std::string& aimed, const std::string& at)
                                               {
                                                   if (! refusedWhileLocked())
@@ -182,7 +189,7 @@ namespace wfg::client
 
                 /*  CLOSING THE PANEL IS PICKING NOTHING, which is client state
                     like the folds and never reaches the engine. */
-                inspectorActions.close = [this] { picked.clear(); };
+                inspectorActions.close = [this] { selection.clear(); };
 
                 inspectorActions.chooseFile = [this] (const std::string& cueId)
                                               { chooseFile (cueId); };
@@ -297,6 +304,7 @@ namespace wfg::client
                     case menuSaveAs:    return { 's', mod | shift, 0 };
                     case menuUndo:      return { 'z', mod, 0 };
                     case menuRedo:      return { 'z', mod | shift, 0 };
+                    case menuSelectAll: return { 'a', mod, 0 };
                     case menuDeleteCue: return { juce::KeyPress::backspaceKey, mod, 0 };
                     case menuLock:      return { 'l', mod, 0 };
                     case menuRevert:    break;
@@ -333,7 +341,8 @@ namespace wfg::client
                     case menuRevert:    return last.mayOfferSave();
                     case menuUndo:      return unlocked && last.canUndo == model::Flag::yes;
                     case menuRedo:      return unlocked && last.canRedo == model::Flag::yes;
-                    case menuDeleteCue: return unlocked && ! picked.empty();
+                    case menuSelectAll: return true;
+                    case menuDeleteCue: return unlocked && ! selection.empty();
                     case menuLock:      return last.locked != model::Flag::unsaid;
                 }
 
@@ -370,7 +379,10 @@ namespace wfg::client
                     addMenuItem (menu, menuUndo, "Undo");
                     addMenuItem (menu, menuRedo, "Redo");
                     menu.addSeparator();
-                    addMenuItem (menu, menuDeleteCue, "Delete cue");
+                    addMenuItem (menu, menuSelectAll, "Select all cues");
+                    addMenuItem (menu, menuDeleteCue, selection.size() > 1
+                                                        ? "Delete " + juce::String (static_cast<int> (selection.size())) + " cues"
+                                                        : "Delete cue");
                 }
                 else if (index == 2)
                 {
@@ -392,7 +404,8 @@ namespace wfg::client
                     case menuRevert:    shell->transport.askThenRevert(); break;
                     case menuUndo:      send (gesture::undo()); break;
                     case menuRedo:      send (gesture::redo()); break;
-                    case menuDeleteCue: removeCue (picked); break;
+                    case menuSelectAll: selection.all (show.rows()); break;
+                    case menuDeleteCue: removeChosen(); break;
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     default: break;
                 }
@@ -401,13 +414,21 @@ namespace wfg::client
             /*  ONE `object.delete`, from the key and from the menu alike. It does
                 not ask, since undo is one keystroke; and it unpicks, so the
                 panel is not left describing a cue that is gone. */
-            void removeCue (const std::string& id)
+            void removeChosen()
             {
-                if (id.empty() || refusedWhileLocked())
+                if (selection.empty() || refusedWhileLocked())
                     return;
 
-                send (gesture::deleteObject (id));
-                picked.clear();
+                /*  ONE `object.delete` EACH, in the order they were picked:
+                    N decisions, N records, N presses of undo to take back -
+                    which the page's own delete says in its title. A copy of
+                    the ids, since the selection is cleared under them. */
+                const auto ids = selection.ids();
+
+                for (const auto& id : ids)
+                    send (gesture::deleteObject (id));
+
+                selection.clear();
             }
 
             /** For the factory, when a theme file was refused at start: shown where the author is looking. */
@@ -445,9 +466,9 @@ namespace wfg::client
                     when one of the things they read has moved. */
                 if (reading.locked != last.locked || reading.canUndo != last.canUndo
                       || reading.canRedo != last.canRedo || reading.dirty != last.dirty
-                      || picked != pickedAtLastMenu)
+                      || selection.size() != chosenAtLastMenu)
                 {
-                    pickedAtLastMenu = picked;
+                    chosenAtLastMenu = selection.size();
                     menuItemsChanged();
                 }
 
@@ -464,7 +485,10 @@ namespace wfg::client
                     pointer copy, so the list and the strip can never disagree
                     about which tick they are drawing. */
                 show.refresh (*snapshot, reading.listId);
-                shell->cues.show (show, reading.standbyId, picked);
+
+                //  What the show no longer has cannot stay picked.
+                selection.retain (show.rows());
+                shell->cues.show (show, reading.standbyId, selection.ids());
 
                 /*  And the present tense, read fresh: runs have no revision to
                     key on, because a run is not a decision anybody recorded.
@@ -492,10 +516,10 @@ namespace wfg::client
                     updated otherwise, so typing is never overwritten by a
                     poll - which is the one thing a panel like this must not
                     do. */
-                shell->setInspecting (! picked.empty());
+                shell->setInspecting (! selection.empty());
 
-                if (! picked.empty())
-                    shell->inspector.show (model::inspect (*snapshot, picked));
+                if (! selection.empty())
+                    shell->inspector.show (model::inspectMany (*snapshot, selection.ids()));
 
                 last = reading;
             }
@@ -926,6 +950,8 @@ namespace wfg::client
             /** The container and member position the next new cue takes. Empty parent when there is no list. */
             std::pair<std::string, int> destination() const
             {
+                const auto& picked = selection.anchor();
+
                 if (latest != nullptr && ! picked.empty())
                 {
                     const auto parent = model::text (*latest, "/godot/cue/" + picked + "/parent");
@@ -939,6 +965,8 @@ namespace wfg::client
 
             juce::String destinationSentence() const
             {
+                const auto& picked = selection.anchor();
+
                 if (latest == nullptr || picked.empty())
                     return "at the end of the list";
 
@@ -1031,7 +1059,7 @@ namespace wfg::client
                                                   model::text (snapshot, "/godot/cue/" + id + "/kind"),
                                                   model::text (snapshot, "/godot/cue/" + id + "/name")))
                     {
-                        picked = id;
+                        selection.set (id);
                         continue;
                     }
 
@@ -1139,7 +1167,7 @@ namespace wfg::client
             /*  WHICH CUE THE INSPECTOR IS ABOUT. Client state, like the folds:
                 what somebody is looking at is not something the show decided,
                 and §14.1 keeps it out of the document for that reason. */
-            std::string picked;
+            model::Selection selection;
 
             /*  THE POINTER THE LAST PASS DREW. Null until the first one, which
                 is why every reader above checks. */
@@ -1154,8 +1182,8 @@ namespace wfg::client
             /** Which level of stop the next Esc means. */
             model::Panic panicPresses;
 
-            /** What was picked when the menu was last rebuilt, so it rebuilds when that moves. */
-            std::string pickedAtLastMenu;
+            /** How many were picked when the menu was last rebuilt, so it rebuilds when that moves. */
+            std::size_t chosenAtLastMenu = 0;
 
             /** The open file dialogue, which must outlive the call that launched it. */
             std::unique_ptr<juce::FileChooser> chooser;

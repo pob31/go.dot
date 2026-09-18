@@ -7190,6 +7190,18 @@ running pane's next round:* buttons to skip to the next loop or slice of a media
 exists), and pause and resume (no command yet, and a pause of a run is a design question §3.29 has only
 begun to ask).
 
+**SEVERAL CUES AT ONCE (2026-09-18).** *"We're also missing multiple selection and batch editing of
+parameters."* The page's 5.12, transcribed. **The selection is the client's** (`model/Selection.h`,
+§14.1): a click picks one and makes it the anchor, shift picks everything between the anchor and here in
+the drawn order with bands skipped, ctrl/⌘ toggles one in or out, ctrl/⌘-A picks every cue drawn; what
+the show loses is dropped from it each pass. **The inspector over N** is the intersection of the rows
+every picked cue has and may write, in the first cue's order, with the value they agree on or
+*(mixed)* in the box - typing over it writes the one value to all, and leaving it writes nothing; the
+reported rows are left out, since a run position is one cue's. **A commit is N `node.set`s**, one per
+cue's own address, which is what §4.11 makes a batch edit: N decisions and N records, and N presses of
+undo. Delete acts on the whole selection the same way, and the menu says how many. A new cue still
+lands after the ANCHOR, the cue somebody clicked last on purpose.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is
