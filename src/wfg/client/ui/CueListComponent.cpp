@@ -76,18 +76,31 @@ namespace wfg::client::ui
         repaint();
     }
 
-    void CueListComponent::show (const model::ShowModel& model, const std::string& standbyId)
+    void CueListComponent::show (const model::ShowModel& model, const std::string& standbyId,
+                                 const std::string& pickedId)
     {
-        /*  THE STRUCTURE, at show-change rate. `builtAt` is the revision the
-            model walked; while it and the list are the same, the rows are the
-            same objects and `updateContent` - which relays out every row -
-            has nothing to do. */
-        const auto structureMoved = model.builtAt() != drawnAt || model.list() != drawnList;
+        /*  THE STRUCTURE, at show-change rate: while the rows are the same
+            objects, `updateContent` - which relays out every one of them - has
+            nothing to do.
+
+            KEYED ON THE WALK AND NOT ON THE REVISION, which is a fix rather
+            than a tidy. `builtAt()` is the SHOW's revision, and a fold does not
+            move it - nor should it, since collapsing a section is not a change
+            to the show. So a folded section rebuilt the model and this view
+            never noticed: the bands drew their twist the other way round and
+            nothing else happened (author, 2026-09-18: "the containers for the
+            groups, headers and footers don't collapse. They're always
+            expanded").
+
+            `rebuilds()` counts walks, so it moves for every reason the rows
+            can change - an edit, a different list, a fold - and asks this view
+            one question instead of three. */
+        const auto structureMoved = model.rebuilds() != drawnWalk || model.list() != drawnList;
 
         if (structureMoved)
         {
             rows = model.rows();
-            drawnAt = model.builtAt();
+            drawnWalk = model.rebuilds();
             drawnList = model.list();
             list.updateContent();
         }
@@ -116,6 +129,26 @@ namespace wfg::client::ui
             if (standbyRow >= 0 && list.getHeight() > 0)
                 list.scrollToEnsureRowIsOnscreen (standbyRow);
         }
+
+        /*  AND WHICH CUE IS PICKED, which moves as often as somebody clicks and
+            costs the same two rows. THE STANDBY AND THE SELECTION ARE DIFFERENT
+            THINGS - where GO will act, against what the inspector is about -
+            and §4.8 wants them told apart by more than a hue: one is a mark in
+            the gutter and a bar down the left edge, the other is a wash across
+            the row. */
+        if (pickedId != picked || structureMoved)
+        {
+            const auto wasAt = pickedRow;
+
+            picked = pickedId;
+            pickedRow = model.indexOf (pickedId);
+
+            if (! structureMoved)
+            {
+                if (wasAt >= 0)      list.repaintRow (wasAt);
+                if (pickedRow >= 0)  list.repaintRow (pickedRow);
+            }
+        }
     }
 
     int CueListComponent::getNumRows()
@@ -138,6 +171,7 @@ namespace wfg::client::ui
         }
 
         const auto isStandby = row == standbyRow;
+        const auto isPicked = row == pickedRow;
 
         const auto ink = Look::colour (theme, entry.enabled ? "ink" : "ink-off");
         const auto faint = Look::colour (theme, "ink-faint");
@@ -152,6 +186,12 @@ namespace wfg::client::ui
         g.fillAll (entry.section != model::Section::member || entry.depth > 0
                      ? Look::colour (theme, "panel-in")
                      : Look::colour (theme, row % 2 == 0 ? "panel" : "panel-high"));
+
+        if (isPicked)
+        {
+            g.setColour (Look::colour (theme, "picked").withAlpha (0.16f));
+            g.fillRect (0, 0, width, height);
+        }
 
         if (isStandby)
         {
@@ -256,8 +296,14 @@ namespace wfg::client::ui
         auto markCell = area.removeFromLeft (indent);
         g.setColour (faint);
         g.setFont (Look::font (theme, 13.0f));
-        g.drawText (entry.isGroup ? juce::String (juce::CharPointer_UTF8 ("\xe2\x96\xbe"))
-                                  : juce::String(),
+        /*  A GROUP'S TWIST POINTS DOWN WHEN IT IS OPEN AND RIGHT WHEN IT IS
+            SHUT, which is the one convention a file tree has taught everybody
+            already - and the same shape a section's band uses, so the two kinds
+            of container fold the same way. */
+        g.drawText (entry.isGroup
+                      ? juce::String (juce::CharPointer_UTF8 (entry.shut ? "\xe2\x96\xb8"
+                                                                        : "\xe2\x96\xbe"))
+                      : juce::String(),
                     markCell, juce::Justification::centredLeft, false);
 
         g.setColour (ink);
@@ -362,8 +408,34 @@ namespace wfg::client::ui
 
         const auto unit = juce::roundToInt (theme.type * 7.0);
 
+        /*  A GROUP'S TWIST FOLDS IT, and only the twist: the rest of the row
+            picks like any other, because a group is a cue somebody can inspect
+            as well as a container they can shut. */
+        if (entry.isGroup)
+        {
+            const auto indent = unit * 2;
+            const auto twistFrom = unit / 2 + unit * 2 + numberChars * unit + entry.depth * indent;
+
+            if (event.x >= twistFrom && event.x < twistFrom + indent)
+            {
+                if (actions.fold)
+                    actions.fold (entry.bandKey);
+
+                return;
+            }
+        }
+
+        /*  THE GUTTER PARKS AND THE ROW PICKS, which is the two meanings a
+            click has to carry and the reason the whole row could not be one of
+            them. The page splits them the same way, and it is why the row body
+            was left inert until there was an inspector for it to speak to. */
         if (event.x > unit * 2 + unit / 2)
+        {
+            if (actions.pick)
+                actions.pick (entry.id);
+
             return;
+        }
 
         /*  AND A ROW THAT CANNOT TAKE THE POINTER SAYS SO rather than being
             sent and refused. The engine answers `standby.set` on a header, a
@@ -398,6 +470,17 @@ namespace wfg::client::ui
 
         if (actions.park)
             actions.park (entry.id);
+    }
+
+    void CueListComponent::backgroundClicked (const juce::MouseEvent&)
+    {
+        /*  EMPTY SPACE MEANS NOTHING IS PICKED (author, 2026-09-18: "clicking
+            on empty space in the cuelist could also close the inspector"). The
+            close box says the same thing at the other end of the window; this
+            is the gesture somebody makes without thinking about it, which is
+            the one worth having. */
+        if (actions.pick)
+            actions.pick ({});
     }
 
     void CueListComponent::paint (juce::Graphics& g)

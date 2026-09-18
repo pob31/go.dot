@@ -31,21 +31,36 @@ namespace wfg::client::model
 {
     namespace
     {
-        /*  The page's palette, in styles.css's order and with its values, so
-            that the first thing the author sees in the window is the thing
-            they already judged on the page - and every difference from then
-            on is one they made. */
+        /*  The page's palette, in styles.css's order - and no longer with all
+            of its values, which is a divergence worth naming.
+
+            THREE GREYS ARE LIGHTER HERE THAN ON THE PAGE, and the inspector's
+            ground is blue rather than violet, because the author read both
+            surfaces and asked (2026-09-18): "make the grey a little lighter in
+            general for more contrast with the background. Details is
+            especially hard to read", and "make the background of the inspector
+            a dark blue of the same density to tell it apart from the cuelist
+            and active cues".
+
+            IT IS NOT A DISAGREEMENT ABOUT THE PALETTE. A browser and JUCE do
+            not lay type down the same way - the page's greys are rendered with
+            subpixel antialiasing over a stylesheet's own gamma, and the same
+            hex here reads thinner and darker - so keeping the numbers
+            identical would have kept the LOOK identical only on paper. What
+            both surfaces share is the intention; the numbers serve it
+            separately. `ink-off` moved furthest because it carries the details
+            fold, which is where it was least readable. */
         const std::vector<std::pair<std::string, std::uint32_t>>& palette()
         {
             static const std::vector<std::pair<std::string, std::uint32_t>> table
             {
                 { "ink",           0xFFE8E6E1 },
-                { "ink-dim",       0xFFB4AFA7 },
-                { "ink-faint",     0xFF8F8A83 },
-                { "ink-off",       0xFF625F5B },
+                { "ink-dim",       0xFFC6C1B9 },
+                { "ink-faint",     0xFFA9A49C },
+                { "ink-off",       0xFF8B867F },
                 { "ground",        0xFF16161A },
                 { "panel",         0xFF1D1D22 },
-                { "panel-inspect", 0xFF21212A },
+                { "panel-inspect", 0xFF1C2433 },
                 { "panel-high",    0xFF24242B },
                 { "panel-in",      0xFF191920 },
                 { "rule",          0xFF3A3A45 },

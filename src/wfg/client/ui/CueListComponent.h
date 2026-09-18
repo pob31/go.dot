@@ -68,12 +68,17 @@ namespace wfg::client::ui
 
             /** Opens or shuts a section, by the key its head carries. */
             std::function<void (const std::string&)> fold;
+
+            /** Which cue the inspector should be about. Empty when none is picked. */
+            std::function<void (const std::string&)> pick;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);
 
-        /** The rows, and where the pointer is. Cheap when neither moved. */
-        void show (const model::ShowModel& model, const std::string& standbyId);
+        /*  The rows, where the pointer is, and which cue is picked. Cheap
+            when none of the three has moved. */
+        void show (const model::ShowModel& model, const std::string& standbyId,
+                   const std::string& pickedId);
 
         void applyTheme (const model::Theme& theme);
 
@@ -86,6 +91,7 @@ namespace wfg::client::ui
         void paintListBoxItem (int row, juce::Graphics& g, int width, int height,
                                bool rowIsSelected) override;
         void listBoxItemClicked (int row, const juce::MouseEvent& event) override;
+        void backgroundClicked (const juce::MouseEvent& event) override;
         void paintBand (const model::Row& entry, int row, juce::Graphics& g, int width, int height);
 
         Actions actions;
@@ -100,7 +106,9 @@ namespace wfg::client::ui
         std::vector<model::Row> rows;
         std::string standby;
         int standbyRow = -1;
-        std::uint64_t drawnAt = 0;
+        std::string picked;
+        int pickedRow = -1;
+        std::size_t drawnWalk = 0;
         std::string drawnList;
 
         int rowHeight() const noexcept;

@@ -253,6 +253,8 @@ target_link_libraries(wfg_engine
 add_library(wfg_client_model STATIC
     wfg/client/model/Gestures.h
     wfg/client/model/Gestures.cpp
+    wfg/client/model/Inspector.h
+    wfg/client/model/Inspector.cpp
     wfg/client/model/RunModel.h
     wfg/client/model/RunModel.cpp
     wfg/client/model/ShowModel.h
@@ -278,6 +280,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/CueListComponent.cpp
     wfg/client/ui/MainWindow.h
     wfg/client/ui/MainWindow.cpp
+    wfg/client/ui/InspectorComponent.h
+    wfg/client/ui/InspectorComponent.cpp
     wfg/client/ui/RunPaneComponent.h
     wfg/client/ui/RunPaneComponent.cpp
     wfg/client/ui/Shell.h

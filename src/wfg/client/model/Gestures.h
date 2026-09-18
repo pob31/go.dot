@@ -76,6 +76,11 @@ namespace wfg::client::gesture
     /** Show mode, written as the node it is. */
     Event setLocked (bool locked);
 
+    /*  ONE FIELD, COMMITTED. The address is the NODE's own, never one this
+        client assembled: a generic inspector writes back to what it read,
+        which is the whole reason it needs no table of field names. */
+    Event setNode (const std::string& address, const std::string& text);
+
     /*  Stops one run and everything under it. The running pane's cross, and
         only the cross: a cue stopped by a click that landed anywhere on a row
         is a cue nobody meant to stop. */

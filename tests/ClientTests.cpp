@@ -43,6 +43,7 @@
 #include "TestSupport.h"
 
 #include <wfg/client/model/Gestures.h>
+#include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Theme.h>
@@ -501,6 +502,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     {
         gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
+        gesture::setNode ("/godot/cue/B3N8R5TW/name", "Renamed"),
         gesture::undo(), gesture::redo(), gesture::save(), gesture::revert(),
         gesture::recover(), gesture::discardRecovery(),
         gesture::setLocked (true), gesture::setLocked (false),
@@ -753,4 +755,144 @@ TEST_CASE ("client: a section is a band that folds, and the fold is the client's
     CHECK_FALSE (show.isShut (persistent->bandKey));
     CHECK (show.refresh (*snapshot, listId));
     CHECK (show.rows().size() == before);
+}
+
+//==============================================================================
+TEST_CASE ("client: the inspector is built from the tree, in the order somebody works in")
+{
+    /*  §14.2's generic inspector, which is what lets a row added to the
+        parameter table appear in this window with no line written here. The
+        order is the page's, settled by the author with the page open
+        (2026-09-16), because a window that re-argued where `preWait` goes
+        would be two clients disagreeing about one panel. */
+    Rig rig { "groups" };
+    const auto snapshot = rig.publish (0);
+
+    const auto panel = model::inspect (*snapshot, "B3N8R5TW");   // "House to half"
+
+    REQUIRE_FALSE (panel.empty());
+    CHECK (panel.cueId == "B3N8R5TW");
+    CHECK (panel.cueName == "House to half");
+    CHECK_FALSE (panel.kind.empty());
+
+    /*  THE BLOCKS, in the order somebody fills them in - and never the tree's
+        alphabet, which puts `postWait` above `preWait` and `duration` under
+        another owner word entirely. */
+    std::vector<std::string> headings;
+
+    for (const auto& block : panel.blocks)
+        headings.push_back (block.heading);
+
+    const auto placeOf = [&headings] (const std::string& heading)
+    {
+        const auto found = std::find (headings.begin(), headings.end(), heading);
+        return found == headings.end() ? headings.size()
+                                       : static_cast<std::size_t> (found - headings.begin());
+    };
+
+    CHECK (placeOf ("what it is") < placeOf ("when"));
+    CHECK (placeOf ("when") < placeOf ("in the list"));
+
+    //  And within the timing block: before, how long, after.
+    for (const auto& block : panel.blocks)
+    {
+        if (block.heading != "when")
+            continue;
+
+        std::vector<std::string> names;
+
+        for (const auto& field : block.fields)
+            names.push_back (field.name);
+
+        const auto at = [&names] (const std::string& name)
+        {
+            const auto found = std::find (names.begin(), names.end(), name);
+            return found == names.end() ? names.size()
+                                        : static_cast<std::size_t> (found - names.begin());
+        };
+
+        CHECK (at ("preWait") < at ("postWait"));
+    }
+
+    /*  WHAT IS A DECISION AND WHAT IS THE ENGINE ANSWERING BACK is decided by
+        the node's own ACCESS and never by a list of names here, so a row that
+        becomes writable leaves the fold by itself. */
+    for (const auto& block : panel.blocks)
+        for (const auto& field : block.fields)
+        {
+            CHECK (field.writable);
+            CHECK (field.address.rfind ("/godot/cue/B3N8R5TW/", 0) == 0);
+            CHECK (field.address == "/godot/cue/B3N8R5TW/" + field.name);
+        }
+
+    CHECK_FALSE (panel.details.empty());          // kind, parent, index, role, prepare…
+
+    for (const auto& field : panel.details)
+        CHECK_FALSE (field.writable);
+
+    //  Only this cue's own rows: nothing from a cue that merely shares a prefix.
+    for (const auto& field : panel.details)
+        CHECK (field.name.find ('/') == std::string::npos);
+
+    //  A cue nobody named inspects to nothing rather than to a panel of blanks.
+    CHECK (model::inspect (*snapshot, "").empty());
+    CHECK (model::inspect (*snapshot, "ZZZZZZZZ").empty());
+}
+
+//==============================================================================
+TEST_CASE ("client: a group folds like a section does, and a fold is a reason to rebuild")
+{
+    /*  THE CASE THE AUTHOR'S SESSION BOUGHT (2026-09-18: "the containers for
+        the groups, headers and footers don't collapse. They're always
+        expanded"). The model was folding correctly and the VIEW never noticed,
+        because it keyed its rows on the show's revision - and a fold does not
+        move that, nor should it: collapsing a section is not a change to the
+        show. `rebuilds()` is what moves for every reason the rows can change,
+        which is why the view keys on it now and why this case counts walks. */
+    Rig rig { "groups" };
+    const auto snapshot = rig.publish (0);
+
+    const auto listId = model::readTransport (*snapshot).listId;
+    model::ShowModel show;
+
+    REQUIRE (show.refresh (*snapshot, listId));
+
+    const auto groupOf = [] (const model::ShowModel& model) -> model::Row
+    {
+        for (const auto& row : model.rows())
+            if (row.isGroup)
+                return row;
+
+        return {};
+    };
+
+    const auto group = groupOf (show);
+    REQUIRE (group.isGroup);
+    CHECK (group.bandKey == group.id);          // a group folds by its own identifier
+    CHECK_FALSE (group.shut);
+
+    const auto openRows = show.rows().size();
+    const auto walksBefore = show.rebuilds();
+
+    show.toggle (group.id);
+    CHECK (show.isShut (group.id));
+
+    //  The fold is a reason to rebuild that the revision cannot express.
+    CHECK (show.refresh (*snapshot, listId));
+    CHECK (show.rebuilds() == walksBefore + 1);
+    CHECK (show.rows().size() < openRows);      // its members and their sections are gone
+
+    //  The group itself stays, and says it is shut.
+    const auto stillThere = groupOf (show);
+    CHECK (stillThere.id == group.id);
+    CHECK (stillThere.shut);
+
+    //  Nothing inside it is drawn while it is shut.
+    for (const auto& row : show.rows())
+        CHECK (row.parent != group.id);
+
+    //  And opening it puts them all back.
+    show.toggle (group.id);
+    CHECK (show.refresh (*snapshot, listId));
+    CHECK (show.rows().size() == openRows);
 }

@@ -49,6 +49,7 @@
 #include <wfg/client/Client.h>
 
 #include <wfg/client/model/Gestures.h>
+#include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
@@ -117,14 +118,29 @@ namespace wfg::client
                     decided, so it goes to the model and nowhere near `submit`. */
                 listActions.fold            = [this] (const std::string& key)
                                               { show.toggle (key); };
+                listActions.pick            = [this] (const std::string& id) { picked = id; };
 
                 ui::RunPaneComponent::Actions runActions;
 
                 runActions.kill = [this] (const std::string& id) { send (gesture::kill (id)); };
 
+                ui::InspectorComponent::Actions inspectorActions;
+
+                /*  ONE COMMITTED FIELD IS ONE `node.set`, carrying the address
+                    the NODE gave rather than one assembled here - which is what
+                    keeps this inspector generic and keeps the command reachable
+                    from the page's (§14.16, rule 3). */
+                inspectorActions.set = [this] (const std::string& address, const std::string& text)
+                                       { send (gesture::setNode (address, text)); };
+
+                /*  CLOSING THE PANEL IS PICKING NOTHING, which is client state
+                    like the folds and never reaches the engine. */
+                inspectorActions.close = [this] { picked.clear(); };
+
                 auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
                                                             std::move (listActions),
-                                                            std::move (runActions));
+                                                            std::move (runActions),
+                                                            std::move (inspectorActions));
                 shell = content.get();
 
                 window = std::make_unique<ui::MainWindow> (titleFor (""),
@@ -180,11 +196,21 @@ namespace wfg::client
                     pointer copy, so the list and the strip can never disagree
                     about which tick they are drawing. */
                 show.refresh (*snapshot, reading.listId);
-                shell->cues.show (show, reading.standbyId);
+                shell->cues.show (show, reading.standbyId, picked);
 
                 /*  And the present tense, read fresh: runs have no revision to
                     key on, because a run is not a decision anybody recorded. */
                 shell->runs.show (model::readRuns (*snapshot));
+
+                /*  AND THE ONE CUE SOMEBODY ASKED ABOUT. The panel is built
+                    from the tree when the picked cue changes and its values
+                    updated otherwise, so typing is never overwritten by a
+                    poll - which is the one thing a panel like this must not
+                    do. */
+                shell->setInspecting (! picked.empty());
+
+                if (! picked.empty())
+                    shell->inspector.show (model::inspect (*snapshot, picked));
 
                 last = reading;
             }
@@ -296,6 +322,11 @@ namespace wfg::client
                 window only because nothing in it points back: it is plain data
                 the timer hands to the list. */
             model::ShowModel show;
+
+            /*  WHICH CUE THE INSPECTOR IS ABOUT. Client state, like the folds:
+                what somebody is looking at is not something the show decided,
+                and §14.1 keeps it out of the document for that reason. */
+            std::string picked;
         };
     }
 

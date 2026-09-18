@@ -243,10 +243,23 @@ namespace wfg::client::model
         if (row.isGroup)
             row.mode = attribute (snapshot, cueId, "mode");
 
+        /*  A GROUP FOLDS LIKE A SECTION DOES, and by its own identifier: it
+            holds cues, so an operator reading a long show wants it shut as
+            much as they want a footer shut. Its head is its own row rather
+            than a band, which is why the key is the cue's id and not a
+            container-and-word pair. */
+        if (row.isGroup)
+        {
+            row.bandKey = cueId;
+            row.shut = folded.count (cueId) != 0;
+        }
+
+        const auto walkInto = row.isGroup && ! row.shut;
+
         indexOfCue.emplace (cueId, static_cast<int> (drawn.size()));
         drawn.push_back (std::move (row));
 
-        if (drawn.back().isGroup)
+        if (walkInto)
             walk (snapshot, cueId, false, depth + 1);
     }
 }

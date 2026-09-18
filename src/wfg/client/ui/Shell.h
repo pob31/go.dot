@@ -34,6 +34,7 @@
 
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CueListComponent.h>
+#include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
 #include <wfg/client/ui/TransportComponent.h>
 
@@ -47,7 +48,8 @@ namespace wfg::client::ui
         Shell (const model::Theme& theme,
                TransportComponent::Actions transportActions,
                CueListComponent::Actions listActions,
-               RunPaneComponent::Actions runActions);
+               RunPaneComponent::Actions runActions,
+               InspectorComponent::Actions inspectorActions);
 
         void applyTheme (const model::Theme& theme);
 
@@ -57,8 +59,16 @@ namespace wfg::client::ui
         TransportComponent transport;
         CueListComponent cues;
         RunPaneComponent runs;
+        InspectorComponent inspector;
+
+        /*  THE INSPECTOR STANDS DOWN WHEN NOTHING IS PICKED, which is the
+            arrangement the author settled on the page: the two list panes have
+            the width to themselves until somebody asks about one cue. */
+        void setInspecting (bool showing);
 
     private:
+        bool inspecting = false;
+
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Shell)
     };
 }

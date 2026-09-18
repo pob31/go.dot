@@ -51,6 +51,17 @@ namespace wfg::client::gesture
     Event recover()         { return plain ("document.recover"); }
     Event discardRecovery() { return plain ("document.discardRecovery"); }
 
+    Event setNode (const std::string& address, const std::string& text)
+    {
+        /*  A STRING, WHATEVER THE ROW'S TYPE IS. `node.set` declares its value
+            parameter as `*` and the engine coerces to the row's declared tag,
+            refusing what will not go - which is the right place for that
+            decision: a client that parsed "12" into an int here would be a
+            second copy of the type rules, and the one that disagreed. */
+        return { origin::window, "node.set",
+                 { osc::Value::string (address), osc::Value::string (text) } };
+    }
+
     Event kill (const std::string& runId)
     {
         return { origin::window, "run.kill", { osc::Value::string (runId) } };

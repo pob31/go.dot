@@ -25,10 +25,12 @@ namespace wfg::client::ui
     Shell::Shell (const model::Theme& theme,
                   TransportComponent::Actions transportActions,
                   CueListComponent::Actions listActions,
-                  RunPaneComponent::Actions runActions)
+                  RunPaneComponent::Actions runActions,
+                  InspectorComponent::Actions inspectorActions)
         : transport (theme, std::move (transportActions)),
           cues (theme, std::move (listActions)),
-          runs (theme, std::move (runActions))
+          runs (theme, std::move (runActions)),
+          inspector (theme, std::move (inspectorActions))
     {
         /*  NEITHER PANE TAKES THE FOCUS: it rests here, and `keyPressed` below
             offers each key to both. */
@@ -43,6 +45,9 @@ namespace wfg::client::ui
         addAndMakeVisible (cues);
         addAndMakeVisible (runs);
 
+        inspector.setVisible (false);
+        addChildComponent (inspector);
+
         setWantsKeyboardFocus (true);
     }
 
@@ -51,6 +56,7 @@ namespace wfg::client::ui
         transport.applyTheme (theme);
         cues.applyTheme (theme);
         runs.applyTheme (theme);
+        inspector.applyTheme (theme);
         resized();
         repaint();
     }
@@ -69,7 +75,26 @@ namespace wfg::client::ui
             the page (§14.3) and the space this split leaves room for. */
         runs.setBounds (area.removeFromRight (juce::jmax (area.getWidth() * 2 / 5,
                                                           juce::jmin (area.getWidth(), 220))));
+
+        /*  AND THE INSPECTOR BETWEEN THEM, only when something is picked -
+            the arrangement the author chose on the page (`3115b10`), where
+            the two list panes shrink to make room rather than a third pane
+            standing empty whenever nobody is asking about a cue. */
+        if (inspecting)
+            inspector.setBounds (area.removeFromRight (juce::jmax (area.getWidth() * 2 / 5,
+                                                                   juce::jmin (area.getWidth(), 240))));
+
         cues.setBounds (area);
+    }
+
+    void Shell::setInspecting (bool showing)
+    {
+        if (showing == inspecting)
+            return;
+
+        inspecting = showing;
+        inspector.setVisible (showing);
+        resized();
     }
 
     bool Shell::keyPressed (const juce::KeyPress& key)
