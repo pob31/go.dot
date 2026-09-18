@@ -93,6 +93,8 @@ namespace wfg::client::ui
 
             void paint (juce::Graphics& g) override;
             void mouseUp (const juce::MouseEvent& event) override;
+            void mouseMove (const juce::MouseEvent& event) override;
+            void mouseExit (const juce::MouseEvent& event) override;
 
         private:
             RunPaneComponent& owner;
@@ -100,6 +102,17 @@ namespace wfg::client::ui
 
         void paintRow (int index, juce::Graphics& g, int width, int height);
         void clicked (const juce::MouseEvent& event);
+
+        /*  THE CROSS SAYS WHAT IT WOULD STOP BEFORE IT IS PRESSED (author,
+            2026-09-18: "hovering over the X of a group should highlight the
+            cues that will be stopped if clicked"). A kill takes a run and
+            everything under it, so the pointer resting on a cross marks that
+            run's row and every descendant's, and the marking is client state
+            that never reaches the engine. */
+        void hovered (const juce::MouseEvent& event);
+        void unhovered();
+        bool wouldStop (const model::RunRow& entry) const;
+        bool overCross (int x) const;
 
         /** A row's height: the words, plus a band for a waveform when it has one. */
         int heightOf (const model::RunRow& entry) const;
@@ -137,6 +150,9 @@ namespace wfg::client::ui
         juce::Viewport viewport;
         Canvas canvas { *this };
         std::vector<model::RunRow> rows;
+
+        /** The run whose cross the pointer rests on; empty when none. */
+        std::string hoverKill;
 
         std::shared_ptr<const audio::MediaRecords> media;
         std::map<std::string, std::vector<model::Column>> bars;

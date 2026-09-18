@@ -150,6 +150,80 @@ namespace wfg::client::ui
         owner.clicked (event);
     }
 
+    void RunPaneComponent::Canvas::mouseMove (const juce::MouseEvent& event)
+    {
+        owner.hovered (event);
+    }
+
+    void RunPaneComponent::Canvas::mouseExit (const juce::MouseEvent&)
+    {
+        owner.unhovered();
+    }
+
+    bool RunPaneComponent::overCross (int x) const
+    {
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+        return x >= canvas.getWidth() - unit * 3;
+    }
+
+    void RunPaneComponent::hovered (const juce::MouseEvent& event)
+    {
+        const auto index = rowAt (event.y);
+        const auto over = index >= 0 && overCross (event.x)
+                            ? rows[static_cast<std::size_t> (index)].id
+                            : std::string {};
+
+        if (over == hoverKill)
+            return;
+
+        hoverKill = over;
+        canvas.setMouseCursor (hoverKill.empty() ? juce::MouseCursor::NormalCursor
+                                                 : juce::MouseCursor::PointingHandCursor);
+        canvas.repaint();
+    }
+
+    void RunPaneComponent::unhovered()
+    {
+        if (hoverKill.empty())
+            return;
+
+        hoverKill.clear();
+        canvas.setMouseCursor (juce::MouseCursor::NormalCursor);
+        canvas.repaint();
+    }
+
+    bool RunPaneComponent::wouldStop (const model::RunRow& entry) const
+    {
+        if (hoverKill.empty())
+            return false;
+
+        /*  Up the parent chain to the hovered run, or to the top. A dozen
+            rows, so a walk per row per repaint is nothing; bounded by the row
+            count so a cycle the engine would never publish cannot hang it. */
+        const auto* at = &entry;
+
+        for (std::size_t steps = 0; at != nullptr && steps <= rows.size(); ++steps)
+        {
+            if (at->id == hoverKill)
+                return true;
+
+            const auto parent = at->parentRun;
+            at = nullptr;
+
+            if (parent.empty())
+                break;
+
+            for (const auto& row : rows)
+                if (row.id == parent)
+                {
+                    at = &row;
+                    break;
+                }
+        }
+
+        return false;
+    }
+
     bool RunPaneComponent::hasWaveform (const model::RunRow& entry) const
     {
         /*  ARMED IS NOT SOUNDING (author, 2026-09-18: "the audio files are also
@@ -160,8 +234,12 @@ namespace wfg::client::ui
             picture of the whole file under a row that is merely READY says
             more than the row means. It gets the cursor instead, which costs no
             height, and the picture arrives when the sound does. */
+        /*  AND DONE IS NOT SOUNDING EITHER (author, 2026-09-18: "hide the
+            waveform right away and only keep the name on a thinner strip like
+            regular cues"): the picture goes the tick the sound does, and the
+            row drops to one line for the seconds it is still shown. */
         if (media == nullptr || entry.kind != "media" || entry.file.empty()
-              || ! entry.launched())
+              || ! entry.launched() || entry.state == "done")
         {
             return false;
         }
@@ -465,6 +543,21 @@ namespace wfg::client::ui
 
         paintStrip (entry, g, strip, tint, layered);
 
+        /*  WHAT THE HOVERED CROSS WOULD STOP is washed in the stopping colour
+            and outlined, this row and every descendant: the answer to "what
+            happens if I press this" given before the press, in a shape as
+            well as a colour (§4.8). */
+        const auto marked = wouldStop (entry);
+
+        if (marked)
+        {
+            const auto stopping = Look::colour (theme, "stopping");
+            g.setColour (stopping.withAlpha (0.18f));
+            g.fillRect (0, 0, width, height);
+            g.setColour (stopping);
+            g.drawRect (0, 0, width, height, 1);
+        }
+
         g.setColour (tint);
         g.fillRect (0, 0, 3, height);
 
@@ -479,7 +572,8 @@ namespace wfg::client::ui
             (author, 2026-09-18: "the X can be a bit larger too with some more
             spacing to its left"). */
         auto killCell = area.removeFromRight (unit * 3);
-        g.setColour (Look::colour (theme, "ink-off"));
+        g.setColour (Look::colour (theme, entry.id == hoverKill ? "stopping"
+                                           : marked ? "ink" : "ink-off"));
         g.setFont (Look::font (theme, 16.0f));
         g.drawText (juce::String (juce::CharPointer_UTF8 ("\xc3\x97")),
                     killCell, juce::Justification::centred, false);
