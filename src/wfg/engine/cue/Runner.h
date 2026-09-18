@@ -626,7 +626,7 @@ namespace wfg::cue
             the sample counter and there is no counter without a Player. A
             replay leaves `position` at nought exactly as it leaves
             `rangeIteration`, which is §3.15: a readout is not an event. */
-        void updatePositions();
+        void updatePositions (std::int64_t tick);
 
         /*  Recomputes every live run's effective level from its own and its
             ancestors', and hands the media ones to the audio side.

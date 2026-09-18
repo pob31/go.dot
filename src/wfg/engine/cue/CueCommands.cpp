@@ -42,6 +42,13 @@ namespace wfg::cue
             const auto listId = list[idProperty].toString().toStdString();
             const auto edit = document.setAttribute (standbyAddressOf (listId), wanted);
 
+            /*  PARKING THE POINTER UNDOES THE END OF THE LIST, whatever it is
+                parked on - including nowhere, which is somebody deliberately
+                disarming a list rather than a list that ran out. Written
+                unconditionally, because a flag that only went false on some
+                parks would be one nobody could reason about. */
+            document.setAttribute (finishedAddressOf (listId), "false");
+
             return edit.ok ? Outcome::ok (args) : Outcome::rejected (edit.reason);
         }
     }

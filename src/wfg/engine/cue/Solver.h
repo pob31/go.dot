@@ -240,5 +240,6 @@ namespace wfg::cue
                           const std::map<std::string, double>* durations,
                           const tree::MountTable* mounts,
                           const std::string& listId,
-                          const std::string& standbyCue);
+                          const std::string& standbyCue,
+                          bool ranOut = false);
 }

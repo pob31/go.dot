@@ -1366,6 +1366,15 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="finished">
+          <a:documentation>Whether this list&apos;s pointer is empty because the list RAN OUT rather than because nobody has armed it. The two look identical - one empty string - and they are opposite facts about the show: a list nobody has parked on has had nothing happen to it, and a list whose last cue has been fired has had everything happen to it. Nothing needed to tell them apart until GO began clearing the pointer at the end (PRD 3.5, amended 2026-09-18); the persistent solver had been reading an empty pointer as the top of the list, so without this a show run through to its end would re-assert every persistent bed a Stop had suspended - the beds coming back on after the last cue. It goes true when a GO fires the last cue there is, false the moment anybody parks the pointer anywhere, and it is kept in state.xml beside the standby because it is the same fact about the same performance in progress. It is WRITABLE for the same reason the standby beside it is - the document&apos;s own door refuses a read-only attribute, and this is a fact about the pointer rather than a reading taken off one - but no client needs to touch it: standby.set clears it, and firing the last cue is what sets it.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="standby">
           <a:documentation>The cue GO will act on. One per list, and always one of that list&apos;s own top-level children or empty; moved only by a standby command, a write to this node, or the repair when the cue it names is deleted or moved away. Never by selection or scrolling.</a:documentation>
           <data type="string"/>

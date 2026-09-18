@@ -103,7 +103,13 @@ namespace wfg::client::model
         std::string duration;    ///< only some kinds have one; empty otherwise
         std::string postWait;
 
-        std::string mode;        ///< a group's sequence: manual, automatic, timeline; empty otherwise
+        std::string mode;
+
+        /*  A GROUP'S BEHAVIOUR, as the tree spells it: `sequential` or
+            `shuffle`, and how many rounds it plays - where nought is for ever
+            and one is once. Empty on anything that is not a group. */
+        std::string selection;
+        std::string loops;        ///< a group's sequence: manual, automatic, timeline; empty otherwise
         std::string preset;      ///< the ancestor group this cue is a preset of, when it is one
 
         int depth = 0;           ///< 0 at the top of the list; a group's members are one deeper

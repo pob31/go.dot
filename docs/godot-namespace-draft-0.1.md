@@ -6825,6 +6825,139 @@ model folded correctly and the view keyed its rows on the SHOW's revision, which
 - nor should it, since collapsing a section is not a change to the show. The view keys on the walk
 count now, which moves for every reason the rows can change, and a test counts walks.
 
+**THE END OF A SHOW CLEARS THE POINTER, and the arrows do not (2026-09-18).** The author, watching
+the window: *"once the last cue of the show has been triggered and the standby has no other cue to
+go to, it should be cleared."* An engine change, not a client one, and PRD §3.5 carries it.
+
+**What it costs to leave it.** The pointer used to stay on the cue that had just gone, so a second
+GO at the end of a show **fired that cue again** — which is not what anybody pressing GO once more
+means. Cleared, the second GO is applied and does nothing, which is precisely what the `go` handler's
+own comment has claimed since it was written: *"GO with nothing in standby is applied and does
+nothing. An operator at the end of a list has not made a mistake."* The change makes the code agree
+with the comment rather than the other way round.
+
+**AND IT IS THE RESTING STATE, not a new one** (§4.6). An empty pointer is nowhere at all, is always
+legal (§3.5), and is what a list carries before anybody arms it — so a show that has been run through
+ends where it began rather than in a state of its own.
+
+**THE ARROWS KEEP THE OLD ANSWER, and that is the whole reason this is a second function rather than
+an edit to the first.** `standbyAfterFiring` sits beside `nextStandby` in `cue/CueList.h`, and only
+`go` calls it. Walking off the end is somebody LOOKING, and a pointer that vanished under a keypress
+would be the machine taking their place away; firing off the end is the show being over. Getting a
+cleared pointer back is a click on a row, which both clients offer, because stepping from nowhere
+stays nowhere — the rule that made click-to-park necessary at M3 in the first place.
+
+**What the change forced, and it is the better half of it.** The manual-group rounds rule — the one
+question the cursor asks about what is RUNNING rather than about what is written — was inline in
+`nextStandby`, and a second walk asking it would have been a second copy of thirty lines of argument.
+It is now `heldForAnotherRound`, named once and asked by both. Without that, a one-member manual
+group with rounds left, standing last in its list, would have had its pointer cleared out from under
+a scene with two thirds of itself still to play — a fault the shape of the refactor prevents rather
+than a case a test happened to catch.
+
+**AND CLEARING IT HAD A CONSEQUENCE, which is the better half of the change.** §3.29's persistent
+section asks the solver what should be sounding, and the solver reads the pointer to know how far
+through the show everything is. Its rule for an empty pointer was *"a list nobody has parked on is
+the top of the list, so nothing has happened and nothing is suspended"* — true while empty could only
+mean *never armed*. After this change it also means *ran out*, which is the opposite fact, and a show
+played to its end would have re-asserted every bed a Stop had killed: the ambience coming back on
+after the last cue, with nobody on the GO button.
+
+**It was a unit test that said so** — `persistent: a stop before the pointer suspends it` — and it
+said so within a minute of the change, which is the whole argument for the seam tests this phase
+keeps writing. The fix is a second fact, `list,finished`, kept in `state.xml` beside the pointer it
+qualifies: set when a GO fires the last cue there is, cleared by any `standby.set`, and read by the
+solver as *past the end, so everything counts*. Two things the building of it taught, both cheap and
+both the kind that waste an hour: the document's own door **refuses a read-only attribute**
+(`reason::readOnly`), so an engine-only row still has to be `rw` to be written at all; and a `T` row
+lands in the tree as a **bool var**, whose `toString()` is `"1"` and not `"true"` — the flag was being
+written correctly and read as false for a whole build.
+
+**THREE THINGS CAME OFF THE TRANSPORT THE SAME AFTERNOON**, all asked for by the author *"to gain a
+bit of headroom"*, and each replaced by something that says the same thing where somebody is already
+looking.
+
+- **The undo and redo sentences** are the buttons' tooltips now (`undoTip`, `redoTip`), still the
+  engine's own name for what would be taken back and still with a word for a flag that is `unsaid`.
+  A history panel listing what can be undone and redone is the author's own suggestion for when the
+  line is missed.
+- **"Audio running" is gone**, to a configuration panel nobody has built yet. Whether a device is
+  open is something somebody sets up once and then stops reading. The **lock keeps its word** on the
+  same line, because §4.8 will not have it carried by a colour alone.
+- **"Saved" is gone too, and the Save button dims instead.** A state a control can BE in beats a
+  state a control is described by. `unsaid` still offers the save: a dot the engine has not published
+  is not a show with nothing in it, and offering a save that turns out to be unnecessary costs a
+  write while withholding one can cost an afternoon. The two reasons a save is not offered — a
+  locked show, and a saved one — are told apart by the tooltip.
+
+**M11 CAME FORWARD, AND WITH IT A SECOND READ DOOR (2026-09-18).** The author, with the window
+open: *"can we have the waveform beneath the media cues in the active cue panel with a progress bar
+showing where the playhead is? Pre-waits and post-waits can also have progress bars, maybe running
+the opposite way, right to left, as a countdown."* That is §14's 5.17 and it arrived six milestones
+early, which is what M2's lesson predicted: what the author asks for after looking is never the next
+view on the list.
+
+**NOTHING NEW IS MEASURED.** §3.30's analyser already computes what every file sounds like, halved
+level by level down to sixty-four frames, and `Timbre.h` already says what a client does with it —
+*"a client drawing a bar picks the level whose frame count is nearest its pixel count and reads it
+once, so no redraw recomputes anything"*. `client/model/Waveform.h` is that sentence and nothing
+else: pick a level, bucket it into columns, stop. A window that decided for itself what a file looks
+like would be a second answer to a question the engine has answered, and the two would drift the
+first time the ramp moved.
+
+**THE PYRAMID IS NOT IN THE PARAMETER TREE AND NEVER WILL BE**, which is why this needed a decision
+rather than a lookup. It is tens of kilobytes per file; `GET /media/<hash>/timbre` exists because a
+page must fetch it over a socket. A client in the same process does not have to, and asking it to
+would be a socket opened to talk to itself. So `ClientHost` carries the analyser's table, and
+§14.16's second rule now reads **one call site per published snapshot** rather than one call site
+full stop — the boundary gate checks exactly that, and names each door in its output. It is not a
+reach past the tick thread, which is what the rule is actually about: `MediaInfo::snapshot()` is an
+immutable table the ANALYSER thread publishes under a short mutex, and the HTTP thread has been
+reading it on every request since PR 5.8.
+
+**ONE ENGINE NODE WAS OWED AND IS NOW THERE.** A countdown needs to know how much of a wait is left,
+and nothing published it: `run,remaining` is a subtraction from `dueTick`, which a handler set from
+its own tick, so a client that missed twenty publishes reads the truth on the next one and nothing
+accumulates. Nought whenever the run is not waiting, so no reader has to ask the state node whether
+this one means anything.
+
+**AND THE STRIP UNDER A RUN IS ONE OF THREE THINGS, never two at once.** A wait is a bar in one
+colour whose MOTION says which wait it is — a pre-wait empties right to left and arrives at the cue,
+a post-wait fills left to right and is full when the run is done, which is why one hue is enough and
+why a hue would have been the weaker telling anyway (§4.8). A sounding media cue is its own waveform,
+amplitude in the column heights and timbre in their colour, with the playhead on it. Anything else —
+and a media cue whose analysis is not built yet — is a plain cursor on a shaded ground, because a
+waveform that is not ready is not a cue with nothing happening. A fade carries its own colour
+wherever it appears, being the one kind that changes something already sounding rather than starting
+or ending anything.
+
+**WHAT AN HOUR OF THE AUTHOR'S EYE CHANGED IN THE CUE LIST (2026-09-18).** Six things, and the first
+of them was a fault the others made visible.
+
+- **The bracket did not meet the twist it came from.** A section's band and the rows it heads were
+  measuring their rails from two pieces of arithmetic that agreed at the top level and nowhere else.
+  They now measure from one function, `railsOrigin()`, and the gate against their drifting again is
+  that there is only one of it. The twist is CENTRED in a cell exactly one indent wide, whose centre
+  IS the rail its children come down — so the tip of the triangle stands on the line, with no second
+  sum to keep in step.
+- **A section's rows sit one level in**, like a group's, which is what gives a header and a footer
+  the bracket they lacked and the band a rail to open. They had shared their band's depth, so
+  nothing drew them as contained.
+- **A header, a footer and a persistent cue have their own tone**, cooler than the recessed ground
+  rather than darker, so the difference reads as a different KIND of row and not as another level of
+  nesting.
+- **Nothing alternates.** A zebra is for following a row across a wide table, and it was fighting the
+  two distinctions above — which carry meaning, where a stripe carries only parity.
+- **A group's name is larger and carries its behaviour as shapes**: a loop mark with its round count,
+  an infinity for a group that loops for ever, and a shuffle mark. Every one of them is also a word
+  in the inspector, so none is the only telling.
+- **The column labels live outside the list**, drawn by the component rather than by a row, so they
+  stay put while the show scrolls under them. They take their widths from the same three constants
+  the rows take theirs from, which is what stops a label and its column coming apart.
+
+**And GO moved to the left, with the cue it will fire beside it** — the hand goes to one place and
+the eye reads outward from it, rather than reading a name and travelling back across the window.
+
 **WHAT M7 BUILT, AND IT IS THE ONE THING THE PAGE CANNOT BE GIVEN LATER (2026-09-18).** Decision Y,
 in a gesture: a file dragged onto the window. A browser is handed a dropped file's NAME and BYTES and
 never its path, deliberately and by design, so it can only ever offer to upload one. This is handed

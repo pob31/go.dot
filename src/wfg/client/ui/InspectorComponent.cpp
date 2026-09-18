@@ -43,6 +43,9 @@ namespace wfg::client::ui
             Written as the author asked for it (2026-09-18): "First [x]Loop if
             checked [x] infinite if unchecked [123] loops". */
         juce::ToggleButton repeats { "loop" }, forever { "for ever" };
+
+        /** The file control's other half: the box takes a name, this goes looking. */
+        juce::TextButton browse { "..." };
     };
 
     namespace
@@ -90,8 +93,10 @@ namespace wfg::client::ui
         detailsButton.onClick = [this]
         {
             detailsOpen = ! detailsOpen;
+            sayWhetherDetailsAreOpen();
             layOut();
         };
+        sayWhetherDetailsAreOpen();
         addAndMakeVisible (detailsButton);
 
         viewport.setViewedComponent (&content, false);
@@ -102,6 +107,23 @@ namespace wfg::client::ui
     }
 
     InspectorComponent::~InspectorComponent() = default;
+
+    /*  A TOGGLE THAT DOES NOT SAY WHICH WAY IT IS SET is a control somebody has
+        to press to find out (author, 2026-09-18: "the details toggle doesn't
+        show different states"). It said `details` open and `details` shut, so
+        the only way to read it was to look at whether any details were there -
+        which is exactly what somebody is pressing it to change.
+
+        THE SAME TWIST THE BANDS USE, pointing down when the fold is open and
+        right when it is shut: the window has one convention for a thing that
+        opens, and a panel that invented a second would be two conventions for
+        one idea. A SHAPE and not a colour (§4.8), like theirs. */
+    void InspectorComponent::sayWhetherDetailsAreOpen()
+    {
+        detailsButton.setButtonText (juce::String (juce::CharPointer_UTF8 (detailsOpen ? "â¾"
+                                                                                      : "â¸"))
+                                       + "  details");
+    }
 
     int InspectorComponent::rowHeight() const noexcept
     {
@@ -206,6 +228,7 @@ namespace wfg::client::ui
                     break;
                 }
 
+                case model::Control::file:
                 case model::Control::text:
                 default:
                     line.box.setText (field.value, juce::dontSendNotification);
@@ -319,16 +342,20 @@ namespace wfg::client::ui
                 {
                     const auto typed = juce::jmax (2, raw->box.getText().getIntValue());
 
-                    const auto count = ! raw->repeats.getToggleState() ? loopsOnce
-                                     : raw->forever.getToggleState()   ? loopsForever
-                                                                       : typed;
+                    /*  `wanted` and not `count`, which is the value this row
+                        was DRAWN with and is still in scope: GCC's -Wshadow is
+                        right that two of them one inside the other is a
+                        reader's trap, whatever the compiler this box has says. */
+                    const auto wanted = ! raw->repeats.getToggleState() ? loopsOnce
+                                      : raw->forever.getToggleState()   ? loopsForever
+                                                                        : typed;
 
                     raw->forever.setEnabled (raw->repeats.getToggleState());
                     raw->box.setVisible (raw->repeats.getToggleState()
                                            && ! raw->forever.getToggleState());
 
                     if (actions.set)
-                        actions.set (address, std::to_string (count));
+                        actions.set (address, std::to_string (wanted));
                 };
 
                 line->repeats.onClick = commit;
@@ -344,6 +371,26 @@ namespace wfg::client::ui
             else
             {
                 line->box.setText (juce::String (field.value), juce::dontSendNotification);
+
+                /*  AND A WAY TO GO LOOKING, beside the box and never instead of
+                    it. `JUCE_MODAL_LOOPS_PERMITTED` is 0 here, so the chooser
+                    is launched and answered later; the window owns it, because
+                    a panel rebuilt while a dialogue is open would take its
+                    owner with it. */
+                if (field.control == model::Control::file && field.writable)
+                {
+                    const auto id = drawnCue;   // set above, and what this panel is about
+
+                    line->browse.setWantsKeyboardFocus (false);
+                    line->browse.setTooltip ("Choose the media this cue plays");
+                    line->browse.onClick = [this, id]
+                    {
+                        if (actions.chooseFile)
+                            actions.chooseFile (id);
+                    };
+
+                    content.addAndMakeVisible (line->browse);
+                }
 
                 /*  ONE CLICK, NOT TWO. This wanted a double-click at first, and
                     the author met that the way anybody would: they picked a
@@ -432,6 +479,8 @@ namespace wfg::client::ui
                                         && line->field.control == model::Control::loopCount);
             line->forever.setVisible (! hidden
                                         && line->field.control == model::Control::loopCount);
+            line->browse.setVisible (! hidden && line->browse.getParentComponent() != nullptr
+                                       && line->field.control == model::Control::file);
 
             if (hidden)
                 continue;
@@ -463,6 +512,10 @@ namespace wfg::client::ui
             }
             else
             {
+                if (line->browse.isVisible())
+                    line->browse.setBounds (boxArea.removeFromRight (juce::jmin (row + row / 2,
+                                                                                 boxArea.getWidth() / 3)));
+
                 line->box.setBounds (boxArea);
                 line->toggle.setBounds (boxArea);
                 line->choice.setBounds (boxArea);

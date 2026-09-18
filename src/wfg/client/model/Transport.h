@@ -105,15 +105,36 @@ namespace wfg::client::model
         std::string standbyLine() const;
 
         /** "unsaved changes · recovery waiting", "saved", or the word for no answer. */
-        std::string fileLine() const;
+        /*  WHAT UNDO AND REDO WOULD TAKE BACK, for the buttons' own
+            tooltips rather than for a line of its own. The line went on the
+            author's word (2026-09-18: "to gain a bit of headroom, the undo/redo
+            messages can be removed. If we need we can have a history toggle to
+            display the list of edits we can undo and redo") - so the sentence is
+            one hover away instead of always on screen, and the history it
+            describes is a panel somebody will build once.
+
+            THE ENGINE'S OWN WORD FOR IT, and no table here: `undoName` already
+            reads `node.set`, `cue.create`, `object.delete` - the names §4.11
+            makes every action carry. A lookup table in this file would go stale
+            the day a command is added by somebody who never opened it. */
+        std::string undoTip() const;
+        std::string redoTip() const;
 
         /*  "undo: node.set · redo: nothing to redo" - said, not only greyed
             (§4.8): a disabled button reports that something is unavailable and
             never which something. */
-        std::string undoLine() const;
+
 
         /** "audio running · locked", the lock said in a word beside its colour. */
-        std::string statusLine() const;
+        /*  THE LOCK, SAID IN A WORD and not only drawn in a colour (§4.8),
+            and empty when the show is not locked or has not said.
+
+            IT USED TO CARRY THE AUDIO TOO - "audio running" - and no longer
+            does (author, 2026-09-18: "the 'Audio running' can go. We will add a
+            configuration panel for the various settings"). Whether a device is
+            open is something somebody sets up once and then stops reading; the
+            lock is something that changes what the next press will do. */
+        std::string lockLine() const;
 
         /** "3 warnings · <the first>", or empty. Bounded, whatever the show says. */
         std::string warningLine() const;
@@ -136,6 +157,20 @@ namespace wfg::client::model
 
         /** Whether this client should OFFER a save: not while the show is locked (§9, decision W). */
         bool mayOfferSave() const noexcept { return locked != Flag::yes; }
+
+        /*  AND WHETHER THERE IS ANYTHING TO SAVE, which is the other half of
+            the same button and is now the ONLY place the window says so
+            (author, 2026-09-18: "'Saved' can also go and be replaced by a
+            dimmed Save button when there are no changes to save").
+
+            A STATE A CONTROL CAN BE IN beats a state a control is described by:
+            a dimmed Save says "nothing to save" where somebody is already
+            looking when they wonder, and it costs no line. `unsaid` counts as
+            something to save, because a dot the engine has not published yet is
+            not a show with nothing in it - offering a save that turns out to be
+            unnecessary costs a write, and withholding one can cost an
+            afternoon. */
+        bool hasSomethingToSave() const noexcept { return dirty != Flag::no; }
 
         bool operator== (const TransportReading& other) const noexcept;
         bool operator!= (const TransportReading& other) const noexcept { return ! (*this == other); }

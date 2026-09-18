@@ -931,10 +931,16 @@ namespace wfg::cue
 
             /*  The pointer, read straight off the list: it is one property,
                 and every helper that wraps it lives in a file this one does
-                not include. */
+                not include. And beside it, whether an empty one means the end
+                of the list rather than the top of it. */
             const auto standby = list[juce::Identifier ("standby")].toString().toStdString();
+            /*  Read as the BOOLEAN the schema types it as: a `T` row lands in
+                the tree as a bool var, whose `toString()` is "1" and not
+                "true" - which is JUCE's answer and not this file's to argue
+                with. The same conversion the enabled flag is read through. */
+            const auto ranOut = static_cast<bool> (list[juce::Identifier ("finished")]);
 
-            plans.push_back (solvePersistent (document, durations, mounts, listId, standby));
+            plans.push_back (solvePersistent (document, durations, mounts, listId, standby, ranOut));
         }
 
         if (plans.empty())
@@ -4511,7 +4517,7 @@ namespace wfg::cue
             moved, and a run that `observeEdges` finishes below keeps the
             playhead it had while it was still sounding rather than a nought
             written after the sound stopped. */
-        updatePositions();
+        updatePositions (tick);
         enforceStops();
         observeEdges (engine);
     }
@@ -4845,7 +4851,7 @@ namespace wfg::cue
         }
     }
 
-    void Runner::updatePositions()
+    void Runner::updatePositions (std::int64_t tick)
     {
         /*  WHERE THE PLAYHEAD IS IN THE FILE, in seconds, which is what a
             client draws over a waveform (§3.30) and what has been the literal
@@ -4902,7 +4908,29 @@ namespace wfg::cue
                 would otherwise report the session's whole elapsed time and be
                 drawn as a cue that has been playing since the show opened. */
             if (run->launchedAtSample <= 0)
+            {
+                /*  A RUN WITH NO VOICE STILL GETS OLDER, and a fade is the
+                    case that matters: it has a duration the document declares
+                    and a bar a client draws from it, and `launchedAtSample` is
+                    nought for it for ever because nothing was ever placed on a
+                    track. So it is measured in TICKS from the GO that started
+                    it - the clock such a run actually runs on - and the sample
+                    clock is kept for the runs that have one, where it is the
+                    finer answer and the only one a range can wrap.
+
+                    THE GUARD ABOVE STILL HOLDS FOR WHAT IT WAS WRITTEN FOR. A
+                    run that has not been LAUNCHED reports nothing, so a cue
+                    parked on a standby does not read as having played since
+                    the show opened; what changes is only that having no VOICE
+                    is no longer read as having no PLAYHEAD. */
+                if (run->launchRequestedAtTick > 0 && ! run->isWaiting()
+                      && run->state != runState::armed
+                      && run->state != runState::preparing)
+                    run->position = static_cast<double> (tick - run->launchRequestedAtTick)
+                                      / static_cast<double> (TickClock::rateHz);
+
                 continue;
+            }
 
             /*  MEASURED FROM THE LAUNCH, and clamped at nought because the
                 launch is PLACED a few ticks into the future: between the
@@ -5396,9 +5424,26 @@ namespace wfg::cue
                                 one did. */
                             /*  The run table, so that a manual group with
                                 rounds left keeps the pointer instead of letting
-                                it out on the last member of round one. */
-                            const auto next = nextStandby (list, standby, &runner.runTable());
+                                it out on the last member of round one.
+
+                                `standbyAfterFiring` and NOT `nextStandby`:
+                                firing the last cue leaves the pointer nowhere,
+                                which is the resting state and is what makes the
+                                do-nothing GO above honest. The arrows keep the
+                                other answer, because looking is not firing. */
+                            const auto next = standbyAfterFiring (list, standby,
+                                                                  &runner.runTable());
                             document.setAttribute (standbyAddressOf (listId), next);
+
+                            /*  AND WHY IT IS EMPTY, WHEN IT IS. An empty
+                                pointer means two opposite things - a list
+                                nobody armed, and a list that has been all the
+                                way through - and the persistent solver reads
+                                one of them as the top of the list. Without
+                                this, a show run to its end would re-assert
+                                every bed a Stop had suspended. */
+                            document.setAttribute (finishedAddressOf (listId),
+                                                   next.empty() ? "true" : "false");
 
                             /*  EVERY IDENTIFIER THIS GO CREATED, not just one.
 

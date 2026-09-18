@@ -25,6 +25,7 @@
 #include <wfg/engine/document/Sequence.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/audio/Timbre.h>
 
 #include <algorithm>
@@ -1270,6 +1271,22 @@ namespace wfg::tree
             has not arrived. A silent frame is `0 0 0`, and that is a reading:
             lightness nought is below the ramp's darkest, so no client can take
             it for a low sound. */
+        /*  HOW MUCH OF THE WAIT IT IS IN IS LEFT, in seconds, and nought
+            when it is not in one. `dueTick` is meaningful only while the state
+            is `waiting` or `postWait` - Run.h says so - so the state is asked
+            first and the deadline second. */
+        double remainingOf (const cue::Run& run, std::int64_t tick)
+        {
+            if (run.state != cue::runState::waiting && run.state != cue::runState::postWait)
+                return 0.0;
+
+            const auto left = run.dueTick - tick;
+
+            return left > 0 ? static_cast<double> (left)
+                                / static_cast<double> (TickClock::rateHz)
+                            : 0.0;
+        }
+
         std::string timbreText (const cue::Run& run, const audio::MediaRecords* records)
         {
             if (records == nullptr || run.media.empty())
@@ -1691,6 +1708,26 @@ namespace wfg::tree
                 else if (name == "state")     text = run.state;
                 else if (name == "track")     text = std::to_string (run.track);
                 else if (name == "position")  text = osc::formatDouble (run.position);
+
+                /*  WHEN IT STARTED, as the tick a GO was applied on - which is
+                    what the runner already keeps in order to measure lateness,
+                    handed out so a client can order a pane by it. */
+                else if (name == "started")   text = std::to_string (run.launchRequested
+                                                                       || run.launchedAtSample > 0
+                                                                       || run.launchRequestedAtTick > 0
+                                                                         ? run.launchRequestedAtTick
+                                                                         : 0);
+
+                /*  HOW LONG UNTIL IT DOES THE NEXT THING, and nought whenever
+                    it is not in a wait - so a reader never has to ask the state
+                    node whether this one means anything.
+
+                    FROM THE DEADLINE AND NOT FROM A COUNTER. `dueTick` is an
+                    absolute tick a handler set from its own tick, so this is a
+                    subtraction rather than an accumulation: a client that
+                    missed twenty publishes reads the truth on the next one, and
+                    nothing here can drift. */
+                else if (name == "remaining") text = osc::formatDouble (remainingOf (run, tick));
 
                 /*  A table lookup at that same position, every tick: the 10 in
                     the row is what a surface is told to draw it at, and nothing

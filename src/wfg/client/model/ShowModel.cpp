@@ -192,8 +192,15 @@ namespace wfg::client::model
         if (drawn.back().shut)
             return;
 
+        /*  A SECTION'S ROWS SIT ONE LEVEL IN, like a group's do (author,
+            2026-09-18: "I think the header and footer need to have more
+            definition visually"). They used to share their band's depth, which
+            drew them as though nothing held them - and left the band's twist
+            with no rail under its tip, because there was no level for one.
+            Indenting them gives the section the same bracket a group has, and
+            the same shape means the two read as one idea rather than two. */
         for (const auto& id : ids)
-            append (snapshot, id, which, depth, container);
+            append (snapshot, id, which, depth + 1, container);
     }
 
     void ShowModel::toggle (const std::string& bandKey)
@@ -245,7 +252,17 @@ namespace wfg::client::model
         row.isGroup = snapshot.find ("/godot/cue/" + cueId + "/order") != nullptr;
 
         if (row.isGroup)
+        {
             row.mode = attribute (snapshot, cueId, "mode");
+
+            /*  HOW IT BEHAVES, for the two marks a group carries beside its
+                name (author, 2026-09-18: "they can have icons showing their
+                behaviour, loop, sequential/random"). Read as the tree spells
+                them, so a value added to either row turns up here rather than
+                being silently read as its opposite. */
+            row.selection = attribute (snapshot, cueId, "selection");
+            row.loops = attribute (snapshot, cueId, "loops");
+        }
 
         /*  A GROUP FOLDS LIKE A SECTION DOES, and by its own identifier: it
             holds cues, so an operator reading a long show wants it shut as

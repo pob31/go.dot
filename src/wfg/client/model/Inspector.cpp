@@ -105,13 +105,17 @@ namespace wfg::client::model
 
             /*  WHICH CONTROL ASKS THIS BEST. Decided from the node wherever the
                 node can say - a `T` row is a switch, a closed set of values is
-                a choice - and named once, for `loops`, where one integer
-                carries three questions and no single control can put them.
+                a choice - and NAMED only twice, where no property of a row
+                could have said it: `loops`, where one integer carries three
+                questions and no single control can put them, and `file`, where
+                the value is a name on a disk and a machine can be asked to go
+                and find it. Both send the same `node.set` a typed answer would.
                 A read-only row is never composed: there is nothing to ask. */
             if (! field.writable)          field.control = Control::text;
             else if (field.boolean)        field.control = Control::toggle;
             else if (! field.options.empty()) field.control = Control::choice;
             else if (name == "loops")      field.control = Control::loopCount;
+            else if (name == "file")       field.control = Control::file;
             else                           field.control = Control::text;
 
             return field;

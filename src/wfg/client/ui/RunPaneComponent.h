@@ -35,12 +35,16 @@
 */
 
 #include <wfg/client/model/RunModel.h>
+#include <wfg/client/model/Waveform.h>
+#include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/client/model/Theme.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
 #include <string>
+#include <map>
+#include <memory>
 #include <vector>
 
 namespace wfg::client::ui
@@ -56,8 +60,16 @@ namespace wfg::client::ui
 
         RunPaneComponent (const model::Theme& theme, Actions actions);
 
-        /** The runs this pass found. Cheap when they are the ones already drawn. */
-        void show (std::vector<model::RunRow> runs);
+        /*  The runs this pass found, and the analyser's table to draw their
+            waveforms from. Cheap when they are the ones already drawn.
+
+            THE TABLE IS HANDED IN RATHER THAN LOOKED UP: it is an immutable
+            snapshot the analyser thread published, so holding one for a pass
+            costs a pointer copy and cannot tear - the same bargain the
+            parameter tree's snapshot makes. Null is ordinary and means no
+            analysis yet, which is drawn as no bar. */
+        void show (std::vector<model::RunRow> runs,
+                   std::shared_ptr<const audio::MediaRecords> media);
 
         void applyTheme (const model::Theme& theme);
 
@@ -70,12 +82,46 @@ namespace wfg::client::ui
                                bool rowIsSelected) override;
         void listBoxItemClicked (int row, const juce::MouseEvent& event) override;
 
+        /*  UNDER THE WORDS, A PICTURE OF WHAT IS SOUNDING (author,
+            2026-09-18). A media run gets its file's waveform with a playhead
+            on it; a run in a pre-wait or a post-wait gets a bar that EMPTIES
+            right to left, which is a countdown and not a progress bar - what
+            somebody watching a wait wants is how long until it fires.
+
+            THE COLUMNS ARE CACHED, keyed by the file and thrown away when the
+            pane's width changes. Recomputing them is cheap, but this pane
+            repaints whole at twenty-five passes a second by design, and M25's
+            lesson was that the cost nobody measures is the one that bites: a
+            bar is the same picture every pass until the bar itself moves. */
+        void paintStrip (const model::RunRow& entry, juce::Graphics& g,
+                         juce::Rectangle<int> strip, juce::Colour tint, bool layered);
+
+        /*  Whether this run has a picture to draw, which is what decides
+            between a band of its own and a mark behind the words. */
+        bool hasWaveform (const model::RunRow& entry) const;
+        bool anyWaveform() const;
+        bool paintWaveform (const model::RunRow& entry, juce::Graphics& g,
+                            juce::Rectangle<int> strip);
+        void paintCountdown (const model::RunRow& entry, juce::Graphics& g,
+                             juce::Rectangle<int> strip, bool layered);
+        void paintCursor (const model::RunRow& entry, juce::Graphics& g,
+                          juce::Rectangle<int> strip, juce::Colour tint, bool layered);
+        const std::vector<model::Column>& columnsFor (const std::string& file, int width);
+
         Actions actions;
         model::Theme theme;
         juce::ListBox list { "runs", this };
         std::vector<model::RunRow> rows;
 
+        std::shared_ptr<const audio::MediaRecords> media;
+        std::map<std::string, std::vector<model::Column>> bars;
+        int barsWidth = 0;
+
+        /** Whether anything in this pane wants a band of its own. */
+        bool tallRows = false;
+
         int rowHeight() const noexcept;
+        int stripHeight() const noexcept;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (RunPaneComponent)
     };

@@ -45,10 +45,13 @@
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Media.h>
+#include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
+#include <wfg/client/model/Waveform.h>
+#include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/command/Event.h>
@@ -245,28 +248,37 @@ TEST_CASE ("client: an edit is a name to take back, and the window is told in th
     made.undoName = "node.set";
     made.canRedo = model::Flag::no;
 
-    CHECK (made.undoLine() == "undo: node.set · nothing to redo");
+    /*  A TOOLTIP APIECE RATHER THAN A LINE, since the author asked for the
+        headroom back (2026-09-18) - but still the engine's own name for what
+        would be taken back, and still three answers to a flag. */
+    CHECK (made.undoTip() == "undo node.set");
+    CHECK (made.redoTip() == "nothing to redo");
 
     made.undoName.clear();
-    CHECK (made.undoLine() == "undo: the last edit · nothing to redo");
+    CHECK (made.undoTip() == "undo the last edit");
 
     made.canRedo = model::Flag::yes;
     made.redoName = "object.delete";
-    CHECK (made.undoLine() == "undo: the last edit · redo: object.delete");
+    CHECK (made.redoTip() == "redo object.delete");
 
     made.canUndo = model::Flag::unsaid;
     made.canRedo = model::Flag::unsaid;
-    CHECK (made.undoLine() == "undo: — · redo: —");
+    CHECK (made.undoTip() == "undo: —");
+    CHECK (made.redoTip() == "redo: —");
 }
 
 TEST_CASE ("client: the strip says in words what it also says in colour")
 {
     model::TransportReading reading;
 
-    // Nothing published yet: three answers, and the third is a dash.
+    // Nothing published yet.
     CHECK (reading.standbyLine() == "no standby");
-    CHECK (reading.fileLine() == "—");
-    CHECK (reading.statusLine() == "—");
+    CHECK (reading.lockLine().empty());
+
+    /*  AND A SAVE IS STILL OFFERED, because a dot the engine has not published
+        is not a show with nothing in it: withholding the save is the expensive
+        way to be wrong. */
+    CHECK (reading.hasSomethingToSave());
 
     reading.standbyId = "X";
     reading.standbyName = "Thunder";
@@ -276,30 +288,26 @@ TEST_CASE ("client: the strip says in words what it also says in colour")
     reading.standbyKind.clear();
     CHECK (reading.standbyLine() == "Thunder");
 
+    /*  WHETHER THERE IS ANYTHING TO SAVE IS THE SAVE BUTTON'S OWN STATE
+        now, and no longer a word on a line (author, 2026-09-18). */
     reading.dirty = model::Flag::no;
-    CHECK (reading.fileLine() == "saved");
+    CHECK_FALSE (reading.hasSomethingToSave());
 
     reading.dirty = model::Flag::yes;
-    CHECK (reading.fileLine() == "unsaved changes");
+    CHECK (reading.hasSomethingToSave());
 
-    /*  ONE QUESTION, NOT TWO - is everything worth keeping on disk as the
-        show? "saved" alone would be true of show.xml and silent about the
-        afternoon beside it. */
-    reading.recovery = model::Flag::yes;
-    CHECK (reading.fileLine() == "unsaved changes · recovery waiting");
-
-    reading.dirty = model::Flag::no;
-    CHECK (reading.fileLine() == "saved · recovery waiting");
-
+    /*  AND THE LOCK IS STILL SAID IN A WORD and not only in a colour (§4.8),
+        while the audio's own word has gone to a configuration panel nobody has
+        built yet. */
     reading.status = "running";
-    CHECK (reading.statusLine() == "audio running");
+    CHECK (reading.lockLine().empty());
 
     reading.locked = model::Flag::yes;
-    CHECK (reading.statusLine() == "audio running · locked");
+    CHECK (reading.lockLine() == "locked");
 
     // An unpublished lock says nothing here rather than saying "open".
     reading.locked = model::Flag::unsaid;
-    CHECK (reading.statusLine() == "audio running");
+    CHECK (reading.lockLine().empty());
 }
 
 TEST_CASE ("client: a show with everything wrong with it is summarised, never carried whole")
@@ -842,6 +850,48 @@ TEST_CASE ("client: the inspector is built from the tree, in the order somebody 
 }
 
 //==============================================================================
+TEST_CASE ("client: which control asks a field is the node's answer, twice by name")
+{
+    /*  The two exceptions are the whole of the special-casing in this panel,
+        and both are here so that adding a third has to be argued for. */
+    Rig rig { "phase4" };
+    const auto snapshot = rig.publish (0);
+
+    const auto panel = model::inspect (*snapshot, "P4MED001");   // "The bed", a media cue
+
+    REQUIRE_FALSE (panel.empty());
+    CHECK (panel.kind == "media");
+
+    const auto controlOf = [&panel] (const std::string& name)
+    {
+        for (const auto& block : panel.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == name)
+                    return field.control;
+
+        for (const auto& field : panel.details)
+            if (field.name == name)
+                return field.control;
+
+        return model::Control::text;
+    };
+
+    /*  A NAME ON A DISK IS SOMETHING A MACHINE CAN BE ASKED TO FIND, which is
+        decision Y's control and the one thing the page cannot offer. It stays
+        a text field underneath and sends the same `node.set`. */
+    CHECK (controlOf ("file") == model::Control::file);
+
+    //  And everything else is still decided by the node itself.
+    CHECK (controlOf ("level") == model::Control::text);       // a number, with a range
+    CHECK (controlOf ("enabled") == model::Control::toggle);   // a `T` row is a switch
+    CHECK (controlOf ("kind") == model::Control::text);        // read-only: nothing to ask
+
+    for (const auto& field : panel.blocks.front().fields)
+        if (field.name == "file")
+            CHECK (field.writable);
+}
+
+//==============================================================================
 TEST_CASE ("client: a group folds like a section does, and a fold is a reason to rebuild")
 {
     /*  THE CASE THE AUTHOR'S SESSION BOUGHT (2026-09-18: "the containers for
@@ -940,4 +990,149 @@ TEST_CASE ("client: an import names its cue after the file, and finds what the c
     CHECK_FALSE (model::madeByImport (job, "group", "Thunder", ""));     // not a media cue
     CHECK_FALSE (model::madeByImport (job, "media", "Rain", ""));        // somebody else's
     CHECK_FALSE (model::madeByImport (job, "media", "Thunder", "Rain.wav"));  // already named
+}
+
+//==============================================================================
+TEST_CASE ("client: a waveform is the engine's analysis bucketed, and never a second analysis")
+{
+    /*  §3.30's pyramid is what a file SOUNDS like, computed once on the
+        analyser thread and halved level by level so a bar of any width can
+        read one of them and stop. This file's whole job is picking that level
+        and bucketing it; a window that decided for itself what a file looks
+        like would be a second answer to a question already answered, and the
+        two would drift the first time the ramp moved. */
+    audio::TimbrePyramid pyramid;
+    pyramid.sampleRate = 48000;
+    pyramid.samples = 48000 * 4;
+
+    //  Four levels: 512, 256, 128, 64 frames, as `pyramidOf` builds them.
+    for (const auto count : { 512, 256, 128, 64 })
+    {
+        std::vector<audio::timbre::Frame> level;
+
+        for (auto at = 0; at < count; ++at)
+        {
+            audio::timbre::Frame frame;
+            frame.peak = static_cast<std::uint8_t> (at % 256);
+            frame.hue = static_cast<std::uint8_t> ((at * 7) % 256);
+            frame.saturation = 200;
+            frame.lightness = 128;
+            level.push_back (frame);
+        }
+
+        pyramid.levels.push_back (std::move (level));
+    }
+
+    /*  THE COARSEST LEVEL THAT STILL HAS A FRAME PER COLUMN. A bar that
+        silently read level 0 of a three-hour show would still LOOK right and
+        would walk a million frames per repaint, which is why this is asserted
+        rather than left to the bucketing. */
+    CHECK (model::levelFor (pyramid, 64) == 3u);     // exactly the coarsest
+    CHECK (model::levelFor (pyramid, 100) == 2u);    // 128 frames is the first that fits
+    CHECK (model::levelFor (pyramid, 256) == 1u);   // exactly a frame per column
+    CHECK (model::levelFor (pyramid, 512) == 0u);
+    CHECK (model::levelFor (pyramid, 5000) == 0u);   // wider than the file: the finest there is
+
+    //  One column per pixel, whatever the level underneath it turns out to be.
+    CHECK (model::waveform (pyramid, 200).size() == 200u);
+    CHECK (model::waveform (pyramid, 1).size() == 1u);
+
+    /*  NOTHING TO DRAW IS AN EMPTY BAR AND NEVER A FLAT ONE: a file being
+        analysed is not a file with no sound in it, and a window that invented
+        a line for one would be saying something false about a cue somebody is
+        about to fire. */
+    CHECK (model::waveform (pyramid, 0).empty());
+    CHECK (model::waveform (audio::TimbrePyramid {}, 200).empty());
+
+    //  The loudest frame of a span wins, so a transient survives to the screen.
+    const auto wide = model::waveform (pyramid, 2);
+    REQUIRE (wide.size() == 2u);
+    CHECK (wide[0].peak > 0.0);
+
+    for (const auto& column : model::waveform (pyramid, 128))
+    {
+        CHECK (column.hue >= 0.0);
+        CHECK (column.hue < 360.0);
+        CHECK (column.saturation >= 0.0);
+        CHECK (column.saturation <= 1.0);
+        CHECK (column.peak >= 0.0);
+        CHECK (column.peak <= 1.0);
+    }
+}
+
+TEST_CASE ("client: a playhead needs a length, and a countdown empties")
+{
+    CHECK (model::playhead (0.0, 10.0) == 0.0);
+    CHECK (model::playhead (5.0, 10.0) == 0.5);
+    CHECK (model::playhead (20.0, 10.0) == 1.0);     // never past the end
+    CHECK (model::playhead (-1.0, 10.0) == 0.0);
+
+    /*  A LENGTH OF NOUGHT IS A CUE IMPORTED IN THIS SESSION - the duration map
+        is frozen at load - so the head stays at the left rather than sliding
+        across a bar nobody has measured. */
+    CHECK (model::playhead (5.0, 0.0) == 0.0);
+
+    /*  AND A COUNTDOWN IS WHAT IS LEFT, not what is done: full is a wait that
+        has not started, empty is a cue about to go (author, 2026-09-18). */
+    CHECK (model::countdown (2.0, 2.0) == 1.0);
+    CHECK (model::countdown (1.0, 2.0) == 0.5);
+    CHECK (model::countdown (0.0, 2.0) == 0.0);
+
+    //  An unmeasurable wait reads as waiting rather than as finished.
+    CHECK (model::countdown (0.0, 0.0) == 1.0);
+}
+
+//==============================================================================
+TEST_CASE ("client: the running pane reads the way the show happened, not the way runs were made")
+{
+    /*  THE ENGINE'S ORDER IS THE ORDER RUNS WERE CREATED, and the two differ
+        exactly where it matters: a cue the anticipation window prepared is
+        created BEFORE the things already sounding, so the run table puts the
+        next cue above them - upside down from where an operator looks for it
+        (author, 2026-09-18: "the yellow ring marked next cue should always sit
+        at the bottom to reflect the structure of the cuelist... order items in
+        the active cues by start time"). */
+    const auto row = [] (const char* id, const char* parent, std::int64_t started)
+    {
+        model::RunRow made;
+        made.id = id;
+        made.parentRun = parent;
+        made.started = started;
+        return made;
+    };
+
+    /*  As the engine holds them: the armed group first, because preparing it
+        is what created it, and the thing that is actually sounding after. */
+    const std::vector<model::RunRow> asMade
+    {
+        row ("ARMED", "", 0),          // prepared, not let go: the next cue
+        row ("GROUP", "", 10),
+        row ("LATE",  "GROUP", 30),
+        row ("EARLY", "GROUP", 12),
+        row ("FIRST", "", 5),
+    };
+
+    std::vector<std::string> order;
+
+    for (const auto& one : model::inShowOrder (asMade))
+        order.push_back (one.id);
+
+    /*  What started first is at the top, each parent keeps its children
+        directly under it, and the one nobody has let go yet is last. */
+    CHECK (order == std::vector<std::string> { "FIRST", "GROUP", "EARLY", "LATE", "ARMED" });
+
+    //  A tie keeps the order the engine made them in, which is document order.
+    const std::vector<model::RunRow> together { row ("A", "", 7), row ("B", "", 7) };
+    const auto tied = model::inShowOrder (together);
+
+    REQUIRE (tied.size() == 2u);
+    CHECK (tied[0].id == "A");
+
+    /*  AND A CHAIN THAT DOES NOT ADD UP IS DRAWN ANYWAY. A client reading a
+        tree it did not build does not get to assume the parents resolve; a row
+        dropped from this pane is a run somebody cannot kill. */
+    const std::vector<model::RunRow> orphaned { row ("X", "NOBODY", 1) };
+    CHECK (model::inShowOrder (orphaned).size() == 1u);
+
+    CHECK (model::inShowOrder ({}).empty());
 }

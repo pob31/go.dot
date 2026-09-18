@@ -318,15 +318,51 @@ TEST_CASE ("go: standby moves first, whatever the cue turns out to do")
     CHECK (rig.standby() == rig.memoId);
 }
 
-TEST_CASE ("go: at the end of a list it is applied and stays put")
+TEST_CASE ("go: at the end of a list it is applied and clears the pointer")
 {
+    /*  FIRING THE LAST CUE LEAVES THE POINTER NOWHERE (author, 2026-09-18),
+        which is the resting state a list carries before anybody arms it (§3.5,
+        §4.6) - so a show that has been run through ends where it began.
+
+        The pointer used to stay on the cue that had just gone, which meant a
+        second GO FIRED IT AGAIN. Now the second GO is applied and does
+        nothing, which is what the handler's own comment always claimed.
+
+        THE ARROWS ARE UNCHANGED: `standby.next` off the end still stays put,
+        because looking is not firing. */
     Rig rig;
     rig.setStandby (rig.memoId);            // the last cue
 
     const auto outcome = rig.submitAndTick ("go");
 
     CHECK (outcome.applied == 1);
+    CHECK (rig.standby().empty());
+
+    /*  And a second press has nothing to fire rather than the same cue again -
+        which is the whole of what clearing buys. The applied count is not
+        asserted, because the memo's own run ends in that tick and the engine
+        submits for itself; what matters is that no SECOND run was made. */
+    rig.submitAndTick ("go");
+
+    CHECK (rig.standby().empty());
+    CHECK (rig.runs.all().size() == 1u);
+}
+
+TEST_CASE ("standby.next: at the end of a list it still stays put, because looking is not firing")
+{
+    /*  THE OTHER HALF OF THE RULE ABOVE, and the reason a GO's walk is a
+        second function rather than an edit to the arrows': a pointer that
+        vanished under a keypress would be the machine taking somebody's place
+        away while they were reading. Firing off the end is the show being
+        over; walking off it is not. */
+    Rig rig;
+    rig.setStandby (rig.memoId);            // the last cue
+
+    CHECK (rig.submitAndTick ("standby.next").applied == 1);
     CHECK (rig.standby() == rig.memoId);
+
+    //  And nothing was fired by looking.
+    CHECK (rig.runs.all().empty());
 }
 
 TEST_CASE ("go: with nothing in standby it is applied and does nothing")
@@ -2151,10 +2187,10 @@ TEST_CASE ("pre-wait: the run exists from the GO and fires when the wait has ela
     CHECK (rig.runs.find (id)->state == cue::runState::waiting);
     CHECK (rig.runs.find (id)->dueTick == goTick + 10);
 
-    /*  Standby did on the GO what it always does: it moved to the next sibling.
-        The memo is the last cue in this list and there is no wrap (§3.5), so it
-        stayed where it was - what matters is that it did not wait for the cue. */
-    CHECK (rig.standby() == rig.memoId);
+    /*  Standby did on the GO what it always does: it moved. The memo is the
+        last cue in this list and there is no wrap (§3.5), so it moved to
+        nowhere - what matters here is that it did not wait for the cue. */
+    CHECK (rig.standby().empty());
 
     CHECK (ticksSpentIn (rig, id, cue::runState::waiting) == 10);
     CHECK (rig.runs.find (id)->state == cue::runState::playing);

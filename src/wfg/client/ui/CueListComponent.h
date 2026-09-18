@@ -114,7 +114,29 @@ namespace wfg::client::ui
         void filesDropped (const juce::StringArray& files, int x, int y) override;
 
         int rowUnder (int y) const;
+
+        /*  WHERE THE RAILS STAND, asked in one place because four kinds of row
+            draw the same shape and the shape only holds if they agree: a
+            contained row draws the rule down its left, a container starts that
+            rule under itself, the last row inside turns it right, and a
+            section's band carries it through. They disagreed once - a band sat
+            one indent right of the rows it headed, because a section's members
+            share their band's depth and the band was measuring as though they
+            were one deeper (author, 2026-09-18: "the expanded bracket is not
+            always well aligned"). */
+        int railsOrigin() const noexcept;
+        int railAt (int level) const noexcept;
+        void paintRails (const model::Row& entry, int row, juce::Graphics& g, int height);
         void paintBand (const model::Row& entry, int row, juce::Graphics& g, int width, int height);
+
+        /*  THE COLUMN LABELS, drawn by this component and not by the list, so
+            they stay put while the rows scroll under them (author,
+            2026-09-18: "we're missing Pre/Duration/Post for the column labels
+            at the top of the cuelist. These should stay visible when
+            scrolling"). Laid out from the same three widths the rows use, so
+            a label and its column cannot come apart. */
+        void paintHeadings (juce::Graphics& g, juce::Rectangle<int> area);
+        int headingHeight() const noexcept;
 
         Actions actions;
         model::Theme theme;

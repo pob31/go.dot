@@ -4,35 +4,28 @@
 # media ramp.wav 0 0.000
 # media segments.wav 0 0.000
 A 0 0 engine audio.editBuilt s:"hosted" i:4 i:6 i:44
-A 85991 1 window go
-A 86509 2 ws:::ffff:127.0.0.1:55131 node.releaseAll
-A 86763 3 ws:::ffff:127.0.0.1:54423 standby.set s:"P4GRP001"
-A 86764 4 engine run.prepare s:"P4GRP001" s:"N1MAAS6Y" s:"847SB5ZV" s:"8ABT83F3"
-A 86765 5 engine run.failed s:"8ABT83F3" s:"media-missing"
-A 86765 6 engine run.launch s:"847SB5ZV"
-A 86867 7 ws:::ffff:127.0.0.1:54423 standby.set s:"P4MSG001"
-A 86868 8 engine run.revoke s:"N1MAAS6Y"
-A 86926 9 ws:::ffff:127.0.0.1:54423 standby.set s:"P4GRP002"
-A 86927 10 engine run.prepare s:"P4GRP002" s:"YT0B5QB7" s:"4DDYEA09"
-A 86928 11 engine run.failed s:"4DDYEA09" s:"media-missing"
-A 87016 12 engine run.failed s:"847SB5ZV" s:"timeout"
-A 87199 13 ws:::ffff:127.0.0.1:54423 node.releaseAll
-A 87845 14 window go s:"YT0B5QB7"
-A 87846 15 engine run.round s:"YT0B5QB7" i:0 s:"P4RMP001" s:"P4MED002"
-A 87846 16 engine run.spawn s:"YT0B5QB7" s:"P4MED002" s:"F9RCJQA5"
-A 87846 17 engine audio.arm s:"P4MED003" s:"3R916VWA"
-A 87847 18 engine run.failed s:"F9RCJQA5" s:"media-missing"
-A 87847 19 engine run.failed s:"3R916VWA" s:"media-missing"
-A 87847 20 engine run.launch s:"4DDYEA09"
-A 87847 21 engine run.launch s:"F9RCJQA5"
-A 87848 22 engine run.ended s:"YT0B5QB7"
-A 87871 23 engine run.assert s:"P4MSG003" s:"WHVMCHCG"
-A 87872 24 engine run.ended s:"WHVMCHCG"
-A 87894 25 window go s:"HR89J863"
-A 87895 26 engine run.failed s:"HR89J863" s:"media-missing"
-A 87931 27 window go s:"870J6RRH"
-A 87932 28 engine run.ended s:"870J6RRH"
-A 87990 29 window go s:"FZ539K3N"
-A 87991 30 engine run.ended s:"FZ539K3N"
-A 88027 31 window go s:"7H6EF7EQ"
-A 88028 32 engine run.ended s:"7H6EF7EQ"
+A 21 1 window go
+A 24 2 window go
+A 62 3 udp:127.0.0.1:58223 standby.set s:"P4MED003"
+A 63 4 engine audio.arm s:"P4MED003" s:"XENNHH5P"
+A 64 5 engine run.failed s:"XENNHH5P" s:"media-missing"
+A 123 6 window go s:"WBJBJ6PR"
+A 124 7 engine run.failed s:"WBJBJ6PR" s:"media-missing"
+A 126 8 window go s:"8KP4RZM9"
+A 127 9 engine run.ended s:"8KP4RZM9"
+A 152 10 engine run.assert s:"P4MSG003" s:"79HHG787"
+A 153 11 engine run.ended s:"79HHG787"
+A 162 12 window standby.next
+A 200 13 window standby.previous
+A 238 14 window go
+A 242 15 window go
+A 277 16 window go
+A 280 17 window go
+A 338 18 window standby.set s:"P4GRP001"
+A 339 19 engine run.prepare s:"P4GRP001" s:"8A2YP408" s:"G1VT9XJ9" s:"NP8A3GHV"
+A 340 20 engine run.failed s:"NP8A3GHV" s:"media-missing"
+A 340 21 engine run.launch s:"G1VT9XJ9"
+A 357 22 window go s:"8A2YP408"
+A 358 23 engine run.round s:"8A2YP408" i:0 s:"P4MED001" s:"P4MSG001" s:"P4GRP002"
+A 358 24 engine audio.arm s:"P4MED003" s:"7CVESSB9"
+A 359 25 engine run.failed s:"7CVESSB9" s:"media-missing"

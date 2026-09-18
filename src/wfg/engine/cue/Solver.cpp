@@ -21,6 +21,7 @@
 #include <wfg/engine/tree/Mount.h>
 
 #include <algorithm>
+#include <limits>
 #include <cmath>
 
 namespace wfg::cue
@@ -474,7 +475,8 @@ namespace wfg::cue
                           const std::map<std::string, double>* durations,
                           const tree::MountTable* mounts,
                           const std::string& listId,
-                          const std::string& standbyCue)
+                          const std::string& standbyCue,
+                          bool ranOut)
     {
         Plan plan;
         plan.aim = { listId, standbyCue, -1.0 };
@@ -504,10 +506,18 @@ namespace wfg::cue
         /*  WHERE THE POINTER IS, AS A ROW. Everything before it has happened;
             a stop there that names a persistent cue is the decision to end it.
             A pointer on nothing - a list nobody has parked on - is the top of
-            the list, so nothing has happened and nothing is suspended. */
+            the list, so nothing has happened and nothing is suspended.
+
+            UNLESS IT IS EMPTY BECAUSE THE LIST RAN OUT, which is the opposite
+            fact and looks exactly the same from here: since 2026-09-18 a GO
+            that fires the last cue leaves the pointer nowhere, so the list
+            carries `finished` to say which nowhere this is. Past the end,
+            EVERYTHING has happened - every stop in the list counts - and a bed
+            somebody killed at cue twelve stays killed when the show ends,
+            which is the whole reason the flag exists. */
         walk.visitList (list);
 
-        int standbyRow = -1;
+        int standbyRow = ranOut ? std::numeric_limits<int>::max() : -1;
 
         for (const auto& entry : walk.placed)
             if (entry.id == standbyCue)

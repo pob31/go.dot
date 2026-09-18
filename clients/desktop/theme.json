@@ -15,6 +15,7 @@
   "panel-inspect": "#1c2433",
   "panel-high": "#24242b",
   "panel-in": "#191920",
+  "panel-section": "#1b1e26",
   "rule": "#3a3a45",
 
   "standby": "#e8b04b",
@@ -22,5 +23,6 @@
   "stopping": "#d98b4b",
   "failed": "#e0685d",
   "waiting": "#86a3db",
+  "fade": "#5fb8c9",
   "picked": "#9a95e4"
 }

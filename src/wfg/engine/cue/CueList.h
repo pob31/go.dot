@@ -168,6 +168,25 @@ namespace wfg::cue
                              const RunTable* runs = nullptr);
     std::string previousStandby (const juce::ValueTree& list, const std::string& current);
 
+    /*  WHERE THE POINTER GOES AFTER A GO, which is `nextStandby`'s answer
+        everywhere except at the end of the list: firing the last cue CLEARS the
+        pointer rather than leaving it standing on the cue that has just gone
+        (author, 2026-09-18).
+
+        THE ARROWS KEEP THE OLD ANSWER, and that difference is the whole reason
+        this is a second function rather than an edit to the first. Walking off
+        the end is somebody LOOKING, and a pointer that vanished under a keypress
+        would be the machine taking their place away. Firing off the end is the
+        show being OVER, and an empty pointer is the resting state a list carries
+        before anybody armed it (§3.5, §4.6) - so a show that has been run through
+        ends where it began, and a second GO is applied and does nothing instead
+        of firing the last cue a second time.
+
+        A manual group with rounds left still keeps the pointer, here as there:
+        the group is not finished, so neither is the list. */
+    std::string standbyAfterFiring (const juce::ValueTree& list, const std::string& current,
+                                    const RunTable* runs = nullptr);
+
     /*  MAY THE POINTER STAND HERE: is `cueId` one of this list's stops - an
         enabled cue it holds, at any depth, that is not inside a header, a footer
         or a persistent section - or the empty string, which is nowhere at all
@@ -250,4 +269,10 @@ namespace wfg::cue
         goes - the commands, a client's `node.set`, and the load path all use
         this one spelling. */
     std::string standbyAddressOf (const std::string& listId);
+
+    /*  Where the ran-out flag lives, beside the pointer it qualifies. See the
+        parameter table's `list,finished`: it is what tells an empty pointer
+        nobody has armed from an empty pointer that has been all the way
+        through, which the persistent solver has to know and cannot infer. */
+    std::string finishedAddressOf (const std::string& listId);
 }

@@ -59,8 +59,10 @@
 #include <wfg/client/ui/MainWindow.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
+#include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <iostream>
@@ -146,6 +148,9 @@ namespace wfg::client
                     like the folds and never reaches the engine. */
                 inspectorActions.close = [this] { picked.clear(); };
 
+                inspectorActions.chooseFile = [this] (const std::string& cueId)
+                                              { chooseFile (cueId); };
+
                 auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
                                                             std::move (listActions),
                                                             std::move (runActions),
@@ -215,8 +220,18 @@ namespace wfg::client
                 shell->cues.show (show, reading.standbyId, picked);
 
                 /*  And the present tense, read fresh: runs have no revision to
-                    key on, because a run is not a decision anybody recorded. */
-                shell->runs.show (model::readRuns (*snapshot));
+                    key on, because a run is not a decision anybody recorded.
+
+                    THE ANALYSER'S TABLE IS READ ONCE HERE TOO, beside the
+                    tree's and for the same reason: one pointer copy per pass,
+                    so the waveform under a row and the position on it cannot
+                    come from two different moments. It is the table the HTTP
+                    route serves the page from, published by the analyser
+                    thread under a short mutex - not anything the tick thread
+                    owns, which is what §14.16's second rule is about. */
+                shell->runs.show (model::readRuns (*snapshot),
+                                  host.media != nullptr ? host.media->snapshot()
+                                                        : nullptr);
 
                 //  And any import still waiting for the cue its create made.
                 finishImports (*snapshot, reading.revision);
@@ -508,6 +523,42 @@ namespace wfg::client
                 pending = std::move (waiting);
             }
 
+            /*  THE NATIVE OPEN, which is the other half of decision Y: a drop
+                is what somebody does with a file they can already see, and this
+                is what they do when they cannot. It ends in exactly the same
+                place - `linkMedia`, with its copy and its confirmation - so the
+                two gestures cannot come to mean different things.
+
+                THE CHOOSER IS A MEMBER because `launchAsync` returns at once
+                and the object must outlive the dialogue; one at a time, since
+                a second click while one is open replaces it, which is what
+                somebody clicking twice meant anyway. */
+            void chooseFile (const std::string& cueId)
+            {
+                if (refusedWhileLocked())
+                    return;
+
+                /*  THE SAME READERS THE ENGINE USES, so the chooser cannot
+                    offer a file the show would then fail on. */
+                juce::AudioFormatManager formats;
+                formats.registerBasicFormats();
+
+                chooser = std::make_unique<juce::FileChooser> (
+                            "Choose the media this cue plays",
+                            mediaFolder(), formats.getWildcardForAllFormats());
+
+                chooser->launchAsync (juce::FileBrowserComponent::openMode
+                                        | juce::FileBrowserComponent::canSelectFiles,
+                                      [safe = juce::Component::SafePointer<ui::MainWindow> (window.get()),
+                                       this, cueId] (const juce::FileChooser& answered)
+                                      {
+                                          const auto chosen = answered.getResult();
+
+                                          if (safe != nullptr && chosen.existsAsFile())
+                                              linkMedia (cueId, chosen.getFullPathName());
+                                      });
+            }
+
             /*  A CLIENT DOES NOT OFFER A GESTURE IT COULD HAVE KNOWN WOULD BE
                 REFUSED. Under the lock the engine turns down a create and a
                 write to a show value alike, so a drop is answered here - and
@@ -627,6 +678,9 @@ namespace wfg::client
 
             /** Files copied in, cues asked for, and the naming still to do. */
             std::vector<model::Import> pending;
+
+            /** The open file dialogue, which must outlive the call that launched it. */
+            std::unique_ptr<juce::FileChooser> chooser;
         };
     }
 

@@ -345,6 +345,67 @@ namespace wfg::cue
 
             return {};
         }
+
+        /*  A MANUAL GROUP WITH ROUNDS LEFT KEEPS THE POINTER, which is the one
+            question the cursor asks about what is RUNNING rather than about
+            what is written.
+
+            It has to. The document says a group loops three times; only the run
+            knows it is on round two. Leaving on the last member of round one
+            would take the operator out of a scene that has two thirds of itself
+            still to play, and their next press would fire whatever follows the
+            group while the group was still going.
+
+            The pointer goes to the first member of the round, in document
+            order, which is where the next round will begin: a manual group
+            plays its members as they are written - shuffling and "play N of M"
+            are the machine choosing, and in a manual group the operator is the
+            one choosing (PRD 3.6). `wfg validate` warns about a manual group
+            that declares either.
+
+            RUN-AWARE AND OPTIONAL, so that every caller that has no run table -
+            a validator, a test of the document alone - gets the pure document
+            answer and the same behaviour a group with no loops has.
+
+            STILL KEYED ON `isManualSequence`, AND NOT ON "the pointer is inside
+            a group", which is the one place in this file where the two did not
+            move together on 2026-09-16. This rule is about §3.6's loop: the
+            operator is the parent of a manual group, so the pointer has to stay
+            in the scene while the scene has rounds to play. A timeline or an
+            automatic group runs its own rounds without being asked, so a pointer
+            parked inside one to try a single cue is a place somebody chose to
+            stand, and holding it there while the machine looped would be the
+            machine moving the operator around. It leaves at the last member,
+            like any other stop.
+
+            ANSWERED IN ONE PLACE because two things ask it now - the arrows
+            and a GO - and this file's own argument against a second `nextOf`
+            applies exactly as well to a second copy of this. Empty when
+            nothing is holding the pointer, which both callers read as
+            "walk on". */
+        std::string heldForAnotherRound (const juce::ValueTree& from, const RunTable* runs)
+        {
+            if (runs == nullptr || ! from.isValid())
+                return {};
+
+            const auto group = from.getParent();
+
+            if (! isManualSequence (group))
+                return {};
+
+            const auto members = stops (group);
+
+            if (members.empty() || members.back() != from)
+                return {};
+
+            const auto groupId = group[idProperty].toString().toStdString();
+
+            if (const auto* run = runs->liveRunOf (groupId))
+                if (run->iterations == 0 || run->iteration < run->iterations)
+                    return descendTo (members.front())[idProperty].toString().toStdString();
+
+            return {};
+        }
     }
 
     bool isInList (const juce::ValueTree& list, const std::string& cueId)
@@ -380,59 +441,51 @@ namespace wfg::cue
         if (! from.isValid())
             return current;
 
-        /*  A MANUAL GROUP WITH ROUNDS LEFT KEEPS THE POINTER, which is the one
-            question the cursor asks about what is RUNNING rather than about
-            what is written.
-
-            It has to. The document says a group loops three times; only the run
-            knows it is on round two. Leaving on the last member of round one
-            would take the operator out of a scene that has two thirds of itself
-            still to play, and their next press would fire whatever follows the
-            group while the group was still going.
-
-            The pointer goes to the first member of the round, in document
-            order, which is where the next round will begin: a manual group
-            plays its members as they are written - shuffling and "play N of M"
-            are the machine choosing, and in a manual group the operator is the
-            one choosing (PRD 3.6). `wfg validate` warns about a manual group
-            that declares either.
-
-            RUN-AWARE AND OPTIONAL, so that every caller that has no run table -
-            a validator, a test of the document alone - gets the pure document
-            answer and the same behaviour a group with no loops has.
-
-            STILL KEYED ON `isManualSequence`, AND NOT ON "the pointer is inside
-            a group", which is the one place in this file where the two did not
-            move together on 2026-09-16. This rule is about §3.6's loop: the
-            operator is the parent of a manual group, so the pointer has to stay
-            in the scene while the scene has rounds to play. A timeline or an
-            automatic group runs its own rounds without being asked, so a pointer
-            parked inside one to try a single cue is a place somebody chose to
-            stand, and holding it there while the machine looped would be the
-            machine moving the operator around. It leaves at the last member,
-            like any other stop. */
-        if (runs != nullptr)
-        {
-            const auto group = from.getParent();
-
-            if (isManualSequence (group))
-            {
-                const auto members = stops (group);
-
-                if (! members.empty() && members.back() == from)
-                {
-                    const auto groupId = group[idProperty].toString().toStdString();
-
-                    if (const auto* run = runs->liveRunOf (groupId))
-                        if (run->iterations == 0 || run->iteration < run->iterations)
-                            return descendTo (members.front())[idProperty]
-                                     .toString().toStdString();
-                }
-            }
-        }
+        if (const auto held = heldForAnotherRound (from, runs); ! held.empty())
+            return held;
 
         const auto next = stepFrom (list, from, true);
         return next.isValid() ? next[idProperty].toString().toStdString() : current;
+    }
+    std::string standbyAfterFiring (const juce::ValueTree& list, const std::string& current,
+                                    const RunTable* runs)
+    {
+        if (! list.isValid())
+            return current;
+
+        const auto from = findOnPath (list, current);
+
+        /*  Nowhere, or somewhere the pointer cannot be. That is not the end of
+            anything - it is a list nobody has armed - so it is left alone, and
+            only `standby.set` arms a list. */
+        if (! from.isValid())
+            return current;
+
+        /*  A group that still has rounds to play is not the end of the list
+            either, whether or not it is the last thing in it. */
+        if (const auto held = heldForAnotherRound (from, runs); ! held.empty())
+            return held;
+
+        const auto next = stepFrom (list, from, true);
+
+        /*  AND THE END OF THE LIST CLEARS THE POINTER rather than leaving it
+            standing on the cue that has just gone (author, 2026-09-18: "once
+            the last cue of the show has been triggered and the standby has no
+            other cue to go to, it should be cleared").
+
+            AN EMPTY POINTER IS THE RESTING STATE and not a special case (§4.6):
+            nowhere at all is always legal (§3.5), and it is what a list carries
+            before anybody arms it - so a show that has been run through ends
+            where it began. What it buys is what an operator would otherwise pay
+            for: with the pointer left standing on the last cue, a second GO
+            FIRED IT AGAIN. Now a second GO is applied and does nothing, which
+            is what the `go` handler's own comment - "an operator at the end of
+            a list has not made a mistake" - has claimed all along.
+
+            GETTING IT BACK IS A CLICK, not an arrow. `standby.next` from
+            nowhere stays put, deliberately and by the rule above, so both
+            clients offer park on a row and that is how a list is armed again. */
+        return next.isValid() ? next[idProperty].toString().toStdString() : std::string {};
     }
 
     std::string previousStandby (const juce::ValueTree& list, const std::string& current)
@@ -532,5 +585,10 @@ namespace wfg::cue
     std::string standbyAddressOf (const std::string& listId)
     {
         return "/godot/list/" + listId + "/standby";
+    }
+
+    std::string finishedAddressOf (const std::string& listId)
+    {
+        return "/godot/list/" + listId + "/finished";
     }
 }

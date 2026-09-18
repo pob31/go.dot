@@ -70,7 +70,14 @@ namespace wfg::client::model
 
         So a control may be composed. The VALUE is still one integer and the
         commit is still one `node.set`: what changes is how somebody is asked. */
-    enum class Control { text, toggle, choice, loopCount };
+    /*  WHICH CONTROL ASKS A FIELD BEST. Decided from the node wherever the
+        node can say so - a `T` row is a switch, a closed set of values is a
+        choice - and NAMED only where no property of the row could have said
+        it: `loops`, where one integer carries three questions, and `file`,
+        where the value is a name on a disk that a machine can be asked to
+        find. Both stay ordinary text underneath and send the same `node.set`,
+        so the generic route is never the only casualty of the specific one. */
+    enum class Control { text, toggle, choice, loopCount, file };
 
     struct Field
     {

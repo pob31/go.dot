@@ -3117,15 +3117,19 @@ namespace
                 servers stopped below, which is everything it ever read out of
                 a snapshot still standing.
 
-                The two doors it is handed are the only two it has (§14.16):
-                the engine to submit to, the tree to read. `quit` is the flag
-                SIGINT sets, so the watchdog ends the loop the one way it
-                already knows, inside fifty milliseconds. */
+                The doors it is handed are the only ones it has (§14.16):
+                the engine to submit to, the tree to read, and the analyser's
+                table to draw a waveform from - which is the same table the
+                HTTP route serves the page from, handed over rather than asked
+                for through a socket this process would be opening to itself.
+                `quit` is the flag SIGINT sets, so the watchdog ends the loop
+                the one way it already knows, inside fifty milliseconds. */
             std::unique_ptr<wfg::Client> client;
 
             if (wantWindow)
             {
-                client = makeClient ({ engine, parameters, [] { interrupted = 1; }, themePath });
+                client = makeClient ({ engine, parameters, &mediaInfo,
+                                       [] { interrupted = 1; }, themePath });
 
                 if (client == nullptr)
                     return 2;   // the factory has already said why

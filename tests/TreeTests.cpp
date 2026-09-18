@@ -1302,3 +1302,60 @@ TEST_CASE ("tree: a fade's and a stop's duration is the one the show says, and o
     CHECK (valueAt ("/godot/cue/P9XKC2WR/duration") == osc::Value::float64 (1.0));    // another fade
     CHECK (valueAt ("/godot/cue/B3N8R5TW/duration") == osc::Value::float64 (4.5));    // the media cue's file
 }
+
+//==============================================================================
+TEST_CASE ("tree: a run counts down the wait it is in, and says nought when it is in none")
+{
+    /*  The node a client draws a countdown from (author, 2026-09-18:
+        "pre-waits and post-waits can also have progress bars, maybe running
+        the opposite way, right to left, as a countdown").
+
+        IT IS A SUBTRACTION FROM A DEADLINE and never an accumulation: a
+        handler set `dueTick` from its own tick, so a client that missed twenty
+        publishes reads the truth on the next one and nothing can drift. */
+    Rig rig;
+
+    /*  The cue does not matter here and is not looked up: `remaining` is a
+        subtraction between two ticks, and a run carries its own deadline. */
+    rig.runs.create ("R1", "CUE00001", "memo");
+
+    auto* run = rig.runs.find ("R1");
+    REQUIRE (run != nullptr);
+
+    run->state = cue::runState::waiting;
+    run->dueTick = 150;                      // fifty ticks, and the clock is 50 Hz
+
+    /*  Read as the NUMBER it is declared as, and compared through `osc::Value`
+        rather than by `==` on two doubles - which is what the strict build's
+        -Wfloat-equal is there to stop, and what this file does everywhere
+        else. */
+    const auto left = [&rig] (std::int64_t at)
+    {
+        const auto snapshot = rig.publish (at);
+        const auto* node = snapshot->find ("/godot/run/R1/remaining");
+
+        REQUIRE_MESSAGE (node != nullptr, "no remaining node");
+        REQUIRE (node->soleValue().has_value());
+
+        return *node->soleValue();
+    };
+
+    CHECK (left (100) == osc::Value::float64 (1.0));
+    CHECK (left (125) == osc::Value::float64 (0.5));
+    CHECK (left (150) == osc::Value::float64 (0.0));
+
+    //  Past the deadline is nought and never a negative: a wait cannot owe time.
+    CHECK (left (200) == osc::Value::float64 (0.0));
+
+    //  A post-wait counts down the same way, because it is the same question.
+    rig.runs.find ("R1")->state = cue::runState::postWait;
+    rig.runs.find ("R1")->dueTick = 300;
+    CHECK (left (250) == osc::Value::float64 (1.0));
+
+    /*  AND EVERY OTHER STATE READS NOUGHT, so nobody has to ask the state node
+        whether this one means anything. `dueTick` is left exactly where it was:
+        Run.h says it is meaningful only in a wait, and this is that sentence
+        enforced rather than repeated. */
+    rig.runs.find ("R1")->state = cue::runState::playing;
+    CHECK (left (250) == osc::Value::float64 (0.0));
+}

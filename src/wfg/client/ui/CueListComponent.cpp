@@ -48,6 +48,33 @@ namespace wfg::client::ui
                 && row.section == model::Section::member;
         }
 
+        /*  HOW A GROUP BEHAVES, AS SHAPES. Two questions and two marks,
+            drawn only when the answer is not the default - a group that plays
+            its members once, in order, is the ordinary case and says nothing.
+
+                ↻   it loops, and the number of rounds beside it
+                ∞   it loops for ever, which is what nought rounds means
+                ⇄   its members are shuffled rather than played in order
+
+            Shapes and not colours (§4.8), and every one of them is a word in
+            the inspector as well. */
+        juce::String behaviourOf (const model::Row& row)
+        {
+            juce::String marks;
+
+            if (row.loops == "0")
+                marks << juce::String (juce::CharPointer_UTF8 ("\xe2\x86\xbb\xe2\x80\x89\xe2\x88\x9e"));
+            else if (! row.loops.empty() && row.loops != "1")
+                marks << juce::String (juce::CharPointer_UTF8 ("\xe2\x86\xbb\xe2\x80\x89"))
+                      << juce::String (row.loops);
+
+            if (row.selection == "shuffle")
+                marks << (marks.isEmpty() ? "" : "  ")
+                      << juce::String (juce::CharPointer_UTF8 ("\xe2\x87\x84"));
+
+            return marks;
+        }
+
         juce::String sectionWord (model::Section section)
         {
             switch (section)
@@ -77,6 +104,53 @@ namespace wfg::client::ui
     int CueListComponent::rowHeight() const noexcept
     {
         return juce::roundToInt (theme.row * theme.type);
+    }
+
+    /*  THE LEFT EDGE EVERY RAIL IS MEASURED FROM: past the padding, the park
+        gutter and the number column, which is where a row's own indented part
+        begins. Both painters removed exactly these three by hand and got the
+        same answer; asking once is what stops the next edit to either from
+        being the one that separates them. */
+    int CueListComponent::railsOrigin() const noexcept
+    {
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+
+        return unit / 2 + unit * 2 + numberChars * unit;
+    }
+
+    /** Where the rail of the Nth enclosing container stands. Level 1 is the outermost. */
+    int CueListComponent::railAt (int level) const noexcept
+    {
+        const auto indent = juce::roundToInt (theme.type * 7.0) * 2;
+
+        return railsOrigin() + (level - 1) * indent + indent / 2;
+    }
+
+    /*  THE RAILS OF WHATEVER HOLDS THIS ROW, and it is asked of the row's
+        DEPTH alone - so a cue, a group and a section's band all draw the same
+        line in the same place, which is the whole of what makes the bracket
+        read as one shape rather than as several that nearly line up. */
+    void CueListComponent::paintRails (const model::Row& entry, int row, juce::Graphics& g,
+                                       int height)
+    {
+        const auto indent = juce::roundToInt (theme.type * 7.0) * 2;
+        const auto middle = height / 2;
+
+        g.setColour (Look::colour (theme, "rule"));
+
+        for (int level = 1; level <= entry.depth; ++level)
+        {
+            /*  Does this level's run end on this row? The walk lays a
+                container's rows out contiguously, so the next row shallower
+                than the level is where that level closes. */
+            const auto next = static_cast<std::size_t> (row) + 1;
+            const auto closes = next >= rows.size() || rows[next].depth < level;
+
+            g.fillRect (railAt (level), 0, 1, closes ? middle : height);
+
+            if (closes)
+                g.fillRect (railAt (level), middle, indent / 2, 1);
+        }
     }
 
     void CueListComponent::applyTheme (const model::Theme& themeToUse)
@@ -198,9 +272,20 @@ namespace wfg::client::ui
             questions drawn two different ways: a header is not a member, and
             drawing them alike is what made the page's own header lines
             ambiguous until they got a frame. */
-        g.fillAll (entry.section != model::Section::member || entry.depth > 0
-                     ? Look::colour (theme, "panel-in")
-                     : Look::colour (theme, row % 2 == 0 ? "panel" : "panel-high"));
+        /*  THREE GROUNDS AND NOT A STRIPE. A header, a footer or a
+            persistent cue is a different KIND of row and says so in its own
+            tone; anything inside a container is recessed; everything else is
+            the panel.
+
+            NOTHING ALTERNATES (author, 2026-09-18: "the lines for each group
+            can stay the same colour and not alternating"). A zebra is a way of
+            following a row across a wide table, and it was fighting the two
+            distinctions above - which carry meaning, where the stripe carried
+            only parity. */
+        g.fillAll (entry.section != model::Section::member
+                     ? Look::colour (theme, "panel-section")
+                     : entry.depth > 0 ? Look::colour (theme, "panel-in")
+                                       : Look::colour (theme, "panel"));
 
         if (isPicked)
         {
@@ -299,37 +384,22 @@ namespace wfg::client::ui
             list of rows and there is nothing around a group to put a border
             on. So each contained row draws the same one-pixel rule down its
             left; the container's own row starts that rule under itself; and
-            the last row inside turns it right and stops it. Three rows drawing
-            one shape, which holds together only because all three measure the
-            rail from the same left edge. */
+            the last row inside turns it right and stops it. Rows of four kinds
+            drawing one shape, which holds together only because all of them
+            measure the rail from `railsOrigin()` rather than each from its own
+            arithmetic. */
         const auto indent = unit * 2;
-        const auto railsFrom = area.getX();
-
-        const auto railX = [railsFrom, indent] (int level)
-        { return railsFrom + (level - 1) * indent + indent / 2; };
-
         const auto middle = height / 2;
 
-        g.setColour (Look::colour (theme, "rule"));
-
-        for (int level = 1; level <= entry.depth; ++level)
-        {
-            /*  Does this level's run end on this row? The walk lays a
-                container's rows out contiguously, so the next row shallower
-                than the level is where that level closes. */
-            const auto next = static_cast<std::size_t> (row) + 1;
-            const auto closes = next >= rows.size() || rows[next].depth < level;
-
-            g.fillRect (railX (level), 0, 1, closes ? middle : height);
-
-            if (closes)
-                g.fillRect (railX (level), middle, indent / 2, 1);
-        }
+        paintRails (entry, row, g, height);
 
         /*  And a container opens its children's rail under itself, so the eye
             can follow one line from the group to the last thing inside it. */
         if (entry.isGroup)
-            g.fillRect (railX (entry.depth + 1), middle, 1, height - middle);
+        {
+            g.setColour (Look::colour (theme, "rule"));
+            g.fillRect (railAt (entry.depth + 1), middle, 1, height - middle);
+        }
 
         area.removeFromLeft (entry.depth * indent);
 
@@ -342,12 +412,28 @@ namespace wfg::client::ui
             SHUT, which is the one convention a file tree has taught everybody
             already - and the same shape a section's band uses, so the two kinds
             of container fold the same way. */
+        /*  CENTRED, so the tip of the triangle stands on the rail its
+            children come down (author, 2026-09-18: "the expanded bracket could
+            have the vertical line aligned with the tip of the triangle when
+            it's pointing down"). The cell is exactly one indent wide and its
+            centre IS `railAt (depth + 1)`, so centring the glyph is the whole
+            of the alignment - no second arithmetic to keep in step. */
         g.drawText (entry.isGroup
                       ? juce::String (juce::CharPointer_UTF8 (entry.shut ? "\xe2\x96\xb8"
                                                                         : "\xe2\x96\xbe"))
                       : juce::String(),
-                    markCell, juce::Justification::centredLeft, false);
+                    markCell, juce::Justification::centred, false);
 
+        /*  A GROUP'S NAME IS THE ONE AN EYE RUNS DOWN LOOKING FOR, so it is
+            larger and brighter than its members' and carries its behaviour
+            beside it as SHAPES (author, 2026-09-18: "we could have a style for
+            group label so they are easy to read and they can have icons
+            showing their behaviour, loop, sequential/random").
+
+            THE MARKS ARE NOT THE ONLY TELLING (§4.8): the mode is already a
+            word in the kind column, and every one of these is in the inspector
+            in full. What they buy is a group whose behaviour can be read
+            without picking it. */
         g.setColour (ink);
         g.setFont (Look::font (theme, entry.isGroup ? 14.0f : 13.0f));
 
@@ -356,6 +442,22 @@ namespace wfg::client::ui
 
         g.drawText (word.isEmpty() ? name : name + "   " + word,
                     area, juce::Justification::centredLeft, true);
+
+        if (entry.isGroup)
+        {
+            const auto marks = behaviourOf (entry);
+
+            if (! marks.isEmpty())
+            {
+                const auto used = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(),
+                                                                            name) + unit;
+
+                g.setColour (faint);
+                g.setFont (Look::font (theme, 12.0f));
+                g.drawText (marks, area.withTrimmedLeft (juce::jmin (used, area.getWidth())),
+                            juce::Justification::centredLeft, false);
+            }
+        }
 
         //  A rule under every row, as the page draws one.
         g.setColour (Look::colour (theme, "rule").withAlpha (0.5f));
@@ -369,39 +471,56 @@ namespace wfg::client::ui
             three tellings, and not one of them a colour (§4.8). The page's
             band, in a list box rather than a stylesheet.
 
-            THE FRAME IS ITS TOP EDGE. The head draws the rule over the word and
-            the corner the rail comes down from; the rows inside draw that rail;
-            the last of them turns it right. A shut section keeps the rule -
-            that is what parts it from the rows above, open or shut - and loses
-            the rail, which would otherwise hang off the bottom with nothing to
-            enclose. */
+            THE FRAME IS ITS TOP EDGE, and the rule runs from the rail of
+            whatever holds the section so that the two meet rather than nearly
+            meet. A SECTION ADDS NO INDENT: its rows carry its own depth, not
+            one more, because a footer is not further inside its group than the
+            group's members are - so the band draws exactly the rails one of
+            those rows draws, through itself, and has no line of its own.
+
+            IT USED TO HAVE ONE, at its own depth times the indent, which is
+            one half-indent right of where those rows put theirs: the bracket
+            around a footer stood a few pixels off the rail it was supposed to
+            continue, and did so at every depth but the outermost - where there
+            is no rail to disagree with (author, 2026-09-18: "the expanded
+            bracket is not always well aligned"). */
         const auto unit = juce::roundToInt (theme.type * 7.0);
         const auto pad = unit / 2;
         const auto indent = unit * 2;
 
-        g.fillAll (Look::colour (theme, "panel-in"));
+        g.fillAll (Look::colour (theme, "panel-section"));
 
         auto area = juce::Rectangle<int> (0, 0, width, height).reduced (pad, 0);
         area.removeFromLeft (unit * 2 + numberChars * unit);
 
-        const auto left = area.getX() + entry.depth * indent;
+        paintRails (entry, row, g, height);
+
+        /*  From the enclosing rail when there is one, and from the row's own
+            left edge at the top level, where nothing encloses the section. */
+        const auto left = entry.depth > 0 ? railAt (entry.depth) : area.getX();
 
         g.setColour (Look::colour (theme, "rule"));
         g.fillRect (left, 0, width - left - pad, 1);
 
+        /*  AND THE SECTION'S OWN RAIL, opened under this head exactly as a
+            group opens its children's - which is what a section's rows now
+            come down, since they sit one level in. */
         if (! entry.shut)
-            g.fillRect (left, 0, 1, height);
+            g.fillRect (railAt (entry.depth + 1), height / 2, 1, height - height / 2);
 
-        auto text = area.withTrimmedLeft (entry.depth * indent + pad);
+        auto text = area.withTrimmedLeft (entry.depth * indent);
 
         /*  THE TWIST IS A SHAPE: pointing down when the section is open and
             right when it is shut, which is the one convention every file tree
             has taught everybody already. */
+        //  Centred on the rail, for the reason a cue row's twist is.
         auto twist = text.removeFromLeft (indent);
         g.setColour (Look::colour (theme, "ink-dim"));
         g.setFont (Look::font (theme, 11.0f));
         g.drawText (juce::String (juce::CharPointer_UTF8 (entry.shut ? "\xe2\x96\xb8" : "\xe2\x96\xbe")),
-                    twist, juce::Justification::centredLeft, false);
+                    twist, juce::Justification::centred, false);
+
+        text.removeFromLeft (pad);
 
         auto word = juce::String (entry.name).toUpperCase();
         g.setColour (Look::colour (theme, "ink-dim"));
@@ -663,14 +782,55 @@ namespace wfg::client::ui
             actions.pick ({});
     }
 
+    int CueListComponent::headingHeight() const noexcept
+    {
+        return juce::roundToInt (rowHeight() * 0.7);
+    }
+
+    void CueListComponent::paintHeadings (juce::Graphics& g, juce::Rectangle<int> area)
+    {
+        const auto unit = juce::roundToInt (theme.type * 7.0);
+        const auto pad = unit / 2;
+
+        g.setColour (Look::colour (theme, "panel-high"));
+        g.fillRect (area);
+
+        g.setColour (Look::colour (theme, "rule"));
+        g.fillRect (area.getX(), area.getBottom() - 1, area.getWidth(), 1);
+
+        auto row = area.reduced (pad, 0);
+        row.removeFromLeft (unit * 2);        // the park gutter, which has no label
+
+        g.setColour (Look::colour (theme, "ink-off"));
+        g.setFont (Look::font (theme, 10.0f));
+
+        /*  THE SAME THREE WIDTHS AND THE SAME ORDER the rows take them off in,
+            which is what keeps a label over its own column: post, duration,
+            pre from the right, then the kind. */
+        for (const auto* label : { "POST", "DURATION", "PRE" })
+        {
+            auto cell = row.removeFromRight (timeChars * unit);
+            g.drawText (label, cell.reduced (pad / 2, 0), juce::Justification::centredRight, false);
+        }
+
+        g.drawText ("KIND", row.removeFromRight (kindChars * unit),
+                    juce::Justification::centredRight, true);
+
+        g.drawText ("CUE", row.removeFromLeft (numberChars * unit),
+                    juce::Justification::centredLeft, false);
+    }
+
     void CueListComponent::paint (juce::Graphics& g)
     {
         g.fillAll (Look::colour (theme, "panel"));
+        paintHeadings (g, getLocalBounds().removeFromTop (headingHeight()));
     }
 
     void CueListComponent::resized()
     {
-        list.setBounds (getLocalBounds());
+        auto area = getLocalBounds();
+        area.removeFromTop (headingHeight());   // the labels, which never scroll
+        list.setBounds (area);
     }
 
     bool CueListComponent::keyPressed (const juce::KeyPress& key)

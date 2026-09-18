@@ -52,36 +52,30 @@ namespace wfg::client::model
         return standbyName + "  " + standbyKind;
     }
 
-    std::string TransportReading::fileLine() const
+    namespace
     {
-        /*  ONE QUESTION, NOT TWO - is everything worth keeping on disk as the
-            show? - because "saved" alone would be true of show.xml and silent
-            about the afternoon beside it (the page's own argument, strip.js). */
-        const auto saved = dirty == Flag::yes ? "unsaved changes"
-                         : dirty == Flag::no  ? "saved"
-                                              : unsaid;
-
-        return join (saved, recovery == Flag::yes ? "recovery waiting" : "");
-    }
-
-    std::string TransportReading::undoLine() const
-    {
-        const auto half = [] (Flag can, const std::string& name,
-                              const char* verb, const char* nothing)
+        /*  ONE HALF OF THE OLD UNDO LINE, now a tooltip apiece. `—` for a
+            client the engine has not answered yet, the plain refusal when
+            there is nothing, and otherwise the engine's own name for what
+            would be taken back. */
+        std::string tipFor (Flag can, const std::string& name,
+                            const char* verb, const char* nothing)
         {
             if (can == Flag::unsaid)    return std::string (verb) + ": " + unsaid;
             if (can == Flag::no)        return std::string (nothing);
 
-            /*  THE ENGINE'S OWN WORD FOR IT, and no table here: `undoName`
-                already reads `node.set`, `cue.create`, `object.delete` - the
-                names §4.11 makes every action carry. A lookup table in this
-                file would go stale the day a command is added by somebody who
-                never opened it. */
-            return std::string (verb) + ": " + (name.empty() ? "the last edit" : name);
-        };
+            return std::string (verb) + " " + (name.empty() ? "the last edit" : name);
+        }
+    }
 
-        return join (half (canUndo, undoName, "undo", "nothing to undo"),
-                     half (canRedo, redoName, "redo", "nothing to redo"));
+    std::string TransportReading::undoTip() const
+    {
+        return tipFor (canUndo, undoName, "undo", "nothing to undo");
+    }
+
+    std::string TransportReading::redoTip() const
+    {
+        return tipFor (canRedo, redoName, "redo", "nothing to redo");
     }
 
     std::size_t countWarnings (std::string_view all)
@@ -144,16 +138,12 @@ namespace wfg::client::model
         return fields[4] + " refused: " + fields[3];
     }
 
-    std::string TransportReading::statusLine() const
+    std::string TransportReading::lockLine() const
     {
-        const auto audio = status.empty() ? std::string (unsaid) : "audio " + status;
-
-        /*  SAID IN A WORD, not only drawn in a colour (§4.8) - and `unsaid`
-            gets no word at all here, because "the engine has not told us
-            whether the show is locked" belongs beside the lock's own button
-            and would be noise on the line that says whether sound is coming
-            out. */
-        return join (audio, locked == Flag::yes ? "locked" : "");
+        /*  `unsaid` gets no word at all, because "the engine has not told us
+            whether the show is locked" belongs beside the lock's own button,
+            which says so by being disabled. */
+        return locked == Flag::yes ? "locked" : "";
     }
 
     bool TransportReading::operator== (const TransportReading& other) const noexcept

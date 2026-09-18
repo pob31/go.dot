@@ -20,6 +20,8 @@
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <algorithm>
+#include <limits>
 #include <unordered_map>
 
 namespace wfg::client::model
@@ -76,6 +78,82 @@ namespace wfg::client::model
             && state != "armed" && state != "failed";
     }
 
+    bool RunRow::isWaiting() const noexcept
+    {
+        /*  The two states a run can be counted down in. They are the same
+            question from where an operator sits - how long until this does the
+            next thing - so they are drawn alike and only the state word says
+            which end of the cue it is. */
+        return state == "waiting" || state == "postWait";
+    }
+
+    /*  THE PANE IN THE ORDER THINGS HAPPENED, with each parent's children
+        kept under it. A depth-first walk of the parent chains, siblings
+        sorted by when they started and the not-yet-started last, which is
+        where the next cue belongs.
+
+        STABLE WITHIN A TIE, so two runs that a single GO started keep the
+        order the engine made them in - which is the order their cues are
+        written in, and the only tie-break that is not arbitrary. */
+    std::vector<RunRow> inShowOrder (const std::vector<RunRow>& rows)
+{
+        std::unordered_map<std::string, std::vector<std::size_t>> childrenOfRun;
+        std::vector<std::size_t> roots;
+
+        for (auto at = std::size_t { 0 }; at < rows.size(); ++at)
+        {
+            const auto parent = rows[at].parentRun;
+
+            if (parent.empty())
+                roots.push_back (at);
+            else
+                childrenOfRun[parent].push_back (at);
+        }
+
+        const auto byStart = [&rows] (std::size_t a, std::size_t b)
+        {
+            /*  Nought is "not started", which sorts LAST rather than first
+                - the whole point of the ordering, since that is the next
+                cue and the operator's eye goes to the bottom for it. */
+            const auto when = [&rows] (std::size_t at)
+            {
+                return rows[at].started > 0 ? rows[at].started
+                                            : std::numeric_limits<std::int64_t>::max();
+            };
+
+            return when (a) < when (b);
+        };
+
+        std::stable_sort (roots.begin(), roots.end(), byStart);
+
+        for (auto& family : childrenOfRun)
+            std::stable_sort (family.second.begin(), family.second.end(), byStart);
+
+        std::vector<RunRow> out;
+        out.reserve (rows.size());
+
+        /*  Depth-first, and capped by the row count rather than trusted to
+            terminate: a parent chain the engine never makes cyclic is
+            still not something a client gets to ASSUME. */
+        const auto walk = [&] (auto&& self, std::size_t at) -> void
+        {
+            if (out.size() >= rows.size())
+                return;
+
+            out.push_back (rows[at]);
+
+            if (const auto kids = childrenOfRun.find (rows[at].id); kids != childrenOfRun.end())
+                for (const auto child : kids->second)
+                    self (self, child);
+        };
+
+        for (const auto root : roots)
+            walk (walk, root);
+
+        //  Anything a broken chain left out still gets drawn, at the end.
+        return out.size() == rows.size() ? out : rows;
+    }
+
     std::vector<RunRow> readRuns (const tree::TreeSnapshot& snapshot)
     {
         const auto order = words (text (snapshot, "/godot/run/order"));
@@ -114,6 +192,46 @@ namespace wfg::client::model
             if (row.launched())
                 row.position = seconds (at (snapshot, id, "position"));
 
+            /*  THE NUMBERS THE BARS ARE DRAWN FROM, beside the words the row
+                already reads. Asked of the CUE for what the document decided -
+                the file's length, the waits somebody wrote - and of the RUN for
+                where it has got to, which is the split §4.10 makes everywhere
+                else in this tree. */
+            if (const auto now = osc::parseDouble (at (snapshot, id, "position")); now.has_value())
+                row.seconds = *now;
+
+            if (const auto left = osc::parseDouble (at (snapshot, id, "remaining")); left.has_value())
+                row.remaining = *left;
+
+            if (const auto began = osc::parseDouble (at (snapshot, id, "started")); began.has_value())
+                row.started = static_cast<std::int64_t> (*began);
+
+            row.parentRun = at (snapshot, id, "parent");
+
+            if (! row.cueId.empty())
+            {
+                const auto cue = "/godot/cue/" + row.cueId + "/";
+
+                row.file = text (snapshot, cue + "file");
+
+                if (const auto len = osc::parseDouble (text (snapshot, cue + "duration"));
+                    len.has_value())
+                {
+                    row.length = *len;
+                }
+
+                /*  The wait it is IN, which is the only one worth a bar: the
+                    two are the same question from where an operator sits, and
+                    the state node is what tells them apart. */
+                const auto which = row.state == "postWait" ? "postWait" : "preWait";
+
+                if (const auto total = osc::parseDouble (text (snapshot, cue + which));
+                    total.has_value())
+                {
+                    row.waitTotal = *total;
+                }
+            }
+
             for (auto up = parentOf.find (id);
                  up != parentOf.end() && ! up->second.empty() && row.depth < deepestNesting;
                  up = parentOf.find (up->second))
@@ -124,6 +242,6 @@ namespace wfg::client::model
             rows.push_back (std::move (row));
         }
 
-        return rows;
+        return inShowOrder (rows);
     }
 }

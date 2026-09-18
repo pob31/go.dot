@@ -266,7 +266,9 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Theme.h
     wfg/client/model/Theme.cpp
     wfg/client/model/Transport.h
-    wfg/client/model/Transport.cpp)
+    wfg/client/model/Transport.cpp
+    wfg/client/model/Waveform.h
+    wfg/client/model/Waveform.cpp)
 add_library(wfg::client_model ALIAS wfg_client_model)
 
 target_link_libraries(wfg_client_model

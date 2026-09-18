@@ -224,6 +224,33 @@ sequence, standby lands on the cue *positionally after* the whole automated chai
 time: the standby pointer is ready for the operator's next action while the
 automated sequence runs on its own. The run pointers catch up underneath it.
 
+**And firing the last cue clears it** *(amended in 0.8, at the author's
+direction, 2026-09-18)*. When GO fires a cue the pointer has nowhere to advance
+from, the pointer is left **empty** rather than standing on the cue that has
+just gone. An empty pointer is a resting state and is always legal (§4.6); it is
+what a list carries before anybody arms it, so a show that has been run through
+ends where it began. The reason is what the alternative costs: with the pointer
+left on the last cue, a second GO fires that cue *again*, which is the wrong
+answer to an operator pressing GO once more at the end of a show. With it empty,
+the second GO is applied and does nothing. **Stepping the pointer off the end
+does not clear it** — walking is looking, and a pointer that vanished under a
+keypress would be the machine taking the operator's place away; only firing ends
+a list. A cleared pointer is re-armed by parking it, which every client offers
+on a row, because stepping from nowhere stays nowhere. A group that still has
+rounds to play keeps the pointer as it always did: the group is not finished, so
+neither is the list.
+
+**And the list records which nowhere it is in.** An empty pointer now means two
+opposite things — a list nobody has armed, and a list that has been all the way
+through — and §3.29's persistent section reads one of them: with the pointer
+nowhere, it had been taking the top of the list as the reading, so *nothing has
+happened yet and nothing is suspended*. Left alone, a show run to its end would
+have re-asserted every persistent bed a Stop had killed, the beds coming back on
+after the last cue. So a list carries the fact that it ran out, beside the
+pointer and in `state.xml` with it: firing the last cue sets it, parking the
+pointer anywhere clears it, and past the end **everything** in the list counts as
+having happened.
+
 **The pointer may stand inside every group** *(amended in 0.8, at the author's
 direction, 2026-09-16 — decision X, `docs/godot-namespace-draft-0.1.md` §9 and
 §12.6)*. The standby may be parked on **any cue of its list**, at the top level

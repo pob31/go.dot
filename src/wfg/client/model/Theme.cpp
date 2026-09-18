@@ -63,12 +63,28 @@ namespace wfg::client::model
                 { "panel-inspect", 0xFF1C2433 },
                 { "panel-high",    0xFF24242B },
                 { "panel-in",      0xFF191920 },
+
+                /*  A HEADER, A FOOTER AND A PERSISTENT SECTION ARE NOT MEMBERS
+                    and now do not look like them (author, 2026-09-18: "the
+                    header and footer sections can have a slightly different
+                    shade"). Cooler than `panel-in` by a hair rather than
+                    darker, so the difference reads as a different KIND of row
+                    and not as another level of nesting. */
+                { "panel-section", 0xFF1B1E26 },
                 { "rule",          0xFF3A3A45 },
                 { "standby",       0xFFE8B04B },
                 { "live",          0xFF4BC38A },
                 { "stopping",      0xFFD98B4B },
                 { "failed",        0xFFE0685D },
                 { "waiting",       0xFF86A3DB },
+
+                /*  A FADE IS NOT A SOUND AND IS NOT A WAIT (author,
+                    2026-09-18: "fades another colour, maybe over a shaded
+                    background"). It is the one cue kind that changes something
+                    already sounding rather than starting or stopping anything,
+                    and a colour of its own is what lets a glance sort the
+                    three bars in the running pane. */
+                { "fade",          0xFF5FB8C9 },
                 { "picked",        0xFF9A95E4 },
             };
 

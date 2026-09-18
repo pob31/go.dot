@@ -2211,11 +2211,10 @@ TEST_CASE ("first sound: GO reaches the outputs the cue names, at the level it n
         CHECK (sink[silent] < 0.001f);
     }
 
-    /*  Standby was asked to move and had nowhere to go: one cue in the list, so
-        it stays put rather than wrapping or clearing. That is the end-of-list
-        rule, and GO applied either way. */
-    CHECK (document.findById (listId)[juce::Identifier ("standby")].toString()
-             == juce::String (cueId));
+    /*  Standby was asked to move and had nowhere to go: one cue in the list,
+        so firing it clears the pointer rather than wrapping or standing on the
+        cue that has just gone (author, 2026-09-18). GO applied either way. */
+    CHECK (document.findById (listId)[juce::Identifier ("standby")].toString().isEmpty());
 
     const auto parsed = LogFile::parse (engine.log().contents());
     const auto go = std::find_if (parsed.records.begin(), parsed.records.end(),

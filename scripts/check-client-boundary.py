@@ -25,7 +25,10 @@ CMake property to have stayed edited.
       a vector of the whole tree, and per row that is quadratic
   (b) nothing the tick thread owns is named: ShowDocument, doc::, ValueTree,
       EngineState, UndoManager, ChangeListener
-  (c) exactly ONE snapshot() call site in the whole client, in the root timer
+  (c) exactly one call site per published snapshot, both in the root timer:
+      the parameter tree's, and the analyser's media table - which is the same
+      immutable snapshot the HTTP route serves the page's waveforms from, and
+      is not anything the tick thread owns
   (d) the model half and the public header name no JUCE type at all - they are
       std only, as Engine.h is, so they can be tested with no window
 
@@ -88,15 +91,40 @@ def main():
         print("  ok  (b) nothing the tick thread owns is named")
 
     # (c)
-    sites = []
+    #
+    # Two doors now, one call site each, and every call has to name which door
+    # it went through: a bare snapshot() on something else is a third reader
+    # nobody argued for, and the point of this check is that the argument
+    # happens before the reader does.
+    doors = {"host.parameters.": "the parameter tree",
+             "host.media->": "the analyser's media table"}
+    sites = {door: [] for door in doors.values()}
+    unnamed = []
+
     for p in files:
-        for m in re.finditer(r"snapshot\s*\(\s*\)", code[p]):
+        for m in re.finditer(r"(?:[A-Za-z_][A-Za-z0-9_]*(?:\.|->))*snapshot\s*\(\s*\)", code[p]):
             line = code[p].count("\n", 0, m.start()) + 1
-            sites.append("%s:%d" % (p.relative_to(REPO_ROOT), line))
-    if len(sites) != 1:
-        failures.append("(c) snapshot() is called at %d sites, not one: %s" % (len(sites), ", ".join(sites) or "none"))
-    else:
-        print("  ok  (c) one snapshot() call site: %s" % sites[0])
+            where = "%s:%d" % (p.relative_to(REPO_ROOT), line)
+
+            for prefix, door in doors.items():
+                if m.group(0).startswith(prefix):
+                    sites[door].append(where)
+                    break
+            else:
+                unnamed.append(where)
+
+    for door, found in sites.items():
+        if len(found) != 1:
+            failures.append("(c) %s is read at %d sites, not one: %s"
+                            % (door, len(found), ", ".join(found) or "none"))
+
+    if unnamed:
+        failures.append("(c) snapshot() is called on something that is not a door: "
+                        + ", ".join(unnamed))
+
+    if not any(f.startswith("(c)") for f in failures):
+        print("  ok  (c) one call site per door: %s"
+              % ", ".join("%s at %s" % (door, found[0]) for door, found in sites.items()))
 
     # (d)
     hits = [p for p in files if is_model(p) and word("juce").search(code[p])]

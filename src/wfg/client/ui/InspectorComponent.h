@@ -58,6 +58,13 @@ namespace wfg::client::ui
             /** One committed field: the node's own address, and the text typed into it. */
             std::function<void (const std::string& address, const std::string& text)> set;
 
+            /*  ASKS THE MACHINE FOR A FILE, which is the one thing a
+                browser cannot do (decision Y) and so the one control here
+                that is the desktop's alone. It is an ACCELERATOR and never a
+                sole route: the same field takes a typed name and sends the
+                same `node.set`, which is what keeps §14.16's third rule. */
+            std::function<void (const std::string& cueId)> chooseFile;
+
             /** Picks nothing, which is what closes this panel. */
             std::function<void()> close;
         };
@@ -77,6 +84,9 @@ namespace wfg::client::ui
         struct Line;
 
         void rebuild (const model::Inspection& inspection);
+
+        /** Puts the fold's own state on its button, as a twist rather than a colour. */
+        void sayWhetherDetailsAreOpen();
         void layOut();
 
         Actions actions;

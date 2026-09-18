@@ -99,8 +99,12 @@ namespace wfg::client::ui
         bool shownOnce = false;
         bool bannerShowing = false;
 
-        juce::Label showLabel, tickLabel, clockLabel, rateLabel, fileLabel,
-                    undoLabel, listLabel, standbyLabel, statusLabel, errorLabel, noticeLabel;
+        /*  The saved/unsaved line and the undo/redo line both went on the
+            author's word (2026-09-18), for the headroom and because a dimmed
+            button and a tooltip say the same things where somebody is already
+            looking. `statusLabel` carries only the lock word now. */
+        juce::Label showLabel, tickLabel, clockLabel, rateLabel,
+                    listLabel, standbyLabel, statusLabel, errorLabel, noticeLabel;
         juce::TextButton goButton { "GO" }, saveButton { "save" }, revertButton { "revert" },
                         undoButton { "undo" }, redoButton { "redo" }, lockButton { "lock the show" },
                         recoverButton { "recover" }, discardButton { "discard" };

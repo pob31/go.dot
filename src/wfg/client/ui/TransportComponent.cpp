@@ -44,8 +44,8 @@ namespace wfg::client::ui
     TransportComponent::TransportComponent (const model::Theme& themeToUse, Actions actionsToUse)
         : actions (std::move (actionsToUse)), theme (themeToUse)
     {
-        for (auto* label : { &showLabel, &tickLabel, &clockLabel, &rateLabel, &fileLabel,
-                             &undoLabel, &listLabel, &standbyLabel, &statusLabel, &errorLabel,
+        for (auto* label : { &showLabel, &tickLabel, &clockLabel, &rateLabel,
+                             &listLabel, &standbyLabel, &statusLabel, &errorLabel,
                              &noticeLabel })
         {
             label->setJustificationType (juce::Justification::centredLeft);
@@ -53,7 +53,7 @@ namespace wfg::client::ui
             addAndMakeVisible (label);
         }
 
-        for (auto* label : { &tickLabel, &clockLabel, &rateLabel, &fileLabel })
+        for (auto* label : { &tickLabel, &clockLabel, &rateLabel })
             label->setJustificationType (juce::Justification::centredRight);
 
         /*  NO BUTTON TAKES THE KEYBOARD, so Space stays this component's. A
@@ -119,11 +119,8 @@ namespace wfg::client::ui
             label->setColour (juce::Label::textColourId, dim);
         }
 
-        for (auto* label : { &fileLabel, &undoLabel, &listLabel })
-        {
-            label->setFont (Look::font (theme, 13.0f));
-            label->setColour (juce::Label::textColourId, faint);
-        }
+        listLabel.setFont (Look::font (theme, 13.0f));
+        listLabel.setColour (juce::Label::textColourId, faint);
 
         standbyLabel.setFont (Look::font (theme, 22.0f));
         standbyLabel.setColour (juce::Label::textColourId, Look::colour (theme, "standby"));
@@ -155,15 +152,12 @@ namespace wfg::client::ui
         tickLabel.setText ("tick " + text (reading.tick), juce::dontSendNotification);
         clockLabel.setText (text (reading.clock), juce::dontSendNotification);
         rateLabel.setText (text (reading.rate), juce::dontSendNotification);
-        fileLabel.setText (text (reading.fileLine()), juce::dontSendNotification);
-        undoLabel.setText (text (reading.undoLine()), juce::dontSendNotification);
-
         listLabel.setText (reading.listId.empty() ? juce::String ("no list")
                                                   : "standby in " + text (reading.listName),
                            juce::dontSendNotification);
         standbyLabel.setText (text (reading.standbyLine()), juce::dontSendNotification);
 
-        statusLabel.setText (text (reading.statusLine()), juce::dontSendNotification);
+        statusLabel.setText (text (reading.lockLine()), juce::dontSendNotification);
 
         /*  THE WRITER'S OWN SENTENCE COMES FIRST when there is one: a write
             that failed belongs to a command that was APPLIED, so it is not
@@ -178,13 +172,22 @@ namespace wfg::client::ui
             thing does not need and a reader of the log does. */
         errorLabel.setTooltip (text (reading.lastError));
 
-        saveButton.setEnabled (reading.mayOfferSave());
-        saveButton.setTooltip (reading.mayOfferSave()
-                                 ? "writes the show into its bundle — ctrl/⌘-S"
-                                 : "show mode: saving is not offered while the show is locked");
+        /*  DIMMED IS THE ONLY PLACE THIS IS SAID NOW, so the two reasons a
+            save is not on offer have to be told apart by the tooltip: a locked
+            show refuses one, and a saved show has nothing to write. */
+        saveButton.setEnabled (reading.mayOfferSave() && reading.hasSomethingToSave());
+        saveButton.setTooltip (! reading.mayOfferSave()
+                                 ? "show mode: saving is not offered while the show is locked"
+                                 : ! reading.hasSomethingToSave()
+                                     ? "no changes to save"
+                                     : "writes the show into its bundle — ctrl/⌘-S");
 
         undoButton.setEnabled (model::isYes (reading.canUndo));
         redoButton.setEnabled (model::isYes (reading.canRedo));
+
+        //  What each would take back, one hover away rather than on a line.
+        undoButton.setTooltip (text (reading.undoTip()));
+        redoButton.setTooltip (text (reading.redoTip()));
 
         lockButton.setButtonText (reading.locked == model::Flag::yes ? "unlock the show"
                                                                      : "lock the show");
@@ -248,12 +251,11 @@ namespace wfg::client::ui
                         + row                       // show, tick, clock, rate
                         + row / 2
                         + row                       // the buttons
-                        + row                       // undo and file lines
                         + (bannerShowing ? row * 3 + row / 2 : 0)
                         + row / 2
                         + row * 2                   // the standby, and GO
                         + row / 2
-                        + row                       // audio and the error
+                        + row                       // the lock word and the error
                         + row;                      // the notice
 
         return rows;
@@ -326,10 +328,6 @@ namespace wfg::client::ui
         undoButton.setBounds (buttons.removeFromLeft (row * 3).reduced (1));
         redoButton.setBounds (buttons.removeFromLeft (row * 3).reduced (1));
 
-        auto lines = area.removeFromTop (row);
-        fileLabel.setBounds (lines.removeFromRight (row * 8));
-        undoLabel.setBounds (lines);
-
         if (bannerShowing)
         {
             auto banner = area.removeFromTop (row * 3 + row / 2).withTrimmedTop (row / 2);
@@ -341,16 +339,22 @@ namespace wfg::client::ui
 
         area.removeFromTop (row / 2);
 
+        /*  GO ON THE LEFT AND THE CUE IT WILL FIRE BESIDE IT (author,
+            2026-09-18: "the Go button should be on the left with the standby
+            cue name to its right"). The hand goes to one place and the eye
+            reads outward from it, which is the order the two things are used
+            in - rather than reading a name and then travelling back across the
+            window to the button. */
         auto middle = area.removeFromTop (row * 2);
-        goButton.setBounds (middle.removeFromRight (row * 3).reduced (2));
-        middle.removeFromRight (pad);
+        goButton.setBounds (middle.removeFromLeft (row * 3).reduced (2));
+        middle.removeFromLeft (pad);
         listLabel.setBounds (middle.removeFromTop (row * 3 / 4));
         standbyLabel.setBounds (middle);
 
         area.removeFromTop (row / 2);
 
         auto bottom = area.removeFromTop (row);
-        statusLabel.setBounds (bottom.removeFromLeft (row * 8));
+        statusLabel.setBounds (bottom.removeFromLeft (row * 4));
         errorLabel.setBounds (bottom);
 
         noticeLabel.setBounds (area.removeFromTop (row));
