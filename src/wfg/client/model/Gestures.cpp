@@ -62,6 +62,13 @@ namespace wfg::client::gesture
                    osc::Value::string (kind), osc::Value::string (name) } };
     }
 
+    Event moveObject (const std::string& id, const std::string& parent, int index)
+    {
+        return { origin::window, "object.move",
+                 { osc::Value::string (id), osc::Value::string (parent),
+                   osc::Value::int32 (index) } };
+    }
+
     Event setNode (const std::string& address, const std::string& text)
     {
         /*  A STRING, WHATEVER THE ROW'S TYPE IS. `node.set` declares its value

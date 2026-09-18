@@ -94,6 +94,10 @@ namespace wfg::client::gesture
     Event createCue (const std::string& parent, int index,
                      const std::string& kind, const std::string& name);
 
+    /*  Moves a cue or a group: a row dragged in the cue list (model/Reorder.h).
+        `index` is a member position in `parent`, or -1 for the end. */
+    Event moveObject (const std::string& id, const std::string& parent, int index);
+
     /*  ONE FIELD, COMMITTED. The address is the NODE's own, never one this
         client assembled: a generic inspector writes back to what it read,
         which is the whole reason it needs no table of field names. */

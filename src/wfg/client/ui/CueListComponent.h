@@ -42,6 +42,7 @@
     can move is a pointer nobody can judge.
 */
 
+#include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
 
@@ -54,6 +55,7 @@ namespace wfg::client::ui
 {
     class CueListComponent final : public juce::Component,
                                    public juce::FileDragAndDropTarget,
+                                   public juce::DragAndDropTarget,
                                    private juce::ListBoxModel
     {
     public:
@@ -85,6 +87,13 @@ namespace wfg::client::ui
                                 const juce::StringArray& files)> importMedia;
             std::function<void (const std::string& cueId,
                                 const juce::String& file)> linkMedia;
+
+            /*  A ROW DRAGGED IN THE LIST (model/Reorder.h): moved after or
+                into another, or dropped on a fade or a stop to become what it
+                aims at. This pane says what the hand did; the window sends
+                the one command each means. */
+            std::function<void (const std::string& id, const std::string& parent, int index)> move;
+            std::function<void (const std::string& aimedCue, const std::string& atCue)> setTarget;
         };
 
         CueListComponent (const model::Theme& theme, Actions actions);
@@ -112,6 +121,21 @@ namespace wfg::client::ui
         void fileDragMove (const juce::StringArray& files, int x, int y) override;
         void fileDragExit (const juce::StringArray& files) override;
         void filesDropped (const juce::StringArray& files, int x, int y) override;
+
+        /*  THE ROW DRAG. The list starts it (`getDragSourceDescription` names
+            the cue), the shell carries it, and this pane is where it lands:
+            the same rows, the same feedback shapes a dropped file uses - a
+            line under for "after", the whole row lit for "on". */
+        juce::var getDragSourceDescription (const juce::SparseSet<int>& rowsToDescribe) override;
+        bool isInterestedInDragSource (const SourceDetails& details) override;
+        void itemDragEnter (const SourceDetails& details) override;
+        void itemDragMove (const SourceDetails& details) override;
+        void itemDragExit (const SourceDetails& details) override;
+        void itemDropped (const SourceDetails& details) override;
+
+        /** What letting go of the dragged row at this point would do. */
+        model::Drop dropAt (const SourceDetails& details, int& rowOut) const;
+        const model::Row* rowById (const std::string& id) const;
 
         int rowUnder (int y) const;
 
@@ -154,7 +178,7 @@ namespace wfg::client::ui
         int pickedRow = -1;
         int dropRow = -1;            ///< the row a file drag is over, or -1
         bool dropWouldInsert = false;   ///< whether letting go really inserts after that row
-        bool dropWouldLink = false;  ///< whether letting go there names a cue's file
+        bool dropWouldLink = false;  ///< whether letting go there names a cue's file, or lands ON the row
         std::size_t drawnWalk = 0;
         std::string drawnList;
 

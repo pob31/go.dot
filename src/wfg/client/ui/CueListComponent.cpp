@@ -789,6 +789,142 @@ namespace wfg::client::ui
             actions.importMedia (drawnList, -1, files);
     }
 
+    //==========================================================================
+    /*  THE ROW DRAG (model/Reorder.h). The description is the cue's identifier
+        and nothing else: a drag that carried a row index would name a row
+        that may have moved by the time it lands, and a drag that carried a
+        name would name two cues. */
+    juce::var CueListComponent::getDragSourceDescription (const juce::SparseSet<int>& rowsToDescribe)
+    {
+        if (rowsToDescribe.isEmpty())
+            return {};
+
+        const auto at = rowsToDescribe[0];
+
+        if (at < 0 || at >= static_cast<int> (rows.size()))
+            return {};
+
+        const auto& entry = rows[static_cast<std::size_t> (at)];
+
+        //  Only a cue can be picked up. A band is a heading, not a thing.
+        if (entry.rowKind != model::RowKind::cue || entry.id.empty())
+            return {};
+
+        return juce::var (juce::String (entry.id));
+    }
+
+    const model::Row* CueListComponent::rowById (const std::string& id) const
+    {
+        for (const auto& row : rows)
+            if (row.rowKind == model::RowKind::cue && row.id == id)
+                return &row;
+
+        return nullptr;
+    }
+
+    bool CueListComponent::isInterestedInDragSource (const SourceDetails& details)
+    {
+        //  One of this list's own rows, and still one of them.
+        return details.description.isString()
+            && rowById (details.description.toString().toStdString()) != nullptr;
+    }
+
+    model::Drop CueListComponent::dropAt (const SourceDetails& details, int& rowOut) const
+    {
+        rowOut = rowUnder (details.localPosition.y);
+
+        const auto* dragged = rowById (details.description.toString().toStdString());
+
+        if (rowOut < 0 || dragged == nullptr)
+            return {};
+
+        /*  How far down the row the pointer is, which is what tells "on"
+            from "after": the same arithmetic `rowUnder` uses, kept beside it. */
+        const auto inList = details.localPosition.y - list.getY()
+                              + list.getViewport()->getViewPositionY();
+        const auto height = juce::jmax (1, rowHeight());
+        const auto fraction = static_cast<double> (inList % height) / static_cast<double> (height);
+
+        return model::dropFor (rows[static_cast<std::size_t> (rowOut)], *dragged, fraction);
+    }
+
+    void CueListComponent::itemDragEnter (const SourceDetails& details)
+    {
+        itemDragMove (details);
+    }
+
+    void CueListComponent::itemDragMove (const SourceDetails& details)
+    {
+        const auto was = dropRow;
+        const auto wasLink = dropWouldLink;
+        const auto wasInsert = dropWouldInsert;
+
+        auto at = -1;
+        const auto drop = dropAt (details, at);
+
+        /*  THE SAME TWO SHAPES A FILE GETS: a line under the row for "after",
+            the whole row lit for "on" - into a group, or aimed at a fade. */
+        dropRow = drop.kind == model::DropKind::none ? -1 : at;
+        dropWouldInsert = drop.kind == model::DropKind::after;
+        dropWouldLink = drop.kind == model::DropKind::into || drop.kind == model::DropKind::target;
+
+        if (dropRow != was || dropWouldLink != wasLink || dropWouldInsert != wasInsert)
+        {
+            if (was >= 0)      list.repaintRow (was);
+            if (dropRow >= 0)  list.repaintRow (dropRow);
+
+            if (actions.say && dropRow >= 0)
+                actions.say (juce::String (model::describe (drop, rows[static_cast<std::size_t> (at)])));
+        }
+    }
+
+    void CueListComponent::itemDragExit (const SourceDetails&)
+    {
+        const auto was = dropRow;
+
+        dropRow = -1;
+        dropWouldLink = false;
+        dropWouldInsert = false;
+
+        if (was >= 0)
+            list.repaintRow (was);
+
+        if (actions.say)
+            actions.say ({});
+    }
+
+    void CueListComponent::itemDropped (const SourceDetails& details)
+    {
+        auto at = -1;
+        const auto drop = dropAt (details, at);
+        const auto dragged = details.description.toString().toStdString();
+
+        dropRow = -1;
+        dropWouldLink = false;
+        dropWouldInsert = false;
+        repaint();
+
+        if (actions.say)
+            actions.say ({});
+
+        switch (drop.kind)
+        {
+            case model::DropKind::none:
+                return;
+
+            case model::DropKind::after:
+            case model::DropKind::into:
+                if (actions.move)
+                    actions.move (dragged, drop.container, drop.index);
+                return;
+
+            case model::DropKind::target:
+                if (actions.setTarget)
+                    actions.setTarget (drop.cueId, dragged);
+                return;
+        }
+    }
+
     void CueListComponent::backgroundClicked (const juce::MouseEvent&)
     {
         /*  EMPTY SPACE MEANS NOTHING IS PICKED (author, 2026-09-18: "clicking

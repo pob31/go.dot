@@ -77,7 +77,11 @@ namespace wfg::client::model
         where the value is a name on a disk that a machine can be asked to
         find. Both stay ordinary text underneath and send the same `node.set`,
         so the generic route is never the only casualty of the specific one. */
-    enum class Control { text, toggle, choice, loopCount, file };
+    /*  `cueRef` is a field that names another cue - a fade's or a stop's
+        target - and takes the cue's number or name as well as its identifier
+        (author, 2026-09-18); the window resolves what was typed to the
+        identifier before it is written (model/Reorder.h). */
+    enum class Control { text, toggle, choice, loopCount, file, cueRef };
 
     struct Field
     {

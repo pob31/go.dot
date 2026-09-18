@@ -43,7 +43,11 @@
 
 namespace wfg::client::ui
 {
-    class Shell final : public juce::Component
+    /*  A DragAndDropContainer as well, because a row dragged in the cue list
+        needs an ancestor to carry it: JUCE looks up from the list for the
+        nearest one, and this is the nearest thing that holds every pane. */
+    class Shell final : public juce::Component,
+                        public juce::DragAndDropContainer
     {
     public:
         Shell (const model::Theme& theme,

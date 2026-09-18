@@ -65,6 +65,11 @@ namespace wfg::client::ui
                 same `node.set`, which is what keeps §14.16's third rule. */
             std::function<void (const std::string& cueId)> chooseFile;
 
+            /*  A FIELD THAT NAMES A CUE, committed as typed: a number, a name
+                or an identifier. The window resolves it to the identifier the
+                document stores and says so when it cannot. */
+            std::function<void (const std::string& address, const std::string& text)> setCueRef;
+
             /** Picks nothing, which is what closes this panel. */
             std::function<void()> close;
         };

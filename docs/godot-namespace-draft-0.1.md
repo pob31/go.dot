@@ -7117,6 +7117,25 @@ a stop and then kills, each applied harmlessly to a table already stopping. The 
 the page has *stop all* and *kill all* on its running pane's header. What double Esc does NOT yet do
 is park mounted parameters at their §4.6 panic values - that is the mount table's, and Phase 10's.
 
+**A ROW DRAGGED IN THE LIST (2026-09-18).** *"Can we have drag and drop reordering? Can we also have
+drag and drop onto a fade to set its target? Can we also use its user ID (not only the unique ID) to
+set the fade target too?"* The page declined dragging for a reason that holds there - a row moving
+under the pointer while the tree is re-fetched - and does not hold in a window with no poll, so this
+is the first client to offer it. **Three answers, told apart by where on the row the hand is** and
+said on the foot while it is still in the air: the middle band of a fade or a stop means *aim this at
+it* (one write to the fade's `target`); the middle band of a group means *into it*, at the end of its
+members; everywhere else means *after it*, in the row's own container, which is the reading a dropped
+file already gets. The feedback is the file drop's two shapes - a line under for after, the row lit
+for on. **The index is `object.move`'s member position in the list as it stands**, so a cue dropped
+after a member below it asks for that member's own position and lands directly after it, and one
+dropped after a member above it, or from another container, asks for the position after; that
+arithmetic is the document's (§14.6's `move`) and the model has one function that speaks it
+(`model/Reorder.h`), tested. **A target may be typed as a cue's number or name**, and the window
+resolves it to the identifier before the write: the number is the operator's and "never an identity"
+(the parameter table's words), so what the document stores is the identity and renumbering during tech
+breaks nothing. Two cues with one name resolve to nothing, and the foot says so. Rule 3 holds: the
+page's inspector writes the same `target` by identifier, and its ▲/▼ send the same `object.move`.
+
 ### 14.17 What Phase 5 built, against what section 14 drew
 
 *Written 2026-09-17, at `7b9c73b`, from the phase rather than from its commit messages — which is

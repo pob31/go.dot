@@ -47,6 +47,7 @@
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/Panic.h>
+#include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Text.h>
@@ -522,6 +523,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::park ("B3N8R5TW"), gesture::kill ("R4NID001"),
         gesture::setNode ("/godot/cue/B3N8R5TW/name", "Renamed"),
         gesture::createCue ("7K2QM9X4", 0, "media", "Thunder"),
+        gesture::moveObject ("B3N8R5TW", "7K2QM9X4", 0),
         gesture::undo(), gesture::redo(), gesture::save(), gesture::revert(),
         gesture::recover(), gesture::discardRecovery(),
         gesture::setLocked (true), gesture::setLocked (false),
@@ -999,6 +1001,92 @@ TEST_CASE ("client: an import names its cue after the file, and finds what the c
     CHECK_FALSE (model::madeByImport (job, "group", "Thunder", ""));     // not a media cue
     CHECK_FALSE (model::madeByImport (job, "media", "Rain", ""));        // somebody else's
     CHECK_FALSE (model::madeByImport (job, "media", "Thunder", "Rain.wav"));  // already named
+}
+
+//==============================================================================
+TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be named by number or name")
+{
+    /*  model/Reorder.h: the one rule the drawing and the dropping share.
+        Rows are built by hand, because what is under test is the arithmetic
+        and not the walk. */
+    const auto cue = [] (const char* id, const char* kind, const char* parent, int index,
+                         const char* number = "", const char* name = "")
+    {
+        model::Row row;
+        row.rowKind = model::RowKind::cue;
+        row.id = id;
+        row.kind = kind;
+        row.parent = parent;
+        row.indexInParent = index;
+        row.number = number;
+        row.name = name;
+        row.isGroup = std::string (kind) == "group";
+        return row;
+    };
+
+    const auto a = cue ("A", "memo", "L", 0, "1", "Thunder");
+    const auto b = cue ("B", "fade", "L", 1, "2", "Fade it");
+    const auto c = cue ("C", "memo", "L", 2, "3", "Thunder");     // a second Thunder
+    const auto g = cue ("G", "group", "L", 3, "4", "Scene");
+    const auto inner = cue ("I", "memo", "G", 0, "4.1", "Inside");
+
+    //  AFTER, within one container: the position object.move wants.
+    {
+        const auto later = model::dropFor (c, a, 0.9);       // A dropped after C: moving later
+        CHECK (later.kind == model::DropKind::after);
+        CHECK (later.container == "L");
+        CHECK (later.index == 2);                             // C's own position: A ends up after C
+
+        const auto earlier = model::dropFor (a, c, 0.9);     // C dropped after A: moving earlier
+        CHECK (earlier.kind == model::DropKind::after);
+        CHECK (earlier.index == 1);                           // the position after A
+
+        CHECK (model::dropFor (a, b, 0.9).kind == model::DropKind::none);   // B is already after A
+        CHECK (model::dropFor (a, a, 0.5).kind == model::DropKind::none);   // onto itself
+    }
+
+    //  AFTER, from another container: the position after the row.
+    {
+        const auto out = model::dropFor (a, inner, 0.9);
+        CHECK (out.kind == model::DropKind::after);
+        CHECK (out.container == "L");
+        CHECK (out.index == 1);
+    }
+
+    //  ON a fade aims it; on a group goes inside; the edges of both mean after.
+    {
+        const auto aim = model::dropFor (b, a, 0.5);
+        CHECK (aim.kind == model::DropKind::target);
+        CHECK (aim.cueId == "B");
+
+        const auto into = model::dropFor (g, a, 0.5);
+        CHECK (into.kind == model::DropKind::into);
+        CHECK (into.container == "G");
+        CHECK (into.index == -1);
+
+        CHECK (model::dropFor (b, a, 0.1).kind == model::DropKind::after);
+        CHECK (model::dropFor (g, a, 0.95).kind == model::DropKind::after);
+        CHECK (model::dropFor (a, c, 0.5).kind == model::DropKind::after);   // a memo has no "on"
+    }
+
+    //  A band cannot be dropped on.
+    {
+        model::Row band;
+        band.rowKind = model::RowKind::band;
+        CHECK (model::dropFor (band, a, 0.5).kind == model::DropKind::none);
+    }
+
+    /*  NAMING A CUE: identifier first, then number, then name - and two cues
+        with one name answer nothing rather than one of them. */
+    const std::vector<model::Row> rows { a, b, c, g, inner };
+
+    CHECK (model::resolveCueRef ("B", rows) == "B");
+    CHECK (model::resolveCueRef ("2", rows) == "B");
+    CHECK (model::resolveCueRef ("4.1", rows) == "I");
+    CHECK (model::resolveCueRef ("Fade it", rows) == "B");
+    CHECK (model::resolveCueRef ("Thunder", rows).empty());    // two of them
+    CHECK (model::resolveCueRef ("Nobody", rows).empty());
+    CHECK (model::resolveCueRef ("", rows).empty());
 }
 
 //==============================================================================

@@ -53,6 +53,7 @@
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/Panic.h>
+#include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
@@ -134,6 +135,21 @@ namespace wfg::client
                                                       const juce::String& file)
                                               { linkMedia (cueId, file); };
 
+                /*  A ROW DRAGGED IN THE LIST: one `object.move`, or one write to
+                    the aimed cue's target. The document holds the identifier;
+                    the pane already has it. */
+                listActions.move            = [this] (const std::string& id, const std::string& parent,
+                                                      int index)
+                                              {
+                                                  if (! refusedWhileLocked())
+                                                      send (gesture::moveObject (id, parent, index));
+                                              };
+                listActions.setTarget       = [this] (const std::string& aimed, const std::string& at)
+                                              {
+                                                  if (! refusedWhileLocked())
+                                                      send (gesture::setNode ("/godot/cue/" + aimed + "/target", at));
+                                              };
+
                 ui::RunPaneComponent::Actions runActions;
 
                 runActions.kill = [this] (const std::string& id) { send (gesture::kill (id)); };
@@ -153,6 +169,28 @@ namespace wfg::client
 
                 inspectorActions.chooseFile = [this] (const std::string& cueId)
                                               { chooseFile (cueId); };
+
+                /*  A TARGET TYPED AS A NUMBER OR A NAME is resolved to the
+                    identifier the document stores (model/Reorder.h), against
+                    the rows this window is drawing. An empty field clears the
+                    target; a name nobody has, or two cues have, writes nothing
+                    and says so. */
+                inspectorActions.setCueRef  = [this] (const std::string& address, const std::string& text)
+                                              {
+                                                  if (text.empty())
+                                                  {
+                                                      send (gesture::setNode (address, text));
+                                                      return;
+                                                  }
+
+                                                  const auto id = model::resolveCueRef (text, show.rows());
+
+                                                  if (id.empty())
+                                                      shell->transport.setNotice ("no one cue is numbered or named "
+                                                                                    + juce::String (text));
+                                                  else
+                                                      send (gesture::setNode (address, id));
+                                              };
 
                 /*  THE NEW-CUE ROW: one button per kind, one `cue.create` each,
                     landing where the pick says (model/NewCue.h). The bar

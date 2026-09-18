@@ -116,6 +116,7 @@ namespace wfg::client::model
             else if (! field.options.empty()) field.control = Control::choice;
             else if (name == "loops")      field.control = Control::loopCount;
             else if (name == "file")       field.control = Control::file;
+            else if (name == "target")     field.control = Control::cueRef;
             else                           field.control = Control::text;
 
             return field;

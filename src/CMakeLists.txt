@@ -258,6 +258,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/NewCue.h
     wfg/client/model/NewCue.cpp
     wfg/client/model/Panic.h
+    wfg/client/model/Reorder.h
+    wfg/client/model/Reorder.cpp
     wfg/client/model/Inspector.h
     wfg/client/model/Inspector.cpp
     wfg/client/model/RunModel.h

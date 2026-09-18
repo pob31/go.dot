@@ -242,6 +242,7 @@ namespace wfg::client::ui
                 }
 
                 case model::Control::file:
+                case model::Control::cueRef:
                 case model::Control::text:
                 default:
                     line.box.setText (field.value, juce::dontSendNotification);
@@ -420,21 +421,33 @@ namespace wfg::client::ui
                 line->box.setEditable (field.writable, field.writable, false);
                 line->box.setTooltip (juce::String (field.description)
                                         + (field.unit.empty() ? juce::String()
-                                                              : "  (" + juce::String (field.unit) + ")"));
+                                                              : "  (" + juce::String (field.unit) + ")")
+                                        + (field.control == model::Control::cueRef
+                                             ? "  Type a cue's number, name or identifier, "
+                                               "or drag a cue onto this one in the list."
+                                             : ""));
 
                 if (field.writable)
                 {
                     const auto address = field.address;
+                    const auto namesACue = field.control == model::Control::cueRef;
                     auto* raw = line.get();
 
                     /*  ON COMMIT, NOT ON EVERY KEYSTROKE: `onTextChange` fires
                         when the editor is dismissed, which is Return or the
                         focus leaving - so a cue is not renamed letter by
-                        letter down the log. */
-                    line->box.onTextChange = [this, address, raw]
+                        letter down the log.
+
+                        A FIELD THAT NAMES A CUE goes by the other door, where
+                        what was typed is resolved to an identifier first. */
+                    line->box.onTextChange = [this, address, raw, namesACue]
                     {
-                        if (actions.set)
-                            actions.set (address, raw->box.getText().toStdString());
+                        const auto text = raw->box.getText().toStdString();
+
+                        if (namesACue && actions.setCueRef)
+                            actions.setCueRef (address, text);
+                        else if (actions.set)
+                            actions.set (address, text);
                     };
                 }
 
