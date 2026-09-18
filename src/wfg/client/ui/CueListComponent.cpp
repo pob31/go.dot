@@ -268,6 +268,8 @@ namespace wfg::client::ui
 
     void CueListComponent::listBoxItemDoubleClicked (int row, const juce::MouseEvent& event)
     {
+        /*  The list box's own count, kept for the case where nothing moved
+            between the clicks; `listBoxItemClicked` counts across a relayout. */
         if (! editable || row < 0 || row >= static_cast<int> (rows.size()))
             return;
 
@@ -276,9 +278,18 @@ namespace wfg::client::ui
         if (entry.rowKind != model::RowKind::cue || entry.derived)
             return;
 
-        const auto cell = cellAt (entry, event.x, list.getWidth(), rowHeight());
+        openCell (row, cellAt (entry, event.x, list.getWidth(), rowHeight()));
+    }
 
-        if (cell == model::EditCell::none)
+    void CueListComponent::openCell (int row, model::EditCell cell)
+    {
+        if (row < 0 || row >= static_cast<int> (rows.size()) || cell == model::EditCell::none)
+            return;
+
+        const auto& entry = rows[static_cast<std::size_t> (row)];
+
+        //  Already open on this very cell: a second count of the same clicks.
+        if (editing() && editRow == row && editCell == cell)
             return;
 
         /*  A COLUMN THAT IS NOT THIS CUE'S TO WRITE says so rather than opening
@@ -937,6 +948,31 @@ namespace wfg::client::ui
                 toggles, and the selection model reads them (model/Selection.h).
                 `isCommandDown` is ctrl here and ⌘ on the Mac, which is the
                 key each platform's lists use. */
+            /*  THE DOUBLE-CLICK IS COUNTED HERE, NOT BY THE ROW: the first click
+                on an unpicked cue opens the inspector, which narrows the list
+                and relays its rows out between the two clicks, so the second
+                lands on a fresh row component and the list box's own count
+                starts again (author, 2026-09-18: "difficult to edit other
+                cues in the cue list than the first one" - the first was
+                already picked, and nothing moved). Two plain clicks on the
+                same cell inside the system's double-click time open it. */
+            const auto now = juce::Time::getMillisecondCounter();
+            const auto cell = cellAt (entry, event.x, list.getWidth(), rowHeight());
+            const auto plain = ! event.mods.isShiftDown() && ! event.mods.isCommandDown();
+            const auto second = plain && lastClickId == entry.id && lastClickCell == cell
+                             && now - lastClickAt <= static_cast<juce::uint32> (juce::MouseEvent::getDoubleClickTimeout());
+
+            lastClickId = entry.id;
+            lastClickCell = cell;
+            lastClickAt = now;
+
+            if (second && editable && ! entry.derived && cell != model::EditCell::none)
+            {
+                lastClickAt = 0;    // a third click is a first again
+                openCell (row, cell);
+                return;
+            }
+
             if (actions.pick)
                 actions.pick (entry.id, event.mods.isShiftDown(), event.mods.isCommandDown());
 

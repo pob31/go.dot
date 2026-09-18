@@ -158,6 +158,8 @@ namespace wfg::client::ui
         model::EditCell cellAt (const model::Row& entry, int x, int width, int height) const;
         juce::Rectangle<int> rectOf (const Cells& cells, model::EditCell cell) const;
 
+        /** Opens a cell, or says why it cannot be written. */
+        void openCell (int row, model::EditCell cell);
         void beginEdit (int row, model::EditCell cell);
         void placeEditor();
         void commitEdit();
@@ -243,6 +245,12 @@ namespace wfg::client::ui
         bool isChosen (const std::string& id) const;
 
         CellEditor editor { *this };
+        /*  The last plain click, for counting a double-click across a relayout
+            (see listBoxItemClicked). */
+        std::string lastClickId;
+        model::EditCell lastClickCell = model::EditCell::none;
+        juce::uint32 lastClickAt = 0;
+
         int editRow = -1;
         model::EditCell editCell = model::EditCell::none;
         std::string editId;                  ///< the cue the open box is about, so a rebuild can follow it
