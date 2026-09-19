@@ -342,8 +342,27 @@ namespace wfg::client
                 juce::MenuBarModel::setMacMainMenu (this);
                #endif
 
-                window->centreWithSize (juce::roundToInt (34 * theme.row * theme.type),
-                                        juce::roundToInt (26 * theme.row * theme.type));
+                /*  MOST OF THE SCREEN, not a fixed thirty-four rows by
+                    twenty-six (author, 2026-09-19: "make the initial window
+                    size larger too. It's cramped"): the panes have grown to
+                    three beside each other, and a booth screen is there to
+                    be used. Eighty-five hundredths of the working area, never
+                    smaller than the size it opened at before, and never past
+                    the area itself. */
+                const auto least = juce::Point<int> (juce::roundToInt (34 * theme.row * theme.type),
+                                                     juce::roundToInt (26 * theme.row * theme.type));
+                auto wanted = least;
+
+                if (const auto* display = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+                {
+                    const auto area = display->userBounds.toNearestInt();
+                    wanted.x = juce::jlimit (juce::jmin (least.x, area.getWidth()), area.getWidth(),
+                                             juce::roundToInt (area.getWidth() * 0.85));
+                    wanted.y = juce::jlimit (juce::jmin (least.y, area.getHeight()), area.getHeight(),
+                                             juce::roundToInt (area.getHeight() * 0.85));
+                }
+
+                window->centreWithSize (wanted.x, wanted.y);
 
                 pass();     // the first reading, before the window is seen
 
