@@ -420,7 +420,9 @@ namespace wfg::client
                     case menuLoadToTime: return { 't', mod, 0 };
                     case menuUndoHistory: return { 'u', mod | shift, 0 };
                     case menuRecord:     return { 'r', mod | shift, 0 };
-                    case menuRevert:    break;
+                    //  No accelerator: both are reached through the menu only.
+                    case menuRevert:
+                    case menuAudioSettings: break;
                 }
 
                 return {};

@@ -20,9 +20,9 @@ namespace wfg::client::ui
         class TestMatrix final : public Matrix
         {
         public:
-            TestMatrix (spatcore::ui::patch::PatchMatrixConfig config, bool input,
+            TestMatrix (spatcore::ui::patch::PatchMatrixConfig configToUse, bool input,
                         spatcore::io::TestSignalGenerator* generator)
-                : Matrix (std::move (config), input, generator), draftGenerator (generator) {}
+                : Matrix (std::move (configToUse), input, generator), draftGenerator (generator) {}
             std::function<void()> changed;
             void mouseDown (const juce::MouseEvent& event) override
             { Matrix::mouseDown (event); if (changed) changed(); }
