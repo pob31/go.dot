@@ -69,6 +69,22 @@ namespace wfg::client::model
         return {};
     }
 
+    bool CueErrorLog::observe (const std::vector<RunRow>& rows)
+    {
+        bool changed = false;
+        std::set<std::string> present;
+        for (const auto& row : rows)
+        {
+            present.insert (row.id);
+            if (! row.error.empty() && seen[row.id].insert (row.error).second)
+            { entries.push_back (row); changed = true; }
+        }
+        for (auto it = seen.begin(); it != seen.end();)
+            if (present.count (it->first) == 0) it = seen.erase (it);
+            else ++it;
+        return changed;
+    }
+
     bool RunRow::launched() const noexcept
     {
         /*  The four states before a launch, named rather than inferred: a run

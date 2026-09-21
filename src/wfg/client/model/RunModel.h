@@ -44,6 +44,8 @@
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <map>
+#include <set>
 
 namespace wfg::tree { class TreeSnapshot; }
 
@@ -146,4 +148,19 @@ namespace wfg::client::model
     /*  The ordering `readRuns` finishes with, on its own so a test can hand it
         rows and assert the rule rather than building a tree to imply it. */
     std::vector<RunRow> inShowOrder (const std::vector<RunRow>& rows);
+
+    /** Session-local history, retained after failed runs leave the active pane.
+        Dismissing entries keeps visible failures marked as already observed. */
+    class CueErrorLog
+    {
+    public:
+        bool observe (const std::vector<RunRow>& rows);
+        void clear() { entries.clear(); }
+        void dismiss (std::size_t index)
+        { if (index < entries.size()) entries.erase (entries.begin() + static_cast<std::ptrdiff_t> (index)); }
+        const std::vector<RunRow>& errors() const noexcept { return entries; }
+    private:
+        std::vector<RunRow> entries;
+        std::map<std::string, std::set<std::string>> seen;
+    };
 }

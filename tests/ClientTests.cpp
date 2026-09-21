@@ -2195,3 +2195,30 @@ TEST_CASE ("client: a section is a band and its rows sit one level inside it")
     CHECK_FALSE (rowsOf (model::Section::persistent).empty());
     CHECK_FALSE (rowsOf (model::Section::footer).empty());
 }
+
+TEST_CASE ("client: cue error history survives retirement and Clear dismisses observed failures")
+{
+    model::CueErrorLog history;
+    model::RunRow failed;
+    failed.id = "run-1"; failed.cueId = "cue-1"; failed.cueName = "Thunder";
+    failed.state = "failed"; failed.error = "missing-media";
+    CHECK (history.observe ({ failed }));
+    CHECK_FALSE (history.observe ({ failed }));
+    REQUIRE (history.errors().size() == 1);
+    CHECK (history.errors()[0].cueName == "Thunder");
+    history.clear();
+    CHECK_FALSE (history.observe ({ failed }));
+    CHECK (history.errors().empty());
+    failed.id = "run-2";
+    CHECK (history.observe ({ failed }));
+    REQUIRE (history.errors().size() == 1);
+    CHECK_FALSE (history.observe ({}));
+    CHECK (history.errors().size() == 1);
+    failed.id = "run-3"; failed.error = "no-track";
+    CHECK (history.observe ({ failed }));
+    CHECK (history.errors().size() == 2);
+    failed.error = "bad-route";
+    CHECK (history.observe ({ failed }));
+    CHECK (history.errors().size() == 3);
+    CHECK (history.errors().back().error == "bad-route");
+}

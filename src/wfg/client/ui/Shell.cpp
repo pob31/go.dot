@@ -153,6 +153,7 @@ namespace wfg::client::ui
         editing = editable;
         newCues.setVisible (editable);
         cues.setEditable (editable);
+        runs.setEditing (editable);
         resized();
     }
 

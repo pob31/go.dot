@@ -58,7 +58,7 @@ namespace wfg::client::ui
         profile"). So the rows are painted by hand on a canvas inside a
         viewport, each at its own height, which is cheap for the dozen rows a
         busy pane holds and repaints whole every pass by design. */
-    class RunPaneComponent final : public juce::Component
+    class RunPaneComponent final : public juce::Component, private juce::ListBoxModel
     {
     public:
         struct Actions
@@ -67,6 +67,7 @@ namespace wfg::client::ui
 
             /** A scrub settling on a second of a run: one per position the hand rests at, one on release. */
             std::function<void (const std::string&, double)> seek;
+            std::function<void (const std::string&)> inspectError;
         };
 
         RunPaneComponent (const model::Theme& theme, Actions actions);
@@ -83,11 +84,43 @@ namespace wfg::client::ui
                    std::shared_ptr<const audio::MediaRecords> media);
 
         void applyTheme (const model::Theme& theme);
+        void setEditing (bool editable) { editing = editable; errorList.repaint(); }
 
         void paint (juce::Graphics& g) override;
         void resized() override;
 
     private:
+        int getNumRows() override;
+        juce::Component* refreshComponentForRow (int row, bool selected, juce::Component* existing) override;
+        void dismissError (int row);
+        class ErrorControls final : public juce::Component
+        {
+        public:
+            explicit ErrorControls (RunPaneComponent& pane) : owner (pane)
+            {
+                setInterceptsMouseClicks (false, true);
+                addAndMakeVisible (close);
+                close.setWantsKeyboardFocus (false);
+                close.setTooltip ("Dismiss this error");
+                close.onClick = [this] { owner.dismissError (row); };
+            }
+            void resized() override { close.setBounds (getLocalBounds().removeFromRight (34).reduced (3)); }
+            int row = -1;
+            juce::TextButton close { "×" };
+        private:
+            RunPaneComponent& owner;
+        };
+        void paintListBoxItem (int row, juce::Graphics&, int width, int height, bool selected) override;
+        void listBoxItemClicked (int row, const juce::MouseEvent&) override;
+        void returnKeyPressed (int row) override;
+        juce::String getNameForRow (int row) override;
+        juce::String getTooltipForRow (int row) override { return getNameForRow (row); }
+        void updateErrors();
+        void inspectError (int row);
+        model::CueErrorLog errorLog;
+        juce::TextButton errorToggle { "> Errors (0)" }, clearErrors { "Clear" };
+        juce::ListBox errorList { "Cue errors", this };
+        bool editing = true;
         /*  The rows' surface: paints each row at its own top and height by
             asking its owner, and hands clicks back the same way. */
         class Canvas final : public juce::Component

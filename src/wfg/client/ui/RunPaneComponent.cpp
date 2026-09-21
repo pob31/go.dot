@@ -32,6 +32,18 @@ namespace wfg::client::ui
         viewport.setWantsKeyboardFocus (false);
         canvas.setWantsKeyboardFocus (false);
         addAndMakeVisible (viewport);
+        addAndMakeVisible (errorToggle);
+        addAndMakeVisible (clearErrors);
+        addChildComponent (errorList);
+        errorList.setWantsKeyboardFocus (false);
+        errorToggle.setWantsKeyboardFocus (false);
+        clearErrors.setWantsKeyboardFocus (false);
+        errorToggle.setClickingTogglesState (true);
+        errorToggle.onClick = [this] { updateErrors(); };
+        clearErrors.setTooltip ("Dismiss all recorded cue errors");
+        clearErrors.onClick = [this] { errorLog.clear(); updateErrors(); };
+        errorList.setOutlineThickness (0);
+        updateErrors();
 
         applyTheme (theme);
     }
@@ -57,9 +69,61 @@ namespace wfg::client::ui
         return juce::roundToInt (theme.row * theme.type);
     }
 
+    int RunPaneComponent::getNumRows() { return static_cast<int> (errorLog.errors().size()); }
+
+    juce::String RunPaneComponent::getNameForRow (int row)
+    {
+        if (row < 0 || row >= getNumRows()) return {};
+        const auto& error = errorLog.errors()[static_cast<std::size_t> (getNumRows() - row - 1)];
+        return juce::String (error.cueName.empty() ? error.cueId : error.cueName)
+             + " — " + juce::String (error.error);
+    }
+
+    void RunPaneComponent::paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool selected)
+    {
+        g.fillAll (Look::colour (theme, selected ? "panel-in" : "panel-runs"));
+        g.setColour (Look::colour (theme, "ink"));
+        g.setFont (Look::font (theme, 12.0f));
+        g.drawFittedText (getNameForRow (row), 8, 3, width - 48, height - 6,
+                         juce::Justification::centredLeft, 2);
+    }
+
+    void RunPaneComponent::inspectError (int row)
+    {
+        if (! editing || row < 0 || row >= getNumRows() || ! actions.inspectError) return;
+        actions.inspectError (errorLog.errors()[static_cast<std::size_t> (getNumRows() - row - 1)].cueId);
+    }
+    juce::Component* RunPaneComponent::refreshComponentForRow (int row, bool, juce::Component* existing)
+    {
+        auto* controls = static_cast<ErrorControls*> (existing);
+        if (! controls) controls = new ErrorControls (*this);
+        controls->row = row;
+        controls->close.setTitle ("Dismiss " + getNameForRow (row));
+        return controls;
+    }
+    void RunPaneComponent::dismissError (int row)
+    {
+        if (row < 0 || row >= getNumRows()) return;
+        errorLog.dismiss (static_cast<std::size_t> (getNumRows() - row - 1));
+        updateErrors();
+    }
+    void RunPaneComponent::listBoxItemClicked (int row, const juce::MouseEvent&) { inspectError (row); }
+    void RunPaneComponent::returnKeyPressed (int row) { inspectError (row); }
+
+    void RunPaneComponent::updateErrors()
+    {
+        errorToggle.setButtonText (juce::String (errorToggle.getToggleState() ? "v Errors (" : "> Errors (")
+                                   + juce::String (getNumRows()) + ")");
+        clearErrors.setEnabled (getNumRows() > 0);
+        errorList.updateContent();
+        resized(); repaint();
+    }
+
     void RunPaneComponent::applyTheme (const model::Theme& themeToUse)
     {
         theme = themeToUse;
+        errorList.setColour (juce::ListBox::backgroundColourId, Look::colour (theme, "panel-runs"));
+        errorList.setRowHeight (juce::jmax (36, rowHeight() * 2));
 
         resized();
         repaint();
@@ -537,6 +601,7 @@ namespace wfg::client::ui
                                  std::shared_ptr<const audio::MediaRecords> mediaToUse)
     {
         media = std::move (mediaToUse);
+        if (errorLog.observe (runs)) updateErrors();
 
         /*  A SCRUB IN PROGRESS RIDES THE PASS. The pointer against an edge of
             the window keeps the head sliding, and this - twenty-five times a
@@ -981,13 +1046,22 @@ namespace wfg::client::ui
         {
             g.setColour (Look::colour (theme, "ink-off"));
             g.setFont (Look::font (theme, 12.0f));
-            g.drawText ("nothing running", getLocalBounds(), juce::Justification::centred, false);
+            g.drawText ("nothing running", viewport.getBounds(), juce::Justification::centred, false);
         }
     }
 
     void RunPaneComponent::resized()
     {
-        viewport.setBounds (getLocalBounds());
+        auto area = getLocalBounds();
+        auto header = area.removeFromTop (juce::jmax (28, rowHeight()));
+        clearErrors.setBounds (header.removeFromRight (65).reduced (3));
+        errorToggle.setBounds (header.reduced (3));
+        const bool expanded = errorToggle.getToggleState() && getNumRows() > 0;
+        errorList.setVisible (expanded);
+        if (expanded)
+            errorList.setBounds (area.removeFromTop (juce::jmin (area.getHeight() / 2,
+                                                               getNumRows() * errorList.getRowHeight())));
+        viewport.setBounds (area);
         layOutRows();
     }
 }

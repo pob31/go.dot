@@ -27,6 +27,12 @@
 
 namespace wfg::client::ui
 {
+    void CueListComponent::revealCue (const std::string& id)
+    {
+        for (std::size_t index = 0; index < rows.size(); ++index)
+            if (rows[index].id == id)
+            { list.scrollToEnsureRowIsOnscreen (static_cast<int> (index)); return; }
+    }
     namespace
     {
         /*  THE COLUMNS, as fractions of the width left after the number and

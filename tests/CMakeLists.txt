@@ -118,12 +118,15 @@ target_link_libraries(wfg_tests PRIVATE wfg::engine wfg::client_model wfg::warni
 # These native-window checks need a Windows desktop and exercise the actual
 # settings panel with a live device; keep the ordinary unit runner headless.
 if(WIN32)
-    add_executable(wfg_audio_ui_tests TestMain.cpp AudioSettingsUiTests.cpp)
+    add_executable(wfg_audio_ui_tests TestMain.cpp AudioSettingsUiTests.cpp RunPaneUiTests.cpp)
     target_link_libraries(wfg_audio_ui_tests PRIVATE wfg::engine wfg::client_ui wfg::warnings)
     add_test(NAME ui.audio-settings.C COMMAND wfg_audio_ui_tests --wfg-locale=C)
     add_test(NAME ui.audio-settings.fr_FR COMMAND wfg_audio_ui_tests --wfg-locale=${WFG_LOCALE_FR})
     set_tests_properties(ui.audio-settings.C ui.audio-settings.fr_FR PROPERTIES
                          RUN_SERIAL TRUE TIMEOUT 120)
+    add_test(NAME ui.cue-errors.C COMMAND wfg_audio_ui_tests "--test-case=active cue errors:*" --wfg-locale=C)
+    add_test(NAME ui.cue-errors.fr_FR COMMAND wfg_audio_ui_tests "--test-case=active cue errors:*" --wfg-locale=${WFG_LOCALE_FR})
+    set_tests_properties(ui.cue-errors.C ui.cue-errors.fr_FR PROPERTIES RUN_SERIAL TRUE TIMEOUT 30)
 endif()
 
 # -----------------------------------------------------------------------------

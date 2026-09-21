@@ -136,6 +136,7 @@ namespace wfg::client::ui
                    const std::vector<std::string>& chosenIds);
 
         void applyTheme (const model::Theme& theme);
+        void revealCue (const std::string& id);
 
         /** Whether a double-click may open a cell for editing: not while the show is locked. */
         void setEditable (bool editable);

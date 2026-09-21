@@ -236,6 +236,7 @@ namespace wfg::client
                 ui::RunPaneComponent::Actions runActions;
 
                 runActions.kill = [this] (const std::string& id) { send (gesture::kill (id)); };
+                runActions.inspectError = [this] (const std::string& id) { inspectCueError (id); };
 
                 /*  A SCRUB IS A HANDFUL OF SEEKS A SECOND AND ONE ON RELEASE,
                     each a record; the pane decides when the hand has settled
@@ -828,6 +829,17 @@ namespace wfg::client
 
                 //  What the show no longer has cannot stay picked.
                 selection.retain (show.rows());
+                if (! errorCueToInspect.empty()
+                    && snapshot->find ("/godot/cue/" + errorCueToInspect + "/kind") == nullptr)
+                    errorCueToInspect.clear();
+                std::string revealedErrorCue;
+                if (! errorCueToInspect.empty() && show.indexOf (errorCueToInspect) >= 0)
+                {
+                    selection.set (errorCueToInspect);
+                    revealedErrorCue = errorCueToInspect;
+                    errorCueToInspect.clear();
+                    inspectNow();
+                }
 
                 /*  LOAD TO TIME, READ EVERY PASS WHILE THE PANEL IS UP: the
                     history, the aim and the engine's answer, and the steps
@@ -871,6 +883,7 @@ namespace wfg::client
                     shell->cues.setDiff ({}, {});
 
                 shell->cues.show (show, reading.standbyId, selection.ids());
+                if (! revealedErrorCue.empty()) shell->cues.revealCue (revealedErrorCue);
 
                 /*  And the present tense, read fresh: runs have no revision to
                     key on, because a run is not a decision anybody recorded.
@@ -1609,6 +1622,53 @@ namespace wfg::client
             {
                 inspectorHeld = false;
                 inspectorDueAt = 0;
+            }
+
+            std::string errorCueToInspect;
+            void inspectCueError (const std::string& id)
+            {
+                if (! latest || model::isYes (model::flag (*latest, "/godot/document/locked"))) return;
+                if (latest->find ("/godot/cue/" + id + "/kind") == nullptr)
+                {
+                    shell->transport.setNotice ("This cue has been deleted.");
+                    return;
+                }
+                // Reveal its containing list and folded ancestors without
+                // moving standby or launching the cue.
+                auto child = id;
+                for (int depth = 0; depth < 64; ++depth)
+                {
+                    const auto parent = model::text (*latest, "/godot/cue/" + child + "/parent");
+                    if (parent.empty()) break;
+                    const bool isList = latest->find ("/godot/list/" + parent + "/order") != nullptr;
+                    const auto base = (isList ? "/godot/list/" : "/godot/cue/") + parent + "/";
+                    const auto unfold = [&] (const std::string& address, const std::string& key)
+                    {
+                        if (model::isYes (model::flag (*latest, address)))
+                        {
+                            send (gesture::setNode (address, "false"));
+                            if (show.isShut (key)) show.toggle (key);
+                        }
+                    };
+                    if (! isList) unfold (base + "folded", parent);
+                    for (const auto* section : { "header", "footer", "persistent" })
+                    {
+                        const auto members = model::words (model::text (*latest, base + section + "Order"));
+                        if (std::find (members.begin(), members.end(), child) != members.end())
+                            unfold (base + section + "Folded", parent + "/" + section);
+                    }
+                    if (isList)
+                    {
+                        if (parent != last.listId)
+                            send ({ "window", "list.focus", { osc::Value::string (parent) } });
+                        break;
+                    }
+                    child = parent;
+                }
+                if (loadingToTime) leaveLoadToTime();
+                browsingUndo = false;
+                errorCueToInspect = id;
+                inspectNow();
             }
 
             /*  LOAD TO TIME (PRD §3.13; author, 2026-09-18). While it is on,
