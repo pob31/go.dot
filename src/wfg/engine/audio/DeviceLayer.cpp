@@ -156,7 +156,9 @@ namespace wfg::audio
             observedBlock.store (device->getCurrentBufferSizeSamples(), std::memory_order_relaxed);
             recovery.started (device->getTypeName() == pinnedType
                 && device->getName() == pinnedSetup.outputDeviceName
-                && device->getCurrentSampleRate() == granted.sampleRate
+                // The int domain `granted.sampleRate` was stored in, by the same
+                // cast (`open` below), so the round trip compares exactly.
+                && static_cast<int> (device->getCurrentSampleRate()) == granted.sampleRate
                 && device->getCurrentBufferSizeSamples() == granted.blockSize
                 && device->getActiveInputChannels() == pinnedSetup.inputChannels
                 && device->getActiveOutputChannels() == pinnedSetup.outputChannels);
