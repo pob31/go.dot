@@ -69,6 +69,9 @@
 # where most of the reasoning lives.
 # -----------------------------------------------------------------------------
 add_library(wfg_engine STATIC
+    wfg/engine/audio/AudioSettings.cpp
+    wfg/engine/audio/AudioSettings.h
+    wfg/engine/audio/OutputTestSignal.h
     wfg/engine/Engine.cpp
     wfg/engine/Engine.h
     wfg/engine/Console.cpp
@@ -289,6 +292,8 @@ target_link_libraries(wfg_client_model
     PRIVATE wfg::warnings)
 
 add_library(wfg_client_ui STATIC
+    wfg/client/ui/AudioSettingsWindow.h
+    wfg/client/ui/AudioSettingsWindow.cpp
     wfg/client/Client.h
     wfg/client/ui/Client.cpp
     wfg/client/ui/Look.h

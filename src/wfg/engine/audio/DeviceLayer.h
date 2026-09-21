@@ -49,10 +49,12 @@
 */
 
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/audio/AudioSettings.h>
 
 #include <memory>
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace juce
 {
@@ -113,6 +115,12 @@ namespace wfg::audio
 
             /** Empty for the platform's default type. */
             std::string deviceType;
+            std::optional<std::string> inputDeviceName;
+            std::vector<int> inputPatch, outputPatch;
+            int logicalOutputs = 0;
+            // Optional diagnostic capture of the final, patched device buffers.
+            // Called on the audio thread; observer must outlive the open device.
+            BlockSink* outputObserver = nullptr;
 
             /*  What to ASK for. What is granted is in `settings()` afterwards,
                 and the two differ often enough that believing the request is a
@@ -141,6 +149,11 @@ namespace wfg::audio
 
         /** The device that is open, or empty. */
         const std::string& deviceName() const noexcept;
+        int inputChannels() const noexcept;
+        int outputChannels() const noexcept;
+        /** Supported buffer sizes captured from the owned device at open. */
+        const std::string& availableBufferSizes() const noexcept;
+        void setOutputTest (const OutputTestSettings&) noexcept;
 
         AudioHost& host() noexcept;
 

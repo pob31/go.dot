@@ -1219,6 +1219,54 @@
   <define name="Audio">
     <element name="Audio">
       <optional>
+        <attribute name="bufferSize">
+          <a:documentation>Requested buffer size. Zero uses the device default; the granted size is observed.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">65536</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="deviceType">
+          <a:documentation>Audio driver type selected for this show.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Open the saved audio interface when this show starts.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="inputDevice">
+          <a:documentation>Input interface selected for this show. Empty disables inputs.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="inputPatch">
+          <a:documentation>Space-separated hardware input indices per logical input. Zero based; -1 disconnects. Empty preserves identity routing.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="outputDevice">
+          <a:documentation>Output interface selected for this show. Empty selects the system default.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="outputPatch">
+          <a:documentation>Space-separated hardware output indices per logical output. Zero based; -1 disconnects. Empty preserves identity routing.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="tracks">
           <a:documentation>The fixed number of audio tracks, and so the polyphony ceiling: N tracks is N simultaneous cues. Zero is legal and means a show with no audio. Required, and deliberately without a default - the number is a decision about the shape of a show, and no value here could be right for every rig.</a:documentation>
           <data type="integer">

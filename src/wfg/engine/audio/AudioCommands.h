@@ -45,6 +45,7 @@
 */
 
 #include <wfg/engine/command/CommandRegistry.h>
+#include <wfg/engine/audio/AudioSettings.h>
 
 #include <string>
 
@@ -61,6 +62,13 @@ namespace wfg::audio
     */
     struct AudioState
     {
+        std::string settingsStatus = "ready", settingsError;
+        std::string availableBufferSizes;
+        OutputTestSettings test;
+        std::function<void (const OutputTestSettings&)> sendTest;
+        int sampleRate = 0, bufferSize = 0, inputs = 0, hardwareOutputs = 0;
+        int settingsRevision = 0;
+        SettingsRequest requestSettings;
         /** The device in use, or empty when none is open. `hosted` has no card. */
         std::string device;
 
@@ -89,4 +97,5 @@ namespace wfg::audio
         nine nodes built four tracks that are not in the graph.
     */
     void registerAudioCommands (CommandRegistry& registry, AudioState& state);
+    void stopOutputTest (AudioState& state);
 }

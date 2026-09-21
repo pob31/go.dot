@@ -58,6 +58,7 @@ namespace wfg::audio
 
         /** Hardware output channels the graph is built to fill. */
         int outputChannels = 0;
+        int inputChannels = 0;
     };
 
     /** The shape of the show's audio, read out of the document's <Audio>. */
@@ -137,6 +138,7 @@ namespace wfg::audio
             when the test says so and not when a device interrupt says so.
             Either way it is the only thing that moves the clock. */
         void processBlock();
+        void processBlock (const float* const* inputs, int numInputs);
 
         /** Blocks processed since the last start. Any thread. */
         std::int64_t blocksProcessed() const noexcept;

@@ -13,7 +13,11 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-"""`serve --device=` opens a real interface, and is still there afterwards.
+"""A real interface plays media before and after stopped reconfiguration.
+
+Also saves and reopens the show's interface and output patch. The media probe
+is a quiet sine; final device-buffer signal and channel isolation are measured
+separately by DeviceTests.cpp. Hardware rates are observed, never forced here.
 
 WHAT THIS IS FOR, and it is the plainest possible thing: the engine used to
 print its whole banner — both ports, the client URL, the granted device
@@ -48,15 +52,20 @@ Exit codes: 0 everything held or nothing to test, 1 something did not,
 from __future__ import annotations
 
 import json
+import math
+import struct
 import sys
 import tempfile
 import time
+import wave
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import common
 from common import HarnessError, Report, Server
+from first_sound import runs_in, wait_for_run_state
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -64,7 +73,28 @@ FIXTURE = REPO_ROOT / "tests" / "fixtures" / "bundles" / "groups"
 CLIENT = REPO_ROOT / "clients" / "console"
 
 
-def available_devices() -> "list[str]":
+def add_media_probe(bundle: Path) -> None:
+    """Make the first cue a quiet routed sine, safe to send to a real device."""
+    root = ET.parse(bundle / "show.xml")
+    cue = root.find("./Lists/List/Cue")
+    cue.tag = "Media"
+    cue.set("file", "device-probe.wav")
+    ET.SubElement(cue, "Route", id="Z04EH7PH", bus="J3MT5XYA", gains="1 0")
+    audio = root.find("Audio")
+    audio.set("tracks", "1")
+    ET.SubElement(audio, "Bus", id="J3MT5XYA", name="Main", width="2")
+    root.write(bundle / "show.xml", encoding="utf-8")
+    media = bundle / "media"
+    media.mkdir(exist_ok=True)
+    with wave.open(str(media / "device-probe.wav"), "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(44100)
+        out.writeframes(b"".join(struct.pack("<h", int(32 * math.sin(2 * math.pi * 440 * n / 44100)))
+                                 for n in range(44100 * 5)))
+
+
+def available_devices() -> "list[tuple[str, str]]":
     """Every device `wfg devices` lists, in the order it lists them.
 
     Parsed off the verb's own output rather than guessed at, because the name
@@ -77,12 +107,15 @@ def available_devices() -> "list[str]":
         raise HarnessError(f"wfg devices exited {code}: {(out + err).strip()[:200]}")
 
     found = []
+    device_type = ""
 
     for line in out.splitlines():
         # A type heading is unindented; a device is indented four spaces; its
         # channel counts and rates are indented eight.
-        if line.startswith("    ") and not line.startswith("        "):
-            found.append(line.strip())
+        if line and not line.startswith(" "):
+            device_type = line.removesuffix(" (default)").strip()
+        elif line.startswith("    ") and not line.startswith("        "):
+            found.append((device_type, line.strip()))
 
     return found
 
@@ -149,18 +182,22 @@ def refusal_from(server) -> "str | None":
     return None
 
 
-def check_on(device: str, locale: "str | None", report: Report) -> bool:
+def check_on(device: str, locale: "str | None", report: Report, device_type: str = "") -> bool:
     """Runs every check against one device. False if it would not open."""
     with tempfile.TemporaryDirectory(prefix="wfg-device-") as scratch:
         bundle = common.copy_bundle(FIXTURE, Path(scratch) / "groups")
+        add_media_probe(bundle)
 
         try:
-            server = Server(bundle, locale=locale, sample_rate=44100,
-                            device=device, ui=CLIENT)
-        except HarnessError:
-            # It did not get far enough to report its ports, which on this path
-            # means it never opened the card.
-            return False
+            server = Server(bundle, locale=locale, sample_rate=None, buffer_size=None,
+                            device=device, device_type=device_type, ui=CLIENT)
+        except HarnessError as error:
+            # An explicit refusal can mean unavailable hardware. A crash or a
+            # startup timeout must fail this test, even before ports appeared.
+            if "serve exited 2 before it was ready:" in str(error):
+                print(f"device_serve: {error}")
+                return False
+            raise
 
         with server:
             ticking = wait_until_ticking(server)
@@ -206,7 +243,64 @@ def check_on(device: str, locale: "str | None", report: Report) -> bool:
 
             report.check(bool(moved), "and it keeps ticking")
 
-            return True
+            # A callback and advancing ticks can both work while GO stays silent:
+            # the hardware launch path must also configure Runner's tick size.
+            play_and_kill(server, report)
+
+            revision = value_at(server.http_port, "/godot/audio/settingsRevision")
+            common.send_udp(server.osc_port, common.osc_encode("/godot/cmd/audio/setup",
+                            [True, device_type, device, "", 0, "-1 -1", "1 0"]))
+            applied = common.wait_until(
+                lambda: value_at(server.http_port, "/godot/audio/settingsRevision") > revision,
+                timeout=20.0)
+            report.check(bool(applied), "Audio settings finishes switching while stopped")
+            report.equal(value_at(server.http_port, "/godot/audio/settingsError"), "",
+                         "the selected interface and swapped patch are accepted")
+            report.equal(value_at(server.http_port, "/godot/engine/clock"), "device",
+                         "the switched interface drives the clock")
+            if applied:
+                play_and_kill(server, report)
+            rate = value_at(server.http_port, "/godot/audio/actualSampleRate")
+            buffer = value_at(server.http_port, "/godot/audio/actualBufferSize")
+            common.send_udp(server.osc_port, common.osc_encode("/godot/cmd/document/save"))
+            saved = common.wait_until(
+                lambda: value_at(server.http_port, "/godot/document/dirty") is False)
+            report.check(bool(saved), "the show saves its audio settings")
+
+        # No --device argument: the reopened show must select its own interface.
+        with Server(bundle, locale=locale, sample_rate=rate, buffer_size=buffer) as reopened:
+            report.check(wait_until_ticking(reopened), "the saved show reopens on its selected interface")
+            report.equal(value_at(reopened.http_port, "/godot/engine/clock"), "device",
+                         "the saved selection starts hardware playback")
+            report.equal(value_at(reopened.http_port, "/godot/audio/outputPatch"), "1 0",
+                         "the saved output patch is restored")
+            play_and_kill(reopened, report)
+        return True
+
+
+def play_and_kill(server: Server, report: Report) -> None:
+    before = set(runs_in(server))
+    common.send_udp(server.osc_port,
+                    common.osc_encode("/godot/cmd/cue/fire", ["B3N8R5TW"]))
+    created = common.wait_until(lambda: [run for run in set(runs_in(server)) - before
+                               if value_at(server.http_port, f"/godot/run/{run}/cue") == "B3N8R5TW"],
+                               timeout=8.0)
+    report.check(bool(created), "the media cue has a new run")
+    if not created:
+        return
+    run = sorted(created)[0]
+    state = wait_for_run_state(server, run, "playing", timeout=8.0)
+    report.equal(state, "playing", "GO launches media on the device clock")
+    if state != "playing":
+        print("device_serve: last engine error:", value_at(server.http_port, "/godot/engine/lastError"))
+    if state == "playing":
+        advanced = common.wait_until(
+            lambda: float(value_at(server.http_port, f"/godot/run/{run}/position")) > 0.1)
+        report.check(bool(advanced), "the media playhead advances")
+    common.send_udp(server.osc_port,
+                    common.osc_encode("/godot/cmd/run/kill", [run]))
+    report.equal(wait_for_run_state(server, run, "done", timeout=5.0), "done",
+                 "the media cue can still be killed")
 
 
 def run(locale: "str | None") -> int:
@@ -218,10 +312,10 @@ def run(locale: "str | None") -> int:
         print("device_serve: this machine has no audio device; nothing to test")
         return 0
 
-    for device in devices:
-        print(f"device_serve: trying \"{device}\"")
+    for device_type, device in devices:
+        print(f"device_serve: trying {device_type} / \"{device}\"")
 
-        if check_on(device, locale, report):
+        if check_on(device, locale, report, device_type):
             return report.finish()
 
         print(f"device_serve:   would not open")
@@ -229,8 +323,8 @@ def run(locale: "str | None") -> int:
     print("device_serve: none of this machine's devices will open for playback;"
           " nothing to test")
 
-    for device in devices:
-        print(f"device_serve:   tried \"{device}\"")
+    for device_type, device in devices:
+        print(f"device_serve:   tried {device_type} / \"{device}\"")
 
     return 0
 

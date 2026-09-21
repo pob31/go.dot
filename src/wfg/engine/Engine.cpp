@@ -113,6 +113,17 @@ namespace wfg
         }
 
         CommandContext context;
+        if (admissionCheck)
+        {
+            const auto refusal = admissionCheck (event.command);
+            if (! refusal.empty())
+            {
+                r.kind = LogRecord::Kind::rejected;
+                r.reason = refusal;
+                r.args = std::move (check.args);
+                return r;
+            }
+        }
         context.tick = tickIndex;
         context.origin = &event.origin;
 

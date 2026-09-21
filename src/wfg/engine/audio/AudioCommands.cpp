@@ -15,11 +15,36 @@
 */
 
 #include <wfg/engine/audio/AudioCommands.h>
+#include <cmath>
 
 namespace wfg::audio
 {
+    void stopOutputTest (AudioState& state)
+    {
+        state.test.type = 0; state.test.channel = -1; state.test.hold = false;
+        if (state.sendTest) state.sendTest (state.test);
+    }
+
     void registerAudioCommands (CommandRegistry& registry, AudioState& state)
     {
+        registry.add ({ "audio.testSignal", "Test one hardware output without changing cue routing.",
+            { { "type", 'i', false }, { "channel", 'i', false }, { "frequency", 'i', false },
+              { "level", 'd', false }, { "hold", 'T', false } }, false,
+            [&state] (CommandContext&, const std::vector<osc::Value>& args)
+            {
+                OutputTestSettings next { args[0].getInt32(), args[1].getInt32(), args[2].getInt32(),
+                                          args[3].getFloat64(), args[4].getBool() };
+                if (next.type < 0 || next.type > 4 || next.channel < -1 || next.channel >= maximumPatchChannels
+                    || next.frequency < 20 || next.frequency > 20000 || ! std::isfinite (next.level)
+                    || next.level < -92.0 || next.level > 0.0)
+                    return Outcome::rejected (reason::typeMismatch);
+                state.test = next;
+                if (state.sendTest) state.sendTest (state.test);
+                return Outcome::ok (args);
+            } });
+        registry.add ({ "audio.testStop", "Stop and clear the output test signal.", {}, false,
+            [&state] (CommandContext&, const std::vector<osc::Value>& args)
+            { stopOutputTest (state); return Outcome::ok (args); } });
         //----------------------------------------------------------------------
         registry.add ({ "audio.editBuilt",
                         "The playback graph exists, and this is its shape. Reported by the"

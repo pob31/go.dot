@@ -40,6 +40,7 @@
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/HostPlayer.h>
 #include <wfg/engine/audio/DeviceLayer.h>
+#include <wfg/engine/audio/SettingsPump.h>
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
@@ -255,12 +256,13 @@ namespace
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
-        wfg::cue::registerRunCommands (engine.commands(), runs);
+        wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
+        wfg::audio::registerAudioSettingsCommands (engine, document, runner, audioState);
 
         for (const auto& command : engine.commands().all())
         {
@@ -505,13 +507,14 @@ namespace
             as applied on a machine with no sound card and no show, which is
             exactly the guarantee the event exists to provide. */
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
+        wfg::audio::registerAudioSettingsCommands (engine, document, runner, audioState);
 
         /*  The run lifecycle, unconditionally and for the same reason. Only
             `audio.arm` reads the document, and it answers unknown-id against an
             empty one - which is the right answer. Everything else is the
             machine reporting what happened to a run, and a log of a performance
             has to replay on a laptop with no show open. */
-        wfg::cue::registerRunCommands (engine.commands(), runs);
+        wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
         /*  The mounts, and deliberately no sender. A network cue replayed
@@ -1084,11 +1087,12 @@ namespace
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
-        wfg::cue::registerRunCommands (engine.commands(), runs);
+        wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
+        wfg::audio::registerAudioSettingsCommands (engine, document, runner, audioState);
 
         /*  The mounts are loaded before the first publish, so what this prints
             includes somebody else's namespace at its own prefix. A mount that
@@ -1646,6 +1650,22 @@ namespace
         return shape;
     }
 
+    wfg::audio::DeviceAudioDriver::Request deviceRequestFor (
+        const wfg::audio::AudioSettings& settings, const AudioShape& shape)
+    {
+        wfg::audio::DeviceAudioDriver::Request request;
+        request.deviceName = settings.outputDevice;
+        request.deviceType = settings.deviceType;
+        request.inputDeviceName = settings.inputDevice;
+        request.blockSize = settings.bufferSize;
+        request.edit.tracks = shape.tracks;
+        request.edit.slots = shape.slots;
+        wfg::audio::readPatch (settings.inputPatch, request.inputPatch);
+        wfg::audio::readPatch (settings.outputPatch, request.outputPatch);
+        request.logicalOutputs = std::max (shape.outputs, static_cast<int> (request.outputPatch.size()));
+        return request;
+    }
+
     /*  `wfg serve <bundle> --sample-rate=N --buffer=N [--hosted [--render=<wav>]]`
         `                     [--http-port=N] [--osc-port=N] [--log=<file>]`
 
@@ -1729,7 +1749,8 @@ namespace
             return 2;
         }
 
-        if (! args.containsOption ("--sample-rate") || ! args.containsOption ("--buffer"))
+        if (! args.containsOption ("--window") && ! args.containsOption ("--device")
+            && (! args.containsOption ("--sample-rate") || ! args.containsOption ("--buffer")))
         {
             std::cerr << "wfg serve: --sample-rate=N and --buffer=N are both required.\n"
                          "    They have no defaults on purpose: a rate Go.dot chose for\n"
@@ -1738,8 +1759,10 @@ namespace
             return 2;
         }
 
-        const auto sampleRate = args.getValueForOption ("--sample-rate").getIntValue();
-        const auto blockSize = args.getValueForOption ("--buffer").getIntValue();
+        auto sampleRate = args.containsOption ("--sample-rate")
+                            ? args.getValueForOption ("--sample-rate").getIntValue() : 48000;
+        auto blockSize = args.containsOption ("--buffer")
+                            ? args.getValueForOption ("--buffer").getIntValue() : 256;
         const auto hosted = args.containsOption ("--hosted");
 
         /*  `--window`: the compiled client, in this process (namespace draft
@@ -2093,12 +2116,13 @@ namespace
             });
 
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
-        wfg::cue::registerRunCommands (engine.commands(), runs);
+        wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
+        wfg::audio::registerAudioSettingsCommands (engine, document, runner, audioState);
 
         /*  ONE APPLIED COMMAND, ONE UNDO TRANSACTION, opened here and nowhere
             else - so a command added next year is on the stack without knowing
@@ -2194,6 +2218,58 @@ namespace
             before anything binds means the failure is a message on stderr and
             an exit code, rather than a server that answers for a while and then
             stops. */
+        auto selectedAudio = wfg::audio::audioSettingsOf (document);
+        const auto onDevice = args.containsOption ("--device") || (selectedAudio.enabled && ! hosted);
+        std::unique_ptr<wfg::audio::DeviceAudioDriver> deviceDriver;
+        audioState.sendTest = [&deviceDriver] (const wfg::audio::OutputTestSettings& settings)
+        { if (deviceDriver) deviceDriver->setOutputTest (settings); };
+        wfg::audio::DeviceAudioDriver::Request activeDeviceRequest;
+        if (onDevice && hosted)
+        {
+            std::cerr << "wfg serve: --device and --hosted cannot be combined" << std::endl;
+            return 2;
+        }
+        if (onDevice)
+        {
+            const auto shape = audioShapeOf (document);
+            if (! shape.problem.empty()) { std::cerr << shape.problem << std::endl; return 2; }
+            activeDeviceRequest = deviceRequestFor (selectedAudio, shape);
+            if (args.containsOption ("--device"))
+            {
+                activeDeviceRequest.deviceName = args.getValueForOption ("--device").toStdString();
+                if (! selectedAudio.enabled) activeDeviceRequest.inputDeviceName.reset();
+            }
+            if (args.containsOption ("--device-type"))
+                activeDeviceRequest.deviceType = args.getValueForOption ("--device-type").toStdString();
+            if (args.containsOption ("--buffer")) activeDeviceRequest.blockSize = blockSize;
+            deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
+                engineCacheFolder().getFullPathName().toStdString());
+            if (! deviceDriver->open (activeDeviceRequest))
+            {
+                const auto error = deviceDriver->lastError();
+                if (! wantWindow) { std::cerr << error << std::endl; return 2; }
+                audioState.settingsStatus = "error";
+                audioState.settingsError = error;
+                deviceDriver.reset(); // keep the window available to select a replacement
+            }
+            else
+            {
+                const auto actual = deviceDriver->settings();
+                if (args.containsOption ("--sample-rate") && sampleRate != actual.sampleRate)
+                {
+                    std::cerr << "wfg serve: device opened at " << actual.sampleRate
+                              << " Hz, not the requested " << sampleRate << " Hz" << std::endl;
+                    return 2;
+                }
+                sampleRate = actual.sampleRate;
+                blockSize = actual.blockSize;
+                audioState.sampleRate = sampleRate;
+                audioState.bufferSize = blockSize;
+                audioState.inputs = deviceDriver->inputChannels();
+                audioState.hardwareOutputs = deviceDriver->outputChannels();
+                audioState.availableBufferSizes = deviceDriver->availableBufferSizes();
+            }
+        }
         const auto schedule = wfg::TickClock::create (sampleRate);
 
         if (! schedule.has_value())
@@ -2542,54 +2618,12 @@ namespace
             device mode rather than a simulation of it. */
         std::unique_ptr<wfg::DummyAudioClock> dummy;
         std::unique_ptr<wfg::audio::HostedAudioDriver> driver;
-        std::unique_ptr<wfg::audio::DeviceAudioDriver> deviceDriver;
         std::unique_ptr<wfg::audio::HostPlayer> player;
         const wfg::SampleClock* blockSource = nullptr;
 
-        const auto deviceName = args.containsOption ("--device")
-                                  ? args.getValueForOption ("--device").toStdString()
-                                  : std::string {};
-
-        const auto onDevice = args.containsOption ("--device");
-
-        if (onDevice && hosted)
+        if (deviceDriver != nullptr)
         {
-            std::cerr << "wfg serve: --device and --hosted are two different block"
-                         " sources; give one" << std::endl;
-            return 2;
-        }
-
-        if (onDevice)
-        {
-            /*  A SHOW OFF A SOUND CARD, which is the same program as the two
-                lines below it with a different thing deciding when a block
-                happens. TickThread takes a SampleClock and cannot tell which. */
             const auto shape = audioShapeOf (document);
-
-            if (! shape.problem.empty())
-            {
-                std::cerr << "wfg serve: " << shape.problem << std::endl;
-                return 2;
-            }
-
-            deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
-                             engineCacheFolder().getFullPathName().toStdString());
-
-            wfg::audio::DeviceAudioDriver::Request request;
-            request.deviceName = deviceName;
-            request.deviceType = args.containsOption ("--device-type")
-                                   ? args.getValueForOption ("--device-type").toStdString()
-                                   : std::string {};
-            request.blockSize = blockSize;
-            request.edit.tracks = shape.tracks;
-            request.edit.slots = shape.slots;
-
-            if (! deviceDriver->open (request))
-            {
-                std::cerr << "wfg serve --device: " << deviceDriver->lastError() << std::endl;
-                std::cerr << "    `wfg devices` lists what this machine has." << std::endl;
-                return 2;
-            }
 
             if (const auto duplicates = deviceDriver->host().inspectNodeIds();
                 ! duplicates.ok())
@@ -2602,33 +2636,6 @@ namespace
 
             const auto ids = deviceDriver->host().inspectNodeIds();
             const auto granted = deviceDriver->settings();
-
-            /*  A RATE THAT IS NOT THE ONE ASKED FOR STOPS THE SHOW HERE.
-
-                The tick schedule was built above from `--sample-rate`, and
-                everything downstream is arithmetic on it: samples per tick, the
-                launch-tick rule, the fade's fifty values a second. A card that
-                opened at 44100 while the schedule says 48000 would put every
-                one of those 8.8% out - every cue late, every fade the wrong
-                length - and nothing would look wrong.
-
-                REFUSING IS THE SAFE READING OF PRD §6.2, whose mismatch policy
-                (refuse, warn, or resample) is the author's to settle and is
-                deliberately still open. Refusing is the one of the three that
-                cannot be wrong quietly, and the message says the number to
-                pass, so the remedy is one flag rather than an investigation. */
-            if (granted.sampleRate != sampleRate)
-            {
-                std::cerr << "wfg serve --device: \"" << deviceDriver->deviceName()
-                          << "\" opened at " << granted.sampleRate
-                          << " Hz, not the " << sampleRate << " Hz this was asked for."
-                          << std::endl
-                          << "    The rate is the device's to choose (PRD 6.2), and every"
-                             " tick is computed from it," << std::endl
-                          << "    so re-run with --sample-rate=" << granted.sampleRate
-                          << " or set the device to " << sampleRate << " Hz." << std::endl;
-                return 2;
-            }
 
             /*  REPORTED WITH THE DEVICE'S NAME, and the numbers it GRANTED
                 rather than the ones that were asked for. A driver is entitled
@@ -2739,7 +2746,6 @@ namespace
                 Tracktion. */
             player = std::make_unique<wfg::audio::HostPlayer> (driver->host(), engine);
             runner.setPlayer (player.get());
-            runner.setSamplesPerTick (schedule->samplesPerTick());
             runner.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
 
             state.launchLatencyTicks = runner.latencyTicks();
@@ -2766,8 +2772,13 @@ namespace
             graph and drives it from a dummy clock of its own, which is what
             makes a render reproducible and is exactly not a card. */
         state.clock = deviceDriver != nullptr ? "device" : "dummy";
+        // All block sources use the same cue launch arithmetic. A zero value
+        // prevents launchIfDue from placing clips even with a running device.
+        runner.setSamplesPerTick (schedule->samplesPerTick());
+        state.launchLatencyTicks = runner.latencyTicks();
 
-        wfg::TickThread ticks { engine, *blockSource, *schedule };
+        wfg::audio::SessionAudioClock sessionClock (*blockSource);
+        wfg::TickThread ticks { engine, sessionClock, *schedule };
 
         /*  Publish then flush, on the tick thread, once per tick, in that
             order. The snapshot has to be the finished answer to the tick that
@@ -2794,7 +2805,8 @@ namespace
 
         ticks.setBeforeTick ([&] (std::int64_t tickIndex)
                              {
-                                 runner.beforeTick (engine, tickIndex);
+                                 if (audioState.settingsStatus != "applying")
+                                     runner.beforeTick (engine, tickIndex);
 
                                  const auto now = juce::Time::getCurrentTime();
                                  const auto second = now.getHours() * 3600
@@ -2888,6 +2900,20 @@ namespace
                                 state.audioDevice = audioState.device;
                                 state.audioOutputs = audioState.outputs;
                                 state.audioStatus = audioState.status;
+                                state.audioSettingsStatus = audioState.settingsStatus;
+                                state.clock = deviceDriver != nullptr ? "device" : "dummy";
+                                state.audioSettingsRevision = audioState.settingsRevision;
+                                state.audioAvailableBufferSizes = audioState.availableBufferSizes;
+                                state.audioTest = audioState.test;
+                                state.audioSettingsError = audioState.settingsError;
+                                state.audioSampleRate = audioState.sampleRate;
+                                state.audioBufferSize = audioState.bufferSize;
+                                state.hardwareInputs = audioState.inputs;
+                                state.hardwareOutputs = audioState.hardwareOutputs;
+                                state.sampleRate = ticks.sampleRate();
+                                state.samplesPerTick = ticks.samplesPerTick();
+                                if (audioState.bufferSize > 0) state.blockSize = audioState.bufferSize;
+                                state.launchLatencyTicks = runner.latencyTicks();
 
                                 state.lateness = ticks.lateness();
                                 state.latenessMax = ticks.latenessMax();
@@ -3094,6 +3120,96 @@ namespace
                                 previous = std::move (current);
                             });
 
+        wfg::audio::SettingsPump settingsPump ([&] (const wfg::audio::AudioSettings& settings, bool defaultsOnly)
+        {
+            if (defaultsOnly)
+            {
+                const auto error = wfg::audio::saveAudioDefaults (
+                    engineCacheFolder().getSiblingFile ("audio-defaults.xml").getFullPathName().toStdString(), settings);
+                engine.submit ("engine", "audio.defaultsReady", { wfg::osc::Value::string (error) });
+                return;
+            }
+
+            // Joining the sole model owner also prevents a queued GO from racing
+            // device teardown. The admission check holds gestures until ready.
+            ticks.stop();
+            const auto hadDevice = deviceDriver != nullptr;
+            if (deviceDriver) deviceDriver->close();
+            if (driver) driver->stop();
+            if (dummy) dummy->stop();
+            player.reset();
+            runner.setPlayer (nullptr);
+            std::string error;
+            const auto shape = audioShapeOf (document);
+            auto wanted = deviceRequestFor (settings, shape);
+            if (settings.enabled)
+            {
+                if (! deviceDriver)
+                    deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
+                        engineCacheFolder().getFullPathName().toStdString());
+                if (! shape.problem.empty()) error = shape.problem;
+                else if (! deviceDriver->open (wanted)) error = deviceDriver->lastError();
+                else if (! wfg::TickClock::create (deviceDriver->settings().sampleRate))
+                    error = "The device sample rate does not support the 50 Hz show clock";
+                else if (! deviceDriver->host().inspectNodeIds().ok())
+                    error = "The audio graph contains duplicate node identities";
+            }
+            if (! error.empty())
+            {
+                deviceDriver->close();
+                if (! hadDevice || ! deviceDriver->open (activeDeviceRequest))
+                {
+                    if (hadDevice) error += "; the previous interface could not be restored";
+                    deviceDriver.reset();
+                }
+                else error += "; the previous interface was restored";
+            }
+            else if (! settings.enabled) deviceDriver.reset();
+            else activeDeviceRequest = wanted;
+
+            int rate = ticks.sampleRate(), buffer = blockSize, inputs = 0, outputs = 0;
+            if (deviceDriver)
+            {
+                const auto granted = deviceDriver->settings();
+                rate = granted.sampleRate;
+                buffer = granted.blockSize;
+                inputs = deviceDriver->inputChannels();
+                outputs = deviceDriver->outputChannels();
+                player = std::make_unique<wfg::audio::HostPlayer> (deviceDriver->host(), engine);
+                blockSource = &deviceDriver->host().clock();
+            }
+            else if (! error.empty() && driver && driver->start())
+            {
+                player = std::make_unique<wfg::audio::HostPlayer> (driver->host(), engine);
+                blockSource = &driver->clock();
+                rate = driver->host().settings().sampleRate;
+                buffer = driver->host().settings().blockSize;
+            }
+            else
+            {
+                dummy = std::make_unique<wfg::DummyAudioClock> (rate, buffer);
+                blockSource = &dummy->clock();
+                dummy->start();
+            }
+            runner.setPlayer (player.get());
+            runner.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
+            sessionClock.use (*blockSource, ticks.rebaseAudio (rate));
+            engine.submit ("engine", "audio.settingsReady",
+                { wfg::osc::Value::string (error), wfg::osc::Value::int32 (rate),
+                  wfg::osc::Value::int32 (buffer), wfg::osc::Value::int32 (inputs),
+                  wfg::osc::Value::int32 (outputs), wfg::osc::Value::string (
+                      deviceDriver ? deviceDriver->availableBufferSizes() : std::string {}) });
+            if (deviceDriver)
+                engine.submit ("engine", "audio.editBuilt",
+                    { wfg::osc::Value::string (deviceDriver->deviceName()),
+                      wfg::osc::Value::int32 (activeDeviceRequest.edit.tracks),
+                      wfg::osc::Value::int32 (deviceDriver->settings().outputChannels),
+                      wfg::osc::Value::int32 (deviceDriver->host().inspectNodeIds().nodes) });
+            ticks.start();
+        });
+        audioState.requestSettings = [&settingsPump] (const wfg::audio::AudioSettings& settings, bool defaultsOnly)
+        { settingsPump.post (settings, defaultsOnly); };
+
         {
             /*  THE WINDOW, IF ASKED FOR, and this scope is its whole life.
                 Built BEFORE THE CLOCK RUNS, and that ordering is a measurement
@@ -3162,6 +3278,10 @@ namespace
                                  + " is not empty";
 
                     wfg::doc::ShowDocument fresh;
+                    wfg::audio::AudioSettings defaults;
+                    if (wfg::audio::loadAudioDefaults (engineCacheFolder().getSiblingFile ("audio-defaults.xml")
+                                                       .getFullPathName().toStdString(), defaults))
+                        fresh.configureAudio (defaults);
 
                     if (const auto made = fresh.createList ("Main"); ! made.ok)
                         return "could not start the new show: " + made.reason;
@@ -3285,6 +3405,9 @@ namespace
                 dummy->start();
             }
 
+            // Device callbacks may already have run while the UI was built.
+            // Start session time here rather than catching up those samples.
+            sessionClock.use (*blockSource, 0);
             ticks.start();
 
             /*  The main thread from here on is JUCE's, and only JUCE's. Phase 2
@@ -3326,9 +3449,9 @@ namespace
 
         if (deviceDriver != nullptr)
             deviceDriver->close();
-        else if (driver != nullptr)
+        if (driver != nullptr)
             driver->stop();
-        else
+        if (dummy != nullptr)
             dummy->stop();
 
         server.stop();

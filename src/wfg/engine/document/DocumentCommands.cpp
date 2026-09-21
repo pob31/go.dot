@@ -108,6 +108,23 @@ namespace wfg::doc
     void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document,
                                    ForeignWrite foreign)
     {
+        registry.add ({ "audio.configure", "Set the show's audio interface and channel patches as one edit.",
+                        { { "enabled", 'T', false }, { "deviceType", 's', false },
+                          { "outputDevice", 's', false }, { "inputDevice", 's', false },
+                          { "bufferSize", 'i', false }, { "inputPatch", 's', false },
+                          { "outputPatch", 's', false } }, true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            audio::AudioSettings settings;
+                            settings.enabled = args[0].getBool();
+                            settings.deviceType = args[1].getString();
+                            settings.outputDevice = args[2].getString();
+                            settings.inputDevice = args[3].getString();
+                            settings.bufferSize = args[4].getInt32();
+                            settings.inputPatch = args[5].getString();
+                            settings.outputPatch = args[6].getString();
+                            return fromEdit (document.configureAudio (settings), args);
+                        } });
         //----------------------------------------------------------------------
         registry.add ({ "list.create",
                         "Creates a cue list. Generates an identifier if none is given.",
@@ -157,6 +174,15 @@ namespace wfg::doc
                                                                     args[1].getString(),
                                                                     id);
 
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        registry.add ({ "route.default", "Route an imported media cue to the first output bus, preserving existing assignments.",
+                        { { "cue", 's', false }, { "channels", 'i', false }, { "id", 's', true } }, true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto edit = document.defaultMediaRoute (args[0].getString(), args[1].getInt32(),
+                                                                          args.size() > 2 ? args[2].getString() : std::string {});
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });
 

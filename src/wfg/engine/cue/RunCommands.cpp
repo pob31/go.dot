@@ -23,7 +23,7 @@
 namespace wfg::cue
 {
     //==============================================================================
-    void registerRunCommands (CommandRegistry& registry, RunTable& runs)
+    void registerRunCommands (CommandRegistry& registry, RunTable& runs, std::function<void()> stopDiagnostics)
     {
         //----------------------------------------------------------------------
         registry.add ({ "audio.armed",
@@ -588,8 +588,9 @@ namespace wfg::cue
                         " every footer runs.",
                         {},
                         true,
-                        [&runs, rootsOf] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs, rootsOf, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
                         {
+                            if (stopDiagnostics) stopDiagnostics();
                             for (const auto& id : rootsOf())
                                 if (auto* run = runs.find (id))
                                     run->state = runState::stopping;
@@ -602,8 +603,9 @@ namespace wfg::cue
                         " as it was.",
                         {},
                         true,
-                        [&runs, rootsOf] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&runs, rootsOf, stopDiagnostics] (CommandContext&, const std::vector<osc::Value>& args)
                         {
+                            if (stopDiagnostics) stopDiagnostics();
                             for (const auto& id : rootsOf())
                             {
                                 if (auto* run = runs.find (id))

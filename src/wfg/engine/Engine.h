@@ -166,6 +166,11 @@ namespace wfg
 
         void setBeforeApply (BeforeApply hook) { beforeApply = std::move (hook); }
 
+        // A short asynchronous audio restart defers gestures until its logged
+        // completion. The same predicate runs on replay; no hardware is consulted.
+        void setAdmissionCheck (std::function<std::string (const std::string&)> check)
+        { admissionCheck = std::move (check); }
+
     private:
         LogRecord applyEvent (std::int64_t tickIndex, const Event& event);
         void record (const LogRecord& r);
@@ -176,6 +181,7 @@ namespace wfg
 
         std::vector<Entry> draining;          // reused; tick thread only
         BeforeApply beforeApply;
+        std::function<std::string (const std::string&)> admissionCheck;
 
         std::atomic<std::int64_t> tick { -1 };
         std::atomic<std::uint64_t> seq { 0 };

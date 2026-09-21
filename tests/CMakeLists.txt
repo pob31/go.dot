@@ -62,6 +62,8 @@
 add_executable(wfg_tests
     TestMain.cpp
     TestSupport.h
+    OutputTestSignalTests.cpp
+    ImportRoutingTests.cpp
     ToolchainTests.cpp
     LocaleTests.cpp
     OscValueTests.cpp
@@ -112,6 +114,17 @@ target_compile_definitions(wfg_tests PRIVATE
 # wfg::client_model and not wfg::client_ui: the model half is what a test can
 # hold (ClientTests.cpp); the window is tested by opening it.
 target_link_libraries(wfg_tests PRIVATE wfg::engine wfg::client_model wfg::warnings)
+
+# These native-window checks need a Windows desktop and exercise the actual
+# settings panel with a live device; keep the ordinary unit runner headless.
+if(WIN32)
+    add_executable(wfg_audio_ui_tests TestMain.cpp AudioSettingsUiTests.cpp)
+    target_link_libraries(wfg_audio_ui_tests PRIVATE wfg::engine wfg::client_ui wfg::warnings)
+    add_test(NAME ui.audio-settings.C COMMAND wfg_audio_ui_tests --wfg-locale=C)
+    add_test(NAME ui.audio-settings.fr_FR COMMAND wfg_audio_ui_tests --wfg-locale=${WFG_LOCALE_FR})
+    set_tests_properties(ui.audio-settings.C ui.audio-settings.fr_FR PROPERTIES
+                         RUN_SERIAL TRUE TIMEOUT 120)
+endif()
 
 # -----------------------------------------------------------------------------
 # The unit suite, run once per locale.
@@ -649,6 +662,13 @@ add_test(NAME blackbox.phase1.fr_FR
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.phase1.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+add_test(NAME blackbox.import-playback.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/import_playback.py" --wfg-locale=C)
+add_test(NAME blackbox.import-playback.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/import_playback.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.import-playback.C blackbox.import-playback.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 60)
 
 # -----------------------------------------------------------------------------
 # THE PHASE 2 DONE-WHEN CLAUSE, driven from outside the process.

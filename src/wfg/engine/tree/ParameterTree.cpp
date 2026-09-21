@@ -1475,6 +1475,19 @@ namespace wfg::tree
             if (name == "device")        text = state.audioDevice;
             else if (name == "outputs")  text = std::to_string (state.audioOutputs);
             else if (name == "status")   text = state.audioStatus;
+            else if (name == "settingsStatus") text = state.audioSettingsStatus;
+            else if (name == "settingsRevision") text = std::to_string (state.audioSettingsRevision);
+            else if (name == "settingsError") text = state.audioSettingsError;
+            else if (name == "actualSampleRate") text = std::to_string (state.audioSampleRate);
+            else if (name == "actualBufferSize") text = std::to_string (state.audioBufferSize);
+            else if (name == "availableBufferSizes") text = state.audioAvailableBufferSizes;
+            else if (name == "testType") text = std::to_string (state.audioTest.type);
+            else if (name == "testChannel") text = std::to_string (state.audioTest.channel);
+            else if (name == "testFrequency") text = std::to_string (state.audioTest.frequency);
+            else if (name == "testLevel") text = juce::String (state.audioTest.level, 1).toStdString();
+            else if (name == "testHold") text = state.audioTest.hold ? "true" : "false";
+            else if (name == "hardwareInputs") text = std::to_string (state.hardwareInputs);
+            else if (name == "hardwareOutputs") text = std::to_string (state.hardwareOutputs);
             else                         text = std::string (row->defaultText);
 
             engineValue (*row, "audio", text);

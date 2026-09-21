@@ -391,6 +391,22 @@ namespace wfg::doc
         showNode.addListener (this);
     }
 
+    EditResult ShowDocument::configureAudio (const audio::AudioSettings& settings)
+    {
+        if (isLocked()) return EditResult::failed (reason::locked);
+        if (! audio::validAudioSettings (settings)) return EditResult::failed (reason::badValue);
+        const std::pair<const char*, std::string> fields[] {
+            { "enabled", settings.enabled ? "true" : "false" },
+            { "deviceType", settings.deviceType }, { "outputDevice", settings.outputDevice },
+            { "inputDevice", settings.inputDevice }, { "bufferSize", std::to_string (settings.bufferSize) },
+            { "inputPatch", settings.inputPatch }, { "outputPatch", settings.outputPatch }
+        };
+        for (const auto& [name, value] : fields)
+            if (const auto result = setAttribute (std::string ("/godot/audio/") + name, value); ! result.ok)
+                return result;
+        return EditResult::succeeded();
+    }
+
     ShowDocument::ShowDocument (ShowDocument&& other)
         : showNode (juce::ValueTree()), registry (IdRegistry::withSystemEntropy())
     {
@@ -900,6 +916,13 @@ namespace wfg::doc
         if (! parsed.ok)
             return EditResult::failed (reason::typeMismatch);
 
+        if (target.attribute->element == "Audio"
+            && (target.attribute->name() == "inputPatch" || target.attribute->name() == "outputPatch"))
+        {
+            std::vector<int> patch;
+            if (! audio::readPatch (std::string (text), patch)) return EditResult::failed (reason::badValue);
+        }
+
         /*  ONE REFERENTIAL INVARIANT, and it is named rather than generalised.
 
             A list's standby must name a cue that list may be parked on - one of
@@ -1050,6 +1073,18 @@ namespace wfg::doc
                 return EditResult::failed (reason::badAddress);
             }
 
+            if (attribute->isList())
+            {
+                std::string canonical;
+                if (! Schema::parseList (*attribute, text, canonical).ok)
+                {
+                    registry.release (objectId);
+                    return EditResult::failed (reason::typeMismatch);
+                }
+                node.setProperty (juce::Identifier (juce::String (std::string (name))), juce::String (canonical), nullptr);
+                continue;
+            }
+
             Value value;
 
             if (! Schema::parseValue (*attribute, text, value).ok)
@@ -1123,6 +1158,39 @@ namespace wfg::doc
 
         return insertObject (cue, endOfSequence, "Route", id,
                              { { "bus", busId } });
+    }
+
+    EditResult ShowDocument::defaultMediaRoute (const std::string& cueId, int channels,
+                                               const std::string& id)
+    {
+        if (auto refusal = refuseIfLocked()) return *refusal;
+        const auto cue = findById (cueId);
+        if (! cue.isValid()) return EditResult::failed (reason::unknownId);
+        if (! cue.hasType ("Media") || channels < 1 || channels > 512)
+            return EditResult::failed (reason::typeMismatch);
+        for (const auto& child : cue)
+            if (child.hasType ("Route") || child.hasType ("Feed"))
+                return EditResult::succeeded (child[idProperty].toString().toStdString());
+
+        juce::ValueTree destination;
+        for (const auto& bus : showNode.getChildWithName ("Audio"))
+            if (bus.hasType ("Bus") && (! destination.isValid()
+                || static_cast<int> (bus.getProperty ("firstChannel", 0)) < static_cast<int> (destination.getProperty ("firstChannel", 0))))
+                destination = bus;
+        if (! destination.isValid()) return EditResult::failed (reason::badAddress);
+        const auto width = static_cast<int> (destination.getProperty ("width", 1));
+        if (width < 1 || width > 512) return EditResult::failed (reason::typeMismatch);
+        // Input-major coefficients: mono feeds both sides of a stereo bus;
+        // wider files map matching channels, without an implicit downmix.
+        std::string gains;
+        for (int input = 0; input < channels; ++input)
+            for (int output = 0; output < width; ++output)
+            {
+                if (! gains.empty()) gains += ' ';
+                gains += (input == output || (channels == 1 && width == 2)) ? '1' : '0';
+            }
+        return insertObject (cue, endOfSequence, "Route", id,
+                             { { "bus", destination[idProperty].toString().toStdString() }, { "gains", gains } });
     }
 
     EditResult ShowDocument::createSlot (const std::string& mountId,
@@ -1701,6 +1769,8 @@ namespace wfg::doc
     std::vector<std::string> ShowDocument::validate() const
     {
         std::vector<std::string> problems;
+        if (! audio::validAudioSettings (audio::audioSettingsOf (*this)))
+            problems.push_back ("/Show/Audio: invalid audio patch or buffer size");
         std::unordered_set<std::string> seenIds;
 
         const auto& schema = Schema::instance();

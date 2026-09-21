@@ -161,6 +161,26 @@ mount,readback,s,r,none,none|oscquery,,state,1,no,park,show,,"Whether this targe
 mount,sent,i,r,0,,,state,1,no,park,none,,"How many messages have left for this target since the show opened. A readout for a tech rehearsal, and the first thing to establish when a device is not moving and nobody knows whose end is wrong: UDP cannot report delivery, so what Go.dot can honestly say is how many times it sent."
 audio,tracks,i,r,,0..,,state,1,no,park,show,,"The fixed number of audio tracks, and so the polyphony ceiling: N tracks is N simultaneous cues. Zero is legal and means a show with no audio. Required, and deliberately without a default - the number is a decision about the shape of a show, and no value here could be right for every rig."
 audio,device,s,r,,,,state,1,no,park,none,,"The audio device the engine has open, or empty when there is none."
+audio,enabled,T,rw,false,,,state,1,no,park,show,,Open the saved audio interface when this show starts.
+audio,deviceType,s,rw,,,,state,1,no,park,show,,Audio driver type selected for this show.
+audio,outputDevice,s,rw,,,,state,1,no,park,show,,Output interface selected for this show. Empty selects the system default.
+audio,inputDevice,s,rw,,,,state,1,no,park,show,,Input interface selected for this show. Empty disables inputs.
+audio,bufferSize,i,rw,0,0..65536,samples,state,1,no,park,show,,Requested buffer size. Zero uses the device default; the granted size is observed.
+audio,inputPatch,s,rw,,,,state,1,no,park,show,,Space-separated hardware input indices per logical input. Zero based; -1 disconnects. Empty preserves identity routing.
+audio,outputPatch,s,rw,,,,state,1,no,park,show,,Space-separated hardware output indices per logical output. Zero based; -1 disconnects. Empty preserves identity routing.
+audio,settingsStatus,s,r,ready,ready|applying|error,,state,10,no,park,none,,Whether the requested audio settings have finished applying.
+audio,settingsRevision,i,r,0,0..,,state,10,no,park,none,,Number of completed audio settings apply operations in this session.
+audio,settingsError,s,r,,,,state,10,no,park,none,,Why the most recent audio settings operation failed.
+audio,actualSampleRate,i,r,0,0..,Hz,state,1,no,park,none,,The observed device sample rate.
+audio,actualBufferSize,i,r,0,0..,samples,state,1,no,park,none,,The buffer size granted by the device.
+audio,availableBufferSizes,s,r,,,,state,1,no,park,none,,Space-separated buffer sizes supported by the active interface. Read from the engine-owned device without opening another driver.
+audio,testType,i,r,0,0..4,,state,10,no,park,none,,Output test signal: off pink noise tone sweep or pulse.
+audio,testChannel,i,r,-1,-1..511,,state,10,no,park,none,,Hardware output under test. Minus one means stopped.
+audio,testFrequency,i,r,1000,20..20000,Hz,state,10,no,park,none,,Output test sine frequency.
+audio,testLevel,d,r,-40,-92..0,dB,state,10,no,park,none,,Output test level.
+audio,testHold,T,r,false,,,state,1,no,park,none,,Output test hold toggle.
+audio,hardwareInputs,i,r,0,0..,,state,1,no,park,none,,The number of active hardware input channels.
+audio,hardwareOutputs,i,r,0,0..,,state,1,no,park,none,,The number of active hardware output channels.
 audio,outputs,i,r,0,0..,,state,1,no,park,none,,How many hardware output channels are available to route to. A cue wider than this is refused when the show loads.
 audio,status,s,r,stopped,stopped|running|noClock,,state,5,no,park,none,,"Whether audio is running. An unlocked device is present and producing nothing, which is a different failure from no device at all and wants a different remedy."
 bus,name,s,rw,,,,state,50,no,park,show,,The bus name as the designer wrote it. Names are what appear in a dropdown and on a scribble strip; channel numbers are not.

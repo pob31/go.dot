@@ -174,6 +174,14 @@ namespace wfg
         /** Stops after the tick in progress and joins. The destructor calls it. */
         void stop();
 
+        // Only while stopped. Keep tick indices monotonic across a device switch.
+        std::int64_t rebaseAudio (int newSampleRate)
+        {
+            const auto next = lastTick() + 1;
+            schedule.rebase (next, newSampleRate);
+            return schedule.sampleForTick (next);
+        }
+
         bool isRunning() const noexcept { return running.load (std::memory_order_relaxed); }
 
         //======================================================================

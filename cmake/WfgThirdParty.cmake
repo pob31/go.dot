@@ -222,6 +222,9 @@ target_compile_definitions(wfg_deps INTERFACE
     $<$<NOT:$<CONFIG:Debug>>:NDEBUG=1>
     $<$<NOT:$<CONFIG:Debug>>:_NDEBUG=1>
     $<$<PLATFORM_ID:Linux>:LINUX=1>
+    # Audio ASIO (not the networking Asio library). Keep the definition shared
+    # by JUCE, the engine and the UI so device enumeration agrees everywhere.
+    $<$<PLATFORM_ID:Windows>:JUCE_ASIO=1>
 
     # --- JUCE_MODULE_AVAILABLE_* : one per module reachable from our headers,
     #     including the three that arrive only transitively via juce_audio_processors.
@@ -496,6 +499,10 @@ endif()
 # make this "look right" — measured: wfg_thirdparty builds 31 TUs, wfg_engine builds
 # exactly 1, and the modules compile exactly once for the whole project.
 add_library(wfg_thirdparty STATIC)
+# Compile the shared widget under the vendor warning policy, without changing
+# spatcore's API or pulling a second set of JUCE module sources into the build.
+target_sources(wfg_thirdparty PRIVATE
+    "${CMAKE_SOURCE_DIR}/ThirdParty/spatcore/ui/patch/PatchMatrixComponent.cpp")
 add_library(wfg::thirdparty ALIAS wfg_thirdparty)
 
 # The engine will eventually be linked into things that are themselves shared objects

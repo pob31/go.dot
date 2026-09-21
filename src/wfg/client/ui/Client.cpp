@@ -62,6 +62,7 @@
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/ui/Look.h>
+#include <wfg/client/ui/AudioSettingsWindow.h>
 #include <wfg/client/ui/MainWindow.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
@@ -90,7 +91,7 @@ namespace wfg::client
         {
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
-            menuLock, menuLoadToTime, menuUndoHistory, menuRecord
+            menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuAudioSettings
         };
 
         class Window final : public wfg::Client,
@@ -462,6 +463,7 @@ namespace wfg::client
                     case menuLoadToTime: return ! last.listId.empty();
                     case menuUndoHistory: return unlocked;
                     case menuRecord:     return model::isYes (last.recording) ? unlocked : true;
+                    case menuAudioSettings: return true;
                 }
 
                 return false;
@@ -522,6 +524,8 @@ namespace wfg::client
                     menu.addSeparator();
                     addMenuItem (menu, menuRecord, model::isYes (last.recording) ? "Stop the live recorder"
                                                                                   : "Start the live recorder");
+                    menu.addSeparator();
+                    addMenuItem (menu, menuAudioSettings, "Audio settings...");
                 }
 
                 return menu;
@@ -546,6 +550,16 @@ namespace wfg::client
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     case menuLoadToTime: toggleLoadToTime(); break;
                     case menuUndoHistory: toggleUndoHistory(); break;
+                    case menuAudioSettings:
+                        if (latest)
+                        {
+                            if (! audioSettings)
+                                audioSettings = std::make_unique<ui::AudioSettingsWindow> (theme, *latest,
+                                    [this] (Event event) { send (std::move (event)); }, [this] { panic(); });
+                            audioSettings->setVisible (true);
+                            audioSettings->toFront (true);
+                        }
+                        break;
                     case menuRecord:     send (model::isYes (last.recording) ? gesture::recordStop()
                                                                              : gesture::recordStart()); break;
                     default: break;
@@ -780,6 +794,7 @@ namespace wfg::client
                     site. This is the same pointer, kept until the next pass
                     replaces it. */
                 latest = snapshot;
+                if (audioSettings) audioSettings->refresh (*snapshot);
 
                 if (reading.show != last.show)
                     window->setName (titleFor (reading.show));
@@ -1045,6 +1060,7 @@ namespace wfg::client
                 }
 
                 send (gesture::setNode ("/godot/cue/" + cueId + "/file", name));
+                routeImportedMedia (cueId, name);
 
                 if (const auto warning = silenceWarning(); ! warning.isEmpty())
                     shell->transport.setNotice (juce::String (name) + " is on the cue" + warning);
@@ -1186,6 +1202,7 @@ namespace wfg::client
                                                   model::text (snapshot, "/godot/cue/" + id + "/file")))
                     {
                         send (gesture::setNode ("/godot/cue/" + id + "/file", job.mediaName));
+                        routeImportedMedia (id, job.mediaName);
                         continue;
                     }
 
@@ -1197,6 +1214,20 @@ namespace wfg::client
                 }
 
                 pending = std::move (waiting);
+            }
+
+            void routeImportedMedia (const std::string& cueId, const std::string& name)
+            {
+                // Read the copied file's header off the tick/audio threads.
+                // Channel count is part of the logged command, so replay never
+                // depends on the file still being present or readable.
+                juce::AudioFormatManager formats;
+                formats.registerBasicFormats();
+                const std::unique_ptr<juce::AudioFormatReader> reader (
+                    formats.createReaderFor (mediaFolder().getChildFile (juce::String (name))));
+                if (! reader) return;
+                send ({ "window", "route.default", { osc::Value::string (cueId),
+                    osc::Value::int32 (static_cast<int> (reader->numChannels)) } });
             }
 
             /*  THE NATIVE OPEN, which is the other half of decision Y: a drop
@@ -1536,6 +1567,7 @@ namespace wfg::client
                 (§4.8): without one, setTooltip is a value nothing reads. */
             juce::TooltipWindow tooltips { nullptr, 700 };
             std::unique_ptr<ui::MainWindow> window;
+            std::unique_ptr<ui::AudioSettingsWindow> audioSettings;
             ui::Shell* shell = nullptr;                     // owned by the window
 
             /*  The rows, cached against the show's revision. Declared after the

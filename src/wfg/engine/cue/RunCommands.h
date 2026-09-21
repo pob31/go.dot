@@ -66,5 +66,6 @@ namespace wfg::cue
 
         `runs` may not outlive the registry.
     */
-    void registerRunCommands (CommandRegistry& registry, RunTable& runs);
+    void registerRunCommands (CommandRegistry& registry, RunTable& runs,
+                              std::function<void()> stopDiagnostics = {});
 }

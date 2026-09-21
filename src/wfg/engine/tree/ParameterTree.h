@@ -102,6 +102,11 @@ namespace wfg::tree
         std::string audioDevice;
         int audioOutputs = 0;
         std::string audioStatus = "stopped";
+        std::string audioSettingsStatus = "ready", audioSettingsError;
+        std::string audioAvailableBufferSizes;
+        audio::OutputTestSettings audioTest;
+        int audioSampleRate = 0, audioBufferSize = 0, hardwareInputs = 0, hardwareOutputs = 0;
+        int audioSettingsRevision = 0;
 
         std::uint64_t errorCount = 0;
         std::string lastError;

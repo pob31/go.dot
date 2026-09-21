@@ -15,6 +15,8 @@
 */
 
 #include <wfg/engine/audio/DeviceLayer.h>
+#include <wfg/engine/audio/AudioSettings.h>
+#include <wfg/engine/audio/OutputTestSignal.h>
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <spatcore/io/DeviceHost.h>
@@ -126,18 +128,19 @@ namespace wfg::audio
                 if (destination == nullptr)
                     return;
 
-                const auto rows = std::min (numChannels, destinationChannels);
                 const auto frames = std::min (numSamples, destinationFrames);
-
-                for (int channel = 0; channel < rows; ++channel)
-                    if (destination[channel] != nullptr && channels[channel] != nullptr)
-                        juce::FloatVectorOperations::copy (destination[channel],
-                                                           channels[channel], frames);
+                patchOutputs (patch, channels, numChannels, destination, destinationChannels, frames);
+                test.render (destination, destinationChannels, frames);
+                if (observer != nullptr)
+                    observer->blockProduced (destination, destinationChannels, frames);
             }
 
             float* const* destination = nullptr;
             int destinationChannels = 0;
             int destinationFrames = 0;
+            std::vector<int> patch;
+            BlockSink* observer = nullptr;
+            OutputTestSignal test;
         };
 
         //======================================================================
@@ -155,7 +158,7 @@ namespace wfg::audio
 
         void audioDeviceStopped() override {}
 
-        void audioDeviceIOCallbackWithContext (const float* const*, int,
+        void audioDeviceIOCallbackWithContext (const float* const* inputChannelData, int numInputChannels,
                                                float* const* outputChannelData,
                                                int numOutputChannels,
                                                int numSamples,
@@ -184,7 +187,9 @@ namespace wfg::audio
             sink.destinationChannels = numOutputChannels;
             sink.destinationFrames = numSamples;
 
-            audioHost.processBlock();
+            patchInputs (inputPatch, inputChannelData, numInputChannels,
+                         inputScratch.getArrayOfWritePointers(), inputScratch.getNumChannels(), numSamples);
+            audioHost.processBlock (inputScratch.getArrayOfReadPointers(), inputScratch.getNumChannels());
 
             sink.destination = nullptr;
 
@@ -213,9 +218,13 @@ namespace wfg::audio
 
         AudioHost audioHost;
         DeviceSink sink;
+        std::vector<int> inputPatch;
+        juce::AudioBuffer<float> inputScratch;
+        int hardwareInputs = 0, hardwareOutputs = 0;
 
         HostSettings granted;
         std::string openedName;
+        std::string bufferSizes;
         std::string error;
 
         std::atomic<double> observedRate { 0.0 };
@@ -265,7 +274,7 @@ namespace wfg::audio
             return false;
         }
 
-        if (! wantsDefault)
+        if (! wantsDefault || request.inputDeviceName.has_value())
         {
             /*  THE CHOSEN TYPE'S OWN DEVICE LIST, SCANNED, and this is the
                 second half of the same trap.
@@ -317,12 +326,15 @@ namespace wfg::audio
             if (auto* type = impl->manager.getCurrentDeviceTypeObject())
                 hasInputs = type->getDeviceNames (true)
                               .contains (juce::String (request.deviceName));
+            if (request.inputDeviceName.has_value()) hasInputs = ! request.inputDeviceName->empty();
 
             auto setup = impl->manager.getAudioDeviceSetup();
 
             setup.inputDeviceName = hasInputs ? juce::String (request.deviceName)
                                               : juce::String {};
-            setup.outputDeviceName = juce::String (request.deviceName);
+            if (request.inputDeviceName.has_value())
+                setup.inputDeviceName = juce::String (*request.inputDeviceName);
+            if (! request.deviceName.empty()) setup.outputDeviceName = juce::String (request.deviceName);
             setup.useDefaultInputChannels = false;
             setup.useDefaultOutputChannels = false;
             setup.inputChannels.clear();
@@ -423,6 +435,21 @@ namespace wfg::audio
         settings.sampleRate = static_cast<int> (device->getCurrentSampleRate());
         settings.blockSize = device->getCurrentBufferSizeSamples();
         settings.outputChannels = device->getActiveOutputChannels().countNumberOfSetBits();
+        impl->hardwareInputs = device->getActiveInputChannels().countNumberOfSetBits();
+        impl->hardwareOutputs = settings.outputChannels;
+        for (const auto channel : request.inputPatch)
+            if (channel >= impl->hardwareInputs)
+            { impl->error = "The input patch names an unavailable hardware input"; close(); return false; }
+        for (const auto channel : request.outputPatch)
+            if (channel >= impl->hardwareOutputs)
+            { impl->error = "The output patch names an unavailable hardware output"; close(); return false; }
+        settings.inputChannels = request.inputPatch.empty() ? impl->hardwareInputs
+                                                           : static_cast<int> (request.inputPatch.size());
+        if (request.logicalOutputs > 0) settings.outputChannels = request.logicalOutputs;
+        impl->inputPatch = request.inputPatch;
+        impl->sink.patch = request.outputPatch;
+        impl->sink.observer = request.outputObserver;
+        impl->inputScratch.setSize (settings.inputChannels, settings.blockSize);
 
         if (settings.outputChannels <= 0)
         {
@@ -451,7 +478,13 @@ namespace wfg::audio
         }
 
         impl->granted = settings;
+        impl->sink.test.prepare (settings.sampleRate, settings.blockSize);
         impl->openedName = device->getName().toStdString();
+        for (const auto size : device->getAvailableBufferSizes())
+        {
+            if (! impl->bufferSizes.empty()) impl->bufferSizes += ' ';
+            impl->bufferSizes += std::to_string (size);
+        }
 
         impl->audioHost.setBlockSink (&impl->sink);
         impl->manager.addAudioCallback (impl.get());
@@ -461,12 +494,10 @@ namespace wfg::audio
 
     void DeviceAudioDriver::close()
     {
-        if (! impl->running)
-            return;
-
         impl->closeDevice();
         impl->granted = {};
         impl->openedName.clear();
+        impl->bufferSizes.clear();
         impl->running = false;
     }
 
@@ -476,6 +507,10 @@ namespace wfg::audio
     const HostSettings& DeviceAudioDriver::settings() const noexcept { return impl->granted; }
     const std::string& DeviceAudioDriver::deviceName() const noexcept { return impl->openedName; }
     AudioHost& DeviceAudioDriver::host() noexcept               { return impl->audioHost; }
+    int DeviceAudioDriver::inputChannels() const noexcept { return impl->hardwareInputs; }
+    int DeviceAudioDriver::outputChannels() const noexcept { return impl->hardwareOutputs; }
+    const std::string& DeviceAudioDriver::availableBufferSizes() const noexcept { return impl->bufferSizes; }
+    void DeviceAudioDriver::setOutputTest (const OutputTestSettings& settings) noexcept { impl->sink.test.set (settings); }
 
     std::int64_t DeviceAudioDriver::blocksDelivered() const noexcept
     {

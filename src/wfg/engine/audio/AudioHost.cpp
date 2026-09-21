@@ -213,7 +213,7 @@ namespace wfg::audio
                 rack and MIDI cues are Phase 3; asking for either now would
                 build graph nodes nothing drives and make the block cost
                 measured here a measurement of the wrong thing. */
-            parameters.inputChannels = 0;
+            parameters.inputChannels = requested.inputChannels;
             parameters.useMidiDevices = false;
 
             hosted.initialise (parameters);
@@ -227,7 +227,8 @@ namespace wfg::audio
             /*  Sized once, here, and reused for every block. Allocating inside
                 processBlock would be the first violation of §4.2 in a file
                 whose whole purpose is to be callable from the audio thread. */
-            scratch.setSize (requested.outputChannels, requested.blockSize, false, true, true);
+            scratch.setSize (std::max (requested.outputChannels, requested.inputChannels),
+                             requested.blockSize, false, true, true);
             midi.ensureSize (256);
 
             current = requested;
@@ -512,7 +513,7 @@ namespace wfg::audio
             current = {};
         }
 
-        void processBlock()
+        void processBlock (const float* const* inputs = nullptr, int numInputs = 0)
         {
             if (! running)
                 return;
@@ -532,6 +533,9 @@ namespace wfg::audio
             const juce::ScopedNoDenormals denormalsOffWhileAudioRuns;
 
             scratch.clear();
+            for (int channel = 0; channel < std::min (numInputs, current.inputChannels); ++channel)
+                if (inputs != nullptr && inputs[channel] != nullptr)
+                    scratch.copyFrom (channel, 0, inputs[channel], current.blockSize);
             midi.clear();
 
             {
@@ -542,7 +546,7 @@ namespace wfg::audio
 
             if (sink != nullptr)
                 sink->blockProduced (scratch.getArrayOfReadPointers(),
-                                     scratch.getNumChannels(), current.blockSize);
+                                     current.outputChannels, current.blockSize);
 
             /*  After the graph has run, not before. A reader that saw the new
                 sample count would otherwise be told the block had happened
@@ -1433,6 +1437,8 @@ namespace wfg::audio
     bool AudioHost::isRunning() const noexcept             { return impl->running; }
     const std::string& AudioHost::lastError() const noexcept { return impl->error; }
     void AudioHost::processBlock()                         { impl->processBlock(); }
+    void AudioHost::processBlock (const float* const* inputs, int numInputs)
+    { impl->processBlock (inputs, numInputs); }
 
     void AudioHost::setBlockSink (BlockSink* sink) noexcept { impl->sink = sink; }
 

@@ -45,9 +45,12 @@
 #include <wfg/engine/audio/DeviceLayer.h>
 
 #include <juce_core/juce_core.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 
 #include <algorithm>
 #include <chrono>
+#include <atomic>
+#include <cmath>
 #include <string>
 #include <thread>
 
@@ -70,6 +73,94 @@ namespace
 
         juce::File folder;
     };
+
+    // Only the callback writes these peaks; the test reads after close() joins it.
+    struct DevicePeaks final : audio::BlockSink
+    {
+        void blockProduced (const float* const* channels, int count, int frames) noexcept override
+        {
+            for (int channel = 0; channel < std::min (count, 2); ++channel)
+                if (channels[channel] != nullptr)
+                    for (int sample = 0; sample < frames; ++sample)
+                        peaks[channel] = std::max (peaks[channel], std::abs (channels[channel][sample]));
+            if (peaks[1] > 0.0005f)
+                received.store (true, std::memory_order_relaxed);
+        }
+        float peaks[2] {};
+        std::atomic<bool> received { false };
+    };
+
+    juce::File writeQuietTone (const juce::File& folder)
+    {
+        folder.createDirectory();
+        const auto file = folder.getChildFile ("quiet-tone.wav");
+        std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
+        juce::WavAudioFormat format;
+        auto writer = format.createWriterFor (stream, juce::AudioFormatWriterOptions{}
+            .withSampleRate (48000).withNumChannels (1).withBitsPerSample (16));
+        if (writer == nullptr) return {};
+        juce::AudioBuffer<float> samples (1, 48000 * 3);
+        for (int n = 0; n < samples.getNumSamples(); ++n)
+            samples.setSample (0, n, 0.001f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                       * 440.0f * static_cast<float> (n) / 48000.0f));
+        if (! writer->writeFromAudioSampleBuffer (samples, 0, samples.getNumSamples())) return {};
+        return file;
+    }
+}
+
+TEST_CASE ("devices: media reaches the patched hardware output")
+{
+    // Exercise one usable device per API, including ASIO when installed. A quiet
+    // sine (-60 dBFS) goes through the real callback, never a test-driven pump.
+    const auto devices = audio::availableDevices();
+    std::vector<std::string> testedTypes;
+    int tested = 0;
+    for (const auto& device : devices)
+    {
+        if (device.outputChannels < 2
+            || std::find (testedTypes.begin(), testedTypes.end(), device.type) != testedTypes.end())
+            continue;
+        ScopedRoom room;
+        const auto tone = writeQuietTone (room.folder);
+        REQUIRE (tone.existsAsFile());
+        DevicePeaks capture; // Outlives the driver, even on an assertion failure.
+        audio::DeviceAudioDriver driver { room.path() };
+        audio::DeviceAudioDriver::Request request;
+        request.deviceType = device.type;
+        request.deviceName = device.name;
+        request.inputDeviceName = std::string {};
+        request.logicalOutputs = 2;
+        request.outputPatch = { 1, 0 };
+        request.outputObserver = &capture;
+        request.edit.tracks = 1;
+        request.edit.channelsPerTrack = 1;
+        if (! driver.open (request))
+        {
+            MESSAGE ("media callback test could not open " << device.type << " / "
+                      << device.name << ": " << driver.lastError());
+            continue;
+        }
+        testedTypes.push_back (device.type);
+        ++tested;
+        INFO (device.type << " / " << device.name);
+        REQUIRE (driver.host().setTrackSource (0, 0, tone.getFullPathName().toStdString()));
+        driver.host().setTrackRouting (0, 0.0, { { 0.0, 0.0, 1.0 } });
+        for (int i = 0; i < 1000 && ! driver.host().isTrackSourceReady (0); ++i)
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        REQUIRE (driver.host().isTrackSourceReady (0));
+        const auto target = driver.host().clock().samplesElapsed() + driver.settings().blockSize * 4;
+        REQUIRE (driver.host().launchTrackAt (0, 0, driver.host().beatsAtSample (target)));
+        for (int i = 0; i < 1000 && ! capture.received.load (std::memory_order_relaxed); ++i)
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        driver.close();
+        MESSAGE (device.type << " / " << device.name << ": final device peaks "
+                  << capture.peaks[0] << ", " << capture.peaks[1]);
+        CHECK (capture.peaks[0] == 0.0f);
+        CHECK (capture.peaks[1] > 0.0005f);
+        CHECK (capture.peaks[1] < 0.0011f);
+    }
+    if (tested == 0)
+        MESSAGE ("no usable output device; hardware media/patch verification did not run");
 }
 
 //==============================================================================

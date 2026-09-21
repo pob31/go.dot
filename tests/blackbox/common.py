@@ -482,13 +482,16 @@ class Server:
 
     def __init__(self, bundle: Path, log: "Path | None" = None,
                  locale: "str | None" = None,
-                 sample_rate: int = 48000, buffer_size: int = 128,
+                 sample_rate: "int | None" = 48000, buffer_size: "int | None" = 128,
                  hosted: bool = False, render: "Path | None" = None,
                  ui: "Path | None" = None, device: "str | None" = None,
-                 window: bool = False, theme: "Path | None" = None):
-        argv = [str(find_binary()), "serve", str(bundle),
-                f"--sample-rate={sample_rate}", f"--buffer={buffer_size}",
-                "--http-port=0", "--osc-port=0"]
+                 window: bool = False, theme: "Path | None" = None,
+                 device_type: "str | None" = None):
+        argv = [str(find_binary()), "serve", str(bundle), "--http-port=0", "--osc-port=0"]
+        if sample_rate is not None:
+            argv.append(f"--sample-rate={sample_rate}")
+        if buffer_size is not None:
+            argv.append(f"--buffer={buffer_size}")
 
         # --hosted puts a real Tracktion graph under the clock instead of a
         # dummy one, and --render writes what comes out of it to a WAV. That
@@ -512,6 +515,8 @@ class Server:
         # neither is any use.
         if device is not None:
             argv.append(f"--device={device}")
+        if device_type is not None:
+            argv.append(f"--device-type={device_type}")
 
         # --window opens the compiled client over this same engine, in this
         # same process (namespace draft section 14.16). Off by default here as

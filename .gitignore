@@ -53,6 +53,7 @@ compile_commands.json
 .claude/
 tmpclaude-*
 **/tmpclaude-*
+MEMORY.md
 
 # ---------------------------------------------------------------------------
 # Python (scripts/check-pins.py and whatever joins it)

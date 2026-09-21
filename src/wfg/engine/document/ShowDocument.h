@@ -72,6 +72,7 @@
 #include <wfg/engine/document/Ids.h>
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/audio/AudioSettings.h>
 
 #include <juce_data_structures/juce_data_structures.h>
 
@@ -165,6 +166,7 @@ namespace wfg::doc
         /** An empty show: a root, an empty Lists and an empty Mounts. Every
             attribute at its default, which the canonical writer then omits. */
         ShowDocument();
+        EditResult configureAudio (const audio::AudioSettings&);
 
         //======================================================================
         // Structure
@@ -193,6 +195,10 @@ namespace wfg::doc
             that does not exist. */
         EditResult createRoute (const std::string& cueId, const std::string& busId,
                                 const std::string& id = {});
+        /** Import convenience: explicitly route an unassigned cue to the first
+            output bus. Existing routes and processor feeds are preserved. */
+        EditResult defaultMediaRoute (const std::string& cueId, int channels,
+                                      const std::string& id = {});
 
         /*  Gives a group its header or its footer, and answers with the one it
             already had if it has one.

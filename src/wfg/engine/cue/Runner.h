@@ -300,6 +300,7 @@ namespace wfg::cue
 
         /** Null is legal and means a show with no audio side. */
         void setPlayer (Player* player) noexcept { audio = player; }
+        void resetAudioPreparation() { armedStandby.clear(); }
 
         /*  The runs, for the one caller outside the Runner that has to ask
             about them: `go`, whose cursor has to know whether a manual group

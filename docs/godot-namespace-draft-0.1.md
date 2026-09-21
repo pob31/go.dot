@@ -1044,6 +1044,24 @@ be reconciled into this file at close-out, as §2 was for Phase 1.
 A **bus** is a summing point — a named, contiguous range of hardware outputs with a declared
 width. Processor *slots* (exclusive, allocated) are Phase 4 and are not drawn here.
 
+Implementation update (2026-09-20): Show → Audio settings stores interface and
+input/output patches in the show, with an optional default for new shows.
+Windows includes ASIO. Applying while stopped restarts the interface safely.
+
+The output patch's Test mode uses WFS-DIY's shared generator: pink noise, a
+20–20000 Hz tone, logarithmic sweep, and its repeating pulse. All start with a
+500 ms ramp; level is -92 to 0 dB, initially -40 dB. Hold latches one hardware
+output. Leaving the page, closing the window, applying settings, or global
+stop/panic clears the test. Tests replace samples on that hardware output;
+cue routing and the other outputs continue unchanged.
+
+`audio.testSignal(type:i, channel:i, frequency:i, level:d, hold:T)` changes the
+runtime test configuration. Types are 0=off, 1=pink, 2=tone, 3=sweep, 4=pulse;
+channel is zero-based, or -1 to stop. `audio.testStop()` clears type, target and
+Hold. Read-only `/godot/audio/testType`, `testChannel`, `testFrequency`,
+`testLevel`, and `testHold` publish the configuration. These values are not
+saved in shows or defaults.
+
 ### 11.2 Cue kinds
 
 `kind` grows to `memo | group | media | fade | stop | osc`. Each kind's attributes are nodes
