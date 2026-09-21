@@ -649,9 +649,11 @@ namespace wfg::client::ui
             //  A drop INTO the section lights its band, as a drop onto a group lights the group.
             if (row == dropRow && dropWouldLink)
             {
-                g.setColour (Look::colour (theme, "live").withAlpha (0.22f));
+                const auto tone = Look::colour (theme, dropTone.c_str());
+
+                g.setColour (tone.withAlpha (0.22f));
                 g.fillRect (0, 0, width, height);
-                g.setColour (Look::colour (theme, "live"));
+                g.setColour (tone);
                 g.drawRect (0, 0, width, height, 1);
             }
 
@@ -722,13 +724,20 @@ namespace wfg::client::ui
             no line is drawn under a row the cue will not appear under. */
         if (row == dropRow)
         {
-            g.setColour (Look::colour (theme, "live"));
+            /*  AND THE TONE SAYS WHICH OF THE FOUR (author, 2026-09-21): into a
+                group, aimed at a fade, prepared by a group's header, or into a
+                footer. The sentence under the list says the same thing in
+                words, so the colour is the fast half of a pair and not the
+                only carrier (§4.8). */
+            const auto tone = Look::colour (theme, dropTone.c_str());
+
+            g.setColour (tone);
 
             if (dropWouldLink)
             {
-                g.setColour (Look::colour (theme, "live").withAlpha (0.22f));
+                g.setColour (tone.withAlpha (0.22f));
                 g.fillRect (0, 0, width, height);
-                g.setColour (Look::colour (theme, "live"));
+                g.setColour (tone);
                 g.drawRect (0, 0, width, height, 1);
             }
             else if (dropWouldInsert)
@@ -1164,6 +1173,7 @@ namespace wfg::client::ui
         dropRow = rowUnder (y);
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropTone = "drop-into";
 
         if (dropRow >= 0)
         {
@@ -1193,6 +1203,7 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropTone = "drop-into";
 
         if (was >= 0)
             list.repaintRow (was);
@@ -1205,6 +1216,7 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropTone = "drop-into";
         repaint();
 
         if (files.isEmpty())
@@ -1375,6 +1387,7 @@ namespace wfg::client::ui
         const auto was = dropRow;
         const auto wasLink = dropWouldLink;
         const auto wasInsert = dropWouldInsert;
+        const auto wasTone = dropTone;
 
         auto at = -1;
         const auto drop = dropAt (details, at);
@@ -1385,12 +1398,14 @@ namespace wfg::client::ui
         dropWouldInsert = drop.kind == model::DropKind::after;
         dropWouldLink = drop.kind == model::DropKind::into || drop.kind == model::DropKind::target
                      || drop.kind == model::DropKind::preset || drop.kind == model::DropKind::footer;
+        dropTone = model::dropTone (drop.kind);
 
         //  Out of the header: said even over nothing, since that is where the hand is.
         if (drop.kind == model::DropKind::clearPreset && actions.say)
             actions.say (juce::String (model::describe (drop, model::Row {}, false)));
 
-        if (dropRow != was || dropWouldLink != wasLink || dropWouldInsert != wasInsert)
+        if (dropRow != was || dropWouldLink != wasLink || dropWouldInsert != wasInsert
+              || dropTone != wasTone)
         {
             if (was >= 0)      list.repaintRow (was);
             if (dropRow >= 0)  list.repaintRow (dropRow);
@@ -1416,6 +1431,7 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropTone = "drop-into";
 
         if (was >= 0)
             list.repaintRow (was);
@@ -1433,6 +1449,7 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropTone = "drop-into";
         repaint();
 
         if (actions.say)

@@ -501,6 +501,15 @@ namespace wfg::client
                 {
                     addMenuItem (menu, menuUndo, "Undo");
                     addMenuItem (menu, menuRedo, "Redo");
+
+                    /*  AND THE HISTORY BESIDE THEM (author, 2026-09-21: "the
+                        undo/redo history should be in the edit menu not the
+                        show"). It was under Show, beside load-to-time, because
+                        both open a panel where the inspector sits - but what a
+                        menu groups is what a thing IS, not where it draws, and
+                        this is the third way of saying Undo. */
+                    addMenuItem (menu, menuUndoHistory, browsingUndo ? "Close the undo history"
+                                                                     : "Undo history...");
                     menu.addSeparator();
                     addMenuItem (menu, menuCut, selection.size() > 1
                                                   ? "Cut " + juce::String (static_cast<int> (selection.size())) + " cues"
@@ -522,8 +531,6 @@ namespace wfg::client
                     menu.addSeparator();
                     addMenuItem (menu, menuLoadToTime, loadingToTime ? "Stop loading to time"
                                                                      : "Load to time...");
-                    addMenuItem (menu, menuUndoHistory, browsingUndo ? "Close the undo history"
-                                                                     : "Undo history...");
                     menu.addSeparator();
                     addMenuItem (menu, menuRecord, model::isYes (last.recording) ? "Stop the live recorder"
                                                                                   : "Start the live recorder");

@@ -79,6 +79,27 @@ namespace wfg::client::model
         std::string cueId;       ///< for target: the fade or stop being aimed
     };
 
+    /*  WHICH COLOUR SAYS WHAT LETTING GO WOULD DO (author, 2026-09-21: "so the
+        drag and drop has a clear colour coding for the user to be sure what
+        they're doing").
+
+        Four of these kinds land ON a row rather than between two rows, and
+        every one of them used to light it the same green - so the hand had to
+        remember which modifier it was holding to know which of four quite
+        different things was about to happen. They are told apart by tone now:
+        green into a group, blue for a fade being aimed, red for a mark that
+        this group's HEADER prepares the cue, purple into a footer.
+
+        A THEME TOKEN AND NOT A COLOUR, because this library names no JUCE type
+        and because the four are rethemeable like everything else. The kinds
+        that draw a LINE between two rows rather than lighting one - `after` -
+        and the ones that draw nothing keep the plain tone; `dropTone` answers
+        `drop-into` for them, which nothing reads.
+
+        Colour is not the only carrier (§4.8): `describe` below says the same
+        thing in a sentence under the list, and always has. */
+    std::string dropTone (DropKind kind);
+
     /*  THE CONTAINER A ROW IS IN, as `object.move` names it: a member's is its
         parent; a row inside a header, a footer or a persistent section is in
         that section, whose own identifier the row carries. */

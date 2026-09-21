@@ -1723,6 +1723,41 @@ TEST_CASE ("client: the new-cue row offers every kind the engine makes, and land
 }
 
 //==============================================================================
+TEST_CASE ("client: each thing a drop would do wears its own colour")
+{
+    /*  Four gestures land ON a row rather than between two, and every one of
+        them lit it the same green - so the hand had to remember which modifier
+        it was holding to know which of four quite different things was about
+        to happen (author, 2026-09-21: "so the drag and drop has a clear colour
+        coding for the user to be sure what they're doing"). */
+    CHECK (model::dropTone (model::DropKind::into) == "drop-into");
+    CHECK (model::dropTone (model::DropKind::target) == "drop-aim");
+    CHECK (model::dropTone (model::DropKind::preset) == "drop-header");
+    CHECK (model::dropTone (model::DropKind::footer) == "drop-footer");
+
+    //  All four are told apart, which is the whole point of having them.
+    const std::set<std::string> tones
+    {
+        model::dropTone (model::DropKind::into), model::dropTone (model::DropKind::target),
+        model::dropTone (model::DropKind::preset), model::dropTone (model::DropKind::footer)
+    };
+
+    CHECK (tones.size() == 4u);
+
+    /*  AND EVERY ONE IS A COLOUR THE THEME REALLY DECLARES: a token nobody
+        declared draws magenta, which is the theme's way of shouting, and a
+        drop target is not where anybody wants to meet it. */
+    model::Theme theme;
+
+    for (const auto& tone : tones)
+    {
+        INFO (tone);
+        CHECK (std::find (model::Theme::colourNames().begin(),
+                          model::Theme::colourNames().end(), tone)
+                 != model::Theme::colourNames().end());
+    }
+}
+
 TEST_CASE ("client: the output list reads up the interface, and says which regime the patch is in")
 {
     /*  `minimal` declares Main L/R at 0 and Foldback at 2, both stereo and

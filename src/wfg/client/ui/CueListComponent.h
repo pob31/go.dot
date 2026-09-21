@@ -295,6 +295,12 @@ namespace wfg::client::ui
         int dropRow = -1;            ///< the row a file drag is over, or -1
         bool dropWouldInsert = false;   ///< whether letting go really inserts after that row
         bool dropWouldLink = false;  ///< whether letting go there names a cue's file, or lands ON the row
+
+        /*  WHICH OF THE FOUR THINGS LETTING GO WOULD DO, as a theme token
+            (`model::dropTone`). A dropped FILE keeps the plain one: naming a
+            cue's file is the only thing a file landing on a row can mean, so
+            there is nothing for a colour to tell apart. */
+        std::string dropTone = "drop-into";
         std::size_t drawnWalk = 0;
         std::string drawnList;
 

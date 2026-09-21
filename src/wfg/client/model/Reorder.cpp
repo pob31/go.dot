@@ -40,6 +40,23 @@ namespace wfg::client::model
         }
     }
 
+    std::string dropTone (DropKind kind)
+    {
+        switch (kind)
+        {
+            case DropKind::target:      return "drop-aim";
+            case DropKind::preset:      return "drop-header";
+            case DropKind::footer:      return "drop-footer";
+
+            case DropKind::into:
+            case DropKind::none:
+            case DropKind::after:
+            case DropKind::clearPreset: break;
+        }
+
+        return "drop-into";
+    }
+
     std::string containerOf (const Row& row)
     {
         return row.section == Section::member || row.sectionId.empty() ? row.parent : row.sectionId;

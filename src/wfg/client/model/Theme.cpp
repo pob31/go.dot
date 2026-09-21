@@ -116,6 +116,27 @@ namespace wfg::client::model
                     three bars in the running pane. */
                 { "fade",          0xFF5FB8C9 },
                 { "picked",        0xFF9A95E4 },
+
+                /*  WHAT LETTING GO WOULD DO, one colour each (author,
+                    2026-09-21: "so the drag and drop has a clear colour coding
+                    for the user to be sure what they're doing").
+
+                    Four gestures land ON a row rather than between two, and
+                    until now all four lit it the same green: into a group,
+                    aimed at a fade, marked as prepared by a group's header, and
+                    moved into a footer. They do very different things to a
+                    show, and the moment of choosing between them is the moment
+                    the hand is already moving - so each gets a tone, and the
+                    sentence under the list still says it in words (§4.8).
+
+                    Their own tokens rather than a reuse of `live`, `waiting`,
+                    `failed` and `picked`, although they start at those values:
+                    somebody retheming what a running cue looks like should not
+                    find their drops had moved with it. */
+                { "drop-into",     0xFF4BC38A },   // green, as it has always been
+                { "drop-aim",      0xFF86A3DB },   // blue: this fade would point here
+                { "drop-header",   0xFFE0685D },   // red: prepared by this group's header
+                { "drop-footer",   0xFF9A95E4 },   // purple: into this group's footer
             };
 
             return table;
