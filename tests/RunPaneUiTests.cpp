@@ -1,9 +1,306 @@
 /* Go.dot — Copyright (C) 2026 Pierre-Olivier Boulant
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include <3rd_party/doctest/tracktion_doctest.hpp>
+#include <wfg/client/ui/FootPanelComponent.h>
+#include <wfg/client/ui/InspectorComponent.h>
+#include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
 
+#include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/audio/Timbre.h>
+
+#include <memory>
+
 using namespace wfg::client;
+
+namespace
+{
+    /*  EVERY BUTTON UNDER A COMPONENT, however deep. The table's rows live
+        inside a viewport inside the panel, so a test that only looked at the
+        direct children would find nothing and pass by accident. */
+    void gatherButtons (juce::Component& from, std::vector<juce::Button*>& into)
+    {
+        for (auto* child : from.getChildren())
+        {
+            if (auto* button = dynamic_cast<juce::Button*> (child))
+                into.push_back (button);
+
+            gatherButtons (*child, into);
+        }
+    }
+
+    std::vector<juce::Button*> buttonsUnder (juce::Component& from)
+    {
+        std::vector<juce::Button*> found;
+        gatherButtons (from, found);
+        return found;
+    }
+
+    juce::Button* buttonTipped (juce::Component& from, const juce::String& startsWith)
+    {
+        for (auto* button : buttonsUnder (from))
+            if (auto* tips = dynamic_cast<juce::SettableTooltipClient*> (button))
+                if (tips->getTooltip().startsWith (startsWith))
+                    return button;
+
+        return nullptr;
+    }
+}
+
+
+TEST_CASE ("foot panel: it opens on one subject, draws a file, and a drag writes the range")
+{
+    /*  THE HOST AND ONE EDITOR, which is the author's shape for this panel
+        (2026-09-21): it opens on a named subject rather than on a tab bar. A
+        component test is where a construction fault shows as a stack rather
+        than as a window that is not there. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::FootPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value)
+    { written.emplace_back (address, value); };
+
+    auto closed = false;
+    actions.close = [&] { closed = true; };
+
+    auto grown = 0;
+    actions.resizeBy = [&] (int pixels) { grown += pixels; };
+
+    ui::FootPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (900, 220);
+
+    //  Shut to begin with, and nothing drawn.
+    CHECK_FALSE (panel.subject().isOpen());
+
+    panel.open ({ model::Subject::Kind::waveform, "CUE00001" });
+    CHECK (panel.subject().isOpen());
+    CHECK (panel.subject().objectId == "CUE00001");
+
+    /*  A FILE WITH SOMETHING IN IT, built by hand: one loud frame a quarter of
+        the way through a ten-second file, so the bar has a shape and the
+        column picking has something to pick. */
+    auto pyramid = std::make_shared<wfg::audio::TimbrePyramid>();
+    pyramid->sampleRate = 48000;
+    pyramid->samples = 48000ull * 10ull;
+
+    for (const auto count : { 512, 256, 128, 64 })
+    {
+        std::vector<wfg::audio::timbre::Frame> level;
+
+        for (auto at = 0; at < count; ++at)
+        {
+            wfg::audio::timbre::Frame frame;
+            frame.peak = static_cast<std::uint8_t> (at == count / 4 ? 255 : 30);
+            frame.saturation = 180;
+            frame.lightness = 120;
+            level.push_back (frame);
+        }
+
+        pyramid->levels.push_back (std::move (level));
+    }
+
+    auto table = std::make_shared<wfg::audio::MediaRecords>();
+    wfg::audio::MediaRecord record;
+    record.seconds = 10.0;
+    record.contentHash = "hash";
+    record.pyramid = pyramid;
+    table->emplace ("bed.wav", record);
+
+    model::FootReading reading;
+    reading.subject = panel.subject();
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 10.0;
+    reading.ranges = { { "RNG00001", "verse", 1.0, 4.0, 1, 0 },
+                       { "RNG00002", "chorus", 4.0, 8.0, 2, 1 } };
+    reading.running = true;
+    reading.position = 2.5;
+
+    //  Twice, because a second pass with the same reading is the ordinary case.
+    panel.show (reading, table);
+    panel.show (reading, table);
+
+    /*  IT DRAWS. An editor that threw or read past an end would take the
+        window down rather than fail a check, so this is a crash test as much
+        as a drawing one. */
+    juce::Image canvas (juce::Image::ARGB, 900, 220, true);
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, true);
+    }
+
+    //  The close button is the one control the host owns.
+    juce::Button* shut = nullptr;
+
+    for (auto* child : panel.getChildren())
+        if (auto* button = dynamic_cast<juce::Button*> (child))
+            shut = button;
+
+    REQUIRE (shut != nullptr);
+    shut->onClick();
+    CHECK (closed);
+
+    /*  AND SHUTTING IT IS THE SHELL'S TO DO, not the panel's: the action was
+        called, and the panel is still on its subject until somebody tells it
+        otherwise. One place decides what the panel is showing. */
+    CHECK (panel.subject().isOpen());
+
+    panel.open ({});
+    CHECK_FALSE (panel.subject().isOpen());
+}
+
+
+TEST_CASE ("range table: every slice shows its times, and the arrow gives the next one this length")
+{
+    /*  The author, 2026-09-21: "With the in out times for all slices
+        (including if there's a single slice). It would be great to be able
+        copy a duration from one slice to the next so the next out point is at
+        the same time from the previous. Also show the repeat and
+        infinite/number of repeats."
+
+        The arithmetic is asserted in ClientTests, with no window; what is
+        checked here is that the buttons are wired to it and that the table
+        builds and draws at all - a construction fault in a component shows as
+        a stack here rather than as an empty panel on the night. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::RangeTableComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& value)
+    { written.emplace_back (address, value); };
+
+    std::string made;
+    actions.createRange = [&] (const std::string& cueId, double, double) { made = cueId; };
+
+    std::string dropped;
+    actions.removeRange = [&] (const std::string& id) { dropped = id; };
+
+    ui::RangeTableComponent table (model::Theme {}, actions);
+    table.setSize (table.wantedWidth(), 160);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::waveform, "CUE00001" };
+    reading.cueKind = "media";
+    reading.file = "bed.wav";
+    reading.fileLength = 30.0;
+
+    /*  ONE SLICE FIRST, which is the case the author called out: with a single
+        range there is no join to drag and the table is the only place its two
+        times are legible. */
+    reading.ranges = { { "RNG00001", "verse", 1.0, 4.0, 1, 0 } };
+    table.show (reading);
+
+    juce::Image canvas (juce::Image::ARGB, table.getWidth(), 160, true);
+    {
+        juce::Graphics g (canvas);
+        table.paintEntireComponent (g, true);
+    }
+
+    //  The one row has an arrow, and it is dead because there is no next range.
+    auto* arrow = buttonTipped (table, "Give the next range");
+    REQUIRE (arrow != nullptr);
+    CHECK_FALSE (arrow->isEnabled());
+
+    //  A second range, and the shape of the table changes with it.
+    reading.ranges.push_back ({ "RNG00002", "chorus", 4.0, 20.0, 0, 1 });
+    table.show (reading);
+
+    arrow = buttonTipped (table, "Give the next range");
+    REQUIRE (arrow != nullptr);
+    CHECK (arrow->isEnabled());
+
+    arrow->onClick();
+
+    /*  ONE WRITE, ON THE NEXT RANGE'S OUT-POINT: 4.0 + (4.0 - 1.0). Its
+        in-point is untouched, so the join with the first range survives. */
+    REQUIRE (written.size() == 1);
+    CHECK (written[0].first == "/godot/range/RNG00002/out");
+    CHECK (written[0].second == "7");
+
+    //  The cross removes the range it sits on, and the plus makes one on this cue.
+    if (auto* cross = buttonTipped (table, "Removes this range"); cross != nullptr)
+    {
+        cross->onClick();
+        CHECK (dropped == "RNG00001");
+    }
+
+    if (auto* plus = buttonTipped (table, "Adds a range"); plus != nullptr)
+    {
+        plus->onClick();
+        CHECK (made == "CUE00001");
+    }
+
+    /*  AND THE REPEATS. The second range is set to for ever (nought), so its
+        toggle is on; turning it off writes a number instead of a word, which
+        is the one thing a bare box could never have said. */
+    std::vector<juce::ToggleButton*> toggles;
+
+    for (auto* button : buttonsUnder (table))
+        if (auto* toggle = dynamic_cast<juce::ToggleButton*> (button))
+            toggles.push_back (toggle);
+
+    REQUIRE (toggles.size() == 2);
+    CHECK_FALSE (toggles[0]->getToggleState());   // the first plays once
+    CHECK (toggles[1]->getToggleState());         // the second goes round for ever
+
+    written.clear();
+    toggles[1]->setToggleState (false, juce::sendNotificationSync);
+
+    REQUIRE_FALSE (written.empty());
+    CHECK (written.back().first == "/godot/range/RNG00002/loops");
+    CHECK (written.back().second != "0");
+}
+
+TEST_CASE ("inspector: an opener is a button that asks the window to open the panel, not a field")
+{
+    /*  The author, 2026-09-21: "the controls to show the waveform, the send
+        levels, the EQ, the group timeline were in the inspector. No hunting in
+        the menus." */
+    std::vector<std::pair<std::string, std::string>> written;
+    std::pair<std::string, std::string> opened;
+
+    ui::InspectorComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text)
+    { written.emplace_back (address, text); };
+
+    actions.openPanel = [&] (const std::string& cueId, const std::string& subject)
+    { opened = { cueId, subject }; };
+
+    ui::InspectorComponent inspector (model::Theme {}, actions);
+    inspector.setSize (320, 400);
+
+    model::Inspection inspection;
+    inspection.cueId = "CUE00001";
+    inspection.cueName = "The bed";
+    inspection.kind = "media";
+    inspection.count = 1;
+
+    model::Block block { "what it does", model::openersFor ("media", "CUE00001") };
+    REQUIRE_FALSE (block.fields.empty());
+    inspection.blocks.push_back (block);
+
+    inspector.show (inspection);
+
+    juce::Image canvas (juce::Image::ARGB, 320, 400, true);
+    {
+        juce::Graphics g (canvas);
+        inspector.paintEntireComponent (g, true);
+    }
+
+    auto* door = buttonTipped (inspector, "Opens at the foot");
+    REQUIRE (door != nullptr);
+
+    //  It says what it opens, rather than a bare "Open" beside a label.
+    CHECK (door->getButtonText().containsIgnoreCase ("waveform"));
+
+    door->onClick();
+
+    CHECK (opened.first == "CUE00001");
+    CHECK (opened.second == "waveform");
+
+    //  And it is a door, not a decision: nothing was written.
+    CHECK (written.empty());
+}
 
 TEST_CASE ("active cue errors: collapsed drawer retains failures and respects edit mode")
 {

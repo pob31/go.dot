@@ -206,13 +206,17 @@ namespace wfg::client::ui
             tree until the show is next opened, and the author's first long
             track showed no head at all for that reason (2026-09-18). */
         double lengthOf (const model::RunRow& entry) const;
+
+        /** Where the head sits over the stretch this cue plays, in [0, 1]. */
+        double throughOf (const model::RunRow& entry) const;
         bool paintWaveform (const model::RunRow& entry, juce::Graphics& g,
                             juce::Rectangle<int> strip);
         void paintCountdown (const model::RunRow& entry, juce::Graphics& g,
                              juce::Rectangle<int> strip, bool layered);
         void paintCursor (const model::RunRow& entry, juce::Graphics& g,
                           juce::Rectangle<int> strip, juce::Colour tint, bool layered);
-        const std::vector<model::Column>& columnsFor (const std::string& file, int width);
+        const std::vector<model::Column>& columnsFor (const std::string& file, int width,
+                                                      double from, double to);
 
         Actions actions;
         model::Theme theme;
@@ -233,6 +237,10 @@ namespace wfg::client::ui
         int scrubPush = 0;                 ///< -1, 0 or +1: which edge the pointer is against
 
         std::shared_ptr<const audio::MediaRecords> media;
+        /*  KEYED ON THE WINDOW AS WELL AS THE FILE. Two cues can play two
+            stretches of one recording, and since 2026-09-21 the strip draws
+            the stretch rather than the whole thing - so the file's name alone
+            no longer says which picture this is. */
         std::map<std::string, std::vector<model::Column>> bars;
         int barsWidth = 0;
 

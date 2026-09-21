@@ -86,7 +86,24 @@ namespace wfg::client::model
         out for before GO - and gets a box of several lines rather than one
         (author, 2026-09-18: "the edit field in the Inspector is too limited
         for this"). */
-    enum class Control { text, toggle, choice, loopCount, file, cueRef, longText };
+    enum class Control
+    {
+        text, toggle, choice, loopCount, file, cueRef, longText,
+
+        /*  A BUTTON THAT OPENS THE PANEL AT THE FOOT on this cue (author,
+            2026-09-21: "it would be great if the controls to show the
+            waveform, the send levels, the EQ, the group timeline were in the
+            inspector. No hunting in the menus").
+
+            It is not an attribute and writes nothing: `value` carries the
+            SUBJECT the button opens, in the words `model::Subject` uses, and
+            the window turns that into a `setFoot`. It sits among the fields
+            because that is where somebody is already looking when they want
+            one - the inspector is the place a cue is worked on, and a panel
+            about this cue is a thing to ask for from there rather than from a
+            menu three levels up. */
+        opener
+    };
 
     struct Field
     {
@@ -149,6 +166,16 @@ namespace wfg::client::model
 
         bool empty() const noexcept { return blocks.empty() && details.empty(); }
     };
+
+    /*  WHICH PANELS THIS KIND OF CUE HAS, in the order they are offered.
+
+        ONLY WHAT IS BUILT IS LISTED. The author named four - the waveform, the
+        send levels, the EQ and the group timeline - and three of them have no
+        editor yet; a button that opened nothing would be worse than the menu
+        it replaces, because a dead control teaches somebody the feature is
+        broken rather than absent. Each is added here on the day its editor
+        lands, and that one line is the whole of the change. */
+    std::vector<Field> openersFor (const std::string& kind, const std::string& cueId);
 
     /** Everything published under one cue, sorted into blocks. Empty for no cue. */
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId);

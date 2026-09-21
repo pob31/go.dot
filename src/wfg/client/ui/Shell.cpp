@@ -29,8 +29,10 @@ namespace wfg::client::ui
                   InspectorComponent::Actions inspectorActions,
                   NewCueBarComponent::Actions newCueActions,
                   HistoryPanelComponent::Actions historyActions,
-                  UndoPanelComponent::Actions undoActions)
+                  UndoPanelComponent::Actions undoActions,
+                  FootPanelComponent::Actions footActions)
         : transport (themeToUse, std::move (transportActions)),
+          foot (themeToUse, std::move (footActions)),
           cues (themeToUse, std::move (listActions)),
           runs (themeToUse, std::move (runActions)),
           inspector (themeToUse, std::move (inspectorActions)),
@@ -59,6 +61,8 @@ namespace wfg::client::ui
         addChildComponent (history);
         undoPanel.setVisible (false);
         addChildComponent (undoPanel);
+        foot.setVisible (false);
+        addChildComponent (foot);
 
         setWantsKeyboardFocus (true);
     }
@@ -73,6 +77,7 @@ namespace wfg::client::ui
         inspector.applyTheme (theme);
         history.applyTheme (theme);
         undoPanel.applyTheme (theme);
+        foot.applyTheme (theme);
         resized();
         repaint();
     }
@@ -83,6 +88,33 @@ namespace wfg::client::ui
 
         transport.setBounds (area.removeFromTop (juce::jmin (transport.preferredHeight(),
                                                              area.getHeight())));
+
+        /*  THE FOOT SPANS THE WHOLE WIDTH, under all three panes and not under
+            the cue list alone (author, 2026-09-21: it is where a timeline, a
+            waveform or a video goes, and those are wide). Cut here, before the
+            columns are worked out, so the panes above simply have less height
+            and none of them has to know the panel exists.
+
+            Its height is clamped to what the window can spare: a floor of four
+            rows, which is a bar with a ruler under it and no less, and never
+            more than half the window, because a panel that could take all of
+            it would leave somebody with no cue list and no obvious way back. */
+        if (foot.subject().isOpen())
+        {
+            const auto row = juce::roundToInt (theme.row * theme.type);
+            const auto floorHeight = row * 4;
+            const auto ceiling = juce::jmax (floorHeight, area.getHeight() / 2);
+
+            /*  NINE ROWS TO BEGIN WITH, which is a bar with a ruler under it
+                AND the table beside it showing its heading and half a dozen
+                ranges. Seven was the height before the numbers arrived, and it
+                opened on a table that could show two of them. */
+            if (footHeight <= 0)
+                footHeight = juce::jmin (ceiling, row * 9);
+
+            footHeight = juce::jlimit (floorHeight, ceiling, footHeight);
+            foot.setBounds (area.removeFromBottom (juce::jmin (footHeight, area.getHeight())));
+        }
 
         /*  WHAT THE SHOW WILL DO ON THE LEFT, WHAT IT IS DOING ON THE RIGHT.
             The page keeps Didi and Gogo apart for the same reason and the
@@ -107,6 +139,14 @@ namespace wfg::client::ui
         const auto listFloor = juce::roundToInt (theme.row * theme.type * 16);   // ~520 px at the default type
         const auto runsWidth = juce::jlimit (juce::jmin (220, total), juce::jmax (220, total - listFloor),
                                              total / 3);
+
+        /*  AND THE FOOT IS TOLD WHERE THAT BOUNDARY IS, so its own split - the
+            picture on the left, the numbers on the right - falls on the same
+            line as the one between the inspector and the running cues (author,
+            2026-09-21: *"align and pad the waveform and range table with the
+            separation between the inspector and the running cues"*). One line
+            down the window rather than two a few pixels apart. */
+        foot.setRightColumn (runsWidth, gap);
 
         runs.setBounds (area.removeFromRight (runsWidth));
         area.removeFromRight (gap);
@@ -143,6 +183,26 @@ namespace wfg::client::ui
         }
 
         cues.setBounds (area);
+    }
+
+    void Shell::setFoot (const model::Subject& wanted)
+    {
+        const auto was = foot.subject().isOpen();
+
+        foot.open (wanted);
+        foot.setVisible (wanted.isOpen());
+
+        if (was != wanted.isOpen())
+            resized();
+    }
+
+    void Shell::growFoot (int pixels)
+    {
+        if (! foot.subject().isOpen() || pixels == 0)
+            return;
+
+        footHeight = juce::jmax (0, footHeight + pixels);
+        resized();
     }
 
     void Shell::setEditing (bool editable)

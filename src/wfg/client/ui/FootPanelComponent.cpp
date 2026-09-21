@@ -1,0 +1,206 @@
+/* Go.dot — Copyright (C) 2026 Pierre-Olivier Boulant
+   SPDX-License-Identifier: GPL-3.0-or-later */
+#include <wfg/client/ui/FootPanelComponent.h>
+
+#include <wfg/client/ui/Look.h>
+
+#include <memory>
+#include <string>
+#include <utility>
+
+namespace wfg::client::ui
+{
+    FootPanelComponent::FootPanelComponent (const model::Theme& themeToUse, Actions actionsToUse)
+        : theme (themeToUse), actions (std::move (actionsToUse))
+    {
+        addAndMakeVisible (shut);
+        shut.setTooltip ("Close the panel");
+        shut.onClick = [this] { if (actions.close) actions.close(); };
+
+        setInterceptsMouseClicks (true, true);
+    }
+
+    void FootPanelComponent::applyTheme (const model::Theme& themeToUse)
+    {
+        theme = themeToUse;
+
+        if (waveform != nullptr)
+            waveform->applyTheme (theme);
+
+        repaint();
+    }
+
+    void FootPanelComponent::setRightColumn (int width, int gap)
+    {
+        if (columnWidth == width && columnGap == gap)
+            return;
+
+        columnWidth = width;
+        columnGap = gap;
+        resized();
+    }
+
+    void FootPanelComponent::open (const model::Subject& wanted)
+    {
+        if (showing == wanted)
+            return;
+
+        showing = wanted;
+        build();
+        resized();
+        repaint();
+    }
+
+    void FootPanelComponent::build()
+    {
+        /*  ONE EDITOR AT A TIME, built when the subject changes and destroyed
+            with it. A kind that is not showing holds no component, so a panel
+            on a waveform is not also carrying a fader bank nobody asked for. */
+        waveform.reset();
+
+        switch (showing.kind)
+        {
+            case model::Subject::Kind::waveform:
+            {
+                WaveformEditorComponent::Actions editing;
+                editing.set = actions.set;
+                editing.createRange = actions.createRange;
+                editing.removeRange = actions.removeObject;
+                editing.splitRange = actions.splitRange;
+                editing.play = actions.play;
+                editing.stop = actions.stop;
+                editing.seek = actions.seek;
+                editing.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                waveform = std::make_unique<WaveformEditorComponent> (theme, std::move (editing));
+                addAndMakeVisible (*waveform);
+                break;
+            }
+
+            case model::Subject::Kind::none:
+                break;
+        }
+    }
+
+    void FootPanelComponent::show (const model::FootReading& reading,
+                                   std::shared_ptr<const audio::MediaRecords> media)
+    {
+        /*  WHAT IT IS SHOWING AND WHAT THAT THING IS CALLED. Said in the title
+            rather than left to the drawing, because a panel that opens on one
+            of several subjects has to answer "which" before it answers
+            anything else. */
+        auto wanted = juce::String();
+
+        switch (showing.kind)
+        {
+            case model::Subject::Kind::waveform:
+                wanted = "Waveform";
+                break;
+
+            case model::Subject::Kind::none:
+                break;
+        }
+
+        if (! reading.cueName.empty())
+            wanted += "  " + juce::String::fromUTF8 ("\xe2\x80\x94") + "  "
+                        + juce::String (reading.cueName);
+
+        if (wanted != title)
+        {
+            title = wanted;
+            repaint();
+        }
+
+        if (waveform != nullptr)
+            waveform->show (reading, std::move (media));
+    }
+
+    bool FootPanelComponent::overGrip (juce::Point<int> where) const
+    {
+        return where.y <= gripHeight();
+    }
+
+    void FootPanelComponent::paint (juce::Graphics& g)
+    {
+        g.fillAll (Look::colour (theme, "panel"));
+
+        /*  THE LINE ALONG THE TOP IS THE EDGE AND THE GRIP, one thing, because
+            the edge is where a hand goes to change a height and a separate
+            handle would be a second thing to find. */
+        g.setColour (Look::colour (theme, dragging ? "picked" : "rule"));
+        g.fillRect (0, 0, getWidth(), dragging ? 2 : 1);
+
+        const auto row = juce::roundToInt (theme.row * theme.type);
+        auto head = juce::Rectangle<int> (0, gripHeight(), getWidth(), row).reduced (10, 0);
+
+        head.removeFromRight (row);   // the close button's place
+
+        g.setColour (Look::colour (theme, "ink-dim"));
+        g.setFont (Look::font (theme, 13.0f));
+        g.drawText (title, head, juce::Justification::centredLeft, true);
+
+        if (note.isNotEmpty())
+        {
+            g.setColour (Look::colour (theme, "ink-off"));
+            g.setFont (Look::font (theme, 12.0f));
+            g.drawText (note, head, juce::Justification::centredRight, true);
+        }
+    }
+
+    void FootPanelComponent::resized()
+    {
+        auto area = getLocalBounds();
+        area.removeFromTop (gripHeight());
+
+        const auto row = juce::roundToInt (theme.row * theme.type);
+        auto head = area.removeFromTop (row);
+
+        shut.setBounds (head.removeFromRight (row + 10).reduced (6, 3));
+
+        if (waveform != nullptr)
+        {
+            /*  NO INSET OF ITS OWN ACROSS. The picture's left edge is the cue
+                list's left edge and the table's left edge is the running
+                pane's, which is what makes the foot read as being under the
+                window rather than beside it. */
+            waveform->setRightColumn (columnWidth, columnGap);
+            waveform->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+        }
+    }
+
+    void FootPanelComponent::mouseMove (const juce::MouseEvent& event)
+    {
+        setMouseCursor (overGrip (event.getPosition()) ? juce::MouseCursor::UpDownResizeCursor
+                                                       : juce::MouseCursor::NormalCursor);
+    }
+
+    void FootPanelComponent::mouseDown (const juce::MouseEvent& event)
+    {
+        dragging = overGrip (event.getPosition());
+        dragFrom = event.getScreenY();
+
+        if (dragging)
+            repaint();
+    }
+
+    void FootPanelComponent::mouseDrag (const juce::MouseEvent& event)
+    {
+        if (! dragging || actions.resizeBy == nullptr)
+            return;
+
+        /*  UPWARDS MAKES IT TALLER, which is the direction the edge moves. The
+            Shell clamps: how much of the window this may take is the window's
+            question and not the panel's. */
+        const auto moved = dragFrom - event.getScreenY();
+
+        if (moved != 0)
+        {
+            actions.resizeBy (moved);
+            dragFrom = event.getScreenY();
+        }
+    }
+}

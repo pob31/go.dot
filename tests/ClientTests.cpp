@@ -50,7 +50,10 @@
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Panic.h>
+#include <wfg/client/model/Ranges.h>
+#include <wfg/client/model/View.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/Scrub.h>
@@ -546,6 +549,9 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::deleteBus ("J3MT5XYA"), gesture::moveBus ("J3MT5XYA", 2),
         gesture::setBusWidth ("J3MT5XYA", 2),
         gesture::setPatchSettled (true), gesture::setPatchSettled (false),
+        gesture::createRange ("B3N8R5TW", 1.0, 4.0),
+        gesture::fireCue ("B3N8R5TW"),
+        gesture::splitRange ("B3N8R5TW", 6.0),
     };
 
     for (const auto& event : gestures)
@@ -1723,6 +1729,444 @@ TEST_CASE ("client: the new-cue row offers every kind the engine makes, and land
 }
 
 //==============================================================================
+TEST_CASE ("client: a view zooms about the pointer and never leaves the file")
+{
+    /*  THE ONE PROPERTY WORTH ASSERTING about the foot panel's arithmetic: the
+        second under the pointer stays under the pointer. That is what makes a
+        wheel feel like magnifying the picture rather than scrolling it, and
+        anchoring to an edge instead would send whatever somebody was looking
+        at off the side every time they leaned on it. */
+    model::View view;
+    view.reset (30.0);
+
+    CHECK (view.span() == doctest::Approx (30.0));
+    CHECK (view.isWholeThing());
+
+    const auto width = 600;
+    const auto x = 450.0;                       // three quarters across
+    const auto before = view.secondsForX (x, width);
+
+    for (auto turn = 0; turn < 6; ++turn)
+        view.zoomAbout (x, width, 0.85);
+
+    CHECK (view.secondsForX (x, width) == doctest::Approx (before).epsilon (0.001));
+    CHECK (view.span() < 30.0);
+
+    /*  AND IT NEVER WANDERS OFF THE FILE: panned hard either way, the window
+        comes back inside rather than showing empty time - there is no state in
+        which the bar is blank because the view left. */
+    view.panBy (-100000.0, width);
+    CHECK (view.from >= 0.0);
+
+    view.panBy (100000.0, width);
+    CHECK (view.to <= 30.0 + 1.0e-9);
+
+    //  Zoomed out past the file, it IS the file rather than something wider.
+    for (auto turn = 0; turn < 40; ++turn)
+        view.zoomAbout (x, width, 1.4);
+
+    CHECK (view.isWholeThing());
+    CHECK (view.span() == doctest::Approx (30.0));
+
+    //  And it has a floor, because the pyramid has one.
+    for (auto turn = 0; turn < 200; ++turn)
+        view.zoomAbout (x, width, 0.7);
+
+    CHECK (view.span() >= model::View::floorSeconds - 1.0e-9);
+}
+
+TEST_CASE ("client: a loop join is one handle and two writes")
+{
+    /*  Where one range ends and the next begins at the same instant, the two
+        edges sit on the same pixel. Dragging either of them ALONE would part
+        them and leave a silent gap nobody asked for, so the pair is found and
+        moved together - which is the whole reason `Handle::slice` exists. */
+    std::vector<model::RangeRow> ranges
+    {
+        { "R1", "verse",  1.0, 4.0, 2, 0 },
+        { "R2", "chorus", 4.0, 8.0, 1, 1 },
+        { "R3", "outro", 12.0, 16.0, 1, 2 },
+    };
+
+    const auto join = model::hitTest (ranges, 4.02, 0.1);
+    CHECK (join.handle == model::Handle::slice);
+    CHECK (join.rangeId == "R1");
+    CHECK (join.nextId == "R2");
+
+    const auto writes = model::dragTo (join, 5.5, ranges, 20.0);
+    REQUIRE (writes.size() == 2u);
+    CHECK (writes[0].rangeId == "R1");
+    CHECK (std::string (writes[0].attribute) == "out");
+    CHECK (writes[1].rangeId == "R2");
+    CHECK (std::string (writes[1].attribute) == "in");
+    CHECK (writes[0].seconds == doctest::Approx (5.5));
+    CHECK (writes[1].seconds == doctest::Approx (5.5));
+
+    /*  An edge that stands alone is one write, and a range is never dragged
+        through its own far edge: a range of no length is not a shorter range,
+        it is a mistake with no handle left to undo it by. */
+    const auto out = model::hitTest (ranges, 16.0, 0.1);
+    CHECK (out.handle == model::Handle::out);
+    CHECK (out.rangeId == "R3");
+
+    const auto collapsed = model::dragTo (out, 0.0, ranges, 20.0);
+    REQUIRE (collapsed.size() == 1u);
+    CHECK (collapsed[0].seconds > 12.0);
+
+    /*  A DRAG PAST A LIMIT STOPS AT IT rather than being refused, and that is
+        a deliberate difference from a drag that is impossible. A hand that
+        overshoots wants the edge to wait at the end for it to come back; a
+        gesture that answered nothing would feel like the handle had been
+        dropped, and the operator would let go somewhere they did not mean. */
+    const auto overshot = model::dragTo (out, 99.0, ranges, 20.0);
+    REQUIRE (overshot.size() == 1u);
+    CHECK (overshot[0].seconds == doctest::Approx (20.0));   // the end of the file
+
+    /*  AND THE JOIN STOPS INSIDE BOTH NEIGHBOURS, so a gesture aimed at one of
+        them can never turn the other inside out. */
+    const auto tooEarly = model::dragTo (join, 0.0, ranges, 20.0);
+    REQUIRE (tooEarly.size() == 2u);
+    CHECK (tooEarly[0].seconds > 1.0);        // not through R1's in-point
+    CHECK (tooEarly[0].seconds < 1.2);
+
+    const auto tooLate = model::dragTo (join, 50.0, ranges, 20.0);
+    REQUIRE (tooLate.size() == 2u);
+    CHECK (tooLate[0].seconds < 8.0);         // not through R2's out-point
+    CHECK (tooLate[0].seconds > 7.8);
+}
+
+TEST_CASE ("client: an edge snaps to what is already there, and never to itself")
+{
+    std::vector<model::RangeRow> ranges
+    {
+        { "R1", "", 1.0, 4.0, 1, 0 },
+        { "R2", "", 9.0, 12.0, 1, 1 },
+    };
+
+    const auto targets = model::snapTargets (ranges, "R1", 30.0);
+
+    //  Its own edges are not targets; everything else is, plus both ends.
+    CHECK (std::find (targets.begin(), targets.end(), 9.0) != targets.end());
+    CHECK (std::find (targets.begin(), targets.end(), 0.0) != targets.end());
+    CHECK (std::find (targets.begin(), targets.end(), 30.0) != targets.end());
+    CHECK (std::find (targets.begin(), targets.end(), 4.0) == targets.end());
+
+    CHECK (model::snapTo (8.97, targets, 0.1) == doctest::Approx (9.0));
+    CHECK (model::snapTo (8.5, targets, 0.1) == doctest::Approx (8.5));
+}
+
+TEST_CASE ("client: the foot panel says which subject it is on, and follows a pick")
+{
+    /*  The author's shape for it (2026-09-21): it opens on ONE thing, named by
+        whatever opened it, rather than on a tab bar. A waveform follows the
+        pick, because "show me that cue's file" is the same question asked of a
+        different cue; subjects that are not about the picked cue will not. */
+    CHECK (model::followsPick (model::Subject::Kind::waveform));
+
+    model::Subject shut;
+    CHECK_FALSE (shut.isOpen());
+    CHECK_FALSE (model::followsPick (shut.kind));
+
+    Rig rig ("phase4");
+    const auto snapshot = rig.publish (0);
+
+    const model::Subject onMedia { model::Subject::Kind::waveform, "P4MED001" };
+    const auto reading = model::readFoot (*snapshot, onMedia);
+
+    CHECK (reading.cueKind == "media");
+    CHECK (reading.cueName == "The bed");
+    CHECK (reading.file == "segments.wav");
+
+    /*  AND IT SAYS WHY THERE IS NOTHING TO DRAW when there is nothing, rather
+        than sitting blank: a silent file, a missing one and one still being
+        analysed are three situations with three different answers. */
+    const auto onGroup = model::readFoot (*snapshot,
+                                          { model::Subject::Kind::waveform, "P4GRP001" });
+    CHECK (onGroup.notice.find ("media cue") != std::string::npos);
+
+    //  A shut panel reads nothing at all.
+    CHECK (model::readFoot (*snapshot, shut).cueName.empty());
+}
+
+
+TEST_CASE ("client: a time reads and writes back as the same instant, in either locale")
+{
+    /*  The table types where the bar drags: a loop point is FOUND with a hand
+        and FIXED with a number, and the two have to agree to the millisecond
+        or the next range will not start where this one ends.
+
+        BOTH LOCALES, which is why this is worth a case at all: the suite runs
+        every serialisation test under fr-FR as well as C, where a hand types
+        "4,25" and the document holds "4.25". `osc::formatDouble` and
+        `osc::parseDouble` are the one pair in this project that knows the
+        difference. */
+    CHECK (model::timeText (0.0) == "0");
+    CHECK (model::timeText (4.25) == "4.25");
+    CHECK (model::timeText (59.999) == "59.999");
+
+    //  Minutes once there are any, and the seconds padded so a column lines up.
+    CHECK (model::timeText (60.0) == "1:00");
+    CHECK (model::timeText (187.4) == "3:07.4");
+    CHECK (model::timeText (612.25) == "10:12.25");
+
+    //  And back again, from either form.
+    CHECK (model::timeFrom ("4.25").value() == doctest::Approx (4.25));
+    CHECK (model::timeFrom ("  4.25 ").value() == doctest::Approx (4.25));
+    CHECK (model::timeFrom ("3:07.4").value() == doctest::Approx (187.4));
+    CHECK (model::timeFrom (model::timeText (612.25)).value() == doctest::Approx (612.25));
+
+    /*  WHAT IS NOT A TIME IS NOT NOUGHT. A cell that took "4.2z" as 4.2, or
+        an empty one as the top of the file, would move a cue point on a slip
+        of the keyboard - so these answer nothing at all and the table puts
+        the old number back. */
+    CHECK_FALSE (model::timeFrom ("").has_value());
+    CHECK_FALSE (model::timeFrom ("  ").has_value());
+    CHECK_FALSE (model::timeFrom ("4.2z").has_value());
+    CHECK_FALSE (model::timeFrom ("-1").has_value());
+
+    //  Sixty-one seconds into a minute is a typing slip, not a minute and a quarter.
+    CHECK_FALSE (model::timeFrom ("1:75").has_value());
+}
+
+TEST_CASE ("client: a length copied to the next slice moves its out-point and leaves the join alone")
+{
+    /*  The author, 2026-09-21: "it would be great to be able copy a duration
+        from one slice to the next so the next out point is at the same time
+        from the previous". */
+    std::vector<model::RangeRow> ranges
+    {
+        { "R1", "verse", 1.0, 4.0, 1, 0 },      // three seconds long
+        { "R2", "chorus", 4.0, 12.0, 2, 1 },    // eight, and joined to R1
+        { "R3", "tail", 12.0, 20.0, 1, 2 },
+    };
+
+    const auto writes = model::copyLengthToNext (ranges, 0, 30.0);
+
+    /*  ONE WRITE, and it is the NEXT range's out-point: its in-point stays
+        where it is, so the join with R1 survives the gesture. Two writes here
+        would be a gesture that moved a loop point nobody aimed at. */
+    REQUIRE (writes.size() == 1);
+    CHECK (writes[0].rangeId == "R2");
+    CHECK (std::string (writes[0].attribute) == "out");
+    CHECK (writes[0].seconds == doctest::Approx (7.0));   // 4.0 + 3.0
+
+    //  Pressed down the table, it builds a run of equal slices.
+    ranges[1].out = 7.0;
+    const auto next = model::copyLengthToNext (ranges, 1, 30.0);
+    REQUIRE (next.size() == 1);
+    CHECK (next[0].rangeId == "R3");
+    CHECK (next[0].seconds == doctest::Approx (15.0));    // 12.0 + 3.0
+
+    //  The last range has nothing to copy to, and nothing is written.
+    CHECK (model::copyLengthToNext (ranges, 2, 30.0).empty());
+
+    /*  AND IT DECLINES RATHER THAN CLAMPS when the answer would run past the
+        end of the file. Clamping is right for a DRAG - the handle waits at
+        the end for the hand to come back - but this button means "the same
+        length again", and a shorter one silently is the button lying. */
+    CHECK (model::copyLengthToNext (ranges, 1, 14.0).empty());
+
+    //  A range with no length has none to give.
+    const std::vector<model::RangeRow> flat { { "F1", "", 2.0, 2.0, 1, 0 },
+                                              { "F2", "", 3.0, 5.0, 1, 1 } };
+    CHECK (model::copyLengthToNext (flat, 0, 30.0).empty());
+}
+
+
+TEST_CASE ("client: the plus cuts where the playhead stands, and declines where there is nothing to cut")
+{
+    /*  The author, 2026-09-21: *"even if the ranges amount to the full file,
+        pressing the [+] range button will split the range where the cursor is.
+        No split if the cursor is already on a cut or either the start or end
+        of the file."*
+
+        So one button has three answers and the head decides which. */
+    const std::vector<model::RangeRow> whole { { "R1", "all", 0.0, 30.0, 1, 0 } };
+
+    //  Inside: a cut, which is how a bed covering the file becomes slices.
+    const auto cut = model::addAt (whole, 12.0, 30.0);
+    CHECK (cut.kind == model::RangeAdd::Kind::split);
+    CHECK (cut.at == doctest::Approx (12.0));
+
+    //  Either end of the file: nothing, and a sentence saying why.
+    for (const auto seconds : { 0.0, 30.0 })
+    {
+        const auto edge = model::addAt (whole, seconds, 30.0);
+        CHECK (edge.kind == model::RangeAdd::Kind::nothing);
+        CHECK_FALSE (edge.why.empty());
+    }
+
+    //  On a cut already: nothing. Two ranges meeting at 12 leave nothing to divide there.
+    const std::vector<model::RangeRow> sliced { { "R1", "", 0.0, 12.0, 1, 0 },
+                                                { "R2", "", 12.0, 30.0, 1, 1 } };
+
+    const auto onCut = model::addAt (sliced, 12.0, 30.0);
+    CHECK (onCut.kind == model::RangeAdd::Kind::nothing);
+    CHECK (onCut.why.find ("already") != std::string::npos);
+
+    //  Within a millisecond of one is on it: a hand on a bar does not land on the sample.
+    CHECK (model::addAt (sliced, 12.0004, 30.0).kind == model::RangeAdd::Kind::nothing);
+
+    //  And a hair further off is an ordinary cut of the second slice.
+    CHECK (model::addAt (sliced, 12.5, 30.0).kind == model::RangeAdd::Kind::split);
+
+    /*  A CUE THAT HAS SAID NOTHING YET gets its one range over the whole file,
+        which is the only way to make the FIRST one and is not a split. */
+    const auto first = model::addAt ({}, 5.0, 30.0);
+    CHECK (first.kind == model::RangeAdd::Kind::create);
+    CHECK (first.in == doctest::Approx (0.0));
+    CHECK (first.out == doctest::Approx (30.0));
+
+    /*  IN A GAP, a range from the head to whatever comes next - §3.24 lets a
+        cue's regions be neither contiguous nor in file order, so a gap is an
+        ordinary place to be and not a fault. */
+    const std::vector<model::RangeRow> gapped { { "R1", "", 0.0, 5.0, 1, 0 },
+                                                { "R2", "", 20.0, 24.0, 1, 1 } };
+
+    const auto inGap = model::addAt (gapped, 8.0, 30.0);
+    CHECK (inGap.kind == model::RangeAdd::Kind::create);
+    CHECK (inGap.in == doctest::Approx (8.0));
+    CHECK (inGap.out == doctest::Approx (20.0));     // up to the next in-point, not the end
+
+    //  Past the last range, up to the end of the file.
+    const auto after = model::addAt (gapped, 26.0, 30.0);
+    CHECK (after.kind == model::RangeAdd::Kind::create);
+    CHECK (after.out == doctest::Approx (30.0));
+
+    //  And a length nobody knows yet is a reason, not a guess.
+    CHECK (model::addAt (whole, 12.0, 0.0).kind == model::RangeAdd::Kind::nothing);
+}
+
+TEST_CASE ("client: a new range lands after the material already spoken for")
+{
+    //  Nothing yet: the whole file.
+    const auto empty = model::nextRange ({}, 30.0);
+    REQUIRE (empty.has_value());
+    CHECK (empty->first == doctest::Approx (0.0));
+    CHECK (empty->second == doctest::Approx (30.0));
+
+    /*  AFTER THE LAST ONE IN FILE ORDER and not the last in the list: §3.24
+        lets a cue walk its file out of order, so "the end of the playlist" and
+        "the end of what is used" are two different instants. */
+    const std::vector<model::RangeRow> outOfOrder { { "R1", "", 10.0, 20.0, 1, 0 },
+                                                    { "R2", "", 2.0, 5.0, 1, 1 } };
+
+    const auto after = model::nextRange (outOfOrder, 30.0);
+    REQUIRE (after.has_value());
+    CHECK (after->first == doctest::Approx (20.0));
+    CHECK (after->second == doctest::Approx (30.0));
+
+    //  No room, and no length known: two reasons to decline rather than make a nothing.
+    CHECK_FALSE (model::nextRange (outOfOrder, 20.0).has_value());
+    CHECK_FALSE (model::nextRange ({}, 0.0).has_value());
+}
+
+TEST_CASE ("client: the inspector offers the panels a kind actually has, and no others")
+{
+    /*  The author, 2026-09-21: "the controls to show the waveform, the send
+        levels, the EQ, the group timeline were in the inspector. No hunting in
+        the menus." Four were asked for and one is built, and this case is what
+        keeps the offer honest as the other three land: a button that opened
+        nothing would teach somebody the feature is broken rather than absent. */
+    const auto onMedia = model::openersFor ("media", "B3N8R5TW");
+
+    REQUIRE (onMedia.size() == 1);
+    CHECK (onMedia[0].control == model::Control::opener);
+    CHECK (onMedia[0].value == "waveform");
+    CHECK (onMedia[0].address == "B3N8R5TW");
+    CHECK_FALSE (onMedia[0].label.empty());
+
+    //  An opener is a door and not a decision: it writes nothing.
+    CHECK_FALSE (onMedia[0].writable);
+
+    for (const auto* kind : { "group", "fade", "wait", "message" })
+        CHECK (model::openersFor (kind, "B3N8R5TW").empty());
+
+    //  And they arrive at the end of what the cue DOES, after that kind's own rows.
+    Rig rig ("phase4");
+    const auto snapshot = rig.publish (0);
+    const auto inspection = model::inspect (*snapshot, "P4MED001");
+
+    auto found = false;
+
+    for (const auto& block : inspection.blocks)
+    {
+        if (block.fields.empty())
+            continue;
+
+        if (block.fields.back().control == model::Control::opener)
+        {
+            found = true;
+            CHECK (block.heading == "what it does");
+        }
+
+        //  Nowhere else in the block, which is what "at the end" means.
+        for (std::size_t at = 0; at + 1 < block.fields.size(); ++at)
+            CHECK (block.fields[at].control != model::Control::opener);
+    }
+
+    CHECK (found);
+}
+
+TEST_CASE ("client: a zoomed bar reads finer frames of a shorter span, not the same ones wider")
+{
+    /*  The pyramid exists so a bar of any width reads one level and stops
+        (PRD 3.30). Zooming has to walk DOWN it - finer frames over a shorter
+        window - or a zoomed-in bar would be the same handful of columns drawn
+        fatter, which looks like a fault and is one. */
+    audio::TimbrePyramid pyramid;
+    pyramid.sampleRate = 48000;
+    pyramid.samples = 48000ull * 60ull;   // a minute
+
+    for (const auto count : { 2048, 1024, 512, 256, 128, 64 })
+    {
+        std::vector<audio::timbre::Frame> level;
+
+        for (auto at = 0; at < count; ++at)
+        {
+            audio::timbre::Frame frame;
+            //  One loud frame a tenth of the way in, and silence elsewhere.
+            frame.peak = static_cast<std::uint8_t> (at == count / 10 ? 255 : 0);
+            frame.saturation = 200;
+            frame.lightness = 128;
+            level.push_back (frame);
+        }
+
+        pyramid.levels.push_back (std::move (level));
+    }
+
+    CHECK (model::lengthOf (pyramid) == doctest::Approx (60.0));
+
+    const auto whole = model::waveform (pyramid, 200, 0.0, 60.0);
+    const auto window = model::waveform (pyramid, 200, 20.0, 24.0);
+
+    REQUIRE (whole.size() == 200u);
+    REQUIRE (window.size() == 200u);
+
+    const auto loudest = [] (const std::vector<model::Column>& columns)
+    {
+        auto best = std::size_t { 0 };
+
+        for (std::size_t at = 1; at < columns.size(); ++at)
+            if (columns[at].peak > columns[best].peak)
+                best = at;
+
+        return best;
+    };
+
+    //  The loud frame is a tenth in, so the whole-file bar shows it near 20 of 200.
+    CHECK (whole[loudest (whole)].peak > 0.9);
+    CHECK (loudest (whole) > 10u);
+    CHECK (loudest (whole) < 32u);
+
+    //  Twenty seconds in is past it, so that window is quiet throughout.
+    CHECK (window[loudest (window)].peak < 0.5);
+
+    //  A window backwards, or no width at all, draws nothing rather than guessing.
+    CHECK (model::waveform (pyramid, 200, 40.0, 30.0).empty());
+    CHECK (model::waveform (pyramid, 0, 0.0, 60.0).empty());
+}
+
 TEST_CASE ("client: each thing a drop would do wears its own colour")
 {
     /*  Four gestures land ON a row rather than between two, and every one of
@@ -1886,6 +2330,83 @@ TEST_CASE ("client: a waveform is the engine's analysis bucketed, and never a se
         CHECK (column.peak >= 0.0);
         CHECK (column.peak <= 1.0);
     }
+}
+
+
+TEST_CASE ("client: a running strip shows the stretch the cue plays, and a loop sends the head back")
+{
+    /*  The author, 2026-09-21: *"in the running cues, the part of the waveform
+        between the first in point and last out point should be displayed. And
+        for slices looping have cursor go back to the beginning of each slice
+        as they play loops."*
+
+        THE SECOND HALF IS THE ENGINE'S ALREADY. `run/@position` is a FILE
+        position with the range wrap in it (`Runner::updatePositions`: the
+        elapsed count is taken modulo the pass and added to the range's
+        in-point), so a looping slice IS back at its in-point on every pass.
+        What was missing was the picture: measured against the whole file the
+        jump is a twitch, and measured against the stretch that plays it is the
+        head returning to the start of the slice. */
+    CHECK (model::playhead (0.0, 4.0, 12.0) == doctest::Approx (0.0));
+    CHECK (model::playhead (8.0, 4.0, 12.0) == doctest::Approx (0.5));
+    CHECK (model::playhead (12.0, 4.0, 12.0) == doctest::Approx (1.0));
+
+    //  Outside the window is the nearest end, never a bar off the edge of the world.
+    CHECK (model::playhead (1.0, 4.0, 12.0) == doctest::Approx (0.0));
+    CHECK (model::playhead (99.0, 4.0, 12.0) == doctest::Approx (1.0));
+
+    //  An empty or backwards window is nought, as an unknown length is.
+    CHECK (model::playhead (5.0, 4.0, 4.0) == doctest::Approx (0.0));
+    CHECK (model::playhead (5.0, 12.0, 4.0) == doctest::Approx (0.0));
+
+    /*  AND WHAT A LOOP LOOKS LIKE ON IT. Three slices over a thirty-second
+        file, the second of them repeating: the head walks 12 to 18 and is back
+        at 12 on the next pass, which over the played stretch is a jump from
+        three quarters of the way along back to half way - a movement somebody
+        can see, and the reason the slice boundaries are drawn. */
+    const auto from = 0.0, to = 24.0;
+
+    CHECK (model::playhead (17.9, from, to) > model::playhead (12.0, from, to));
+    CHECK (model::playhead (12.0, from, to) == doctest::Approx (0.5));
+}
+
+TEST_CASE ("client: every range in the show is gathered in one pass, owned by its cue")
+{
+    /*  ONE WALK FOR ALL OF THEM. The running pane wants the ranges of every
+        row it is drawing, twenty-five times a second; asking per row would be
+        the per-row habit the boundary check exists to stop. */
+    Rig rig ("ambience");
+    const auto snapshot = rig.publish (0);
+
+    const auto all = model::rangesByCue (*snapshot);
+
+    REQUIRE_FALSE (all.empty());
+
+    //  The fixture's bed: three regions, the first of them looping for ever.
+    const auto found = std::find_if (all.begin(), all.end(),
+                                     [] (const auto& pair) { return pair.second.size() == 3; });
+
+    REQUIRE (found != all.end());
+
+    const auto& rows = found->second;
+
+    CHECK (rows[0].name == "The bed");
+    CHECK (rows[0].loops == 0);                       // nought is for ever
+    CHECK (rows[0].in == doctest::Approx (0.0));
+    CHECK (rows[1].in == doctest::Approx (12.0));
+    CHECK (rows[2].out == doctest::Approx (24.0));
+
+    //  And it is in playlist order, which `index` is what says.
+    CHECK (rows[0].index <= rows[1].index);
+    CHECK (rows[1].index <= rows[2].index);
+
+    //  One cue picked out of it is what `readRanges` answers.
+    const auto one = model::readRanges (*snapshot, found->first);
+    REQUIRE (one.size() == 3);
+    CHECK (one[0].id == rows[0].id);
+
+    //  A cue with no ranges has none, rather than somebody else's.
+    CHECK (model::readRanges (*snapshot, "NOSUCHID").empty());
 }
 
 TEST_CASE ("client: a playhead needs a length, and a countdown empties")

@@ -1726,6 +1726,75 @@ namespace wfg::doc
                                { "out", osc::formatDouble (out) } });
     }
 
+    EditResult ShowDocument::splitRange (const std::string& cueId, double at,
+                                         const std::string& id)
+    {
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (cue.getType().toString() != "Media")
+            return EditResult::failed (reason::typeMismatch);
+
+        /*  A MILLISECOND, which is the resolution a range is placed at by a
+            hand on a bar and the same one the client calls "the same instant".
+            Inside this of either edge, there is already a cut here and a
+            second one would make a range of no length - so nothing happens,
+            and that one rule answers for a cut, for the top of the file and
+            for its end alike. */
+        constexpr auto sameInstant = 0.001;
+
+        for (int index = 0; index < cue.getNumChildren(); ++index)
+        {
+            auto child = cue.getChild (index);
+
+            if (! child.hasType ("Range"))
+                continue;
+
+            const auto in = static_cast<double> (child.getProperty ("in"));
+            const auto out = static_cast<double> (child.getProperty ("out"));
+
+            if (! (at > in + sameInstant) || ! (at < out - sameInstant))
+                continue;
+
+            const auto first = child[idProperty].toString().toStdString();
+
+            /*  THE SECOND HALF GOES DIRECTLY AFTER THE FIRST, because document
+                order is playlist order (§3.24): a half appended to the end of
+                the list would play after everything else, which is not what
+                cutting something in two means.
+
+                It inherits the loop count, so cutting a bed that goes round
+                for ever gives two pieces that each go round for ever rather
+                than one that stops. That is the reading of "split" a designer
+                slicing a loop has; a piece that quietly stopped looping would
+                be the gesture changing what the cue does. */
+            const auto made = insertObject (cue, index + 1, "Range", id,
+                                             { { "in", osc::formatDouble (at) },
+                                               { "out", osc::formatDouble (out) } });
+
+            if (! made.ok)
+                return made;
+
+            if (const auto loops = static_cast<int> (child.getProperty ("loops", 1)); loops != 1)
+                if (const auto kept = setAttribute ("/godot/range/" + made.id + "/loops",
+                                                    std::to_string (loops)); ! kept.ok)
+                    return kept;
+
+            /*  AND THE FIRST HALF STOPS WHERE THE SECOND BEGINS. Written last,
+                so that at no point in this edit does the cue hold two ranges
+                claiming the same seconds. */
+            if (const auto shortened = setAttribute ("/godot/range/" + first + "/out",
+                                                     osc::formatDouble (at)); ! shortened.ok)
+                return shortened;
+
+            return made;
+        }
+
+        return EditResult::failed (reason::badValue);
+    }
+
     EditResult ShowDocument::createTrigger (const std::string& cueId, const std::string& kind,
                                             const std::string& id)
     {

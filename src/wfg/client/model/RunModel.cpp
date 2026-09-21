@@ -186,6 +186,15 @@ namespace wfg::client::model
         std::vector<RunRow> rows;
         rows.reserve (order.size());
 
+        /*  EVERY RANGE IN THE SHOW, GATHERED ONCE, and only when something
+            with a file is actually running. `readRanges` walks the tree per
+            cue, and this pass happens twenty-five times a second - so asking
+            it per run would be exactly the per-row habit the boundary check
+            was written to stop. Built lazily below, at most once per pass, and
+            not at all on the ordinary pass where nothing is playing. */
+        std::map<std::string, std::vector<RangeRow>> rangesOfCue;
+        auto gathered = false;
+
         //  Parents first, so a depth can be walked without re-reading the tree.
         std::unordered_map<std::string, std::string> parentOf;
 
@@ -250,6 +259,67 @@ namespace wfg::client::model
                     len.has_value())
                 {
                     row.length = *len;
+                }
+
+                /*  AND THE STRETCH OF THE FILE IT PLAYS. Ranges first, and
+                    the start offset when it has none: either way this is the
+                    span the strip draws and the span the playhead is measured
+                    against, so a looping slice is a visible jump rather than a
+                    hair's movement at one end of a long picture. */
+                if (! row.file.empty())
+                {
+                    if (! gathered)
+                    {
+                        rangesOfCue = rangesByCue (snapshot);
+                        gathered = true;
+                    }
+
+                    if (const auto found = rangesOfCue.find (row.cueId);
+                        found != rangesOfCue.end())
+                    {
+                        row.ranges = found->second;
+                    }
+
+                    row.playFrom = osc::parseDouble (text (snapshot, cue + "startOffset"))
+                                     .value_or (0.0);
+                    row.playTo = row.length;
+
+                    for (std::size_t at = 0; at < row.ranges.size(); ++at)
+                    {
+                        const auto& range = row.ranges[at];
+
+                        if (at == 0)
+                        {
+                            row.playFrom = range.in;
+                            row.playTo = range.out;
+                            continue;
+                        }
+
+                        row.playFrom = std::min (row.playFrom, range.in);
+                        row.playTo = std::max (row.playTo, range.out);
+                    }
+
+                    /*  A SPAN OF NO LENGTH IS NO SPAN. A document that has a
+                        range in-point past its out-point is one the engine
+                        already warns about; the strip falls back to whatever
+                        it knows rather than dividing by nought. */
+                    if (! (row.playTo > row.playFrom))
+                    {
+                        row.playFrom = 0.0;
+                        row.playTo = row.length;
+                    }
+                }
+
+                if (const auto which = osc::parseDouble (at (snapshot, id, "range"));
+                    which.has_value())
+                {
+                    row.rangeIndex = static_cast<int> (*which);
+                }
+
+                if (const auto pass = osc::parseDouble (at (snapshot, id, "rangeIteration"));
+                    pass.has_value())
+                {
+                    row.rangeIteration = static_cast<int> (*pass);
                 }
 
                 /*  The wait it is IN, which is the only one worth a bar: the

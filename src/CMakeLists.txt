@@ -262,8 +262,13 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Media.cpp
     wfg/client/model/NewCue.h
     wfg/client/model/NewCue.cpp
+    wfg/client/model/Foot.h
+    wfg/client/model/Foot.cpp
     wfg/client/model/OutputList.h
     wfg/client/model/OutputList.cpp
+    wfg/client/model/Ranges.h
+    wfg/client/model/Ranges.cpp
+    wfg/client/model/View.h
     wfg/client/model/Panic.h
     wfg/client/model/Reorder.h
     wfg/client/model/Reorder.cpp
@@ -300,6 +305,10 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/AudioSettingsWindow.cpp
     wfg/client/Client.h
     wfg/client/ui/Client.cpp
+    wfg/client/ui/FootPanelComponent.cpp
+    wfg/client/ui/FootPanelComponent.h
+    wfg/client/ui/WaveformEditorComponent.cpp
+    wfg/client/ui/WaveformEditorComponent.h
     wfg/client/ui/Look.h
     wfg/client/ui/Look.cpp
     wfg/client/ui/CueListComponent.h
@@ -314,6 +323,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/UndoPanelComponent.cpp
     wfg/client/ui/NewCueBarComponent.h
     wfg/client/ui/NewCueBarComponent.cpp
+    wfg/client/ui/RangeTableComponent.h
+    wfg/client/ui/RangeTableComponent.cpp
     wfg/client/ui/RunPaneComponent.h
     wfg/client/ui/RunPaneComponent.cpp
     wfg/client/ui/Shell.h

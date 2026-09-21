@@ -373,7 +373,8 @@ namespace wfg::client::ui
     }
 
     const std::vector<model::Column>& RunPaneComponent::columnsFor (const std::string& file,
-                                                                   int width)
+                                                                    int width,
+                                                                    double from, double to)
     {
         static const std::vector<model::Column> none;
 
@@ -386,7 +387,15 @@ namespace wfg::client::ui
             barsWidth = width;
         }
 
-        if (const auto drawn = bars.find (file); drawn != bars.end())
+        /*  THE FILE AND THE STRETCH OF IT, because a strip no longer shows the
+            whole recording: two cues over one file with different in and out
+            points are two pictures, and one key for both would hand the second
+            cue the first one's bar. Rounded to the millisecond so an edit
+            somebody is dragging does not mint a new entry per pixel. */
+        const auto key = file + "@" + std::to_string (juce::roundToInt (from * 1000.0))
+                              + ":" + std::to_string (juce::roundToInt (to * 1000.0));
+
+        if (const auto drawn = bars.find (key); drawn != bars.end())
             return drawn->second;
 
         const auto found = media->find (file);
@@ -397,8 +406,31 @@ namespace wfg::client::ui
         if (found == media->end() || found->second.pyramid == nullptr)
             return none;
 
-        return bars.emplace (file, model::waveform (*found->second.pyramid, width))
+        /*  A WINDOW THAT NOBODY HAS SAID ANYTHING ABOUT IS THE WHOLE FILE,
+            which is what every strip was before ranges were drawn and is still
+            the right answer for a cue that plays straight through. */
+        if (! (to > from))
+            return bars.emplace (key, model::waveform (*found->second.pyramid, width))
+                       .first->second;
+
+        return bars.emplace (key, model::waveform (*found->second.pyramid, width, from, to))
                    .first->second;
+    }
+
+    /*  HOW FAR THROUGH THE STRETCH IT PLAYS a run has got, in [0, 1].
+
+        The engine's `position` is a FILE position with the range wrap already
+        in it, so a looping slice is back at its in-point on every pass; drawn
+        against the played stretch, that is the head returning to the start of
+        the slice, which is what the author asked to see (2026-09-21: *"for
+        slices looping have cursor go back to the beginning of each slice as
+        they play loops"*). */
+    double RunPaneComponent::throughOf (const model::RunRow& entry) const
+    {
+        if (entry.playTo > entry.playFrom)
+            return model::playhead (entry.seconds, entry.playFrom, entry.playTo);
+
+        return model::playhead (entry.seconds, lengthOf (entry));
     }
 
     /*  WHAT GOES UNDER THE WORDS, which is one of three things and never two
@@ -452,7 +484,7 @@ namespace wfg::client::ui
         if (! (length > 0.0) || ! entry.launched())
             return;
 
-        const auto through = model::playhead (entry.seconds, length);
+        const auto through = throughOf (entry);
         const auto x = strip.getX() + juce::roundToInt (through * (strip.getWidth() - 1));
 
         /*  What is behind it, faintly, so the cursor reads as having come from
@@ -470,7 +502,8 @@ namespace wfg::client::ui
     bool RunPaneComponent::paintWaveform (const model::RunRow& entry, juce::Graphics& g,
                                           juce::Rectangle<int> strip)
     {
-        const auto& columns = columnsFor (entry.file, strip.getWidth());
+        const auto& columns = columnsFor (entry.file, strip.getWidth(),
+                                          entry.playFrom, entry.playTo);
 
         if (columns.empty())
             return false;
@@ -548,7 +581,26 @@ namespace wfg::client::ui
             show is next opened - so the head sits at the left rather than
             sliding across a bar nobody has measured. */
         const auto length = lengthOf (entry);
-        const auto through = model::playhead (entry.seconds, length);
+        const auto through = throughOf (entry);
+
+        /*  WHERE ONE SLICE ENDS AND THE NEXT BEGINS, when the cue has more
+            than one. Faint, because they are not the subject - but without
+            them a playhead that leaps backwards at the end of a loop reads as
+            a fault rather than as a repeat, and the marks are what turn the
+            jump into something somebody can follow. */
+        if (entry.ranges.size() > 1 && entry.playTo > entry.playFrom)
+        {
+            g.setColour (Look::colour (theme, "standby").withAlpha (0.45f));
+
+            for (std::size_t at = 0; at + 1 < entry.ranges.size(); ++at)
+            {
+                const auto edge = model::playhead (entry.ranges[at].out,
+                                                   entry.playFrom, entry.playTo);
+
+                g.fillRect (strip.getX() + juce::roundToInt (edge * (strip.getWidth() - 1)),
+                            strip.getY(), 1, strip.getHeight());
+            }
+        }
 
         if (entry.launched() && length > 0.0)
         {
@@ -869,7 +921,16 @@ namespace wfg::client::ui
 
     double RunPaneComponent::secondsPerPixel (const model::RunRow& entry, int stripWidth) const
     {
-        const auto span = entry.kind == "media" ? lengthOf (entry) : extentOf (entry);
+        /*  THE STRETCH THE STRIP IS SHOWING, which since 2026-09-21 is the
+            part of the file between the first in-point and the last out-point
+            rather than the whole recording. A gearing measured against the
+            whole file would move the sound a different distance from the one
+            the hand travelled over the picture. */
+        const auto played = entry.playTo - entry.playFrom;
+
+        const auto span = entry.kind == "media" ? (played > 0.0 ? played : lengthOf (entry))
+                                                : extentOf (entry);
+
         return span / static_cast<double> (juce::jmax (1, stripWidth - 1));
     }
 

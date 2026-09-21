@@ -34,6 +34,7 @@
 
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CueListComponent.h>
+#include <wfg/client/ui/FootPanelComponent.h>
 #include <wfg/client/ui/HistoryPanelComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/ui/NewCueBarComponent.h>
@@ -61,7 +62,8 @@ namespace wfg::client::ui
                InspectorComponent::Actions inspectorActions,
                NewCueBarComponent::Actions newCueActions,
                HistoryPanelComponent::Actions historyActions,
-               UndoPanelComponent::Actions undoActions);
+               UndoPanelComponent::Actions undoActions,
+               FootPanelComponent::Actions footActions);
 
         void applyTheme (const model::Theme& theme);
 
@@ -74,6 +76,7 @@ namespace wfg::client::ui
         std::function<bool (const juce::KeyPress&)> menuKeys;
 
         TransportComponent transport;
+        FootPanelComponent foot;
         CueListComponent cues;
         RunPaneComponent runs;
         InspectorComponent inspector;
@@ -86,6 +89,15 @@ namespace wfg::client::ui
             button that would only be refused is not offered, and a show in
             show mode reads as one: the list takes the row back. */
         void setEditing (bool editable);
+
+        /*  THE PANEL AT THE FOOT, which is open when it has a subject and shut
+            when it has none - there is no separate flag, because two ways of
+            saying the same thing is how a window comes to be showing a panel
+            about nothing. Its height is kept here rather than in the panel:
+            how much of the window it may take is the window's question. */
+        void setFoot (const model::Subject&);
+        const model::Subject& footSubject() const noexcept { return foot.subject(); }
+        void growFoot (int pixels);
 
         /*  ONE SLOT BESIDE THE LIST, THREE THINGS THAT CAN STAND IN IT: nothing,
             which is the arrangement the author settled on the page - the two
@@ -103,6 +115,12 @@ namespace wfg::client::ui
         model::Theme theme;
         Panel shown = Panel::none;
         bool editing = true;
+
+        /*  How tall the foot is, in pixels, and how tall it may be. The floor
+            is a bar with a ruler under it and no less; the ceiling is half the
+            window, because a panel that could take all of it would leave
+            somebody with no cue list and no obvious way back. */
+        int footHeight = 0;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (Shell)
     };

@@ -65,6 +65,24 @@ namespace wfg::client::gesture
                    osc::Value::string (kind), osc::Value::string (name) } };
     }
 
+    Event splitRange (const std::string& cueId, double at)
+    {
+        return { origin::window, "range.split",
+                 { osc::Value::string (cueId), osc::Value::float64 (at) } };
+    }
+
+    Event fireCue (const std::string& cueId)
+    {
+        return { origin::window, "cue.fire", { osc::Value::string (cueId) } };
+    }
+
+    Event createRange (const std::string& cueId, double in, double out)
+    {
+        return { origin::window, "range.create",
+                 { osc::Value::string (cueId), osc::Value::float64 (in),
+                   osc::Value::float64 (out) } };
+    }
+
     Event moveObject (const std::string& id, const std::string& parent, int index)
     {
         return { origin::window, "object.move",

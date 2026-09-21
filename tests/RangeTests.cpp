@@ -113,6 +113,100 @@ namespace
 }
 
 //==============================================================================
+
+TEST_CASE ("range: a split cuts one in two, in place and in one edit")
+{
+    /*  The author, 2026-09-21: *"even if the ranges amount to the full file,
+        pressing the [+] range button will split the range where the cursor is.
+        No split if the cursor is already on a cut or either the start or end
+        of the file."*
+
+        ONE COMMAND AND NOT THREE. A split assembled in the window - create the
+        other half, shorten this one, move the new one into place - would be
+        three undo steps for one gesture and would leave the document briefly
+        holding two ranges claiming the same seconds. */
+    RangeRig rig;
+
+    const auto whole = rig.add (0.0, 30.0);
+    const auto second = rig.document.splitRange (rig.cueId, 12.0);
+
+    REQUIRE (second.ok);
+    CHECK (second.id != whole);
+
+    //  The first keeps its identity and stops where the cut is.
+    CHECK (rig.stored (whole, "in") == "0");
+    CHECK (rig.stored (whole, "out") == "12");
+
+    //  And the second half picks up where it left off.
+    CHECK (rig.stored (second.id, "in") == "12");
+    CHECK (rig.stored (second.id, "out") == "30");
+
+    /*  IN PLACE, which is the part that needs the engine: document order is
+        playlist order (§3.24), so the new half sits directly after the one it
+        was cut from rather than at the end of the list. */
+    CHECK (rig.published (whole, "index") == "0");
+    CHECK (rig.published (second.id, "index") == "1");
+
+    //  Cut the FIRST half again, and the third piece lands between them.
+    const auto middle = rig.document.splitRange (rig.cueId, 6.0);
+
+    REQUIRE (middle.ok);
+    CHECK (rig.published (whole, "index") == "0");
+    CHECK (rig.published (middle.id, "index") == "1");
+    CHECK (rig.published (second.id, "index") == "2");
+    CHECK (rig.stored (whole, "out") == "6");
+    CHECK (rig.stored (middle.id, "in") == "6");
+    CHECK (rig.stored (middle.id, "out") == "12");
+}
+
+TEST_CASE ("range: there is nothing to divide on a cut, at the top of the file or at its end")
+{
+    RangeRig rig;
+
+    const auto whole = rig.add (0.0, 30.0);
+
+    //  The two ends of the material: a cut there would make a region of no length.
+    CHECK_FALSE (rig.document.splitRange (rig.cueId, 0.0).ok);
+    CHECK_FALSE (rig.document.splitRange (rig.cueId, 30.0).ok);
+
+    //  Past it entirely, which is not inside any range either.
+    CHECK_FALSE (rig.document.splitRange (rig.cueId, 44.0).ok);
+
+    REQUIRE (rig.document.splitRange (rig.cueId, 12.0).ok);
+
+    //  And now 12 is a cut, so cutting there again does nothing.
+    const auto again = rig.document.splitRange (rig.cueId, 12.0);
+    CHECK_FALSE (again.ok);
+    CHECK (again.reason == reason::badValue);
+
+    //  Within a millisecond of it is on it: a hand on a bar does not land on the sample.
+    CHECK_FALSE (rig.document.splitRange (rig.cueId, 12.0004).ok);
+
+    //  Only a media cue has a file to cut up, as with `createRange`.
+    CHECK_FALSE (rig.document.splitRange (rig.memoId, 1.0).ok);
+    CHECK_FALSE (rig.document.splitRange ("NOTANID1", 1.0).ok);
+
+    //  Nothing was made by any of the refusals: still the two the split gave.
+    CHECK (rig.stored (whole, "out") == "12");
+}
+
+TEST_CASE ("range: cutting a looping slice gives two that each go round")
+{
+    /*  A designer slicing a bed that loops for ever means two pieces that each
+        loop, not one that quietly stops. The half that is made inherits the
+        loop count of the half it came from. */
+    RangeRig rig;
+
+    const auto bed = rig.add (0.0, 30.0);
+    REQUIRE (rig.document.setAttribute ("/godot/range/" + bed + "/loops", "0").ok);
+
+    const auto half = rig.document.splitRange (rig.cueId, 10.0);
+
+    REQUIRE (half.ok);
+    CHECK (rig.stored (bed, "loops") == "0");
+    CHECK (rig.stored (half.id, "loops") == "0");
+}
+
 TEST_CASE ("range: only a media cue has a file to cut up")
 {
     /*  A range is a region of the cue's OWN file (§3.24), so a cue that plays

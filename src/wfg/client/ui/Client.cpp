@@ -91,7 +91,8 @@ namespace wfg::client
         {
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
-            menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuAudioSettings
+            menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuAudioSettings,
+            menuWaveform
         };
 
         class Window final : public wfg::Client,
@@ -257,6 +258,36 @@ namespace wfg::client
                     like the folds and never reaches the engine. */
                 inspectorActions.close = [this] { selection.clear(); };
 
+                /*  THE PANEL AT THE FOOT, ASKED FOR FROM THE CUE ITSELF. The
+                    inspector hands back a word; the words are the ones
+                    `model::Subject` spells, and an unknown one opens nothing
+                    rather than guessing. */
+                inspectorActions.openPanel = [this] (const std::string& cueId,
+                                                     const std::string& subject)
+                {
+                    if (shell == nullptr || cueId.empty())
+                        return;
+
+                    auto wanted = model::Subject::Kind::none;
+
+                    if (subject == "waveform")
+                        wanted = model::Subject::Kind::waveform;
+
+                    if (wanted == model::Subject::Kind::none)
+                        return;
+
+                    /*  A SECOND PRESS ON THE PANEL ALREADY OPEN SHUTS IT, which
+                        is what the same button in a menu does and what a hand
+                        expects of a control that has no other off switch. */
+                    const auto already = shell->footSubject();
+
+                    shell->setFoot (already.kind == wanted && already.objectId == cueId
+                                      ? model::Subject {}
+                                      : model::Subject { wanted, cueId });
+
+                    menuItemsChanged();
+                };
+
                 inspectorActions.chooseFile = [this] (const std::string& cueId)
                                               { chooseFile (cueId); };
 
@@ -309,13 +340,47 @@ namespace wfg::client
                 undoActions.ok     = [this] { leaveUndoHistory(); };
                 undoActions.cancel = [this] { standAt (undoOpenedAt); leaveUndoHistory(); };
 
+                /*  THE PANEL AT THE FOOT. It writes through the same door
+                    every other gesture does - one `node.set` per edit - and
+                    tells the Shell when its edge is dragged, because how much
+                    of the window it may take is the window's question. */
+                ui::FootPanelComponent::Actions footActions;
+                footActions.set = [this] (const std::string& address, const std::string& value)
+                { send (gesture::setNode (address, value)); };
+                footActions.close = [this] { shell->setFoot ({}); };
+                footActions.resizeBy = [this] (int pixels) { shell->growFoot (pixels); };
+
+                footActions.createRange = [this] (const std::string& cueId, double in, double out)
+                                          { send (gesture::createRange (cueId, in, out)); };
+
+                footActions.removeObject = [this] (const std::string& objectId)
+                                           { send (gesture::deleteObject (objectId)); };
+
+                footActions.splitRange = [this] (const std::string& cueId, double at)
+                                         { send (gesture::splitRange (cueId, at)); };
+
+                /*  THE PANEL'S TRANSPORT, through the ordinary doors: the cue
+                    is fired by name, the run it made is killed by identifier,
+                    and a drag in the ruler seeks that run. Every one of them
+                    is a command a surface could send (4.11), and all three
+                    show up in the running pane like anything else. */
+                footActions.play = [this] (const std::string& cueId)
+                                   { send (gesture::fireCue (cueId)); };
+
+                footActions.stop = [this] (const std::string& runId)
+                                   { send (gesture::kill (runId)); };
+
+                footActions.seek = [this] (const std::string& runId, double seconds)
+                                   { send (gesture::seek (runId, seconds)); };
+
                 auto content = std::make_unique<ui::Shell> (theme, std::move (actions),
                                                             std::move (listActions),
                                                             std::move (runActions),
                                                             std::move (inspectorActions),
                                                             std::move (newCueActions),
                                                             std::move (historyActions),
-                                                            std::move (undoActions));
+                                                            std::move (undoActions),
+                                                            std::move (footActions));
                 shell = content.get();
 
                 window = std::make_unique<ui::MainWindow> (titleFor (""),
@@ -418,11 +483,13 @@ namespace wfg::client
                     case menuDeleteCue: return { juce::KeyPress::backspaceKey, mod, 0 };
                     case menuLock:      return { 'l', mod, 0 };
                     case menuLoadToTime: return { 't', mod, 0 };
+                    case menuWaveform:  return { 'e', mod, 0 };
                     case menuUndoHistory: return { 'u', mod | shift, 0 };
                     case menuRecord:     return { 'r', mod | shift, 0 };
                     //  No accelerator: both are reached through the menu only.
                     case menuRevert:
                     case menuAudioSettings: break;
+                    
                 }
 
                 return {};
@@ -431,7 +498,7 @@ namespace wfg::client
             static int menuItemForKey (const juce::KeyPress& key)
             {
                 for (const auto item : { menuNew, menuOpen, menuSaveAs, menuCut, menuCopy, menuPaste, menuLock,
-                                         menuLoadToTime, menuUndoHistory, menuRecord })
+                                         menuLoadToTime, menuUndoHistory, menuRecord, menuWaveform })
                     if (key == keyFor (item))
                         return item;
 
@@ -467,6 +534,13 @@ namespace wfg::client
                     case menuUndoHistory: return unlocked;
                     case menuRecord:     return model::isYes (last.recording) ? unlocked : true;
                     case menuAudioSettings: return true;
+
+                    /*  Offered for a media cue, and for shutting the panel
+                        whatever is picked - a panel that could be opened and
+                        not closed from the same place would be a trap. */
+                    case menuWaveform:  return shell != nullptr
+                                                 && (shell->footSubject().isOpen()
+                                                     || ! selection.empty());
                 }
 
                 return false;
@@ -531,6 +605,15 @@ namespace wfg::client
                     menu.addSeparator();
                     addMenuItem (menu, menuLoadToTime, loadingToTime ? "Stop loading to time"
                                                                      : "Load to time...");
+
+                    /*  THE PANEL AT THE FOOT, named for what it would show
+                        rather than for the furniture: "editor panel" tells
+                        nobody which of several things they are about to get,
+                        and the author's shape for it is that whatever opens it
+                        says what it is opening on. */
+                    addMenuItem (menu, menuWaveform,
+                                 shell != nullptr && shell->footSubject().isOpen()
+                                   ? "Close the waveform" : "Waveform...");
                     menu.addSeparator();
                     addMenuItem (menu, menuRecord, model::isYes (last.recording) ? "Stop the live recorder"
                                                                                   : "Start the live recorder");
@@ -560,6 +643,7 @@ namespace wfg::client
                     case menuLock:      send (gesture::setLocked (! model::isYes (last.locked))); break;
                     case menuLoadToTime: toggleLoadToTime(); break;
                     case menuUndoHistory: toggleUndoHistory(); break;
+                    case menuWaveform:  toggleWaveform(); break;
                     case menuAudioSettings:
                         if (latest)
                         {
@@ -904,9 +988,32 @@ namespace wfg::client
                     route serves the page from, published by the analyser
                     thread under a short mutex - not anything the tick thread
                     owns, which is what §14.16's second rule is about. */
-                shell->runs.show (model::readRuns (*snapshot),
-                                  host.media != nullptr ? host.media->snapshot()
-                                                        : nullptr);
+                const auto mediaTable = host.media != nullptr ? host.media->snapshot() : nullptr;
+
+                shell->runs.show (model::readRuns (*snapshot), mediaTable);
+
+                /*  AND THE PANEL AT THE FOOT, on the ONE subject it is open on.
+                    Handed the table taken just above rather than asking for its
+                    own: §14.16's second rule is one call site per door, and the
+                    boundary check counts them.
+
+                    The subject FOLLOWS THE PICK where that makes sense - the
+                    waveform of the cue somebody just clicked is what they want
+                    next - and `model::followsPick` is that rule, in one place,
+                    so the panel does not have to guess per kind. */
+                if (shell->footSubject().isOpen())
+                {
+                    auto subject = shell->footSubject();
+
+                    if (model::followsPick (subject.kind) && ! selection.anchor().empty()
+                          && selection.anchor() != subject.objectId)
+                    {
+                        subject.objectId = selection.anchor();
+                        shell->setFoot (subject);
+                    }
+
+                    shell->foot.show (model::readFoot (*snapshot, subject), mediaTable);
+                }
 
                 //  And any import or create still waiting for the cue it made.
                 finishImports (*snapshot, reading.revision);
@@ -1756,6 +1863,30 @@ namespace wfg::client
             int undoOpenedAt = 0;
             model::Picture undoPictureAtOpen;
             model::UndoReading lastUndo;
+
+            /*  THE PANEL OPENS ON THE PICKED CUE and shuts from the same
+                place. It is not a mode: nothing else changes, the cue list
+                keeps its selection, and GO still fires. */
+            void toggleWaveform()
+            {
+                if (shell == nullptr)
+                    return;
+
+                if (shell->footSubject().isOpen())
+                {
+                    shell->setFoot ({});
+                    menuItemsChanged();
+                    return;
+                }
+
+                const auto picked = selection.anchor();
+
+                if (picked.empty())
+                    return;
+
+                shell->setFoot ({ model::Subject::Kind::waveform, picked });
+                menuItemsChanged();
+            }
 
             void toggleUndoHistory()
             {

@@ -317,6 +317,27 @@ namespace wfg::doc
         EditResult createInsert (const std::string& cueId, const std::string& channelId,
                                  const std::string& id = {});
 
+        /*  CUTS A RANGE IN TWO where the playhead is (author, 2026-09-21:
+            *"even if the ranges amount to the full file, pressing the [+]
+            range button will split the range where the cursor is. No split if
+            the cursor is already on a cut or either the start or end of the
+            file"*).
+
+            ONE COMMAND AND NOT THREE, which is the whole reason it is here
+            rather than assembled in the window. A split is one decision - a
+            cut, at an instant - and doing it as a create, a shortening and a
+            reorder would be three undo steps for one gesture, three records in
+            the log, and a document that is briefly wrong between the first and
+            the second. Here it is one transaction: the range keeps its place
+            in the playlist and its other half is inserted directly after it.
+
+            Refuses `badValue` when the instant is not strictly inside a range
+            - which is the same answer for a cut, for the top of the file and
+            for its end, because none of those is a place where there is a
+            range to divide. */
+        EditResult splitRange (const std::string& cueId, double at,
+                               const std::string& id = {});
+
         EditResult createRange (const std::string& cueId, double in, double out,
                                 const std::string& id = {});
 

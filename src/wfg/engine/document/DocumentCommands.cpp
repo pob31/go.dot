@@ -215,6 +215,24 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        registry.add ({ "range.split",
+                        "Cuts one of a media cue's ranges in two at a second of its file, the"
+                        " second half keeping the first's place in the playlist. Refused when"
+                        " that second is not strictly inside a range - on a cut, at the top of"
+                        " the file or at its end, there is nothing to divide.",
+                        { { "cue", 's', false }, { "at", 'd', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.splitRange (args[0].getString(),
+                                                                   args[1].getFloat64(), id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
         /*  PHASE 4'S SLOTS, declared. Four commands rather than one, because
             they are four different objects and §4.11 wants each gesture named:
             a processor input belongs to a mount, a rack channel to the rack,

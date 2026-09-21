@@ -149,6 +149,27 @@ namespace wfg::client::model
         }
     }
 
+    std::vector<Field> openersFor (const std::string& kind, const std::string& cueId)
+    {
+        std::vector<Field> out;
+
+        const auto offer = [&out, &cueId] (const char* label, const char* subject)
+        {
+            Field field;
+            field.name = subject;
+            field.label = label;
+            field.control = Control::opener;
+            field.value = subject;          // the SUBJECT, in the words `Subject` uses
+            field.address = cueId;          // what the panel would open ON
+            out.push_back (std::move (field));
+        };
+
+        if (kind == "media")
+            offer ("Waveform, in and out points", "waveform");
+
+        return out;
+    }
+
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId)
     {
         Inspection out;
@@ -213,6 +234,22 @@ namespace wfg::client::model
         sortInto (whenBlock.fields, when);
         sortInto (doesBlock.fields, kindRows);
         sortInto (listBlock.fields, saidLast);
+
+        /*  AND THE PANELS THIS CUE HAS, at the end of what it DOES and after
+            the sorts, so an opener never lands in the middle of the rows a
+            kind orders. The author asked for them here rather than in a menu
+            (2026-09-21: *"the controls to show the waveform, the send levels,
+            the EQ, the group timeline ... No hunting in the menus"*), and the
+            reasoning is the ordinary one: the inspector is where a cue is
+            being worked on, so a longer look at that same cue is a thing to
+            ask for from there.
+
+            They are NOT parameters and write nothing. A row here is usually a
+            decision the document holds; these are doors. The window draws them
+            differently for that reason - §4.8's rule applies to form as well
+            as to colour. */
+        for (auto& opener : openersFor (out.kind, cueId))
+            doesBlock.fields.push_back (std::move (opener));
 
         for (auto* block : { &isBlock, &whenBlock, &doesBlock, &listBlock })
             if (! block->fields.empty())

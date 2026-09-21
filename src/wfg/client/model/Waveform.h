@@ -88,6 +88,27 @@ namespace wfg::client::model
         average; this one does not average twice. */
     std::vector<Column> waveform (const audio::TimbrePyramid& pyramid, int width);
 
+    /*  THE SAME BAR OVER A WINDOW OF THE FILE rather than the whole of it,
+        which is what makes an editor zoom. `from` and `to` are seconds; a
+        window that is empty, backwards or entirely outside the file answers
+        with nothing, exactly as the whole-file call does when there is nothing
+        to draw.
+
+        IT IS STILL NOT A SECOND ANALYSIS. The level is picked for the number of
+        frames the WINDOW holds rather than the file, so zooming in walks down
+        the pyramid and reads finer frames of a shorter span - the same cost per
+        repaint at every zoom, which is the property the pyramid exists to give
+        and the reason a window may be dragged about without the bar stuttering.
+
+        The whole-file overload above is this one over the whole file, and is
+        kept because the running pane wants exactly that and should not have to
+        know a file's length to ask for it. */
+    std::vector<Column> waveform (const audio::TimbrePyramid& pyramid, int width,
+                                  double fromSeconds, double toSeconds);
+
+    /** How long the pyramid says the file is, in seconds; nought when it cannot say. */
+    double lengthOf (const audio::TimbrePyramid& pyramid);
+
     /*  WHERE THE PLAYHEAD STANDS, as a fraction of the bar in [0, 1].
 
         Nought when the length is not known yet, which is the honest answer
@@ -96,6 +117,21 @@ namespace wfg::client::model
         at load), so a playhead that guessed would slide across a bar it had no
         business measuring. */
     double playhead (double position, double length);
+
+    /*  AND THE SAME THING OVER A WINDOW OF THE FILE rather than over the whole
+        of it: where `position` sits between `from` and `to`, in [0, 1].
+
+        THIS IS WHAT MAKES A LOOP VISIBLE. The engine's `position` is a FILE
+        position with the range wrap already in it - a looping slice is back at
+        its in-point on every pass - so a strip drawn over the stretch the cue
+        actually plays shows the head returning to the start of each slice,
+        which is what it is doing. Measured against the whole file instead, the
+        same jump is a twitch at one end of a picture that is mostly silence
+        nobody will hear.
+
+        Nought when the window is empty or backwards, which is the same honest
+        answer the whole-file call gives for an unknown length. */
+    double playhead (double position, double from, double to);
 
     /*  AND HOW FAR THROUGH A WAIT A RUN IS, drawn as a bar that empties rather
         than fills (author, 2026-09-18: "pre-waits and post-waits can also have

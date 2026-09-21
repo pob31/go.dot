@@ -47,6 +47,12 @@ namespace wfg::client::ui
         /** The file control's other half: the box takes a name, this goes looking. */
         juce::TextButton browse { "..." };
 
+        /*  A DOOR RATHER THAN A DECISION: the button that opens the panel at
+            the foot on this cue. It spans the row instead of sitting in the
+            value column, because everything in that column is a number or a
+            word the document keeps and this is neither. */
+        juce::TextButton opener;
+
         /*  THE TALL BOX for a field written at length - notes - several
             lines, wrapped, Return starting a new one, committed when the
             focus leaves (author, 2026-09-18: "the edit field in the
@@ -258,6 +264,10 @@ namespace wfg::client::ui
                     line.box.setText (shown (field), juce::dontSendNotification);
                     break;
 
+                case model::Control::opener:
+                    //  Nothing to poll: it holds no value and writes none.
+                    break;
+
                 case model::Control::file:
                 case model::Control::cueRef:
                 case model::Control::text:
@@ -354,7 +364,30 @@ namespace wfg::client::ui
             line->name.setTooltip (juce::String (field.description));
             content.addAndMakeVisible (line->name);
 
-            if (field.boolean && field.writable)
+            if (field.control == model::Control::opener)
+            {
+                /*  THE WHOLE ROW IS THE BUTTON, and the name label steps aside
+                    - there is no value to line up against, and a label plus a
+                    button reading "Open" would be two things to read where one
+                    will do. */
+                line->name.setVisible (false);
+
+                line->opener.setButtonText (juce::String (field.label));
+                line->opener.setWantsKeyboardFocus (false);
+                line->opener.setTooltip ("Opens at the foot of the window, on this cue");
+
+                const auto id = field.address;      // the cue, put there by `openersFor`
+                const auto subject = field.value;   // and which panel it wants
+
+                line->opener.onClick = [this, id, subject]
+                {
+                    if (actions.openPanel)
+                        actions.openPanel (id, subject);
+                };
+
+                content.addAndMakeVisible (line->opener);
+            }
+            else if (field.boolean && field.writable)
             {
                 line->toggle.setToggleState (field.value == "true", juce::dontSendNotification);
                 line->toggle.setWantsKeyboardFocus (false);
@@ -606,6 +639,16 @@ namespace wfg::client::ui
             line->browse.setVisible (! hidden && line->browse.getParentComponent() != nullptr
                                        && line->field.control == model::Control::file);
 
+            const auto opens = line->field.control == model::Control::opener;
+
+            line->opener.setVisible (! hidden && opens);
+
+            if (opens)
+            {
+                line->name.setVisible (false);
+                line->box.setVisible (false);
+            }
+
             /*  The tall box stands in for the one-line box when it exists. */
             const auto tall = line->field.control == model::Control::longText
                                 && line->editor.getParentComponent() != nullptr;
@@ -622,6 +665,13 @@ namespace wfg::client::ui
             {
                 line->name.setBounds (pad, y + pad, width, row);
                 y += row + pad;
+                continue;
+            }
+
+            if (opens)
+            {
+                line->opener.setBounds (pad, y + 1, width - pad, row - 2);
+                y += row;
                 continue;
             }
 

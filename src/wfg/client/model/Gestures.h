@@ -106,6 +106,30 @@ namespace wfg::client::gesture
         `index` is a member position in `parent`, or -1 for the end. */
     Event moveObject (const std::string& id, const std::string& parent, int index);
 
+    /*  FIRES ONE NAMED CUE, without touching standby - which is what a button
+        on a surface does, and what the waveform panel's play button does when
+        somebody wants to HEAR the region they are placing (author, 2026-09-21:
+        *"we need to play/pause the clip for testing"*).
+
+        IT IS THE REAL CUE AND NOT A PREVIEW. It plays through its own routing
+        at its own level, its run appears in the running pane like any other,
+        and PANIC stops it - which is the honest arrangement: an audition that
+        went somewhere the show does not would be teaching somebody the wrong
+        thing about what they are about to hear. */
+    Event fireCue (const std::string& cueId);
+
+    /*  Makes a range on a media cue: a named region of its file, and one entry
+        in the playlist the cue plays instead of the whole thing (§3.24). As
+        `createCue`, the identifier is the engine's to draw and the log's to
+        record - a window is not the second consumer of entropy in this
+        project - so the panel finds what it made on the next pass. */
+    Event createRange (const std::string& cueId, double in, double out);
+
+    /*  Cuts one of a media cue's ranges in two where the playhead is. One
+        command rather than a create, a shortening and a reorder, so it is one
+        undo step and one record - see `ShowDocument::splitRange`. */
+    Event splitRange (const std::string& cueId, double at);
+
     /** Deletes a cue or a group: ctrl/⌘-Backspace on the picked one. Undo brings it back with its ids. */
     Event deleteObject (const std::string& id);
 

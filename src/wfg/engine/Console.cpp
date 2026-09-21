@@ -1575,14 +1575,55 @@ namespace
         int outputs = 0;
 
         /*  SLOTS PER TRACK: the widest range count of any media cue in the
-            show, at least one. A property of the SHOW, like the track count,
-            because §3.25 fixes the graph's shape when it is built and never
-            after - and a range added later has no slot until the show is
-            reloaded (`no-slot`). */
+            show, plus room to work in. A property of the SHOW, like the track
+            count, because §3.25 fixes the graph's shape when it is built and
+            never after - and a range added beyond this has no slot until the
+            show is reloaded (`no-slot`). */
         int slots = 1;
 
         std::string problem;
     };
+
+    /*  ROOM TO WORK IN, and it is measured rather than guessed.
+
+        Until 2026-09-21 the graph was built with exactly the widest range
+        count in the show, which is the tightest shape that can play it - and
+        that was right while ranges were something a show arrived with. Then
+        the waveform panel got a button that CUTS one in two, and the tightest
+        shape became the one that refuses the second slice of every cue the
+        moment somebody makes it: a show with no ranges loads with one slot, a
+        single split needs two, and the cue stops playing until the show is
+        reloaded. A gesture whose ordinary use breaks the thing it edits is not
+        a gesture anybody can work with.
+
+        SO THE SHAPE IS GENEROUS, and what makes that affordable is that an
+        empty slot costs the callback very little. Measured on this box (Debug,
+        8 output channels, 480 frames at 48 kHz - a 10 ms budget), microseconds
+        per block after a warm-up:
+
+            tracks \ slots      1       8      12
+                  8           614     627     694
+                 32          2096    2174    2138
+                 64          3819    4181    4269
+
+        THE TRACK COUNT IS WHAT COSTS, and by a factor of six; the slots add
+        about a tenth on top of it at the widest shape a show is likely to
+        have, and everything here is inside budget in a DEBUG build. The
+        resident clips are real - one per slot per track - but a launcher node
+        with nothing playing does no work, and what the callback spends its
+        time on is the cue that IS sounding.
+
+        The author chose this over rebuilding the graph on an edit (a device
+        close and reopen, so a gap in the clock) and over leaving §3.25 to
+        refuse with a better message. §3.25 is untouched: the shape is still
+        fixed when the graph is built and never after. It is simply cut with
+        enough cloth that ordinary editing does not reach the edge.
+
+        A show that genuinely has more ranges than the headroom still gets
+        them, because the headroom is added ON TOP of the widest count rather
+        than being a ceiling. */
+    constexpr int slotHeadroom = 4;
+    constexpr int slotFloor = 8;
 
     /*  How many ranges the widest media cue in the show carries.
 
@@ -1624,7 +1665,7 @@ namespace
         }
 
         shape.tracks = static_cast<int> (audio["tracks"]);
-        shape.slots = std::max (1, widestRangeCount (document.root()));
+        shape.slots = std::max (slotFloor, widestRangeCount (document.root()) + slotHeadroom);
 
         for (const auto bus : audio)
         {

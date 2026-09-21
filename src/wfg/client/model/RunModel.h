@@ -40,6 +40,8 @@
     std only, like the rest of model/.
 */
 
+#include <wfg/client/model/Ranges.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <string>
@@ -106,6 +108,44 @@ namespace wfg::client::model
         std::string file;
         double seconds = 0.0;      ///< `position`, as a number
         double length = 0.0;       ///< the cue's `duration`, or 0 when unknown
+
+        /*  WHICH STRETCH OF THE FILE THIS CUE ACTUALLY PLAYS (author,
+            2026-09-21: *"in the running cues, the part of the waveform between
+            the first in point and last out point should be displayed"*).
+
+            A cue with ranges walks regions of its file and may touch none of
+            the rest of it; a strip drawn over the whole file then spends most
+            of its width on material nobody will hear, and the playhead crawls
+            across a picture that is mostly irrelevant. So the strip is the
+            span between the EARLIEST in-point and the LATEST out-point -
+            earliest and latest rather than first and last in the playlist,
+            because 3.24 lets a cue walk its file out of order and the span is
+            a fact about the FILE rather than about the running order.
+
+            With no ranges it is the start offset to the end of the file, which
+            is the same rule said of a cue that plays straight through: the
+            seconds before the offset are never heard either.
+
+            Nought to nought when nothing is known, and the strip then draws
+            what it drew before: the whole of whatever it has. */
+        double playFrom = 0.0;
+        double playTo = 0.0;
+
+        /*  WHICH RANGE IS SOUNDING AND WHICH PASS OF IT, from the engine's own
+            readouts. `rangeIndex` is -1 for every kind but media and for a
+            media cue with no ranges; `rangeIteration` counts from one.
+
+            They are read so the strip can say WHY the playhead jumped: a loop
+            sends it back to its range's in-point on every pass (the engine
+            wraps it, `Runner::updatePositions`), and a head that leaps
+            backwards over a picture with no marks on it reads as a fault
+            rather than as a repeat. */
+        int rangeIndex = -1;
+        int rangeIteration = 0;
+
+        /** This cue's regions, so the strip can draw where one ends and the next begins. */
+        std::vector<RangeRow> ranges;
+
         double remaining = 0.0;    ///< seconds left of the wait it is in
         double waitTotal = 0.0;    ///< how long that wait is, from the cue
         std::int64_t started = 0;  ///< the tick GO was applied on, or 0 before one was

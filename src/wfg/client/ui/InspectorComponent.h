@@ -70,6 +70,12 @@ namespace wfg::client::ui
                 document stores and says so when it cannot. */
             std::function<void (const std::string& address, const std::string& text)> setCueRef;
 
+            /*  OPENS THE PANEL AT THE FOOT on this cue, named by the subject
+                the field carries. The inspector does not know what a foot
+                panel is and must not: it passes on a word and a cue, and the
+                window turns the pair into a `Subject`. */
+            std::function<void (const std::string& cueId, const std::string& subject)> openPanel;
+
             /** Picks nothing, which is what closes this panel. */
             std::function<void()> close;
         };
