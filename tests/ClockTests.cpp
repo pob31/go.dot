@@ -521,3 +521,29 @@ TEST_CASE ("tick thread: a dummy clock drives it end to end")
         two agreeing is the gapless claim checked end to end. */
     CHECK (thread.ticksProcessed() == thread.lastTick() + 1);
 }
+
+TEST_CASE ("tick thread: suspended audio keeps commands responsive without advancing cues")
+{
+    Engine engine;
+    ManualClock counter;
+    const auto schedule = TickClock::create (48000);
+    REQUIRE (schedule.has_value());
+    TickThread thread { engine, counter, *schedule };
+    std::atomic<int> scheduled { 0 }, commands { 0 };
+    thread.setBeforeTick ([&] (std::int64_t) { ++scheduled; });
+    engine.commands().add ({ "test.panic", "Test control while audio is paused", {}, false,
+        [&] (CommandContext&, const std::vector<osc::Value>& args)
+        { ++commands; return Outcome::ok (args); } });
+    thread.start();
+    REQUIRE (waitUntil ([&] { return thread.lastTick() == 0; }));
+    thread.setSuspended (true);
+    REQUIRE (engine.submit ("test", "test.panic"));
+    REQUIRE (waitUntil ([&] { return commands.load() == 1; }));
+    CHECK (thread.lastTick() == 0);
+    CHECK (scheduled.load() == 1);
+    counter.advance (960);
+    thread.setSuspended (false);
+    REQUIRE (waitUntil ([&] { return thread.lastTick() == 1; }));
+    thread.stop();
+    CHECK (scheduled.load() == 2);
+}

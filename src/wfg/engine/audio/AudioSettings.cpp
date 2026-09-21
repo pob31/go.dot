@@ -148,6 +148,13 @@ namespace wfg::audio
     {
         engine.setAdmissionCheck ([&state] (const std::string& command)
         {
+            if (state.status == "noClock" && command != "audio.connection" && command != "audio.reconnect"
+                && command != "run.killAll" && command != "run.kill" && command != "run.stopAll"
+                && command != "run.stop" && command != "audio.testStop"
+                && command != "audio.armed" && command != "run.failed"
+                && command != "document.save" && command != "document.autosave"
+                && command != "document.saved" && command != "document.writeFailed")
+                return std::string ("audio-reconnecting");
             return state.settingsStatus == "applying" && command != "audio.settingsReady"
                 && command != "audio.testStop"
                 && command != "document.save" && command != "audio.defaults" && command != "audio.defaultsReady"

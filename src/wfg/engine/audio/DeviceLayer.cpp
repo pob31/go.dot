@@ -17,6 +17,7 @@
 #include <wfg/engine/audio/DeviceLayer.h>
 #include <wfg/engine/audio/AudioSettings.h>
 #include <wfg/engine/audio/OutputTestSignal.h>
+#include <wfg/engine/audio/RecoveryGate.h>
 
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <spatcore/io/DeviceHost.h>
@@ -153,10 +154,16 @@ namespace wfg::audio
                 What the device says here is what the show runs at. */
             observedRate.store (device->getCurrentSampleRate(), std::memory_order_relaxed);
             observedBlock.store (device->getCurrentBufferSizeSamples(), std::memory_order_relaxed);
-            delivered.store (0, std::memory_order_relaxed);
+            recovery.started (device->getTypeName() == pinnedType
+                && device->getName() == pinnedSetup.outputDeviceName
+                && device->getCurrentSampleRate() == granted.sampleRate
+                && device->getCurrentBufferSizeSamples() == granted.blockSize
+                && device->getActiveInputChannels() == pinnedSetup.inputChannels
+                && device->getActiveOutputChannels() == pinnedSetup.outputChannels);
         }
 
-        void audioDeviceStopped() override {}
+        void audioDeviceStopped() override { recovery.stopped(); }
+        void audioDeviceError (const juce::String&) override { recovery.stopped(); }
 
         void audioDeviceIOCallbackWithContext (const float* const* inputChannelData, int numInputChannels,
                                                float* const* outputChannelData,
@@ -171,6 +178,8 @@ namespace wfg::audio
             for (int channel = 0; channel < numOutputChannels; ++channel)
                 if (outputChannelData[channel] != nullptr)
                     juce::FloatVectorOperations::clear (outputChannelData[channel], numSamples);
+
+            if (! recovery.callback()) return;
 
             if (numSamples != audioHost.settings().blockSize)
             {
@@ -233,6 +242,10 @@ namespace wfg::audio
         std::atomic<std::int64_t> switchAt { 0 };
         std::atomic<std::int64_t> mismatches { 0 };
         bool running = false;
+        RecoveryGate recovery;
+        juce::AudioDeviceManager::AudioDeviceSetup pinnedSetup;
+        juce::String pinnedType;
+        double nextRetry = 0;
     };
 
     //==============================================================================
@@ -478,6 +491,8 @@ namespace wfg::audio
         }
 
         impl->granted = settings;
+        impl->pinnedSetup = impl->manager.getAudioDeviceSetup();
+        impl->pinnedType = device->getTypeName();
         impl->sink.test.prepare (settings.sampleRate, settings.blockSize);
         impl->openedName = device->getName().toStdString();
         for (const auto size : device->getAvailableBufferSizes())
@@ -488,6 +503,9 @@ namespace wfg::audio
 
         impl->audioHost.setBlockSink (&impl->sink);
         impl->manager.addAudioCallback (impl.get());
+        // The initial open has already validated its format. Reopens must first
+        // prove that callbacks and clock have returned through serviceRecovery.
+        impl->recovery.resume (true);
         impl->running = true;
         return true;
     }
@@ -511,6 +529,40 @@ namespace wfg::audio
     int DeviceAudioDriver::outputChannels() const noexcept { return impl->hardwareOutputs; }
     const std::string& DeviceAudioDriver::availableBufferSizes() const noexcept { return impl->bufferSizes; }
     void DeviceAudioDriver::setOutputTest (const OutputTestSettings& settings) noexcept { impl->sink.test.set (settings); }
+
+    bool DeviceAudioDriver::recoveryPaused() const noexcept { return impl->recovery.paused(); }
+    bool DeviceAudioDriver::resumeConnection() noexcept { return impl->recovery.resume(); }
+
+    void DeviceAudioDriver::reconnect()
+    {
+        impl->recovery.stopped();
+        impl->manager.removeAudioCallback (impl.get());
+        impl->manager.closeAudioDevice();
+        impl->nextRetry = 0;
+    }
+
+    bool DeviceAudioDriver::serviceRecovery()
+    {
+        if (! impl->running) return false;
+        const auto now = juce::Time::getMillisecondCounterHiRes();
+        const auto observation = impl->recovery.observe (now);
+        if (observation.retry && now >= impl->nextRetry)
+        {
+            impl->nextRetry = now + 1000.0;
+            // Never tear down AudioHost here: it owns the paused launch handles,
+            // range state, routing and sample counter. No second ASIO instance.
+            impl->manager.removeAudioCallback (impl.get());
+            impl->manager.closeAudioDevice();
+            for (auto* type : impl->manager.getAvailableDeviceTypes())
+                if (type->getTypeName() == impl->pinnedType) type->scanForDevices();
+            impl->manager.setCurrentAudioDeviceType (impl->pinnedType, false);
+            auto setup = impl->pinnedSetup;
+            const auto problem = impl->manager.setAudioDeviceSetup (setup, false);
+            impl->error = problem.toStdString();
+            impl->manager.addAudioCallback (impl.get());
+        }
+        return observation.ready;
+    }
 
     std::int64_t DeviceAudioDriver::blocksDelivered() const noexcept
     {

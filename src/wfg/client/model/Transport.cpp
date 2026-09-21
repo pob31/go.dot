@@ -124,6 +124,8 @@ namespace wfg::client::model
 
     std::string TransportReading::errorLine() const
     {
+        if (status == "noClock")
+            return "Audio disconnected - cues paused; waiting for the interface and clock.";
         if (lastError.empty())
             return {};
 

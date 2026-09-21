@@ -155,6 +155,13 @@ namespace wfg::audio
         const std::string& availableBufferSizes() const noexcept;
         void setOutputTest (const OutputTestSettings&) noexcept;
 
+        // Reopen only the original hardware, retaining the graph and its clock.
+        // serviceRecovery is message-thread work; the other two use atomics.
+        bool serviceRecovery();
+        void reconnect();
+        bool recoveryPaused() const noexcept;
+        bool resumeConnection() noexcept;
+
         AudioHost& host() noexcept;
 
         /*  Blocks the device has asked for since the open, and how late the

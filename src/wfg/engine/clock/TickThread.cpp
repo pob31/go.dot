@@ -123,6 +123,16 @@ namespace wfg
 
         while (! stopping)
         {
+            if (suspended.load())
+            {
+                lock.unlock();
+                const auto at = std::max<std::int64_t> (0, lastTick());
+                const auto outcome = engine.processTick (at);
+                if (afterTick) afterTick (outcome);
+                lock.lock();
+                wakeUp.wait_for (lock, std::chrono::milliseconds (20), [this] { return stopping; });
+                continue;
+            }
             const auto action = nextTickAction (schedule,
                                                 processed.load (std::memory_order_relaxed),
                                                 samples.samplesElapsed());

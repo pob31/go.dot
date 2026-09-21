@@ -16,6 +16,7 @@ namespace wfg::audio
     public:
         explicit SettingsPump (SettingsRequest work) : perform (std::move (work)) { startTimer (40); }
         ~SettingsPump() override { stopTimer(); }
+        std::function<void()> maintenance;
         void post (const AudioSettings& settings, bool defaultsOnly)
         {
             const std::lock_guard<std::mutex> lock (mutex);
@@ -27,6 +28,7 @@ namespace wfg::audio
             std::deque<std::pair<AudioSettings, bool>> work;
             { const std::lock_guard<std::mutex> lock (mutex); work.swap (queued); }
             for (const auto& item : work) perform (item.first, item.second);
+            if (maintenance) maintenance();
         }
         SettingsRequest perform;
         std::mutex mutex;

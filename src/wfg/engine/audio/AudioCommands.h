@@ -83,6 +83,8 @@ namespace wfg::audio
 
         /** `stopped` until something opens a device or a hosted driver. */
         std::string status = "stopped";
+        std::function<bool()> resumePlayback;
+        std::function<void()> reconnect;
     };
 
     /*  Adds `audio.editBuilt`, bound to `state`.

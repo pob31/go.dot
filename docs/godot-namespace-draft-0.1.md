@@ -1062,6 +1062,44 @@ Hold. Read-only `/godot/audio/testType`, `testChannel`, `testFrequency`,
 `testLevel`, and `testHold` publish the configuration. These values are not
 saved in shows or defaults.
 
+Implementation update (2026-09-21) — **the interface going away mid-show.** Part
+of §6.2's "asynchronous failure mode with no defined behaviour yet", and the
+behaviour is now **pause, do not stop.** A device that stops delivering
+callbacks, reports an error, or comes back describing itself differently puts
+`/godot/audio/status` at `noClock`. The show tick freezes where it stood, every
+run keeps its position, and **no footer runs** — an outage is not one of §4.4's
+three stops, and nothing about it is a thing anybody declared.
+
+While paused the control plane stays up: the engine goes on serving commands and
+publishing snapshots at the frozen tick, so a client can still read the show and
+be told why it is still. What it may not do is change it. Every command is
+refused with `audio-reconnecting` except the ones an outage needs — the four stop
+and kill verbs, `audio.testStop`, the document's save and autosave path, the
+engine's own `audio.armed` and `run.failed` bookkeeping, and the two commands
+below.
+
+Recovery insists on **the same hardware**: interface name, device type, sample
+rate, block size and both channel layouts must match what was granted at the
+open. Reopening is retried once a second, and a reopened device is then watched
+**silently** — its callbacks run and clear their outputs, while the playback
+graph and the show clock do not advance — until it has delivered at least three
+callbacks and held steady for 250 ms. A 500 ms stall puts it back to unproven, so
+a device that flaps never passes rather than handing the show back and forth.
+
+`audio.reconnect()` closes the interface and starts that cycle by hand, keeping
+the paused cues: the remedy for a device that is present and wrong.
+`audio.connection(ready:T)` is the engine's own, submitted by its watchdog —
+`false` when the outage is seen, `true` once validation has passed. The `true`
+form is refused with `audio-not-ready` if it has not, so a resume can never
+outrun the clock it is waiting for. On resume the graph continues from where it
+paused, on the launch handles it still held, and the second-resolution clock
+triggers missed during the outage are dropped rather than all fired at once.
+
+What this does **not** settle is §6.2's other half: a device that returns at a
+different sample rate is held at `noClock` and retried, never adapted or
+resampled. "Refuse, warn, or adapt" on a rate mismatch remains the author
+decision §6.2 records as open.
+
 ### 11.2 Cue kinds
 
 `kind` grows to `memo | group | media | fade | stop | osc`. Each kind's attributes are nodes

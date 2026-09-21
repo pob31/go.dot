@@ -174,6 +174,10 @@ namespace wfg
         /** Stops after the tick in progress and joins. The destructor calls it. */
         void stop();
 
+        // Keep serving commands and publishing snapshots at the frozen tick,
+        // without running the scheduler or advancing any cue's elapsed time.
+        void setSuspended (bool value) noexcept { suspended.store (value); wakeUp.notify_all(); }
+
         // Only while stopped. Keep tick indices monotonic across a device switch.
         std::int64_t rebaseAudio (int newSampleRate)
         {
@@ -238,6 +242,7 @@ namespace wfg
         bool stopping = false;
 
         std::atomic<bool> running { false };
+        std::atomic<bool> suspended { false };
         std::atomic<bool> elevated { false };
         std::atomic<std::int64_t> processed { -1 };
         std::atomic<std::int64_t> lastLateness { 0 };

@@ -3210,6 +3210,38 @@ namespace
         audioState.requestSettings = [&settingsPump] (const wfg::audio::AudioSettings& settings, bool defaultsOnly)
         { settingsPump.post (settings, defaultsOnly); };
 
+        bool connectionLost = false;
+        std::atomic<bool> reconnectRequested { false };
+        audioState.reconnect = [&] { reconnectRequested.store (true); };
+        double resumeRequestedAt = 0;
+        audioState.resumePlayback = [&]
+        {
+            if (! deviceDriver || ! deviceDriver->resumeConnection()) return false;
+            // Clock triggers missed during an outage must not all fire on return.
+            previousSecond = -1;
+            ticks.setSuspended (false);
+            return true;
+        };
+        settingsPump.maintenance = [&]
+        {
+            if (! deviceDriver) return;
+            if (reconnectRequested.exchange (false)) deviceDriver->reconnect();
+            const auto ready = deviceDriver->serviceRecovery();
+            if (! deviceDriver->recoveryPaused()) { connectionLost = false; return; }
+            if (! connectionLost)
+            {
+                connectionLost = true;
+                ticks.setSuspended (true);
+                engine.submit ("engine", "audio.connection", { wfg::osc::Value::boolean (false) });
+            }
+            const auto now = juce::Time::getMillisecondCounterHiRes();
+            if (ready && now - resumeRequestedAt >= 250.0)
+            {
+                resumeRequestedAt = now;
+                engine.submit ("engine", "audio.connection", { wfg::osc::Value::boolean (true) });
+            }
+        };
+
         {
             /*  THE WINDOW, IF ASKED FOR, and this scope is its whole life.
                 Built BEFORE THE CLOCK RUNS, and that ordering is a measurement

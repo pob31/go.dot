@@ -152,6 +152,28 @@ TEST_CASE ("devices: media reaches the patched hardware output")
         REQUIRE (driver.host().launchTrackAt (0, 0, driver.host().beatsAtSample (target)));
         for (int i = 0; i < 1000 && ! capture.received.load (std::memory_order_relaxed); ++i)
             std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        REQUIRE (capture.received.load (std::memory_order_relaxed));
+        driver.reconnect();
+        const auto pausedAt = driver.host().clock().samplesElapsed();
+        const auto playedAt = driver.host().trackPlayState (0).playedBeats;
+        CHECK (driver.recoveryPaused());
+        CHECK_FALSE (driver.resumeConnection());
+        bool recovered = false;
+        for (int i = 0; i < 1000 && ! recovered; ++i)
+        {
+            recovered = driver.serviceRecovery();
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        }
+        REQUIRE_MESSAGE (recovered, driver.lastError());
+        CHECK (driver.host().clock().samplesElapsed() == pausedAt);
+        CHECK (driver.host().trackPlayState (0).playedBeats == playedAt);
+        capture.received.store (false, std::memory_order_relaxed);
+        REQUIRE (driver.resumeConnection());
+        for (int i = 0; i < 1000 && ! capture.received.load (std::memory_order_relaxed); ++i)
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        CHECK (capture.received.load (std::memory_order_relaxed));
+        CHECK (driver.host().clock().samplesElapsed() > pausedAt);
+        CHECK (driver.host().trackPlayState (0).playedBeats >= playedAt);
         driver.close();
         MESSAGE (device.type << " / " << device.name << ": final device peaks "
                   << capture.peaks[0] << ", " << capture.peaks[1]);

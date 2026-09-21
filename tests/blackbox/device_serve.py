@@ -297,6 +297,25 @@ def play_and_kill(server: Server, report: Report) -> None:
         advanced = common.wait_until(
             lambda: float(value_at(server.http_port, f"/godot/run/{run}/position")) > 0.1)
         report.check(bool(advanced), "the media playhead advances")
+        common.send_udp(server.osc_port, common.osc_encode("/godot/cmd/audio/reconnect"))
+        paused = common.wait_until(lambda: value_at(server.http_port, "/godot/audio/status") == "noClock")
+        report.check(bool(paused), "reconnecting reports that cues are paused")
+        paused_position = float(value_at(server.http_port, f"/godot/run/{run}/position"))
+        paused_tick = int(value_at(server.http_port, "/godot/engine/tick"))
+        # Silent clock validation lasts 250 ms; query twice without waiting for
+        # an audio tick, proving the control plane remains available while held.
+        if value_at(server.http_port, "/godot/audio/status") == "noClock":
+            report.equal(int(value_at(server.http_port, "/godot/engine/tick")), paused_tick,
+                         "the show tick stays frozen during recovery")
+            report.equal(float(value_at(server.http_port, f"/godot/run/{run}/position")), paused_position,
+                         "the existing cue retains its position")
+        restored = common.wait_until(lambda: value_at(server.http_port, "/godot/audio/status") == "running",
+                                     timeout=15.0)
+        report.check(bool(restored), "the original device and clock recover automatically")
+        resumed = common.wait_until(lambda: float(value_at(server.http_port, f"/godot/run/{run}/position")) > paused_position)
+        report.check(bool(resumed), "the same run resumes after reconnection")
+        report.equal(value_at(server.http_port, f"/godot/run/{run}/state"), "playing",
+                     "recovery does not replace or restart the cue")
     common.send_udp(server.osc_port,
                     common.osc_encode("/godot/cmd/run/kill", [run]))
     report.equal(wait_for_run_state(server, run, "done", timeout=5.0), "done",

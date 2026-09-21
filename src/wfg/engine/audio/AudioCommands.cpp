@@ -27,6 +27,31 @@ namespace wfg::audio
 
     void registerAudioCommands (CommandRegistry& registry, AudioState& state)
     {
+        registry.add ({ "audio.reconnect", "Reconnect the current interface while retaining paused cues.", {}, false,
+            [&state] (CommandContext&, const std::vector<osc::Value>& args)
+            {
+                if (state.reconnect) state.reconnect();
+                return Outcome::ok (args);
+            } });
+        registry.add ({ "audio.connection", "Pause for a lost interface or resume after its clock returns.",
+            { { "ready", 'T', false } }, false,
+            [&state] (CommandContext&, const std::vector<osc::Value>& args)
+            {
+                if (args[0].getBool())
+                {
+                    if (state.resumePlayback && ! state.resumePlayback())
+                        return Outcome::rejected ("audio-not-ready");
+                    state.status = "running";
+                    state.settingsError.clear();
+                }
+                else
+                {
+                    state.status = "noClock";
+                    state.settingsError = "Audio disconnected: cues paused; waiting for the same interface and clock.";
+                    stopOutputTest (state);
+                }
+                return Outcome::ok (args);
+            } });
         registry.add ({ "audio.testSignal", "Test one hardware output without changing cue routing.",
             { { "type", 'i', false }, { "channel", 'i', false }, { "frequency", 'i', false },
               { "level", 'd', false }, { "hold", 'T', false } }, false,

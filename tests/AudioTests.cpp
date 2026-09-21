@@ -31,6 +31,7 @@
 #include <juce_audio_formats/juce_audio_formats.h>
 
 #include <wfg/engine/audio/AudioCommands.h>
+#include <wfg/engine/audio/RecoveryGate.h>
 #include <wfg/engine/rt/RtCheck.h>
 #include <wfg/engine/audio/HostPlayer.h>
 #include <wfg/engine/cue/Runner.h>
@@ -4451,4 +4452,94 @@ TEST_CASE ("M17: where a clip armed with a start offset actually begins")
               "`LaunchHandle::nudge` is not reachable from Go.dot's own code "
               "(no AudioHost entry point exposes it), so load-to-time relaunches "
               "rather than nudges until one is added");
+}
+
+TEST_CASE ("audio recovery: stable callbacks are required and an interrupted validation stays paused")
+{
+    audio::RecoveryGate gate;
+    gate.started (true);
+    REQUIRE (gate.resume (true));
+    CHECK (gate.callback());
+    gate.observe (0);
+    CHECK (gate.observe (500).retry);
+    CHECK (gate.paused());
+    CHECK_FALSE (gate.callback());
+    CHECK_FALSE (gate.resume());
+    gate.stopped();
+    gate.started (false); // wrong interface, rate, block or channel layout
+    for (int i = 0; i < 20; ++i) CHECK_FALSE (gate.callback());
+    CHECK (gate.observe (600).retry);
+    CHECK_FALSE (gate.resume());
+    gate.started (true);
+    gate.observe (1000);
+    CHECK_FALSE (gate.observe (1000).ready); // no callbacks is not recovery
+    for (int i = 1; i <= 8; ++i)
+    {
+        CHECK_FALSE (gate.callback());
+        const auto result = gate.observe (1000 + i * 40);
+        CHECK (result.ready == (i >= 7));
+    }
+    gate.stopped(); // loss between validation and the resume command
+    CHECK_FALSE (gate.resume());
+    gate.started (true);
+    gate.observe (2000);
+    for (int i = 1; i <= 8; ++i) { gate.callback(); gate.observe (2000 + i * 40); }
+    REQUIRE (gate.resume());
+    CHECK (gate.callback());
+}
+
+TEST_CASE ("audio recovery: paused media keeps its position and resumes its existing launch handle")
+{
+    HostRig rig;
+    audio::HostSettings settings;
+    settings.sampleRate = 48000; settings.blockSize = 128; settings.outputChannels = 2;
+    REQUIRE (rig.host.start (settings));
+    audio::EditSpec spec; spec.tracks = 1; spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+    const auto tone = writeSteadyTone (rig.storage.folder, 1, settings.sampleRate);
+    REQUIRE (rig.host.setTrackSource (0, 0, tone.getFullPathName().toStdString()));
+    REQUIRE (rig.host.waitForTrackSourceReady (0, 10000));
+    for (int i = 0; i < 8; ++i) rig.host.processBlock();
+    REQUIRE (rig.host.launchTrackAt (0, 0, rig.host.beatsAtSample (rig.host.clock().samplesElapsed() + 1024)));
+    for (int i = 0; i < 100; ++i) rig.host.processBlock();
+    REQUIRE (rig.host.trackPlayState (0).playing);
+    const auto sample = rig.host.clock().samplesElapsed();
+    const auto position = rig.host.trackPlayState (0).playedBeats;
+    audio::RecoveryGate gate;
+    gate.started (true);
+    gate.observe (0);
+    for (int i = 1; i <= 8; ++i)
+    {
+        if (gate.callback()) rig.host.processBlock();
+        gate.observe (i * 40);
+    }
+    CHECK (rig.host.clock().samplesElapsed() == sample);
+    CHECK (rig.host.trackPlayState (0).playedBeats == position);
+    REQUIRE (gate.resume());
+    for (int i = 0; i < 10; ++i) if (gate.callback()) rig.host.processBlock();
+    CHECK (rig.host.clock().samplesElapsed() == sample + 1280);
+    CHECK (rig.host.trackPlayState (0).playing);
+    CHECK (rig.host.trackPlayState (0).playedBeats == doctest::Approx (position + 1280.0 / 48000.0));
+}
+
+TEST_CASE ("audio recovery: connection state is logged and failed validation cannot resume")
+{
+    Engine engine;
+    audio::AudioState state;
+    audio::registerAudioCommands (engine.commands(), state);
+    state.status = "running";
+    state.test.type = 1;
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (false) });
+    CHECK (engine.processTick (5).applied == 1);
+    CHECK (state.status == "noClock");
+    CHECK (state.test.type == 0);
+    state.resumePlayback = [] { return false; };
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (true) });
+    CHECK (engine.processTick (5).rejected == 1);
+    CHECK (state.status == "noClock");
+    state.resumePlayback = [] { return true; };
+    engine.submit ("engine", "audio.connection", { osc::Value::boolean (true) });
+    CHECK (engine.processTick (5).applied == 1);
+    CHECK (state.status == "running");
+    CHECK (state.settingsError.empty());
 }
