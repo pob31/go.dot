@@ -55,6 +55,14 @@ namespace
 
         void exercisePanel (const std::function<void()>& checkClock)
         {
+            /*  WHAT APPLY SHOULD SEND AS THE OUTPUT PATCH, which depends on
+                whether this show is still following its output list. A show
+                with a patch already written has settled, and Apply sends it
+                back; a show with none has not, and Apply must send none -
+                writing the diagonal out in full would settle it, and somebody
+                applying a buffer size did not ask for that. */
+            const auto wantedPatch = document.getAttribute ("/godot/audio/outputPatch")
+                                       .value_or (std::string {});
             client::ui::AudioSettingsWindow panel (theme, *publish(),
                 [this] (Event event) { sent.push_back (std::move (event)); });
             checkClock();
@@ -67,7 +75,8 @@ namespace
             apply->onClick();
             REQUIRE (sent.size() == 1);
             REQUIRE (sent.back().command == "audio.setup");
-            CHECK (sent.back().args[6].getString() == "0 1");
+
+            CHECK (sent.back().args[6].getString() == wantedPatch);
             CHECK_FALSE (apply->isEnabled());
 
             const auto& args = sent.back().args;
@@ -103,6 +112,81 @@ TEST_CASE ("audio settings UI: apply completion and refusal release the controls
     rig.exercisePanel ([] {});
 }
 
+TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch settles the show")
+{
+    Rig rig;
+
+    /*  Two outputs to look at, made through the commands so the channels are
+        packed the way the tab will show them. */
+    REQUIRE (rig.document.createBus ("direct", 1).ok);
+    const auto mix = rig.document.createBus ("mix", 2);
+    REQUIRE (mix.ok);
+
+    client::ui::AudioSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    /*  A TAB'S CONTENT IS ONLY A LIVE CHILD WHILE IT SHOWS, which is
+        `juce::TabbedComponent`'s own arrangement - so the page has to be
+        selected before anything in it can be found. Outputs is the second tab,
+        between Interface and the two patches. */
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    CHECK (tabs->getTabNames()[1] == "Outputs");
+    tabs->setCurrentTabIndex (1);
+
+    /*  THE TWO ADD BUTTONS ARE THE WHOLE STRUCTURE GESTURE. Everything else on
+        this tab - the name, the width cell, the cross, the drag - is a click on
+        a row, which a component test cannot reach without a mouse; what it CAN
+        assert is that each control sends the named command it claims to. */
+    auto* addDirect = button (panel, "+ direct out");
+    auto* addMix = button (panel, "+ mix channel");
+    REQUIRE (addDirect != nullptr);
+    REQUIRE (addMix != nullptr);
+
+    addDirect->onClick();
+    REQUIRE (rig.sent.size() == 1);
+    CHECK (rig.sent.back().command == "bus.create");
+    CHECK (rig.sent.back().args[0].getString() == "direct");
+    CHECK (rig.sent.back().args[1].getInt32() == 1);
+
+    addMix->onClick();
+    REQUIRE (rig.sent.size() == 2);
+    CHECK (rig.sent.back().args[0].getString() == "mix");
+    CHECK (rig.sent.back().args[1].getInt32() == 2);
+
+    /*  AND THE FIRST HAND EDIT OF THE PATCH SETTLES THE SHOW, before the edit
+        lands rather than after: the engine's layout rule materialises the patch
+        it had before repacking, so it has to already know the show has stopped
+        following its list. */
+    tabs->setCurrentTabIndex (3);   // the output patch
+    auto* matrix = component<spatcore::ui::patch::PatchMatrixComponent> (panel);
+    REQUIRE (matrix != nullptr);
+
+    const auto before = rig.sent.size();
+    REQUIRE (matrix->onBeforeUserPatchEdit != nullptr);
+    matrix->onBeforeUserPatchEdit();
+
+    REQUIRE (rig.sent.size() == before + 1);
+    CHECK (rig.sent.back().command == "node.set");
+    CHECK (rig.sent.back().args[0].getString() == "/godot/audio/patchSettled");
+    CHECK (rig.sent.back().args[1].getBool());
+
+    //  Once, and not once per click: the flag is already true.
+    matrix->onBeforeUserPatchEdit();
+    CHECK (rig.sent.size() == before + 1);
+
+    /*  AND THE OTHER HALF OF THE SAME RULE: once it has been touched, Apply
+        sends the patch it has rather than nothing. An untouched patch on a
+        show still following its list sends nothing at all, which is what
+        `exercisePanel` pins. */
+    auto* apply = button (panel, "Apply while stopped");
+    REQUIRE (apply != nullptr);
+    apply->onClick();
+
+    REQUIRE (rig.sent.back().command == "audio.setup");
+    CHECK_FALSE (rig.sent.back().args[6].getString().empty());
+}
+
 TEST_CASE ("audio settings UI: held output tests clear on tab exit and window close")
 {
     Rig rig;
@@ -128,7 +212,7 @@ TEST_CASE ("audio settings UI: held output tests clear on tab exit and window cl
     REQUIRE (tabs != nullptr);
     for (bool close : { false, true })
     {
-        tabs->setCurrentTabIndex (2);
+        tabs->setCurrentTabIndex (3);   // the output patch, after Interface and Outputs
         auto* page = tabs->getCurrentContentComponent();
         REQUIRE (page != nullptr);
         auto* test = button (*page, "Test");

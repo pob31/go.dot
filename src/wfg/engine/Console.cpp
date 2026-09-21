@@ -3315,7 +3315,10 @@ namespace
                                                        .getFullPathName().toStdString(), defaults))
                         fresh.configureAudio (defaults);
 
-                    if (const auto made = fresh.createList ("Main"); ! made.ok)
+                    /*  A LIST, AN OUTPUT AND SOME TRACKS: `startNewShow` says
+                        why all three, and why a show with one of them and not
+                        the others is worse than an empty one. */
+                    if (const auto made = fresh.startNewShow(); ! made.ok)
                         return "could not start the new show: " + made.reason;
 
                     if (const auto saved = wfg::doc::Bundle::save (folder, fresh); ! saved.ok)

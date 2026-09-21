@@ -156,6 +156,8 @@ add_library(wfg_engine STATIC
     wfg/engine/document/FadePoints.h
     wfg/engine/document/Ids.cpp
     wfg/engine/document/Ids.h
+    wfg/engine/document/OutputLayout.cpp
+    wfg/engine/document/OutputLayout.h
     wfg/engine/document/RelaxNg.cpp
     wfg/engine/document/RelaxNg.h
     wfg/engine/document/Schema.cpp
@@ -260,6 +262,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Media.cpp
     wfg/client/model/NewCue.h
     wfg/client/model/NewCue.cpp
+    wfg/client/model/OutputList.h
+    wfg/client/model/OutputList.cpp
     wfg/client/model/Panic.h
     wfg/client/model/Reorder.h
     wfg/client/model/Reorder.cpp

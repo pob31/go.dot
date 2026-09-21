@@ -20,6 +20,7 @@
 #include <wfg/engine/command/Command.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/document/FadePoints.h>
+#include <wfg/engine/document/OutputLayout.h>
 #include <wfg/engine/document/Sequence.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -1311,6 +1312,359 @@ namespace wfg::doc
                              { { "class", channelClass } });
     }
 
+    //==============================================================================
+    EditResult ShowDocument::writeOwned (juce::ValueTree node, std::string_view element,
+                                         std::string_view name, std::string_view text)
+    {
+        const auto* attribute = Schema::instance().attribute (element, name);
+
+        if (attribute == nullptr || ! node.isValid())
+            return EditResult::failed (reason::badAddress);
+
+        Value value;
+
+        if (! Schema::parseValue (*attribute, text, value).ok)
+            return EditResult::failed (reason::typeMismatch);
+
+        node.setProperty (juce::Identifier (juce::String (std::string (name))),
+                          toVar (value), historyFor (*attribute));
+
+        return EditResult::succeeded (node[idProperty].toString().toStdString());
+    }
+
+    std::vector<juce::ValueTree> ShowDocument::busNodes() const
+    {
+        const auto audio = showNode.getChildWithName ("Audio");
+
+        std::vector<juce::ValueTree> buses;
+
+        if (! audio.isValid())
+            return buses;
+
+        for (const auto& child : audio)
+            if (child.hasType ("Bus"))
+                buses.push_back (child);
+
+        /*  READ ORDER IS CHANNEL ORDER. A show written by the layout commands
+            has the two the same and this changes nothing; a show written by
+            hand may not, and then the list the designer is shown reads up the
+            interface rather than down the file, which is the order they wired
+            it in. Stable, so two buses that somehow start on the same channel
+            keep the order the file gave them rather than swapping about
+            between one command and the next. */
+        const auto* first = Schema::instance().attribute ("Bus", "firstChannel");
+        const auto defaultFirst = first != nullptr
+                                    ? juce::String (juce::CharPointer_UTF8 (first->defaultText().data()),
+                                                    first->defaultText().size()).getIntValue()
+                                    : 0;
+
+        const auto channelOf = [defaultFirst] (const juce::ValueTree& bus)
+        {
+            static const juce::Identifier property { "firstChannel" };
+
+            return bus.hasProperty (property) ? static_cast<int> (bus[property]) : defaultFirst;
+        };
+
+        std::stable_sort (buses.begin(), buses.end(),
+                          [&channelOf] (const juce::ValueTree& a, const juce::ValueTree& b)
+                          { return channelOf (a) < channelOf (b); });
+
+        return buses;
+    }
+
+    EditResult ShowDocument::applyLayout (const LayoutEdit& edit, const std::string& id,
+                                          const std::string& kind)
+    {
+        /*  ASKED HERE, not only at `insertObject`'s door, for the reason
+            `createRackChannel` gives: everything below changes the document
+            before any create is reached - the repacked channels, the reorder,
+            the patch - so a lock asked later would let a locked show be
+            rearranged and THEN refuse. */
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        auto audio = showNode.getChildWithName ("Audio");
+
+        if (! audio.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        const auto nodes = busNodes();
+
+        std::vector<BusShape> before;
+        before.reserve (nodes.size());
+
+        for (const auto& bus : nodes)
+        {
+            BusShape shape;
+            shape.id = bus[idProperty].toString().toStdString();
+
+            /*  Through `getAttribute`, so a bus whose width the canonical
+                writer dropped for being its default reads 1 rather than
+                nought. Reading the property raw is the bug that made every
+                saved-and-reopened show refuse its feeds as `bad-route`
+                (`cue/ShowWalk.h` records it), and it is the same tree and the
+                same omission here. */
+            const auto width = getAttribute ("/godot/bus/" + shape.id + "/width");
+            const auto first = getAttribute ("/godot/bus/" + shape.id + "/firstChannel");
+
+            /*  `getIntValue` rather than `std::stoi`, which throws: every value
+                here has been through the schema, so a number is what is there -
+                but a door that reads a document must not be the one place a
+                malformed file becomes an exception. */
+            shape.width = width.has_value() ? juce::String (*width).getIntValue() : 1;
+            shape.firstChannel = first.has_value() ? juce::String (*first).getIntValue() : 0;
+            before.push_back (std::move (shape));
+        }
+
+        const auto settledText = getAttribute ("/godot/audio/patchSettled");
+        const auto patchText = getAttribute ("/godot/audio/outputPatch");
+
+        std::vector<int> patch;
+
+        if (patchText.has_value() && ! audio::readPatch (*patchText, patch))
+            return EditResult::failed (reason::badValue);
+
+        const auto layout = applyLayoutEdit (before, patch,
+                                             settledText.value_or ("false") == "true", edit);
+
+        if (! layout.problem.empty())
+            return EditResult::failed (edit.kind == LayoutEdit::Kind::create
+                                         || edit.kind == LayoutEdit::Kind::resize
+                                       ? reason::badValue : reason::unknownId);
+
+        /*  THE STRUCTURAL STEP FIRST, so that a refusal inside it - an
+            identifier already taken, a lock that arrived between two lines -
+            leaves the channels as they were rather than repacked around a bus
+            that was never made. */
+        std::string made = id;
+
+        switch (edit.kind)
+        {
+            case LayoutEdit::Kind::create:
+            {
+                /*  A NAME IT CAN BE CALLED BY AT ONCE. An output with no name
+                    is a row reading "Bus" in a menu of them, and the first
+                    thing anybody would do is type one - so it arrives with
+                    "Direct 3" or "Mix 2" and is renamed if that is wrong.
+                    Counted over the outputs of its own kind rather than over
+                    all of them, and by how many there are rather than by the
+                    highest number in use: two outputs called "Mix 2" is a
+                    smaller surprise than a designer's own names being read for
+                    numbering.
+
+                    `name` is `rw`, so a rename is an ordinary `node.set` and
+                    nothing here has to know about it. */
+                auto sameKind = 0;
+
+                for (const auto& bus : nodes)
+                    if (getAttribute ("/godot/bus/" + bus[idProperty].toString().toStdString() + "/kind")
+                          .value_or ("direct") == kind)
+                        ++sameKind;
+
+                const auto name = (kind == "mix" ? std::string ("Mix ") : std::string ("Direct "))
+                                    + std::to_string (sameKind + 1);
+
+                const auto created = insertObject (audio, edit.index < 0 ? endOfSequence : edit.index,
+                                                   "Bus", id, { { "kind", kind }, { "name", name } });
+
+                if (! created.ok)
+                    return created;
+
+                made = created.id;
+                break;
+            }
+
+            case LayoutEdit::Kind::remove:
+            {
+                auto node = findById (id);
+
+                if (! node.isValid() || ! node.hasType ("Bus"))
+                    return EditResult::failed (reason::unknownId);
+
+                /*  EVERY DESTINATION THAT NAMED IT GOES WITH IT, in this same
+                    transaction. A route left naming a bus that has gone is a
+                    run that fails `bad-route`, and it fails at GO rather than
+                    here - months later, in a room with an audience in it. */
+                std::vector<juce::ValueTree> orphans;
+                std::vector<juce::ValueTree> clear;
+
+                const auto visit = [&] (const juce::ValueTree& node_, auto&& recurse) -> void
+                {
+                    for (const auto& child : node_)
+                    {
+                        if (child.hasType ("Route") && child["bus"].toString().toStdString() == id)
+                            orphans.push_back (child);
+                        else if (child.hasType ("Slot") && child["bus"].toString().toStdString() == id)
+                            clear.push_back (child);
+
+                        recurse (child, recurse);
+                    }
+                };
+
+                visit (showNode, visit);
+
+                for (const auto& orphan : orphans)
+                {
+                    std::vector<std::string> released;
+                    collectIds (orphan, released);
+                    orphan.getParent().removeChild (orphan, structuralHistory());
+
+                    for (const auto& gone : released)
+                        registry.release (gone);
+                }
+
+                /*  A processor input keeps its name and its width and loses the
+                    bus it fed from: the slot is a declaration about the
+                    processor, which has not changed, and `wfg validate` then
+                    says it feeds from nowhere. Deleting it would throw away
+                    an address and a width somebody typed. */
+                for (const auto& slot : clear)
+                    setAttribute ("/godot/slot/" + slot[idProperty].toString().toStdString() + "/bus", "");
+
+                std::vector<std::string> released;
+                collectIds (node, released);
+                audio.removeChild (node, structuralHistory());
+
+                for (const auto& gone : released)
+                    registry.release (gone);
+
+                break;
+            }
+
+            case LayoutEdit::Kind::move:
+            case LayoutEdit::Kind::resize:
+            {
+                const auto node = findById (id);
+
+                if (! node.isValid() || ! node.hasType ("Bus"))
+                    return EditResult::failed (reason::unknownId);
+
+                break;
+            }
+        }
+
+        /*  THE DOCUMENT IS PUT INTO THE LIST'S ORDER, which for a show written
+            by these commands it already is. `moveChild` one at a time rather
+            than a sort, because every step has to be an undoable action on the
+            same history - and because the answer is one pass: each bus in
+            turn is moved to where the layout says it goes. */
+        for (std::size_t at = 0; at < layout.buses.size(); ++at)
+        {
+            const auto& wanted = layout.buses[at];
+            const auto node = wanted.id.empty() ? findById (made) : findById (wanted.id);
+
+            if (! node.isValid())
+                continue;
+
+            if (const auto raw = audio.indexOf (node);
+                raw >= 0 && raw != rawIndexForPosition (audio, static_cast<int> (at)))
+                audio.moveChild (raw, std::min (rawIndexForPosition (audio, static_cast<int> (at)),
+                                                audio.getNumChildren() - 1),
+                                 structuralHistory());
+        }
+
+        for (const auto& wanted : layout.buses)
+        {
+            const auto node = wanted.id.empty() ? findById (made) : findById (wanted.id);
+
+            if (! node.isValid())
+                continue;
+
+            if (const auto result = writeOwned (node, "Bus", "firstChannel",
+                                                std::to_string (wanted.firstChannel));
+                ! result.ok)
+                return result;
+
+            if (const auto result = writeOwned (node, "Bus", "width",
+                                                std::to_string (wanted.width));
+                ! result.ok)
+                return result;
+        }
+
+        /*  AND THE PATCH LAST. `patchChanged` is false in the two cases that
+            must not write: a show still following its list, where the patch
+            stays empty and the outputs follow the order, and an edit that
+            moved nothing the patch could see. */
+        if (layout.patchChanged)
+            if (const auto result = setAttribute ("/godot/audio/outputPatch",
+                                                  audio::writePatch (layout.outputPatch));
+                ! result.ok)
+                return result;
+
+        return EditResult::succeeded (made);
+    }
+
+    EditResult ShowDocument::createBus (const std::string& kind, int width, int index,
+                                        const std::string& id)
+    {
+        if (kind != "direct" && kind != "mix")
+            return EditResult::failed (reason::badValue);
+
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::create;
+        edit.index = index;
+        edit.width = width;
+
+        return applyLayout (edit, id, kind);
+    }
+
+    EditResult ShowDocument::startNewShow (int tracks)
+    {
+        if (tracks < 0)
+            return EditResult::failed (reason::badValue);
+
+        if (const auto list = createList ("Main"); ! list.ok)
+            return list;
+
+        if (const auto count = setAttribute ("/godot/audio/tracks", std::to_string (tracks));
+            ! count.ok)
+            return count;
+
+        /*  A STEREO DIRECT OUT ON THE FIRST TWO CHANNELS, named the way every
+            fixture in this repository names it and the way anybody wiring a
+            rig would. A show with tracks and no bus is refused at the door of
+            the audio graph, so this is not a convenience. */
+        const auto out = createBus ("direct", 2);
+
+        if (! out.ok)
+            return out;
+
+        if (const auto named = setAttribute ("/godot/bus/" + out.id + "/name", "Main L/R");
+            ! named.ok)
+            return named;
+
+        return EditResult::succeeded (out.id);
+    }
+
+    EditResult ShowDocument::removeBus (const std::string& id)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::remove;
+        edit.id = id;
+
+        return applyLayout (edit, id, {});
+    }
+
+    EditResult ShowDocument::moveBus (const std::string& id, int index)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::move;
+        edit.id = id;
+        edit.index = index;
+
+        return applyLayout (edit, id, {});
+    }
+
+    EditResult ShowDocument::resizeBus (const std::string& id, int width)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::resize;
+        edit.id = id;
+        edit.width = width;
+
+        return applyLayout (edit, id, {});
+    }
+
     EditResult ShowDocument::createFeed (const std::string& cueId,
                                          const std::string& slotId,
                                          const std::string& id)
@@ -2559,6 +2913,62 @@ namespace wfg::doc
                                     " GO, but @readback is \"" + readback
                                   + "\" - so nothing can be read back to restore, and nothing"
                                     " will be pre-sent");
+        }
+
+        /*  AND TWO OUTPUTS SHARING AN INTERFACE CHANNEL.
+
+            The four layout commands keep `Bus/@firstChannel` packed, so a show
+            written through them never reaches this. A show written by hand
+            can, and an overlap is the one that matters: the same interface
+            channel summing two different mixes, which nobody hears until the
+            night and nothing else in the file would ever mention.
+
+            A GAP IS NOT REPORTED, deliberately. Outputs that start above where
+            the ones before them end are a RIG, not a fault -
+            `tests/fixtures/bundles/slots` feeds a processor from channel 9
+            upward and a foldback from 1, because that is how the box is wired
+            - and the layout commands preserve exactly that by moving the
+            channels into the interface patch before anything is repacked
+            (`document/OutputLayout.h`). Warning about it would put a line in
+            front of every designer who ever left room on their interface.
+
+            A WARNING AND NOT A REFUSAL, for the reason every other one here is
+            one: yesterday's saved show has to open tomorrow, and an overlap
+            still plays - loudly. */
+        {
+            /*  IN CHANNEL ORDER, not document order - `busNodes` sorts, and
+                asking this of the file's own order would report an overlap
+                wherever somebody had simply written the outputs out of
+                sequence, which is not a fault at all. */
+            const auto outputs = busNodes();
+
+            for (std::size_t at = 1; at < outputs.size(); ++at)
+            {
+                const auto previousId = outputs[at - 1][idProperty].toString().toStdString();
+                const auto id = outputs[at][idProperty].toString().toStdString();
+
+                const auto startOf = [this] (const std::string& busId)
+                {
+                    const auto text = getAttribute ("/godot/bus/" + busId + "/firstChannel");
+                    return text.has_value() ? juce::String (*text).getIntValue() : 0;
+                };
+
+                const auto widthOf = [this] (const std::string& busId)
+                {
+                    const auto text = getAttribute ("/godot/bus/" + busId + "/width");
+                    return text.has_value() ? juce::String (*text).getIntValue() : 1;
+                };
+
+                const auto ends = startOf (previousId) + widthOf (previousId);
+
+                if (startOf (id) < ends)
+                    problems.push_back (
+                        "/Show/Audio/Bus[" + id + "]/@firstChannel: starts at "
+                          + std::to_string (startOf (id)) + ", inside \"" + previousId
+                          + "\", which runs to " + std::to_string (ends - 1)
+                          + " - so both are summed onto the same interface channels. The output"
+                            " list keeps outputs packed; this one was written by hand");
+            }
         }
 
         return problems;

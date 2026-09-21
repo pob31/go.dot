@@ -1032,9 +1032,11 @@ be reconciled into this file at close-out, as §2 was for Phase 1.
 | Node | Type | Access | Persist | Meaning |
 |---|---|---|---|---|
 | `/godot/audio/tracks` | `i` | ro | show | the fixed track count — the polyphony ceiling (§3.25). Required, no default (G) |
-| `/godot/audio/bus/<id>/name` | `s` | rw | show | user-authored, what a dropdown shows |
-| `/godot/audio/bus/<id>/firstChannel` | `i` | ro | show | hardware output index, 0-based |
-| `/godot/audio/bus/<id>/width` | `i` | ro | show | explicit, never inferred (§3.9b) |
+| `/godot/bus/<id>/name` | `s` | rw | show | user-authored, what a dropdown shows |
+| `/godot/bus/<id>/kind` | `s` | rw | show | `direct` \| `mix` — a direct out, or a mix channel cues send into |
+| `/godot/bus/<id>/firstChannel` | `i` | ro | show | hardware output index, 0-based; maintained by the `bus.*` commands |
+| `/godot/bus/<id>/width` | `i` | ro | show | explicit, never inferred (§3.9b); changed by `bus.width` |
+| `/godot/audio/patchSettled` | `T` | rw | **state** | whether the output patch has stopped following the output list |
 | `/godot/audio/device` | `s` | ro | none | the open device's name |
 | `/godot/audio/outputs` | `i` | ro | none | hardware outputs the device presents; a cue wider than this is refused at load |
 | `/godot/audio/status` | `s` | ro | none | `stopped` \| `running` \| `noClock` — "no clock" and "no interface" are different failures (§6.2) |
@@ -1043,6 +1045,68 @@ be reconciled into this file at close-out, as §2 was for Phase 1.
 
 A **bus** is a summing point — a named, contiguous range of hardware outputs with a declared
 width. Processor *slots* (exclusive, allocated) are Phase 4 and are not drawn here.
+
+**The addresses above are `/godot/bus/<id>/…`, not `/godot/audio/bus/…`** — corrected in place
+2026-09-21, having been wrong here since §11 was written. A bus is an identified object, so it
+publishes under its owner word like every other one; `ShowDocument::addressOwnerFor` is where the
+segment is decided, and `ParameterTree` has always emitted it this way.
+
+Implementation update (2026-09-21) — **the output layout, and the patch that follows it.**
+
+A show's outputs are a LIST somebody wrote: so many mono direct outs, so many stereo mix
+channels, interleaved however the rig is wired. PRD §6.2's own example is thirty-two mono direct
+outs interleaved with sixteen stereo buses on a sixty-four channel interface, and the author's
+decision (2026-09-21) is that it is **one list of mixed kinds**, not two lists — because a list
+that can be interleaved comes out one-for-one with no patching at all, which two lists cannot.
+
+`Bus/@firstChannel` is therefore not a number anybody types. It is the running sum of the widths
+before it, and four commands keep it so:
+
+| Command | Arguments | What it does |
+|---|---|---|
+| `bus.create` | `kind:s, width:i, index:i, [id:s]` | adds an output; `index` is a position in the list, -1 appends; named "Direct 3" / "Mix 2" |
+| `bus.delete` | `bus:s` | takes it away, with every `Route` that named it and clearing every `Slot` that fed from it |
+| `bus.move` | `bus:s, index:i` | a position in the list AS IT STANDS, as `object.move`'s is |
+| `bus.width` | `bus:s, width:i` | 1 mono, 2 stereo, wider for a processor send |
+
+Each repacks every channel and puts the document's own children into the same order, so list
+order, channel order and document order agree from the first command onward. `firstChannel` and
+`width` stay `ro` at the door: a client that could write one could leave two outputs summing onto
+the same interface channel, and nobody would hear it until the night. `ShowDocument::writeOwned`
+is the one private door that writes them, and `document/OutputLayout.{h,cpp}` is the pure rule —
+the `Sequence.h` / `FadePoints.h` shape, unit-tested in `tests/OutputLayoutTests.cpp`.
+
+**And the patch follows the list until the show has been heard.** `audio/@outputPatch` is empty
+in a fresh show, which the device layer already reads as identity, so adding a stereo mix at the
+top of the list moves every output below it — exactly what a designer arranging a rig wants. It
+stops following when **`audio/@patchSettled`** goes true, which happens two ways: the settings
+window sends it **before the first hand edit of the output matrix lands** (spatcore's
+`onBeforeUserPatchEdit`, the hook WFS-DIY latches on — merely LOOKING at the patch must leave it
+following), and the Runner sends it beside the first `run.started` of a media run that launches
+with audio. From then on each edit MOVES rows instead: a new output takes the next interface
+channels past everything in use, a deleted one drops its block, a moved one carries its block,
+a widened one appends and a narrowed one drops.
+
+A layout that arrives **unpacked** counts as settled too, and that is the case worth knowing.
+`tests/fixtures/bundles/slots` feeds a processor from channel 8 and a foldback from 0, with a
+hole between them. Those channels are a rig, not a consequence of an order, so the first layout
+command materialises them into the patch before repacking — the processor keeps 8–19 and the list
+becomes packed. `validate()` warns about the gap (and about an overlap, which is the one that
+matters) rather than refusing the file: yesterday's saved show has to open tomorrow.
+
+The flag is **state, not show**. It records what has happened to this rig rather than a decision
+about what the show plays, so it lands in `state.xml` beside the standby and the folds, costs no
+undo entry, marks nothing unsaved, and is allowed while the show is locked — which it will be,
+because a locked show is exactly the one being played. The author's decision (2026-09-21) is that
+it is **kept with the show**: a rig sound-checked on Tuesday must not be re-patched by an edit to
+the list on Wednesday.
+
+The window gains an **Outputs** tab between Interface and the two patches: one list with a grip,
+an editable name, the kind word, a Mono/Stereo cell, a delete cross, two add buttons, and a
+sentence saying which regime is in force (WFS-DIY prints a drag hint per regime, for the same
+reason — the two look identical and behave completely differently). The patch matrix's rows are
+named after the outputs ("Main L/R · L") rather than numbered, and its row count is the layout's.
+`model/OutputList.{h,cpp}` is the std-only reading behind all of it.
 
 Implementation update (2026-09-20): Show → Audio settings stores interface and
 input/output patches in the show, with an optional default for new shows.

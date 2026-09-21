@@ -237,6 +237,75 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  THE OUTPUT LAYOUT. Four commands rather than writes to
+            `Bus/@firstChannel`, because the channels are the running sum of
+            the widths before each output and nothing else may set them: a
+            client that could write one could leave two outputs summing into
+            the same interface channel, and nobody would hear it until the
+            night. `document/OutputLayout.h` holds the arithmetic, including
+            what each of these does to `audio/@outputPatch`. */
+        registry.add ({ "bus.create",
+                        "Adds an output to the show: a direct out, where one cue's channels land,"
+                        " or a mix channel many cues send into. Width is 1 for mono and 2 for"
+                        " stereo. Index is a position in the output list; -1 appends.",
+                        /*  `index` IS REQUIRED although -1 is the ordinary
+                            answer, because the identifier after it is the
+                            optional one: `withId` fills a trailing argument
+                            and cannot fill a gap, so a create sent without an
+                            index would record its drawn identifier where the
+                            index goes and refuse itself on replay. Found by
+                            replaying a session rather than by reading. */
+                        { { "kind", 's', false }, { "width", 'i', false },
+                          { "index", 'i', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 3 ? args[3].getString() : std::string {};
+
+                            const auto edit = document.createBus (args[0].getString(),
+                                                                  args[1].getInt32(),
+                                                                  args[2].getInt32(), id);
+
+                            return fromEdit (edit, withId (args, 3, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "bus.delete",
+                        "Takes an output away and repacks the ones after it. Every route that"
+                        " named it goes too, and every processor input that fed from it is left"
+                        " feeding from nowhere - all in one undoable step.",
+                        { { "bus", 's', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.removeBus (args[0].getString()), args);
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "bus.move",
+                        "Puts an output at another place in the list. Index is a position in the"
+                        " list as it stands, as object.move's is.",
+                        { { "bus", 's', false }, { "index", 'i', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.moveBus (args[0].getString(),
+                                                               args[1].getInt32()), args);
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "bus.width",
+                        "Makes an output mono, stereo or wider, and repacks the ones after it."
+                        " Narrowing drops the channels at its end.",
+                        { { "bus", 's', false }, { "width", 'i', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.resizeBus (args[0].getString(),
+                                                                 args[1].getInt32()), args);
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "channel.create",
                         "Adds a channel to the live rack: one position in the pool a cue's insert"
                         " claims. Makes the rack if the show has none.",

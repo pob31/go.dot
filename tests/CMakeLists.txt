@@ -64,6 +64,7 @@ add_executable(wfg_tests
     TestSupport.h
     OutputTestSignalTests.cpp
     ImportRoutingTests.cpp
+    OutputLayoutTests.cpp
     ToolchainTests.cpp
     LocaleTests.cpp
     OscValueTests.cpp
@@ -672,6 +673,16 @@ add_test(NAME blackbox.import-playback.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/import_playback.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.import-playback.C blackbox.import-playback.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 60)
+
+# The output list, and the patch that follows it until a cue has played. Hosted,
+# because the latch is at a real launch: without --hosted the run sits at
+# `armed` and never reaches it.
+add_test(NAME blackbox.output-layout.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/output_layout.py" --wfg-locale=C)
+add_test(NAME blackbox.output-layout.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/output_layout.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.output-layout.C blackbox.output-layout.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
 
 # -----------------------------------------------------------------------------
 # THE PHASE 2 DONE-WHEN CLAUSE, driven from outside the process.

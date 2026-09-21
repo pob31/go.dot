@@ -70,6 +70,7 @@
 */
 
 #include <wfg/engine/document/Ids.h>
+#include <wfg/engine/document/OutputLayout.h>
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/audio/AudioSettings.h>
@@ -250,6 +251,65 @@ namespace wfg::doc
 
         EditResult createRackChannel (const std::string& channelClass,
                                       const std::string& id = {});
+
+        /*  THE OUTPUT LAYOUT (PRD §3.9b, §6.2). A show's outputs are a list
+            somebody wrote - so many mono direct outs, so many stereo mix
+            channels, in the order the interface is wired - and
+            `Bus/@firstChannel` is the running sum of the widths before each one
+            rather than a number anybody types. These four keep it that way, and
+            keep `audio/@outputPatch` in step: `document/OutputLayout.h` holds
+            the rule and says why a layout written by hand is preserved rather
+            than repacked.
+
+            `kind` is "direct" or "mix". `index` is a position in the list of
+            buses, counted the way a client counts rows; -1 appends, and
+            `moveBus`'s is a position in the list AS IT STANDS, exactly as
+            `move`'s is, so one drag rule serves both lists a window draws.
+
+            THE LIST IS `firstChannel` ORDER, and these put the document's own
+            children into that order as they go. For a show written by these
+            commands the two never differ; for one written by hand they can, and
+            the first of these to run settles it - visibly, in one undo step,
+            and leaving the invariant true from then on.
+
+            `removeBus` also takes away every route that named the bus and
+            clears every processor input that fed from it, in the same
+            transaction. A dangling destination is not the tidier answer: it is
+            a run that fails `bad-route` on a show night, months after the
+            delete that caused it. Undo brings the bus and its routes back
+            together. */
+        EditResult createBus (const std::string& kind, int width, int index = -1,
+                              const std::string& id = {});
+
+        /*  WHAT A NEW SHOW ARRIVES WITH, which has to be enough to play
+            something.
+
+            A document built by the constructor is EMPTY - no list, no outputs,
+            and `tracks` at nought - and that is right for a scratch document,
+            a paste target and every test. It was also what File - New wrote to
+            disk, and the result was a show that looked complete and could
+            never make a sound: no command set the track count, so a dropped
+            file was armed against a polyphony ceiling of nought and every GO
+            ended `no-track`. The outputs being plainly listable since
+            2026-09-21 made that stranger rather than better.
+
+            So a new show starts with a list, somewhere for sound to go, and
+            room for some of it: one stereo direct out on the first two
+            interface channels, and eight cues able to sound at once. Eight is
+            a judgement and not a law - it is more than most shows need at any
+            one instant and cheap to carry - and it is one number in a box on
+            the Outputs tab the moment anybody disagrees.
+
+            Both halves or neither: tracks with no output is worse than no
+            tracks at all, because the engine refuses to start a show that has
+            somewhere to play from and nowhere to play to. */
+        EditResult startNewShow (int tracks = 8);
+
+        EditResult removeBus (const std::string& id);
+
+        EditResult moveBus (const std::string& id, int index);
+
+        EditResult resizeBus (const std::string& id, int width);
 
         EditResult createFeed (const std::string& cueId, const std::string& slotId,
                                const std::string& id = {});
@@ -611,6 +671,32 @@ namespace wfg::doc
                                  const std::vector<std::pair<std::string_view, std::string>>& attributes);
 
         void collectIds (const juce::ValueTree& node, std::vector<std::string>& out) const;
+
+        /*  THE ONE DOOR THAT MAY WRITE A READ-ONLY ROW, and it is private so
+            that it stays one. `setAttribute` refuses `access == read`, which is
+            what keeps a client from writing `Bus/@firstChannel` and leaving two
+            outputs summing into one interface channel - but the engine itself
+            has to write it, because repacking is exactly what the layout
+            commands do. The refusal stays at the door a command comes through;
+            this is the inside of the house.
+
+            It writes through the schema, so a value that does not parse is
+            still refused, and it takes the row's own history, so the write
+            joins the transaction its command opened. It asks the lock nothing:
+            the command above it already did. */
+        EditResult writeOwned (juce::ValueTree node, std::string_view element,
+                               std::string_view name, std::string_view text);
+
+        /*  Every bus the show has, in the order the list is read - which is
+            `firstChannel` order, ties broken by document order. */
+        std::vector<juce::ValueTree> busNodes() const;
+
+        /*  Applies a layout edit and writes everything that came out of it: the
+            structural change, every repacked `firstChannel`, the document order
+            and the patch. The four layout commands are this and a
+            `doc::LayoutEdit`. */
+        EditResult applyLayout (const LayoutEdit& edit, const std::string& id,
+                                const std::string& kind);
 
         /*  The histories, built empty. Called by the constructor and by the
             move, which is why it is a function rather than two loops that could

@@ -146,4 +146,25 @@ namespace wfg::client::gesture
     /** The live recorder: keep every cue start from now, and write them into a take. */
     Event recordStart();
     Event recordStop();
+
+    /*  THE OUTPUT LAYOUT (PRD §3.9b, §6.2). Four commands rather than writes,
+        because `Bus/@firstChannel` is the running sum of the widths before it
+        and the engine keeps it so: `document/OutputLayout.h` says why, and
+        what each of these does to the interface patch.
+
+        `kind` is "direct" or "mix"; `width` is 1 for mono and 2 for stereo;
+        `index` is a position in the output list, -1 for the end, and
+        `moveBus`'s is a position in the list AS IT STANDS - the same
+        convention `moveObject` uses, so one drag rule serves both lists. */
+    Event createBus (const std::string& kind, int width, int index);
+    Event deleteBus (const std::string& busId);
+    Event moveBus (const std::string& busId, int index);
+    Event setBusWidth (const std::string& busId, int width);
+
+    /*  THAT THE PATCH HAS STOPPED FOLLOWING THE LIST. Sent by the settings
+        window before the first hand edit of the output matrix lands, and by
+        its "follow the list" button with false to hand the outputs back to
+        the order. The other way it becomes true is the engine's own: the
+        first media run that launches with audio says so. */
+    Event setPatchSettled (bool settled);
 }

@@ -209,7 +209,15 @@ TEST_CASE ("audio: the tree publishes the track count and every bus")
 
     REQUIRE (tracks != nullptr);
     CHECK (tracks->typeTags == "i");
-    CHECK (tracks->access == tree::Access::read);
+
+    /*  WRITABLE SINCE 2026-09-21, and this line used to say `read`. How many
+        cues can sound at once is a decision about the shape of a show, and a
+        decision no client can state is a decision nobody can take: File - New
+        wrote `tracks="0"`, nothing could change it, and every GO in a new show
+        ended `no-track`. The graph is built from it when the audio settings
+        are applied, so a write lands at the next Apply rather than under a
+        running show. */
+    CHECK (tracks->access == tree::Access::readWrite);
 
     /*  Read out of the fixture rather than remembered, so that changing the
         bundle changes what this expects. */
@@ -256,22 +264,38 @@ TEST_CASE ("audio: the runtime nodes answer before anything has opened a device"
     CHECK (outputs->soleValue()->getInt32() == 0);
 }
 
-TEST_CASE ("audio: a write to the track count is refused as read-only, not as unknown")
+TEST_CASE ("audio: the track count takes a write, and an address nobody has is still refused")
 {
-    /*  Which refusal arrives is the point. `tracks` is a real address that
-        simply is not writable over the wire, and answering "bad-address"
-        would send a client looking for a spelling mistake it did not make. */
+    /*  THIS CASE USED TO ASSERT THE OPPOSITE, and the reason it changed is
+        worth keeping. `tracks` was read-only with no command behind it, so the
+        polyphony ceiling could only be set by editing show.xml in a text
+        editor - and a show made by File - New therefore declared nought and
+        could never play anything.
+
+        What it still pins is the OTHER half: which refusal arrives for an
+        address nobody has. Answering "read-only" there would send a client
+        looking for a permission problem, and answering "bad-address" for a
+        real row would send them looking for a spelling mistake they did not
+        make. */
     Rig rig;
 
     const auto edit = rig.document.setAttribute ("/godot/audio/tracks", "16");
 
-    CHECK_FALSE (edit.ok);
-    CHECK (edit.reason == reason::readOnly);
+    CHECK (edit.ok);
+    CHECK (rig.document.getAttribute ("/godot/audio/tracks") == "16");
 
     const auto missing = rig.document.setAttribute ("/godot/audio/noSuchThing", "16");
 
     CHECK_FALSE (missing.ok);
     CHECK (missing.reason == reason::badAddress);
+
+    /*  And a read-only row still refuses as one, so the distinction above is
+        still a distinction: a bus's channel is maintained by the layout
+        commands and is not a client's to write. */
+    const auto owned = rig.document.setAttribute ("/godot/bus/J3MT5XYA/firstChannel", "8");
+
+    CHECK_FALSE (owned.ok);
+    CHECK (owned.reason == reason::readOnly);
 }
 
 //==============================================================================

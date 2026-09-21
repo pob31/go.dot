@@ -140,6 +140,39 @@ namespace wfg::client::gesture
     Event recordStart() { return plain ("record.start"); }
     Event recordStop()  { return plain ("record.stop"); }
 
+    Event createBus (const std::string& kind, int width, int index)
+    {
+        return { origin::window, "bus.create",
+                 { osc::Value::string (kind), osc::Value::int32 (width),
+                   osc::Value::int32 (index) } };
+    }
+
+    Event deleteBus (const std::string& busId)
+    {
+        return { origin::window, "bus.delete", { osc::Value::string (busId) } };
+    }
+
+    Event moveBus (const std::string& busId, int index)
+    {
+        return { origin::window, "bus.move",
+                 { osc::Value::string (busId), osc::Value::int32 (index) } };
+    }
+
+    Event setBusWidth (const std::string& busId, int width)
+    {
+        return { origin::window, "bus.width",
+                 { osc::Value::string (busId), osc::Value::int32 (width) } };
+    }
+
+    Event setPatchSettled (bool settled)
+    {
+        /*  A boolean rather than the word, as `setLocked` explains: the row is
+            a `T` and the value carries its own type. */
+        return { origin::window, "node.set",
+                 { osc::Value::string ("/godot/audio/patchSettled"),
+                   osc::Value::boolean (settled) } };
+    }
+
     Event setLocked (bool locked)
     {
         /*  A BOOLEAN, not the word "true": `node.set` takes its value as a

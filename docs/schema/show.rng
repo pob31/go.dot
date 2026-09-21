@@ -1268,7 +1268,7 @@
       </optional>
       <optional>
         <attribute name="tracks">
-          <a:documentation>The fixed number of audio tracks, and so the polyphony ceiling: N tracks is N simultaneous cues. Zero is legal and means a show with no audio. Required, and deliberately without a default - the number is a decision about the shape of a show, and no value here could be right for every rig.</a:documentation>
+          <a:documentation>How many cues can sound at once - the fixed number of audio tracks, and so the polyphony ceiling. Zero is legal and means a show with no audio. Required, and deliberately without a default: the number is a decision about the shape of a show, and no value here could be right for every rig. WRITABLE since 2026-09-21, because a decision a client cannot state is a decision nobody can take: it was read-only, no command set it, and a show made by File - New therefore declared nought and could never play anything. The graph is built from it when the audio settings are applied, so a change lands at the next apply and not under a running show - which is the same moment a changed buffer size lands.</a:documentation>
           <data type="integer">
             <param name="minInclusive">0</param>
           </data>
@@ -1292,10 +1292,19 @@
       </attribute>
       <optional>
         <attribute name="firstChannel">
-          <a:documentation>The first hardware output channel this bus occupies, counting from zero.</a:documentation>
+          <a:documentation>The first hardware output channel this bus occupies, counting from zero. Read-only at the door and maintained by bus.create, bus.delete, bus.move and bus.width, which repack every bus as the running sum of the widths before it: a client that could write this one could leave two buses overlapping, and nothing downstream would notice until a show night. A layout written by hand that is not packed is left exactly as it is and warned about, never rewritten.</a:documentation>
           <data type="integer">
             <param name="minInclusive">0</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="kind">
+          <a:documentation>Whether this bus is a direct out - where one cue&apos;s own channels land, chosen from that cue&apos;s direct-out menu - or a mix channel that many cues send into at a level. The word decides which menu the bus appears in and nothing about the hardware: both kinds are contiguous output channels and both are summing points, so a second cue sent to a direct out is mixed there like anywhere else rather than refused.</a:documentation>
+          <choice>
+            <value>direct</value>
+            <value>mix</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -1306,7 +1315,7 @@
       </optional>
       <optional>
         <attribute name="width">
-          <a:documentation>How many consecutive channels the bus occupies. Explicit and never inferred: the engine will not quietly widen or narrow a cue to make it fit.</a:documentation>
+          <a:documentation>How many consecutive channels the bus occupies - one for a mono output, two for a stereo pair, more for a processor send. Explicit and never inferred: the engine will not quietly widen or narrow a cue to make it fit. Read-only at the door and changed by bus.width, which repacks the channels after it.</a:documentation>
           <data type="integer">
             <param name="minInclusive">1</param>
           </data>
@@ -1465,6 +1474,7 @@
           <ref name="State.Lists"/>
           <ref name="State.List"/>
           <ref name="State.Group"/>
+          <ref name="State.Audio"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -1553,6 +1563,20 @@
       <optional>
         <attribute name="headerFolded">
           <a:documentation>Whether the group&apos;s header band is drawn shut. State, as `folded` is.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Audio">
+    <element name="Audio">
+      <optional>
+        <attribute name="patchSettled">
+          <a:documentation>Whether the output patch has stopped following the output layout one for one. False in a fresh show: the patch stays empty, which the device layer already reads as identity, so every output added, removed, moved or widened simply re-flows it and the designer never touches a matrix. It goes true when somebody edits the patch by hand, and when the first media run launches with audio - after which every output keeps the interface channels it has and a new one takes the next free ones. State rather than show: it records what has happened to this rig, not a decision about what the show plays, so it lands in state.xml beside the standby and does not mark the show unsaved.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>

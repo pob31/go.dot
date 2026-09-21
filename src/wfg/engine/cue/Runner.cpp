@@ -4898,6 +4898,14 @@ namespace wfg::cue
         const auto now = audio->samplesElapsed();
         const auto blockSize = static_cast<std::int64_t> (audio->blockSize());
 
+        /*  ONCE PER TICK AT MOST, for the patch-settled record below. The row
+            it reads only turns true when the command it submits is applied,
+            which is the next tick - so a scene launching eight media cues in
+            this one would otherwise write eight identical records into the
+            log. They are harmless and idempotent, and a log a person reads
+            should not make them wonder why. */
+        auto saidSettled = false;
+
         for (const auto& snapshot : runs.all())
         {
             auto* run = runs.find (snapshot.id);
@@ -4966,6 +4974,38 @@ namespace wfg::cue
                 run->launchedAtSample = target;
 
                 engine.submit (origin::engine, "run.started", one (run->id));
+
+                /*  AND THE SHOW HAS NOW BEEN HEARD, which is what stops the
+                    output patch following the output list (PRD §6.2,
+                    `document/OutputLayout.h`).
+
+                    Until something plays, the interface patch is empty and the
+                    outputs simply follow the order somebody is arranging, so
+                    adding a stereo mix at the top of the list moves everything
+                    below it and that is exactly what the designer wants. The
+                    moment a cue has come out of a speaker, what each output is
+                    plugged into has become a fact about the building: a rig
+                    that was sound-checked on Tuesday must not be re-patched by
+                    an edit to the list on Wednesday. So the first launch says
+                    so, once, and every later edit moves rows instead.
+
+                    A `state` row, so it costs no undo entry, does not mark the
+                    show unsaved, and is allowed while the show is locked -
+                    which it will be, because a locked show is exactly the one
+                    that is being played. Submitted rather than written, so the
+                    log carries it and `wfg replay` reproduces it from the
+                    record rather than from a launch a replay never performs.
+
+                    Asked before it is sent: the row reads false only once in
+                    the life of a show, so this is one string compare per launch
+                    and nothing at all afterwards. */
+                if (! saidSettled && document.getAttribute ("/godot/audio/patchSettled") == "false")
+                {
+                    engine.submit (origin::engine, "node.set",
+                                   { osc::Value::string ("/godot/audio/patchSettled"),
+                                     osc::Value::boolean (true) });
+                    saidSettled = true;
+                }
 
                 /*  AND WHICH RANGE IT IS IN, when it has any. A cue with no
                     ranges plays its file out of slot nought and never enters

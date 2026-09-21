@@ -49,6 +49,7 @@
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
+#include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
@@ -541,6 +542,10 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::pasteCues ("7K2QM9X4", 0, "<Fragment/>"),
         gesture::recover(), gesture::discardRecovery(),
         gesture::setLocked (true), gesture::setLocked (false),
+        gesture::createBus ("direct", 1, -1), gesture::createBus ("mix", 2, 0),
+        gesture::deleteBus ("J3MT5XYA"), gesture::moveBus ("J3MT5XYA", 2),
+        gesture::setBusWidth ("J3MT5XYA", 2),
+        gesture::setPatchSettled (true), gesture::setPatchSettled (false),
     };
 
     for (const auto& event : gestures)
@@ -1718,6 +1723,69 @@ TEST_CASE ("client: the new-cue row offers every kind the engine makes, and land
 }
 
 //==============================================================================
+TEST_CASE ("client: the output list reads up the interface, and says which regime the patch is in")
+{
+    /*  `minimal` declares Main L/R at 0 and Foldback at 2, both stereo and
+        both written by hand - so it is packed, and a fresh show following its
+        list. */
+    Rig rig;
+    const auto snapshot = rig.publish (0);
+
+    auto rows = model::readOutputs (*snapshot);
+    REQUIRE (rows.size() == 2);
+    CHECK (rows[0].name == "Main L/R");
+    CHECK (rows[1].name == "Foldback");
+    CHECK (rows[0].firstChannel == 0);
+    CHECK (rows[1].firstChannel == 2);
+
+    /*  A bus whose `kind` nobody has written is a direct out, which is that
+        row's own default and what every show written before the word existed
+        means. */
+    CHECK (rows[0].kind == "direct");
+    CHECK (rows[0].kindWord() == "Direct out");
+    CHECK (rows[0].widthWord() == "Stereo");
+
+    //  Counted from one, because an interface and a patch panel are.
+    CHECK (rows[0].channelWord() == "1-2");
+    CHECK (rows[1].channelWord() == "3-4");
+    CHECK (model::outputChannelCount (rows) == 4);
+
+    /*  AND THE ROWS OF THE PATCH MATRIX ARE NAMED AFTER THEM. A matrix whose
+        rows read "Output 3" cannot be patched without counting. */
+    const auto labels = model::channelLabels (rows, 0);
+    REQUIRE (labels.size() == 4);
+    CHECK (labels[0] == "Main L/R \xc2\xb7 L");
+    CHECK (labels[1] == "Main L/R \xc2\xb7 R");
+    CHECK (labels[2] == "Foldback \xc2\xb7 L");
+
+    //  A channel no output claims still says what it is.
+    CHECK (model::channelLabels (rows, 6).back() == "Output 6");
+
+    /*  NOTHING HAS PLAYED AND NOBODY HAS PATCHED, so the interface follows the
+        list - and the sentence says so, because the two regimes look identical
+        and behave completely differently. */
+    CHECK_FALSE (model::patchHasSettled (*snapshot));
+    CHECK (model::outputRegime (false).find ("follows this list") != std::string::npos);
+    CHECK (model::outputRegime (true).find ("keeps the channels") != std::string::npos);
+}
+
+TEST_CASE ("client: a patch that is written, or a layout with a hole, has already settled")
+{
+    Rig rig;
+
+    /*  A written patch is the same fact as the flag, arrived at without it -
+        which matters for a show saved before the flag existed. */
+    rig.apply (0, "test", "node.set",
+               { osc::Value::string ("/godot/audio/outputPatch"), osc::Value::string ("0 1 2 3") });
+    CHECK (model::patchHasSettled (*rig.publish (1)));
+
+    /*  And a layout written by hand with a hole in it is a rig: the channels
+        are wired, not derived, so telling the designer the patch will follow
+        their edits would be a promise the engine does not keep. */
+    Rig unpacked ("slots");
+    CHECK (model::patchHasSettled (*unpacked.publish (0)));
+}
+
 TEST_CASE ("client: a waveform is the engine's analysis bucketed, and never a second analysis")
 {
     /*  §3.30's pyramid is what a file SOUNDS like, computed once on the

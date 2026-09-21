@@ -633,6 +633,31 @@ Rules:
   first-class gestures, because that is what a designer actually does when
   writing — not picking from a menu forty times.
 
+*Amended 2026-09-21, at the author's direction — the output list, and what
+"never" means.* "No auto-assignment, ever" is about **which output a cue goes
+to**, and it stands: nothing picks a destination for a cue. It was never about
+**which interface channel an output occupies**, and that is a different
+question with a different answer.
+
+The show's outputs are now a list the designer writes — so many mono **direct
+outs**, where one cue's own channels land, so many stereo **mix channels**, that
+many cues send into at a level, in one list that can be interleaved because a
+rig is (§6.2's own example is thirty-two mono direct outs among sixteen stereo
+buses). `Bus/@firstChannel` is the running sum of the widths before it,
+maintained by four commands rather than typed, so two outputs can never overlap
+onto one interface channel.
+
+And **the interface patch follows that list until the show has been heard.** In
+a fresh show the patch is empty — identity — so adding a stereo mix at the top
+moves everything below it, which is what arranging a rig means. It stops
+following the moment somebody patches by hand or the first cue plays, after
+which each output keeps the channels it is plugged into and a new one takes the
+next free ones. That is not assignment: it is the difference between a list
+being written and a rig that has been wired, and it is WFS-DIY's own behaviour
+(`compactInputPatchToDisplayOrder`, and the one-way latch beside it). The fact
+is kept in `state.xml`, because what has happened to a rig is not a decision
+about what the show plays.
+
 Lifecycle:
 
 - **Claim happens in prepare** (§3.12). The header claims the slot and verifies
