@@ -185,9 +185,16 @@ namespace wfg::client::ui
                 move the rows under their hand. */
             void setOutputs (std::vector<std::string> names, int channelCount)
             {
+                /*  THE LAYOUT IS A FLOOR AND NOT THE COUNT. It says how many
+                    logical outputs the show's buses need; it does not say how
+                    many rows the operator has declared, and a patch written
+                    with more of them than the buses span is theirs. Resizing
+                    DOWN to the bus span would drop those rows out of the draft,
+                    and the next Apply would write the shortened patch - every
+                    output past the buses silently unpatched. Grow only. */
                 const auto renamed = names != labels;
                 const auto resized = channelCount > 0 && ! touched
-                                       && channelCount != static_cast<int> (mapping.size());
+                                       && channelCount > static_cast<int> (mapping.size());
 
                 if (! renamed && ! resized)
                     return;
