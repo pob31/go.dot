@@ -1141,6 +1141,65 @@ namespace wfg::doc
         return insertObject (parent, index, elementName, id, { { "name", name } });
     }
 
+    EditResult ShowDocument::groupSelection (const std::vector<std::string>& ids, const std::string& id)
+    {
+        if (auto refusal = refuseIfLocked()) return *refusal;
+        if (ids.empty()) return EditResult::failed (reason::badValue);
+        std::vector<juce::ValueTree> selected;
+        const auto* groupSchema = Schema::instance().element ("Group");
+        for (const auto& selectedId : ids)
+        {
+            const auto node = findById (selectedId);
+            if (! node.isValid()) return EditResult::failed (reason::unknownId);
+            if (! groupSchema->mayContain (node.getType().toString().toStdString())
+                || ! isSequenceChild (node)) return EditResult::failed (reason::typeMismatch);
+            if (std::find (selected.begin(), selected.end(), node) == selected.end()) selected.push_back (node);
+        }
+        // A selected group already carries its selected descendants.
+        const auto all = selected;
+        selected.erase (std::remove_if (selected.begin(), selected.end(), [&all] (const auto& node)
+        {
+            for (auto up = node.getParent(); up.isValid(); up = up.getParent())
+                if (std::find (all.begin(), all.end(), up) != all.end()) return true;
+            return false;
+        }), selected.end());
+        auto parent = selected.front().getParent();
+        const auto containsAll = [&selected] (const juce::ValueTree& candidate)
+        {
+            for (const auto& node : selected)
+            {
+                auto up = node.getParent();
+                while (up.isValid() && up != candidate) up = up.getParent();
+                if (! up.isValid()) return false;
+            }
+            return true;
+        };
+        while (parent.isValid() && ! containsAll (parent)) parent = parent.getParent();
+        const auto* parentSchema = Schema::instance().element (parent.getType().toString().toStdString());
+        if (! parentSchema || ! parentSchema->mayContain ("Group")) return EditResult::failed (reason::badAddress);
+        std::vector<juce::ValueTree> ordered;
+        const auto walk = [&] (auto&& self, const juce::ValueTree& node) -> void
+        {
+            if (std::find (selected.begin(), selected.end(), node) != selected.end()) ordered.push_back (node);
+            else for (const auto& child : node) self (self, child);
+        };
+        walk (walk, parent);
+        auto first = ordered.front();
+        while (first.getParent() != parent) first = first.getParent();
+        int position = 0;
+        for (const auto& sibling : parent)
+        {
+            if (sibling == first) break;
+            if (isSequenceChild (sibling)) ++position;
+        }
+        // All sources and the destination are validated before the first edit.
+        const auto created = createCue (parent[idProperty].toString().toStdString(), position, "group", "", id);
+        if (! created.ok) return created;
+        for (const auto& node : ordered)
+            move (node[idProperty].toString().toStdString(), created.id, endOfSequence);
+        return created;
+    }
+
     EditResult ShowDocument::createRoute (const std::string& cueId,
                                           const std::string& busId,
                                           const std::string& id)

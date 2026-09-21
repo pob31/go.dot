@@ -177,6 +177,15 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });
 
+        registry.add ({ "group.wrap", "Create a group containing the selected cues in show order.",
+                        { { "cues", 's', false }, { "id", 's', true } }, true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto edit = document.groupSelection (splitWords (args[0].getString()),
+                                                                       args.size() > 1 ? args[1].getString() : std::string {});
+                            return fromEdit (edit, withId (args, 1, edit.id));
+                        } });
+
         registry.add ({ "route.default", "Route an imported media cue to the first output bus, preserving existing assignments.",
                         { { "cue", 's', false }, { "channels", 'i', false }, { "id", 's', true } }, true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)

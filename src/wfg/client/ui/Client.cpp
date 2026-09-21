@@ -1402,6 +1402,21 @@ namespace wfg::client
                 if (refusedWhileLocked())
                     return;
 
+                if (kind == "group" && ! selection.empty() && latest)
+                {
+                    if (! groupingCue.empty()) return;
+                    std::string ids;
+                    for (const auto& id : selection.ids()) { if (! ids.empty()) ids += ' '; ids += id; }
+                    groupingCue = selection.ids().front();
+                    for (auto parent = model::text (*latest, "/godot/cue/" + groupingCue + "/parent");
+                         ! parent.empty(); parent = model::text (*latest, "/godot/cue/" + parent + "/parent"))
+                        if (selection.contains (parent)) groupingCue = parent;
+                    groupingParent = model::text (*latest, "/godot/cue/" + groupingCue + "/parent");
+                    groupingWait = 0;
+                    send ({ "window", "group.wrap", { osc::Value::string (ids) } });
+                    return;
+                }
+
                 const auto [parent, index] = destination();
 
                 if (parent.empty())
@@ -1465,6 +1480,15 @@ namespace wfg::client
                 that is never found costs nothing but a sentence. */
             void finishCreations (const tree::TreeSnapshot& snapshot, std::uint64_t revision)
             {
+                if (! groupingCue.empty())
+                {
+                    const auto parent = model::text (snapshot, "/godot/cue/" + groupingCue + "/parent");
+                    if (! parent.empty() && parent != groupingParent
+                        && model::text (snapshot, "/godot/cue/" + parent + "/kind") == "group")
+                    { selection.set (parent); inspectNow(); groupingCue.clear(); }
+                    else if (++groupingWait >= model::importPatience)
+                    { groupingCue.clear(); shell->transport.setNotice ("Grouping the selected cues was refused."); }
+                }
                 if (creations.empty())
                     return;
 
@@ -1602,6 +1626,8 @@ namespace wfg::client
 
             /** Creates sent from the new-cue row and not yet found, to be picked when they are. */
             std::vector<model::Creation> creations;
+            std::string groupingCue, groupingParent;
+            int groupingWait = 0;
 
             /** Which level of stop the next Esc means. */
             model::Panic panicPresses;

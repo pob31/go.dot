@@ -17,6 +17,7 @@
 #include <wfg/client/model/Gestures.h>
 
 #include <cstddef>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -68,7 +69,7 @@ namespace wfg::client::gesture
     {
         return { origin::window, "object.move",
                  { osc::Value::string (id), osc::Value::string (parent),
-                   osc::Value::int32 (index) } };
+                   osc::Value::int32 (index == -1 ? std::numeric_limits<std::int32_t>::max() : index) } };
     }
 
     Event saveAs (const std::string& folder)

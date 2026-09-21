@@ -1160,6 +1160,26 @@ TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be name
         REQUIRE (model::text (*rig.publish (tick), "/godot/cue/" + group + "/order")
                    == one + " " + two + " " + three + " " + four);
 
+        // Dropping on the group title appends through the actual UI gesture.
+        const auto outside = create (listId, 1, "memo", "Outside");
+        const auto into = model::dropFor (cue (group.c_str(), "group", listId.c_str(), 0),
+                                         cue (outside.c_str(), "memo", listId.c_str(), 1), 0.5);
+        REQUIRE (into.kind == model::DropKind::into);
+        const auto event = gesture::moveObject (outside, into.container, into.index);
+        REQUIRE (rig.apply (tick++, "window", event.command, event.args).applied == 1);
+        CHECK (model::text (*rig.publish (tick), "/godot/cue/" + group + "/order")
+               == one + " " + two + " " + three + " " + four + " " + outside);
+        const auto back = gesture::moveObject (outside, listId, -1);
+        REQUIRE (rig.apply (tick++, "window", back.command, back.args).applied == 1);
+        rig.document.beginTransaction ("group.wrap", tick, "window", {});
+        REQUIRE (rig.apply (tick++, "window", "group.wrap",
+                            { osc::Value::string (outside + " " + group),
+                              osc::Value::string ("WRAP0001") }).applied == 1);
+        CHECK (model::text (*rig.publish (tick), "/godot/cue/WRAP0001/order") == group + " " + outside);
+        REQUIRE (rig.apply (tick++, "window", "undo", {}).applied == 1);
+        CHECK (model::text (*rig.publish (tick), "/godot/cue/" + group + "/order")
+               == one + " " + two + " " + three + " " + four);
+
         //  Rows as the list would hold them, from the published order.
         const auto rowsOf = [&]
         {

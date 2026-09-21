@@ -6,6 +6,32 @@
 
 using namespace wfg;
 
+TEST_CASE ("group selection: order, descendants and one-step undo are preserved")
+{
+    doc::ShowDocument document;
+    REQUIRE (doc::CanonicalXml::read (
+        "<Show><Lists><List id=\"7K2QM9X4\"><Cue id=\"B3N8R5TW\"/>"
+        "<Cue id=\"P9XKC2WR\"/><Group id=\"J3MT5XYA\"><Cue id=\"F7HR8TVD\"/></Group>"
+        "</List></Lists><Mounts/><Audio tracks=\"2\"/></Show>", document).ok);
+    const auto before = doc::CanonicalXml::write (document);
+    CHECK_FALSE (document.groupSelection ({ "B3N8R5TW", "missing" }).ok);
+    CHECK (doc::CanonicalXml::write (document) == before);
+    document.beginTransaction ("group.wrap", 0, "window", {});
+    const auto grouped = document.groupSelection ({ "F7HR8TVD", "J3MT5XYA", "B3N8R5TW", "B3N8R5TW" });
+    REQUIRE (grouped.ok);
+    const auto group = document.findById (grouped.id);
+    REQUIRE (group.getNumChildren() == 2);
+    CHECK (group.getChild (0)["id"].toString() == "B3N8R5TW");
+    CHECK (group.getChild (1)["id"].toString() == "J3MT5XYA");
+    CHECK (document.findById ("F7HR8TVD").getParent() == document.findById ("J3MT5XYA"));
+    CHECK (document.findById ("P9XKC2WR").getParent() == document.findById ("7K2QM9X4"));
+    const auto after = doc::CanonicalXml::write (document);
+    REQUIRE (document.undo (doc::UndoDomain::document).has_value());
+    CHECK (doc::CanonicalXml::write (document) == before);
+    REQUIRE (document.redo (doc::UndoDomain::document).has_value());
+    CHECK (doc::CanonicalXml::write (document) == after);
+}
+
 TEST_CASE ("import routing: explicit mono and stereo routes preserve assignments and undo")
 {
     for (int channels : { 1, 2, 4 })

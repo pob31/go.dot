@@ -195,6 +195,7 @@ namespace wfg::doc
             that does not exist. */
         EditResult createRoute (const std::string& cueId, const std::string& busId,
                                 const std::string& id = {});
+        EditResult groupSelection (const std::vector<std::string>& ids, const std::string& id = {});
         /** Import convenience: explicitly route an unassigned cue to the first
             output bus. Existing routes and processor feeds are preserved. */
         EditResult defaultMediaRoute (const std::string& cueId, int channels,
