@@ -2257,6 +2257,67 @@ follow:
 
 None of this bears on the seven spike results, which never opened a device.
 
+*Amended 2026-09-21 — the interface going away, and the clock being moved.* The
+second and third bullets above are now answered, and the first is answered with
+them. Losing a device and having its rate changed underneath the show are
+**different failures with different right answers**, and the distinction is the
+whole of this amendment: one is an interruption, the other is a new world.
+
+**A device that goes away and comes back the same is a pause, not a stop.** No
+footer runs, no cue is replaced, nothing is declared. The show tick freezes where
+it stood, every run keeps its position and its launch handle, and when the same
+interface returns — same type, name, rate, block size and channel layouts — the
+graph continues from where it was. This is the case that actually happens: a USB
+interface knocked, a driver restarted, a Dante device that drops out and comes
+back. Recovery is not a favour to the operator; it is the difference between a
+gap and a wrecked cue.
+
+**A rate change is a stop, and then an adaptation.** When the clock domain moves
+— someone in Dante Controller taking 48 kHz to 96 — the device that returns is
+not the device that left, and pretending otherwise is worse than stopping.
+**Playback stops** rather than pausing: there is nothing to resume onto, because
+the thing the runs were launched against no longer exists. Go.dot then **adapts
+to the rate it is given** rather than refusing to run at it, and adapts by
+**resampling** — the author's own test of it (2026-09-21): *"up or down sample, no
+Alvin and the Chipmunks."* Pitch and duration are preserved; reinterpreting the
+same samples at the new rate, which is the cheap thing to do and shifts
+everything by the ratio, is precisely the failure this forbids.
+
+*(Proposed, and the one thing here nobody has said yet.)* The first bullet's open
+decision — a show **file** whose authored rate is not the rate the device reports,
+at load rather than mid-show — looks like the same question with the same answer,
+**adapt and resample**. It is written as a proposal rather than a decision because
+the author decided the mid-show case and this one was inferred from it, and the two
+can reasonably differ: a rate moving under a running show gives no opportunity to
+ask, while opening a file does, and "this show was written at 96, your device is at
+48, carry on?" may be a question worth putting rather than answering silently.
+
+**GO is suspended while reconnecting, and a suspended GO is dropped, not
+remembered.** This is the sharp operational point and the reason the gate is a
+refusal rather than a queue: an operator who does not yet know the interface is
+gone will press GO, and press it again, and keep pressing. Twenty presses during
+an outage must fire **nothing** when the device returns — not twenty cues, not
+one. Each press is refused as it arrives, with a reason that says why. The
+refusal is **logged**, because a log that shows an operator pressing GO eleven
+times is exactly what somebody wants the morning after; what does not survive is
+anything *pending*, and that is the half that matters here.
+
+**Esc is accepted at any moment, and takes effect when the device returns.** An
+operator may always abort, outage or not; the abort is never the thing that is
+refused. What it cannot do is run its footers into a dead device, so the runs are
+flushed out once the interface is back — §4.4's "same code path as normal
+completion, entered early", entered during an outage and completed on the other
+side of it.
+
+**The operator must be able to see that it is reconnecting**, and not by
+inference from a cue that will not start. This is §4.8's rule as much as this
+section's: the state is a first-class one, it is distinct from both "running" and
+"stopped", and colour alone does not carry it.
+
+*Built as of 2026-09-21:* the pause, the frozen tick, the same-hardware
+validation, the dropped GO and the resume. *Not yet built:* the rate-change stop,
+the resampling, and the operator-facing indication that reconnection is under way.
+
 ### 6.3 Video — DeckLink vs GPU
 
 ### 6.4 Asparion — remaining asks

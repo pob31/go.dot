@@ -1095,10 +1095,18 @@ outrun the clock it is waiting for. On resume the graph continues from where it
 paused, on the launch handles it still held, and the second-resolution clock
 triggers missed during the outage are dropped rather than all fired at once.
 
-What this does **not** settle is §6.2's other half: a device that returns at a
-different sample rate is held at `noClock` and retried, never adapted or
-resampled. "Refuse, warn, or adapt" on a rate mismatch remains the author
-decision §6.2 records as open.
+A device that returns at a **different sample rate** is held at `noClock` and
+retried, and that is where the code stops rather than where the design does.
+§6.2's 2026-09-21 amendment decides it the other way: a rate change is a **stop**,
+not a pause, and Go.dot then **adapts by resampling** — pitch and duration
+preserved. Neither the stop nor the resampling is built, so today a moved clock
+domain is a permanent `noClock` with the retry running behind it. That gap is the
+next thing this area owes, and it is a gap against a decision rather than an open
+question.
+
+The other debt is operator-facing: `noClock` reaches a client through
+`/godot/audio/status` and a line of text, which §6.2 says is not enough. The state
+has to be visible as a state — and, per §4.8, not by colour alone.
 
 ### 11.2 Cue kinds
 
