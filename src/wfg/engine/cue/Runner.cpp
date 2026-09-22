@@ -65,7 +65,7 @@ namespace wfg::cue
             if (element == "Group") return "group";
             if (element == "Media") return "media";
             if (element == "Fade")  return "fade";
-            if (element == "Stop")  return "stop";
+            if (element == "Transport") return "transport";
             if (element == "Osc")   return "osc";
             if (element == "Midi")  return "midi";
             if (element == "Start") return "start";
@@ -2136,7 +2136,7 @@ namespace wfg::cue
             return;
         }
 
-        if (kind == "stop")
+        if (kind == "transport")
         {
             fireStop (cue, runId);
             return;
@@ -2837,6 +2837,51 @@ namespace wfg::cue
                           std::move (drawn.points));
     }
 
+    int Runner::advanceTargetOf (const juce::ValueTree& cue, const Run& run) const
+    {
+        /*  WHICH SLICE `transport/range` NAMES, as a place in the playlist -
+            and -1, meaning the next one, for every transport cue written
+            before there was anything to name and for every one that names
+            nothing.
+
+            REFUSED RATHER THAN GUESSED, in three ways, and each leaves the
+            advance doing what it always did rather than doing nothing: a slice
+            of some OTHER cue is a reference somebody has to fix and the run
+            still has somewhere to go; the slice it is already on is a request
+            with no boundary in it; and a slice past the graph's slots has no
+            clip to launch, which is the `no-slot` refusal one step earlier and
+            quieter. */
+        const auto wanted = textOf (cue, "range");
+
+        if (wanted.empty())
+            return -1;
+
+        const auto target = document.findById (run.cue);
+
+        if (! target.isValid())
+            return -1;
+
+        auto at = 0;
+
+        for (const auto& child : target)
+        {
+            if (child.getType().toString() != "Range")
+                continue;
+
+            if (child[idProperty].toString().toStdString() == wanted)
+            {
+                if (at == run.range)
+                    return -1;          // already there, so the next one is the answer
+
+                return audio != nullptr && at >= audio->slotCount() ? -1 : at;
+            }
+
+            ++at;
+        }
+
+        return -1;                      // a slice of some other cue, or of none
+    }
+
     void Runner::fireStop (const juce::ValueTree& cue, const std::string& runId)
     {
         const auto verb = textOf (cue, "verb");
@@ -2863,6 +2908,7 @@ namespace wfg::cue
                     if (run->range >= 0)
                     {
                         run->advanceRequested = true;
+                        run->advanceTo = advanceTargetOf (cue, *run);
                         finishing.push_back (runId);
                         return;
                     }
@@ -2923,7 +2969,7 @@ namespace wfg::cue
 
         beginFade (cue[idProperty].toString().toStdString(),
                           textOf (cue, "target"),
-                          runId, "stop",
+                          runId, "transport",
                           silenceDb, seconds,
                           fadeCurveFrom (textOf (cue, "curve")),
                           true, {});
@@ -5004,6 +5050,17 @@ namespace wfg::cue
             same ticks, or it would not reproduce the session it is replaying. */
         currentTick = tick;
 
+        /*  THE LENGTHS FOR THIS TICK, held so nothing swaps them mid-solve. A
+            file imported since the show opened has no length until the
+            analyser reads it, and learning one swaps the map - so it is asked
+            for here rather than remembered by address. A replay, and a test,
+            hand in a map of their own and keep it. */
+        if (fixedDurations == nullptr && mediaInfo != nullptr)
+        {
+            durationsHeld = mediaInfo->durations();
+            durations = durationsHeld.get();
+        }
+
         /*  WHAT THE START CUES ASKED FOR, fired by name now: the hook decides,
             the handler applies, and the record is `cue.fire`'s own. */
         for (const auto& target : startsToFire)
@@ -5366,7 +5423,12 @@ namespace wfg::cue
                 }
             }
 
-            const auto next = run->range + 1;
+            /*  WHERE IT GOES: the slice the transport cue named, or the one
+                after this. `advanceTo` is already known to be a slice of this
+                cue and inside the graph's slots - `advanceTargetOf` refuses
+                anything else and leaves it at -1 - so there is nothing left to
+                judge here. */
+            const auto next = run->advanceTo >= 0 ? run->advanceTo : run->range + 1;
             const auto hasNext = next < count;
 
             /*  THE PAIR, both at the same instant. M12 priced it: the outgoing
@@ -5380,6 +5442,7 @@ namespace wfg::cue
 
             run->boundaryPlacedAt = placeAt;
             run->advanceRequested = false;
+            run->advanceTo = -1;
 
             if (! hasNext)
             {

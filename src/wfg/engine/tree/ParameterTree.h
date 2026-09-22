@@ -239,9 +239,19 @@ namespace wfg::tree
 
             Held by pointer and not owned; the map must outlive the tree. Marks
             the document half stale, because that is the half a cue lives in. */
+        /*  THE LENGTHS ARE ASKED FOR EACH PUBLISH and not held by address
+            (2026-09-22). They used to be frozen at open, so an address was
+            safe and a file imported since read a length of nought for the rest
+            of the session; now one is LEARNED when the analyser reads it, the
+            map is swapped, and a holder of the old address would go on
+            publishing the old answer. `publish` takes the pointer for the
+            length of a pass and lets it go.
+
+            Kept as a setter so a test can hand in a map of its own without a
+            `MediaInfo` at all. */
         void setMediaDurations (const std::map<std::string, double>* durationsToPublish) noexcept
         {
-            durations = durationsToPublish;
+            fixedDurations = durationsToPublish;
             stale = true;
         }
 
@@ -314,6 +324,13 @@ namespace wfg::tree
         const CommandRegistry& commands;
         const MountTable& mounts;
         const MountSender* sender = nullptr;
+        /*  What a test handed in, when one did. Otherwise the lengths come
+            from `mediaInfo` at the top of every publish. */
+        const std::map<std::string, double>* fixedDurations = nullptr;
+
+        /*  Held for the length of one publish so the map cannot be swapped out
+            from under the walk, and released with the next one. */
+        std::shared_ptr<const std::map<std::string, double>> durationsHeld;
         const std::map<std::string, double>* durations = nullptr;
         const audio::MediaInfo* mediaInfo = nullptr;
 

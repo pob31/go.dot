@@ -1459,7 +1459,7 @@ TEST_CASE ("refers: the table is what says which attributes point at things")
 
     CHECK (pointsAt ("List", "standby") == "cue");
     CHECK (pointsAt ("Fade", "target") == "cue");
-    CHECK (pointsAt ("Stop", "target") == "cue");
+    CHECK (pointsAt ("Transport", "target") == "cue");
     CHECK (pointsAt ("Route", "bus") == "bus");
     CHECK (pointsAt ("Midi", "port") == "port");
 

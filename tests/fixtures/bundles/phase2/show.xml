@@ -9,7 +9,7 @@
       <Media id="P9XKC2WR" file="tone.wav" level="-6" name="Rain" number="4">
         <Route id="V3XY5Z7B" bus="J3MT5XYA" gains="0 1"/>
       </Media>
-      <Stop id="Q6RS8TW2" duration="0.2" name="Out" number="5" target="B3N8R5TW" verb="fade"/>
+      <Transport id="Q6RS8TW2" duration="0.2" name="Out" number="5" target="B3N8R5TW" verb="fade"/>
     </List>
   </Lists>
   <Mounts>

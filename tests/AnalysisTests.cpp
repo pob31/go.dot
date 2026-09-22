@@ -485,7 +485,7 @@ TEST_CASE ("analysis: a stop cue aimed at the holder gives the slot back where i
 
     const auto first = rig.media (rig.listId, 0, "Voice");
 
-    const auto stop = rig.document.createCue (rig.listId, 1, "stop", "Stop the voice");
+    const auto stop = rig.document.createCue (rig.listId, 1, "transport", "Stop the voice");
     REQUIRE (stop.ok);
     rig.document.setAttribute ("/godot/cue/" + stop.id + "/target", first);
 

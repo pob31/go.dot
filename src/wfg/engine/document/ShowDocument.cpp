@@ -281,7 +281,7 @@ namespace wfg::doc
         if (kind == "group") return "Group";
         if (kind == "media") return "Media";
         if (kind == "fade")  return "Fade";
-        if (kind == "stop")  return "Stop";
+        if (kind == "transport") return "Transport";
         if (kind == "osc")   return "Osc";
         if (kind == "midi")  return "Midi";
         if (kind == "start") return "Start";
@@ -315,7 +315,7 @@ namespace wfg::doc
             client that has an identifier does not have to know which it got,
             and a cue that becomes a group keeps its address. */
         if (element == "Cue" || element == "Group" || element == "Media"
-              || element == "Fade" || element == "Stop"
+              || element == "Fade" || element == "Transport"
               || element == "Osc" || element == "Midi"
               || element == "Start")                                return "cue";
         if (element == "Lists")                     return "lists";
@@ -2931,7 +2931,7 @@ namespace wfg::doc
                     {
                         const auto element = child.getType().toString().toStdString();
 
-                        if (element != "Fade" && element != "Stop" && element != "Group"
+                        if (element != "Fade" && element != "Transport" && element != "Group"
                              && element != "Start")
                             continue;
 

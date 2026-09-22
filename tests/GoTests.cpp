@@ -1716,7 +1716,7 @@ namespace
         FadeRig()
         {
             fadeId = document.createCue (listId, 2, "fade", "Under").id;
-            stopId = document.createCue (listId, 3, "stop", "Out").id;
+            stopId = document.createCue (listId, 3, "transport", "Out").id;
 
             setCue (fadeId, "target", mediaId);
             setCue (fadeId, "level", "-20");
@@ -2755,7 +2755,7 @@ TEST_CASE ("run.kill: killing a fade-and-stop takes the stop with it")
     rig.fire (rig.stopId);
 
     const auto stopRun = rig.runs.all().back().id;
-    REQUIRE (rig.runs.find (stopRun)->kind == "stop");
+    REQUIRE (rig.runs.find (stopRun)->kind == "transport");
 
     rig.tickOnce();
 
@@ -3344,7 +3344,7 @@ TEST_CASE ("group: a stop cue runs the footer, and run.kill does not")
 
     SUBCASE ("a stop cue is graceful")
     {
-        const auto stopId = rig.document.createCue (rig.listId, 3, "stop", "Abort").id;
+        const auto stopId = rig.document.createCue (rig.listId, 3, "transport", "Abort").id;
         rig.setCue (stopId, "target", rig.groupId);
 
         rig.setStandby (rig.groupId);
@@ -4127,7 +4127,7 @@ TEST_CASE ("prepare: a stop aimed at a prepared scene does nothing, because it i
         the five readings `liveRunOf` carries. */
     PrepareRig rig;
 
-    const auto halt = rig.document.createCue (rig.listId, 4, "stop", "Halt").id;
+    const auto halt = rig.document.createCue (rig.listId, 4, "transport", "Halt").id;
     rig.setCue (halt, "target", rig.groupId);
 
     rig.setStandby (rig.sound);
@@ -5190,7 +5190,7 @@ namespace
             //  stop aimed at the first, and a memo to land on.
             rain = document.createCue (listId, 1, "media", "Rain").id;
             document.setAttribute ("/godot/cue/" + rain + "/file", "rain.wav");
-            stopThunder = document.createCue (listId, 2, "stop", "Cut the thunder").id;
+            stopThunder = document.createCue (listId, 2, "transport", "Cut the thunder").id;
             document.setAttribute ("/godot/cue/" + stopThunder + "/target", mediaId);
             after = document.createCue (listId, 3, "memo", "After").id;
 
@@ -7094,7 +7094,7 @@ TEST_CASE ("persistent: a stop before the pointer suspends it, and the solver is
         for a jump, and the bed is simply not in the plan. */
     PersistentRig rig;
 
-    const auto halt = rig.document.createCue (rig.listId, 2, "stop", "Kill the rain").id;
+    const auto halt = rig.document.createCue (rig.listId, 2, "transport", "Kill the rain").id;
     rig.document.setAttribute ("/godot/cue/" + halt + "/target", rig.bed);
 
     const auto after = rig.document.createCue (rig.listId, 3, "memo", "After").id;

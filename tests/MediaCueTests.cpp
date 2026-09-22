@@ -666,14 +666,14 @@ TEST_CASE ("media info: the durations are the ones mediaDurations read, byte for
 
     const audio::MediaInfo info { show.document, show.mediaFolder() };
 
-    CHECK (sameBytes (info.durations(), audio::mediaDurations (show.document, show.mediaFolder())));
+    CHECK (sameBytes (*info.durations(), audio::mediaDurations (show.document, show.mediaFolder())));
 
-    REQUIRE (info.durations().size() == 4u);
-    CHECK (info.durations().at ("thunder.wav") == doctest::Approx (1.5));
-    CHECK (info.durations().at ("sub/rain.wav") == doctest::Approx (0.5));
-    CHECK (info.durations().at ("absent.wav") == doctest::Approx (0.0));
-    CHECK (info.durations().at ("notes.txt") == doctest::Approx (0.0));
-    CHECK (info.durations().count ("") == 0u);
+    REQUIRE (info.durations()->size() == 4u);
+    CHECK (info.durations()->at ("thunder.wav") == doctest::Approx (1.5));
+    CHECK (info.durations()->at ("sub/rain.wav") == doctest::Approx (0.5));
+    CHECK (info.durations()->at ("absent.wav") == doctest::Approx (0.0));
+    CHECK (info.durations()->at ("notes.txt") == doctest::Approx (0.0));
+    CHECK (info.durations()->count ("") == 0u);
 
     /*  NO MEDIA FOLDER - `wfg tree` on a show that is not a bundle - takes a
         `file` as given. An absolute path, because a relative one would be read
@@ -689,9 +689,9 @@ TEST_CASE ("media info: the durations are the ones mediaDurations read, byte for
 
     const audio::MediaInfo unbundled { loose, std::string() };
 
-    CHECK (sameBytes (unbundled.durations(), audio::mediaDurations (loose, std::string())));
-    REQUIRE (unbundled.durations().size() == 1u);
-    CHECK (unbundled.durations().at (absolute) == doctest::Approx (1.5));
+    CHECK (sameBytes (*unbundled.durations(), audio::mediaDurations (loose, std::string())));
+    REQUIRE (unbundled.durations()->size() == 1u);
+    CHECK (unbundled.durations()->at (absolute) == doctest::Approx (1.5));
 
     /*  And a show that names no media at all is an empty table and an empty
         snapshot, not a failure. */
@@ -699,17 +699,18 @@ TEST_CASE ("media info: the durations are the ones mediaDurations read, byte for
     REQUIRE (silent.createList ("Nothing").ok);
 
     audio::MediaInfo nothing { silent, show.mediaFolder() };
-    CHECK (nothing.durations().empty());
+    CHECK (nothing.durations()->empty());
     CHECK (nothing.snapshot()->empty());
 
-    /*  A file imported into that show afterwards still gets a record - the
-        analyser is queued for it - and the frozen table still names nothing. */
+    /*  A file imported into that show afterwards gets a record AND a length:
+        it had none to begin with, so what the analyser read is the answer. */
     audio::MediaRecord imported;
     imported.seconds = 2.5;
     nothing.publish ("thunder.wav", imported);
 
     CHECK (nothing.snapshot()->count ("thunder.wav") == 1u);
-    CHECK (nothing.durations().empty());
+    REQUIRE (nothing.durations()->count ("thunder.wav") == 1u);
+    CHECK (nothing.durations()->at ("thunder.wav") == doctest::Approx (2.5));
 }
 
 TEST_CASE ("media info: the files a show names, in the order it names them, each once")
@@ -733,14 +734,19 @@ TEST_CASE ("media info: the files a show names, in the order it names them, each
     CHECK (audio::resolveMediaPath (std::string(), "/somewhere/rain.wav") == "/somewhere/rain.wav");
 }
 
-TEST_CASE ("media info: durations is one address for the object's whole life, and no publish writes to it")
+TEST_CASE ("media info: the lengths move only when one is learned, and a publish never writes to them")
 {
-    /*  The durations half is FROZEN (§14.12). A consumer holds its address, so
-        the address must not move - which is why the object can be neither
-        copied nor moved, asserted here at compile time - and a cache compares
-        that address, so the numbers under it must not change either: a
-        publish is the one thing in this class that writes, and it writes only
-        the other half. */
+    /*  §14.12's law, AMENDED 2026-09-22. It used to be that the durations
+        never changed at all, so a consumer could hold their address for ever -
+        and a file imported after the show opened read a length of nought for
+        the rest of the session, which left its timeline bar without an end and
+        every direct out beside it undecided.
+
+        The law now is one step weaker and still enough: the map is never
+        EDITED, only SWAPPED, and only when a length is LEARNED. So an
+        address-keyed cache still cannot see a number change under it - it sees
+        a new map or the same one - and it rebuilds exactly once, for a real
+        reason. Which is what the two halves of this case assert. */
     static_assert (! std::is_copy_constructible_v<audio::MediaInfo>);
     static_assert (! std::is_move_constructible_v<audio::MediaInfo>);
     static_assert (! std::is_copy_assignable_v<audio::MediaInfo>);
@@ -751,8 +757,8 @@ TEST_CASE ("media info: durations is one address for the object's whole life, an
 
     audio::MediaInfo info { show.document, show.mediaFolder() };
 
-    const auto* const address = &info.durations();
-    const auto asLoaded = info.durations();
+    const auto* const address = info.durations().get();
+    const auto asLoaded = *info.durations();
 
     /*  THE FIRST SNAPSHOT is every file, with its seconds and nothing else. */
     const auto unanalysed = info.snapshot();
@@ -779,11 +785,16 @@ TEST_CASE ("media info: durations is one address for the object's whole life, an
             analysed.contentHash = file + "#" + std::to_string (pass);
 
             info.publish (file, analysed);
-            CHECK (&info.durations() == address);
+
+            /*  A FILE THE SHOW NAMED AT OPEN HAS ITS LENGTH ALREADY, so there
+                is nothing to learn and the map does not move however many
+                times the analyser reports one. */
+            CHECK (info.durations().get() == address);
         }
     }
 
-    CHECK (sameBytes (info.durations(), asLoaded));
+    CHECK (sameBytes (*info.durations(), asLoaded));
+
 
     /*  And the snapshot carries the FROZEN seconds, not the publisher's: one
         file has one length, whichever half is asked. */
@@ -803,10 +814,16 @@ TEST_CASE ("media info: durations is one address for the object's whole life, an
         CHECK (record.contentHash.empty());
     }
 
-    /*  A FILE IMPORTED AFTER THE OPEN reaches the snapshot and NEVER the
-        durations. It has no frozen length, so its record keeps the seconds its
-        publisher read; and the table the slot analysis caches by address does
-        not grow by one entry, or by one byte, for it - which is the law. */
+    /*  A FILE IMPORTED AFTER THE OPEN reaches both halves now (2026-09-22).
+        It has no frozen length to agree with, so its record keeps the seconds
+        its publisher read - and the lengths LEARN it, because a cue whose file
+        arrived this session had no length at all until the show was reopened,
+        which read as a bar with no end and an output nobody could say was
+        free.
+
+        The map is SWAPPED and not edited, so the address moves once and the
+        caches that key on it rebuild once. Everything that was already there
+        is byte for byte what it was. */
     audio::MediaRecord imported;
     imported.seconds = 7.25;
     imported.contentHash = "a file this show did not name at open";
@@ -816,9 +833,51 @@ TEST_CASE ("media info: durations is one address for the object's whole life, an
     const auto afterImport = info.snapshot();
     REQUIRE (afterImport->count ("imported.wav") == 1u);
     CHECK (bitsOf (afterImport->at ("imported.wav").seconds) == bitsOf (7.25));
-    CHECK (info.durations().count ("imported.wav") == 0u);
-    CHECK (&info.durations() == address);
-    CHECK (sameBytes (info.durations(), asLoaded));
+
+    REQUIRE (info.durations()->count ("imported.wav") == 1u);
+    CHECK (bitsOf (info.durations()->at ("imported.wav")) == bitsOf (7.25));
+    CHECK (info.durations().get() != address);
+
+    for (const auto& [named, seconds] : asLoaded)
+        CHECK (bitsOf (info.durations()->at (named)) == bitsOf (seconds));
+}
+
+TEST_CASE ("media info: a length nobody had is learned, once, and the map moves with it")
+{
+    /*  THE OTHER HALF OF THE AMENDED LAW. A file the show named at open swaps
+        nothing however often the analyser reports it; a file imported since
+        has no length at all, and learning one is the only thing in this class
+        that moves the map. */
+    MediaShow show;
+    REQUIRE (show.built);
+
+    audio::MediaInfo info { show.document, show.mediaFolder() };
+
+    const auto* const address = info.durations().get();
+    const auto asLoaded = *info.durations();
+
+    audio::MediaRecord late;
+    late.seconds = 4.5;
+    late.contentHash = "late";
+
+    info.publish ("imported.wav", late);
+
+    const auto* const grown = info.durations().get();
+
+    CHECK (grown != address);                       // a new map, so a cache rebuilds
+    CHECK (info.durations()->size() == asLoaded.size() + 1);
+    CHECK (info.durations()->at ("imported.wav") == doctest::Approx (4.5));
+
+    //  And everything that was already there is untouched.
+    for (const auto& [named, seconds] : asLoaded)
+        CHECK (info.durations()->at (named) == doctest::Approx (seconds));
+
+    /*  AND THE SAME LENGTH AGAIN IS NOT NEWS. The analyser republishes a file
+        every time it reads one; a swap for a number already there would move
+        the address, and every cache keyed on it would do its whole walk again
+        for nothing. */
+    info.publish ("imported.wav", late);
+    CHECK (info.durations().get() == grown);
 }
 
 TEST_CASE ("media info: a late publish does not rebuild the slot analysis, which reads the durations by address")
@@ -827,10 +886,11 @@ TEST_CASE ("media info: a late publish does not rebuild the slot analysis, which
         analysis first thing, every publish, and the analysis skips its rebuild
         only when the document's revision AND the durations map's ADDRESS are
         the ones it last built with (`SlotAnalysis::ensureBuilt`). A
-        `durations()` that returned by value, or a map reached through a
-        pointer a publish swapped, would fail that test on every tick: about 77
-        ms of a Debug build's slot walk, fifty times a second, on the tick
-        thread (§14.12). What is asserted is a count, for M18's reason - a count
+        `durations()` that returned by value would fail that test on every
+        tick: about 77 ms of a Debug build's slot walk, fifty times a second,
+        on the tick thread (§14.12). A map SWAPPED when a length is learned is
+        the one exception, and it is not one publish in a thousand - the case
+        above pins that a file the show already knew swaps nothing at all. What is asserted is a count, for M18's reason - a count
         of zero is exact where a wall clock on a shared runner is not. */
     Rig rig;
     ScratchFolder scratch;
@@ -842,7 +902,7 @@ TEST_CASE ("media info: a late publish does not rebuild the slot analysis, which
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + cueId + "/file", "thunder.wav").ok);
 
     audio::MediaInfo info { rig.document, media.getFullPathName().toStdString() };
-    rig.parameters.setMediaDurations (&info.durations());
+    rig.parameters.setMediaInfo (&info);
 
     rig.publish();
 
@@ -880,7 +940,10 @@ TEST_CASE ("media info: a late publish does not rebuild the slot analysis, which
         reading: the same numbers at ANOTHER address are, to the cache, another
         show's media, and it rebuilds - once, and not again. This is exactly
         what a by-value accessor would have done on every publish. */
-    const auto elsewhere = info.durations();
+    /*  A COPY, so the address genuinely differs: what this case is about is
+        the analysis rebuilding when it is handed a DIFFERENT map, and
+        `durations()` hands out the same one until a length is learned. */
+    const auto elsewhere = *info.durations();
     rig.parameters.setMediaDurations (&elsewhere);
 
     rig.publish();
@@ -948,18 +1011,18 @@ TEST_CASE ("media info: a record published on one thread is seen whole on anothe
     }
 
     audio::MediaInfo info { document, media.getFullPathName().toStdString() };
-    REQUIRE (info.durations().size() == static_cast<std::size_t> (takes));
+    REQUIRE (info.durations()->size() == static_cast<std::size_t> (takes));
 
     /*  The walk's fixed order is the map's. */
     std::vector<std::string> files;
 
-    for (const auto& entry : info.durations())
+    for (const auto& entry : *info.durations())
         files.push_back (entry.first);
 
     const auto hashFor = [&info] (int generation, const std::string& named)
     {
         return std::to_string (generation) + " " + named + " "
-             + std::to_string (bitsOf (info.durations().at (named)));
+             + std::to_string (bitsOf (info.durations()->at (named)));
     };
 
     constexpr int passes = 400;
@@ -1045,7 +1108,7 @@ TEST_CASE ("media info: a record published on one thread is seen whole on anothe
             const auto generation = passOf (record.contentHash);
 
             if (generation < 0
-                  || bitsOf (record.seconds) != bitsOf (info.durations().at (named))
+                  || bitsOf (record.seconds) != bitsOf (info.durations()->at (named))
                   || (generation > 0 && record.contentHash != hashFor (generation, named)))
                 ++torn;
 
@@ -1107,7 +1170,7 @@ TEST_CASE ("media info: a record published on one thread is seen whole on anothe
     for (const auto& named : files)
     {
         CHECK (last->at (named).contentHash == hashFor (passes, named));
-        CHECK (bitsOf (last->at (named).seconds) == bitsOf (info.durations().at (named)));
+        CHECK (bitsOf (last->at (named).seconds) == bitsOf (info.durations()->at (named)));
     }
 }
 

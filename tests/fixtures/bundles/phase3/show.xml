@@ -25,7 +25,7 @@
         <Route id="P3RTE004" bus="P3BSA001" gains="0 1"/>
       </Media>
       <Fade id="P3FAD001" duration="0.3" level="-20" name="Under the dialogue" number="3" target="P3TPX001"/>
-      <Stop id="P3STP001" name="Move the bed on" number="4" target="P3BED001" verb="advance"/>
+      <Transport id="P3STP001" name="Move the bed on" number="4" target="P3BED001" verb="advance"/>
     </List>
     <List id="P3FYR001" name="Foyer">
       <Cue id="P3MEM001" name="Doors" number="1">

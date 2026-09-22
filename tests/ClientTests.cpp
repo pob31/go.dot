@@ -1376,7 +1376,7 @@ TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be name
     CHECK (model::editAttributeFor (model::EditCell::preWait, "osc") == "preWait");
     CHECK (model::editAttributeFor (model::EditCell::postWait, "group") == "postWait");
     CHECK (model::editAttributeFor (model::EditCell::duration, "fade") == "duration");
-    CHECK (model::editAttributeFor (model::EditCell::duration, "stop") == "duration");
+    CHECK (model::editAttributeFor (model::EditCell::duration, "transport") == "duration");
     CHECK (model::editAttributeFor (model::EditCell::duration, "media").empty());
     CHECK (model::editAttributeFor (model::EditCell::duration, "memo").empty());
     CHECK (model::editAttributeFor (model::EditCell::none, "memo").empty());
@@ -1816,7 +1816,7 @@ TEST_CASE ("client: the new-cue row offers every kind the engine makes, and land
     const model::Creation job { "L1", 2, "fade", 7, 0 };
 
     CHECK (model::madeByCreate (job, "fade", ""));
-    CHECK_FALSE (model::madeByCreate (job, "stop", ""));       // another kind
+    CHECK_FALSE (model::madeByCreate (job, "transport", ""));       // another kind
     CHECK_FALSE (model::madeByCreate (job, "fade", "Lights"));  // somebody else's, named already
 }
 

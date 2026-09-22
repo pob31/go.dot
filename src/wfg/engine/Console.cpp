@@ -1121,13 +1121,13 @@ namespace
 
         wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
 
-        parameters.setMediaDurations (&mediaInfo.durations());
-
         /*  The records half too, so a tree dump carries every `cue/<id>/hash`
             a session would publish - empty, since nothing here analyses. */
         parameters.setMediaInfo (&mediaInfo);
         parameters.setListState (&runner.listState());
-        runner.setMediaDurations (&mediaInfo.durations());
+        /*  THE OWNER AND NOT THE MAP. A length learned after the show opened
+            swaps it, so both of these ask for it where they use it. */
+        runner.setMediaInfo (&mediaInfo);
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;
@@ -1578,6 +1578,13 @@ namespace
         int tracks = 0;
         int outputs = 0;
 
+        /*  CHANNELS PER TRACK, which is the widest cue this show can play.
+            Said by the document since 2026-09-22 rather than assumed to be
+            two: `media/channels` accepts up to 512 and anything above the
+            track width fails its arm, so the number a show is refused against
+            has to be one somebody can see and change. */
+        int channelsPerTrack = 2;
+
         /*  SLOTS PER TRACK: the widest range count of any media cue in the
             show, plus room to work in. A property of the SHOW, like the track
             count, because §3.25 fixes the graph's shape when it is built and
@@ -1669,6 +1676,13 @@ namespace
         }
 
         shape.tracks = static_cast<int> (audio["tracks"]);
+
+        /*  Through the schema's default rather than the raw property, because
+            the canonical writer omits an attribute equal to its default and a
+            show saved and reopened would otherwise read nought channels. */
+        if (const auto declared = static_cast<int> (audio.getProperty ("channelsPerTrack", 2));
+            declared > 0)
+            shape.channelsPerTrack = declared;
         shape.slots = std::max (slotFloor, widestRangeCount (document.root()) + slotHeadroom);
 
         for (const auto bus : audio)
@@ -1704,6 +1718,7 @@ namespace
         request.inputDeviceName = settings.inputDevice;
         request.blockSize = settings.bufferSize;
         request.edit.tracks = shape.tracks;
+        request.edit.channelsPerTrack = shape.channelsPerTrack;
         request.edit.slots = shape.slots;
         wfg::audio::readPatch (settings.inputPatch, request.inputPatch);
         wfg::audio::readPatch (settings.outputPatch, request.outputPatch);
@@ -2225,8 +2240,6 @@ namespace
 
         wfg::tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
 
-        parameters.setMediaDurations (&mediaInfo.durations());
-
         /*  AND THE OTHER HALF OF THE SAME OBJECT, for `run/timbre` and
             `cue/<id>/hash` (PR 5.8, §14.5): the records the analyser publishes
             late, read through one snapshot per publish. The durations above
@@ -2234,7 +2247,9 @@ namespace
             that address. */
         parameters.setMediaInfo (&mediaInfo);
         parameters.setListState (&runner.listState());
-        runner.setMediaDurations (&mediaInfo.durations());
+        /*  THE OWNER AND NOT THE MAP. A length learned after the show opened
+            swaps it, so both of these ask for it where they use it. */
+        runner.setMediaInfo (&mediaInfo);
 
         wfg::tree::EngineState state;
         state.version = WFG_VERSION;
@@ -2375,7 +2390,7 @@ namespace
             the sounds were even if the sounds have gone. A file that is missing
             is written with nought bytes and nought seconds rather than skipped:
             that it was named and absent is the interesting part. */
-        for (const auto& [named, seconds] : mediaInfo.durations())
+        for (const auto& [named, seconds] : *mediaInfo.durations())
         {
             const auto file = target.isDirectory()
                                 ? target.getChildFile ("media").getChildFile (juce::String (named))

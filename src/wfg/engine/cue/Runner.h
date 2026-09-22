@@ -47,6 +47,7 @@
     the same commands are applied, and only the sound is missing.
 */
 
+#include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/FadeJob.h>
@@ -479,9 +480,21 @@ namespace wfg::cue
             it: absent - a replay, a test, a bundle with no media folder - every
             length is unknown, which the solver reports as a confused entry
             rather than a guess. */
+        /*  As the tree's, and for the same reason: a length learned after the
+            show opened swaps the map, so what is held is the POINTER TO THE
+            OWNER and the map is asked for where it is used. A test may hand in
+            a map of its own instead, and `wfg replay` hands in the lengths its
+            log recorded. */
         void setMediaDurations (const std::map<std::string, double>* durationsToRead) noexcept
         {
+            fixedDurations = durationsToRead;
             durations = durationsToRead;
+        }
+
+        /** The object that learns them, when there is one. */
+        void setMediaInfo (const audio::MediaInfo* infoToRead) noexcept
+        {
+            mediaInfo = infoToRead;
         }
 
         /*  THE POINTER MOVED AWAY BEFORE ANYBODY PRESSED ANYTHING: what
@@ -874,6 +887,9 @@ namespace wfg::cue
         void fireFade (const juce::ValueTree& cue, const std::string& runId);
         void fireStop (const juce::ValueTree& cue, const std::string& runId);
 
+        /** Which slice a transport cue's `range` names, as a playlist place, or -1. */
+        int advanceTargetOf (const juce::ValueTree& cue, const Run& run) const;
+
         /*  A network cue firing: one write to a mounted node, queued for the
             end of this tick. No Engine here either, and for the same reason. */
         void fireOsc (const juce::ValueTree& cue, const std::string& runId);
@@ -983,6 +999,12 @@ namespace wfg::cue
         /*  One per group run in flight. A vector like every other job list
             here, and drained by the same `remove_if` on a retired flag. */
         ListState lists;
+        const audio::MediaInfo* mediaInfo = nullptr;
+        const std::map<std::string, double>* fixedDurations = nullptr;
+
+        /*  Refreshed at the top of each tick from `mediaInfo`, and held for
+            that tick so nothing swaps it mid-solve. */
+        std::shared_ptr<const std::map<std::string, double>> durationsHeld;
         const std::map<std::string, double>* durations = nullptr;
         std::vector<GroupJob> scheduled;
 

@@ -36,7 +36,7 @@ namespace wfg::client::model
 
         bool aimable (const Row& row) noexcept
         {
-            return row.kind == "fade" || row.kind == "stop";
+            return row.kind == "fade" || row.kind == "transport";
         }
     }
 
@@ -332,7 +332,7 @@ namespace wfg::client::model
             case EditCell::name:     return "name";
             case EditCell::preWait:  return "preWait";
             case EditCell::postWait: return "postWait";
-            case EditCell::duration: return kind == "fade" || kind == "stop" ? "duration" : "";
+            case EditCell::duration: return kind == "fade" || kind == "transport" ? "duration" : "";
             case EditCell::none:     break;
         }
 

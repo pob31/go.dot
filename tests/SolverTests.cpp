@@ -283,7 +283,7 @@ TEST_CASE ("solve: a stop cue before the target ends what it names")
     rig.document.findById (range.id)
        .setProperty (juce::Identifier ("loops"), 0, nullptr);
 
-    const auto halt = rig.document.createCue (rig.listId, 1, "stop", "Halt").id;
+    const auto halt = rig.document.createCue (rig.listId, 1, "transport", "Halt").id;
     rig.document.setAttribute ("/godot/cue/" + halt + "/target", bed);
 
     const auto target = rig.document.createCue (rig.listId, 2, "memo", "Here").id;

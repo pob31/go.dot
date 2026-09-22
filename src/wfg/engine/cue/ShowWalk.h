@@ -77,7 +77,7 @@ namespace wfg::cue
     inline bool isCueElement (const juce::String& element) noexcept
     {
         return element == "Cue"  || element == "Group" || element == "Media"
-            || element == "Fade" || element == "Stop"  || element == "Osc"
+            || element == "Fade" || element == "Transport"  || element == "Osc"
             || element == "Midi" || element == "Start";
     }
 
@@ -109,7 +109,7 @@ namespace wfg::cue
                 which is the same writer. The defaults come from here now, as
                 every cue's do. */
             for (const auto* owner : { "cue", "group", "media", "range", "fade",
-                                       "stop", "feed", "insert", "send",
+                                       "transport", "feed", "insert", "send",
                                        "bus", "processorInput", "rackChannel" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))
                     defaults[std::string (owner) + "/" + std::string (row->name)]
@@ -481,7 +481,7 @@ namespace wfg::cue
             const auto element = node.getType().toString();
 
             if (element == "Cue" || element == "Osc" || element == "Midi"
-                 || element == "Stop" || element == "Start")
+                 || element == "Transport" || element == "Start")
                 return 0.0;
 
             if (element == "Fade")
@@ -583,8 +583,27 @@ namespace wfg::cue
                     running = begins + *length + reader.number (child, "cue", "postWait");
             }
 
-            return (reader.number (node, "cue", "preWait") + furthest)
-                     * static_cast<double> (rounds);
+            /*  THE GROUP'S OWN PRE-WAIT IS NOT PART OF ITS LENGTH, corrected
+                2026-09-22. It used to be - `(preWait + furthest) * rounds` -
+                and that was wrong twice over.
+
+                ONCE, because `place` has already added it. A member's start is
+                `running + preWait(child)` and the next member's is
+                `here.at + lengthOf(child) + postWait`, so a length that
+                contained the pre-wait counted it a second time and every cue
+                after a nested group was placed that much too late. For a MEDIA
+                child `mediaLength` excludes it; the asymmetry between the two
+                was the fault, whichever side it is fixed on.
+
+                AND AGAIN, because multiplying by `rounds` repeated it. A group
+                that loops three times waits once before it starts, not once
+                per round - so even read on its own the old answer grew with
+                the loop count for a reason nothing in the show says.
+
+                It moves the SOLVER's answers and the slot analysis's seconds
+                and nothing a listener hears: the Runner schedules from its own
+                tick counts, copied at fire time, and never from this. */
+            return furthest * static_cast<double> (rounds);
         }
 
         /*  Whether this cue reaches an end without anybody stopping it.

@@ -2952,7 +2952,7 @@ namespace
         media.appendChild (route, nullptr);
 
         const auto moverId = document.createCue (listId, 1,
-                                                 scenario.verb == nullptr ? "fade" : "stop",
+                                                 scenario.verb == nullptr ? "fade" : "transport",
                                                  "Out").id;
 
         const auto attribute = [&] (const char* name, const std::string& value)

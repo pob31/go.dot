@@ -746,7 +746,7 @@ TEST_CASE ("range scheduler: a stop cue whose verb is advance does the same thin
     rig.addRange (0.0, 1.0, 0);
     rig.addRange (1.0, 2.0, 1);
 
-    const auto mover = rig.document.createCue (rig.listId, 1, "stop", "Move it on").id;
+    const auto mover = rig.document.createCue (rig.listId, 1, "transport", "Move it on").id;
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/target", rig.cueId).ok);
     REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/verb", "advance").ok);
 
@@ -760,6 +760,90 @@ TEST_CASE ("range scheduler: a stop cue whose verb is advance does the same thin
 
     REQUIRE (rig.audio.stops.size() == 1u);
     CHECK (rig.run (id)->range == 1);
+}
+
+TEST_CASE ("range scheduler: a transport cue can name the slice to go to, not only the next")
+{
+    /*  The author, 2026-09-22: an advance should be able to name a slice. On a
+        bed whose first range loops for ever, stepping to the fourth means
+        three more passes of whatever lies between; naming it is the difference
+        between a gesture and a wait.
+
+        THE PASS IT IS ON STILL FINISHES. That is what makes an advance
+        graceful and it is the same boundary either way - only where it lands
+        differs. */
+    SchedulerRig rig;
+    rig.addRange (0.0, 1.0, 0);             // the bed, looping for ever
+    rig.addRange (1.0, 2.0, 1);
+    const auto outro = rig.addRange (2.0, 3.0, 1);
+
+    const auto mover = rig.document.createCue (rig.listId, 1, "transport", "To the outro").id;
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/target", rig.cueId).ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/verb", "advance").ok);
+
+    SUBCASE ("named, it goes there and not to the next one")
+    {
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/range", outro).ok);
+
+        const auto id = rig.goAndLaunch();
+        rig.ticks (150);
+        REQUIRE (rig.audio.stops.empty());
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string (mover) });
+        rig.ticks (60);
+
+        REQUIRE (rig.audio.stops.size() == 1u);
+        CHECK (rig.run (id)->range == 2);
+
+        //  And it launched the slice it named, not the one in between.
+        REQUIRE (rig.audio.launches.size() == 2u);
+        CHECK (rig.audio.launches.back().slot == 2);
+    }
+
+    SUBCASE ("naming nothing is the next one, as it always was")
+    {
+        const auto id = rig.goAndLaunch();
+        rig.ticks (150);
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string (mover) });
+        rig.ticks (60);
+
+        CHECK (rig.run (id)->range == 1);
+    }
+
+    SUBCASE ("naming a slice of some other cue falls back rather than doing nothing")
+    {
+        /*  A reference somebody has to fix - `wfg validate` says so through
+            the `refers` column - and the run still has somewhere to go. */
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/range", "NOSUCHRG").ok);
+
+        const auto id = rig.goAndLaunch();
+        rig.ticks (150);
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string (mover) });
+        rig.ticks (60);
+
+        CHECK (rig.run (id)->range == 1);
+    }
+
+    SUBCASE ("and naming the slice it is already on is the next one")
+    {
+        /*  A request with no boundary in it. Answering it where it stands
+            would be an advance that advanced nothing. */
+        const auto first = rig.document.findById (rig.cueId)
+                              .getChild (0)[juce::Identifier ("id")].toString().toStdString();
+
+        REQUIRE_FALSE (first.empty());
+        REQUIRE (rig.document.setAttribute ("/godot/cue/" + mover + "/range", first).ok);
+
+        const auto id = rig.goAndLaunch();
+        rig.ticks (150);
+
+        rig.submitAndTick ("cue.fire", { osc::Value::string (mover) });
+        rig.ticks (60);
+
+        CHECK (rig.run (id)->range == 1);
+    }
 }
 
 TEST_CASE ("range scheduler: the last range's end is placed with nothing after it")

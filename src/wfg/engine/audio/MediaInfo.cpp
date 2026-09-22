@@ -138,8 +138,15 @@ namespace wfg::audio
 
     MediaInfo::MediaInfo (const doc::ShowDocument& document, const std::string& mediaFolder)
         : frozenDurations (mediaDurations (document, mediaFolder)),
+          lengths (std::make_shared<const std::map<std::string, double>> (frozenDurations)),
           published (unanalysedRecordsOf (frozenDurations))
     {
+    }
+
+    std::shared_ptr<const std::map<std::string, double>> MediaInfo::durations() const
+    {
+        const std::lock_guard<std::mutex> lock { swapMutex };
+        return lengths;
     }
 
     std::shared_ptr<const MediaRecords> MediaInfo::snapshot() const
@@ -157,10 +164,42 @@ namespace wfg::audio
             imported after the open has no frozen length to agree with, so its
             record keeps the seconds the analyser read - and `durations()`,
             which is read only at open, never hears of it. */
+        auto learned = false;
+
         if (const auto frozen = frozenDurations.find (path); frozen != frozenDurations.end())
             record.seconds = frozen->second;
+        else
+            learned = record.seconds > 0.0;
 
         const std::lock_guard<std::mutex> publishing { publisherMutex };
+
+        /*  A LENGTH NOBODY HAD, WRITTEN DOWN. A file the show named at open has
+            its length already and the line above keeps the two halves agreeing;
+            a file imported since has none, and this is the moment it becomes
+            known. Swapped rather than edited, so the caches that key on this
+            map's address rebuild once and see it. */
+        if (learned)
+        {
+            const std::lock_guard<std::mutex> lock { swapMutex };
+
+            /*  AND ONLY WHEN IT IS NEWS. The analyser republishes a file every
+                time it reads one, and swapping the map for a length already in
+                it would move the address for nothing - which every cache
+                keyed on that address would answer by doing its whole walk
+                again. Compared with two `<` rather than `==`: the strict job's
+                -Wfloat-equal is about doubles that were ARITHMETIC, and this
+                is a copy of the same number, but the warning does not know
+                that and one exception is one too many. */
+            const auto known = lengths->find (path);
+
+            if (known == lengths->end()
+                 || known->second < record.seconds || record.seconds < known->second)
+            {
+                auto grown = std::make_shared<std::map<std::string, double>> (*lengths);
+                (*grown)[path] = record.seconds;
+                lengths = std::move (grown);
+            }
+        }
 
         std::shared_ptr<const MediaRecords> current;
 

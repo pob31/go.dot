@@ -5,7 +5,7 @@
         <Route id="Z04EH7PH" bus="J3MT5XYA" gains="1 0 0 1"/>
       </Media>
       <Fade id="E4GP6QSC" curve="sCurve" duration="2" level="-12" name="Under" number="2" target="B3N8R5TW"/>
-      <Stop id="M5TQ7XVA" duration="3" name="Out" number="3" target="B3N8R5TW" verb="fade"/>
+      <Transport id="M5TQ7XVA" duration="3" name="Out" number="3" target="B3N8R5TW" verb="fade"/>
       <Fade id="P9XKC2WR" duration="1" level="-6" name="Too late" number="4" target="B3N8R5TW"/>
     </List>
   </Lists>

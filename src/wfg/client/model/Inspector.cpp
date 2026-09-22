@@ -44,7 +44,7 @@ namespace wfg::client::model
                 { "media",   { "file", "channels", "stereoToMono", "directOut",
                                "level", "startOffset" } },
                 { "fade",    { "target", "level", "curve", "points", "stopWhenDone" } },
-                { "stop",    { "target", "verb", "curve" } },
+                { "transport", { "target", "verb", "range", "curve" } },
                 { "start",   { "target" } },
                 { "osc",     { "address", "value", "wait", "timeout" } },
                 { "midi",    { "port", "channel", "type", "number", "data", "sysex", "wait" } },

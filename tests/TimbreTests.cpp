@@ -925,7 +925,7 @@ TEST_CASE ("media analyser: every file the show names gets its record, off the c
 
         /*  The frozen seconds, not the analyser's - the two halves agree
             about a file they both know (MediaInfo.h). */
-        CHECK (record.seconds == doctest::Approx (info.durations().at (path)));
+        CHECK (record.seconds == doctest::Approx (info.durations()->at (path)));
         CHECK (cacheFileFor (show.media, record.contentHash).existsAsFile());
     }
 
@@ -954,7 +954,10 @@ TEST_CASE ("media analyser: every file the show names gets its record, off the c
     REQUIRE (later->count ("late.wav") == 1u);
     CHECK (later->at ("late.wav").seconds == doctest::Approx (1.5));
     CHECK (later->at ("late.wav").pyramid != nullptr);
-    CHECK (info.durations().count ("late.wav") == 0u);
+    /*  LEARNED, since 2026-09-22: a file imported after the show opened had no
+        length at all until it was reopened, and now the analyser's reading is
+        the answer. */
+    REQUIRE (info.durations()->count ("late.wav") == 1u);
 
     /*  A file that cannot be coloured is published as nothing - a record
         with a hash and no pyramid would send a client to a route that

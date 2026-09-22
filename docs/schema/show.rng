@@ -77,7 +77,7 @@
           <ref name="Group"/>
           <ref name="Media"/>
           <ref name="Fade"/>
-          <ref name="Stop"/>
+          <ref name="Transport"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
           <ref name="Start"/>
@@ -270,7 +270,7 @@
           <ref name="Group"/>
           <ref name="Media"/>
           <ref name="Fade"/>
-          <ref name="Stop"/>
+          <ref name="Transport"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
           <ref name="Start"/>
@@ -293,7 +293,7 @@
           <ref name="Group"/>
           <ref name="Media"/>
           <ref name="Fade"/>
-          <ref name="Stop"/>
+          <ref name="Transport"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
           <ref name="Start"/>
@@ -313,7 +313,7 @@
           <ref name="Group"/>
           <ref name="Media"/>
           <ref name="Fade"/>
-          <ref name="Stop"/>
+          <ref name="Transport"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
           <ref name="Start"/>
@@ -333,7 +333,7 @@
           <ref name="Group"/>
           <ref name="Media"/>
           <ref name="Fade"/>
-          <ref name="Stop"/>
+          <ref name="Transport"/>
           <ref name="Osc"/>
           <ref name="Midi"/>
           <ref name="Start"/>
@@ -739,8 +739,8 @@
     </element>
   </define>
 
-  <define name="Stop">
-    <element name="Stop">
+  <define name="Transport">
+    <element name="Transport">
       <attribute name="id">
         <ref name="identifier"/>
       </attribute>
@@ -813,6 +813,12 @@
       <optional>
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="range">
+          <a:documentation>Which slice of the target to go to, by identifier, when the verb is advance - and empty, which is what advance has always meant, is the NEXT one. Naming a slice is how a bed is sent to its outro from wherever it has got to rather than stepped through everything in between, which on a loop that never ends is the difference between a gesture and a wait. The slice still finishes the pass it is on before the jump, because that is what makes an advance graceful; a slice of some other cue is a warning and the run goes to the next one instead.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -1258,6 +1264,15 @@
           <data type="integer">
             <param name="minInclusive">0</param>
             <param name="maxInclusive">65536</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="channelsPerTrack">
+          <a:documentation>How many channels one track carries, and so the widest cue this show can play. Two is a stereo file, which is what almost every show is; a six-channel bed or a first-order ambisonic one needs it said. A cue wider than this fails its arm as bad-route rather than being quietly narrowed - PRD 3.9b: width is explicit and never automatic. Fixed when the graph is built and never after, like tracks and for the same reason (3.25), so a show is reopened to change it. It costs: every track carries this many buffers whether a cue uses them or not.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">64</param>
           </data>
         </attribute>
       </optional>

@@ -399,6 +399,18 @@ namespace wfg::cue
             the same pass is the same instruction and not two of them. */
         bool advanceRequested = false;
 
+        /*  WHICH SLICE THE ADVANCE IS AIMED AT, by its place in the playlist,
+            and -1 for the one after this (author, 2026-09-22: a transport cue
+            may name a slice as well as ask for the next).
+
+            A BED IS SENT TO ITS OUTRO FROM WHEREVER IT HAS GOT TO, which on a
+            loop that never ends is the difference between a gesture and a
+            wait: stepping through four slices to reach the fifth means four
+            passes of whatever each of them is. The pass it is on still
+            finishes first - that is what makes an advance graceful and it is
+            the same boundary either way; only the destination differs. */
+        int advanceTo = -1;
+
         /*  The last range's end has been placed, so the silence that follows is
             the cue finishing rather than a gap between two ranges.
 

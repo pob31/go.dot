@@ -165,9 +165,9 @@ namespace wfg::cue
 
             ids[static_cast<std::size_t> (entry.row)] = entry.id;
 
-            if (entry.element == "Stop")
+            if (entry.element == "Transport")
             {
-                const auto target = read.text (entry.node, "stop", "target");
+                const auto target = read.text (entry.node, "transport", "target");
 
                 if (! target.empty())
                     stopsByList[entry.list].push_back ({ entry.row, target });

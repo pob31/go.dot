@@ -124,10 +124,10 @@ namespace wfg::doc
                     exactly as `Audio` carries the track count, which is a fact
                     about the whole show and not about any bus. */
                 { "Lists",  false, { "List" },             { "lists" } },
-                { "List",   true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
+                { "List",   true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
                                      "Midi", "Start", "Persistent" }, { "list" } },
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
-                { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
+                { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
                                      "Midi", "Start", "Header", "Footer", "Trigger" },
                                                                           { "cue", "group" } },
 
@@ -150,9 +150,9 @@ namespace wfg::doc
                     content models to express a rule that fits in one line of
                     validate() would be paying a great deal for a smaller
                     diagnostic. */
-                { "Header", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
+                { "Header", true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
                                      "Midi", "Start" }, {} },
-                { "Footer", true,  { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
+                { "Footer", true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
                                      "Midi", "Start" }, {} },
 
                 /*  THE PERSISTENT SECTION IS A LIST'S, not a group's (§3.29,
@@ -162,7 +162,7 @@ namespace wfg::doc
                     validate() - and the same children, so that a fade or a stop
                     put there is a validate WARNING that the section ignores
                     rather than a file that refuses to open. */
-                { "Persistent", true, { "Cue", "Group", "Media", "Fade", "Stop", "Osc",
+                { "Persistent", true, { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
                                         "Midi", "Start" }, {} },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
@@ -235,7 +235,7 @@ namespace wfg::doc
                     that already has one, which is the whole difference between
                     them and a media cue. */
                 { "Fade",   true,  { "Trigger" },                     { "cue", "fade" } },
-                { "Stop",   true,  { "Trigger" },                     { "cue", "stop" } },
+                { "Transport",   true,  { "Trigger" },                     { "cue", "transport" } },
 
                 /*  A START CUE PRESSES A BUTTON (2026-09-19): it fires another
                     cue by name and is done. Its own element for the reason the

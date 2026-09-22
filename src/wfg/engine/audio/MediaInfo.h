@@ -207,10 +207,26 @@ namespace wfg::audio
 
         ~MediaInfo() = default;
 
-        /*  Any thread. The SAME reference on every call, into a map that never
-            changes after construction - hand its address to anything that
-            caches on one. */
-        const std::map<std::string, double>& durations() const noexcept { return frozenDurations; }
+        /*  EVERY LENGTH THIS SHOW KNOWS, by the path the document writes: the
+            ones read when it opened, and the ones the analyser has learned
+            since.
+
+            SWAPPED AND NEVER EDITED, which is what lets a cache keep comparing
+            it by address. That was the whole reason the map was frozen: a
+            consumer that held `&durations()` could not tell a changed number
+            from an unchanged one, so nothing was allowed to change. A new map
+            object each time one is LEARNED answers both - the address moves,
+            so every address-keyed cache rebuilds exactly once and for a real
+            reason, and nothing anybody is holding is edited underneath them.
+
+            A CALLER HOLDS THE POINTER FOR AS LONG AS IT READS THE MAP, and
+            asks again next time. Holding the raw address across a learn is the
+            one way to be wrong here, which is why this hands out a `shared_ptr`
+            and not a reference (2026-09-22: a file imported mid-session used
+            to read a length of nought until the show was reopened, so its
+            timeline bar had no end and every direct out read undecided beside
+            it). */
+        std::shared_ptr<const std::map<std::string, double>> durations() const;
 
         /*  Any thread. The most recently published records - never nullptr,
             and never changed after it is returned. Before anything is
@@ -246,8 +262,12 @@ namespace wfg::audio
 
     private:
         /*  Declared FIRST, and const: it is filled by the constructor's
-            initialiser list and by nothing, ever, afterwards. */
+            initialiser list and by nothing, ever, afterwards. What `durations()`
+            hands out starts as a copy of this and grows by learning. */
         const std::map<std::string, double> frozenDurations;
+
+        /** The lengths, frozen plus learned. Swapped whole, never edited. */
+        std::shared_ptr<const std::map<std::string, double>> lengths;
 
         /*  A plain mutex rather than the RtSnapshot spin lock, for
             `ParameterTree::publishMutex`'s reason: no reader is the audio

@@ -517,8 +517,8 @@ namespace wfg::cue
             if (entry.row > target->row)
                 break;
 
-            if (entry.element == "Stop" && read.flag (entry.node, "cue", "enabled"))
-                stopped.push_back (read.text (entry.node, "stop", "target"));
+            if (entry.element == "Transport" && read.flag (entry.node, "cue", "enabled"))
+                stopped.push_back (read.text (entry.node, "transport", "target"));
         }
 
         const auto wasStopped = [&stopped] (const std::string& cueId)
@@ -666,9 +666,9 @@ namespace wfg::cue
             if (step.origin == 'g')
                 lastGo = step.cue;
 
-            if (entry->element == "Stop")
+            if (entry->element == "Transport")
             {
-                const auto targetCue = read.text (entry->node, "stop", "target");
+                const auto targetCue = read.text (entry->node, "transport", "target");
 
                 if (! targetCue.empty())
                 {
@@ -872,9 +872,9 @@ namespace wfg::cue
         std::vector<std::string> stopped;
 
         for (const auto& entry : walk.placed)
-            if (entry.row < standbyRow && entry.element == "Stop"
+            if (entry.row < standbyRow && entry.element == "Transport"
                  && read.flag (entry.node, "cue", "enabled"))
-                stopped.push_back (read.text (entry.node, "stop", "target"));
+                stopped.push_back (read.text (entry.node, "transport", "target"));
 
         for (const auto& cue : section)
         {

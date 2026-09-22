@@ -33,18 +33,18 @@
 namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
-    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi", "start" };
+    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
     inline constexpr std::string_view enum_trigger_kind[] = { "osc", "midi", "clock" };
     inline constexpr std::string_view enum_trigger_type[] = { "noteOn", "noteOff", "programChange", "controlChange" };
     inline constexpr std::string_view enum_fade_curve[] = { "linear", "sCurve" };
-    inline constexpr std::string_view enum_stop_verb[] = { "hard", "fade", "afterMember", "afterIteration", "advance" };
-    inline constexpr std::string_view enum_stop_curve[] = { "linear", "sCurve" };
+    inline constexpr std::string_view enum_transport_verb[] = { "hard", "fade", "afterMember", "afterIteration", "advance" };
+    inline constexpr std::string_view enum_transport_curve[] = { "linear", "sCurve" };
     inline constexpr std::string_view enum_osc_wait[] = { "none", "sent", "verified" };
     inline constexpr std::string_view enum_midi_type[] = { "noteOn", "noteOff", "programChange", "controlChange", "pitchBend", "aftertouch", "channelPressure", "sysex" };
     inline constexpr std::string_view enum_midi_wait[] = { "none", "sent" };
-    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "stop", "osc", "midi", "start" };
+    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start" };
     inline constexpr std::string_view enum_run_phase[] = { "entering", "preparing", "prepared", "header", "members", "footer" };
     inline constexpr std::string_view enum_run_state[] = { "preparing", "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
     inline constexpr std::string_view enum_run_warning[] = { "no-channel", "revoked" };
@@ -823,7 +823,7 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "",
           "Whether the target's run is stopped when the fade arrives, at whatever level it arrives at. Off, a fade to silence leaves the run playing silently until it ends by itself, which is what a fade that will come back up wants; on, the arrival is the stop, the same path a stop cue's fade verb takes." },
-        { "stop", "target",
+        { "transport", "target",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",
           false, 0.0, false, 0.0,
@@ -831,14 +831,22 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "cue",
           "The cue this stops. As with a fade it names the cue and finds the run, and a target that is not running is a no-op that is applied rather than refused." },
-        { "stop", "verb",
+        { "transport", "verb",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "hard",
           false, 0.0, false, 0.0,
-          enum_stop_verb, 5,
+          enum_transport_verb, 5,
           "", 50.0, false, "park",
           "",
           "How it stops. Hard stops now and takes Tracktion's own click suppression with it; fade runs a fade to silence first and stops when it arrives. The verb is separate from the duration so that a stop with a duration nobody meant cannot become a slow one by accident. afterMember and afterIteration are the two GRACEFUL ones, and they are only meaningful against a group: they let the scene reach a boundary it was going to reach anyway - the end of the member playing now, or the end of this round - and stop there, which is how an infinite loop is left without a cut. Against anything else they are a hard stop, because there is no boundary to wait for. advance is the third graceful one and belongs to a ranged media cue (PRD 3.24): it lets the range playing now finish the pass it is on and then leaves it, either into the next range or into silence - which is how an infinite ambience is got out of without a cut. Against a cue with no ranges it is a hard stop, for the same reason: there is no boundary." },
+        { "transport", "range",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "range",
+          "Which slice of the target to go to, by identifier, when the verb is advance - and empty, which is what advance has always meant, is the NEXT one. Naming a slice is how a bed is sent to its outro from wherever it has got to rather than stepped through everything in between, which on a loop that never ends is the difference between a gesture and a wait. The slice still finishes the pass it is on before the jump, because that is what makes an advance graceful; a slice of some other cue is a warning and the run goes to the next one instead." },
         { "start", "target",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",
@@ -847,7 +855,7 @@ namespace wfg::doc::generated
           "", 50.0, false, "park",
           "cue",
           "The cue this starts when it fires - by name, as cue.fire does, so standby does not move and the target may sit anywhere in any list. A start cue is a memo that presses a button (2026-09-19): it fires, its run is done the next tick, and the target runs on its own. What the live recorder writes into a take: one start cue per cue the operator fired, at the second they fired it, so a night pressed by hand can be played back by a timeline. A target that is a manual group is refused when it fires, as cue.fire refuses it." },
-        { "stop", "duration",
+        { "transport", "duration",
           ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
           true, "0",
           true, 0.0, false, 0.0,
@@ -855,11 +863,11 @@ namespace wfg::doc::generated
           "s", 50.0, false, "park",
           "",
           "How long the fade half takes, when the verb is fade. Ignored by a hard stop." },
-        { "stop", "curve",
+        { "transport", "curve",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           true, "linear",
           false, 0.0, false, 0.0,
-          enum_stop_curve, 2,
+          enum_transport_curve, 2,
           "", 50.0, false, "park",
           "",
           "The shape of that fade. Ignored by a hard stop." },
@@ -1399,6 +1407,14 @@ namespace wfg::doc::generated
           "", 1.0, false, "park",
           "",
           "How many cues can sound at once - the fixed number of audio tracks, and so the polyphony ceiling. Zero is legal and means a show with no audio. Required, and deliberately without a default: the number is a decision about the shape of a show, and no value here could be right for every rig. WRITABLE since 2026-09-21, because a decision a client cannot state is a decision nobody can take: it was read-only, no command set it, and a show made by File - New therefore declared nought and could never play anything. The graph is built from it when the audio settings are applied, so a change lands at the next apply and not under a running show - which is the same moment a changed buffer size lands." },
+        { "audio", "channelsPerTrack",
+          ValueType::integer, 'i', false, Access::readWrite, Kind::state, Persist::show,
+          true, "2",
+          true, 1.0, true, 64.0,
+          nullptr, 0,
+          "", 1.0, false, "park",
+          "",
+          "How many channels one track carries, and so the widest cue this show can play. Two is a stereo file, which is what almost every show is; a six-channel bed or a first-order ambisonic one needs it said. A cue wider than this fails its arm as bad-route rather than being quietly narrowed - PRD 3.9b: width is explicit and never automatic. Fixed when the graph is built and never after, like tracks and for the same reason (3.25), so a show is reopened to change it. It costs: every track carries this many buffers whether a cue uses them or not." },
         { "audio", "device",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",

@@ -142,7 +142,7 @@ namespace wfg::client::model
             if (kind == "group")
                 return groupSpan (snapshot, id, length, depth);
 
-            if (kind == "media" || kind == "fade" || kind == "stop")
+            if (kind == "media" || kind == "fade" || kind == "transport")
             {
                 length = secondsAt (snapshot, "/godot/cue/" + id + "/duration");
                 return length > 0.0;

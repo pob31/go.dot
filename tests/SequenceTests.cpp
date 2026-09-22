@@ -216,7 +216,7 @@ TEST_CASE ("sequence: a member is an identified child that is not one of the thr
     CHECK (isSequenceChild (child ("Group", "a")));
     CHECK (isSequenceChild (child ("Media", "a")));
     CHECK (isSequenceChild (child ("Fade", "a")));
-    CHECK (isSequenceChild (child ("Stop", "a")));
+    CHECK (isSequenceChild (child ("Transport", "a")));
     CHECK (isSequenceChild (child ("Osc", "a")));
     CHECK (isSequenceChild (child ("Midi", "a")));
     CHECK (isSequenceChild (child ("List", "a")));

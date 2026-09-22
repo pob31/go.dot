@@ -7,7 +7,7 @@
         <Range id="AMB00012" in="18" name="The outro" out="24"/>
         <Route id="AMB00003" bus="AMB00020" gains="1 0 0 1"/>
       </Media>
-      <Stop id="AMB00004" name="Move it on" number="2" target="AMB00002" verb="advance"/>
+      <Transport id="AMB00004" name="Move it on" number="2" target="AMB00002" verb="advance"/>
       <Cue id="AMB00005" name="Dawn" number="3"/>
     </List>
   </Lists>

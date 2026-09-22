@@ -565,7 +565,7 @@ namespace wfg::tree
             const auto isGroup = element == "Group";
             const auto isMedia = element == "Media";
             const auto isFade = element == "Fade";
-            const auto isStop = element == "Stop";
+            const auto isStop = element == "Transport";
             const auto isOsc = element == "Osc";
             const auto isMidi = element == "Midi";
             const auto isStart = element == "Start";
@@ -608,7 +608,7 @@ namespace wfg::tree
                     rows.push_back (row);
 
             if (isStop)
-                for (auto* row : doc::Schema::rowsForOwner ("stop"))
+                for (auto* row : doc::Schema::rowsForOwner ("transport"))
                     rows.push_back (row);
 
             if (isOsc)
@@ -656,7 +656,7 @@ namespace wfg::tree
                 if (name == "kind")        text = isGroup ? "group"
                                                   : isMedia ? "media"
                                                   : isFade  ? "fade"
-                                                  : isStop  ? "stop"
+                                                  : isStop  ? "transport"
                                                   : isOsc   ? "osc"
                                                   : isMidi  ? "midi"
                                                   : isStart ? "start"
@@ -1380,6 +1380,22 @@ namespace wfg::tree
             `/godot/document/warnings` - and it answers out of a cache keyed on
             the document's own revision, so a tick that changed nothing costs a
             comparison of two integers. M18 counts the rebuilds. */
+        /*  THE LENGTHS FOR THIS PASS, taken before anything reads them and
+            held until the next. One is LEARNED when the analyser reads a file
+            imported since the show opened, and learning swaps the map - so the
+            address moves, the slot analysis below sees a new one and rebuilds
+            exactly once, and a cue whose file arrived this session stops
+            reading a length of nought. */
+        if (fixedDurations != nullptr)
+        {
+            durations = fixedDurations;
+        }
+        else if (mediaInfo != nullptr)
+        {
+            durationsHeld = mediaInfo->durations();
+            durations = durationsHeld.get();
+        }
+
         analysis.ensureBuilt (document, durations);
 
         if (stale || documentPart == nullptr)
