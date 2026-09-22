@@ -828,6 +828,31 @@ Program Change as their trigger; a MIDI cue that could only emit continuous data
 would not talk to them. Sequenced MIDI-note output ("MIDI clips to output") is in
 scope from the start.
 
+*Added in 0.8, at the author's direction (2026-09-22).* **A cue and a trigger
+name the port the show declares, never a device on this machine** — and that
+indirection is what makes moving hardware cheap. The show says "Lights"; the
+machine says which cable that is. Move the interface to another socket and one
+binding changes in the show settings, while every cue and every trigger that
+named the port goes on working untouched. A trigger matching a device name
+directly would mean editing every trigger in the show for a moved cable, which
+is the cost the port exists to avoid.
+
+*Added in 0.8, at the author's direction (2026-09-22).* **A port remembers both
+halves of what it is bound to — the device's name and its identifier — and
+matches on the best it can get.** The two fail in opposite directions, which is
+why neither is enough alone. An identifier is operating-system formatted and is
+not stable: on Windows it encodes the device's instance path, so moving a cable
+to another USB socket usually changes it. A name is a property of the box and
+survives the move, but two identical interfaces share one. So the identifier is
+tried first, which tells two of the same apart, and the name is the fallback,
+which finds a box that has moved. **Where neither matches, or where the name is
+ambiguous between two devices, the port stays unbound and says so in words**: a
+MIDI cue arriving at the wrong desk is worse than one that does not arrive.
+The name is what the show stores, being what somebody decided and what reads
+sensibly at another venue; the identifier is what the machine remembers, and
+never travels as a decision (§4.10). The same rule is WFS-DIY's, for the reason
+its own source gives.
+
 **Fades and lanes are one representation.** A QLab-style fade is a degenerate
 curve (two breakpoints and a shape). Two authoring surfaces:
 

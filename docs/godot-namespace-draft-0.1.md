@@ -8000,10 +8000,37 @@ every cell is a `node.set` and the after-tick re-read is what makes it real.
 **M-B, MIDI.** `port,outputDevice` / `inputDevice` / `rx` / `tx` / `bound` / `problem`, an owner
 `ports` for `/godot/port/inputs|outputs`, binding from the document at open with the CLI flags
 overriding, `port.create`, `midi.rescan`, a MIDI tab of the same shape, and `portRef` menus on
-`midi,port` and a MIDI trigger's `port`. One engine fact found while planning and not yet acted
-on: **a MIDI trigger's `port` is matched against the JUCE device name, not the declared port's
-identifier** (`MidiInputs.cpp` stamps `source->getName()`), so the CSV's "the declared port" has
-never been what the code does. The transition is to match either.
+`midi,port` and a MIDI trigger's `port`.
+
+**THE AUTHOR'S DECISION OF 2026-09-22, and it settles two things.** The question that produced it
+was theirs: *"What is best if switching USB ports for instance?"*
+
+*A cue and a trigger name the DECLARED PORT, strictly.* Today a MIDI trigger's `port` is matched
+against the JUCE device name — `MidiInputs.cpp` stamps `source->getName()` — so the parameter
+table's "the declared port" has never been what the code does. The fix is to make the code match
+the table rather than the other way round, and the USB question is what decides it: the show says
+"Lights", the machine says which cable that is, and moving the interface changes ONE binding while
+every cue and trigger that named the port goes on working. Matching a device name in a trigger
+would mean editing every trigger in the show for a moved cable. An earlier proposal to accept
+either spelling is withdrawn; there is nothing to carry (the Stop/Transport rename made the same
+call for the same reason).
+
+*A port stores BOTH the device's name and its identifier, and matches on the best it can get.*
+`juce::MidiDeviceInfo::identifier` is OS-formatted and is not documented as stable: on Windows it
+encodes the device instance path, so moving a cable to another socket usually changes it. A name
+survives the move and is ambiguous between two identical interfaces. So: **identifier first, name
+as fallback** — which is WFS-DIY's own rule (`Source/AppSettings.h`, whose comment gives exactly
+this reasoning and cites JUCE's `openLastRequestedMidiDevices`). Where neither matches, or where
+the name fits two devices, the port stays UNBOUND and says so: a MIDI cue arriving at the wrong
+desk is worse than one that does not arrive.
+
+*Where each half lives.* The NAME is `persist=show`: it is what somebody decided and it reads
+sensibly at another venue, which is decision D3's rule and what `audio/outputDevice` already does.
+The IDENTIFIER is `persist=state`: it is what this machine matched, not a decision, so it belongs
+beside the standby and the folds — it never dirties the show, and a stale one at another venue
+simply fails to match and falls through to the name. When a port binds by NAME, the engine writes
+the identifier it found back to the state row, so the next start is exact; a state row is
+writable under the edit lock, which is what lets that happen during a locked show.
 
 **M-C, interfaces — THE RECEIVE SIDE ONLY (2026-09-22).** The per-device interface was dropped
 before it was built, and `MountDeclaration::interfaceId` removed with it. Which card an outgoing
