@@ -4,11 +4,14 @@
       <Osc id="B3N8R5TW" address="/light/go" name="Desk go" number="1" value="i:1" wait="sent"/>
       <Osc id="E4GP6QSC" address="/desk/fader" name="House to full" number="2" value="f:0.75" wait="sent"/>
       <Osc id="M5TQ7XVA" address="/nowhere/at/all" name="Aimed at no device" number="3" value="f:0.5"/>
+      <Osc id="N6VRA3WB" address="/digico/snapshots/fire" name="Snapshot 4" number="4" value="i:4" wait="sent"/>
+      <Osc id="P7WSB4XC" address="/channel/12/mute" name="Mute the band" number="5" value="T" wait="sent"/>
     </List>
   </Lists>
   <Mounts>
     <Mount id="K3PV7WRB" namespace="namespaces/desk.json" port="9000" prefix="/desk" queryPort="5005" readback="oscquery"/>
     <Mount id="K4QW8YSC" host="127.0.0.1" name="Lighting desk" port="9001" prefix="/light" rx="true"/>
+    <Mount id="K5RX9ZTD" host="127.0.0.1" name="S21" port="9002" prefix="/channel /console /digico"/>
   </Mounts>
   <Audio tracks="0"/>
   <Network/>

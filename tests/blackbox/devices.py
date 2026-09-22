@@ -39,8 +39,11 @@ report = common.Report("devices")
 #  The lighting desk the fixture declares, and the cue aimed at it.
 DESK = "K4QW8YSC"          # opaque: no namespace file
 DESCRIBED = "K3PV7WRB"     # the one with a description
+S21 = "K5RX9ZTD"           # three roots: /channel /console /digico
 CUE = "B3N8R5TW"           # /light/go i:1
 STRAY = "M5TQ7XVA"         # aimed under no device at all
+SNAPSHOT = "N6VRA3WB"      # /digico/snapshots/fire i:4
+MUTE = "P7WSB4XC"          # /channel/12/mute T
 
 desk = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 desk.bind(("127.0.0.1", 0))
@@ -146,6 +149,36 @@ try:
 
         report.check(settle(f"/godot/mount/{DESK}/sent", "1"),
                      "and the device's own sent count moved")
+
+        # --- one device, three vocabularies -----------------------------
+        #
+        #  The author's own desk. A DiGiCo S21 reached directly answers at
+        #  /channel for every strip control, /console for ping and the channel
+        #  counts, and /digico for snapshot recall - three roots with nothing
+        #  above them. It has to be ONE device: one row, one name, one sent
+        #  count, and the address in the cue the address in the manual.
+        desk.settimeout(3.0)
+        send("node.set", ["/godot/mount/%s/port" % S21, str(desk_port)])
+        report.check(settle("/godot/mount/%s/port" % S21, str(desk_port)),
+                     "the S21 is reachable once its port is typed")
+
+        for cue, wanted in ((SNAPSHOT, b"/digico/snapshots/fire"),
+                            (MUTE, b"/channel/12/mute")):
+            send("cue.fire", [cue])
+
+            got = b""
+            try:
+                got, _ = desk.recvfrom(4096)
+            except socket.timeout:
+                pass
+
+            report.check(wanted in got,
+                         "a cue on %s reaches the one device"
+                         % wanted.decode("ascii").split("/")[1],
+                         "received %r" % got[:40])
+
+        report.check(settle("/godot/mount/%s/sent" % S21, "2"),
+                     "and both count against the same device, not two")
 
         # --- a cue aimed under no device is still refused ---------------
         send("cue.fire", [STRAY])

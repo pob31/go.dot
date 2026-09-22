@@ -858,6 +858,17 @@ wait: `none` / `sent` / `verified` (**default for own processors**); a
 read. Enables relative moves computed from actual state, and failure visible in
 the list rather than discovered by ear.
 
+*Added in 0.8, at the author's direction (2026-09-22).* A device may answer at
+**several roots**, its `prefix` naming each with a space between. A DiGiCo S21
+reached directly speaks `/channel/…` for every strip control, `/console/…` for
+ping, pong and the channel counts, and `/digico/snapshots/fire` for snapshot
+recall, with nothing above them — so it has no root to be mounted at, because
+its addresses already start at one. Declaring it three times would be three
+rows, three names and three message counts for one console; giving it one root
+of Go.dot's invention would mean the address in the cue is not the address in
+the manual somebody copied it from. A device that **describes itself** answers
+at one, since its namespace is one tree and mounts in one place.
+
 *Added in 0.8, at the author's direction (2026-09-22).* A device that carries no
 namespace description is **opaque**, and that is the ordinary case rather than a
 degenerate one: what a show knows about a lighting desk is where it is and what
@@ -2490,12 +2501,11 @@ layout option (§3.30).
 
 Added 2026-09-22, with the network devices (§3.3, §3.11, §3.22):
 
-- **An opaque device stripping its prefix on the wire.** A cue carries the whole
-  address it writes, so every device has one root its cues share. A desk with
-  no single root — an X32 answers `/ch/…` and `/bus/…` — cannot be addressed
-  that way without a prefix that is not really its own. A flag on an opaque
-  device, taking the prefix off as the datagram leaves, would cover it; it is
-  not built, and the workaround is a prefix of `/` segments the desk ignores.
+- **Two of the same desk in one rig.** A cue is aimed by the root its address
+  carries, so two identical consoles would want the same roots and could not be
+  told apart. One of each kind is what a rig usually has, and is what several
+  roots per device now covers; the case that would need more is a stored target
+  field on the cue, which §3.3's menu deliberately does without.
 - **`tx` off finishing a run with the warning `not-sent`**, rather than failing
   it. Built that way, because the alternative makes a rehearsal without the
   desk a list of red rows; flagged because it is a new word in `run/warning`

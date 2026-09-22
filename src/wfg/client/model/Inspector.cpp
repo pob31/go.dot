@@ -236,7 +236,11 @@ namespace wfg::client::model
             "(none)" tells nobody anything and takes a line from a panel that
             is short of them; a show with no device declared is one where the
             address box is the whole answer. */
-        void aimAtADevice (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+        /*  NO CUE IDENTIFIER, unlike `fitToTheRig` beside it, and that is the
+            shape of the thing rather than an oversight: this line is derived
+            from a field the scan has already found, so everything it needs is
+            in `decided`. GCC's -Werror=unused-parameter is what said so. */
+        void aimAtADevice (const tree::TreeSnapshot& snapshot,
                            std::vector<Field>& decided)
         {
             const auto devices = readDevices (snapshot);
@@ -368,7 +372,7 @@ namespace wfg::client::model
             reason: which devices exist is a fact about THIS show and cannot
             come from the parameter table. */
         if (out.kind == "osc")
-            aimAtADevice (snapshot, cueId, decided);
+            aimAtADevice (snapshot, decided);
 
         //  The four blocks, in the order somebody fills them in.
         const auto kindRows = [&out]

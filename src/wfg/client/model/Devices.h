@@ -39,6 +39,14 @@
     leading segment for the new device's. One truth in the file - the address -
     rather than an address and a pointer that can disagree with it.
 
+    A DEVICE MAY ANSWER AT SEVERAL ROOTS. A DiGiCo S21 reached directly speaks
+    `/channel/…`, `/console/…` and `/digico/…`, with nothing above them, so its
+    `prefix` row holds all three separated by spaces. Which one an address
+    matched is `wfg::tree::prefixMatchLength`'s answer - THE ENGINE'S OWN
+    FUNCTION, called here rather than restated, because a menu that worked out
+    the device differently from the engine that sends the message would name
+    one box and write to another. It was restated once and they disagreed.
+
     std only, and a pure reading: it takes the snapshot the window already holds
     and answers with plain strings, so every rule here is tested with no window,
     no engine and no network.
@@ -59,8 +67,16 @@ namespace wfg::client::model
         /** What the show calls it. Empty is ordinary; `label()` covers it. */
         std::string name;
 
-        /** The address root every cue aimed here carries: "/desk". */
+        /*  The addresses this device answers at, as the row spells them:
+            "/desk", or "/channel /console /digico" for a desk with several
+            roots. `prefixes()` splits it. */
         std::string prefix;
+
+        /** The roots, split. Empty for a device nobody has finished writing. */
+        std::vector<std::string> prefixes() const;
+
+        /** The first root, which is what a rewrite puts in front. */
+        std::string firstPrefix() const;
 
         std::string host;
 
@@ -98,20 +114,28 @@ namespace wfg::client::model
     /*  Which device an address is aimed at, by identifier, or empty for an
         address under none of them.
 
-        THE LONGEST PREFIX WINS, and the match ends on a separator: "/desktop"
-        is not under "/desk". That is the engine's own rule (`MountTable::
-        mountOf`), restated here because this is what draws the menu and the two
-        must not disagree about which device a cue is pointing at. */
+        THE LONGEST PREFIX WINS, across every root every device declares, and
+        the match ends on a separator: "/desktop" is not under "/desk". It is
+        the engine's own `prefixMatchLength` doing the work rather than a copy
+        of it - see the header above. */
     std::string deviceOf (const std::string& address, const std::vector<DeviceRow>&);
 
     /*  The address this cue would have if it were aimed at another device.
 
-        Swaps the leading prefix for the new one. An address under no device
-        gets the prefix put in front of it, which is what makes a cue somebody
-        typed by hand aimable without retyping. An empty `deviceId` is the
-        inverse: it strips the prefix and leaves what is under it - honest
+        Swaps the matched root for the new device's FIRST one. An address under
+        no device gets that root put in front of it, which is what makes a cue
+        somebody typed by hand aimable without retyping. An empty `deviceId` is
+        the inverse: it strips the root and leaves what is under it - honest
         rather than helpful, because a cue aimed at nothing is a thing the
         operator has to be able to say, and `wfg validate` names it.
+
+        THE FIRST ROOT IS A STARTING POINT AND NOT A TRANSLATION. Moving a cue
+        between two devices that share a vocabulary - two identical desks - is
+        exact. Moving one between devices that do not is a guess at best: a
+        fader on a DiGiCo and a fader on a WFS are not the same address with a
+        different beginning, and nothing here pretends otherwise. What the menu
+        is really for is saying which device a cue is aimed at, and moving it
+        between boxes that speak the same language.
 
         Returns the address unchanged when the identifier names no device. */
     std::string retarget (const std::string& address, const std::vector<DeviceRow>&,

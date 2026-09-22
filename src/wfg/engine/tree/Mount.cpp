@@ -101,7 +101,7 @@ namespace wfg::tree
             and no empty segment, because every mounted address is built by
             sticking it in front of one. A prefix of "/" would put somebody
             else's namespace at the root, on top of /godot. */
-        bool prefixIsUsable (const std::string& prefix, std::string& why)
+        bool onePrefixIsUsable (const std::string& prefix, std::string& why)
         {
             if (prefix.empty() || prefix.front() != '/')
             {
@@ -145,11 +145,37 @@ namespace wfg::tree
                 return false;
             }
 
+            if (prefix.find (' ') != std::string::npos)
+            {
+                why = "a mount prefix cannot contain a space";
+                return false;
+            }
+
             if (prefix.find ("//") != std::string::npos)
             {
                 why = "a mount prefix must not contain an empty segment";
                 return false;
             }
+
+            return true;
+        }
+
+        /*  Every address the row names, each checked the same way, and the
+            row itself refused when it names none - a device with no prefix
+            answers nowhere and would take every cue aimed at nothing. */
+        bool prefixesAreUsable (const MountDeclaration& mount, std::string& why)
+        {
+            const auto prefixes = prefixesOf (mount.prefix);
+
+            if (prefixes.empty())
+            {
+                why = "a device has to say what address it answers at";
+                return false;
+            }
+
+            for (const auto& prefix : prefixes)
+                if (! onePrefixIsUsable (prefix, why))
+                    return false;
 
             return true;
         }
@@ -353,6 +379,47 @@ namespace wfg::tree
     }
 
     //==============================================================================
+    std::vector<std::string> prefixesOf (const std::string& prefixRow)
+    {
+        std::vector<std::string> out;
+        std::size_t at = 0;
+
+        while (at < prefixRow.size())
+        {
+            const auto start = prefixRow.find_first_not_of (' ', at);
+
+            if (start == std::string::npos)
+                break;
+
+            const auto end = prefixRow.find (' ', start);
+            out.push_back (prefixRow.substr (start, end == std::string::npos
+                                                      ? std::string::npos : end - start));
+            at = end == std::string::npos ? prefixRow.size() : end + 1;
+        }
+
+        return out;
+    }
+
+    std::size_t prefixMatchLength (const std::string& address, const std::string& prefixRow)
+    {
+        std::size_t best = 0;
+
+        for (const auto& prefix : prefixesOf (prefixRow))
+        {
+            /*  THE BOUNDARY IS A SEPARATOR. Without the last test `/desktop`
+                would be under `/desk`, and a device whose prefix happens to
+                begin another's would quietly take its cues. */
+            if (address.size() > prefix.size()
+                  && address.compare (0, prefix.size(), prefix) == 0
+                  && address[prefix.size()] == '/'
+                  && prefix.size() > best)
+                best = prefix.size();
+        }
+
+        return best;
+    }
+
+    //==============================================================================
     MountResult MountResult::failed (std::string problem)
     {
         MountResult result;
@@ -365,8 +432,21 @@ namespace wfg::tree
     {
         std::string why;
 
-        if (! prefixIsUsable (mount.prefix, why))
+        if (! prefixesAreUsable (mount, why))
             return MountResult::failed (mount.id + ": " + why);
+
+        /*  A DESCRIBED DEVICE HAS ONE ROOT, and that is not a restriction so
+            much as what describing yourself means: the file is one tree and it
+            mounts in one place, so a second prefix would route messages to a
+            box whose nodes are published somewhere else - and every write
+            under it would be refused as an address the device does not have.
+            Several roots are for a device nobody described, which is the case
+            they exist for. */
+        if (prefixesOf (mount.prefix).size() > 1)
+            return MountResult::failed (mount.id + ": a device with a namespace file answers at"
+                                                   " one address. Several are for a device that"
+                                                   " describes nothing, whose messages are sent"
+                                                   " as they are written");
 
         const auto parsed = json::parse (jsonText);
 
@@ -440,7 +520,7 @@ namespace wfg::tree
             claim cues meant for somebody else. */
         std::string why;
 
-        if (! prefixIsUsable (mount.prefix, why))
+        if (! prefixesAreUsable (mount, why))
             return MountResult::failed (mount.id + ": " + why);
 
         MountResult result;
@@ -588,18 +668,31 @@ namespace wfg::tree
         /*  By PREFIX rather than by searching the nodes, so an address that is
             under a mount but names a node it does not have still says which box
             it was aimed at. That is what lets a cue pointing at a mistyped node
-            be reported against the mount somebody meant. */
+            be reported against the mount somebody meant.
+
+            THE LONGEST MATCH WINS, and until 2026-09-22 it did not: this loop
+            returned the first device whose prefix fitted, walking a map keyed
+            by identifier - so with `/desk` and `/desk/aux` both declared, which
+            one got the cue depended on the alphabetical order of two random
+            eight-character identifiers. Nesting was always legal and nothing
+            made it reachable until a window let somebody type a prefix, at
+            which point the panel and the engine could name different devices
+            for one address. `prefixMatchLength` is the one rule both ask. */
+        std::string best;
+        std::size_t covered = 0;
+
         for (const auto& [id, entry] : mounts)
         {
-            const auto& prefix = entry.declaration.prefix;
+            const auto length = prefixMatchLength (address, entry.declaration.prefix);
 
-            if (address.size() > prefix.size()
-                  && address.compare (0, prefix.size(), prefix) == 0
-                  && address[prefix.size()] == '/')
-                return id;
+            if (length > covered)
+            {
+                covered = length;
+                best = id;
+            }
         }
 
-        return {};
+        return best;
     }
 
     std::vector<std::string> MountTable::ids() const

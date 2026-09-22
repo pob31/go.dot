@@ -128,6 +128,163 @@ namespace
 }
 
 //==============================================================================
+//==============================================================================
+/*  A DEVICE THAT ANSWERS AT SEVERAL ROOTS (2026-09-22).
+
+    The author's own desk is the case. A DiGiCo S21 reached directly, rather
+    than through its sidecar, speaks three vocabularies with nothing above
+    them: `/channel/{n}/…` for every strip control, `/console/…` for ping,
+    pong, resend and the channel counts, and `/digico/snapshots/fire` for
+    snapshot recall. There is no root to mount it at, because its addresses
+    already start at one.
+*/
+TEST_CASE ("mount: a device may answer at several roots, and they are one device")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    CHECK (prefixesOf ("/wfs") == std::vector<std::string> { "/wfs" });
+    CHECK (prefixesOf ("/channel /console /digico")
+             == std::vector<std::string> { "/channel", "/console", "/digico" });
+
+    //  Written by a hand rather than by a writer: extra spaces mean nothing.
+    CHECK (prefixesOf ("  /channel   /console  ")
+             == std::vector<std::string> { "/channel", "/console" });
+    CHECK (prefixesOf ("").empty());
+    CHECK (prefixesOf ("   ").empty());
+
+    SUBCASE ("an address under any of them belongs to the device")
+    {
+        const std::string s21 = "/channel /console /digico";
+
+        CHECK (prefixMatchLength ("/channel/1/fader", s21) == 8u);
+        CHECK (prefixMatchLength ("/console/ping", s21) == 8u);
+        CHECK (prefixMatchLength ("/digico/snapshots/fire", s21) == 7u);
+
+        //  And one it does not speak is not its.
+        CHECK (prefixMatchLength ("/wfs/source/1/gain", s21) == 0u);
+
+        /*  THE BOUNDARY IS A SEPARATOR, per root: `/channels` merely begins
+            with the same letters as `/channel`. */
+        CHECK (prefixMatchLength ("/channels/1/fader", s21) == 0u);
+
+        //  The root itself is not under itself - there is no node there.
+        CHECK (prefixMatchLength ("/console", s21) == 0u);
+    }
+
+    SUBCASE ("the longest root wins, which is what makes nesting mean anything")
+    {
+        CHECK (prefixMatchLength ("/desk/aux/1/level", "/desk") == 5u);
+        CHECK (prefixMatchLength ("/desk/aux/1/level", "/desk/aux") == 9u);
+    }
+}
+
+TEST_CASE ("mount: the engine sends to the device whose root covers most of the address")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    MountTable mounts;
+
+    /*  IDENTIFIERS CHOSEN TO SORT THE WRONG WAY ROUND. Until 2026-09-22 this
+        loop returned the first device whose root fitted, walking a map keyed by
+        identifier - so `AAAA0001` would have taken a cue that belongs to
+        `ZZZZ0001`, and which device got it depended on two random eight
+        character strings. That was unreachable while prefixes were
+        hand-written and became reachable the moment a window let somebody type
+        one. */
+    MountDeclaration desk;
+    desk.id = "AAAA0001";
+    desk.prefix = "/desk";
+    desk.port = 9000;
+    REQUIRE (mounts.declare (desk).ok);
+
+    MountDeclaration aux;
+    aux.id = "ZZZZ0001";
+    aux.prefix = "/desk/aux";
+    aux.port = 9001;
+    REQUIRE (mounts.declare (aux).ok);
+
+    CHECK (mounts.mountOf ("/desk/fader") == "AAAA0001");
+    CHECK (mounts.mountOf ("/desk/aux/1/level") == "ZZZZ0001");
+    CHECK (mounts.mountOf ("/elsewhere/x").empty());
+
+    SUBCASE ("and a write reaches the same one the menu would have named")
+    {
+        const auto written = mounts.write ("/desk/aux/1/level", osc::Value::float32 (0.5f));
+
+        CHECK (written.ok);
+        CHECK (written.mountId == "ZZZZ0001");
+    }
+}
+
+TEST_CASE ("mount: the S21's three vocabularies are one device on the wire")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    MountTable mounts;
+
+    MountDeclaration s21;
+    s21.id = "S2100001";
+    s21.prefix = "/channel /console /digico";
+    s21.host = "192.168.1.60";
+    s21.port = 8000;
+    REQUIRE (mounts.declare (s21).ok);
+
+    /*  Three addresses out of the desk's own command set, each landing on the
+        one device - which is the whole point: one row in the settings, one
+        name, one `sent` count, and the address in the cue is the address in
+        the manual it was copied from. */
+    for (const auto* address : { "/channel/1/fader", "/channel/12/mute",
+                                 "/console/ping", "/digico/snapshots/fire" })
+    {
+        INFO ("address: " << address);
+
+        const auto written = mounts.write (address, osc::Value::int32 (1));
+
+        CHECK (written.ok);
+        CHECK (written.mountId == "S2100001");
+    }
+}
+
+TEST_CASE ("mount: a device that describes itself answers at one root")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    MountDeclaration several;
+    several.id = "G1JS4VWE";
+    several.prefix = "/wfs /other";
+    several.namespaceFile = "namespaces/wfs-diy.json";
+    several.port = 8000;
+
+    /*  The description itself is beside the point - it is refused before a
+        byte of it is read - so the simplest valid one will do. */
+    const auto reloaded = readNamespace (several, R"({"FULL_PATH": "/", "CONTENTS": {}})");
+
+    /*  Refused, and the sentence says why rather than leaving somebody to
+        guess: a namespace file is ONE tree and mounts in ONE place, so a second
+        root would route messages to a box whose nodes are published somewhere
+        else - and every write under it would come back as an address the device
+        does not have. Several roots are for a device nobody described. */
+    CHECK_FALSE (reloaded.ok);
+    REQUIRE_FALSE (reloaded.problems.empty());
+    INFO ("said: " << reloaded.problems.front());
+    CHECK (reloaded.problems.front().find ("one address") != std::string::npos);
+}
+
+TEST_CASE ("mount: a device has to say where it answers")
+{
+    MountTable mounts;
+
+    MountDeclaration nowhere;
+    nowhere.id = "NONE0001";
+    nowhere.port = 9000;
+
+    const auto result = mounts.declare (nowhere);
+
+    CHECK_FALSE (result.ok);
+    CHECK_FALSE (mounts.isLoaded ("NONE0001"));
+}
+
+//==============================================================================
 /*  A DEVICE THAT DESCRIBES NOTHING (2026-09-22).
 
     Until this round a mount without a namespace file was refused outright, so

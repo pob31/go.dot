@@ -7845,6 +7845,42 @@ let's start with vanilla OSC."* So a device made from the window is an OPAQUE mo
 makes a device vanilla is simply the absence of a namespace file. No `kind` row is added until
 there is a second kind to name.
 
+### 15.1a One device, several roots
+
+**The author's own desk decided this.** A DiGiCo S21 reached directly rather than through its
+sidecar answers at three roots with nothing above them: `/channel/{n}/…` for the whole strip
+(name, gain, trim, EQ, both dynamics sections, sends, pan, mute, solo, fader), `/console/…` for
+ping, pong, resend and the channel counts, and `/digico/snapshots/fire` for snapshot recall. The
+command set is in the S21-HiJack documentation folder, `DiGiCo S OSC Commandset_OSCpaths.csv` and
+`…_channelNumbers.csv`. Through the sidecar it is one root, `/s21`; direct, it is three.
+
+So `prefix` holds them all, **space-separated**, and `prefixesOf` splits it. A space is the
+separator because an OSC address can never contain one, and a row with a single prefix reads
+exactly as it always did, so every show written before this is unchanged and no attribute grew a
+type. The alternatives were worse: three devices for one console means three rows, three names
+and three `sent` counts; one invented root means the address in the cue is not the address in the
+manual it was copied from.
+
+**A described device keeps one root.** Its namespace file is one tree and mounts in one place, so
+a second root would route messages to a box whose nodes are published elsewhere, and every write
+under it would come back `bad-address`. Refused at load, with a sentence.
+
+**`prefixMatchLength` is the one rule, and the client calls it.** `wfg_client_model` links
+`wfg::engine`, so `model::deviceOf` asks the engine's own function rather than restating it. The
+first version restated it and they disagreed: the client took the longest match while
+`MountTable::mountOf` returned the first device whose prefix fitted, walking a map keyed by
+identifier. With `/desk` and `/desk/aux` both declared, which one got a cue depended on the
+alphabetical order of two random eight-character strings, so the panel could name one device
+while the message went to another. The engine takes the longest match now, and both ask the same
+function.
+
+**`retarget` is identity on a cue's own device**, which with one root was too obvious to write
+down and with several is load-bearing: a cue on `/digico/snapshots/fire` re-aimed at its own S21
+would otherwise come back `/channel/snapshots/fire`, because the rewrite lands on the first root
+and the cue was on the third. Without it the menu would never look selected, and re-picking the
+device already shown would silently move the cue to another vocabulary. Found by a test, not by
+reading.
+
 ### 15.2 An opaque device, and what it costs
 
 A mount with no `namespace` used to be refused at load. It is now DECLARED: `MountTable::declare`
@@ -7969,8 +8005,15 @@ on: **a MIDI trigger's `port` is matched against the JUCE device name, not the d
 identifier** (`MidiInputs.cpp` stamps `source->getName()`), so the CSV's "the declared port" has
 never been what the code does. The transition is to match either.
 
-**M-C, interfaces.** `<Network><Interface/></Network>` with `address`, `oscPort`, `queryPort`,
-`enabled` and their readouts; `mount,interface`; N `UdpEndpoint`s and N `OscQueryServer`s (the
+**M-C, interfaces — THE RECEIVE SIDE ONLY (2026-09-22).** The per-device interface was dropped
+before it was built, and `MountDeclaration::interfaceId` removed with it. Which card an outgoing
+message leaves by is the operating system's answer: it reads the destination and picks the route.
+WFS-DIY has had an interface menu for years that is stored in its project file and fed to no
+socket at all, and the one socket in that program which does bind an interface is its PSN
+receiver, because multicast has no routing-table answer. Where the choice is real is receiving:
+bind to everything and hear every network, bind to one address and hear one. So:
+`<Network><Interface/></Network>` with `address`, `oscPort`, `queryPort`,
+`enabled` and their readouts; N `UdpEndpoint`s and N `OscQueryServer`s (the
 fork takes a bind address — `SimpleWebSocketServer::start(port, suffix, localAddress, reuse)` —
 and JUCE 8's `DatagramSocket::bindToPort(port, localAddress)` exists); `MountSender` choosing a
 socket per device; and `network.apply` in `audio.setup`'s shape, because rebinding drops every

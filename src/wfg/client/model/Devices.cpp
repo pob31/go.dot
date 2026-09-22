@@ -17,6 +17,7 @@
 #include <wfg/client/model/Devices.h>
 
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <cstddef>
@@ -49,16 +50,17 @@ namespace wfg::client::model
             }
         }
 
-        /*  Whether an address falls under a prefix, with the boundary the
-            engine uses: "/desk/fader" is under "/desk" and "/desktop/fader" is
-            not. Written out rather than a `rfind (prefix, 0) == 0`, which is
-            the mistake this guards against. */
-        bool under (const std::string& address, const std::string& prefix)
-        {
-            return prefix.size() < address.size()
-                     && address.compare (0, prefix.size(), prefix) == 0
-                     && address[prefix.size()] == '/';
-        }
+    }
+
+    std::vector<std::string> DeviceRow::prefixes() const
+    {
+        return tree::prefixesOf (prefix);
+    }
+
+    std::string DeviceRow::firstPrefix() const
+    {
+        const auto roots = prefixes();
+        return roots.empty() ? std::string {} : roots.front();
     }
 
     std::string DeviceRow::label() const
@@ -119,20 +121,19 @@ namespace wfg::client::model
     std::string deviceOf (const std::string& address, const std::vector<DeviceRow>& rows)
     {
         std::string bestId;
-        std::size_t bestLength = 0;
+        std::size_t covered = 0;
 
         for (const auto& row : rows)
         {
-            if (row.prefix.empty() || ! under (address, row.prefix))
-                continue;
+            /*  THE ENGINE'S OWN FUNCTION, across every root this device
+                declares. The longest match wins, which is what makes nesting
+                mean something and what `MountTable::mountOf` now does with the
+                same call. */
+            const auto length = tree::prefixMatchLength (address, row.prefix);
 
-            /*  THE LONGEST WINS. Two devices may nest - "/desk" and
-                "/desk/aux" are both legal prefixes - and the cue belongs to the
-                more specific one, which is the same rule a filesystem uses for
-                a mount point and the one `MountTable::mountOf` follows. */
-            if (row.prefix.size() > bestLength)
+            if (length > covered)
             {
-                bestLength = row.prefix.size();
+                covered = length;
                 bestId = row.id;
             }
         }
@@ -143,14 +144,30 @@ namespace wfg::client::model
     std::string retarget (const std::string& address, const std::vector<DeviceRow>& rows,
                           const std::string& deviceId)
     {
-        /*  What is under the current device's prefix, which is what the new
-            one will carry. An address aimed at nothing is already that. */
         const auto currentId = deviceOf (address, rows);
+
+        /*  AIMING A CUE WHERE IT ALREADY POINTS CHANGES NOTHING, and with one
+            root that was too obvious to write down: strip `/desk`, put `/desk`
+            back. With several it stops being obvious and starts being wrong -
+            a cue on `/digico/snapshots/fire` would come back as
+            `/channel/snapshots/fire`, because the rewrite lands on the FIRST
+            root and the cue was on the third.
+
+            Two things break without this line. The menu finds the device a cue
+            is on by matching a choice against the cue's own address, so the
+            entry for its own device would never match and nothing would look
+            selected. And re-picking the device already shown would silently
+            move the cue to another vocabulary. */
+        if (! deviceId.empty() && deviceId == currentId)
+            return address;
+
+        /*  What is under the current device's root, which is what the new one
+            will carry. An address aimed at nothing is already that. */
         std::string tail = address;
 
         for (const auto& row : rows)
             if (row.id == currentId)
-                tail = address.substr (row.prefix.size());
+                tail = address.substr (tree::prefixMatchLength (address, row.prefix));
 
         /*  AIMED AT NOTHING, deliberately. It leaves an address the engine
             will refuse when the cue fires, and that is the honest inverse of
@@ -163,7 +180,7 @@ namespace wfg::client::model
 
         for (const auto& row : rows)
             if (row.id == deviceId)
-                return row.prefix + tail;
+                return row.firstPrefix() + tail;
 
         /*  A device that is not there any more. The address is left exactly as
             it was rather than half rewritten: a menu that cannot find what it
@@ -183,7 +200,7 @@ namespace wfg::client::model
 
         for (const auto& row : rows)
         {
-            if (row.prefix.empty())
+            if (row.prefixes().empty())
                 continue;
 
             choices.push_back ({ retarget (address, rows, row.id), row.label() });

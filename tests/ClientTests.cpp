@@ -2976,6 +2976,89 @@ TEST_CASE ("client: which device an address is aimed at, and the rewrite that mo
     }
 }
 
+TEST_CASE ("client: a device with several roots is one entry in the target menu")
+{
+    /*  The author's own desk. A DiGiCo S21 reached directly speaks three
+        vocabularies with nothing above them, so the panel has to treat all
+        three as one box - one menu entry, one name - and has to agree with the
+        engine about which box an address belongs to. It agrees by calling the
+        engine's own function rather than by restating it. */
+    std::vector<model::DeviceRow> devices;
+
+    model::DeviceRow s21;
+    s21.id = "S2100001";
+    s21.name = "S21";
+    s21.prefix = "/channel /console /digico";
+    devices.push_back (s21);
+
+    model::DeviceRow wfs;
+    wfs.id = "WFS00001";
+    wfs.name = "The WFS";
+    wfs.prefix = "/wfs";
+    devices.push_back (wfs);
+
+    CHECK (devices.front().prefixes().size() == 3u);
+    CHECK (devices.front().firstPrefix() == "/channel");
+
+    SUBCASE ("every one of its vocabularies names the same device")
+    {
+        for (const auto* address : { "/channel/1/fader", "/console/ping",
+                                     "/digico/snapshots/fire" })
+        {
+            INFO ("address: " << address);
+            CHECK (model::deviceOf (address, devices) == "S2100001");
+        }
+
+        CHECK (model::deviceOf ("/wfs/source/1/gain", devices) == "WFS00001");
+        CHECK (model::deviceOf ("/channels/1/fader", devices).empty());
+    }
+
+    SUBCASE ("and the menu offers it once, whichever root the cue is on")
+    {
+        for (const auto* address : { "/channel/1/fader", "/digico/snapshots/fire" })
+        {
+            INFO ("address: " << address);
+
+            const auto choices = model::targetChoices (address, devices);
+
+            //  "(none)" plus one per device, not one per root.
+            REQUIRE (choices.size() == 3u);
+
+            auto named = 0;
+
+            for (const auto& choice : choices)
+                if (choice.second == "S21")
+                    ++named;
+
+            CHECK (named == 1);
+
+            /*  And the entry for the device the cue is already on carries the
+                address unchanged, so the menu selects it. */
+            const auto here = model::retarget (address, devices, "S2100001");
+            CHECK (here == std::string (address));
+        }
+    }
+
+    SUBCASE ("aiming it elsewhere strips whichever root it matched")
+    {
+        CHECK (model::retarget ("/digico/snapshots/fire", devices, "WFS00001")
+                 == "/wfs/snapshots/fire");
+        CHECK (model::retarget ("/console/ping", devices, "WFS00001") == "/wfs/ping");
+
+        /*  AND BACK THE OTHER WAY IT LANDS ON THE FIRST ROOT, which is a
+            starting point rather than a translation: a fader on a WFS and a
+            fader on a DiGiCo are not one address with a different beginning,
+            and the panel does not pretend they are. */
+        CHECK (model::retarget ("/wfs/source/1/gain", devices, "S2100001")
+                 == "/channel/source/1/gain");
+    }
+
+    SUBCASE ("and taking it off the device strips the root it was on")
+    {
+        CHECK (model::retarget ("/console/ping", devices, {}) == "/ping");
+    }
+}
+
 TEST_CASE ("client: a network cue's target is a menu, and picking one rewrites its address")
 {
     Rig rig;

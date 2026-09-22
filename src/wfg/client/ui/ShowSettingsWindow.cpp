@@ -1069,7 +1069,11 @@ namespace wfg::client::ui
                 const auto rx = area.removeFromRight (42);
                 const auto port = area.removeFromRight (70);
                 const auto host = area.removeFromRight (130);
-                const auto prefix = area.removeFromRight (110);
+                /*  WIDE ENOUGH FOR SEVERAL ROOTS. A desk reached directly can
+                    answer at three - "/channel /console /digico" - and a column
+                    that clipped the third would hide the fact that it is there
+                    at all. Taken from the name, which has the rest of the row. */
+                const auto prefix = area.removeFromRight (200);
 
                 return { area, prefix, host, port, rx, tx, sent, problem, cross };
             }

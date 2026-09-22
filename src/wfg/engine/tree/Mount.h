@@ -88,12 +88,46 @@
 
 namespace wfg::tree
 {
+    /*  THE ADDRESSES A DEVICE ANSWERS AT, split from its `prefix` row.
+
+        ONE DEVICE, SEVERAL ROOTS, and the author's own desk is why. A DiGiCo
+        S21 reached directly rather than through its sidecar answers at
+        `/channel/…` for every strip control, `/console/…` for ping, pong and
+        the channel counts, and `/digico/snapshots/fire` for snapshot recall -
+        three roots with nothing above them, because the desk's addresses
+        simply start at the root of its own world. Declaring it three times
+        would be three rows, three names and three `sent` counts for one
+        console; giving it one root that is not really its own would mean the
+        address in the cue is not the address in the manual somebody is
+        copying from.
+
+        SPACE-SEPARATED IN ONE ROW, which is what `audio/inputPatch` already
+        does and what an OSC address can never contain. A device with one
+        prefix reads exactly as it always did, so every show written before
+        this is unchanged and no attribute had to grow a type. */
+    std::vector<std::string> prefixesOf (const std::string& prefixRow);
+
+    /*  How much of an address one of these prefixes covers, or 0 for none.
+
+        THE BOUNDARY IS A SEPARATOR: `/desktop/fader` is not under `/desk`.
+        THE LONGEST WINS, which is what makes nesting mean something - with
+        `/desk` and `/desk/aux` both declared, a cue under the second belongs
+        to the second, the way a mount point works everywhere else.
+
+        It answers a LENGTH rather than a bool so a caller comparing two
+        devices can tell which matched more of the address, and so a client
+        rewriting an address knows how much of it to replace. */
+    std::size_t prefixMatchLength (const std::string& address, const std::string& prefixRow);
+
     /*  A mount as the document declares it, read off `/godot/mount/<id>`. The
         defaults here are the table's. */
     struct MountDeclaration
     {
         std::string id;
-        std::string prefix;           ///< where it lands: "/wfs"
+
+        /*  Where it lands: "/wfs", or "/channel /console /digico" for a device
+            that answers at several roots. See `prefixesOf`. */
+        std::string prefix;
         std::string namespaceFile;    ///< bundle-relative: "namespaces/wfs-diy.json"
 
         /*  WHAT A PERSON CALLS IT, and it is not the prefix.
@@ -119,10 +153,17 @@ namespace wfg::tree
         bool rx = false;
         bool tx = true;
 
-        /*  Which of this machine's interfaces it is reached through, by
-            identifier, and empty is the first one bound. Read from the
-            document today and acted on when the listeners become plural. */
-        std::string interfaceId;
+        /*  NO INTERFACE HERE, AND THAT IS A DECISION (2026-09-22). Which
+            network card an outgoing message leaves by is the operating
+            system's to answer: it reads the destination address and picks the
+            route. WFS-DIY has had an interface menu for years that is stored
+            and fed to no socket at all, and the one socket in that program
+            which does bind an interface is its PSN receiver - because
+            multicast has no routing table answer, which unicast OSC does.
+
+            Where the choice is real is the RECEIVING side: binding to every
+            address hears every network, binding to one hears one. That lives
+            on the show's own network settings, not on each device. */
 
         /*  Where the box is, and how to reach it.
 
