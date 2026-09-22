@@ -47,5 +47,6 @@
       <Channel id="P4CHN001" access="exclusive" class="mono" name="Reverb A"/>
     </Rack>
   </Audio>
+  <MidiPorts/>
   <Network/>
 </Show>

@@ -45,8 +45,8 @@ namespace wfg::midi
     {
         std::string type { "noteOn" };
         int channel = 1;          ///< 1..16, as every device prints it
-        int number = 0;           ///< note, controller or program
-        int data = 0;             ///< velocity, value, or the 14-bit bend
+        int data1 = 0;            ///< note, controller or program
+        int data2 = 0;            ///< velocity, value, or the 14-bit bend
         std::string sysex;        ///< hex bytes, F0 … F7
     };
 

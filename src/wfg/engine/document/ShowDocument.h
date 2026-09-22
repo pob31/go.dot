@@ -365,6 +365,11 @@ namespace wfg::doc
         EditResult createRole (const std::string& groupId, const std::string& role,
                                const std::string& id = {});
 
+        /*  A MIDI port the show declares, by the name a person reads -
+            "Lights", "The desk". Which cable that is on this machine is said
+            afterwards, with `node.set`, and is a separate fact (PRD 4.10). */
+        EditResult createPort (const std::string& name, const std::string& id = {});
+
         EditResult createMount (const std::string& prefix, const std::string& namespaceFile,
                                 const std::string& id = {});
 

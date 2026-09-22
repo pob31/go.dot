@@ -14,5 +14,6 @@
     <Mount id="K5RX9ZTD" host="127.0.0.1" name="S21" port="9002" prefix="/channel /console /digico"/>
   </Mounts>
   <Audio tracks="0"/>
+  <MidiPorts/>
   <Network/>
 </Show>

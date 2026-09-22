@@ -38,9 +38,11 @@
 #pragma once
 
 #include <wfg/engine/cue/TriggerIndex.h>
+#include <wfg/engine/midi/PortTable.h>
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
+#include <map>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -80,12 +82,34 @@ namespace wfg::midi
     class MidiInputs final : private juce::MidiInputCallback
     {
     public:
+        /** This machine's inputs, name and identifier, for a menu to offer. */
+        static std::vector<Device> availableDevices();
+
         MidiInputs() = default;
         ~MidiInputs() override;
 
         /*  Opens one input by the name a person typed. False, with a line in
-            `problems()`, when this machine has no such device. */
-        bool open (const std::string& name);
+            `problems()`, when this machine has no such device.
+
+            `portId` IS WHAT AN ARRIVING EVENT IS STAMPED WITH, and that is the
+            whole of the author's 2026-09-22 decision made operational. A
+            trigger names the port the SHOW declares - "Lights" - and never the
+            cable, so moving an interface to another socket changes one binding
+            in the settings while every trigger goes on firing. Empty is a
+            `--midi-in` with no port behind it, which stamps the device's own
+            name and is what a rig with one cable and no declared ports has
+            always done. */
+        bool open (const std::string& name, const std::string& portId = {});
+
+        /*  The same, for a port the SHOW declares: both halves of the device
+            are given and matched by `PortTable::match` - the identifier first,
+            because it is the only thing that tells two identical interfaces
+            apart, and the name second, because it is the only thing that
+            survives a cable moving to another socket. What was matched comes
+            back in `matchedId` so the caller can write it down, and `why`
+            carries the sentence when nothing was. */
+        bool openAs (const std::string& deviceName, const std::string& wantedId,
+                     const std::string& portId, std::string& matchedId, std::string& why);
 
         /** Where matched events go. Set before opening anything. */
         void sendTo (Engine& engine) noexcept { target = &engine; }
@@ -110,5 +134,12 @@ namespace wfg::midi
 
         mutable std::mutex triggerMutex;
         std::shared_ptr<const cue::TriggerIndex> triggers;
+
+        /*  Which declared port each opened device belongs to, by the device's
+            own name - the only thing the callback is handed. Written while
+            opening, read on the input thread, under the mutex beside it rather
+            than one of its own: both are read on the same line of the same
+            callback and a second lock would buy nothing. */
+        std::map<std::string, std::string> portOfDevice;
     };
 }

@@ -837,6 +837,18 @@ named the port goes on working untouched. A trigger matching a device name
 directly would mean editing every trigger in the show for a moved cable, which
 is the cost the port exists to avoid.
 
+*Added in 0.8, at the author's direction (2026-09-22).* **A MIDI cue's two payload
+bytes are `data1` and `data2`**, named after their place in the message rather
+than after any one meaning, because they have several: the first is the note, the
+controller or the program, and the second is the velocity, the value, the
+pressure or the whole of a pitch bend. A client shows the word that fits the
+type, so those names are read in the file and nowhere else. The first was
+called `number` until this date and could not stay: **every cue already has a
+number**, which is its place in the list, and two rows of one name on one
+element are one attribute doing two jobs — the same twelve read as the cue's
+number and as the program it sends, published twice, typed two ways, and
+writing either writing both.
+
 *Added in 0.8, at the author's direction (2026-09-22).* **A port remembers both
 halves of what it is bound to — the device's name and its identifier — and
 matches on the best it can get.** The two fail in opposite directions, which is

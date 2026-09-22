@@ -107,7 +107,7 @@ const KIND_ORDER = {
   stop:    ["target", "verb", "curve"],
   start:   ["target"],
   osc:     ["address", "value", "wait", "timeout"],
-  midi:    ["port", "channel", "type", "number", "data", "sysex", "wait"],
+  midi:    ["port", "channel", "type", "data1", "data2", "sysex", "wait"],
   group:   ["mode", "advance", "selection", "play", "loops", "seed"],
   range:   ["name", "in", "out", "loops"],
   trigger: ["kind", "enabled", "address", "value", "port", "channel",

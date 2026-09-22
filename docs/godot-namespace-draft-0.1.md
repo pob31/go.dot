@@ -8024,6 +8024,17 @@ this reasoning and cites JUCE's `openLastRequestedMidiDevices`). Where neither m
 the name fits two devices, the port stays UNBOUND and says so: a MIDI cue arriving at the wrong
 desk is worse than one that does not arrive.
 
+*And the collision it uncovered.* `cue,number` and `midi,number` were two rows of one name on one
+element. A cue's attributes are all published at `/godot/cue/<id>/<name>` with no owner in the
+address, and the tree emits one node PER ROW, so a MIDI cue carried `/godot/cue/<id>/number`
+TWICE — one string, one integer, both reading the single `number="12"` attribute the grammar
+allows. The panel drew the row twice, which is how the author found it; the sharper half is that
+a write reached whichever the schema lookup returned, so renumbering a MIDI cue changed its
+program. Renamed to **`midi,data1` and `midi,data2`**, the MIDI specification's own words for the
+two payload bytes, which are accurate for every type while the panel shows the word that fits.
+`tests/DocumentTests.cpp` now refuses any element whose owners declare one name twice, and counts
+the rows it examined so it cannot pass by looking at nothing.
+
 *Where each half lives.* The NAME is `persist=show`: it is what somebody decided and it reads
 sensibly at another venue, which is decision D3's rule and what `audio/outputDevice` already does.
 The IDENTIFIER is `persist=state`: it is what this machine matched, not a decision, so it belongs

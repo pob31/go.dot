@@ -17,6 +17,7 @@
 #include <wfg/client/model/Inspector.h>
 
 #include <wfg/client/model/Devices.h>
+#include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Text.h>
@@ -48,7 +49,7 @@ namespace wfg::client::model
                 { "transport", { "target", "verb", "range", "curve" } },
                 { "start",   { "target" } },
                 { "osc",     { "device", "address", "value", "wait", "timeout" } },
-                { "midi",    { "port", "channel", "type", "number", "data", "sysex", "wait" } },
+                { "midi",    { "port", "channel", "type", "data1", "data2", "sysex", "wait" } },
                 { "group",   { "mode", "advance", "selection", "play", "loops", "seed" } },
                 { "range",   { "name", "in", "out", "loops" } },
                 { "trigger", { "kind", "enabled", "address", "value", "port", "channel",
@@ -217,6 +218,96 @@ namespace wfg::client::model
             }
         }
 
+        /*  WHAT THE TWO NUMBERS ON A MIDI CUE ARE FOR, which depends entirely
+            on the type and which the panel used to leave somebody to know.
+
+            The author, looking at it: *"There are two number fields in the
+            MIDI cue."* They are `number` and `data`, and neither word means
+            anything at the keyboard: for a note-on they are the NOTE and the
+            VELOCITY, for a control change the CONTROLLER and its VALUE, for a
+            program change the program and nothing at all. The row names are
+            right - one row carries the payload whatever the payload is, which
+            is what stops a bend needing a second place for a number to be
+            wrong - and what was missing is the panel saying which is which.
+
+            SO THE LABEL FOLLOWS THE TYPE, and what the type ignores is GREYED
+            rather than hidden (the rule `stereoToMono` already follows): an
+            absence reads as "this program cannot do that", which is the wrong
+            thing to say about a field that would work perfectly well if the
+            type above it were different.
+
+            The table is `midi::build`'s own, read off it rather than guessed:
+            pitch bend is fourteen bits in `data` and has no `number`, program
+            change carries its program in `number` and has no `data`, channel
+            pressure is the other way round, and sysex uses neither and not the
+            channel either. */
+        void nameTheNumbers (std::vector<Field>& decided)
+        {
+            std::string type = "noteOn";
+
+            for (const auto& field : decided)
+                if (field.name == "type" && ! field.value.empty())
+                    type = field.value;
+
+            const auto note = type == "noteOn" || type == "noteOff" || type == "aftertouch";
+            const auto control = type == "controlChange";
+            const auto program = type == "programChange";
+            const auto bend = type == "pitchBend";
+            const auto pressure = type == "channelPressure";
+            const auto system = type == "sysex";
+
+            for (auto& field : decided)
+            {
+                if (field.name == "data1")
+                {
+                    field.label = note ? "note" : control ? "controller"
+                                : program ? "program" : "data1";
+                    field.applies = note || control || program;
+                }
+                else if (field.name == "data2")
+                {
+                    field.label = note && type != "aftertouch" ? "velocity"
+                                : type == "aftertouch" || pressure ? "pressure"
+                                : control ? "value" : bend ? "bend" : "data2";
+                    field.applies = ! program && ! system;
+                }
+                else if (field.name == "sysex")
+                {
+                    field.applies = system;
+                }
+                else if (field.name == "channel")
+                {
+                    field.applies = ! system;
+                }
+            }
+        }
+
+        /*  WHICH PORT A MIDI CUE SENDS ON, as a menu rather than as the eight
+            characters of an identifier typed by hand.
+
+            AN IDENTIFIER AND NOT A NAME, which is the row's own rule and the
+            reason moving an interface is cheap: the cue names the port, the
+            port names the cable, and only the second changes when somebody
+            re-patches. So the menu's key is the identifier the row stores and
+            its label is what a person reads. */
+        void aimAtAPort (const tree::TreeSnapshot& snapshot, std::vector<Field>& decided)
+        {
+            const auto ports = readPorts (snapshot);
+
+            if (ports.empty())
+                return;
+
+            for (auto& field : decided)
+            {
+                if (field.name != "port" || ! field.writable)
+                    continue;
+
+                field.control = Control::portRef;
+                field.choices = portChoices (ports);
+                return;
+            }
+        }
+
         /*  WHICH DEVICE A NETWORK CUE IS AIMED AT, as a line of its own above
             the address it is derived from.
 
@@ -373,6 +464,12 @@ namespace wfg::client::model
             come from the parameter table. */
         if (out.kind == "osc")
             aimAtADevice (snapshot, decided);
+
+        if (out.kind == "midi")
+        {
+            aimAtAPort (snapshot, decided);
+            nameTheNumbers (decided);
+        }
 
         //  The four blocks, in the order somebody fills them in.
         const auto kindRows = [&out]

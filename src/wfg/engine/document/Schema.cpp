@@ -275,7 +275,7 @@ namespace wfg::doc
                     the schema is concerned, and the one that lost would be the
                     one nobody could find - a <Midi> section reading as a cue
                     with no list to be in. */
-                { "MidiPorts", false, { "Port" },          {} },
+                { "MidiPorts", false, { "Port" },          { "ports" } },
                 { "Port",   true,  {},                     { "port" } },
                 { "Mounts", false, { "Mount" },            {} },
                 { "Mount",  true,  { "Slot" },             { "mount" } },

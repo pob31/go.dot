@@ -204,6 +204,11 @@ namespace wfg::client::gesture
         window reads to know which row to put a name into. */
     Event createDevice (const std::string& prefix);
 
+    /*  A MIDI port the show declares, by the name a person reads. Which cable
+        it is on this machine is said afterwards with `setNode`, because the
+        two are different kinds of fact (PRD 4.10). */
+    Event createPort (const std::string& name);
+
     /*  THAT THE PATCH HAS STOPPED FOLLOWING THE LIST. Sent by the settings
         window before the first hand edit of the output matrix lands, and by
         its "follow the list" button with false to hand the outputs back to

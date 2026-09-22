@@ -41,6 +41,7 @@
 #pragma once
 
 #include <wfg/engine/midi/MidiSink.h>
+#include <wfg/engine/midi/PortTable.h>
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
@@ -69,9 +70,25 @@ namespace wfg::midi
             `--midi-out` is given the NAME, which is what a person reads, and
             whoever parses the command line resolves the one to the other
             against the document. `label` is that name, kept only so that a
-            refusal is a sentence somebody can act on. */
+            refusal is a sentence somebody can act on.
+
+            BOTH HALVES OF THE DEVICE, and the identifier is tried FIRST
+            (author, 2026-09-22, asked as "what is best if switching USB
+            ports?"). An identifier is the only thing that tells two identical
+            interfaces apart and the first thing to break when a cable moves
+            to another socket; a name is the other way round. `wantedId` may be
+            empty, which is an ordinary first run. What was actually matched
+            comes back in `matchedId` so the caller can write it down for next
+            time, and `why` carries the sentence when nothing was. */
         bool bind (const std::string& portId, const std::string& label,
-                   const std::string& deviceName);
+                   const std::string& deviceName, const std::string& wantedId,
+                   std::string& matchedId, std::string& why);
+
+        /** Closes a port's device and forgets it. */
+        void unbind (const std::string& portId);
+
+        /** This machine's outputs, name and identifier, for a menu to offer. */
+        static std::vector<Device> availableDevices();
 
         /** Starts the sending thread. Nothing leaves before this. */
         void start();

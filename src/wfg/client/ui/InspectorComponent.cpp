@@ -241,6 +241,7 @@ namespace wfg::client::ui
 
                 case model::Control::busRef:
                 case model::Control::deviceRef:
+                case model::Control::portRef:
                     /*  THE ITEMS THEMSELVES CAN HAVE MOVED, which no other
                         control here has to think about: a `choice`'s options
                         come from the parameter table and are fixed for the
@@ -325,6 +326,29 @@ namespace wfg::client::ui
 
             line.field = field;
             line.field.control = wasControl;
+
+            /*  AND ITS NAME, which until 2026-09-22 nothing here touched
+                because a row's name could not change: `shapeOf` keys on it,
+                so a different name meant a different panel and a rebuild.
+
+                A MIDI cue broke that. What its two payload rows are CALLED now
+                follows the message type - note and velocity, controller and
+                value, program - which is a value, and a value is exactly what
+                this refill exists to carry. Without this line the panel showed
+                the first cue's words over the second cue's numbers: pick two
+                program changes and a note-on and the note-on's labels stuck to
+                everything after it (author, looking at it). */
+            line.name.setText (juce::String (field.label.empty() ? field.name : field.label),
+                               juce::dontSendNotification);
+            line.name.setTooltip (juce::String (field.description));
+
+            /*  AND WHETHER THE ROW MEANS ANYTHING FOR THIS CUE. Set in the
+                layout as well, which is where it was set alone - and a refill
+                does not resize, so a panel that only swapped values left a
+                dead row live and a live row dead. */
+            line.toggle.setEnabled (field.applies);
+            line.choice.setEnabled (field.applies);
+            line.box.setEnabled (field.applies);
         };
 
         for (const auto& block : inspection.blocks)
@@ -518,7 +542,8 @@ namespace wfg::client::ui
                 content.addAndMakeVisible (line->choice);
             }
             else if ((field.control == model::Control::busRef
-                        || field.control == model::Control::deviceRef)
+                        || field.control == model::Control::deviceRef
+                        || field.control == model::Control::portRef)
                        && field.writable)
             {
                 /*  A MENU THE SHOW WROTE, not one the parameter table
@@ -793,6 +818,12 @@ namespace wfg::client::ui
                 and wrong sentence. */
             line->toggle.setEnabled (line->field.applies);
             line->choice.setEnabled (line->field.applies);
+
+            /*  THE BOX TOO, which it never was: a greyed row whose control is
+                a text field - a MIDI cue's velocity under a program change -
+                stayed white and typeable, so the one kind of row this rule
+                exists for was the one it did not reach. */
+            line->box.setEnabled (line->field.applies);
             line->repeats.setVisible (! hidden
                                         && line->field.control == model::Control::loopCount);
             line->forever.setVisible (! hidden

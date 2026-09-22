@@ -39,6 +39,7 @@
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/midi/MidiInputs.h>
+#include <wfg/engine/midi/PortTable.h>
 
 #include <algorithm>
 #include <string>
@@ -294,8 +295,8 @@ TEST_CASE ("midi cue: every event type PRD 3.10 lists comes out as its own bytes
         midi::MessageSpec spec;
         spec.type = one.type;
         spec.channel = one.channel;
-        spec.number = one.number;
-        spec.data = one.data;
+        spec.data1 = one.number;
+        spec.data2 = one.data;
 
         const auto bytes = bytesFor (spec);
 
@@ -315,8 +316,8 @@ TEST_CASE ("midi cue: a note-on of velocity nought is a note-on, because that is
     midi::MessageSpec spec;
     spec.type = "noteOn";
     spec.channel = 1;
-    spec.number = 60;
-    spec.data = 0;
+    spec.data1 = 60;
+    spec.data2 = 0;
 
     CHECK (bytesFor (spec) == midi::Bytes { 0x90, 0x3c, 0x00 });
 }
@@ -333,8 +334,8 @@ TEST_CASE ("midi cue: a value outside its range is refused rather than clamped")
         midi::MessageSpec spec;
         spec.type = type;
         spec.channel = channel;
-        spec.number = number;
-        spec.data = data;
+        spec.data1 = number;
+        spec.data2 = data;
 
         INFO (type << " ch " << channel << " n " << number << " d " << data);
         CHECK_FALSE (midi::messageFor (spec).ok());
@@ -402,6 +403,115 @@ TEST_CASE ("midi cue: hexBytes is where a typed-in dump is judged")
 }
 
 //==============================================================================
+/*  WHICH CABLE A PORT IS ON, AND WHAT SURVIVES MOVING IT (2026-09-22).
+
+    The author's question was "what is best if switching USB ports?" and the
+    answer has two halves, because the two things a MIDI device can be named by
+    fail in opposite directions. An identifier is operating-system formatted
+    and carries the device's instance path on Windows, so a cable in another
+    socket usually has a new one - and it is the only thing that can tell two
+    identical interfaces apart. A name survives the move and cannot.
+
+    `PortTable::match` is that rule in one function, so both sides of the cable
+    ask the same thing and a case can hand it a list with no hardware in the
+    room.
+*/
+TEST_CASE ("midi: a port matches its device by identifier first and by name second")
+{
+    const std::vector<midi::Device> machine {
+        { "MIDIMATE II", "USB/VID_0763&PID_1001/5&1a2b3c&0&1" },
+        { "Dante Midi Port 1", "dante-1" },
+    };
+
+    std::string why;
+
+    SUBCASE ("the identifier wins when it is there")
+    {
+        const auto* found = midi::PortTable::match (machine, "Dante Midi Port 1",
+                                                    "USB/VID_0763&PID_1001/5&1a2b3c&0&1", why);
+
+        REQUIRE (found != nullptr);
+        CHECK (found->name == "MIDIMATE II");
+        CHECK (why.empty());
+    }
+
+    SUBCASE ("and the name catches a cable that moved to another socket")
+    {
+        /*  The identifier it was bound to last time is gone, because the
+            device instance path changed with the port. The name is still the
+            device's own, so the port finds it. */
+        const auto* found = midi::PortTable::match (machine, "MIDIMATE II",
+                                                    "USB/VID_0763&PID_1001/5&9z8y7x&0&4", why);
+
+        REQUIRE (found != nullptr);
+        CHECK (found->name == "MIDIMATE II");
+    }
+
+    SUBCASE ("a name nothing answers to is a sentence and not a guess")
+    {
+        CHECK (midi::PortTable::match (machine, "A desk nobody owns", {}, why) == nullptr);
+        CHECK (why.find ("A desk nobody owns") != std::string::npos);
+    }
+
+    SUBCASE ("and two devices of one name are refused rather than picked between")
+    {
+        /*  THE CASE THE IDENTIFIER EXISTS FOR, and where it has been lost the
+            honest answer is none: a MIDI cue arriving at the wrong desk is
+            worse than one that does not arrive. */
+        const std::vector<midi::Device> twins {
+            { "MIDIMATE II", "one" }, { "MIDIMATE II", "two" } };
+
+        CHECK (midi::PortTable::match (twins, "MIDIMATE II", {}, why) == nullptr);
+        CHECK (why.find ("2 devices") != std::string::npos);
+
+        //  With the identifier remembered, the same pair is unambiguous.
+        const auto* found = midi::PortTable::match (twins, "MIDIMATE II", "two", why);
+        REQUIRE (found != nullptr);
+        CHECK (found->identifier == "two");
+    }
+
+    SUBCASE ("a port that asks for nothing is bound to nothing, and that is not a fault")
+    {
+        CHECK (midi::PortTable::match (machine, {}, {}, why) == nullptr);
+        CHECK (why.empty());
+    }
+
+    SUBCASE ("an identifier alone, once the device has gone, says so")
+    {
+        CHECK (midi::PortTable::match (machine, {}, "a device that left", why) == nullptr);
+        CHECK_FALSE (why.empty());
+    }
+}
+
+TEST_CASE ("midi: the show declares a port and the machine says which cable it is")
+{
+    doc::ShowDocument document;
+
+    const auto made = document.createPort ("Lights");
+    REQUIRE (made.ok);
+
+    const auto base = "/godot/port/" + made.id + "/";
+
+    /*  THE NAME IS THE SHOW'S AND TRAVELS; the identifier is this machine's
+        and does not dirty the show, which is what `persist=state` buys. */
+    REQUIRE (document.setAttribute (base + "outputDevice", "MIDIMATE II").ok);
+
+    const auto before = document.showRevision();
+    REQUIRE (document.setAttribute (base + "outputDeviceId", "usb-1").ok);
+
+    CHECK (document.showRevision() == before);
+    CHECK (document.getAttribute (base + "outputDeviceId") == std::string ("usb-1"));
+
+    /*  AND A LOCKED SHOW STILL LETS THE ENGINE WRITE IT DOWN, which is what
+        makes the write-back work during a performance: the lock refuses what
+        somebody DECIDES, and where the cable is is not that. */
+    REQUIRE (document.setAttribute ("/godot/document/locked", "true").ok);
+
+    CHECK (document.setAttribute (base + "outputDeviceId", "usb-2").ok);
+    CHECK_FALSE (document.setAttribute (base + "outputDevice", "Another desk").ok);
+}
+
+//==============================================================================
 TEST_CASE ("midi cue: firing one puts its bytes on the port the show named")
 {
     /*  Through the whole cue layer: a document, a GO, and what a cable would
@@ -434,7 +544,12 @@ TEST_CASE ("midi cue: firing one puts its bytes on the port the show named")
     REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/port", portId).ok);
     REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/type", "programChange").ok);
     REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/channel", "3").ok);
-    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/number", "12").ok);
+    /*  `data1` AND NOT `number` (2026-09-22). This line said `number` until the
+        two rows were told apart, and it worked by accident: `cue,number` and
+        `midi,number` were one attribute, so writing the cue's place in the
+        list also wrote the program. Now they are separate and this writes the
+        program, which is what the case is about. */
+    REQUIRE (document.setAttribute ("/godot/cue/" + cueId + "/data1", "12").ok);
 
     REQUIRE (engine.submit (origin::cli, "cue.fire", { osc::Value::string (cueId) }));
     engine.processTick (0);

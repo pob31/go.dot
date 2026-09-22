@@ -203,6 +203,63 @@ TEST_CASE ("schema: a derived value is not an attribute of anything")
 }
 
 //==============================================================================
+TEST_CASE ("schema: no two rows on one element share a name")
+{
+    /*  THE GUARD THE AUTHOR HAD TO BE instead (2026-09-22). A MIDI cue takes
+        the `cue` family of rows and then its own on top, and both families had
+        a row called `number` - the cue's place in the list, and the note the
+        message carries. Two rows of one name on one element are ONE attribute
+        in the file doing two jobs, published TWICE at one address and typed
+        two ways: the same twelve read as a cue number and as a program, and
+        writing either wrote both.
+
+        Nothing said so. It was found by looking at the panel and seeing the
+        row drawn twice, which is the wrong place to find a schema collision.
+        This is that check, and it fails the build instead. */
+    const auto& schema = Schema::instance();
+
+    /*  AND IT HAS TO BE ABLE TO SAY IT LOOKED. A check that walks an empty
+        list passes in silence, which is the one way a guard like this fails
+        without anybody noticing - so it counts what it examined and refuses a
+        run that examined nothing. */
+    auto rowsExamined = 0;
+
+    for (const auto& element : schema.elements())
+    {
+        std::map<std::string, int> seen;
+
+        /*  Both halves, because a stored row and a derived one collide just as
+            badly: one would be published over the other and a write would
+            reach whichever the lookup happened to find. */
+        for (const auto& attribute : element.attributes)
+        {
+            ++seen[std::string (attribute.name())];
+            ++rowsExamined;
+        }
+
+        for (const auto& attribute : element.derivedAttributes)
+        {
+            ++seen[std::string (attribute.name())];
+            ++rowsExamined;
+        }
+
+        for (const auto& [name, count] : seen)
+        {
+            if (count < 2)
+                continue;
+
+            INFO ("element <" << element.name << "> declares \"" << name << "\" "
+                   << count << " times");
+            INFO ("one attribute cannot mean two things; rename one of them");
+
+            CHECK (count == 1);
+        }
+    }
+
+    INFO ("rows examined across every element: " << rowsExamined);
+    CHECK (rowsExamined > 100);
+}
+
 TEST_CASE ("identifiers: shape, alphabet and round trip")
 {
     CHECK (Id::isValid ("K7Q2M9X4"));

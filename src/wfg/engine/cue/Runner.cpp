@@ -3381,8 +3381,8 @@ namespace wfg::cue
         midi::MessageSpec spec;
         spec.type = textOf (cue, "type");
         spec.channel = static_cast<int> (numberOf (cue, "channel"));
-        spec.number = static_cast<int> (numberOf (cue, "number"));
-        spec.data = static_cast<int> (numberOf (cue, "data"));
+        spec.data1 = static_cast<int> (numberOf (cue, "data1"));
+        spec.data2 = static_cast<int> (numberOf (cue, "data2"));
         spec.sysex = textOf (cue, "sysex");
 
         const auto built = midi::messageFor (spec);

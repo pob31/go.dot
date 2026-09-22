@@ -70,6 +70,8 @@
     here, and the .cpp is where it is dereferenced. */
 namespace wfg::audio { class MediaInfo; }
 
+namespace wfg::midi { class PortTable; }
+
 namespace wfg::tree
 {
     /*  The engine's own numbers, handed to the tree each tick because the tree
@@ -238,6 +240,13 @@ namespace wfg::tree
             nowhere to send it. */
         void setSender (const MountSender* senderToRead) noexcept { sender = senderToRead; }
 
+        /*  What each declared MIDI port turned out to be plugged into, and
+            what this machine has to plug one into. The same shape as the
+            sender above and absent for the same kind of reason: a replay or a
+            tree dump has opened no device, so every port reads unbound, which
+            is the truth rather than a placeholder. */
+        void setMidiPorts (const midi::PortTable* portsToRead) noexcept { ports = portsToRead; }
+
         /*  How long each media file is, read once when the show was opened, for
             `/godot/cue/<id>/duration`. Keyed by the `file` the document names.
 
@@ -333,6 +342,7 @@ namespace wfg::tree
         const CommandRegistry& commands;
         const MountTable& mounts;
         const MountSender* sender = nullptr;
+        const midi::PortTable* ports = nullptr;
         /*  What a test handed in, when one did. Otherwise the lengths come
             from `mediaInfo` at the top of every publish. */
         const std::map<std::string, double>* fixedDurations = nullptr;

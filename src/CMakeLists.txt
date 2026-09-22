@@ -106,6 +106,7 @@ add_library(wfg_engine STATIC
     wfg/engine/midi/MidiMessages.h
     wfg/engine/midi/MidiMessages.cpp
     wfg/engine/midi/MidiSender.h
+    wfg/engine/midi/PortTable.h
     wfg/engine/midi/MidiSender.cpp
     wfg/engine/audio/AudioCommands.h
     wfg/engine/audio/AudioCommands.cpp
@@ -272,6 +273,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Curve.h
     wfg/client/model/Curve.cpp
     wfg/client/model/DirectOuts.h
+    wfg/client/model/MidiPorts.cpp
+    wfg/client/model/MidiPorts.h
     wfg/client/model/Devices.cpp
     wfg/client/model/Devices.h
     wfg/client/model/DirectOuts.cpp

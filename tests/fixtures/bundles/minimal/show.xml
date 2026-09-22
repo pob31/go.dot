@@ -16,5 +16,6 @@
     <Bus id="J3MT5XYA" name="Main L/R" width="2"/>
     <Bus id="K4NV6ZB1" firstChannel="2" name="Foldback" width="2"/>
   </Audio>
+  <MidiPorts/>
   <Network/>
 </Show>

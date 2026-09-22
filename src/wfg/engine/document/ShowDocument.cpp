@@ -307,6 +307,13 @@ namespace wfg::doc
         if (element == "Audio")   return "audio";
         if (element == "Lists")   return "list";
         if (element == "Network") return "network";
+
+        /*  SINGULAR, as `Lists` is: `/godot/port/inputs` and
+            `/godot/port/<id>/name` are one container read two ways, and a
+            client walking the tree should not have to learn that one of them
+            is spelled differently. An identifier is eight characters of
+            Crockford base32, so it can never be the word `inputs`. */
+        if (element == "MidiPorts") return "port";
         return {};
     }
 
@@ -342,6 +349,7 @@ namespace wfg::doc
             nobody declared is obeyed is a fact about the whole show, not
             about any one device in it. */
         if (element == "Network")                   return "network";
+        if (element == "MidiPorts")                 return "ports";
 
         /*  A SLOT AND A RACK CHANNEL ANSWER DIFFERENTLY, and they have to: this
             is the by-kind half of the `refers` check, so `feed/@slot` naming a
@@ -393,7 +401,11 @@ namespace wfg::doc
             so no history, no change count, and a show that is opened and saved
             untouched gains an empty element or two in its file and nothing
             else. */
-        for (const auto* name : { "Lists", "Mounts", "Network" })
+        /*  IN THE ORDER THE SCHEMA DECLARES THEM, because the canonical
+            writer keeps the order it is given and a golden file compares byte
+            for byte: adding them in any other order would write a show whose
+            containers read differently from one somebody opened. */
+        for (const auto* name : { "Lists", "Mounts", "MidiPorts", "Network" })
             if (! root.getChildWithName (name).isValid())
                 root.addChild (juce::ValueTree (name), -1, nullptr);
     }
@@ -616,6 +628,7 @@ namespace wfg::doc
         if (segment == "audio")    return showNode.getChildWithName ("Audio");
         if (segment == "list")     return showNode.getChildWithName ("Lists");
         if (segment == "network")  return showNode.getChildWithName ("Network");
+        if (segment == "port")     return showNode.getChildWithName ("MidiPorts");
         return {};
     }
 
@@ -1960,6 +1973,15 @@ namespace wfg::doc
         /*  At the end and with no member position, for the reason the header
             above gives: `order` does not name the section either. */
         return insertObject (list, endOfSequence, "Persistent", id, {});
+    }
+
+    EditResult ShowDocument::createPort (const std::string& name, const std::string& id)
+    {
+        /*  `<MidiPorts>` is one of the containers `ensureContainers` makes, so
+            it is here whether the show was opened or just made - which is why
+            this create needs none of `createRackChannel`'s on-demand lines. */
+        return insertObject (showNode.getChildWithName ("MidiPorts"),
+                             endOfSequence, "Port", id, { { "name", name } });
     }
 
     EditResult ShowDocument::createMount (const std::string& prefix,

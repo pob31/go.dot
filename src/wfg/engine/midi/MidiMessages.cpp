@@ -139,15 +139,15 @@ namespace wfg::midi
             per type rather than once at the top. */
         if (spec.type == "pitchBend")
         {
-            if (spec.data < 0 || spec.data > 16383)
+            if (spec.data2 < 0 || spec.data2 > 16383)
             {
                 out.problem = sendError::badMessage;
                 return out;
             }
 
             out.bytes = { status (0xe0, spec.channel),
-                          static_cast<std::uint8_t> (spec.data & 0x7f),
-                          static_cast<std::uint8_t> ((spec.data >> 7) & 0x7f) };
+                          static_cast<std::uint8_t> (spec.data2 & 0x7f),
+                          static_cast<std::uint8_t> ((spec.data2 >> 7) & 0x7f) };
             return out;
         }
 
@@ -155,7 +155,7 @@ namespace wfg::midi
             so is better than sending it somewhere. */
         if (spec.type == "programChange" || spec.type == "channelPressure")
         {
-            const auto value = spec.type == "programChange" ? spec.number : spec.data;
+            const auto value = spec.type == "programChange" ? spec.data1 : spec.data2;
 
             if (! inSevenBits (value))
             {
@@ -168,7 +168,7 @@ namespace wfg::midi
             return out;
         }
 
-        if (! inSevenBits (spec.number) || ! inSevenBits (spec.data))
+        if (! inSevenBits (spec.data1) || ! inSevenBits (spec.data2))
         {
             out.problem = sendError::badMessage;
             return out;
@@ -187,8 +187,8 @@ namespace wfg::midi
         }
 
         out.bytes = { status (high, spec.channel),
-                      static_cast<std::uint8_t> (spec.number),
-                      static_cast<std::uint8_t> (spec.data) };
+                      static_cast<std::uint8_t> (spec.data1),
+                      static_cast<std::uint8_t> (spec.data2) };
         return out;
     }
 }

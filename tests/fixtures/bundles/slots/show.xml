@@ -31,5 +31,6 @@
       <Channel id="CHN00002" access="shared" class="stereo" name="Hall"/>
     </Rack>
   </Audio>
+  <MidiPorts/>
   <Network/>
 </Show>

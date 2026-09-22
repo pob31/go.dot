@@ -12,5 +12,6 @@
     <Mount id="K3PV7WRB" namespace="namespaces/desk.json" port="9000" prefix="/desk" queryPort="5005" readback="oscquery"/>
   </Mounts>
   <Audio tracks="0"/>
+  <MidiPorts/>
   <Network/>
 </Show>

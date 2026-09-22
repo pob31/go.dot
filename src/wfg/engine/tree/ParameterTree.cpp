@@ -16,6 +16,8 @@
 
 #include <wfg/engine/tree/ParameterTree.h>
 
+#include <wfg/engine/midi/PortTable.h>
+
 #include <wfg/engine/cue/Solver.h>
 
 #include <cctype>
@@ -1092,10 +1094,16 @@ namespace wfg::tree
             }
             else if (containerName == "MidiPorts")
             {
-                /*  THE PORTS THE SHOW DECLARES, and nothing about which cable
-                    each one is. A Port carries a name somebody chose - "Lights",
-                    "The desk" - and what it is bound to on this machine is
-                    `--midi-out`'s answer and never the document's (§4.10). */
+                /*  THE PORTS THE SHOW DECLARES, and which cable each one
+                    turned out to be.
+
+                    The NAME of the device is the show's, because it is what
+                    somebody decided and what reads sensibly at another venue
+                    (§4.10) - `audio/outputDevice` is the same shape. Whether
+                    anything is behind it TONIGHT is not: `bound` and `problem`
+                    are what the machine found, so they come from the port
+                    table and are never stored, exactly as a mount's `loaded`
+                    does two branches up. */
                 for (const auto& port : container)
                 {
                     const auto id = port[idProperty].toString().toStdString();
@@ -1108,9 +1116,18 @@ namespace wfg::tree
                     for (const auto* row : doc::Schema::rowsForOwner ("port"))
                     {
                         const doc::Attribute attribute { "Port", row };
+                        const auto name = std::string (row->name);
 
-                        nodes.push_back (makeLeaf (base + "/" + std::string (row->name),
-                                                   *row, storedText (attribute, port)));
+                        std::string text;
+
+                        if (name == "bound")
+                            text = ports != nullptr && ports->isBound (id) ? "true" : "false";
+                        else if (name == "problem")
+                            text = ports != nullptr ? ports->problemOf (id) : std::string {};
+                        else
+                            text = storedText (attribute, port);
+
+                        nodes.push_back (makeLeaf (base + "/" + name, *row, text));
                     }
                 }
             }
@@ -1577,6 +1594,30 @@ namespace wfg::tree
             engineValue (*row, "audio", text);
         }
 
+        /*  WHAT THIS MACHINE HAS TO PLUG A PORT INTO.
+
+            Here rather than in the cached half because it changes when the
+            document does not: somebody plugs an interface in during a tech
+            rehearsal and asks for a rescan, and the menus have to grow the new
+            name without the show being edited. */
+        for (const auto* row : doc::Schema::rowsForOwner ("ports"))
+        {
+            if (row->persist != doc::Persist::none)
+                continue;
+
+            const auto name = std::string (row->name);
+            std::string text;
+
+            if (name == "inputs" && ports != nullptr)
+                text = midi::PortTable::namesOf (ports->inputs());
+            else if (name == "outputs" && ports != nullptr)
+                text = midi::PortTable::namesOf (ports->outputs());
+            else
+                text = std::string (row->defaultText);
+
+            engineValue (*row, "port", text);
+        }
+
         /*  AND WHAT THE NETWORK SIDE HAS BEEN DOING. One number today: how
             many datagrams the sender gate has dropped since the show opened.
 
@@ -1931,6 +1972,12 @@ namespace wfg::tree
                 answered for it. The show's half owns it, since a show always
                 has a Network element and may have no engine running. */
             std::string (godot) + "/network",
+
+            /*  `/godot/port` for the reason `/godot/audio` is here: both
+                halves publish under it - the declared ports from the show,
+                this machine's device lists from the runtime - and whichever
+                one minted the container would decide what `find` answered. */
+            std::string (godot) + "/port",
             std::string (godot) + "/cue",
             std::string (godot) + "/list",
             std::string (godot) + "/slot" };

@@ -91,7 +91,46 @@ namespace wfg::midi
         closeAll();
     }
 
-    bool MidiInputs::open (const std::string& name)
+    std::vector<Device> MidiInputs::availableDevices()
+    {
+        std::vector<Device> out;
+
+        for (const auto& info : juce::MidiInput::getAvailableDevices())
+            out.push_back ({ info.name.toStdString(), info.identifier.toStdString() });
+
+        return out;
+    }
+
+    bool MidiInputs::openAs (const std::string& deviceName, const std::string& wantedId,
+                             const std::string& portId, std::string& matchedId, std::string& why)
+    {
+        const auto devices = availableDevices();
+        const auto* found = PortTable::match (devices, deviceName, wantedId, why);
+
+        if (found == nullptr)
+            return false;
+
+        matchedId = found->identifier;
+
+        auto input = juce::MidiInput::openDevice (juce::String (found->identifier), this);
+
+        if (input == nullptr)
+        {
+            why = "the MIDI input \"" + found->name + "\" is there and would not open";
+            return false;
+        }
+
+        {
+            const std::lock_guard<std::mutex> lock { triggerMutex };
+            portOfDevice[found->name] = portId;
+        }
+
+        input->start();
+        open_.push_back (std::move (input));
+        return true;
+    }
+
+    bool MidiInputs::open (const std::string& name, const std::string& portId)
     {
         const auto wanted = juce::String (name);
 
@@ -107,6 +146,13 @@ namespace wfg::midi
                 refusals.push_back ("--midi-in: \"" + name + "\" is there and would not open");
                 return false;
             }
+
+            /*  REMEMBERED BY THE DEVICE'S OWN NAME, which is what the callback
+                below is handed and the only thing it can look this up by:
+                `juce::MidiInput::getName()` is the device, and the port is the
+                show's word for it. */
+            if (! portId.empty())
+                portOfDevice[name] = portId;
 
             input->start();
             open_.push_back (std::move (input));
@@ -175,7 +221,23 @@ namespace wfg::midi
         if (index == nullptr)
             return;
 
-        const auto port = source != nullptr ? source->getName().toStdString() : std::string {};
+        /*  THE PORT THE SHOW DECLARES, not the cable it arrived on
+            (2026-09-22). A trigger names "Lights"; which socket that is
+            changes when somebody moves a cable, and every trigger in the show
+            would otherwise have to be edited for it. Where no declared port
+            claimed this device - a bare `--midi-in` - the device's own name is
+            stamped, which is what a rig with one cable has always had. */
+        const auto device = source != nullptr ? source->getName().toStdString() : std::string {};
+        auto port = device;
+
+        {
+            const std::lock_guard<std::mutex> lock { triggerMutex };
+            const auto found = portOfDevice.find (device);
+
+            if (found != portOfDevice.end())
+                port = found->second;
+        }
+
         const auto event = eventFrom (message, port);
 
         if (event.type.empty())

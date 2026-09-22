@@ -25,48 +25,72 @@ namespace wfg::midi
         stop();
     }
 
-    bool MidiSender::bind (const std::string& portId, const std::string& label,
-                           const std::string& deviceName)
+    std::vector<Device> MidiSender::availableDevices()
     {
-        const auto devices = juce::MidiOutput::getAvailableDevices();
+        std::vector<Device> out;
 
-        const auto found = std::find_if (devices.begin(), devices.end(),
-                                         [&deviceName] (const juce::MidiDeviceInfo& info)
-                                         {
-                                             return info.name.toStdString() == deviceName;
-                                         });
+        for (const auto& info : juce::MidiOutput::getAvailableDevices())
+            out.push_back ({ info.name.toStdString(), info.identifier.toStdString() });
 
-        if (found == devices.end())
+        return out;
+    }
+
+    void MidiSender::unbind (const std::string& portId)
+    {
+        const std::lock_guard<std::mutex> lock { queueMutex };
+
+        for (auto at = bound.begin(); at != bound.end(); ++at)
+            if (at->port == portId)
+            {
+                bound.erase (at);
+                return;
+            }
+    }
+
+    bool MidiSender::bind (const std::string& portId, const std::string& label,
+                           const std::string& deviceName, const std::string& wantedId,
+                           std::string& matchedId, std::string& why)
+    {
+        const auto devices = availableDevices();
+
+        /*  ONE RULE FOR BOTH SIDES OF THE CABLE, in `PortTable::match`: the
+            identifier first, the name second, and a name that fits two devices
+            refused rather than guessed. */
+        const auto* found = PortTable::match (devices, deviceName, wantedId, why);
+
+        if (found == nullptr)
         {
             /*  NAMED, AND THE ALTERNATIVES NAMED WITH IT. A port bound to a
                 device that is not there is a cue that will fail at half past
                 seven for a reason nobody can see from the show file, so the
                 sentence has to be enough to fix it by. */
-            std::string line = "the port \"" + label + "\" wants a MIDI output called \""
-                                 + deviceName + "\", and there is none";
+            std::string line = "the port \"" + label + "\": " + why;
 
-            if (devices.isEmpty())
+            if (devices.empty())
             {
-                line += "; this machine has none";
+                line += "; this machine has no MIDI outputs";
             }
             else
             {
                 line += "; this machine has";
 
                 for (const auto& info : devices)
-                    line += " \"" + info.name.toStdString() + "\"";
+                    line += " \"" + info.name + "\"";
             }
 
             refusals.push_back (line);
+            why = line;
             return false;
         }
 
-        auto device = juce::MidiOutput::openDevice (found->identifier);
+        matchedId = found->identifier;
+
+        auto device = juce::MidiOutput::openDevice (juce::String (found->identifier));
 
         if (device == nullptr)
         {
-            refusals.push_back ("could not open the MIDI output \"" + deviceName
-                                  + "\" for the port \"" + label + "\"");
+            why = "the MIDI output \"" + found->name + "\" is there and would not open";
+            refusals.push_back ("the port \"" + label + "\": " + why);
             return false;
         }
 

@@ -15,5 +15,6 @@
   <Audio tracks="2">
     <Bus id="AMB00020" name="Main L/R" width="2"/>
   </Audio>
+  <MidiPorts/>
   <Network/>
 </Show>

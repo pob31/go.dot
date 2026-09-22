@@ -2976,6 +2976,90 @@ TEST_CASE ("client: which device an address is aimed at, and the rewrite that mo
     }
 }
 
+TEST_CASE ("client: a MIDI cue's two numbers are named for the message they carry")
+{
+    /*  The author, looking at the panel: "There are two number fields in the
+        MIDI cue." They are `number` and `data`, and what each one means
+        depends entirely on the type above them. The row names stay - one row
+        carries the payload whatever it is - and the PANEL says which is which.
+
+        The table is `midi::build`'s own, which is what makes this test worth
+        having: if the builder learns a type, this goes stale loudly. */
+    Rig rig;
+
+    const std::string cue = "M1D2N3P4";
+
+    rig.apply (1, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                 osc::Value::string ("midi"), osc::Value::string ("Stinger"),
+                 osc::Value::string (cue) });
+
+    struct Wanted
+    {
+        const char* type;
+        const char* number;     ///< what the panel calls it
+        bool numberApplies;
+        const char* data;
+        bool dataApplies;
+    };
+
+    const Wanted table[] {
+        { "noteOn",          "note",       true,  "velocity", true  },
+        { "noteOff",         "note",       true,  "velocity", true  },
+        { "aftertouch",      "note",       true,  "pressure", true  },
+        { "controlChange",   "controller", true,  "value",    true  },
+        { "programChange",   "program",    true,  "data2",    false },
+        { "channelPressure", "data1",      false, "pressure", true  },
+        { "pitchBend",       "data1",      false, "bend",     true  },
+        { "sysex",           "data1",      false, "data2",    false },
+    };
+
+    auto tick = 2;
+
+    for (const auto& wanted : table)
+    {
+        INFO ("type: " << wanted.type);
+
+        rig.apply (tick++, "window", "node.set",
+                   { osc::Value::string ("/godot/cue/" + cue + "/type"),
+                     osc::Value::string (wanted.type) });
+
+        const auto inspection = model::inspect (*rig.publish (tick++), cue);
+
+        const model::Field* number = nullptr;
+        const model::Field* data = nullptr;
+        const model::Field* sysex = nullptr;
+        const model::Field* channel = nullptr;
+
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+            {
+                if (field.name == "data1")   number = &field;
+                if (field.name == "data2")   data = &field;
+                if (field.name == "sysex")   sysex = &field;
+                if (field.name == "channel") channel = &field;
+            }
+
+        REQUIRE (number != nullptr);
+        REQUIRE (data != nullptr);
+        REQUIRE (sysex != nullptr);
+        REQUIRE (channel != nullptr);
+
+        CHECK (number->label == std::string (wanted.number));
+        CHECK (data->label == std::string (wanted.data));
+
+        /*  GREYED AND NOT HIDDEN: an absence reads as "this program cannot do
+            that", which is the wrong thing to say about a field that would
+            work if the type above it were different. */
+        CHECK (number->applies == wanted.numberApplies);
+        CHECK (data->applies == wanted.dataApplies);
+
+        //  And the two that only one type uses at all.
+        CHECK (sysex->applies == (std::string (wanted.type) == "sysex"));
+        CHECK (channel->applies == (std::string (wanted.type) != "sysex"));
+    }
+}
+
 TEST_CASE ("client: a device with several roots is one entry in the target menu")
 {
     /*  The author's own desk. A DiGiCo S21 reached directly speaks three

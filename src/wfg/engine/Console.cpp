@@ -2483,6 +2483,120 @@ namespace
             that has not been patched yet is a rehearsal. */
         wfg::midi::MidiSender midiOut;
 
+        /*  WHAT EACH PORT TURNED OUT TO BE PLUGGED INTO, published from here
+            and stored nowhere (§4.10). Declared before the bindings below so
+            every one of them can record its answer. */
+        wfg::midi::PortTable midiPorts;
+        midiPorts.setDevices (wfg::midi::MidiInputs::availableDevices(),
+                              wfg::midi::MidiSender::availableDevices());
+        parameters.setMidiPorts (&midiPorts);
+
+        /*  THE SHOW'S OWN BINDINGS FIRST (2026-09-22). A port says which
+            device it wants and the engine finds it: the NAME because that is
+            what somebody decided and what reads at the next venue, and the
+            IDENTIFIER remembered from last time because it is the only thing
+            that tells two identical interfaces apart. Identifier first, name
+            as the fallback - see `PortTable::match`.
+
+            NOT FATAL, unlike a command line that names a device this machine
+            does not have. A show travels to a rig nobody has patched yet, and
+            a port with nothing behind it fails its own cues with `no-port`
+            while the rest of the show runs (§4.10). What it must not do is go
+            quiet: the sentence lands on `/godot/port/<id>/problem`, which the
+            settings window draws. */
+        for (const auto& ports : document.root())
+        {
+            if (ports.getType().toString() != "MidiPorts")
+                continue;
+
+            for (const auto& port : ports)
+            {
+                const auto portId = port[juce::Identifier ("id")].toString().toStdString();
+
+                if (portId.empty())
+                    continue;
+
+                const auto base = "/godot/port/" + portId + "/";
+                const auto label = document.getAttribute (base + "name").value_or (portId);
+
+                const auto reads = [&document, &base] (const char* row)
+                { return document.getAttribute (base + row).value_or (std::string {}); };
+
+                wfg::midi::PortTable::Binding binding;
+                std::vector<std::string> troubles;
+
+                /*  THE INPUT SIDE, AND IT IS OPENED AS THE PORT: what arrives
+                    is stamped with the show's own word for the cable, so a
+                    trigger names "Lights" and goes on firing when somebody
+                    moves the interface to another socket. */
+                if (const auto listens = reads ("inputDevice"); ! listens.empty())
+                {
+                    std::string matched, why;
+
+                    if (midiIn.openAs (listens, reads ("inputDeviceId"), portId, matched, why))
+                    {
+                        binding.bound = true;
+
+                        if (! matched.empty() && matched != reads ("inputDeviceId"))
+                            document.setAttribute (base + "inputDeviceId", matched);
+                    }
+                    else
+                    {
+                        troubles.push_back (why);
+                    }
+                }
+
+                if (const auto sends = reads ("outputDevice"); ! sends.empty())
+                {
+                    const auto remembered = reads ("outputDeviceId");
+                    std::string matched, why;
+
+                    if (midiOut.bind (portId, label, sends, remembered, matched, why))
+                    {
+                        binding.bound = true;
+                        binding.deviceId = matched;
+
+                        /*  AND THE IDENTIFIER IS WRITTEN DOWN, so the next
+                            start is exact rather than by name. A state row:
+                            what the machine matched is not what anybody
+                            decided, so it does not dirty the show and is
+                            writable under the edit lock, which is what lets it
+                            happen during a locked session. */
+                        if (! matched.empty() && matched != remembered)
+                            document.setAttribute (base + "outputDeviceId", matched);
+                    }
+                    else
+                    {
+                        binding.bound = false;
+                        troubles.push_back (why);
+                    }
+                }
+
+                for (const auto& trouble : troubles)
+                {
+                    if (! binding.problem.empty())
+                        binding.problem += "; ";
+
+                    binding.problem += trouble;
+                }
+
+                midiPorts.setBinding (portId, binding);
+            }
+        }
+
+        /*  AND THE TREE IS TOLD TO LOOK AGAIN. `bound` and `problem` are
+            published from the port table on the DOCUMENT side, beside the rows
+            they belong to - and that side is cached, so without this the first
+            snapshot would hold the table as it was before a single port was
+            bound, and an idle show would never correct it. A binding is not a
+            document edit, so nothing else here would say so.
+
+            The same is owed by anything that rebinds later. */
+        parameters.markStale();
+
+        /*  AND THE COMMAND LINE OVERRIDES IT, because which cable is in which
+            socket is a fact about this building and the person at the keyboard
+            has just said so. */
         for (const auto& binding : midiOutputBindings)
         {
             /*  THE NAME ON THE COMMAND LINE, THE IDENTIFIER IN THE CUE. A cue
@@ -2510,7 +2624,12 @@ namespace
                 return 2;
             }
 
-            midiOut.bind (portId, binding.first, binding.second);
+            std::string matched, why;
+
+            if (midiOut.bind (portId, binding.first, binding.second, {}, matched, why))
+                midiPorts.setBinding (portId, { true, {}, matched });
+            else
+                midiPorts.setBinding (portId, { false, why, {} });
         }
 
         if (! midiOut.problems().empty())
@@ -2518,7 +2637,14 @@ namespace
             for (const auto& problem : midiOut.problems())
                 std::cerr << "wfg serve: " << problem << std::endl;
 
-            return 2;
+            /*  FATAL ONLY FOR WHAT THE COMMAND LINE ASKED FOR. A device named
+                on the command line and not there is somebody's typo, and they
+                are still looking at the terminal. A device the SHOW asks for
+                and this machine lacks is a show that travelled, which is the
+                ordinary case and must open - the port says why on its own row
+                and its cues fail `no-port` if anybody fires them. */
+            if (! midiOutputBindings.empty())
+                return 2;
         }
 
         midiOut.start();

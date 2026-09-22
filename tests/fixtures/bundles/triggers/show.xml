@@ -15,5 +15,6 @@
   </Lists>
   <Mounts/>
   <Audio tracks="0"/>
+  <MidiPorts/>
   <Network/>
 </Show>

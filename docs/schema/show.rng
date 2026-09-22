@@ -601,7 +601,7 @@
       </optional>
       <optional>
         <attribute name="port">
-          <a:documentation>midi: the declared port the event must arrive on. Empty is any input, which is what a rig with one MIDI cable wants and is the honest default: naming a port that is not bound would be a trigger that silently never fires.</a:documentation>
+          <a:documentation>midi: the declared port the event must arrive on, by identifier. Empty is any input, which is what a rig with one MIDI cable wants. THE PORT AND NOT THE CABLE (2026-09-22): the show says &quot;Lights&quot; and the machine says which socket that is, so moving an interface changes one binding in the settings and every trigger that named the port goes on firing. Matching a device name here would mean editing every trigger in the show for a moved cable, which is the cost the port exists to avoid.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -1038,8 +1038,17 @@
         </attribute>
       </optional>
       <optional>
-        <attribute name="data">
-          <a:documentation>The velocity, controller value, or the fourteen-bit pitch bend. One row for the three because they are one thing - the payload - and a bend that needed a row of its own would be a second place for a number to be wrong. Nought to 127 for everything but the bend, where 8192 is the centre.</a:documentation>
+        <attribute name="data1">
+          <a:documentation>The first byte of the message: the note for a note on, off or aftertouch, the controller for a control change, the program for a program change. Ignored by pitch bend, channel pressure and system exclusive, which have no such thing. NAMED AFTER ITS PLACE IN THE MESSAGE and not after any one of those meanings, because it is all of them depending on the type above it - and a client shows the word that fits, so nobody reads data1 anywhere but in the file. It was called number until 2026-09-22 and could not stay: every cue already has a number, which is its place in the list, and two rows of one name on one element are one attribute doing two jobs - the same twelve read as the cue&apos;s number and as the program it sends.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">127</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="data2">
+          <a:documentation>The second byte: the velocity of a note, the value of a control change, the pressure of an aftertouch, or the whole fourteen bits of a pitch bend, where 8192 is the centre. Ignored by a program change, which has only one byte, and by system exclusive. Nought to 127 for everything but the bend. Renamed from data with its partner (2026-09-22) so the two read as the pair they are.</a:documentation>
           <data type="integer">
             <param name="minInclusive">0</param>
             <param name="maxInclusive">16383</param>
@@ -1151,9 +1160,39 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="inputDevice">
+          <a:documentation>The MIDI input this port listens on. Events arriving there are matched as THIS port, so a trigger names the port and never the cable - which is what makes moving an interface one edit instead of one per trigger. Empty listens to nothing; --midi-in overrides.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="name">
           <a:documentation>What the show calls this port. The document holds what somebody decided (PRD 4.10), so it says &apos;Lights&apos; or &apos;The desk&apos;; --midi-out=&lt;name&gt;=&lt;device&gt; is what binds it to a cable on this machine, and the two are separate for the reason a bus and a hardware channel are.</a:documentation>
           <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="outputDevice">
+          <a:documentation>The MIDI output on this machine this port sends through, by the name wfg midi lists. What somebody decided and what reads sensibly at the next venue, which is why it is in the show and not beside it (PRD 4.10); --midi-out overrides it for one session. Empty is unbound, and a cue on an unbound port fails its RUN with no-port and never the load, because a show travels to a rig nobody has patched yet.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="rx">
+          <a:documentation>Whether events arriving on this port&apos;s input fire triggers. Off is a port that sends and does not listen, which is most of them - a lighting desk takes messages and has nothing to say back.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="tx">
+          <a:documentation>Whether cues on this port are sent. Off, the cue still runs and finishes carrying the warning not-sent, exactly as a network device&apos;s tx does, so a rehearsal in a room without the desk plays the show instead of printing a column of failures.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
     </element>
@@ -1587,6 +1626,7 @@
           <ref name="State.Lists"/>
           <ref name="State.List"/>
           <ref name="State.Group"/>
+          <ref name="State.Port"/>
           <ref name="State.Audio"/>
         </choice>
       </zeroOrMore>
@@ -1680,6 +1720,26 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="State.Port">
+    <element name="Port">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="inputDeviceId">
+          <a:documentation>The identifier that input had when this machine last found it, tried before the name, for the reason the output&apos;s twin gives.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="outputDeviceId">
+          <a:documentation>The identifier that output had when this machine last found it, tried BEFORE the name. Two things fail in opposite directions and that is why both are kept: an identifier is operating-system formatted and is not stable - on Windows it carries the device&apos;s instance path, so moving a cable to another USB socket changes it - while a name survives the move and cannot tell two identical interfaces apart. State rather than show: it is what the machine matched and not what anybody decided, so it never dirties the show, and a stale one at another venue simply fails and falls through to the name. Written back by the engine whenever a port binds by name, so the next start is exact.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
     </element>

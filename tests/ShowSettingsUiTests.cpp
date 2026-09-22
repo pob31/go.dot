@@ -2,6 +2,8 @@
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 #include <wfg/client/ui/ShowSettingsWindow.h>
+#include <wfg/client/ui/InspectorComponent.h>
+#include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/engine/audio/DeviceLayer.h>
 #include <wfg/engine/Engine.h>
@@ -12,6 +14,7 @@
 #include <spatcore/ui/patch/PatchMatrixComponent.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <algorithm>
+#include <functional>
 #include <chrono>
 #include <thread>
 #include <windows.h>
@@ -197,6 +200,95 @@ TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch s
     CHECK_FALSE (rig.sent.back().args[6].getString().empty());
 }
 
+//==============================================================================
+/*  A ROW'S NAME CAN CHANGE NOW, AND THE PANEL HAS TO FOLLOW IT.
+
+    Two cues of one kind share a panel: `shapeOf` keys on each row's name, its
+    control and whether it is writable, so picking a second MIDI cue REFILLS
+    the lines rather than rebuilding them. That was safe while a name was
+    fixed. It stopped being safe when a MIDI cue's two payload rows started
+    being called after the message they carry - note and velocity, controller
+    and value, program - because that is a VALUE, and the refill was the one
+    path that never touched a name.
+
+    The author found it by looking: two program changes, then a note-on, and
+    the note-on's words stuck to everything picked afterwards.
+*/
+TEST_CASE ("inspector UI: a MIDI cue's labels follow the type when the panel is reused")
+{
+    Rig rig;
+
+    const auto list = rig.document.createList ("Cues");
+    REQUIRE (list.ok);
+
+    const auto program = rig.document.createCue (list.id, 0, "midi", "Snapshot");
+    const auto note = rig.document.createCue (list.id, 1, "midi", "Stinger");
+    REQUIRE (program.ok);
+    REQUIRE (note.ok);
+
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + program.id + "/type",
+                                        "programChange").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + note.id + "/type", "noteOn").ok);
+
+    client::ui::InspectorComponent panel (rig.theme, {});
+    panel.setSize (420, 800);
+
+    const auto snapshot = rig.publish();
+
+    /*  Every label the panel is drawing, which is what somebody reads. A row's
+        name is a juce::Label and there is no other way in from outside - which
+        is the point: this asserts what is on the screen, not what the model
+        was asked for. */
+    const auto drawn = [&panel]
+    {
+        std::vector<std::string> out;
+
+        const std::function<void (juce::Component&)> walk = [&] (juce::Component& root)
+        {
+            if (auto* label = dynamic_cast<juce::Label*> (&root))
+                if (label->isVisible() && label->getText().isNotEmpty())
+                    out.push_back (label->getText().toStdString());
+
+            for (auto* child : root.getChildren())
+                walk (*child);
+        };
+
+        walk (panel);
+        return out;
+    };
+
+    const auto shows = [] (const std::vector<std::string>& labels, const char* word)
+    {
+        for (const auto& label : labels)
+            if (label == word)
+                return true;
+
+        return false;
+    };
+
+    panel.show (client::model::inspect (*snapshot, program.id));
+    panel.resized();
+
+    REQUIRE (shows (drawn(), "program"));
+    CHECK_FALSE (shows (drawn(), "note"));
+
+    /*  THE SECOND CUE, SAME SHAPE, DIFFERENT WORDS. This is the refill path:
+        nothing is rebuilt, and before the fix the labels stayed as they were. */
+    panel.show (client::model::inspect (*snapshot, note.id));
+    panel.resized();
+
+    CHECK (shows (drawn(), "note"));
+    CHECK (shows (drawn(), "velocity"));
+    CHECK_FALSE (shows (drawn(), "program"));
+
+    //  And back again, because the author's report was that it stuck both ways.
+    panel.show (client::model::inspect (*snapshot, program.id));
+    panel.resized();
+
+    CHECK (shows (drawn(), "program"));
+    CHECK_FALSE (shows (drawn(), "velocity"));
+}
+
 TEST_CASE ("show settings UI: the Network tab declares devices and switches the sender filter")
 {
     Rig rig;
@@ -253,6 +345,43 @@ TEST_CASE ("show settings UI: the Network tab declares devices and switches the 
 
     /*  AND UNDER THE LOCK THE STRIP GOES DEAD, devices included. A show in
         show mode is one nobody can restructure, and a device is structure. */
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+
+    CHECK_FALSE (tabs->isEnabled());
+}
+
+TEST_CASE ("show settings UI: the MIDI tab declares ports and offers this machine's devices")
+{
+    Rig rig;
+
+    REQUIRE (rig.document.createPort ("Lights").ok);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+    CHECK (tabs->getTabNames()[5] == "MIDI");
+
+    tabs->setCurrentTabIndex (5);
+
+    /*  ADD DECLARES A PORT, and nothing about a cable: the name is the show's
+        and which socket it is on is said afterwards, because the two are
+        different kinds of fact (PRD 4.10). */
+    auto* add = button (panel, "ADD");
+    REQUIRE (add != nullptr);
+
+    const auto before = rig.sent.size();
+    add->onClick();
+
+    REQUIRE (rig.sent.size() == before + 1);
+    CHECK (rig.sent.back().command == "port.create");
+    REQUIRE (rig.sent.back().args.size() == 1u);
+
+    //  And it does not collide with the port already there.
+    CHECK (rig.sent.back().args[0].getString() != "Lights");
+
     REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
     panel.refresh (*rig.publish());
 

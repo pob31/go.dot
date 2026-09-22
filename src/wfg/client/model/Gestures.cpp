@@ -172,6 +172,11 @@ namespace wfg::client::gesture
                  { osc::Value::string (prefix), osc::Value::string ({}) } };
     }
 
+    Event createPort (const std::string& name)
+    {
+        return { origin::window, "port.create", { osc::Value::string (name) } };
+    }
+
     Event createBus (const std::string& kind, int width, int index)
     {
         return { origin::window, "bus.create",

@@ -115,6 +115,14 @@ namespace wfg::client::model
             identifiers. See `model::targetChoices`. */
         deviceRef,
 
+        /*  A MENU OF THE SHOW'S MIDI PORTS. The same kind of thing as an
+            output's menu and unlike the device one above: it writes an
+            IDENTIFIER, because a cue names the port the show declares and a
+            port's name is what a person reads and may rename. The row already
+            held that identifier; what was missing was anything to pick it
+            from, so it was a box you typed eight characters into. */
+        portRef,
+
         /*  A BUTTON THAT OPENS THE PANEL AT THE FOOT on this cue (author,
             2026-09-21: "it would be great if the controls to show the
             waveform, the send levels, the EQ, the group timeline were in the
