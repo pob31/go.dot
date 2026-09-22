@@ -17,6 +17,7 @@
 #include <wfg/engine/tree/ParameterTree.h>
 
 #include <wfg/engine/midi/PortTable.h>
+#include <wfg/engine/surface/SurfaceTable.h>
 
 #include <wfg/engine/cue/Solver.h>
 
@@ -465,7 +466,8 @@ namespace wfg::tree
         void collectSlot (const juce::ValueTree& node, const char* element,
                           const char* extraOwner, const char* kindText,
                           const cue::SlotAnalysis& analysis,
-                          std::vector<Node>& out)
+                          std::vector<Node>& out,
+                          const std::map<std::string, std::string>* derived = nullptr)
         {
             const auto id = node[idProperty].toString().toStdString();
 
@@ -496,6 +498,23 @@ namespace wfg::tree
                     half emits them, against the roster this walk leaves behind. */
                 if (name == "holder" || name == "pending")
                     continue;
+
+                /*  A STRIP'S LIVE ROWS, for the same reason (Phase 6): what it
+                    is riding, the word its display shows and the cue on it
+                    change with every press and every handover while nothing
+                    about the show does. The runtime half emits them. */
+                if (name == "target" || name == "word" || name == "cue")
+                    continue;
+
+                /*  And what the caller computed from the structure - a
+                    strip's surface, its place on it and what kind of hand
+                    control it is - which the element does not store. */
+                if (derived != nullptr)
+                    if (const auto found = derived->find (name); found != derived->end())
+                    {
+                        out.push_back (makeLeaf (base + "/" + name, *row, found->second));
+                        continue;
+                    }
 
                 /*  `usage` and `overlaps` ARE from here, and the difference is
                     what they are about. They change when somebody edits the
@@ -934,6 +953,10 @@ namespace wfg::tree
             answers that are about a session rather than about a show. */
         std::vector<std::string> listOrder;
 
+        /*  And every DCA, for its `trim` - what a fader is doing tonight, which
+            the runtime half publishes. */
+        std::vector<std::string> dcaOrder;
+
         for (const auto& container : showNode)
         {
             const auto containerName = container.getType().toString().toStdString();
@@ -1153,6 +1176,129 @@ namespace wfg::tree
                                                *row, storedText (attribute, container)));
                 }
             }
+            else if (containerName == "Surfaces")
+            {
+                /*  THE CONTROL SURFACES THE SHOW DECLARES (PRD §3.16, Phase 6),
+                    and every strip on them as a slot of the fourth kind.
+
+                    WHAT A SURFACE IS belongs to the show - its name, its
+                    profile, the ports it is on - and WHETHER ANYTHING ANSWERS
+                    TONIGHT does not: `connected`, `problem` and `serial` come
+                    from the surface table the bridge fills, exactly as a port's
+                    `bound` comes from the port table two branches up. A virtual
+                    surface is the client's own panel and always connected. */
+                for (const auto* row : doc::Schema::rowsForOwner ("surfaces"))
+                {
+                    const auto name = std::string (row->name);
+                    const auto text = name == "order" ? orderOf (container, "Surface") : std::string {};
+
+                    nodes.push_back (makeLeaf (std::string (godot) + "/surface/" + name,
+                                               *row, text));
+                }
+
+                for (const auto& declared : container)
+                {
+                    const auto id = declared[idProperty].toString().toStdString();
+
+                    if (id.empty())
+                        continue;
+
+                    const auto base = std::string (godot) + "/surface/" + id;
+                    const auto profile = declared[juce::Identifier ("profile")].toString().toStdString();
+                    const auto isVirtual = profile.empty() || profile == "virtual";
+                    const auto status = surfaces != nullptr ? surfaces->statusOf (id)
+                                                            : surface::SurfaceTable::Status {};
+
+                    int stripCount = 0;
+
+                    for (const auto& strip : declared)
+                        if (strip.getType().toString() == "Strip")
+                            ++stripCount;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("surface"))
+                    {
+                        const doc::Attribute attribute { "Surface", row };
+                        const auto name = std::string (row->name);
+
+                        std::string text;
+
+                        if (name == "strips")
+                            text = std::to_string (stripCount);
+                        else if (name == "connected")
+                            text = isVirtual || status.connected ? "true" : "false";
+                        else if (name == "problem")
+                            text = isVirtual ? std::string {} : status.problem;
+                        else if (name == "serial")
+                            text = status.serial;
+                        else
+                            text = storedText (attribute, declared);
+
+                        nodes.push_back (makeLeaf (base + "/" + name, *row, text));
+                    }
+
+                    /*  AND ITS STRIPS, published at /godot/slot/<id> beside the
+                        processor inputs and the rack's channels: a run holds
+                        one and waits for one the way a Feed holds a slot, so
+                        a client reading who holds what reads one table. */
+                    int position = 0;
+
+                    for (const auto& strip : declared)
+                    {
+                        if (strip.getType().toString() != "Strip")
+                            continue;
+
+                        const std::map<std::string, std::string> derivedRows {
+                            { "surface",  id },
+                            { "index",    std::to_string (position++) },
+                            { "endpoint", profile == "midiPads" ? "gate" : "absolute" } };
+
+                        collectSlot (strip, "Strip", "strip", "strip", analysis, nodes,
+                                     &derivedRows);
+
+                        if (const auto stripId = strip[idProperty].toString().toStdString();
+                            ! stripId.empty())
+                            slotOrder.push_back (stripId);
+                    }
+                }
+            }
+            else if (containerName == "Dcas")
+            {
+                /*  THE DCAS (PRD §3.28): a name, a short name, the DCA each sits
+                    inside. The TRIM is not here - it is what a fader is doing
+                    tonight, not a decision, and this half is a cache rebuilt
+                    when the show changes; the runtime half publishes it. */
+                for (const auto* row : doc::Schema::rowsForOwner ("dcas"))
+                {
+                    const auto name = std::string (row->name);
+                    const auto text = name == "order" ? orderOf (container, "Dca") : std::string {};
+
+                    nodes.push_back (makeLeaf (std::string (godot) + "/dca/" + name, *row, text));
+                }
+
+                for (const auto& dca : container)
+                {
+                    const auto id = dca[idProperty].toString().toStdString();
+
+                    if (id.empty())
+                        continue;
+
+                    const auto base = std::string (godot) + "/dca/" + id;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("dca"))
+                    {
+                        const auto name = std::string (row->name);
+
+                        if (name == "trim")
+                            continue;
+
+                        const doc::Attribute attribute { "Dca", row };
+                        nodes.push_back (makeLeaf (base + "/" + name, *row,
+                                                   storedText (attribute, dca)));
+                    }
+
+                    dcaOrder.push_back (id);
+                }
+            }
             else if (containerName == "Audio")
             {
                 /*  The one container that publishes attributes of its own -
@@ -1270,6 +1416,7 @@ namespace wfg::tree
         declaredCues = std::move (cueOrder);
         declaredMedia = std::move (mediaOrder);
         declaredLists = std::move (listOrder);
+        declaredDcas = std::move (dcaOrder);
 
         //----------------------------------------------------------------------
         /*  Commands, as write-only method nodes. `node.set` is deliberately

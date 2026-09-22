@@ -52,6 +52,12 @@
       <optional>
         <ref name="Network"/>
       </optional>
+      <optional>
+        <ref name="Surfaces"/>
+      </optional>
+      <optional>
+        <ref name="Dcas"/>
+      </optional>
     </element>
   </define>
 
@@ -150,6 +156,12 @@
           <data type="string"/>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
       <zeroOrMore>
         <ref name="Trigger"/>
       </zeroOrMore>
@@ -177,6 +189,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dca">
+          <a:documentation>The DCA this group is assigned to, by identifier, or empty. Adds the DCA&apos;s trim to the group run&apos;s own, which reaches every member through the sum a group already is (PRD 3.6, 3.28).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="enabled">
           <a:documentation>Whether the cue runs at all. A disabled cue is skipped, not deleted.</a:documentation>
           <choice>
@@ -195,10 +213,11 @@
       </optional>
       <optional>
         <attribute name="mode">
-          <a:documentation>Whether members are scheduled at entry or run one after another.</a:documentation>
+          <a:documentation>Whether members are scheduled at entry, run one after another, or wait for a hand. sampler launches none of its members: GO arms the group, every member is loaded onto a strip, and faders and pads start them - in any order, any number of times, several at once (PRD 3.27).</a:documentation>
           <choice>
             <value>timeline</value>
             <value>sequence</value>
+            <value>sampler</value>
           </choice>
         </attribute>
       </optional>
@@ -264,6 +283,21 @@
           <choice>
             <value>sequential</value>
             <value>shuffle</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="takeover">
+          <a:documentation>sampler: what arming this group does to the sampler groups already armed (PRD 3.27). group closes every other sampler group - each launches nothing new, plays out what is playing and hands each strip over as that clip ends; strip takes only the strips this group&apos;s members land on and leaves the rest to whoever had them, and a group that has lost every strip completes. Read when the group is armed and at each refresh.</a:documentation>
+          <choice>
+            <value>group</value>
+            <value>strip</value>
           </choice>
         </attribute>
       </optional>
@@ -366,6 +400,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dca">
+          <a:documentation>The DCA this cue is assigned to, by identifier, or empty. A mark on the member and never a list on the DCA (PRD 3.28), so assigning eight cues is a multi-select edit and nothing flows downward (4.12). Adds that DCA&apos;s trim, and the trim of every DCA it sits inside, to the level of every run of this cue - level only, one to one in dB; a mapping per assignment comes later.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="directOut">
           <a:documentation>The direct out this cue-s channels land on, by identifier; empty routes it nowhere by this road and is what every cue starts as. A mono cue feeds every channel of a stereo out; a cue wider than its out fails the run as bad-route rather than being quietly folded, unless stereoToMono says to fold it. Chosen among the outputs whose kind is direct - a mix channel is reached through a Send, at a level, which is the whole difference between the two.</a:documentation>
           <data type="string"/>
@@ -436,12 +476,54 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="pressure">
+          <a:documentation>sampler member: whether pressure on the pad - polyphonic aftertouch or channel pressure - rides the clip&apos;s trim while it is held, on velocity&apos;s scale: 127 is 0 dB, one is velocityFloor, and nought is ignored so a pad that rests at nought after the hit does not pull the sound down. A pad is a fader without a motor (author, 2026-09-23), and this is that fader.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="release">
+          <a:documentation>sampler member: what letting go does. hold stops the clip on release - a pad lifted, a touched fader let go at silence - after the short releaseFade, so it does not click; playOut lets it run to its end, and silence on the fader is a mute rather than a stop.</a:documentation>
+          <choice>
+            <value>hold</value>
+            <value>playOut</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="releaseFade">
+          <a:documentation>sampler member: how long the fade to silence takes when a hold clip is released, or a play-out clip is stopped by a second press. Fifty milliseconds reads as a stop and does not click.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="secondPress">
+          <a:documentation>sampler member, play-out only: what a press does while the clip is already playing. restart takes it from the top; noop leaves it alone; stop ends it with the release fade. A hold clip cannot be pressed again by the hand holding it, and a press from anywhere else is ignored while it is held (PRD 3.8, 3.27).</a:documentation>
+          <choice>
+            <value>restart</value>
+            <value>noop</value>
+            <value>stop</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="sharedOut">
           <a:documentation>This cue is MEANT to share its direct out with another. PRD 3.9c-s -allow marking deliberate sharing-, as feed/shared already gives a processor slot: the live-range analysis is conservative by design and reports overlaps it cannot prove impossible, so this is how a designer says of one pair that they considered it. It silences that pair-s warning and NOTHING ELSE - the menu still marks the out as taken, because which outs carry sound is a fact and the warning is a complaint, and only a complaint can be answered.</a:documentation>
           <choice>
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
       <optional>
@@ -459,6 +541,24 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="velocity">
+          <a:documentation>sampler member: whether the velocity of a press sets the level the clip starts at (author, 2026-09-23). Off, every press starts at unity trim, which is what a fader strip gives anyway. On, a press at 127 starts at 0 dB and a press at one at velocityFloor, in a straight line between them in dB.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="velocityFloor">
+          <a:documentation>sampler member: the trim a press of velocity one starts at when velocity is on, and where a pressure of one takes it when pressure is on. -40 dB is a light tap on most pads; -120 is silence.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-120</param>
+            <param name="maxInclusive">0</param>
+          </data>
         </attribute>
       </optional>
       <zeroOrMore>
@@ -646,6 +746,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="dca">
+          <a:documentation>The DCA whose trim this fade moves, by identifier, instead of a cue&apos;s level. When it is set, target is not read: a DCA has no run to find, so the fade moves /godot/dca/&lt;id&gt;/trim from wherever it stands to level, and stopWhenDone means nothing. A second row rather than a wider target, because target names a cue and the refers check knows one kind per row.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="duration">
           <a:documentation>How long it takes. Zero is a jump, and it is the default so that a fade nobody has finished writing does something obvious rather than something slow and mysterious.</a:documentation>
           <data type="double">
@@ -718,6 +824,12 @@
       <optional>
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -826,6 +938,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="target">
           <a:documentation>The cue this stops. As with a fade it names the cue and finds the run, and a target that is not running is a no-op that is applied rather than refused.</a:documentation>
           <data type="string"/>
@@ -910,6 +1028,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="target">
           <a:documentation>The cue this starts when it fires - by name, as cue.fire does, so standby does not move and the target may sit anywhere in any list. A start cue is a memo that presses a button (2026-09-19): it fires, its run is done the next tick, and the target runs on its own. What the live recorder writes into a take: one start cue per cue the operator fired, at the second they fired it, so a night pressed by hand can be played back by a timeline. A target that is a manual group is refused when it fires, as cue.fire refuses it.</a:documentation>
           <data type="string"/>
@@ -984,6 +1108,12 @@
       <optional>
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -1107,6 +1237,12 @@
       <optional>
         <attribute name="preset">
           <a:documentation>The ancestor group whose header prepares this cue, or empty for the ordinary case - prepared with its own group, as everything is. THE MARK IS THE DECISION AND THE HEADER LINE IS A READING OF IT (PRD 4.10): nothing is copied into the Header element, so editing the line is editing the member, deleting the member removes the line with no repair rule to write, and the two can never come to disagree because there is only one of them. It names an ANCESTOR rather than being a tickbox, because a cue three groups deep can be got ready by its own group, by the act, or by the opening scene, and which one is a decision about how early. A value naming a group that is not an ancestor is a validate warning and is ignored - not a refusal, because the repair is somebody dragging it somewhere sensible and yesterday-s show must still open.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The cue&apos;s name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -1610,6 +1746,144 @@
             <param name="minInclusive">-120</param>
             <param name="maxInclusive">12</param>
           </data>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Surfaces">
+    <element name="Surfaces">
+      <zeroOrMore>
+        <ref name="Surface"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Surface">
+    <element name="Surface">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="channel">
+          <a:documentation>midiPads: the channel the pads send on, one to sixteen, or nought for any.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">16</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the engine drives this surface at all. Off, nothing is sent to it and nothing it sends is heard; its strips still exist and are still filled, so a surface left in the van is still part of the layout the show was written for.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="firstNote">
+          <a:documentation>midiPads: the note the first pad sends; the strips follow it upwards, one note each. 36 is where most pad controllers start.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">127</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the show calls this surface - &apos;The D700&apos;, &apos;Pads by the desk&apos;. A name for people; the profile says what the hardware is.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="ports">
+          <a:documentation>The declared ports this surface is reached through, by identifier, space-separated, in bank order: the first port carries strips one to eight, the second nine to sixteen. The bank is the port and never the message (docs/D700_CONTROL_GUIDE.md 1.1), which is why this is a list. A virtual surface has none.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The preset the hardware must be set to for this profile to read it - Mackie for the D700 - written down and shown to the operator, never detected: two presets can differ by one button, and a surface cannot be fingerprinted from its traffic (docs/godot-asparion-d700-protocol-0.1.md 5).</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="profile">
+          <a:documentation>What kind of surface this is, which decides how its strips are driven and what each one has (PRD 3.16: a device profile is topology plus protocol). virtual is the desktop client&apos;s own panel and needs no port; mcu is a Mackie Control unit, eight fader strips per port; d700 is the Asparion D700, Mackie plus its native display, colour and rings, eight strips per port; midiPads is a pad controller sending notes with velocity and pressure. Changing it changes how the strips are driven and leaves the strips as they are.</a:documentation>
+          <choice>
+            <value>virtual</value>
+            <value>mcu</value>
+            <value>d700</value>
+            <value>midiPads</value>
+          </choice>
+        </attribute>
+      </optional>
+      <zeroOrMore>
+        <ref name="Strip"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Strip">
+    <element name="Strip">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="dca">
+          <a:documentation>The DCA a dca strip rides, by identifier. Read only when the role is dca; a dca strip naming nothing says unassigned and moves nothing.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the designer called it. PRD 3.9b: the names appear in the dropdown and on the OLED, and the channel numbers do not - -Voix solo- is what somebody wrote down and -input 3- is a fact about a patch that will change.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="role">
+          <a:documentation>What this strip is for (PRD 3.9a, 3.27): a sampler strip is unpinned and filled by whichever sampler group is armed, in member order across the sampler strips of every surface; a dca strip is pinned to one DCA and never reassigned. The two may be mixed on one surface.</a:documentation>
+          <choice>
+            <value>sampler</value>
+            <value>dca</value>
+          </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Dcas">
+    <element name="Dcas">
+      <zeroOrMore>
+        <ref name="Dca"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Dca">
+    <element name="Dca">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="dca">
+          <a:documentation>The DCA this one sits inside, by identifier, or empty at the top. A nested DCA adds its parent&apos;s trim to its own (PRD 3.28), so Everything over Band over one guitar is three terms in one sum. A cycle is refused when it is written and when the show loads, because no reading of it says what anything should play at.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the DCA is called - &apos;Band&apos;, &apos;Ambiences&apos;, &apos;Everything&apos; - which is what a client and a wide display show.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="shortName">
+          <a:documentation>The name for a seven-character scribble strip, written by somebody rather than cut by the machine (PRD 3.16). Empty, a display cuts the name to its width.</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
     </element>

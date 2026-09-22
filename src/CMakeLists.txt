@@ -108,6 +108,7 @@ add_library(wfg_engine STATIC
     wfg/engine/midi/MidiSender.h
     wfg/engine/midi/PortTable.h
     wfg/engine/midi/MidiSender.cpp
+    wfg/engine/surface/SurfaceTable.h
     wfg/engine/audio/AudioCommands.h
     wfg/engine/audio/AudioCommands.cpp
     wfg/engine/audio/AudioHost.h

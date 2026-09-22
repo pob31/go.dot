@@ -113,6 +113,14 @@
       "VALUE": ["member"],
       "RANGE": [{"VALS": ["member", "header", "footer", "persistent"]}],
       "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
+    },
+    "shortName": {
+      "FULL_PATH": "/godot/cue/F7HR8TVD/shortName",
+      "DESCRIPTION": "The cue's name for a seven-character display, written by somebody rather than cut by the machine (PRD 3.16: authored short names, never auto-truncation). Empty, a strip display cuts the name to its width and says nothing about it.",
+      "TYPE": "s",
+      "ACCESS": 3,
+      "VALUE": [""],
+      "GODOT": {"KIND": "state", "RATE_CAP": 50, "ANTICIPATABLE": false, "PANIC": "park"}
     }
   }
 }

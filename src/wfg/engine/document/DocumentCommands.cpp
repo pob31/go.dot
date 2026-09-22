@@ -455,6 +455,80 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  A CONTROL SURFACE AND ITS STRIPS, IN ONE COMMAND (PRD §3.16,
+            2026-09-23). A surface with no strips is a box nobody can use, and
+            making the strips one at a time would be a gesture per fader - so
+            the profile says how many and they arrive together.
+
+            THE RECORD CARRIES EVERY IDENTIFIER IT DREW: the profile, the name
+            (empty when none was given, so the positions below it hold), the
+            surface's, then each strip's in order. A replay draws none of its
+            own - the `go` shape, whose record carries every run a press made. */
+        registry.add ({ "surface.create",
+                        "Declares a control surface of a profile - virtual, mcu, d700, midiPads -"
+                        " with the strips that profile has.",
+                        { { "profile", 's', false }, { "name", 's', true }, { "id", 's', true },
+                          { "strip", 's', true, true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto name = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            std::vector<std::string> stripIds;
+
+                            for (std::size_t i = 3; i < args.size(); ++i)
+                                stripIds.push_back (args[i].getString());
+
+                            std::vector<std::string> made;
+                            const auto edit = document.createSurface (args[0].getString(), name, id,
+                                                                      stripIds, made);
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            std::vector<osc::Value> applied { args[0], osc::Value::string (name),
+                                                              osc::Value::string (edit.id) };
+
+                            for (const auto& strip : made)
+                                applied.push_back (osc::Value::string (strip));
+
+                            return Outcome::ok (std::move (applied));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "strip.create",
+                        "Adds a strip at the end of a surface - the second eight of a Mackie"
+                        " unit with an extender, one more pad.",
+                        { { "surface", 's', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto edit = document.createStrip (args[0].getString(), id);
+
+                            return fromEdit (edit, withId (args, 1, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
+        registry.add ({ "dca.create",
+                        "Declares a DCA: a trim that the cues and groups marked with it follow.",
+                        { { "name", 's', true }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto name = args.empty() ? std::string {} : args[0].getString();
+                            const auto id = args.size() > 1 ? args[1].getString() : std::string {};
+                            const auto edit = document.createDca (name, id);
+
+                            if (! edit.ok)
+                                return Outcome::rejected (edit.reason);
+
+                            return Outcome::ok ({ osc::Value::string (name),
+                                                  osc::Value::string (edit.id) });
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "mount.create",
                         "Declares a foreign namespace to be mounted at a prefix.",
                         { { "prefix", 's', false }, { "namespace", 's', false },

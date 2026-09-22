@@ -15,4 +15,6 @@
     <Port id="MDXP0003" name="Nobody bound this"/>
   </MidiPorts>
   <Network/>
+  <Surfaces/>
+  <Dcas/>
 </Show>

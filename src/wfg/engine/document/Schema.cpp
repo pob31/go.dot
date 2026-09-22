@@ -116,8 +116,8 @@ namespace wfg::doc
         const std::vector<Containment>& containmentTable()
         {
             static const std::vector<Containment> table {
-                { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts", "Network" },
-                                                                          { "document" } },
+                { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts", "Network",
+                                     "Surfaces", "Dcas" },                { "document" } },
                 /*  THE CONTAINER CARRIES A VALUE, which is why it is no
                     longer an empty pair of brackets. `focus` is a fact about
                     the collection of lists rather than about any list in it -
@@ -325,6 +325,36 @@ namespace wfg::doc
                     the reason `Route` is: deleting the first send must not
                     re-point a client holding the second. */
                 { "Send",    true,  {},                    { "send" } },
+
+                /*  PHASE 6'S SURFACES (PRD §3.16, 2026-09-23). A surface is a
+                    box of faders, pads and displays the show talks to through
+                    ports it already declares; what it is called and which
+                    ports it is on are decisions about the rig, so they are
+                    here, and whether anything answers tonight is not.
+
+                    A STRIP IS THE FOURTH SLOT KIND (§3.9e), which is why it
+                    carries the owner `slot` beside its own - the `Channel`
+                    shape exactly. It is published at /godot/slot/<id> with
+                    the other three, a run holds it and waits for it the way
+                    a Feed holds a processor input, and a sampler group's
+                    takeover is the eviction §13.15 left for this phase.
+
+                    `Surfaces` carries the owner `surfaces` for its `order`,
+                    as `Lists` carries `lists`; a container with an order and
+                    nothing else to say. */
+                { "Surfaces", false, { "Surface" },        { "surfaces" } },
+                { "Surface",  true,  { "Strip" },          { "surface" } },
+                { "Strip",    true,  {},                   { "slot", "strip" } },
+
+                /*  AND THE DCAS (PRD §3.28): an object of its own, cross-cutting
+                    the hierarchy. It holds only a name, a short name and the
+                    DCA it sits inside; which cues it trims is a mark on each
+                    member (`media/dca`, `group/dca`), so nothing flows down
+                    (§4.12). A container beside Surfaces rather than inside
+                    Audio: a DCA trims a level, and one day an opacity, and is
+                    no more an audio object than a group is. */
+                { "Dcas",     false, { "Dca" },            { "dcas" } },
+                { "Dca",      true,  {},                   { "dca" } },
             };
 
             return table;

@@ -87,7 +87,14 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # `feed` rather than of `route`: both name a destination the
                 # designer chose and carry what reaching it costs, while a
                 # route carries a matrix.
-                "send")
+                "send",
+                # Phase 6 (2026-09-23). A SURFACE is a box of faders and pads
+                # the show talks to through declared ports; a STRIP is one
+                # position on it and the fourth slot kind, so it is addressed
+                # /godot/slot/<id> and carries `slot` rows beside its own; a
+                # DCA is a trim cues and groups are marked with (PRD 3.28).
+                # `surfaces` and `dcas` are CONTAINER tokens like `lists`.
+                "surfaces", "surface", "strip", "dcas", "dca")
 
 VALUE_TYPES = {
     "s": "string",

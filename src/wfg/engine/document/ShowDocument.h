@@ -373,6 +373,31 @@ namespace wfg::doc
         EditResult createMount (const std::string& prefix, const std::string& namespaceFile,
                                 const std::string& id = {});
 
+        /*  A CONTROL SURFACE, and the strips its profile implies (PRD §3.16,
+            2026-09-23): eight for a virtual panel or a Mackie unit, sixteen
+            for the D700's two banks and for a pad controller. One command
+            makes all of them, so the strips' identifiers are ALSO what a
+            replay has to be handed: `stripIds` are used first, in order, and
+            the rest are drawn; `madeStrips` answers every strip identifier the
+            surface ended up with, which is what the applied record carries.
+            An unknown profile is `bad-value`. */
+        EditResult createSurface (const std::string& profile, const std::string& name,
+                                  const std::string& id,
+                                  const std::vector<std::string>& stripIds,
+                                  std::vector<std::string>& madeStrips);
+
+        /** One more strip at the end of a surface. Any profile: a Mackie unit
+            with an extender has sixteen, and which of them the hardware has is
+            the surface's ports, not a refusal here. */
+        EditResult createStrip (const std::string& surfaceId, const std::string& id = {});
+
+        /** A DCA (PRD §3.28), at the end of the show's DCAs. */
+        EditResult createDca (const std::string& name, const std::string& id = {});
+
+        /** How many strips a fresh surface of this profile is made with, or
+            -1 for a word that is not a profile. */
+        static int stripsForProfile (std::string_view profile);
+
         /** Removes the object and everything under it, releasing identifiers. */
         EditResult remove (const std::string& id);
 
@@ -561,6 +586,14 @@ namespace wfg::doc
 
         juce::ValueTree findById (std::string_view id) const;
         juce::ValueTree root() const noexcept { return showNode; }
+
+        /*  Whether climbing from the DCA `start` through each one's `dca` -
+            the DCA it sits inside - reaches `self`. The cycle test, asked by
+            the write door before a DCA is put inside another and by
+            `validate()` of every DCA in a file. Bounded by how many DCAs the
+            show has, so a file that already carries a cycle cannot make it
+            loop. */
+        bool dcaChainReaches (const std::string& start, const std::string& self) const;
 
         IdRegistry& ids() noexcept { return registry; }
         const IdRegistry& ids() const noexcept { return registry; }

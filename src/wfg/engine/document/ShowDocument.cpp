@@ -314,6 +314,12 @@ namespace wfg::doc
             is spelled differently. An identifier is eight characters of
             Crockford base32, so it can never be the word `inputs`. */
         if (element == "MidiPorts") return "port";
+
+        /*  And the same for Phase 6's two: `/godot/surface/order` beside
+            `/godot/surface/<id>/name`, `/godot/dca/order` beside
+            `/godot/dca/<id>/trim`. */
+        if (element == "Surfaces") return "surface";
+        if (element == "Dcas")     return "dca";
         return {};
     }
 
@@ -367,15 +373,28 @@ namespace wfg::doc
             container that holds channels and carries nothing of its own. */
         if (element == "Rack")                      return {};
 
+        /*  PHASE 6. A STRIP ANSWERS `strip` and not `slot`, for the reason a
+            rack channel answers `rackChannel`: this is the by-kind half of the
+            `refers` check, and a Feed whose `slot` named a fader would
+            otherwise pass it. It is still ADDRESSED as a slot - see
+            `addressOwnerFor` below. */
+        if (element == "Surfaces")                  return "surfaces";
+        if (element == "Surface")                   return "surface";
+        if (element == "Strip")                     return "strip";
+        if (element == "Dcas")                      return "dcas";
+        if (element == "Dca")                       return "dca";
+
         return {};
     }
 
     std::string_view ShowDocument::addressOwnerFor (std::string_view element)
     {
-        /*  The one place the two answers differ, and the reason is in the
-            header: a rack channel and a processor input share an address space
-            and not a kind. Everything else is addressed under its own owner. */
+        /*  The places the two answers differ, and the reason is in the header:
+            a rack channel, a processor input and a strip share an address
+            space and not a kind. Everything else is addressed under its own
+            owner. */
         if (element == "Channel")                   return "slot";
+        if (element == "Strip")                     return "slot";
 
         return ownerForElement (element);
     }
@@ -405,7 +424,7 @@ namespace wfg::doc
             writer keeps the order it is given and a golden file compares byte
             for byte: adding them in any other order would write a show whose
             containers read differently from one somebody opened. */
-        for (const auto* name : { "Lists", "Mounts", "MidiPorts", "Network" })
+        for (const auto* name : { "Lists", "Mounts", "MidiPorts", "Network", "Surfaces", "Dcas" })
             if (! root.getChildWithName (name).isValid())
                 root.addChild (juce::ValueTree (name), -1, nullptr);
     }
@@ -629,6 +648,8 @@ namespace wfg::doc
         if (segment == "list")     return showNode.getChildWithName ("Lists");
         if (segment == "network")  return showNode.getChildWithName ("Network");
         if (segment == "port")     return showNode.getChildWithName ("MidiPorts");
+        if (segment == "surface")  return showNode.getChildWithName ("Surfaces");
+        if (segment == "dca")      return showNode.getChildWithName ("Dcas");
         return {};
     }
 
@@ -1013,6 +1034,19 @@ namespace wfg::doc
             return EditResult::failed (elsewhere ? reason::notInList
                                                  : reason::notAStop);
         }
+
+        /*  AND A SECOND ONE, for the same reason and in the same place: a DCA
+            may sit inside a DCA (PRD §3.28), and one that ended up inside
+            itself would make its members' level a sum with no end. The walk
+            starts at the DCA being named and climbs; reaching the one being
+            written is the refusal. Bounded by the number of DCAs, so a file
+            that already carries a cycle - which `validate()` refuses to open,
+            but a reader should not have to trust that - cannot hang the door. */
+        if (target.attribute->name() == "dca"
+            && target.node.getType().toString() == "Dca"
+            && dcaChainReaches (value.getString(),
+                                target.node[idProperty].toString().toStdString()))
+            return EditResult::failed (reason::badValue);
 
         /*  THE HISTORY THE ROW BELONGS ON, which is the document's for a
             `persist == show` value and nothing at all for a state one: undo
@@ -2010,6 +2044,140 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    bool ShowDocument::dcaChainReaches (const std::string& start, const std::string& self) const
+    {
+        const auto dcas = showNode.getChildWithName ("Dcas");
+
+        if (! dcas.isValid())
+            return false;
+
+        const juce::Identifier parentProperty { "dca" };
+        auto current = start;
+
+        for (int steps = 0; steps <= dcas.getNumChildren() && ! current.empty(); ++steps)
+        {
+            if (current == self)
+                return true;
+
+            const auto node = dcas.getChildWithProperty (idProperty, juce::String (current));
+
+            if (! node.isValid())
+                return false;
+
+            current = node[parentProperty].toString().toStdString();
+        }
+
+        return false;
+    }
+
+    int ShowDocument::stripsForProfile (std::string_view profile)
+    {
+        /*  WHAT A FRESH SURFACE OF EACH KIND IS MADE WITH, and nothing more:
+            strips are objects, so a Mackie unit with an extender gains its
+            second eight with `strip.create`, and a pad controller with nine
+            pads loses seven with `object.delete`. The D700 is two banks of
+            eight on two port pairs (docs/D700_CONTROL_GUIDE.md 1.1); a pad
+            controller is most often sixteen; a virtual panel starts where a
+            Mackie unit does. */
+        if (profile == "virtual")  return 8;
+        if (profile == "mcu")      return 8;
+        if (profile == "d700")     return 16;
+        if (profile == "midiPads") return 16;
+        return -1;
+    }
+
+    EditResult ShowDocument::createSurface (const std::string& profile, const std::string& name,
+                                            const std::string& id,
+                                            const std::vector<std::string>& stripIds,
+                                            std::vector<std::string>& madeStrips)
+    {
+        madeStrips.clear();
+
+        const auto count = stripsForProfile (profile);
+
+        if (count < 0)
+            return EditResult::failed (reason::badValue);
+
+        /*  EVERY SUPPLIED IDENTIFIER IS ASKED ABOUT BEFORE ANYTHING IS MADE.
+            A surface is one command and several objects, and a replay hands
+            back the identifiers the live session drew; one of them malformed
+            or already taken would otherwise leave a surface with half its
+            strips - a document the refusal had changed. So the whole list is
+            checked first, duplicates within it included, and a refusal leaves
+            nothing behind. More identifiers than the profile makes is the
+            same refusal: the record describes a different surface. */
+        if (stripIds.size() > static_cast<std::size_t> (count))
+            return EditResult::failed (reason::unknownId);
+
+        for (std::size_t i = 0; i < stripIds.size(); ++i)
+        {
+            if (! Id::isValid (stripIds[i]) || registry.isTaken (stripIds[i]) || stripIds[i] == id)
+                return EditResult::failed (reason::unknownId);
+
+            for (std::size_t j = 0; j < i; ++j)
+                if (stripIds[j] == stripIds[i])
+                    return EditResult::failed (reason::unknownId);
+        }
+
+        std::vector<std::pair<std::string_view, std::string>> attributes {
+            { "profile", profile } };
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        auto made = insertObject (showNode.getChildWithName ("Surfaces"), endOfSequence,
+                                  "Surface", id, attributes);
+
+        if (! made.ok)
+            return made;
+
+        auto surface = findById (made.id);
+
+        for (int i = 0; i < count; ++i)
+        {
+            const auto wanted = static_cast<std::size_t> (i) < stripIds.size()
+                                  ? stripIds[static_cast<std::size_t> (i)]
+                                  : std::string {};
+
+            const auto strip = insertObject (surface, endOfSequence, "Strip", wanted, {});
+
+            /*  Cannot fail once the identifiers above passed and the surface
+                exists - but a create that could fail must say so rather than
+                answer with a surface short of strips. */
+            if (! strip.ok)
+                return strip;
+
+            madeStrips.push_back (strip.id);
+        }
+
+        return made;
+    }
+
+    EditResult ShowDocument::createStrip (const std::string& surfaceId, const std::string& id)
+    {
+        auto surface = findById (surfaceId);
+
+        if (! surface.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (surface.getType().toString() != "Surface")
+            return EditResult::failed (reason::typeMismatch);
+
+        return insertObject (surface, endOfSequence, "Strip", id, {});
+    }
+
+    EditResult ShowDocument::createDca (const std::string& name, const std::string& id)
+    {
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        return insertObject (showNode.getChildWithName ("Dcas"), endOfSequence, "Dca", id,
+                             attributes);
+    }
+
+    //==============================================================================
     void ShowDocument::collectIds (const juce::ValueTree& node, std::vector<std::string>& out) const
     {
         if (node.hasProperty (idProperty))
@@ -2891,6 +3059,24 @@ namespace wfg::doc
 
         Destinations { problems, busWidth, slotWidth }.visit (showNode);
 
+        /*  A DCA INSIDE ITSELF (PRD §3.28). The write door refuses to make one,
+            so a file carrying one was edited by hand - and no reading of it
+            says what the cues marked with those DCAs should play at, because
+            the sum has no end. Refused at load for the reason an OSC trigger
+            under /godot is: there is no reading of the file under which it
+            does what it says. */
+        if (const auto dcas = showNode.getChildWithName ("Dcas"); dcas.isValid())
+            for (const auto& dca : dcas)
+            {
+                const auto id = dca[idProperty].toString().toStdString();
+                const auto parent = dca[juce::Identifier ("dca")].toString().toStdString();
+
+                if (! id.empty() && dcaChainReaches (parent, id))
+                    problems.push_back ("/Show/Dcas/Dca[" + id + "]: sits inside itself - a DCA"
+                                        " may sit inside another, never in a circle, or the level"
+                                        " of every cue marked with it would be a sum with no end");
+            }
+
         return problems;
     }
 
@@ -2943,35 +3129,61 @@ namespace wfg::doc
                         if (! node.hasProperty (name))
                             continue;
 
-                        const auto value = node[name].toString().toStdString();
+                        const auto whole = node[name].toString().toStdString();
 
                         /*  Empty is a pointer at nothing on purpose - a list
                             with no standby, a cue with no target yet - and is a
                             resting state rather than a dangling reference. */
-                        if (value.empty())
+                        if (whole.empty())
                             continue;
-
-                        const auto target = document.findById (value);
 
                         const auto here = "/Show/.../" + element + "["
                                             + node[idProperty].toString().toStdString() + "]/@"
                                             + std::string (attribute.name());
 
-                        if (! target.isValid())
+                        /*  SEVERAL IDENTIFIERS, SPACE-SEPARATED, ARE SEVERAL
+                            REFERENCES (2026-09-23). A surface names its ports
+                            in bank order, one per bank, in one row - and an
+                            identifier is eight characters of Crockford base32
+                            with no space in it, so a value with spaces was
+                            never one identifier and splitting it loses nothing
+                            a single-valued row could have said. */
+                        std::vector<std::string> values;
+
+                        for (std::size_t at = 0; at < whole.size();)
                         {
-                            problems.push_back (here + ": names \"" + value
-                                                 + "\", which is not in this show");
-                            continue;
+                            const auto start = whole.find_first_not_of (' ', at);
+
+                            if (start == std::string::npos)
+                                break;
+
+                            const auto end = whole.find (' ', start);
+                            values.push_back (whole.substr (start, end == std::string::npos
+                                                                     ? std::string::npos
+                                                                     : end - start));
+                            at = end == std::string::npos ? whole.size() : end;
                         }
 
-                        const auto found = ownerForElement (
-                            target.getType().toString().toStdString());
+                        for (const auto& value : values)
+                        {
+                            const auto target = document.findById (value);
 
-                        if (found != refers)
-                            problems.push_back (here + ": names \"" + value + "\", which is a "
-                                                 + (found.empty() ? std::string ("thing of no kind")
-                                                                  : std::string (found))
-                                                 + " and not a " + std::string (refers));
+                            if (! target.isValid())
+                            {
+                                problems.push_back (here + ": names \"" + value
+                                                     + "\", which is not in this show");
+                                continue;
+                            }
+
+                            const auto found = ownerForElement (
+                                target.getType().toString().toStdString());
+
+                            if (found != refers)
+                                problems.push_back (here + ": names \"" + value + "\", which is a "
+                                                     + (found.empty() ? std::string ("thing of no kind")
+                                                                      : std::string (found))
+                                                     + " and not a " + std::string (refers));
+                        }
                     }
                 }
 

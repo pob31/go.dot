@@ -72,6 +72,8 @@ namespace wfg::audio { class MediaInfo; }
 
 namespace wfg::midi { class PortTable; }
 
+namespace wfg::surface { class SurfaceTable; }
+
 namespace wfg::tree
 {
     /*  The engine's own numbers, handed to the tree each tick because the tree
@@ -247,6 +249,17 @@ namespace wfg::tree
             is the truth rather than a placeholder. */
         void setMidiPorts (const midi::PortTable* portsToRead) noexcept { ports = portsToRead; }
 
+        /*  What each declared control surface turned out to be - talked to or
+            not, and why - for `/godot/surface/<id>/connected`, `problem` and
+            `serial`. The port table's shape and its reason: a replay or a tree
+            dump drives no surface, so every hardware surface reads not
+            connected, which is the truth. A virtual one reads connected
+            whatever this says, being the client's own panel. */
+        void setSurfaces (const surface::SurfaceTable* surfacesToRead) noexcept
+        {
+            surfaces = surfacesToRead;
+        }
+
         /*  How long each media file is, read once when the show was opened, for
             `/godot/cue/<id>/duration`. Keyed by the `file` the document names.
 
@@ -343,6 +356,7 @@ namespace wfg::tree
         const MountTable& mounts;
         const MountSender* sender = nullptr;
         const midi::PortTable* ports = nullptr;
+        const surface::SurfaceTable* surfaces = nullptr;
         /*  What a test handed in, when one did. Otherwise the lengths come
             from `mediaInfo` at the top of every publish. */
         const std::map<std::string, double>* fixedDurations = nullptr;
@@ -391,6 +405,11 @@ namespace wfg::tree
 
         /** Every cue list, in document order. See `declaredCues`. */
         std::vector<std::string> declaredLists;
+
+        /*  Every DCA, in document order: the roster `/godot/dca/<id>/trim` is
+            published against from the runtime half, because a trim is what a
+            fader is doing tonight and the document half is a cache. */
+        std::vector<std::string> declaredDcas;
         const cue::RunTable& runs;
 
         /*  Which cues can be holding one slot at once, and every dangling

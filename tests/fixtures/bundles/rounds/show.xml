@@ -13,4 +13,6 @@
   <Audio tracks="0"/>
   <MidiPorts/>
   <Network/>
+  <Surfaces/>
+  <Dcas/>
 </Show>
