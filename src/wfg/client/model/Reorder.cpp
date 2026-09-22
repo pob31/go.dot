@@ -46,6 +46,7 @@ namespace wfg::client::model
         {
             case DropKind::target:      return "drop-aim";
             case DropKind::preset:      return "drop-header";
+            case DropKind::header:      return "drop-header";
             case DropKind::footer:      return "drop-footer";
 
             case DropKind::into:
@@ -118,15 +119,36 @@ namespace wfg::client::model
         /*  A SECTION'S BAND TAKES THE CUE INTO THAT SECTION (author,
             2026-09-18: "drag and drop directly in the footer if it already
             exists"): the header, the footer or the persistent section, at
-            its end. A band with no section yet - none exists - takes nothing. */
+            its end. */
         if (over.rowKind == RowKind::band)
         {
-            if (over.sectionId.empty())
+            if (! over.sectionId.empty())
+            {
+                drop.kind = DropKind::into;
+                drop.container = over.sectionId;
+                drop.index = -1;
                 return drop;
+            }
 
-            drop.kind = DropKind::into;
-            drop.container = over.sectionId;
-            drop.index = -1;
+            /*  AND A BAND WITH NO SECTION YET MAKES ONE (author, 2026-09-22:
+                "drag and drop to an empty group header or footer is not
+                working").
+
+                It used to take nothing, which was right while such a band was
+                only ever drawn for a section that had been emptied - there was
+                nothing on screen to aim at either way. Now the list grows the
+                two bands of whichever group is being dragged over, so the band
+                IS the target, and letting go on it has to make the section the
+                cue is being put into. The footer already had that path from a
+                group title (`moveToFooter`: the role, then the move, queued
+                until the section lands); the header now has the same. */
+            if (! over.parent.empty() && over.parent != dragged.id)
+            {
+                drop.kind = over.section == Section::header ? DropKind::header
+                                                            : DropKind::footer;
+                drop.cueId = over.parent;
+            }
+
             return drop;
         }
 
@@ -332,6 +354,7 @@ namespace wfg::client::model
             case DropKind::into:    return "into " + name + timelineNote;
             case DropKind::target:  return "aim " + name + " at it";
             case DropKind::preset:  return "prepare it in " + name + "'s header";
+            case DropKind::header:  return "into " + name + "'s header";
             case DropKind::footer:  return "into " + name + "'s footer";
             case DropKind::clearPreset: return "no longer prepared ahead";
         }

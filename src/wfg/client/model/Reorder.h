@@ -67,6 +67,7 @@ namespace wfg::client::model
         into,       ///< `object.move` into the group `container`, at its end
         target,     ///< `node.set <cueId>/target <dragged>`
         preset,     ///< `node.set <dragged>/preset <cueId>`: prepared by that group's header
+        header,     ///< move into the header of the group `cueId`, made first if it has none
         footer,     ///< move into the footer of the group `cueId`, made first if it has none
         clearPreset ///< `node.set <dragged>/preset ""`: no longer prepared ahead
     };

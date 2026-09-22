@@ -726,6 +726,82 @@ TEST_CASE ("client: the cue list is rebuilt when the show moves, and not when th
 }
 
 //==============================================================================
+TEST_CASE ("client: a band with no section behind it makes one rather than taking nothing")
+{
+    /*  The author, 2026-09-22: "drag and drop to an empty group header or
+        footer is not working". An empty section draws no band, so the list
+        grows the two bands of whichever group is being dragged over - and
+        letting go on one of them has to MAKE the section, because there is
+        nothing to move into yet.
+
+        The footer already had that path from a group's title row; the header
+        had none at all, which is the half that was missing. */
+    model::Row dragged;
+    dragged.rowKind = model::RowKind::cue;
+    dragged.id = "CUE00001";
+
+    model::Row band;
+    band.rowKind = model::RowKind::band;
+    band.parent = "GRP00001";
+    band.name = "Header";
+
+    SUBCASE ("a header band with no section names the group and the role")
+    {
+        band.section = model::Section::header;
+
+        const auto drop = model::dropFor (band, dragged, 0.5);
+
+        CHECK (drop.kind == model::DropKind::header);
+        CHECK (drop.cueId == "GRP00001");
+
+        //  And it is the same colour the preset mark uses, which is the header's.
+        CHECK (model::dropTone (drop.kind) == "drop-header");
+    }
+
+    SUBCASE ("and a footer band the same, in the footer's own colour")
+    {
+        band.section = model::Section::footer;
+        band.name = "Footer";
+
+        const auto drop = model::dropFor (band, dragged, 0.5);
+
+        CHECK (drop.kind == model::DropKind::footer);
+        CHECK (drop.cueId == "GRP00001");
+        CHECK (model::dropTone (drop.kind) == "drop-footer");
+    }
+
+    SUBCASE ("a band whose section exists still moves into it, as it always did")
+    {
+        band.section = model::Section::header;
+        band.sectionId = "HDR00001";
+
+        const auto drop = model::dropFor (band, dragged, 0.5);
+
+        CHECK (drop.kind == model::DropKind::into);
+        CHECK (drop.container == "HDR00001");
+        CHECK (drop.index == -1);
+    }
+
+    SUBCASE ("and a group cannot be dropped into its own empty section")
+    {
+        band.section = model::Section::footer;
+        dragged.id = "GRP00001";
+
+        CHECK (model::dropFor (band, dragged, 0.5).kind == model::DropKind::none);
+    }
+
+    SUBCASE ("the sentence says which section it would make")
+    {
+        band.section = model::Section::header;
+
+        model::Row group;
+        group.name = "Preshow";
+
+        const auto said = model::describe (model::dropFor (band, dragged, 0.5), group, false);
+        CHECK (said == "into Preshow's header");
+    }
+}
+
 TEST_CASE ("client: a section is a band that folds, and the fold is the client's alone")
 {
     /*  The author, 2026-09-18, having asked whether the header and footer
@@ -1098,13 +1174,22 @@ TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be name
         CHECK (model::dropFor (a, c, 0.5).kind == model::DropKind::after);   // a memo has no "on"
     }
 
-    //  A band takes the cue INTO its section when the tree names one, and nothing otherwise.
+    /*  A band takes the cue INTO its section when the tree names one, and
+        MAKES the section when it does not (2026-09-22). It used to take
+        nothing there, which was right while such a band was drawn only for a
+        section that had been emptied - there was nothing on screen to aim at
+        either way. Now the list grows the missing bands of whichever group is
+        being dragged over, so the band is the target and letting go has to
+        make the thing being dropped into. */
     {
         model::Row band;
         band.rowKind = model::RowKind::band;
         band.section = model::Section::footer;
         band.parent = "G";
-        CHECK (model::dropFor (band, a, 0.5).kind == model::DropKind::none);
+
+        const auto made = model::dropFor (band, a, 0.5);
+        CHECK (made.kind == model::DropKind::footer);
+        CHECK (made.cueId == "G");
 
         band.sectionId = "FOOT";
         const auto into = model::dropFor (band, a, 0.5);

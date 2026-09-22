@@ -77,24 +77,34 @@ namespace wfg::client::ui
                     owner.refresh();
             };
 
-            /*  THE CROSS ONLY WHERE THERE IS SOMETHING TO TAKE AWAY. A strip
-                at silence with no `Send` behind it has nothing to delete, and
-                a cross on it would offer to remove a mix channel - which is
-                the Outputs tab's business and not this panel's. The strips
-                are rebuilt when a send appears or goes, so this is decided
-                once rather than polled. */
-            if (! isMaster && send().present())
+            if (! isMaster)
             {
                 drop.setButtonText ("x");
                 drop.setWantsKeyboardFocus (false);
                 drop.setTooltip ("Takes this send away. The mix channel stays; this cue stops "
                                  "arriving at it.");
                 drop.onClick = [this] { owner.removeAt (at); };
-                addAndMakeVisible (drop);
             }
         }
 
         const model::SendStrip& send() const { return owner.reading.sends[at - 1]; }
+
+        /*  THE CROSS ONLY WHERE THERE IS SOMETHING TO TAKE AWAY: a strip at
+            silence with no `Send` behind it has nothing to delete, and a cross
+            on it would look like an offer to remove the mix channel, which is
+            the Outputs tab's business and not this panel's. */
+        void showCross (bool wanted)
+        {
+            if (wanted == (drop.getParentComponent() != nullptr))
+                return;
+
+            if (wanted)
+                addAndMakeVisible (drop);
+            else
+                removeChildComponent (&drop);
+
+            resized();
+        }
 
         /** Where the throw is drawn, which is what a drag is measured against. */
         juce::Rectangle<int> throwArea() const
@@ -105,15 +115,41 @@ namespace wfg::client::ui
             return area;
         }
 
+        /*  WHERE THE FADER IS DRAWN, which is the HAND while a hand is on it
+            and the document the rest of the time.
+
+            A drag is a conversation with a round trip in it: the level goes
+            out as a command, the tick thread applies it, and the reading comes
+            back a pass later. Drawn from the reading throughout, the cap
+            lags the pointer - and on the first move of a SILENT strip it does
+            worse than lag, because what comes back first is the new send's
+            own default of nought. That is the jump the author saw. So while
+            the hand is down the strip draws what the hand asked for, and the
+            document catches up underneath it. */
         double levelHere() const
         {
+            if (dragging)
+                return shown;
+
             return isMaster ? owner.reading.cueLevel : send().levelDb;
         }
 
         void mouseDown (const juce::MouseEvent& event) override
         {
             held = levelHere();
+            shown = held;
+            dragging = true;
             dragFrom = event.position.y;
+        }
+
+        void mouseUp (const juce::MouseEvent&) override
+        {
+            /*  AND THE READING TAKES OVER AGAIN. By now the level that was
+                asked for has been applied and published; if it has not, the
+                next pass corrects the cap rather than this holding a number
+                the document never accepted. */
+            dragging = false;
+            owner.refresh();
         }
 
         void mouseDrag (const juce::MouseEvent& event) override
@@ -131,8 +167,11 @@ namespace wfg::client::ui
                                  / static_cast<float> (area.getHeight());
             const auto scale = event.mods.isShiftDown() ? 0.1f : 1.0f;
 
-            owner.levelWanted (at, model::dbForFraction (model::fractionForDb (held)
-                                                           + static_cast<double> (moved * scale)));
+            shown = model::dbForFraction (model::fractionForDb (held)
+                                            + static_cast<double> (moved * scale));
+
+            owner.levelWanted (at, shown);
+            owner.refresh();
         }
 
         void mouseDoubleClick (const juce::MouseEvent&) override
@@ -234,7 +273,9 @@ namespace wfg::client::ui
         juce::Label value;
         juce::TextButton drop;
 
-        double held = 0.0;
+        double held = 0.0;      ///< where the level was when the hand went down
+        double shown = 0.0;     ///< where the hand has asked for it to be
+        bool dragging = false;
         float dragFrom = 0.0f;
     };
 
@@ -269,10 +310,16 @@ namespace wfg::client::ui
             retyped when a fader moves. Rebuilding on a level would take the
             focus out of the box somebody is typing a number into, twenty-five
             times a second. */
+        /*  THE MIX CHANNELS AND NOT THE SENDS. A send appearing or going is
+            NOT a change of shape: the strip was already there, drawn at
+            silence, and the only visible difference is whether it has a cross.
+            Rebuilding on it would destroy the very component the hand is
+            dragging, mid-drag - which is exactly what raising a silent fader
+            does, so the first move of every new send killed itself. */
         std::string out = reading.subject.objectId + "!" + reading.notice;
 
         for (const auto& strip : reading.sends)
-            out += "|" + strip.busId + ":" + strip.sendId;
+            out += "|" + strip.busId;
 
         return out;
     }
@@ -283,28 +330,25 @@ namespace wfg::client::ui
         reading = readingToUse;
 
         if (shapeOf() != was)
-        {
             rebuild();
-
-            /*  AND THE LEVEL THE HAND WAS ASKING FOR, now that the object it
-                needed exists. The `send.create` went out on the drag; the
-                level goes out here, on the first pass where the tree has the
-                new send in it - the same two-step the importer uses to make a
-                cue and then fill it in. */
-            if (! awaitingBus.empty())
-                for (std::size_t at = 0; at < reading.sends.size(); ++at)
-                    if (reading.sends[at].busId == awaitingBus && reading.sends[at].present())
-                    {
-                        const auto wanted = awaitingLevel;
-                        awaitingBus.clear();
-                        levelWanted (at + 1, wanted);
-                        break;
-                    }
-        }
         else
-        {
             refresh();
-        }
+
+        /*  AND THE LEVEL THE HAND WAS ASKING FOR, now that the object it
+            needed exists. The `send.create` went out on the drag; the level
+            goes out here, on the first pass where the tree has the new send in
+            it - the same two-step the importer uses to make a cue and then
+            fill it in. Outside the rebuild branch, because a send arriving is
+            no longer a change of shape. */
+        if (! awaitingBus.empty())
+            for (std::size_t at = 0; at < reading.sends.size(); ++at)
+                if (reading.sends[at].busId == awaitingBus && reading.sends[at].present())
+                {
+                    const auto wanted = awaitingLevel;
+                    awaitingBus.clear();
+                    levelWanted (at + 1, wanted);
+                    break;
+                }
     }
 
     void SendMixerComponent::rebuild()
@@ -336,6 +380,12 @@ namespace wfg::client::ui
     {
         for (auto& strip : strips)
         {
+            /*  THE CROSS FOLLOWS THE SEND rather than the strip, and it is
+                here rather than in the constructor because a send arriving is
+                no longer a rebuild: there is something to delete now, so there
+                is a cross, and the strip it belongs to has not moved. */
+            strip->showCross (! strip->isMaster && strip->send().present());
+
             if (strip->value.isBeingEdited())
                 continue;
 
@@ -375,9 +425,18 @@ namespace wfg::client::ui
         {
             if (actions.createSend)
             {
+                /*  ONCE PER DRAG, not once per mouse-move. A drag sends fifty
+                    of these a second and the document refuses every duplicate
+                    after the first - correctly, but it would put fifty
+                    refusals in the log for one gesture. The level keeps
+                    catching up; only the making of the object is once. */
+                const auto asked = awaitingBus == strip.busId;
+
                 awaitingBus = strip.busId;
                 awaitingLevel = level;
-                actions.createSend (reading.subject.objectId, strip.busId);
+
+                if (! asked)
+                    actions.createSend (reading.subject.objectId, strip.busId);
             }
 
             return;

@@ -57,7 +57,8 @@ namespace wfg::client::ui
     class CueListComponent final : public juce::Component,
                                    public juce::FileDragAndDropTarget,
                                    public juce::DragAndDropTarget,
-                                   private juce::ListBoxModel
+                                   private juce::ListBoxModel,
+                                   private juce::Timer
     {
     public:
         struct Actions
@@ -113,6 +114,9 @@ namespace wfg::client::ui
             /*  Into the group's footer, made first if it has none: shift+alt
                 drop on the group title. */
             std::function<void (const std::string& cueId, const std::string& group)> moveToFooter;
+
+            /** The same for a group's header, made first if it has none. */
+            std::function<void (const std::string& cueId, const std::string& group)> moveToHeader;
 
             /** One value edited in place: the node's address and the text typed. */
             std::function<void (const std::string& address, const std::string& text)> setValue;
@@ -292,6 +296,30 @@ namespace wfg::client::ui
         std::string editId;                  ///< the cue the open box is about, so a rebuild can follow it
         std::string editAttribute;
         bool editable = true;
+        /*  THE GROUP WHOSE EMPTY BANDS ARE SHOWING, while a drag is over its
+            title row (author, 2026-09-22: "showing temporarily the bands while
+            dragging over a group might be best"). Empty the rest of the time,
+            which is every moment nobody is dragging. */
+        std::string bandsFor;
+
+        /** Grows `rows` the two bands of `bandsFor`, or takes them away again. */
+        void showEmptyBands (const std::string& groupId);
+
+        /*  WHAT A DRAG IS DOING, re-asked while the hand holds still.
+
+            A drag carries no modifiers of its own, so `dropAt` reads the
+            keyboard's live state - and it is only called when the POINTER
+            moves. Hold a cue over a group and press alt and nothing happened
+            until the hand twitched, which reads as the modifier not working at
+            all (author, 2026-09-22: "the drag operation didn't work at first
+            (alt and shift+alt modifiers)"). So while a drag is over this list
+            the answer is re-asked on a timer from the last position the
+            pointer was at, and a changed modifier lands without a twitch. */
+        void timerCallback() override;
+
+        SourceDetails lastDrag { juce::var(), nullptr, {} };
+        juce::ModifierKeys lastMods;
+
         int dropRow = -1;            ///< the row a file drag is over, or -1
         bool dropWouldInsert = false;   ///< whether letting go really inserts after that row
         bool dropWouldLink = false;  ///< whether letting go there names a cue's file, or lands ON the row

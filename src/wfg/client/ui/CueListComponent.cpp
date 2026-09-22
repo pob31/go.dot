@@ -1379,7 +1379,25 @@ namespace wfg::client::ui
 
     void CueListComponent::itemDragEnter (const SourceDetails& details)
     {
+        /*  Thirty times a second, which is cheap - the body is a hit test
+            over rows already in memory - and only for as long as a hand is
+            over this list holding something. */
+        lastMods = juce::ModifierKeys::getCurrentModifiers();
+        startTimerHz (30);
         itemDragMove (details);
+    }
+
+    void CueListComponent::timerCallback()
+    {
+        const auto now = juce::ModifierKeys::getCurrentModifiers();
+
+        if (now == lastMods)
+            return;
+
+        lastMods = now;
+
+        if (lastDrag.sourceComponent != nullptr)
+            itemDragMove (lastDrag);
     }
 
     void CueListComponent::itemDragMove (const SourceDetails& details)
@@ -1389,6 +1407,26 @@ namespace wfg::client::ui
         const auto wasInsert = dropWouldInsert;
         const auto wasTone = dropTone;
 
+        //  Kept so the timer can ask the same question again without the hand moving.
+        lastDrag = details;
+
+        /*  THE BANDS FIRST, because they change what is under the pointer:
+            hovering a group's name grows its missing header and footer, and
+            the hit test below has to see them. */
+        {
+            const auto over = rowUnder (details.localPosition.y);
+            const auto* row = over >= 0 && static_cast<std::size_t> (over) < rows.size()
+                                ? &rows[static_cast<std::size_t> (over)] : nullptr;
+
+            /*  STICKY WHILE THE HAND IS ON ONE OF THE BANDS ITSELF, or they
+                would vanish the moment somebody moved towards them. */
+            const auto keep = row != nullptr && row->rowKind == model::RowKind::band
+                                && row->parent == bandsFor;
+
+            if (! keep)
+                showEmptyBands (row != nullptr && row->isGroup ? row->id : std::string {});
+        }
+
         auto at = -1;
         const auto drop = dropAt (details, at);
 
@@ -1397,7 +1435,8 @@ namespace wfg::client::ui
         dropRow = drop.kind == model::DropKind::none || drop.kind == model::DropKind::clearPreset ? -1 : at;
         dropWouldInsert = drop.kind == model::DropKind::after;
         dropWouldLink = drop.kind == model::DropKind::into || drop.kind == model::DropKind::target
-                     || drop.kind == model::DropKind::preset || drop.kind == model::DropKind::footer;
+                     || drop.kind == model::DropKind::preset || drop.kind == model::DropKind::footer
+                     || drop.kind == model::DropKind::header;
         dropTone = model::dropTone (drop.kind);
 
         //  Out of the header: said even over nothing, since that is where the hand is.
@@ -1424,9 +1463,108 @@ namespace wfg::client::ui
         }
     }
 
+    /*  THE BANDS A GROUP WOULD HAVE, shown while a drag is over its name.
+
+        AN EMPTY SECTION DRAWS NO BAND (`ShowModel`: "an empty header is not a
+        thing an operator needs told about"), which is right when nobody is
+        holding a cue and leaves nothing to aim at when somebody is. So the two
+        lines appear for the group under the hand and go when the hand does.
+
+        THE GROUP WHOSE TITLE ROW IS UNDER THE POINTER, which is what makes
+        nesting answer itself: a title row belongs to exactly one group, so
+        there is never a question of which group's header is meant. To reach an
+        outer group's header from inside a nested one, hover the outer group's
+        own name - the same gesture, one row up.
+
+        AND THE ROWS BELOW THE TITLE MOVE, which is why it is the TITLE row
+        rather than any row of the group: nothing above the insertion shifts,
+        so the pointer stays on the thing it was pointing at. */
+    void CueListComponent::showEmptyBands (const std::string& groupId)
+    {
+        if (groupId == bandsFor)
+            return;
+
+        bandsFor = groupId;
+
+        //  Whatever was spliced in last time goes with the group it was for.
+        rows.erase (std::remove_if (rows.begin(), rows.end(),
+                                    [] (const model::Row& row)
+                                    { return row.rowKind == model::RowKind::band && row.sectionId.empty()
+                                              && row.count == 0; }),
+                    rows.end());
+
+        if (! bandsFor.empty())
+        {
+            const auto* group = rowById (bandsFor);
+
+            if (group == nullptr || ! group->isGroup)
+            {
+                bandsFor.clear();
+            }
+            else
+            {
+                /*  ONLY THE SECTIONS THAT ARE NOT THERE. One that already has
+                    cues in it has a band of its own, drawn by the model, and a
+                    second would be two answers to one question. */
+                const auto has = [this] (model::Section which)
+                {
+                    for (const auto& row : rows)
+                        if (row.rowKind == model::RowKind::band && row.parent == bandsFor
+                              && row.section == which)
+                            return true;
+
+                    return false;
+                };
+
+                const auto make = [this, group] (model::Section which, const char* word)
+                {
+                    model::Row band;
+                    band.rowKind = model::RowKind::band;
+                    band.section = which;
+                    band.depth = group->depth + 1;
+                    band.parent = bandsFor;
+                    band.name = word;
+                    band.count = 0;         //  what marks it as one of ours
+                    band.bandKey = bandsFor + "/" + word;
+                    return band;
+                };
+
+                auto at = std::find_if (rows.begin(), rows.end(),
+                                        [this] (const model::Row& row) { return row.id == bandsFor; });
+
+                if (at != rows.end())
+                {
+                    const auto depth = at->depth;
+                    auto after = at + 1;
+
+                    //  The footer goes past everything the group contains.
+                    while (after != rows.end() && after->depth > depth)
+                        ++after;
+
+                    if (! has (model::Section::footer))
+                        after = rows.insert (after, make (model::Section::footer, "Footer"));
+
+                    if (! has (model::Section::header))
+                    {
+                        at = std::find_if (rows.begin(), rows.end(),
+                                           [this] (const model::Row& row) { return row.id == bandsFor; });
+                        rows.insert (at + 1, make (model::Section::header, "Header"));
+                    }
+                }
+            }
+        }
+
+        list.updateContent();
+        list.repaint();
+    }
+
     void CueListComponent::itemDragExit (const SourceDetails&)
     {
         const auto was = dropRow;
+
+        stopTimer();
+        lastDrag = SourceDetails { juce::var(), nullptr, {} };
+        showEmptyBands ({});
 
         dropRow = -1;
         dropWouldLink = false;
@@ -1446,10 +1584,17 @@ namespace wfg::client::ui
         const auto drop = dropAt (details, at);
         const auto dragged = draggedIdOf (details);
 
+        stopTimer();
+        lastDrag = SourceDetails { juce::var(), nullptr, {} };
+
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
         dropTone = "drop-into";
+
+        //  The bands were the hand's, and the hand has gone.
+        showEmptyBands ({});
+
         repaint();
 
         if (actions.say)
@@ -1479,6 +1624,11 @@ namespace wfg::client::ui
             case model::DropKind::footer:
                 if (actions.moveToFooter)
                     actions.moveToFooter (dragged, drop.cueId);
+                return;
+
+            case model::DropKind::header:
+                if (actions.moveToHeader)
+                    actions.moveToHeader (dragged, drop.cueId);
                 return;
 
             case model::DropKind::clearPreset:

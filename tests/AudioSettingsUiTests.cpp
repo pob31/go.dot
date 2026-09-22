@@ -134,25 +134,35 @@ TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch s
     CHECK (tabs->getTabNames()[1] == "Outputs");
     tabs->setCurrentTabIndex (1);
 
-    /*  THE TWO ADD BUTTONS ARE THE WHOLE STRUCTURE GESTURE. Everything else on
-        this tab - the name, the width cell, the cross, the drag - is a click on
-        a row, which a component test cannot reach without a mouse; what it CAN
-        assert is that each control sends the named command it claims to. */
-    auto* addDirect = button (panel, "+ direct out");
-    auto* addMix = button (panel, "+ mix channel");
-    REQUIRE (addDirect != nullptr);
-    REQUIRE (addMix != nullptr);
+    /*  THE FOUR ADD BUTTONS ARE THE WHOLE STRUCTURE GESTURE. Everything else
+        on this tab - the name, the cross, the drag - is a click on a row,
+        which a component test cannot reach without a mouse; what it CAN assert
+        is that each control sends the named command it claims to.
 
-    addDirect->onClick();
-    REQUIRE (rig.sent.size() == 1);
-    CHECK (rig.sent.back().command == "bus.create");
-    CHECK (rig.sent.back().args[0].getString() == "direct");
-    CHECK (rig.sent.back().args[1].getInt32() == 1);
+        FOUR AND NOT TWO WITH A FLIP (author, 2026-09-22): a width is said when
+        the output is made, because changing it afterwards repacks every
+        channel below it, which reads from the patch as the rig having been
+        re-wired. */
+    struct Wanted { const char* label; const char* kind; int width; };
 
-    addMix->onClick();
-    REQUIRE (rig.sent.size() == 2);
-    CHECK (rig.sent.back().args[0].getString() == "mix");
-    CHECK (rig.sent.back().args[1].getInt32() == 2);
+    for (const auto& one : { Wanted { "+ mono out",   "direct", 1 },
+                             Wanted { "+ stereo out", "direct", 2 },
+                             Wanted { "+ mono mix",   "mix",    1 },
+                             Wanted { "+ stereo mix", "mix",    2 } })
+    {
+        INFO (one.label);
+
+        auto* add = button (panel, one.label);
+        REQUIRE (add != nullptr);
+
+        const auto before = rig.sent.size();
+        add->onClick();
+
+        REQUIRE (rig.sent.size() == before + 1);
+        CHECK (rig.sent.back().command == "bus.create");
+        CHECK (rig.sent.back().args[0].getString() == one.kind);
+        CHECK (rig.sent.back().args[1].getInt32() == one.width);
+    }
 
     /*  AND THE FIRST HAND EDIT OF THE PATCH SETTLES THE SHOW, before the edit
         lands rather than after: the engine's layout rule materialises the patch

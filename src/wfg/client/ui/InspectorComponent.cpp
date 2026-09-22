@@ -238,11 +238,31 @@ namespace wfg::client::ui
                     break;
 
                 case model::Control::busRef:
-                    /*  BY ITEM AND NOT BY TEXT, because the text is a name and
-                        the value is an identifier: setting the text would
-                        clear the menu the moment an output was renamed, and
-                        would show the identifier to somebody who never typed
-                        one. */
+                    /*  THE ITEMS THEMSELVES CAN HAVE MOVED, which no other
+                        control here has to think about: a `choice`'s options
+                        come from the parameter table and are fixed for the
+                        life of the program, while these come from the SHOW -
+                        an output renamed, added, deleted, or its mark changing
+                        from free to taken as a cue is moved. The field count
+                        does not change when any of that happens, so the panel
+                        is not rebuilt and the menu would go on offering last
+                        week's names.
+
+                        Compared rather than repopulated blindly, because
+                        refilling a ComboBox twenty-five times a second would
+                        shut it under anybody trying to use it. */
+                    if (line.field.choices != field.choices)
+                    {
+                        line.field.choices = field.choices;
+                        line.choice.clear (juce::dontSendNotification);
+
+                        //  Named `item` and not `at`: this panel already has one.
+                        auto item = 1;
+
+                        for (const auto& choice : field.choices)
+                            line.choice.addItem (juce::String (choice.second), item++);
+                    }
+
                     line.choice.setSelectedId (idForChoice (field), juce::dontSendNotification);
                     break;
 

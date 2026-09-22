@@ -56,11 +56,29 @@ namespace wfg::client::ui
                        std::function<void (Event)> dispatch = {})
                 : theme (colours), isInput (input), minimum (minimumRows), mapping (std::move (initial)), send (std::move (dispatch))
             {
-                addAndMakeVisible (countLabel); countLabel.setText ("Logical channels", juce::dontSendNotification);
-                addAndMakeVisible (count); count.setInputRestrictions (3, "0123456789");
-                count.setText (juce::String (static_cast<int> (mapping.size())));
-                count.onReturnKey = [this] { changeRows(); };
-                count.onFocusLost = [this] { changeRows(); };
+                /*  THE OUTPUT SIDE HAS NO CHANNEL COUNT TO TYPE (author,
+                    2026-09-22: "I think we can remove the logical channel.
+                    Adding and removing channels is redundant with this").
+
+                    The show's OUTPUT LIST is the count: every bus declares a
+                    width, `firstChannel` is the running sum, and the four
+                    `bus.*` commands keep it packed. A second number beside it
+                    was a second answer to one question, and the two could
+                    disagree - a patch row past the last bus went nowhere and
+                    said nothing about it.
+
+                    THE INPUT SIDE KEEPS IT, because nothing else declares
+                    inputs. There is no list of them to read a count off, so
+                    the box is the only place the number can come from. */
+                if (isInput)
+                {
+                    addAndMakeVisible (countLabel);
+                    countLabel.setText ("Logical channels", juce::dontSendNotification);
+                    addAndMakeVisible (count); count.setInputRestrictions (3, "0123456789");
+                    count.setText (juce::String (static_cast<int> (mapping.size())));
+                    count.onReturnKey = [this] { changeRows(); };
+                    count.onFocusLost = [this] { changeRows(); };
+                }
                 for (auto* button : { &scroll, &patch, &identity, &clear }) addAndMakeVisible (*button);
                 scroll.onClick = [this] { stopTest(); matrix->setMode (Matrix::Mode::Scrolling); resized(); };
                 patch.onClick = [this] { stopTest(); matrix->setMode (Matrix::Mode::Patching); resized(); };
@@ -222,7 +240,10 @@ namespace wfg::client::ui
                     }
 
                     minimum = channelCount;
-                    count.setText (juce::String (channelCount), false);
+
+                    //  Only the input side has one to keep in step.
+                    if (isInput)
+                        count.setText (juce::String (channelCount), false);
                 }
 
                 rebuild();
@@ -241,8 +262,12 @@ namespace wfg::client::ui
             {
                 auto area = getLocalBounds().reduced (10);
                 auto bar = area.removeFromTop (30);
-                countLabel.setBounds (bar.removeFromLeft (145)); count.setBounds (bar.removeFromLeft (65));
-                bar.removeFromLeft (20);
+                if (isInput)
+                {
+                    countLabel.setBounds (bar.removeFromLeft (145));
+                    count.setBounds (bar.removeFromLeft (65));
+                    bar.removeFromLeft (20);
+                }
                 for (auto* button : { &scroll, &patch, &identity, &clear })
                 { button->setBounds (bar.removeFromLeft (80).reduced (3, 0)); }
                 if (! isInput) test.setBounds (bar.removeFromLeft (80).reduced (3, 0));
@@ -418,19 +443,50 @@ namespace wfg::client::ui
                 list.setColour (juce::ListBox::backgroundColourId, Look::colour (themeToUse, "panel-in"));
                 addAndMakeVisible (list);
 
-                for (auto* button : { &addDirect, &addMix })
+                for (auto* button : { &addMonoDirect, &addStereoDirect, &addMonoMix, &addStereoMix })
                     addAndMakeVisible (*button);
+
+                /*  HIDDEN UNTIL A NAME IS CLICKED, and a child of the page
+                    rather than of the list so that scrolling cannot leave it
+                    drawn over the wrong row: it is placed from the row's live
+                    position each time it opens. */
+                addChildComponent (nameEditor);
+                nameEditor.setEditable (false, true, false);
+                nameEditor.setColour (juce::Label::backgroundColourId,
+                                      Look::colour (themeToUse, "panel-in"));
+                nameEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                nameEditor.onEditorHide = [this] { commitName(); };
 
                 addAndMakeVisible (regime);
                 addAndMakeVisible (summary);
                 regime.setJustificationType (juce::Justification::topLeft);
                 summary.setJustificationType (juce::Justification::topLeft);
 
-                addDirect.setTooltip ("A direct out is where one cue's own channels land.");
-                addMix.setTooltip ("A mix channel is one many cues send into, each at its own level.");
+                /*  FOUR BUTTONS AND NO FLIP (author, 2026-09-22: "I'd rather
+                    have fixed add mono and add stereo direct out or mix
+                    channels than to flip").
 
-                addDirect.onClick = [this] { if (send) send (gesture::createBus ("direct", 1, -1)); };
-                addMix.onClick    = [this] { if (send) send (gesture::createBus ("mix", 2, -1)); };
+                    A width is decided when an output is made, and changing it
+                    afterwards moves every channel below it - which is the
+                    repack working correctly and reads, from the patch, as the
+                    rig having been re-wired. Saying it once, at the moment
+                    the thing is created, is both fewer gestures and fewer
+                    surprises; an output of the wrong width is deleted and
+                    made again, which is one more click than a flip and says
+                    what it is doing. */
+                addMonoDirect.setTooltip ("A direct out is where one cue's own channels land. "
+                                          "Mono: one interface channel.");
+                addStereoDirect.setTooltip ("A direct out is where one cue's own channels land. "
+                                            "Stereo: two consecutive interface channels.");
+                addMonoMix.setTooltip ("A mix channel is one many cues send into, each at its own "
+                                       "level. Mono: one interface channel.");
+                addStereoMix.setTooltip ("A mix channel is one many cues send into, each at its own "
+                                         "level. Stereo: two consecutive interface channels.");
+
+                addMonoDirect.onClick   = [this] { if (send) send (gesture::createBus ("direct", 1, -1)); };
+                addStereoDirect.onClick = [this] { if (send) send (gesture::createBus ("direct", 2, -1)); };
+                addMonoMix.onClick      = [this] { if (send) send (gesture::createBus ("mix", 1, -1)); };
+                addStereoMix.onClick    = [this] { if (send) send (gesture::createBus ("mix", 2, -1)); };
 
                 /*  HOW MANY CUES CAN SOUND AT ONCE, said in those words rather
                     than as "tracks": the number IS the track count, and what
@@ -468,8 +524,8 @@ namespace wfg::client::ui
                 rows = std::move (outputs);
                 locked = ! editable;
 
-                addDirect.setVisible (editable);
-                addMix.setVisible (editable);
+                for (auto* button : { &addMonoDirect, &addStereoDirect, &addMonoMix, &addStereoMix })
+                    button->setVisible (editable);
 
                 regime.setText (juce::String (model::outputRegime (settled)), juce::dontSendNotification);
 
@@ -537,8 +593,8 @@ namespace wfg::client::ui
             {
                 auto area = getLocalBounds().reduced (10);
                 auto bar = area.removeFromTop (30);
-                addDirect.setBounds (bar.removeFromLeft (150).reduced (3, 0));
-                addMix.setBounds (bar.removeFromLeft (150).reduced (3, 0));
+                for (auto* button : { &addMonoDirect, &addStereoDirect, &addMonoMix, &addStereoMix })
+                    button->setBounds (bar.removeFromLeft (128).reduced (3, 0));
                 bar.removeFromLeft (20);
                 polyphonyLabel.setBounds (bar.removeFromLeft (220));
                 polyphony.setBounds (bar.removeFromLeft (60).reduced (0, 2));
@@ -617,26 +673,67 @@ namespace wfg::client::ui
 
                 /*  Carved from the right in the painter's own order, so the
                     two stay in step: the cross, then the channels, then the
-                    width word. The width cell cycles mono and stereo, which is
-                    the author's ask; a wider output is left alone rather than
-                    silently narrowed to two. */
+                    width word.
+
+                    THE WIDTH CELL NO LONGER FLIPS. A width is said when the
+                    output is made - there are four buttons for it - and the
+                    word here reports rather than offers. `bus.width` is still
+                    a command and still tested; nothing in this window sends
+                    it. */
                 if (event.x > width - 32)
-                {
                     send (gesture::deleteBus (entry.id));
-                }
-                else if (event.x > width - 32 - 74 - 80 && event.x <= width - 32 - 74)
-                {
-                    if (entry.width <= 2)
-                        send (gesture::setBusWidth (entry.id, entry.width == 1 ? 2 : 1));
-                }
+                else
+                    renameAt (row, event);
             }
 
-            void listBoxItemDoubleClicked (int row, const juce::MouseEvent&) override
+            /*  A DOUBLE CLICK IS THE SAME THING TWICE now that one click
+                opens the editor. Kept rather than removed, because a hand that
+                has learned to double-click a name should not be punished for
+                it - the second click lands in the editor the first one
+                opened. */
+            void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
+
+            /*  WHERE THE NAME IS DRAWN, carved exactly as the painter carves
+                it: the grip off the left, and the cross, channels, width and
+                kind off the right. One arithmetic, so a click cannot land
+                somewhere the eye says is a name. */
+            static juce::Rectangle<int> nameCellOf (juce::Rectangle<int> row)
             {
-                if (locked || row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                auto area = row.reduced (8, 0);
+                area.removeFromLeft (18);
+                area.removeFromRight (24 + 74 + 80 + 96);
+                return area;
+            }
+
+            /*  RENAMED IN PLACE (author, 2026-09-22: "can we directly rename
+                in the output list rather than double click, validate and
+                all?"). One click on the name opens an editor over it, Return
+                or clicking away commits, Escape puts it back. One floating
+                editor rather than a component per row: a list of outputs is a
+                handful of rows and only one of them can be being typed into.  */
+            void renameAt (int row, const juce::MouseEvent& event)
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
                     return;
 
-                rename (rows[static_cast<std::size_t> (row)]);
+                const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                   : list.getWidth();
+
+                const auto cell = nameCellOf (juce::Rectangle<int> (0, 0, width, list.getRowHeight()));
+
+                if (event.x < cell.getX() || event.x >= cell.getRight())
+                    return;
+
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                editing = rows[static_cast<std::size_t> (row)].id;
+
+                nameEditor.setBounds (nameCellOf (place));
+                nameEditor.setText (juce::String (rows[static_cast<std::size_t> (row)].name),
+                                    juce::dontSendNotification);
+                nameEditor.setVisible (true);
+                nameEditor.showEditor();
             }
 
             bool isInterestedInDragSource (const SourceDetails& details) override
@@ -737,29 +834,18 @@ namespace wfg::client::ui
                                         juce::String (wanted.getIntValue()).toStdString()));
             }
 
-            void rename (const model::OutputRow& entry)
+            void commitName()
             {
-                if (! send)
+                const auto typed = nameEditor.getText().trim().toStdString();
+                const auto id = editing;
+
+                editing.clear();
+                nameEditor.setVisible (false);
+
+                if (id.empty() || typed.empty() || send == nullptr)
                     return;
 
-                auto* box = new juce::AlertWindow ("Rename output", entry.name, juce::MessageBoxIconType::NoIcon);
-                box->addTextEditor ("name", juce::String (entry.name), "Name");
-                box->addButton ("Rename", 1, juce::KeyPress (juce::KeyPress::returnKey));
-                box->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
-
-                /*  `JUCE_MODAL_LOOPS_PERMITTED=0`, so this is async and the
-                    callback holds a SafePointer rather than `this`: the window
-                    can be shut while the box is open. */
-                box->enterModalState (true, juce::ModalCallbackFunction::create (
-                    [safe = juce::Component::SafePointer<OutputPage> (this), box,
-                     id = entry.id] (int result)
-                    {
-                        const auto typed = box->getTextEditorContents ("name").toStdString();
-                        delete box;
-
-                        if (result == 1 && safe != nullptr && safe->send != nullptr && ! typed.empty())
-                            safe->send (gesture::setNode ("/godot/bus/" + id + "/name", typed));
-                    }), false);
+                send (gesture::setNode ("/godot/bus/" + id + "/name", typed));
             }
 
             const model::Theme& theme;
@@ -768,7 +854,13 @@ namespace wfg::client::ui
             bool locked = false;
             int dropRow = -1;
             juce::ListBox list;
-            juce::TextButton addDirect { "+ direct out" }, addMix { "+ mix channel" };
+            juce::TextButton addMonoDirect { "+ mono out" }, addStereoDirect { "+ stereo out" },
+                             addMonoMix { "+ mono mix" }, addStereoMix { "+ stereo mix" };
+            /*  The one floating name editor, and which output it is over.
+                Empty when nothing is being typed into. */
+            juce::Label nameEditor;
+            std::string editing;
+
             juce::Label regime, summary, polyphonyLabel;
             juce::TextEditor polyphony;
         };

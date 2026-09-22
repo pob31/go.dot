@@ -167,7 +167,9 @@ namespace wfg::client
                                               };
                 listActions.presetStep      = [this] (int direction) { ladderStep (direction); };
                 listActions.moveToFooter    = [this] (const std::string& cueId, const std::string& group)
-                                              { moveToFooter (cueId, group); };
+                                              { moveIntoRole (cueId, group, "footer"); };
+                listActions.moveToHeader    = [this] (const std::string& cueId, const std::string& group)
+                                              { moveIntoRole (cueId, group, "header"); };
 
                 //  A cell edited in place is one `node.set`, as a field in the inspector is.
                 listActions.setValue        = [this] (const std::string& address, const std::string& text)
@@ -747,7 +749,7 @@ namespace wfg::client
                     const auto ancestors = model::ancestorsOf (id, show.rows());
 
                     if (direction < 0 && current.empty() && ! ancestors.empty())
-                        moveToFooter (id, ancestors.front());
+                        moveIntoRole (id, ancestors.front(), "footer");
                 }
             }
 
@@ -761,29 +763,39 @@ namespace wfg::client
             /*  INTO A GROUP'S FOOTER: one `object.move` when the footer exists,
                 and when it does not, `group.role` to make it and the move on
                 a later pass once the tree names it (the import's own shape). */
-            void moveToFooter (const std::string& cueId, const std::string& group)
+            /*  INTO A GROUP'S HEADER OR ITS FOOTER, made first if it has
+                none. One verb for both roles (2026-09-22): they differ by a
+                word in three places and by nothing at all in the shape - ask
+                whether the section exists, move into it if it does, otherwise
+                make it and remember to move once it lands. Two copies of that
+                would be two things to keep in step, and the header's was the
+                one that did not exist. */
+            void moveIntoRole (const std::string& cueId, const std::string& group,
+                               const std::string& role)
             {
                 if (refusedWhileLocked() || latest == nullptr)
                     return;
 
-                const auto footer = model::text (*latest, "/godot/cue/" + group + "/footer");
+                const auto section = model::text (*latest, "/godot/cue/" + group + "/" + role);
 
-                if (! footer.empty())
+                if (! section.empty())
                 {
-                    const auto members = static_cast<int> (model::words (model::text (*latest, "/godot/cue/" + group + "/footerOrder")).size());
-                    send (gesture::moveObject (cueId, footer, members));
-                    shell->transport.setNotice ("into " + nameOf (group) + "'s footer");
+                    const auto members = static_cast<int> (model::words (
+                        model::text (*latest, "/godot/cue/" + group + "/" + role + "Order")).size());
+
+                    send (gesture::moveObject (cueId, section, members));
+                    shell->transport.setNotice ("into " + nameOf (group) + "'s " + role);
                     return;
                 }
 
-                send (gesture::groupRole (group, "footer"));
-                footerMoves.push_back ({ cueId, group, 0 });
-                shell->transport.setNotice ("making " + nameOf (group) + "'s footer");
+                send (gesture::groupRole (group, role));
+                footerMoves.push_back ({ cueId, group, role, 0 });
+                shell->transport.setNotice ("making " + nameOf (group) + "'s " + role);
             }
 
             struct FooterMove
             {
-                std::string cueId, group;
+                std::string cueId, group, role;
                 int waited = 0;
             };
 
@@ -796,11 +808,11 @@ namespace wfg::client
 
                 for (auto& job : footerMoves)
                 {
-                    const auto footer = model::text (snapshot, "/godot/cue/" + job.group + "/footer");
+                    const auto footer = model::text (snapshot, "/godot/cue/" + job.group + "/" + job.role);
 
                     if (! footer.empty())
                     {
-                        const auto members = static_cast<int> (model::words (model::text (snapshot, "/godot/cue/" + job.group + "/footerOrder")).size());
+                        const auto members = static_cast<int> (model::words (model::text (snapshot, "/godot/cue/" + job.group + "/" + job.role + "Order")).size());
                         send (gesture::moveObject (job.cueId, footer, members));
                         shell->transport.setNotice ("into " + nameOf (job.group) + "'s footer");
                         continue;
