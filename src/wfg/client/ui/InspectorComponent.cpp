@@ -196,16 +196,18 @@ namespace wfg::client::ui
             different panel. Counting the fields catches the case that matters
             in between - a kind changing under the same identifier, which adds
             and removes rows. */
-        auto fieldCount = inspection.details.size();
-
-        for (const auto& block : inspection.blocks)
-            fieldCount += block.fields.size();
-
-        if (inspection.cueId != drawnCue || fieldCount != drawnFields)
+        if (shapeOf (inspection) != drawnShape)
         {
             rebuild (inspection);
             return;
         }
+
+        /*  THE SAME PANEL, POINTED SOMEWHERE ELSE. Everything a row writes is
+            addressed, and the address is the cue's - so the identifier moves
+            here, before the values do, and the buttons read it when pressed. */
+        drawnCue = inspection.cueId;
+
+        heading.setText (headingFor (inspection), juce::dontSendNotification);
 
         //  The same panel: only the values can have moved.
         std::size_t at = 0;
@@ -312,9 +314,16 @@ namespace wfg::client::ui
                     break;
             }
 
-            line.field.value = field.value;
-            line.field.mixed = field.mixed;
-            line.field.addresses = field.addresses;
+            /*  THE WHOLE ROW AND NOT ONLY ITS VALUE, now that a line outlives
+                the cue it was built for: the address is what a commit writes
+                to, `choices` is the menu of a rig that may have changed, and
+                `applies` is whether this cue is one the row means anything
+                for. Keeping the value and dropping the rest would be a panel
+                that showed one cue and wrote to another. */
+            const auto wasControl = line.field.control;
+
+            line.field = field;
+            line.field.control = wasControl;
         };
 
         for (const auto& block : inspection.blocks)
@@ -376,6 +385,45 @@ namespace wfg::client::ui
         return 0;
     }
 
+    juce::String InspectorComponent::headingFor (const model::Inspection& inspection)
+    {
+        if (inspection.cueId.empty())
+            return "nothing picked";
+
+        return juce::String (inspection.cueName.empty() ? inspection.cueId : inspection.cueName)
+                 + "   " + juce::String (inspection.kind);
+    }
+
+    std::string InspectorComponent::shapeOf (const model::Inspection& inspection)
+    {
+        /*  WHAT WOULD HAVE TO BE BUILT DIFFERENTLY, and nothing else: a row's
+            name, which control draws it, and whether it can be written. A
+            value is not in it, and neither is the cue - those are what the
+            refill is for. */
+        std::string out;
+
+        const auto add = [&out] (const model::Field& field)
+        {
+            out += field.name + ":" + std::to_string (static_cast<int> (field.control))
+                     + (field.writable ? "w;" : "r;");
+        };
+
+        for (const auto& block : inspection.blocks)
+        {
+            out += "[" + block.heading + "]";
+
+            for (const auto& field : block.fields)
+                add (field);
+        }
+
+        out += "|";
+
+        for (const auto& field : inspection.details)
+            add (field);
+
+        return out;
+    }
+
     void InspectorComponent::rebuild (const model::Inspection& inspection)
     {
         lines.clear();
@@ -388,16 +436,9 @@ namespace wfg::client::ui
         content.addAndMakeVisible (detailsButton);
 
         drawnCue = inspection.cueId;
-        drawnFields = inspection.details.size();
+        drawnShape = shapeOf (inspection);
 
-        for (const auto& block : inspection.blocks)
-            drawnFields += block.fields.size();
-
-        heading.setText (inspection.cueId.empty()
-                           ? juce::String ("nothing picked")
-                           : juce::String (inspection.cueName.empty() ? inspection.cueId
-                                                                      : inspection.cueName)
-                               + "   " + juce::String (inspection.kind),
+        heading.setText (headingFor (inspection),
                          juce::dontSendNotification);
 
         detailsButton.setVisible (! inspection.details.empty());
@@ -425,13 +466,16 @@ namespace wfg::client::ui
                 line->opener.setWantsKeyboardFocus (false);
                 line->opener.setTooltip ("Opens at the foot of the window, on this cue");
 
-                const auto id = field.address;      // the cue, put there by `openersFor`
-                const auto subject = field.value;   // and which panel it wants
+                /*  THE SUBJECT IS REMEMBERED AND THE CUE IS NOT. Which panel
+                    this row opens is a property of the row and cannot change
+                    while the row exists; WHICH cue it opens on is whatever is
+                    picked now, because two cues of one kind share these lines. */
+                const auto subject = field.value;
 
-                line->opener.onClick = [this, id, subject]
+                line->opener.onClick = [this, subject]
                 {
                     if (actions.openPanel)
-                        actions.openPanel (id, subject);
+                        actions.openPanel (drawnCue, subject);
                 };
 
                 content.addAndMakeVisible (line->opener);
@@ -504,11 +548,14 @@ namespace wfg::client::ui
                 /*  AND THE DOOR TO THE MIX BESIDE IT. It opens on the cue this
                     panel is about, through the same door the waveform opener
                     uses, so the panel at the foot has exactly one way in. */
-                const auto id = drawnCue;
-
+                /*  READ WHEN PRESSED AND NOT REMEMBERED. A line now outlives
+                    the cue it was built for - two cues of one kind share a
+                    panel - so a button holding the identifier it was made with
+                    would open the panel on whichever cue happened to be picked
+                    when the row was first drawn. */
                 line->sends.setWantsKeyboardFocus (false);
                 line->sends.setTooltip ("Send levels from this cue into the show's mix channels");
-                line->sends.onClick = [this, id] { if (actions.openPanel) actions.openPanel (id, "sends"); };
+                line->sends.onClick = [this] { if (actions.openPanel) actions.openPanel (drawnCue, "sends"); };
 
                 content.addAndMakeVisible (line->sends);
             }
@@ -600,14 +647,13 @@ namespace wfg::client::ui
                     owner with it. */
                 if (field.control == model::Control::file && field.writable)
                 {
-                    const auto id = drawnCue;   // set above, and what this panel is about
-
+                    //  Read when pressed, for the reason the sends button is.
                     line->browse.setWantsKeyboardFocus (false);
                     line->browse.setTooltip ("Choose the media this cue plays");
-                    line->browse.onClick = [this, id]
+                    line->browse.onClick = [this]
                     {
                         if (actions.chooseFile)
-                            actions.chooseFile (id);
+                            actions.chooseFile (drawnCue);
                     };
 
                     content.addAndMakeVisible (line->browse);

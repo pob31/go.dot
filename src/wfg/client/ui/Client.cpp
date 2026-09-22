@@ -298,6 +298,8 @@ namespace wfg::client
                         wanted = model::Subject::Kind::sends;
                     else if (subject == "timeline")
                         wanted = model::Subject::Kind::timeline;
+                    else if (subject == "curve")
+                        wanted = model::Subject::Kind::curve;
 
                     if (wanted == model::Subject::Kind::none)
                         return;
@@ -373,7 +375,17 @@ namespace wfg::client
                 ui::FootPanelComponent::Actions footActions;
                 footActions.set = [this] (const std::string& address, const std::string& value)
                 { send (gesture::setNode (address, value)); };
-                footActions.close = [this] { shell->setFoot ({}); };
+                footActions.close = [this]
+                {
+                    /*  SHUT MEANS SHUT, for the one subject that opens itself:
+                        remembered against the cue it was showing, so picking
+                        the same fade again leaves it closed and picking a
+                        different one opens it. */
+                    if (shell->footSubject().kind == model::Subject::Kind::curve)
+                        shutCurveFor = shell->footSubject().objectId;
+
+                    shell->setFoot ({});
+                };
                 footActions.resizeBy = [this] (int pixels) { shell->growFoot (pixels); };
 
                 footActions.createRange = [this] (const std::string& cueId, double in, double out)
@@ -1052,6 +1064,33 @@ namespace wfg::client
                     waveform of the cue somebody just clicked is what they want
                     next - and `model::followsPick` is that rule, in one place,
                     so the panel does not have to guess per kind. */
+                /*  A FADE OPENS ITS CURVE BY ITSELF (author, 2026-09-22:
+                    "this opens automatically when selecting the fade cue").
+
+                    THE ONE SUBJECT THAT IS NOT ASKED FOR, and the reason is
+                    what a fade IS: its level, its duration and its curve word
+                    are rows the inspector shows like any other, and its SHAPE
+                    is not a row at all. A drawn fade whose panel had to be
+                    opened by hand would be a list of numbers nobody can read
+                    until they think to go looking.
+
+                    AND IT CAN STILL BE SHUT. A panel that reopened every time
+                    the pick came back would be one nobody could get rid of, so
+                    closing it while a fade is picked is remembered against THAT
+                    cue and cleared the moment the pick moves. The row in the
+                    inspector is the way back. */
+                if (! selection.anchor().empty()
+                      && model::text (*snapshot, "/godot/cue/" + selection.anchor() + "/kind") == "fade"
+                      && shutCurveFor != selection.anchor()
+                      && shell->footSubject().kind != model::Subject::Kind::curve)
+                {
+                    shell->setFoot ({ model::Subject::Kind::curve, selection.anchor() });
+                    menuItemsChanged();
+                }
+
+                if (shutCurveFor != selection.anchor())
+                    shutCurveFor.clear();
+
                 if (shell->footSubject().isOpen())
                 {
                     auto subject = shell->footSubject();
@@ -1077,6 +1116,23 @@ namespace wfg::client
                     if (model::followsPick (subject.kind) && ! picked.empty())
                     {
                         auto wanted = picked;
+
+                        /*  A PANEL THAT OPENS BY ITSELF MAY CLOSE BY ITSELF
+                            (author, 2026-09-22: "collapse the fade foot panel
+                            when selecting another type of cue").
+
+                            The rule is not "every panel follows or shuts", it
+                            is which of the two a subject was ASKED for. A
+                            waveform and a send mixer were opened by hand and
+                            stay until a hand shuts them - clicking a group to
+                            check something must not cost somebody the zoom
+                            they set. A fade's curve was never asked for: it
+                            arrived because a fade was picked, so it leaves
+                            when one is not, and picking a fade again brings it
+                            straight back at no cost. */
+                        if (subject.kind == model::Subject::Kind::curve
+                              && model::text (*snapshot, "/godot/cue/" + picked + "/kind") != "fade")
+                            wanted.clear();
 
                         if (subject.kind == model::Subject::Kind::timeline)
                         {
@@ -1477,6 +1533,11 @@ namespace wfg::client
             };
 
             std::optional<MovedCue> watchingMove;
+
+            /*  The fade whose curve panel was shut by hand. Cleared when the
+                pick moves, so the rule is "not this one, for now" rather than
+                "never again". */
+            std::string shutCurveFor;
 
             void rememberOutsOf (const std::string& cueId)
             {

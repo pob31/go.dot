@@ -52,6 +52,10 @@ namespace wfg::client::model
                 subject, and re-pointing at it would shut the very thing
                 somebody is dragging in. `Client` holds it on the group. */
             case Subject::Kind::timeline:  return true;
+
+            /*  AND A CURVE FOLLOWS, which is what makes it able to open by
+                itself: picking a fade is the gesture that asks for it. */
+            case Subject::Kind::curve:     return true;
             case Subject::Kind::none:      break;
         }
 
@@ -100,6 +104,9 @@ namespace wfg::client::model
 
         if (subject.kind == Subject::Kind::timeline)
             out.timeline = readTimeline (snapshot, subject.objectId);
+
+        if (subject.kind == Subject::Kind::curve)
+            out.curve = readCurve (snapshot, subject.objectId);
 
         if (subject.kind == Subject::Kind::sends)
         {

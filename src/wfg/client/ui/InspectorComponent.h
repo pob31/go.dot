@@ -127,7 +127,28 @@ namespace wfg::client::ui
 
         std::vector<std::unique_ptr<Line>> lines;
         std::string drawnCue;
-        std::size_t drawnFields = 0;
+
+        /*  THE SHAPE OF THE PANEL AND NOT THE CUE IN IT, which is what stops
+            it blinking (author, 2026-09-22: "is there a way so that the
+            inspector when being rebuilt doesn't disappear and reappear?").
+
+            Picking one media cue and then another used to tear every row down
+            and build it again, because the key was the cue's identifier - and
+            two media cues have exactly the same rows, in the same order, with
+            different values in them. So the key is the SHAPE: each row's name,
+            its control and whether it can be written. Same shape, same panel,
+            and the values are set the way a poll sets them.
+
+            The cost is that the lines outlive the cue they were built for, so
+            nothing may capture that cue by value - see the buttons, which read
+            `drawnCue` when they are pressed rather than remembering it. */
+        std::string drawnShape;
+
+        /** The panel's shape, for deciding rebuild against refill. */
+        static std::string shapeOf (const model::Inspection&);
+
+        /** What the head says: the cue's name and kind, or that nothing is picked. */
+        static juce::String headingFor (const model::Inspection&);
         bool detailsOpen = false;
 
         int rowHeight() const noexcept;

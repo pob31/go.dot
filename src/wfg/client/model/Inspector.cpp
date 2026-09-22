@@ -236,6 +236,13 @@ namespace wfg::client::model
         {
             offer ("Waveform, in and out points", "waveform");
         }
+        else if (kind == "fade")
+        {
+            /*  OFFERED EVEN THOUGH PICKING A FADE OPENS IT, because the row is
+                also how it is SHUT: a panel that opened by itself and could
+                only be closed from somewhere else would be a trap. */
+            offer ("Curve, the shape of the fade", "curve");
+        }
         else if (kind == "group")
         {
             /*  ONLY A GROUP HAS MEMBERS TO ARRANGE, and the panel says in its

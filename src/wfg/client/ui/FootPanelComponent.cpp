@@ -33,6 +33,9 @@ namespace wfg::client::ui
         if (timeline != nullptr)
             timeline->applyTheme (theme);
 
+        if (curve != nullptr)
+            curve->applyTheme (theme);
+
         repaint();
     }
 
@@ -65,9 +68,25 @@ namespace wfg::client::ui
         waveform.reset();
         sends.reset();
         timeline.reset();
+        curve.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::curve:
+            {
+                CurveEditorComponent::Actions drawing;
+                drawing.set = actions.set;
+                drawing.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                curve = std::make_unique<CurveEditorComponent> (theme, std::move (drawing));
+                addAndMakeVisible (*curve);
+                break;
+            }
+
             case model::Subject::Kind::timeline:
             {
                 TimelineComponent::Actions arranging;
@@ -150,6 +169,10 @@ namespace wfg::client::ui
                 wanted = "Timeline";
                 break;
 
+            case model::Subject::Kind::curve:
+                wanted = "Fade curve";
+                break;
+
             case model::Subject::Kind::none:
                 break;
         }
@@ -176,6 +199,9 @@ namespace wfg::client::ui
 
         if (timeline != nullptr)
             timeline->show (reading);
+
+        if (curve != nullptr)
+            curve->show (reading);
     }
 
     bool FootPanelComponent::overGrip (juce::Point<int> where) const
@@ -235,6 +261,9 @@ namespace wfg::client::ui
 
         if (timeline != nullptr)
             timeline->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (curve != nullptr)
+            curve->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
     }
 
     void FootPanelComponent::mouseMove (const juce::MouseEvent& event)

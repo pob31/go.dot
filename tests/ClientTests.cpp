@@ -44,6 +44,7 @@
 
 #include <optional>
 
+#include <wfg/client/model/Curve.h>
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
@@ -80,6 +81,7 @@
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/DocumentSession.h>
+#include <wfg/engine/document/FadePoints.h>
 #include <wfg/engine/document/DocumentWriter.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
@@ -2179,8 +2181,19 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     CHECK (onGroup[0].value == "timeline");
     CHECK_FALSE (onGroup[0].writable);
 
+    /*  AND A FADE HAS ONE, since 2026-09-22: the shape it takes, which is the
+        one thing about a fade that is not a row. Offered even though picking a
+        fade opens it by itself, because the row is also how it is SHUT - a
+        panel that opened on its own and could only be closed from somewhere
+        else would be a trap. */
+    const auto onFade = model::openersFor ("fade", "B3N8R5TW");
+
+    REQUIRE (onFade.size() == 1);
+    CHECK (onFade[0].value == "curve");
+    CHECK_FALSE (onFade[0].writable);
+
     //  And the kinds with nothing longer to look at still offer nothing.
-    for (const auto* kind : { "fade", "wait", "message" })
+    for (const auto* kind : { "wait", "message", "osc" })
         CHECK (model::openersFor (kind, "B3N8R5TW").empty());
 
     //  And they arrive at the end of what the cue DOES, after that kind's own rows.
@@ -2300,6 +2313,139 @@ TEST_CASE ("client: each thing a drop would do wears its own colour")
         CHECK (std::find (model::Theme::colourNames().begin(),
                           model::Theme::colourNames().end(), tone)
                  != model::Theme::colourNames().end());
+    }
+}
+
+TEST_CASE ("client: a drawn fade, and every string it writes is one the engine accepts")
+{
+    /*  THE ANTI-DRIFT CHECK, and the reason `model/Curve` may exist at all.
+        `doc::readFadePoints` is the ONE judge of what a curve is - the write
+        door, `validate` and the Runner all ask it - and the client boundary
+        forbids naming `doc::`, so the rules are stated a second time in the
+        client. A copy nobody compares is a copy that drifts; this is the
+        comparison. */
+    const auto accepted = [] (const std::vector<model::CurvePoint>& points)
+    {
+        const auto text = model::writePoints (points);
+        const auto judged = doc::readFadePoints (text);
+
+        INFO ("wrote: " << text);
+        INFO ("engine said: " << judged.problem);
+
+        return judged.problem.empty() && judged.points.size() == points.size();
+    };
+
+    SUBCASE ("a straight line, and a drawn shape, both round-trip")
+    {
+        CHECK (accepted ({ { 0.0, 0.0 }, { 1.0, -120.0 } }));
+        CHECK (accepted ({ { 0.0, 0.0 }, { 0.5, -30.0 }, { 1.0, -10.0 } }));
+        CHECK (accepted ({ { 0.0, -6.5 }, { 0.25, 3.25 }, { 0.75, -12.75 }, { 1.0, -120.0 } }));
+    }
+
+    SUBCASE ("and the numbers survive a French locale, which is where a comma would get in")
+    {
+        const auto text = model::writePoints ({ { 0.0, 0.0 }, { 0.5, -6.5 }, { 1.0, -120.0 } });
+
+        CHECK (text.find (',') == std::string::npos);
+        CHECK (doc::readFadePoints (text).problem.empty());
+    }
+
+    SUBCASE ("the window refuses what the door would refuse, rather than finding out after")
+    {
+        //  Each of these is a shape `readFadePoints` turns down, named here first.
+        CHECK_FALSE (model::whyNotACurve ({ { 0.2, 0.0 }, { 1.0, -10.0 } }).empty());
+        CHECK_FALSE (model::whyNotACurve ({ { 0.0, 0.0 }, { 0.8, -10.0 } }).empty());
+        CHECK_FALSE (model::whyNotACurve ({ { 0.0, 0.0 }, { 0.5, -3.0 }, { 0.5, -9.0 },
+                                            { 1.0, -10.0 } }).empty());
+        CHECK_FALSE (model::whyNotACurve ({ { 0.0, 0.0 }, { 1.0, -400.0 } }).empty());
+
+        //  An EMPTY list is not a bad curve, it is the absence of one.
+        CHECK (model::whyNotACurve ({}).empty());
+        CHECK (model::writePoints ({}).empty());
+        CHECK (doc::readFadePoints ("").problem.empty());
+    }
+}
+
+TEST_CASE ("client: drawing on a fade, point by point")
+{
+    const std::vector<model::CurvePoint> line { { 0.0, 0.0 }, { 1.0, -20.0 } };
+
+    SUBCASE ("a worded fade becomes a drawn one shaped like the word, so nothing jumps")
+    {
+        /*  A fade with no points plays its `curve`. The first thing drawn has
+            to make a curve the rules accept - two ends and the point asked
+            for - and the ends take the levels the fade already has. */
+        const auto made = model::insertAt ({}, 0.5, 0.0, -20.0);
+
+        REQUIRE (made.has_value());
+        REQUIRE (made->size() == 3);
+        CHECK ((*made)[0].t == doctest::Approx (0.0));
+        CHECK ((*made)[2].t == doctest::Approx (1.0));
+        CHECK ((*made)[2].levelDb == doctest::Approx (-20.0));
+
+        //  And the new one sits on the line the word already drew.
+        CHECK ((*made)[1].levelDb == doctest::Approx (-10.0));
+        CHECK (model::whyNotACurve (*made).empty());
+    }
+
+    SUBCASE ("a point added to a drawn curve changes the shape not at all")
+    {
+        /*  Which is what makes adding one safe to do while listening: it lands
+            on the line that is already there, and only moving it does anything. */
+        const auto more = model::insertAt (line, 0.25, 0.0, -20.0);
+
+        REQUIRE (more.has_value());
+        REQUIRE (more->size() == 3);
+        CHECK ((*more)[1].t == doctest::Approx (0.25));
+        CHECK ((*more)[1].levelDb == doctest::Approx (-5.0));
+    }
+
+    SUBCASE ("and one at a moment already taken is refused rather than doubled")
+    {
+        CHECK_FALSE (model::insertAt (line, 0.0, 0.0, -20.0).has_value());
+        CHECK_FALSE (model::insertAt (line, 1.0, 0.0, -20.0).has_value());
+    }
+
+    SUBCASE ("the ends move in level and never in time")
+    {
+        /*  A curve that began after nought would leave a stretch of the fade
+            it says nothing about, which the engine's door refuses. */
+        const auto first = model::dragTo (line, 0, 0.4, -6.0);
+        CHECK (first.t == doctest::Approx (0.0));
+        CHECK (first.levelDb == doctest::Approx (-6.0));
+
+        const auto last = model::dragTo (line, 1, 0.6, -3.0);
+        CHECK (last.t == doctest::Approx (1.0));
+        CHECK (last.levelDb == doctest::Approx (-3.0));
+    }
+
+    SUBCASE ("and a middle one stays strictly inside its neighbours")
+    {
+        const std::vector<model::CurvePoint> three { { 0.0, 0.0 }, { 0.5, -10.0 },
+                                                     { 1.0, -20.0 } };
+
+        CHECK (model::dragTo (three, 1, -1.0, 0.0).t > 0.0);
+        CHECK (model::dragTo (three, 1, 2.0, 0.0).t < 1.0);
+
+        //  A level outside what a fade may reach is clamped, not written.
+        CHECK (model::dragTo (three, 1, 0.5, -400.0).levelDb
+                 == doctest::Approx (model::quietestDb));
+        CHECK (model::dragTo (three, 1, 0.5, 400.0).levelDb
+                 == doctest::Approx (model::loudestFadeDb));
+    }
+
+    SUBCASE ("neither end can be taken away, and a middle one can")
+    {
+        const std::vector<model::CurvePoint> three { { 0.0, 0.0 }, { 0.5, -10.0 },
+                                                     { 1.0, -20.0 } };
+
+        CHECK_FALSE (model::removeAt (three, 0).has_value());
+        CHECK_FALSE (model::removeAt (three, 2).has_value());
+
+        const auto fewer = model::removeAt (three, 1);
+        REQUIRE (fewer.has_value());
+        CHECK (fewer->size() == 2);
+        CHECK (model::whyNotACurve (*fewer).empty());
     }
 }
 

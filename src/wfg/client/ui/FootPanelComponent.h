@@ -28,6 +28,7 @@
 
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Theme.h>
+#include <wfg/client/ui/CurveEditorComponent.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/TimelineComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
@@ -112,6 +113,7 @@ namespace wfg::client::ui
         std::unique_ptr<WaveformEditorComponent> waveform;
         std::unique_ptr<SendMixerComponent> sends;
         std::unique_ptr<TimelineComponent> timeline;
+        std::unique_ptr<CurveEditorComponent> curve;
         juce::TextButton shut { "x" };
         int columnWidth = 0, columnGap = 0;
 

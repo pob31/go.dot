@@ -268,6 +268,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/OutputList.cpp
     wfg/client/model/Ranges.h
     wfg/client/model/Ranges.cpp
+    wfg/client/model/Curve.h
+    wfg/client/model/Curve.cpp
     wfg/client/model/DirectOuts.h
     wfg/client/model/DirectOuts.cpp
     wfg/client/model/Fader.h
@@ -335,6 +337,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/RangeTableComponent.cpp
     wfg/client/ui/RunPaneComponent.h
     wfg/client/ui/RunPaneComponent.cpp
+    wfg/client/ui/CurveEditorComponent.h
+    wfg/client/ui/CurveEditorComponent.cpp
     wfg/client/ui/SendMixerComponent.h
     wfg/client/ui/SendMixerComponent.cpp
     wfg/client/ui/TimelineComponent.h
