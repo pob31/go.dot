@@ -46,6 +46,12 @@ namespace wfg::client::model
                 be a mixer that lies. */
             case Subject::Kind::waveform:  return true;
             case Subject::Kind::sends:     return true;
+
+            /*  AND THE TIMELINE FOLLOWS TOO, but only as far as a group: a
+                cue picked inside the group being arranged is not a new
+                subject, and re-pointing at it would shut the very thing
+                somebody is dragging in. `Client` holds it on the group. */
+            case Subject::Kind::timeline:  return true;
             case Subject::Kind::none:      break;
         }
 
@@ -91,6 +97,9 @@ namespace wfg::client::model
                              "opens, so a file imported in this session has none until the show is "
                              "reopened.";
         }
+
+        if (subject.kind == Subject::Kind::timeline)
+            out.timeline = readTimeline (snapshot, subject.objectId);
 
         if (subject.kind == Subject::Kind::sends)
         {

@@ -48,6 +48,7 @@
 
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sends.h>
+#include <wfg/client/model/Timeline.h>
 
 namespace wfg::tree { class TreeSnapshot; }
 
@@ -57,7 +58,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform, sends };
+        enum class Kind { none, waveform, sends, timeline };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -93,6 +94,12 @@ namespace wfg::client::model
             is what makes the picture true. */
         std::vector<SendStrip> sends;
         double cueLevel = 0.0;
+
+        /*  A GROUP'S MEMBERS IN TIME, filled only when the timeline is what is
+            open. It carries its own notice, which the panel shows in place of
+            the reading's - a group with no members and a cue that is not a
+            group are different sentences. */
+        TimelineReading timeline;
 
         /*  Where the playhead is, when a run of this cue is sounding, and
             whether there is one at all. A cue with no run has no playhead, and

@@ -29,6 +29,7 @@
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/SendMixerComponent.h>
+#include <wfg/client/ui/TimelineComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -57,6 +58,9 @@ namespace wfg::client::ui
 
             /** `send.create`, when a silent fader in the mixer is raised. */
             std::function<void (const std::string& cueId, const std::string& busId)> createSend;
+
+            /** Point the panel at another group, from the timeline's own gestures. */
+            std::function<void (const std::string& groupId)> openTimelineOn;
 
             /** The transport of whatever the panel is showing: fire, kill, seek. */
             std::function<void (const std::string& cueId)> play;
@@ -107,6 +111,7 @@ namespace wfg::client::ui
 
         std::unique_ptr<WaveformEditorComponent> waveform;
         std::unique_ptr<SendMixerComponent> sends;
+        std::unique_ptr<TimelineComponent> timeline;
         juce::TextButton shut { "x" };
         int columnWidth = 0, columnGap = 0;
 

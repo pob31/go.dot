@@ -59,6 +59,7 @@
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/Sends.h>
+#include <wfg/client/model/Timeline.h>
 #include <wfg/client/model/Scrub.h>
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/ShowModel.h>
@@ -2168,7 +2169,18 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     //  An opener is a door and not a decision: it writes nothing.
     CHECK_FALSE (onMedia[0].writable);
 
-    for (const auto* kind : { "group", "fade", "wait", "message" })
+    /*  A GROUP HAS ONE TOO, since 2026-09-22: its members laid out in time,
+        which is a thing only a container has. Offered for a sequence as well
+        as a timeline - seeing the shape is worth the look even where nothing
+        can be dragged - and the panel says which it is. */
+    const auto onGroup = model::openersFor ("group", "B3N8R5TW");
+
+    REQUIRE (onGroup.size() == 1);
+    CHECK (onGroup[0].value == "timeline");
+    CHECK_FALSE (onGroup[0].writable);
+
+    //  And the kinds with nothing longer to look at still offer nothing.
+    for (const auto* kind : { "fade", "wait", "message" })
         CHECK (model::openersFor (kind, "B3N8R5TW").empty());
 
     //  And they arrive at the end of what the cue DOES, after that kind's own rows.
@@ -2289,6 +2301,298 @@ TEST_CASE ("client: each thing a drop would do wears its own colour")
                           model::Theme::colourNames().end(), tone)
                  != model::Theme::colourNames().end());
     }
+}
+
+TEST_CASE ("client: a timeline group's members are bars, and a sequence's are a consequence")
+{
+    /*  PRD 3.6: a timeline schedules every member at the group's entry and
+        each one's pre-wait is its OFFSET from that moment - so a bar's left
+        edge IS its pre-wait, and moving it writes one number. A sequence runs
+        them one after another, where a member's position is arithmetic over
+        everything above it. */
+    Rig rig;
+
+    const auto list = "7K2QM9X4";
+
+    rig.apply (1, "window", "cue.create",
+               { osc::Value::string (list), osc::Value::int32 (0),
+                 osc::Value::string ("group"), osc::Value::string ("Scene"),
+                 osc::Value::string ("GRPXXXX1") });
+
+    const auto member = [&rig] (std::int64_t tick, const char* id, const char* name,
+                                int at, const char* preWait)
+    {
+        rig.apply (tick, "window", "cue.create",
+                   { osc::Value::string ("GRPXXXX1"), osc::Value::int32 (at),
+                     osc::Value::string ("memo"), osc::Value::string (name),
+                     osc::Value::string (id) });
+
+        rig.apply (tick + 1, "window", "node.set",
+                   { osc::Value::string (std::string ("/godot/cue/") + id + "/preWait"),
+                     osc::Value::string (preWait) });
+    };
+
+    member (2, "MEMXXXX1", "First",  0, "1");
+    member (4, "MEMXXXX2", "Second", 1, "4");
+
+    SUBCASE ("a sequence says so and is not arranged by dragging")
+    {
+        const auto reading = model::readTimeline (*rig.publish (6), "GRPXXXX1");
+
+        CHECK (reading.mode == "sequence");
+        CHECK_FALSE (reading.draggable);
+        REQUIRE (reading.bars.size() == 2);
+
+        /*  A memo takes no time, so the second starts at its own pre-wait
+            after the first - which is a sum and not a decision. */
+        CHECK (reading.bars[0].at == doctest::Approx (1.0));
+        CHECK (reading.bars[1].at == doctest::Approx (5.0));
+    }
+
+    SUBCASE ("a timeline puts every member at its own pre-wait, and can be dragged")
+    {
+        rig.apply (6, "window", "node.set",
+                   { osc::Value::string ("/godot/cue/GRPXXXX1/mode"),
+                     osc::Value::string ("timeline") });
+
+        const auto reading = model::readTimeline (*rig.publish (7), "GRPXXXX1");
+
+        CHECK (reading.mode == "timeline");
+        CHECK (reading.draggable);
+        REQUIRE (reading.bars.size() == 2);
+
+        //  Both measured from the group's entry, not from each other.
+        CHECK (reading.bars[0].at == doctest::Approx (1.0));
+        CHECK (reading.bars[1].at == doctest::Approx (4.0));
+        CHECK (reading.bars[0].name == "First");
+    }
+
+    SUBCASE ("a cue that is not a group has no members to arrange")
+    {
+        const auto reading = model::readTimeline (*rig.publish (6), "B3N8R5TW");
+
+        CHECK (reading.bars.empty());
+        CHECK_FALSE (reading.notice.empty());
+    }
+}
+
+TEST_CASE ("client: a nested group's bar is as long as what is inside it")
+{
+    /*  The author, 2026-09-22: "can you resolve nested groups?" No group's
+        length is published - the engine keeps it inside its own static walk -
+        but everything the sum is MADE of is published a level at a time, so
+        the client walks down and does the same arithmetic.
+
+        Under the same guards, and each one is a reason the answer cannot be
+        known rather than a formality. */
+    Rig rig ("phase4");
+
+    const auto reading = [&rig] (std::int64_t tick, const char* group)
+    {
+        return model::readTimeline (*rig.publish (tick), group);
+    };
+
+    /*  `phase4` has a scene group with a ramp and two beds in it. Made a
+        timeline so its own members are placed by their pre-waits, and wrapped
+        so there is a nested one to resolve. */
+    rig.apply (1, "window", "cue.create",
+               { osc::Value::string ("P4ACT001"), osc::Value::int32 (0),
+                 osc::Value::string ("group"), osc::Value::string ("Outer"),
+                 osc::Value::string ("GRPAXXX1") });
+
+    rig.apply (2, "window", "node.set",
+               { osc::Value::string ("/godot/cue/GRPAXXX1/mode"),
+                 osc::Value::string ("timeline") });
+
+    rig.apply (3, "window", "cue.create",
+               { osc::Value::string ("GRPAXXX1"), osc::Value::int32 (0),
+                 osc::Value::string ("group"), osc::Value::string ("Inner"),
+                 osc::Value::string ("GRPBXXX1") });
+
+    rig.apply (4, "window", "node.set",
+               { osc::Value::string ("/godot/cue/GRPBXXX1/mode"),
+                 osc::Value::string ("timeline") });
+
+    /*  Asserted rather than assumed. Identifiers are Crockford base32 and the
+        alphabet skips I, L, O and U, so a test id with one of those in it
+        creates nothing at all and every check below fails somewhere else
+        entirely. */
+    REQUIRE (model::text (*rig.publish (4), "/godot/cue/GRPBXXX1/kind") == "group");
+
+    SUBCASE ("an empty nested group reaches nowhere, which is a length and not an unknown")
+    {
+        const auto outer = reading (5, "GRPAXXX1");
+
+        REQUIRE (outer.bars.size() == 1);
+        CHECK (outer.bars[0].isGroup);
+        CHECK (outer.bars[0].lengthKnown);
+        CHECK (outer.bars[0].length == doctest::Approx (0.0));
+    }
+
+    SUBCASE ("and it is as long as the furthest thing inside it reaches")
+    {
+        /*  A memo takes no time, so the inner group's extent is its member's
+            pre-wait: place one at four seconds and the inner group is four
+            seconds long, measured from its OWN entry. */
+        rig.apply (5, "window", "cue.create",
+                   { osc::Value::string ("GRPBXXX1"), osc::Value::int32 (0),
+                     osc::Value::string ("memo"), osc::Value::string ("Mark"),
+                     osc::Value::string ("MRKXXXX1") });
+
+        rig.apply (6, "window", "node.set",
+                   { osc::Value::string ("/godot/cue/MRKXXXX1/preWait"),
+                     osc::Value::string ("4") });
+
+        const auto outer = reading (7, "GRPAXXX1");
+
+        REQUIRE (outer.bars.size() == 1);
+        CHECK (outer.bars[0].lengthKnown);
+        CHECK (outer.bars[0].length == doctest::Approx (4.0));
+
+        SUBCASE ("and the inner group's OWN pre-wait is not counted into its length")
+        {
+            /*  A bar's left edge is already its pre-wait; a length that
+                contained it too would draw the group that much too long, and
+                every bar after it in a sequence that much too late. */
+            rig.apply (8, "window", "node.set",
+                       { osc::Value::string ("/godot/cue/GRPBXXX1/preWait"),
+                         osc::Value::string ("3") });
+
+            const auto moved = reading (9, "GRPAXXX1");
+
+            REQUIRE (moved.bars.size() == 1);
+            CHECK (moved.bars[0].at == doctest::Approx (3.0));
+            CHECK (moved.bars[0].length == doctest::Approx (4.0));
+        }
+
+        SUBCASE ("a manual sequence inside cannot be resolved, because a person is in it")
+        {
+            rig.apply (8, "window", "node.set",
+                       { osc::Value::string ("/godot/cue/GRPBXXX1/mode"),
+                         osc::Value::string ("sequence") });
+
+            const auto manual = reading (9, "GRPAXXX1");
+
+            REQUIRE (manual.bars.size() == 1);
+            CHECK_FALSE (manual.bars[0].lengthKnown);
+        }
+
+        SUBCASE ("nor one that loops for ever, or plays some of its members")
+        {
+            rig.apply (8, "window", "node.set",
+                       { osc::Value::string ("/godot/cue/GRPBXXX1/loops"),
+                         osc::Value::string ("0") });
+
+            CHECK_FALSE (reading (9, "GRPAXXX1").bars[0].lengthKnown);
+        }
+
+        SUBCASE ("and a round count multiplies it")
+        {
+            rig.apply (8, "window", "node.set",
+                       { osc::Value::string ("/godot/cue/GRPBXXX1/loops"),
+                         osc::Value::string ("3") });
+
+            CHECK (reading (9, "GRPAXXX1").bars[0].length == doctest::Approx (12.0));
+        }
+    }
+
+    //  And the reading says what it is inside of, so the panel can climb back up.
+    CHECK (reading (5, "GRPBXXX1").parent == "GRPAXXX1");
+}
+
+TEST_CASE ("client: shift lines a bar up with another, by any of its edges")
+{
+    /*  The author, 2026-09-22: "you can snap starts together, start and end,
+        end and end with drag+shift modifier". All three fall out of offering
+        BOTH edges of the dragged bar to every target - which is why there is
+        one comparison here and not three. */
+    std::vector<model::Bar> bars;
+
+    model::Bar bed;
+    bed.id = "BED";
+    bed.name = "The bed";
+    bed.at = 4.0;
+    bed.length = 6.0;
+    bed.lengthKnown = true;
+    bars.push_back (bed);
+
+    model::Bar voice;
+    voice.id = "VOICE";
+    voice.name = "Voice";
+    voice.at = 20.0;
+    voice.length = 3.0;
+    voice.lengthKnown = true;
+    bars.push_back (voice);
+
+    const auto targets = model::snapTargets (bars, "VOICE");
+
+    /*  THE GROUP'S ENTRY AND BOTH EDGES OF THE OTHER BAR, and nothing of the
+        dragged one: a bar cannot line up with itself. */
+    REQUIRE (targets.size() == 3);
+    CHECK (targets[0].seconds == doctest::Approx (0.0));
+    CHECK (targets[1].seconds == doctest::Approx (4.0));
+    CHECK (targets[2].seconds == doctest::Approx (10.0));
+
+    SUBCASE ("start to start")
+    {
+        const auto found = model::snapTo (4.4, 3.0, true, targets, 1.0);
+
+        REQUIRE (found.has_value());
+        CHECK (found->at == doctest::Approx (4.0));
+        CHECK (found->said.find ("start") != std::string::npos);
+        CHECK (found->said.find ("The bed") != std::string::npos);
+    }
+
+    SUBCASE ("start to end")
+    {
+        const auto found = model::snapTo (9.7, 3.0, true, targets, 1.0);
+
+        REQUIRE (found.has_value());
+        CHECK (found->at == doctest::Approx (10.0));
+    }
+
+    SUBCASE ("end to end: the START is what gets written, however the match was made")
+    {
+        /*  The dragged bar is three seconds long, so lining its END up with
+            the bed's end at ten puts its start at seven. */
+        const auto found = model::snapTo (7.2, 3.0, true, targets, 1.0);
+
+        REQUIRE (found.has_value());
+        CHECK (found->at == doctest::Approx (7.0));
+        CHECK (found->said.find ("its end") != std::string::npos);
+    }
+
+    SUBCASE ("and back to the group's entry, which is always there to line up with")
+    {
+        const auto found = model::snapTo (0.3, 3.0, true, targets, 1.0);
+
+        REQUIRE (found.has_value());
+        CHECK (found->at == doctest::Approx (0.0));
+        CHECK (found->said.find ("group") != std::string::npos);
+    }
+
+    SUBCASE ("nothing near is no answer rather than a wrong one")
+    {
+        CHECK_FALSE (model::snapTo (14.0, 3.0, true, targets, 1.0).has_value());
+    }
+
+    SUBCASE ("a bar whose length nobody knows offers no end to line up with")
+    {
+        /*  A group's length never reaches a client at all, and a media file
+            this build could not read has none either. Offering their "end"
+            would be offering their start wearing a different word. */
+        bars[0].lengthKnown = false;
+
+        const auto fewer = model::snapTargets (bars, "VOICE");
+        REQUIRE (fewer.size() == 2);
+
+        //  And the dragged bar's own end is not offered either.
+        CHECK_FALSE (model::snapTo (7.2, 3.0, false, fewer, 1.0).has_value());
+    }
+
+    //  A member cannot begin before the group it is inside of.
+    CHECK (model::preWaitFor (-3.0) == doctest::Approx (0.0));
+    CHECK (model::preWaitFor (2.5) == doctest::Approx (2.5));
 }
 
 TEST_CASE ("client: a fader's throw bends where a hand expects it to")

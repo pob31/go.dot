@@ -296,6 +296,8 @@ namespace wfg::client
                         wanted = model::Subject::Kind::waveform;
                     else if (subject == "sends")
                         wanted = model::Subject::Kind::sends;
+                    else if (subject == "timeline")
+                        wanted = model::Subject::Kind::timeline;
 
                     if (wanted == model::Subject::Kind::none)
                         return;
@@ -385,6 +387,12 @@ namespace wfg::client
 
                 footActions.createSend = [this] (const std::string& cueId, const std::string& busId)
                                          { send (gesture::createSend (cueId, busId)); };
+
+                footActions.openTimelineOn = [this] (const std::string& groupId)
+                {
+                    if (shell != nullptr && ! groupId.empty())
+                        shell->setFoot ({ model::Subject::Kind::timeline, groupId });
+                };
 
                 /*  THE PANEL'S TRANSPORT, through the ordinary doors: the cue
                     is fired by name, the run it made is killed by identifier,
@@ -1048,11 +1056,59 @@ namespace wfg::client
                 {
                     auto subject = shell->footSubject();
 
-                    if (model::followsPick (subject.kind) && ! selection.anchor().empty()
-                          && selection.anchor() != subject.objectId)
+                    /*  A TIMELINE IS ABOUT A CONTAINER, so picking a cue moves
+                        it to that cue's GROUP rather than to the cue (author,
+                        2026-09-22: "the group panel stays visible when
+                        selecting other cues").
+
+                        Three answers rather than two, and each one is what
+                        somebody meant: pick a group and the panel arranges
+                        THAT group; pick a cue inside one and it arranges the
+                        group the cue is in, which is the scene they are
+                        working on; pick a cue at the top of a list, where
+                        there is no group to arrange, and the panel shuts
+                        rather than sitting there showing somewhere else.
+
+                        The last is the plan's own rule for every subject - "re-
+                        points where that makes sense and closes where it does
+                        not" - and it is the one a timeline had wrong. */
+                    const auto picked = selection.anchor();
+
+                    if (model::followsPick (subject.kind) && ! picked.empty())
                     {
-                        subject.objectId = selection.anchor();
-                        shell->setFoot (subject);
+                        auto wanted = picked;
+
+                        if (subject.kind == model::Subject::Kind::timeline)
+                        {
+                            const auto isGroup = [&snapshot] (const std::string& id)
+                            {
+                                return ! id.empty()
+                                         && model::text (*snapshot, "/godot/cue/" + id + "/kind") == "group";
+                            };
+
+                            if (! isGroup (wanted))
+                                wanted = model::text (*snapshot, "/godot/cue/" + picked + "/parent");
+
+                            /*  A CUE AT THE TOP OF A LIST HAS A LIST FOR A
+                                PARENT, and a list is not a cue and has no
+                                members to arrange in time. Asked rather than
+                                assumed, because `parent` is never empty for a
+                                placed cue and an unchecked climb would land
+                                the panel on an identifier it cannot read. */
+                            if (! isGroup (wanted))
+                                wanted.clear();
+                        }
+
+                        if (wanted.empty())
+                        {
+                            shell->setFoot ({});
+                            menuItemsChanged();
+                        }
+                        else if (wanted != subject.objectId)
+                        {
+                            subject.objectId = wanted;
+                            shell->setFoot (subject);
+                        }
                     }
 
                     shell->foot.show (model::readFoot (*snapshot, subject), mediaTable);

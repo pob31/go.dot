@@ -274,6 +274,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Fader.cpp
     wfg/client/model/Sends.h
     wfg/client/model/Sends.cpp
+    wfg/client/model/Timeline.h
+    wfg/client/model/Timeline.cpp
     wfg/client/model/View.h
     wfg/client/model/Panic.h
     wfg/client/model/Reorder.h
@@ -335,6 +337,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/RunPaneComponent.cpp
     wfg/client/ui/SendMixerComponent.h
     wfg/client/ui/SendMixerComponent.cpp
+    wfg/client/ui/TimelineComponent.h
+    wfg/client/ui/TimelineComponent.cpp
     wfg/client/ui/Shell.h
     wfg/client/ui/Shell.cpp
     wfg/client/ui/TransportComponent.h

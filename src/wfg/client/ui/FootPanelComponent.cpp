@@ -27,6 +27,12 @@ namespace wfg::client::ui
         if (waveform != nullptr)
             waveform->applyTheme (theme);
 
+        if (sends != nullptr)
+            sends->applyTheme (theme);
+
+        if (timeline != nullptr)
+            timeline->applyTheme (theme);
+
         repaint();
     }
 
@@ -58,9 +64,26 @@ namespace wfg::client::ui
             on a waveform is not also carrying a fader bank nobody asked for. */
         waveform.reset();
         sends.reset();
+        timeline.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::timeline:
+            {
+                TimelineComponent::Actions arranging;
+                arranging.set = actions.set;
+                arranging.openOn = actions.openTimelineOn;
+                arranging.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                timeline = std::make_unique<TimelineComponent> (theme, std::move (arranging));
+                addAndMakeVisible (*timeline);
+                break;
+            }
+
             case model::Subject::Kind::sends:
             {
                 SendMixerComponent::Actions mixing;
@@ -123,6 +146,10 @@ namespace wfg::client::ui
                 wanted = "Send levels";
                 break;
 
+            case model::Subject::Kind::timeline:
+                wanted = "Timeline";
+                break;
+
             case model::Subject::Kind::none:
                 break;
         }
@@ -146,6 +173,9 @@ namespace wfg::client::ui
             this cue plays nothing, or whether the window has stopped. */
         if (sends != nullptr)
             sends->show (reading);
+
+        if (timeline != nullptr)
+            timeline->show (reading);
     }
 
     bool FootPanelComponent::overGrip (juce::Point<int> where) const
@@ -202,6 +232,9 @@ namespace wfg::client::ui
 
         if (sends != nullptr)
             sends->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (timeline != nullptr)
+            timeline->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
     }
 
     void FootPanelComponent::mouseMove (const juce::MouseEvent& event)

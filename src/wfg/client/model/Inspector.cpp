@@ -233,7 +233,17 @@ namespace wfg::client::model
         };
 
         if (kind == "media")
+        {
             offer ("Waveform, in and out points", "waveform");
+        }
+        else if (kind == "group")
+        {
+            /*  ONLY A GROUP HAS MEMBERS TO ARRANGE, and the panel says in its
+                own notice when the group is a sequence rather than a timeline -
+                offered either way, because seeing the shape of a sequence is
+                worth the look even where nothing can be dragged. */
+            offer ("Timeline, members arranged by dragging", "timeline");
+        }
 
         return out;
     }
