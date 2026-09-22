@@ -313,63 +313,58 @@ incoming member.
 
 **Goal:** the D700 driving a show; fader-start working.
 
-- **Surface abstraction** (PRD §3.16): strips, transports, device profile vs
-  layout, change-origin tagging, touch gating. Endpoint classes absolute /
-  relative / rate. **Touch alone is not the gate** (PRD §3.16, 2026-09-10): on
-  the D700 an operator reaching past a fader registers a real touch, so a touch
-  counts as adjusting only once the fader has moved, and the value is resent on
-  release *(proposed)*.
-- **Mackie transport first** (vendor recommendation). HUI when and if decided
-  (PRD §6.10). The D700 needs nothing beyond it: **its profile is MIDI-only**,
-  and the vendor HID interface is not implemented (PRD §3.16, 2026-09-10).
-- **D700 profile** from the measured protocol
-  (`docs/godot-asparion-d700-protocol-0.1.md`; byte tables in
-  `docs/D700_CONTROL_GUIDE.md`), itself read from vendor-published files only
-  (PRD §6.4): ports matched by name and the bank chosen by port; sign-magnitude
-  encoders; the native three-row display, 12 + 12 + 8 characters and a
-  track-number field, with MCU `0x12` left to generic MCU profiles; rings at
-  0–127; meters; motor moves interpolated, never full travel in one message;
-  the preset it expects named, Mackie. Display as a renderable with the bounded
-  field vocabulary; user-selectable fields per line.
-- **Bindings** with automation modes, cue-scoped lifetimes, DCA trims, pinning,
-  explicit update-cue capture.
-- **Fader linking** (PRD §3.9a): start value in prepare, fader-start with
-  hysteresis, fader-stop on touch-release at -inf.
-- **Banking**: implement the simplest option first; decide in practice (PRD
-  §3.9d).
-- Standing test: two surfaces on different protocols bound to the same node.
-- **Sampler groups** (PRD §3.27, 2026-09-07): the scheduling mode; strip roles
-  in the layout (DCA strips pinned, sampler strips following the show, left to
-  right); the two takeover modes; finish-first handover with the start value
-  reasserted; refresh on GO; per-clip `hold`/`playOut` and second-press
-  behaviour on the fader-movement trigger. The disarm is the existing stop cue.
-- **The gate endpoint** (PRD §3.16): pads, keys, MIDI notes and Stream Deck
-  tiles as press and release, no pressure. A start edge only from a parked
-  fader (PRD §3.9a).
-- **DCAs as objects** (PRD §3.28): membership as a mark on the member with its
-  mapping; nested DCAs; a cycle refused at edit time; composition by parameter
-  type.
-- **Timbre on the strip** (PRD §3.30): the layout binds a run's timbre to the
-  strip's colour cell. The D700 profile sends it **over MIDI** to the encoder
-  surround above the fader, which is the strip's only RGB element, quantised
-  and rate-limited, and re-asserted against the firmware's idle animation. The
-  write rate and how soon the animation resumes are measured first (PRD
-  §6.11). A generic MCU profile declares SysEx `0x72`'s eight colours unfit for
-  it.
+**Four decisions of 2026-09-23 shape it** — **Z**, **AA**, **AB** and **AC** in
+`godot-namespace-draft-0.1.md` §9, the author asked directly and each
+recommendation taken. One voice per armed member, a member that finds no free
+track waiting and saying so (Z). Velocity sets the level a pad starts a clip at
+and pressure rides it while the pad is held, per clip and off by default, which
+amends the PRD's *"no pressure"* (AA). A **Surfaces** tab in the show settings,
+and a virtual surface panel in the desktop client that plays a sampler group
+with the mouse (AB). And the order: the engine and that panel first, the generic
+Mackie bridge second, the D700 layer third (AC). The phase is drawn before the
+code as §16 of that draft, as §11 to §14 were. The D700's protocol is the one
+measured on the unit (`docs/godot-asparion-d700-protocol-0.1.md`, byte tables in
+`docs/D700_CONTROL_GUIDE.md`), read from vendor-published files only (PRD §6.4).
+
+| PR | What | Depends on |
+|---|---|---|
+| 6.0 | Docs first: namespace draft §16, decisions Z–AC in §9, the PRD amendments, this section | — |
+| 6.1 | The MCU/D700 codec: bytes to typed events and back, pure, tested against the byte tables | nothing — beside 6.2–6.5 |
+| 6.2 | Surfaces, strips and DCAs as document objects: rows, schema, fixtures, the three creates | M-B, landed at `5ec980a` |
+| 6.3 | DCA arithmetic, the live trims written through `node.set`, fades aimed at a DCA | 6.2 |
+| 6.4 | Strips as slots, the sampler mode, press and release, fader-start and fader-stop, velocity and pressure, eviction, refresh | 6.3 |
+| 6.5 | The client: the Surfaces tab, the virtual panel, inspector rows, list and run-pane words, the page's lists | 6.4 |
+| 6.6 | The bridge: MCU and pad-controller profiles, serve wiring, a MIDI test seam, the standing test | 6.1, 6.5 |
+| 6.7 | The D700 layer — native display, colour, rings, two banks, the preset — and measurements M26–M29 | 6.6, the unit |
+| 6.8 | Close-out: §16.12, the PRD amendments applied, this section ticked, the Phase 7 handoff | all |
+
+What the list this section carried until 2026-09-23 named and the table does not
+build — banking beyond a no-op, HUI, Stream Deck, meters, the rate endpoint
+class, bindings with automation modes and update-cue capture, a mapping per DCA
+assignment — is in §16.10 of the same draft, with the reason for each.
 
 **Done when:** a fader-start cue fires from the D700 with the audio already
 armed; a group DCA follows automation on motorised faders; the strip displays
 show provenance; a sampler group arms onto the D700 and a bank change finishes a
 playing clip before its strip switches; a DCA assigned to two cues in different
-groups trims both.
+groups trims both; and a virtual surface arms a sampler group and plays it from
+the mouse on a machine with no MIDI. *(2026-09-23: in this phase the automation
+a group DCA follows is a fade cue aimed at the DCA — lanes are PRD §3.10's and
+not built — the fader-start cue is a sampler member, and a bank change is a
+second sampler group armed over the first; surface banking is §3.9d's and not
+built.)*
 
-**Needs from the author:** banking policy as it emerges; the field layout he
-wants on the D700's three display rows; the touch filter of §3.16
-*(proposed)*; the *(proposed)* items of §3.27 and §3.9a — `stop` as a
-second-press value, the dwell for faders without touch, the second-surface
-rule, release-less triggers on a hold clip, members pinning their strips; the
-voices claim shape now that M16 has answered (PRD §3.25); the idle-colour
-policy of §3.30.
+**Needs from the author:** banking policy as it emerges (PRD §3.9d — the bank
+arrows do nothing until then); the field layout on the D700's three display
+rows, built as name, level-or-word and role with the cue number in the number
+field *(proposed)*; the touch filter of §3.16 *(proposed)*; the idle-colour
+policy of §3.30, built as authored colour at idle and timbre while sounding;
+**judging the virtual panel** after PR 6.5, before anything is plugged in
+(decision AC); and **the D700 on the bench for M27 and M28**, the colour rate
+and the idle animation, which need a person watching the unit. The other
+*(proposed)* items the phase builds as defaults are listed in PRD §6.9 under
+2026-09-23, each a yes or a no whenever the author has seen it working. The
+voices claim shape is answered (decision Z).
 
 ---
 

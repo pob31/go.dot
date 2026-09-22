@@ -1074,7 +1074,19 @@ Four, not one — this drops in a whole family of devices without special-casing
 | **absolute** | motor fader | position is value; soft takeover / touch |
 | **relative** | endless encoder | increments |
 | **rate** | SpaceMouse, spring-centred joystick, pedal | deflection is rate of change; deadzone; defined behaviour on release mid-deflection |
-| **gate** | pad, key, MIDI note, Stream Deck tile | press and release; optionally a value at press, which is what velocity is, and whether anything maps it is a per-clip mapping defaulting to none. No pressure, no XY: the MPE-like Sampler in WFS-DIY is deliberately not reproduced here (§3.27) |
+| **gate** | pad, key, MIDI note, Stream Deck tile | press and release; optionally a value at press, which is what velocity is, and whether anything maps it is a per-clip mapping defaulting to none. ~~No pressure,~~ no XY: the MPE-like Sampler in WFS-DIY is deliberately not reproduced here (§3.27). *Pressure amended 2026-09-23, below the table* |
+
+*Amended in 0.8, at the author's direction (2026-09-23) — decision AA,
+`docs/godot-namespace-draft-0.1.md` §9.* **A gate may carry pressure, as a
+per-clip mapping that rides the level while the pad is held, off by default.**
+Velocity sets the level a clip starts at — a floor at velocity one, 0 dB at 127,
+a straight line in dB between — and pressure moves the same trim a fader would
+move, on the same scale, for as long as the pad is down. A pressure of nought is
+ignored, so a pad that falls to nought after the hit does not pull the sound
+down. In the author's words, *a pad is a fader without a motor*. What stays out
+is the rest of what the struck words were written against, WFS-DIY's MPE-shaped
+Sampler: XY, and per-note pitch. One of that Sampler's mappings, the level one,
+comes in; the instrument does not.
 
 A 6DOF controller driving a WFS source position is better than two faders —
 three axes plus orientation is what the parameter actually is.
@@ -1755,6 +1767,15 @@ load and only slot contents change.
   a bank of eight being eight voices. **The author's to pick before Phase 6**;
   Phase 4's allocator assumes neither.
 
+  *Amended in 0.8, at the author's direction (2026-09-23) — decision Z,
+  `docs/godot-namespace-draft-0.1.md` §9.* Answered: **one voice per armed
+  member** — the second shape, a bank of eight being eight voices. A sampler
+  group's arm claims a track for every member, and polyphony is bounded by
+  `Show/Audio/@tracks` alone. A member that finds no free track **waits** — it
+  shows *pending* in words and lands when one frees, the waiting claim §3.9e's
+  voice row already promised a sampler group. The group does not declare its
+  voices.
+
 *Amended in 0.8 — `docs/spikes/spike04-graph-stability.md`, `spike01-bus-routing.md`.*
 Both halves are now measured rather than assumed.
 
@@ -2013,7 +2034,16 @@ whichever sampler group is armed, in member order, left to right. A member may
 pin its strip *(proposed)* — "the gunshot is always the rightmost fader" is a
 decision somebody may want to write down; derived from order is the half that
 exists first. **A pad is a fader-start fader without a motor**: the same
-binding at one bit, a *gate* endpoint (§3.16). No pressure, no XY.
+binding at one bit, a *gate* endpoint (§3.16). ~~No pressure,~~ no XY.
+
+*Amended in 0.8, at the author's direction (2026-09-23) — decision AA,
+`docs/godot-namespace-draft-0.1.md` §9.* **Pressure yes, XY no.** Per clip and
+off by default, velocity sets the level a clip starts at and pressure rides that
+level while the pad is held — the trim a fader would ride, which is why the
+sentence above already had the words for it; the author's own are *"a pad is a
+fader without a motor."* The press and the release stay one bit. Per-note pitch
+and XY stay out, with anything else that would make a pad an instrument rather
+than a trigger with a level.
 
 **Per clip, on the member's fader-movement trigger** (§3.7), edited across the
 bank through the bulk-edit view so that nothing inherits downward:
@@ -2083,10 +2113,25 @@ launches is a question about what GO would mean there. It stays as written until
 they say so, and nothing in this section is built either way for several phases
 yet.
 
+*Added 2026-09-23:* Phase 6 is that phase, and it builds the refusal as written
+— `standby.set` on a member of a sampler group answers `not-a-stop` — which
+remains the author's to overturn (`docs/godot-namespace-draft-0.1.md` §16.5).
+
 **Voices.** Each playing member is a track (§3.25), and a full bank as one
 track per cell is the wrong price; the group declares its voices, and the claim
 shape is §3.25's *(proposed)* item, to be measured before the allocator is
 written.
+
+*Amended in 0.8, at the author's direction (2026-09-23) — decision Z,
+`docs/godot-namespace-draft-0.1.md` §9.* Answered, and against the lean above:
+**one voice per armed member.** Every member is armed on a track of its own when
+the group is armed, so a press is a launch and nothing else — the premise of
+§3.9a's fader-start — and the price the paragraph above objected to is paid in
+tracks, which `Show/Audio/@tracks` bounds and the designer declares. A member
+that finds none free **waits**, showing *pending* in words, and lands when one
+frees (§3.9e). The group does not declare its voices: a strip's fader rides one
+run's level, and a run's level is its track's, so two members sharing a track
+would share a fader.
 
 ### 3.28 DCAs — an object of their own
 
@@ -2567,6 +2612,27 @@ member boundary it owns (§3.6). Added the same day: the group's default join
 header touch the same target (§3.6); and where the range join setting lives
 (§3.24, per cue).
 
+*Answered 2026-09-23, at the author's direction* (decisions Z, AA, AB and AC,
+`docs/godot-namespace-draft-0.1.md` §9 and §16.1): the voices claim shape
+(§3.25, §3.27) — one voice per armed member, bounded by `Show/Audio/@tracks`,
+and a claim that finds no free track waits and says so; pressure on pads (§3.16,
+§3.27) — yes, per clip, riding the level while the pad is held, off by default,
+with XY and per-note pitch still out; a **Surfaces** tab in the show settings
+and a virtual surface panel in the desktop client, which is §3.17's redundancy
+path when the hardware is absent; and the build order — the engine and that
+panel first, the generic Mackie bridge second, the D700 layer third — which also
+answers §6.10 for this phase: Mackie, and HUI not yet.
+
+Built by Phase 6 as the default and still *(proposed)*, each the author's to
+overturn once it has been seen working (namespace draft §16): `stop` as a
+second-press value (§3.8, §3.27); the second-surface rule, the origin that
+started a held clip owning it (§3.27); a release-less trigger on a hold clip
+playing it out (§3.27); authored colour at idle and timbre while sounding
+(§3.30), with no switch yet to turn timbre off; and a start edge counted only
+from a parked fader (§3.9a). Still *(proposed)* and not built: a member pinning
+its strip (§3.27), the dwell for faders without touch (§3.9a), and a touch
+counting as adjusting only once the fader has moved (§3.16).
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -2596,9 +2662,16 @@ Mackie vs HUI first — first week with the D700.
   measured says whether that is fine: a full-surface chase needed no
   throttling, but the hue rotation that confirmed the route did not record its
   rate.
+  *2026-09-23:* Phase 6 takes it as M27 (`docs/godot-namespace-draft-0.1.md`
+  §16.9) — all seventeen elements repainted at 10, 20 and 50 a second on the
+  unit, the operator saying which rate first stutters — and holds to ten a
+  second until then.
 - **How soon the D700's idle animation resumes** (§3.16), which sets the
   interval a profile repaints an idle colour at — unless the switch that
   disables it is found in the configuration block first.
+  *2026-09-23:* Phase 6 takes it as M28 (`docs/godot-namespace-draft-0.1.md`
+  §16.9) — paint, stop, and time the animation's return on the unit — and
+  re-asserts an idle colour every two seconds until then.
 
 ---
 

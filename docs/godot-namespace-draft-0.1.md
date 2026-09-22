@@ -886,8 +886,7 @@ back on if nobody feels strongly by then.
   (§14.16) and that nothing is built on the page in the meantime. What forced the question is a
   fact about browsers rather than a preference: **a page is never told a dropped file's path.** It
   is given the name and the bytes, deliberately, so the web client cannot say *"the file is at
-  D:udio
-ain.wav"* — it can only offer to COPY one into the show. And `media/@file` is
+  D:udioain.wav"* — it can only offer to COPY one into the show. And `media/@file` is
   deliberately relative to the bundle's `media/` folder, for the reason the parameter table gives
   in as many words: *"a show travels between machines and an absolute path is a fact about the
   machine it was authored on."* So the page's only honest route is an import, and the engine has
@@ -899,6 +898,39 @@ ain.wav"* — it can only offer to COPY one into the show. And `media/@file` is
   only the cue naming the file records (§4.10 suggests the second); what a name collision does; and
   whether a locked show refuses one. This is the first gesture where the two clients genuinely
   cannot be the same, which bears on §9's question E and on decision U.
+
+- **Z — One voice per armed member** (settled 2026-09-23, with the Phase 6 plan): GO on a sampler
+  group arms every member on a track of its own, and a member that finds no free track does not fail
+  — it shows *pending* in words and lands when one frees, §3.9e's waiting claim applied to a voice
+  for the first time. Polyphony is bounded by `Show/Audio/@tracks` and by nothing else. The other
+  shape, a group declaring a voice count and sharing it among its members, had been the lean since
+  2026-09-07 and is not built: a strip's fader rides one run's level and a run's level is its
+  track's, so two members on one track would share a fader; and a voice handed out at the press is a
+  file made ready at the press, which is exactly the delay fader-start exists to avoid. Answers PRD
+  §3.25's *(proposed)* claim shape, §3.27's **Voices.** and §13.15's open question. §16.1, and §16.5
+  for the mechanism.
+
+- **AA — Velocity sets the level a clip starts at; pressure rides it while the pad is held**
+  (settled 2026-09-23): per clip, both off by default. A velocity of one starts at `velocityFloor`,
+  127 at 0 dB, a straight line in dB between; pressure moves the same trim a fader moves, on the
+  same scale, and only while the pad is down. The author's words: *"a pad is a fader without a
+  motor."* This AMENDS PRD §3.16's gate row and §3.27's *"No pressure, no XY"*, which were written
+  against WFS-DIY's MPE-shaped Sampler; XY and per-note pitch stay out, and nothing new reaches the
+  audio — pressure writes the node a fader writes. §16.1.
+
+- **AB — A Surfaces tab in Show settings, and a virtual surface panel in the desktop client**
+  (settled 2026-09-23): the tab declares each surface — its profile, a port per bank of eight, the
+  preset the hardware expects — each strip's role, and the DCAs; the panel draws every strip of
+  every surface with a fader, a pad, a name, a state word and a colour, is played with the mouse
+  through the commands a surface sends, and is PRD §3.17's redundancy path when the hardware is
+  absent. It answers the author's *"look into the show settings to add a control window for this"*.
+  §16.1 and §16.7.
+
+- **AC — The engine and the virtual panel first, the generic Mackie bridge second, the D700 layer
+  third** (settled 2026-09-23): sampler groups and DCAs are judged on a screen with no hardware and
+  driven in CI the same way; real faders come through a Mackie Control bridge any MCU unit answers;
+  colour, the three-row display, the rings and the second bank are a layer over it. HUI is not in
+  the phase, and the Icon V1 and P1 are new profile words when they arrive. §16.1.
 
 ### Open, with the subphase that forces each
 
@@ -8056,3 +8088,960 @@ fork takes a bind address — `SimpleWebSocketServer::start(port, suffix, localA
 and JUCE 8's `DatagramSocket::bindToPort(port, localAddress)` exists); `MountSender` choosing a
 socket per device; and `network.apply` in `audio.setup`'s shape, because rebinding drops every
 WebSocket subscription and must not happen under a GO.
+
+
+## 16. Phase 6 — surfaces, strips, DCAs, sampler groups: what the tree, the commands and the log gain
+
+Written on 2026-09-23, before the code, as §11 to §14 were: the approved Phase 6 plan drawn as a
+text the pull requests 6.1–6.8 can be reviewed against rather than against memory. It is drawn
+against `main` at `5ec980a`, the MIDI ports milestone — M-B of §15.8, which is where this phase
+starts from — and PR 6.2 landed as `f43d104` while it was being written; §16.2 says where that
+commit took a different line. Rows reach `docs/parameters/godot-parameters.csv` with the PR that
+implements each of them, never before. Where this section and the code come to disagree, §16.12 at
+close-out says which won.
+
+The request was the author's, on the evening of 2026-09-22: *"Can you work on the DAW controllers
+now, phase 6? Plan for standard Mackie protocol and then add some niceties for the Asparion D700.
+Eventually we'll add others like the Icon V1 and P1, not in the scope here. Look into the show
+settings to add a control window for this. There will be also velocity/pressure sensitive pads too
+to trigger samples. Add the sample groups."* Every sentence of it lands somewhere below. Mackie is
+the bridge of §16.6 and the D700's niceties are a layer over it; the Icon units become words in a
+table when they arrive (§16.10); the control window is a tab and a panel (§16.7); the pads are
+strips that are pressed (§16.5); and the sample groups are the scheduling mode PRD §3.27 has
+described since 2026-09-07.
+
+**What the phase is, before any of its names.** Until now everything that started a sound was a GO,
+a trigger, or one cue firing another. Phase 6 gives the show hands: a fader somebody lifts to start
+a sound and pulls down to end it, a pad hit harder to play louder, one fader that brings five cues
+in two different scenes down together. Three things are needed for that, and all three are declared
+in the show. A **surface** is the box on the desk. A **strip** is one fader or pad on it, and says
+what it is for. A **DCA** is a named trim — an amount added to a level without touching the level
+itself — that cues and groups are marked with. What the hands are doing tonight, where a fader sits
+and which sound is under it, is published beside what was declared and never stored (§4.10); and
+every movement is a named command in the log, so a replay of the night moves the same faders the
+same way.
+
+Four decisions the author took with the plan shape it — **Z**, **AA**, **AB** and **AC** in §9,
+after Y — and §16.1 says what each means for a show:
+
+| | decision | what it shapes |
+|---|---|---|
+| **Z** | one voice per armed member; a member that finds no free track waits, and says so | §16.5's arming, the word `voice` in `run/pending`, and `run.arm` |
+| **AA** | velocity sets the level a clip starts at and pressure rides it while the pad is held — per clip, both off by default | four `media` rows, `levelForByte`, and two PRD sentences amended |
+| **AB** | a Surfaces tab in Show settings, and a virtual surface panel in the desktop client | §16.7, and a sampler group that can be played with no hardware at all |
+| **AC** | the engine and the virtual panel first, the generic Mackie bridge second, the D700 layer third | the order of every pull request in the phase |
+
+Eighteen further decisions were taken with the plan rather than by the author. They are numbered in
+§16.11 and cited in place as *plan decision N*, each an implementer's call written down so that it
+can be overruled early rather than late — §14's convention, kept. Where this phase builds something
+the PRD still marks *(proposed)*, it says so where it builds it, and PRD §6.9 lists every such item
+under 2026-09-23 as a default the author may overturn.
+
+**Where it starts, in the code rather than in the plan.** M-B landed at `5ec980a`: MIDI ports are
+document objects, bound by identifier and then by name, with a MIDI tab and `port.create`. It leaves
+two things this phase needs and pays for in PR 6.6 — a port's `rx` and `tx` rows are read by no
+engine code, and nothing rebinds a port after start (`midi.rescan` is named in a row's description
+and registered nowhere). Triggers fire from JUCE's MIDI callback thread through `Engine::submit`
+with the velocity thrown away, with no press paired to its release and nothing continuous, and no
+test can inject a MIDI message. The touch table PR 1.9 built for this phase — *"no surface exists
+yet to disagree with it"*, says `tree/Touches.h` — is a local of each Console verb, where the Runner
+cannot see it. A run's level is its own plus every ancestor's (`Runner::applyLevels`), only a fade
+writes the first of those, and nothing called a DCA exists.
+
+Phase 3's rule does more work here than anywhere since it was written — *the hook decides, the
+handler applies, and a handler never submits* (§12.1) — because every edge a fader crosses is a
+decision a replay has to reproduce without running the hook that made it. The tick stays at 50 Hz;
+the audio thread is untouched, since levels reach it through `setLevelDb` exactly as today; and the
+engine still links no client (`Console.h`'s `ClientHost` is the whole contract).
+
+### 16.1 The four decisions the author took (2026-09-23)
+
+Asked directly, one question each with a recommendation beside it; all four recommendations were
+taken.
+
+**Z — one voice per armed member.** Arming a sampler group arms every member on a track of its own,
+from the GO, so a bank of eight pads holds eight voices while it waits for a hand. When there is no
+free track the member does not fail: it shows *pending* in words and lands the moment a track frees
+— §3.9e's waiting claim, applied to a voice for the first time. Polyphony is bounded by
+`Show/Audio/@tracks` and by nothing else, and a designer who wants a bigger bank declares more
+tracks, which a show already has to say (decision G).
+
+The other shape was a group that declares how many voices it has and shares them among its members,
+and §3.25 and §3.27 had leant towards it since 2026-09-07, on the argument that *"a full bank as one
+track per cell is the wrong price"*. Two facts are against it. A strip's fader rides one run's
+level, and a run's level reaches the audio as its TRACK's (`Runner::applyLevels` ends in `setLevelDb
+(track, …)`), so two members on one track would share a fader: the one over the gunshot would move
+the rain as well. And a voice handed out at the press is a file made ready at the press, where §3.9a
+says fader-start is only possible because *"by the time the finger moves, the file is open, the
+transport armed"*. One voice per member keeps a press what GO already is on an armed cue — a launch,
+and nothing else. The price is paid in tracks, and the track set is fixed at load and exists whether
+anybody holds it or not (§3.25), so what an armed member costs is availability; the waiting claim is
+what makes a shortage of it visible.
+
+For a show: a bank of twelve armed with `tracks="16"` while an eight-cue scene is still sounding
+arms eight members and shows four `pending voice`, each landing as a cue of the scene ends. Z
+answers §3.25's *(proposed)* claim shape — *"the author's to pick before Phase 6"* — and §13.15's
+open question, and §3.27's **Voices.** paragraph is answered in place.
+
+**AA — velocity sets the level a clip starts at; pressure rides it while the pad is held.** Per
+clip, and both off by default. Velocity maps a press onto the level the clip starts at: a velocity
+of one starts at a floor (`velocityFloor`, −40 dB unless the designer says otherwise), 127 at 0 dB,
+and between them it is a straight line in dB. Pressure — polyphonic aftertouch or channel pressure,
+whichever the pad sends — moves the same trim a fader would move, on the same scale, and only while
+the pad is down. The author's sentence for it is the design: *"a pad is a fader without a motor."*
+Off, every press starts at unity, which is what a fader strip gives anyway, so a member plays the
+same from either kind of strip until somebody decides otherwise.
+
+This amends a sentence rather than filling a gap, and the sentence had a reason. §3.16's gate row
+and §3.27 both say *"No pressure, no XY"*, and both were written on 2026-09-07 against WFS-DIY's
+Sampler, which is MPE-shaped — pitch, pressure and a position for every note — and which the author
+chose not to reproduce here. What the amendment keeps out is exactly that: no XY, no per-note pitch,
+nothing that turns a pad into an instrument. What it lets in is one thing, and not a new one:
+pressure writes the node a fader writes (`/godot/run/<id>/trim`, §16.4) through the one function
+velocity uses (`levelForByte`, §16.5). No new node, no mapping language, no second path to the
+audio. WFS-DIY's `PressureMapping {enabled, direction, curve}` is the precedent for the shape and
+nothing is lifted from it — it is JUCE 9, MPE-shaped and monophonic per channel — and its default is
+not taken either: there the level mapping is on, here both are off.
+
+**AB — a Surfaces tab in Show settings, and a virtual surface panel in the desktop client.** The
+author asked to *"look into the show settings to add a control window for this"*, and the answer is
+two things because it is two jobs. The **tab** is where a show declares its surfaces: each one's
+profile, the port it is reached through for each bank of eight, the preset the hardware has to be
+set to, what each strip is for, and the DCAs. It sits beside Audio, Network and MIDI because it is
+the same kind of thing — a fact about the rig written into the show (§15.1, D3). The **panel** is
+where a show is played without hardware: every strip of every surface drawn with a fader, a pad, a
+name, a state word and a colour, driven by the mouse through exactly the commands a surface sends.
+It is PRD §3.17's redundancy path — *"losing the D700 is a downgrade in feel, not capability"* —
+built in the phase that brings the D700 rather than left for the tablet, and it is what makes AC
+possible.
+
+**AC — the engine and the virtual panel first, the generic Mackie bridge second, the D700 layer
+third.** Sampler groups and DCAs are judged on a screen with no hardware at all, and driven in CI
+the same way; real faders come second, through a Mackie Control bridge any MCU unit answers; colour,
+the three-row display, the rings and the second bank come third, as a layer over that bridge. It is
+the vendor's advice — *"for own development, use MIDI … Mackie-based with vendor extensions"*
+(§3.16) — made into a schedule, and it is how the author works made into one too: the things that
+have to be judged by looking, how a bank arms and what a strip says while it waits, are on a screen
+before anything is plugged in. The codec (PR 6.1) is pure and needs nothing else, so it runs beside
+all of it. HUI is not in the phase, which answers PRD §6.10's *"Mackie vs HUI first"* for now.
+
+| decision | the PRD sentence it answers or amends | written where, 2026-09-23 |
+|---|---|---|
+| **Z** | §3.25's *(proposed)* claim shape; §3.27's **Voices.** | both in place, and §6.9 |
+| **AA** | §3.16's gate row and §3.27's *"No pressure, no XY"* | both in place, and §6.9 |
+| **AB** | §3.17's redundancy path, and the author's *"control window"* | §6.9 |
+| **AC** | §6.10's *"Mackie vs HUI first"* | §6.9 |
+
+### 16.2 The objects and their rows
+
+**A surface is a box the show talks to through declared MIDI ports.** Faders, encoders, buttons,
+displays: whatever the hardware has, its profile says (§3.16: a device profile is *"topology +
+protocol"*). The show says *"the D700, on ports P1 and P2, expecting the Mackie preset"*; the
+machine says which cables P1 and P2 are, which the ports already do (§15.8). Element
+`<Show><Surfaces><Surface>`, published at `/godot/surface/<id>`, with one of four profile words:
+
+- `virtual` — the desktop client's own panel, which needs no port;
+- `mcu` — a generic Mackie Control unit, eight fader strips on one port;
+- `d700` — the Asparion D700: Mackie plus its native display, colour and rings, sixteen strips on
+  two ports;
+- `midiPads` — a pad controller sending notes with velocity and pressure.
+
+**A strip is one fader or pad on a surface, and it is the fourth kind of slot** — one of a fixed
+number of places a running cue can hold, wait for, or be pushed out of (§3.9e). §13.2 reserved its
+row and left the columns for this phase. What a strip is for is the layout's decision and not the
+hardware's (§3.9a): a **dca strip** is pinned to one DCA and never reassigned; a **sampler strip**
+is filled by whichever sampler group is armed, member by member, left to right. Element `<Strip>`
+under `<Surface>`, published at `/godot/slot/<id>` beside the processor inputs and rack channels —
+the precedent is a rack `Channel`, an element in one place and a slot in the tree — with `kind =
+strip` and a derived `target`: the one node the strip's fader or pad is writing now.
+
+**A DCA is a named trim that cues and groups are assigned to, and DCAs nest** (§3.28). Element
+`<Show><Dcas><Dca>`, published at `/godot/dca/<id>`. The assignment is a mark on the member — `dca`
+on a media cue or a group — and never a list on the DCA, so nothing flows downward (§4.12) and
+assigning eight cues is a multi-select edit. Its `trim` is live: it rests at 0 dB, a show opens
+there, and it is never stored.
+
+**Two containers beside `<Network>`, not one somewhere else** (plan decision 1). A DCA is not an
+audio object — §3.28 lets a video cue be assigned to one, trimming its opacity — so it does not
+belong under `<Audio>`; and a surface is not a port — a virtual one has none and a D700 has two — so
+it does not belong under `<MidiPorts>`. `ensureContainers` grows to `Lists, Mounts, MidiPorts,
+Network, Surfaces, Dcas`, and every fixture gains two empty lines after `<Network/>`: the `c973bfa`
+pattern §15.6 describes, and the cost to overrule early if it is the wrong one.
+
+**A strip's index and a surface's strip count are derived, never written** (plan decision 2). A
+strip is an object and objects are identity-addressed (§1), so where it sits is the element's
+position, as a range's `index` is (§12.9), and moving it is `object.move` rather than a number that
+could collide with another strip's. A writable count would make *how many strips* and *which strips
+exist* two truths that could disagree. `surface.create` makes the strips the profile implies, and
+`strip.create` adds one. *(Dated note, 2026-09-23: PR 6.2 was committed as `f43d104` while this
+section was being written, and on two counts it took a different line from the plan this section
+draws. The plan refused `strip.create` on the Mackie profiles, eight to a port being the hardware's
+number, and made eight strips for a pad surface; the code lets `strip.create` add to any surface — a
+Mackie unit with its extender is one surface of sixteen — and makes sixteen for a pad surface. The
+tables below follow the code; §16.12 records which reading stands.)*
+
+**A surface's `profile` is fixed at creation, and the row has to be able to say so.** The plan draws
+it `rw` and PR 6.2 kept it so — `trigger/kind`'s shape, writable although §12.8 calls a trigger's
+kind fixed at creation — and nothing yet refuses a profile rewritten afterwards, which would leave
+behind the strips the old one made. `bus/width` is the shape that makes the sentence true: read-only
+at the door, `persist=show`, written only by its own command *(proposed)*. The Surfaces tab shows
+the word as text either way.
+
+**`ports` is the first `refers` row that holds a list.** The check that warns about a dangling
+reference — the `References` walk in `ShowDocument`'s warnings — looks the whole value up with one
+`findById`, so a two-bank D700 naming `P1 P2` would be reported as naming a port that does not
+exist. PR 6.2 splits the value on spaces there — an identifier never holds a space, so nothing a
+single-valued row could say is lost — and checks a surface's ports one by one. `mount/prefix` is
+space-separated too and never met this, because it refers to nothing.
+
+The rows, grouped by where they are published. Every one carries the panic policy `park`, and its
+resting value is its default.
+
+| Node | Type, default | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/surface/order` | `s` | ro | none | the surfaces declared, in document order — the order a sampler group fills sampler strips in, and then each strip's `index` |
+| `/godot/surface/<id>/name` | `s` | rw | show | what the show calls it: *"The D700"*, *"Pads by the desk"* |
+| `/godot/surface/<id>/profile` | `s`, `virtual` — `virtual \| mcu \| d700 \| midiPads` | rw | show | what kind of surface it is, which decides how its strips are driven and what each has; fixed at creation, and the strips it implies are made with it |
+| `/godot/surface/<id>/ports` | `s`, refers to `port` | rw | show | the declared ports it is reached through, space-separated, in bank order: the first carries strips one to eight, the second nine to sixteen. The bank is the port and never the message (`docs/D700_CONTROL_GUIDE.md` §1.1). Empty on a virtual surface |
+| `/godot/surface/<id>/preset` | `s` | rw | show | the preset the hardware must be set to — *Mackie* for the D700 — written down and shown to the operator, never detected: two presets can differ by one button, and a surface cannot be fingerprinted from its traffic (`docs/godot-asparion-d700-protocol-0.1.md` §5) |
+| `/godot/surface/<id>/enabled` | `T`, true | rw | show | off, nothing is sent to it and nothing it sends is heard; its strips still exist and are still filled, so a surface left in the van is still part of the layout |
+| `/godot/surface/<id>/channel` | `i`, 0 (0..16) | rw | show | `midiPads`: the channel the pads send on, nought for any |
+| `/godot/surface/<id>/firstNote` | `i`, 36 (0..127) | rw | show | `midiPads`: the first pad's note; the strips follow it upwards, one note each |
+| `/godot/surface/<id>/strips` | `i`, 0 | ro | none | how many strips it has, counted off its `Strip` children |
+| `/godot/surface/<id>/connected` | `T`, false | ro | none | the engine is talking to it tonight: every port it names is bound, with `rx` and `tx` on. A virtual surface always is |
+| `/godot/surface/<id>/problem` | `s` | ro | none | why it is not, in one sentence — a port with no device behind it, a port whose `rx` or `tx` is off, a profile that names no port |
+| `/godot/surface/<id>/serial` | `s` | ro | none | the serial the hardware reported in the Mackie handshake, when it made one. Nothing depends on it; it is the one identifier that survives the operating system renumbering the ports |
+| `/godot/slot/<id>/kind` | `s` — gains `strip` | ro | none | derived from the element, as for the other two kinds |
+| `/godot/slot/<id>/surface` | `s` | ro | none | the surface the strip belongs to, from where it sits |
+| `/godot/slot/<id>/index` | `i`, 0 | ro | none | where it sits on its surface, from nought: fader one is index nought |
+| `/godot/slot/<id>/role` | `s`, `sampler` — `sampler \| dca` | rw | show | what it is for (§3.9a, §3.27); the two may be mixed on one surface |
+| `/godot/slot/<id>/dca` | `s`, refers to `dca` | rw | show | the DCA a dca strip rides; read only when the role is `dca`, and naming nothing says *unassigned* and moves nothing |
+| `/godot/slot/<id>/endpoint` | `s`, `absolute` — `absolute \| gate` | ro | none | what the hand control is (§3.16): a fader, whose position is the value, or a pad, a press and a release with a velocity at the press. From the profile — `midiPads` strips are gates, every other profile's are faders — and published so a client draws the right thing and the engine knows where a fresh run's trim starts |
+| `/godot/slot/<id>/target` | `s` | ro | none | the node the strip is riding now: `/godot/dca/<id>/trim` on a dca strip, the holding run's `/godot/run/<id>/trim` on a sampler strip, empty with nothing on it. It changes at every handover, which is how one fader rides a different sound after the bank changes |
+| `/godot/slot/<id>/word` | `s`, `free` — `free \| dca \| unassigned \| armed \| pending \| playing \| held \| stopping \| closing` | ro | none | what the strip is doing, in a word for the display and never colour alone (§4.8); §16.5 says when each applies |
+| `/godot/slot/<id>/cue` | `s` | ro | none | the member cue on the strip — the holder's, or the first waiter's — so a display can show a name and a number |
+| `/godot/dca/order` | `s` | ro | none | the DCAs declared, in document order |
+| `/godot/dca/<id>/name` | `s` | rw | show | *"Band"*, *"Ambiences"*, *"Everything"* — what a client and a wide display show |
+| `/godot/dca/<id>/shortName` | `s` | rw | show | the name for a seven-character scribble strip, written by somebody rather than cut by the machine (§3.16) |
+| `/godot/dca/<id>/dca` | `s`, refers to `dca` | rw | show | the DCA this one sits inside, or empty at the top. *"Everything"* over *"Band"* over one guitar is three terms in one sum; a cycle is refused when it is written and when the show loads |
+| `/godot/dca/<id>/trim` | `d`, 0 (−120..12 dB) | rw | none | the trim this DCA applies now, added to every run whose cue is marked with it and to every run under a group so marked. Never stored (§4.10), which is also why writing it is not undoable |
+| `/godot/cue/<id>/shortName` | `s` | rw | show | any cue's name for a seven-character display, authored (§3.16) |
+| `/godot/cue/<id>/dca` — media, group | `s`, refers to `dca` | rw | show | the DCA this cue or group is assigned to; adds that DCA's trim, and its parents', to every run of it — level only, one to one in dB |
+| `/godot/cue/<id>/dca` — fade | `s`, refers to `dca` | rw | show | the DCA whose trim this fade moves instead of a cue's level; when it is set, `target` is not read and `stopWhenDone` means nothing |
+| `/godot/cue/<id>/takeover` — group | `s`, `group` — `group \| strip` | rw | show | sampler: what arming this group does to the sampler groups already armed (§16.5) |
+| `/godot/cue/<id>/release` — media | `s`, `playOut` — `hold \| playOut` | rw | show | sampler member: what letting go does. `hold` stops the clip after a short fade; `playOut` lets it run to its end, and silence on a fader is a mute |
+| `/godot/cue/<id>/secondPress` — media | `s`, `restart` — `restart \| noop \| stop` | rw | show | sampler member, play-out only: what a press does while the clip is playing — from the top, nothing, or the release fade |
+| `/godot/cue/<id>/velocity` — media | `T`, false | rw | show | sampler member: whether a press's velocity sets the level the clip starts at (decision AA) |
+| `/godot/cue/<id>/velocityFloor` — media | `d`, −40 (−120..0 dB) | rw | show | where a press of velocity one starts, and where a pressure of one takes the trim |
+| `/godot/cue/<id>/pressure` — media | `T`, false | rw | show | sampler member: whether pressure on the pad rides the clip's trim while it is held, on velocity's scale |
+| `/godot/cue/<id>/releaseFade` — media | `d`, 0.05 (0.. s) | rw | show | the fade to silence when a hold clip is released or a play-out clip is stopped by a second press; fifty milliseconds reads as a stop and does not click |
+| `/godot/run/<id>/trim` | `d`, 0 (−120..12 dB) | rw | none | what a hand is adding to this run's level — the fader or pad on the strip it holds, and nothing else writes it. Starts at silence under a fader and at unity under a pad |
+| `/godot/run/<id>/strip` | `s` | ro | none | the strip this run holds, when it is a sampler member on one: the strip's holder, read from the run's side |
+| `/godot/run/<id>/held` | `T`, false | ro | none | whether a pad is down on this run, and so which press owns it (§16.5) |
+
+**Four existing rows change.** `group/mode` gains `sampler` — *"sampler launches none of its
+members: the hand does, from strips (PRD 3.27)"*. `slot/kind` gains `strip`, as the table says.
+`/godot/slot/order` gains *", then the strips of every surface"*. And `run/pending` gains a word
+that is not an identifier — *"…or the word voice, for a sampler member armed onto a strip while
+every track is busy: it lands when one frees"* — for the reason §16.5 gives. **A strip's name is the
+slot's**: a `Strip` carries the owners `slot` and `strip`, as a rack `Channel` carries `slot` and
+`rackChannel`, so its name is `slot/name` and the `strip` owner must not declare one — the check M-B
+added, that no element's owners declare a name twice, covers it.
+
+**Published out of both halves of the tree, as a slot is** (§13.2). What the show decided, and what
+its structure alone decides — a strip's `index`, `surface` and `endpoint`, a surface's `strips` —
+comes from the document half, rebuilt when the show changes. What changes while nothing about the
+show does comes from the runtime half: a strip's `holder`, `pending`, `target`, `word` and `cue`; a
+run's `trim`, `strip` and `held`; a DCA's `trim`; and a surface's `connected`, `problem` and
+`serial`, from a surface table handed to the tree as the MIDI ports are (`setSurfaces`, in
+`setMidiPorts`'s shape; until PR 6.6 hands one over they read their defaults, and a virtual surface
+reads connected regardless). **The trap in that split is silent, so it is written down**: a `none`
+row on a document element is published by the document half WITH ITS DEFAULT unless that half skips
+it and the runtime half emits it, and a row with no runtime branch at all publishes its default
+without a word (`ParameterTree.cpp:1941`). A strip whose `word` read `free` for ever would pass
+every test that only looked at a strip nobody had pressed.
+
+### 16.3 The commands
+
+Three creates, three run gestures, a rescan, and two new addresses for a verb that already exists.
+
+| Command | Arguments | What it does, and what it records | What it refuses |
+|---|---|---|---|
+| `surface.create` | `<profile s> [name s] [id s]` | a `<Surface>` at the end of `<Surfaces>`, with the strips its profile implies: eight for `mcu` and `virtual`, sixteen for `d700` across its two ports and for `midiPads` (§16.2's note). Every identifier it draws — the surface's and each strip's — rides on the applied record in the order drawn, as `go` records the runs it makes, so a replay makes the same objects | a profile that is not one of the four, `bad-value`; under the edit lock, `locked` |
+| `strip.create` | `<surface s> [id s]` | one more `<Strip>` at the end of a surface — of any profile, as PR 6.2 built it (§16.2's note) | `locked` |
+| `dca.create` | `[name s] [id s]` | a `<Dca/>` at the end of `<Dcas>` | `locked` |
+| `object.delete` | `<id>` | already generic; deleting a surface takes its strips with it | as today |
+| `strip.press` | `<strip s> [velocity i 0..127]` | a hand on a sampler strip: launches the member on it, or applies its second-press rule if it is playing, and appends a step `p` to the list's history (§16.5) | a dca strip, `bad-value`. A free strip, a pending one, or one held from another origin: applied, and nothing happens |
+| `strip.release` | `<strip s>` | the hand lifted: a hold clip fades to silence and stops, a play-out clip carries on | a dca strip, `bad-value`; with nothing held, applied and nothing |
+| `run.arm` | `<run s>` | engine origin, submitted by the hook: the retry of a voice claim. The word `voice` leaves the run's `pending` and the member is armed again, now that a track is free | a run not waiting for a voice: applied, nothing |
+| `midi.rescan` | — | re-enumerates this machine's MIDI devices and rebinds the declared ports, on an explicit gesture and never on an idle tick, because enumerating blocks for milliseconds on Windows | — |
+| `node.set` | `<address s> <value>` — two new live addresses | `/godot/run/<id>/trim` and `/godot/dca/<id>/trim`, answered in front of the document (§16.4); the applied record carries the value as an `f:` atom, and no undo transaction is opened | out of range, `bad-value`; not a number, `type-mismatch`. A write to a run that has finished is applied and ignored, as `run.kill` on one is |
+
+**One reason is new**: `needs-strip`, in `needs-go`'s shape — a sampler member fired by name, by
+`cue.fire`, a trigger or a `start` cue, while no armed group has put it on a strip (§16.5). A member
+with a strip is pressed instead. And one old refusal gains a case: `standby.set` on a member of a
+sampler group answers `not-a-stop`.
+
+**The edit lock draws its line where decision W drew it.** The creates are document mutations and
+refuse while the show is locked. A press, a release, `run.arm` and the trims are the show being
+played rather than edited, and keep working — the trims because the door they go through sits in
+front of the place the lock is asked (§16.4).
+
+**The commands a surface sends that already exist** are the ones any client sends: `go`,
+`run.stopAll`, `run.killAll`, `standby.previous` and `standby.next` from the transport buttons, and
+`node.touch`, `node.release` and `node.releaseAll` from the faders (§16.6). A dca strip is never
+pressed; on a Mackie surface its gate resets its DCA's trim to nought (plan decision 12), which is a
+`node.set`.
+
+### 16.4 One sum, one write verb
+
+**A trim is an amount added to a level that leaves the level itself alone.** Pull a DCA down six
+decibels and every cue marked with it plays six decibels quieter, while the levels written in the
+show are exactly what they were. A group fade has worked this way since Phase 3 (decision O), and
+§3.28 says a DCA *"adds terms to the same sum"*. So Phase 6 adds no arithmetic, only terms:
+
+```
+effective(run) = run.ownLevel + run.trim + Σ dcaChain (cueOf (run))
+               + Σ over ancestor runs a: a.ownLevel + a.trim + Σ dcaChain (cueOf (a))
+dcaChain(cue)  = trim (cue.dca) + trim (parent (cue.dca)) + …   (bounded by the DCA count)
+```
+
+`ownLevel` is what a fade writes, as today. `trim` on a run is what a hand writes, through the strip
+the run holds. The DCA chain is the trim of the DCA a cue is marked with, plus its parent's, and so
+on up; an ancestor group run brings all three of its own, which is how a group marked with a DCA
+trims every member without anything flowing down to them.
+
+**It is a sum, and that is the property that matters** — §3.28's words: *"Sums are
+order-independent, which is the property that matters because cues arrive in whatever order the
+operator pressed GO."* A DCA ridden before a cue fires and one ridden after arrive at the same
+level. Adding decibels is multiplying gains, which is §3.6's *"nested trims compose
+multiplicatively"* in the other unit. The chain is read into a map once per show revision —
+`dcaChainOf`, rebuilt when `document.showRevision()` moves, as `applyRouting` is — so a tick pays
+lookups and additions, walked no further than the number of DCAs so that a cycle past both refusals
+could not hang one. The `approximatelyEqual` guard in `applyLevels` stays: a sum that did not change
+sends nothing towards the audio thread.
+
+**Both trims are `persist=none`, and the reason is §4.10**: where a fader sits at 04:12 is not a
+decision about the show, it is what a hand is doing to it tonight. So a show opens with every DCA at
+nought, and nothing a hand did yesterday is in the file.
+
+**And a `persist=none` row cannot be written through the document at all — the finding that shaped
+the door.** `Schema.cpp:360-363` files every `none` row among an element's derived attributes, and
+`ShowDocument::setAttribute` refuses a derived attribute `read-only` before it asks anything else
+(`ShowDocument.cpp:890-894`): *"A derived value is read-only by construction, whatever its row
+says."* Its own comment a few lines further on anticipates the day a writable `none` row is resolved
+there. Nor should the trims go through it if they could: a run is not a document object, and a trim
+that reached `show.xml` would be a fader position saved as a decision. So the write is answered IN
+FRONT of the document, by a dispatch the `node.set` handler consults first.
+
+**The precedent went the other way.** `list/aim` is a runtime row with a command of its own —
+`list.aim`, registered by the Runner — skipped by the document half of the tree
+(`ParameterTree.cpp:987`) and emitted by the runtime half. Followed to the letter, the trims would
+be written by `dca.trim` and `run.trim`, two commands, and the `node.set` handler would stay exactly
+as it is.
+
+**What decided it was who already speaks `node.set`** (plan decision 7). Three things do, and none
+of them speaks a new command. The touch table is keyed by ADDRESS: `node.touch` and `node.release`
+hold the address a fader writes, so a trim written by `dca.trim <id> <dB>` would be a write under
+one name held by a touch under another, and the gate that stops the engine fighting a finger (§3.16)
+would have nothing to gate. The page's generic inspector writes any writable node it is shown with
+`node.set` and nothing else — §14.2's fifth rule, *a client assumes nothing about the parameter
+table* — so a DCA's trim is ridable from the page the day its row exists, with no change to the
+page. And every other client, a Max patch or `curl` or the desktop's own fader, gets it the same
+way. About forty lines of dispatch buy all three.
+
+**How the door works.** `registerDocumentCommands` gains a `LiveWrite` hook —
+`std::function<std::optional<Outcome> (const std::string& address, const osc::Value&)>` — which the
+`node.set` handler asks before `document.setAttribute`, for addresses under `/godot/run/` and
+`/godot/dca/` only; for anything else it answers nothing and the document is asked, as today. Serve,
+replay and the tests supply it. A run's trim is found in the run table, parsed against the
+`run,trim` row — its type and its range, refused `type-mismatch` or `bad-value` exactly as the
+document would refuse them — and written. A DCA's trim is checked against the declared DCAs and set
+in a small table beside the runner (`cue/DcaTable.h`, std-only). A write to a run that has already
+finished is applied and ignored, as `run.kill` on one is, because a surface a tick late should not
+collect an `R` for every message it sent. `wfg tree` and `wfg validate` supply no hook: they have no
+runs. The dispatch widens nothing else — `list/aim` written through `node.set` is still refused, and
+a test says so.
+
+**No undo transaction for a ride.** The before-apply hook that opens one transaction per applied
+command (§14.9) skips `node.set` under `/godot/run/` and `/godot/dca/`, so `document/canUndo` stays
+false after a hundred of them. §14.9 reserved a second undo domain for writes like these — *an
+operator riding a level during a show must not be able to take back a cue rename by pressing Undo,
+and must not have to* — and this phase does not build it either. A trim is nothing anybody decided,
+so the document holds nothing for an undo to put back, and what an undo of a ride would put back is
+a fader position: a motor moving because somebody pressed ctrl-Z. A ride is logged and replayed like
+any `node.set`, which is the half of the promise that matters the morning after.
+
+**And it keeps working under the edit lock**, which falls out of where the door sits rather than
+from a rule of its own: the lock is asked inside `setAttribute`, of `persist=show` rows only, and
+the trims never get there. That is decision W's line — show mode locks the editing and never the
+mixing.
+
+**A fade aimed at a DCA moves the DCA** (plan decision 16). A fade cue whose `dca` row names a DCA
+moves `/godot/dca/<id>/trim` from wherever it is to the fade's destination; `target` is not read, a
+DCA having no run to find, and `stopWhenDone` means nothing. A second fade on the same DCA takes
+over from where the first had got to, as on a cue. It is a second row rather than a widened
+`fade/target` because the `refers` machinery checks one kind per row; with both set, `dca` wins and
+`wfg validate` says so. It is also how the devplan's *"a group DCA follows automation on motorised
+faders"* is met in this phase: a fade cue moves the trim, the trim is a dca strip's `target`, and
+the motor follows its target.
+
+**Esc and double Esc leave DCA trims where they are** (plan decision 8). An abort ends runs; it does
+not reset the desk, and after it the next GO sounds at the level the faders show. A run's own trim
+ends with its run, and a DCA's resting state, §4.6's, is the nought every show opens at.
+
+### 16.5 Strips — the fourth slot kind
+
+**§13.2's fourth row, filled.** The slot table has carried a row for strips since Phase 4, with its
+columns left for this phase:
+
+| kind | pool declared by | typed by | released | a claim that finds none |
+|---|---|---|---|---|
+| `strip` | the layout: every `<Strip>` whose role is `sampler`, on every surface | role — a dca strip is pinned and never claimed | when the clip's run ends, however it ends | **waits** in the strip's pending queue, or **evicts**, when the arming group's takeover says so — and an eviction is a close |
+
+**The claim is positional** (plan decision 3). The roster (`stripRoster`) is every sampler strip,
+ordered by surface — `surface/order` — and then by index, rebuilt when the show's revision moves.
+Member *i* of an armed group goes to strip *i* of that roster, across surfaces, in both takeover
+modes. It is §3.27's *"in member order, left to right"* taken literally, and it has the property an
+operator needs: the third member of a bank is the third fader, and nobody has to read a screen to
+know it. A member beyond the last strip is not armed at all, and the group's row says *partially
+armed*, §3.6's words for it. A member that pins its strip — *"the gunshot is always the rightmost
+fader"* — is §3.27's *(proposed)* and not built (§16.10).
+
+**Arming, in the handler and in the hook.** GO on a sampler group makes a group run and launches
+nothing. The handler (`fireKind`'s group branch) sets the run playing, records its members, and —
+when its takeover is `group` — marks every other live sampler group `closing`: a fact about the
+model, written by a handler so that a replay writes it too. The members are the group's members in
+order; no round is drawn, and `selection`, `play` and `loops` are ignored as a manual group ignores
+them. Then, every tick, a sampler branch in the hook (`samplerTick`, ahead of the timeline branch in
+`advanceGroups`) looks at each armed group, and every decision it takes leaves as a command:
+
+1. **A closing group launches nothing new.** Every child armed and never launched is ended with
+   `run.kill` — it never sounded, so ending it takes nothing from anybody — and a playing child
+   plays on. When the last child has finished, the group's footer runs and it ends, exactly as a
+   group ends today.
+2. **Otherwise each member with no unfinished run gets one**: if its strip exists and the group has
+   not lost it, `run.spawn` makes a run of the member there.
+3. **A child waiting for a voice is retried** with `run.arm` the first tick a track is free.
+4. **The fader edges**, below.
+5. **Under strip takeover, a group that has lost every strip and has nothing unfinished completes.**
+
+**A member re-arms after its run ends, any number of times.** The handler that ends a run releases
+its slots (§13.2), so the tick after a member's clip ends, the branch finds that member with no
+unfinished run and spawns it again on the same strip — until the group closes or loses the strip.
+That is §3.27's *"any number of times"*, and it is also what makes every press a fresh run: nothing
+of the last time the gunshot fired is left on the strip to confuse the next.
+
+**The claim, in the handler** (`claimStripFor`, from `spawnChild` when the parent is a sampler
+group). A free strip is taken. A busy one puts the claimant in the strip's pending queue, first come
+first served as §13.2's queue always was, and under strip takeover adds the strip to the holder's
+group's `lostStrips` (under group takeover that group is already closing). Then the member is armed
+on a voice, and **this is where decision Z becomes code, in one branch.** Since Phase 3 `armMedia`
+has failed a run at entry, `no-track`, when no track was free (`Runner.cpp:2443-2449`); for a run
+marked as waiting for a voice (`waitsForVoice`) it now pushes the word `voice` onto the run's
+`pending` and returns, and the hook's `run.arm` arms it again — idempotently — when a track frees.
+Every other run fails at entry as before. A run pending a strip or a voice cannot launch, the rule
+for any pending claim; a press on its strip is applied, does nothing, and the strip goes on saying
+`pending`.
+
+**Why `voice` is a word and not an identifier** (plan decision 4): `run/pending` lists slots by
+identifier, and a track has none — it is not an object anybody declared (§13.2) — so the word stands
+where an identifier would and says in words what is being waited for (§3.9e, §4.8). The retry is a
+command because the hook decides and the handler applies: the hook sees the free track, and the
+record lets a replay make the same arm without it.
+
+**Where a fresh run's trim starts** (plan decision 5): at −120 dB under a fader and at 0 dB under a
+pad. Under a fader, the fader is parked and lifting it is what starts the clip; under a pad there is
+no fader to lift, and a press should sound. A pad pressed on a strip whose fader is parked — a V-Pot
+press, the panel's pad — lifts the trim to nought, or to the velocity's level, so a press never
+starts a clip nobody can hear. **And −120 at every new run is §3.9a's *"the start value is
+reasserted at every handover"*:** the strip's `target` moves to the new run's trim, the panel and
+the bridge fly the fader to the bottom there, and a fader left at −10 by a clip that ended on its
+own never sits over a clip that has not started.
+
+**The two takeovers** (§3.27): what arming one bank does to a bank already on the strips, decided
+once, on the group that arms — the scene change is where the designer is thinking about it. Both
+follow §3.9e's second shared rule, **eviction is a close, not a kill**, which §13.15 left for this
+phase with one instruction — *a close is exactly a release that waits* — and built as that:
+`closing` and `lostStrips` on a group run are the whole of the state, and nothing ever stops a
+sounding clip to make room. A playing clip always finishes before its strip switches, however it
+finishes: its end, a release at the bottom, a stop cue, Esc.
+
+- **`group`, the default: the whole group takes over.** Arming B closes every other sampler group. A
+  closing group's idle members are ended at once, so their strips hand over at once; a member that
+  is playing finishes, its strip says `closing`, and the strip's `pending` names B's member, which
+  lands the tick the clip's run ends. When the last of the closing group's clips ends, its footer
+  runs and it ends.
+- **`strip`: only the strips B's members land on.** B takes strips one and two; A keeps three and
+  four, spawns nothing more on the two it lost, and treats those two as a closing group treats all
+  of its strips — an idle member there is ended, a playing one finishes and then hands over. Several
+  sampler groups run at once, each owning what nobody has taken from it, and a group that has lost
+  every strip has nothing left to offer and completes, as an emptied round completes a loop (§3.6).
+
+**Refresh — and what it found on the way.** §3.27: *"A GO on a running sampler group re-issues the
+claims of every member that has no strip, in the group's own takeover mode."* It has to land on a
+check that is not there. Decision N says a second GO on a running group is ignored, and so does the
+comment above the check in `armInternal` (`Runner.cpp:261`); but the check itself asks `liveRunOf`
+only when the cue is media (`:276`), and the one guard a group has is for a PREPARED group, which is
+adopted rather than started twice. So today a GO on a group that is already running starts it again
+— a second copy of the scene on top of the first. The fix is pinned before anything is built on it:
+a `GoTests` case that fires a live timeline group twice and expects one scene, then the check
+extended to groups, then every replay fixture run again, because a fixture that happens to fire a
+live group twice would replay differently, and that is worth knowing before the sampler exception is
+laid on top. Then, for a sampler group, the live check is the refresh: the group's `lostStrips` is
+cleared, its takeover runs again — under `group`, the others close — the GO returns the live run,
+and the branch re-claims on the next tick. A refresh cannot make strips the layout does not have
+(§3.9d's banking, unchanged); it only takes back what eviction took.
+
+**Disarming, aborting, and the pointer.** A transport cue aimed at the group, or `run.stop` on it,
+is the disarm (§3.27: no new cue kind): its children end, its footer runs, it ends, and its strips
+come free. Esc and double Esc are what they are for every run (§4.4). `isManualGroup` stops
+answering yes for a sampler group — which, being neither timeline nor automatic, it otherwise would
+at the pointer's descent, `cue.fire`'s refusal and `fireStandby`. The standby never descends into
+one: the cue list treats it as a row, GO on it moves the standby to the next sibling, and
+`standby.set` on a member is refused `not-a-stop` — §3.27's flagged sentence, built as written, the
+author's to overturn, and said so in the PRD where it is flagged. `ShowWalk.h`'s `timingInside` and
+`groupLength` answer *not a chain* for a sampler group, so its length is unbounded, as a manual
+group's is.
+
+**Press and release.** `strip.press <strip> [velocity]` finds the run holding the strip; on a dca
+strip it is refused, and with nothing on the strip it is applied and does nothing. Then, in order:
+
+- **Held from somewhere else** — the run is held and the press comes from another origin: applied,
+  and nothing happens. §3.27's second-surface rule, *the origin that started it owns it* —
+  *(proposed)* there, and built here as the default.
+- **Armed and not launched**: the trim is set — to `levelForByte (velocity, velocityFloor)` when the
+  member's velocity mapping is on; otherwise to nought if the fader is parked, and left where the
+  fader has it if it is not — and the launch is requested exactly as GO requests one on an armed
+  cue. A `hold` member records who pressed: `held`, and the origin holding it.
+- **Playing**: the member's `secondPress`. `restart` seeks it to the top, `noop` leaves it alone,
+  `stop` is the release fade — §3.8's and §3.27's *(proposed)* third value, built as the default.
+  That a seek to nought re-places a playing clip from the top without a click is what the
+  implementation will confirm; if it does not, `restart` becomes a stop and a relaunch.
+
+`strip.release <strip>` clears `held`. On a `hold` member it starts a fade to silence over
+`releaseFade` that stops the clip when it gets there — the fade machinery a fade cue uses, started
+with no fade cue behind it, which the implementation will confirm `beginFade` accepts — and on a
+`playOut` member it does nothing. A `hold` clip cannot be pressed again by the hand holding it, and
+while it is held a release from any other origin is a no-op too.
+
+**One function for velocity and pressure.** `levelForByte (b, floor) = floor + (0 − floor) × (b − 1)
+/ 126`: a byte of one is the floor, 127 is 0 dB, a straight line in dB between, and nought is the
+floor as well. Pressure uses it while the pad is held and the member's `pressure` row is on, and the
+bridge writes the result as `node.set` on the strip's `target` — so to the engine a pressed pad is a
+fader somebody is riding (§16.6). A pressure of nought is IGNORED rather than mapped (plan decision
+15): most pads fall to nought the instant the hit is over, and reading that as *pull the sound to
+the floor* would make every hit a blip.
+
+**Fader-start and fader-stop are engine rules, not a surface's.** The Runner's before-tick hook
+decides them over two things every client already writes — the run's trim, and the touch table,
+handed to the Runner with `setTouches` by serve and by nothing in replay — so the D700, the panel's
+mouse, the page's slider and a script all get the same ones for nothing. Per sampler strip under a
+fader it keeps whether the fader is parked, the last trim it saw, and whether anybody was holding
+it:
+
+- **parked** becomes true when the trim is at or below −118 dB and nobody holds the strip's `target`
+  — *released at the bottom*;
+- **start**: an armed member not yet launched, a parked fader, and a trim above −110 dB — the hook
+  submits `strip.press` for the strip, engine origin, no velocity, and the fader stops being parked.
+  A dip to the bottom while touched is therefore a ride, neither a release nor a press — §3.9a's
+  *(proposed)* start edge, built as the default — and a play-out clip set to restart does not
+  restart every time the operator dips;
+- **stop**: a playing `hold` member, a trim at or below −118 dB, nobody holding it, and a fader that
+  was held and has been let go, or has just come down from above — `strip.release`. §3.9a's
+  fader-stop word for word: the bottom stops the cue *on release*, so riding through the bottom
+  during a fade kills nothing.
+
+The eight decibels between −118 and −110 are the hysteresis §3.9a asks for, *"or a parked fader
+chatters"*. Both numbers live in one place (`faderEdge::parkedDb`, `faderEdge::startDb`), beside the
+bridge's colour and motor constants (plan decision 14), so that what the bench and the room find
+changes one line each; a debounce is a user preference and Phase 10's (§3.7). A replay runs no hooks
+and needs none: it has the `strip.press` and `strip.release` records the hook submitted.
+
+**`cue.fire` and `trigger.fire` on a member** (plan decision 10). With a live run holding a strip, a
+fire is a press with no velocity. Without one it is refused `needs-strip`: fired by name, a member
+has nothing to run on until an armed group has put it on a strip. A fire has no release, so on a
+`hold` member it plays the clip out — §3.27's *(proposed)* release-less trigger, built as the
+default: *hold only means something to a trigger that can let go*. A `start` cue fires its target by
+name, so it reaches the same rule.
+
+**A press is a step in the list's history, and load-to-time skips it** (plan decision 9). The
+handler appends `<tick>:<cue>:p` beside the `g`, `f` and `t` that a GO, a fire and a trigger leave
+(§13.10); the velocity is not in it, because a step has no value field. Load-to-time's walk over the
+history skips `p` steps, since where a hand was pressing is not a place the show can be put back to.
+The live recorder keeps them and writes a press into a take as a `start` cue — which reaches a
+member as a press — so a pad performance recorded once plays back, provided the group is armed when
+the take plays. That is half of what the author asked of the live recorder on 2026-09-19; §16.10 has
+the other half.
+
+**What load-to-time does with a sampler group.** A landing after its row plans it as sounding — the
+walk found no end to it — and seats the group run and its job like any other, and the branch re-arms
+every member on the next tick; that a seated job reaches the branch is what the implementation will
+confirm. Who pressed what is not reconstructed, and the solver says so with a confusion on the
+group, `handLaunched` — *"nothing pressed"* — because a solver that says what it did not do is
+better than one that guesses (§3.24). Strip ownership among several strip-exclusive groups depends
+on the order they were armed in (§3.27), so whether seated groups re-claim in that order is part of
+what the implementation confirms.
+
+**`usage` on a strip answers empty.** §3.9c's edit-time analysis warns about two claims whose live
+ranges overlap on one slot, and successive banks on the same strips are exactly that, on purpose: a
+sampler claim declares its eviction policy and the overlap is the intended pattern (§3.27). So the
+analysis has nothing to say about a strip, and says nothing.
+
+**The words.** A strip is `free` with nothing on it; `dca`, or `unassigned` when a dca strip names
+no DCA; `armed` when its member is ready and not launched; `pending` while a member waits for it, or
+holds it and waits for a voice; `playing`; `held` while a pad is down on it; `stopping` during a
+release fade; and `closing` when the group holding it has been taken over — whole, or on this strip
+— and its clip is finishing.
+
+### 16.6 The bridge
+
+**Where it lives, and why there.** Beside the mount probe and the MIDI sender, in `engine/surface/`,
+outside `Engine` and `Runner` — where §12.8 put the trigger matchers, for the same reason: the
+engine reads no clock and owns no socket, and a surface is a socket with faders on it. Three parts,
+each testable alone: a **codec** that turns bytes into typed events and back and knows nothing else;
+a **profile table** saying what each kind of surface has, which button is a strip's gate and what
+the transport buttons mean; and the **bridge**, which turns a surface's events into commands before
+each tick and the tree into bytes after it.
+
+**The codec** (`McuCodec`, PR 6.1) is pure — no JUCE, no state, one message in and one event out —
+and its tests are byte vectors copied from `docs/D700_CONTROL_GUIDE.md` §3 and §4. Three of its
+rules are the ones that bite. An encoder is **sign-magnitude**, bit six the sign, so 65 is −1 and
+not −63; the guide ranks that as the most likely bug in any new integration. A pad controller's
+messages are classified by the status byte, so a note-on of velocity nought stays one, as
+`MidiInputs` already classifies it (§12.8's fourth point), and the bridge reads it as a release. And
+colour is three note-ons on channels two, three and four at the element's own note, **blue last**
+because the ring refreshes when blue arrives, refused for any note that is not one of the seventeen
+RGB elements. The rest is the guide's tables: fourteen-bit faders, touch notes, a named button
+table, both ring forms, the MCU scribble strip always padded to seven because its buffer is flat,
+the D700's native rows with their row numbers one-based on the wire. The Mackie handshake is decoded
+for the serial it carries and never answered (plan decision 6): nothing on the D700 needs the reply,
+and the query alone yields the serial.
+
+**The codec can emit six SysEx command bytes and no others** — `0x12 0x17 0x19 0x1A 0x00 0x02` — and
+a test says so. A sweep of undocumented command bytes once put the D700's displays into a logo-only
+state that took a full restart of the controller to clear
+(`docs/godot-asparion-d700-protocol-0.1.md` §6), and the only way that comes back is a new byte in
+an encoder written by somebody who did not know the history. `0x72` is on the protocol document's
+safe list and not on the codec's: the colour it carries is MCU's eight, too coarse for timbre, and
+§3.30 says a generic profile says so rather than approximating.
+
+**The profile table** (`SurfaceProfile`, std-only, keyed by the profile word):
+
+| profile | strips | each strip has | display | a strip's gate | endpoint |
+|---|---|---|---|---|---|
+| `virtual` | eight, more by `strip.create`; no port | what the panel draws: fader, pad, name, word, colour | the panel's own | the drawn pad | `absolute` |
+| `mcu` | eight on one port; with an extender on a second port, sixteen, the other eight by `strip.create` | motor fader with touch, V-Pot and ring, buttons | two rows of seven | V-Pot press, `0x20 + n` | `absolute` |
+| `d700` | sixteen, eight per port | the same, and an RGB surround on the encoder | 12 + 12 + 8, and a track number | V-Pot press | `absolute` |
+| `midiPads` | sixteen, more by `strip.create`; a note each from `firstNote` | a pad with velocity and pressure | none | the note | `gate` |
+
+**The gate is the V-Pot press, and SELECT is left alone** (plan decision 12). On the D700 an
+element's identity is its button note — encoder three's V-Pot press, ring and colour all key off one
+number — so the button that presses a strip is the one wearing its colour. On a dca strip the gate
+resets the DCA's trim to nought.
+
+**The transport.** PLAY is `go`. STOP is `run.stopAll` — Esc — and STOP again within 750 ms is
+`run.killAll`, double Esc, so §4.4's first two levels are under the hand that is already on the
+surface. ◀◀ and ▶▶ are `standby.previous` and `standby.next`. The bank and channel arrows do
+nothing, because banking is §3.9d's decision to take with the hardware in hand, and REC does
+nothing. The 750 ms is restated in the engine rather than shared: the client's is in
+`model/Panic.h`, the engine links no client, and a comment on each points at the other. An encoder
+moves its strip's `target` half a decibel a detent.
+
+**Inbound, and why a tick's worth of fader is one write.** The MIDI callback thread does the least
+it can: the bridge's consumer claims a surface's port — so a surface never fires triggers — and
+pushes the port and the raw bytes into an inbox under a short mutex. The before-tick hook drains it,
+decodes, maps port and bank to a strip, and submits in arrival order with the origin `surface:<id>`:
+presses, releases and buttons as their commands; a touch as `node.touch` or `node.release` on the
+strip's `target`; and a fader as `node.set` on it, COALESCED to one write per strip per tick — the
+latest position wins — through a fader curve that restates `model/Fader.h`'s four points on the
+engine side, a duplication noted in both. A moving fader sends a message every few milliseconds; the
+tree shows one value a tick, so writing the rest would fill the log with positions nobody could ever
+have seen. The inbox drains before `runner.beforeTick` in the same hook (plan decision 13), so a
+tick's commands from the hand enter the queue ahead of the scheduler's. The origin, like `window`,
+has neither `udp:` nor `ws:` in front of it, so the OSCQuery server's echo rule never mistakes a
+surface for one of its own clients.
+
+**Outbound, and why it costs nothing it does not send.** After the publish, the after-tick hook
+hands the bridge the snapshot and the touch table. For each enabled, connected surface and each of
+its strips, the bridge reads the strip's `target` and that node's value, its `word`, the cue's name,
+short name and number, and the holder's timbre or the cue's colour; compares them with what it last
+sent; and sends only the difference. Every send is `MidiSink::send`, which hands the bytes to
+`MidiSender`'s worker thread and never does the I/O on the tick thread — a SysEx send busy-waits on
+Windows, about 32 ms per hundred bytes (§12.11). The work is about sixteen strips times eight
+lookups and compares a tick; the caches are allocated once, and nothing is allocated per tick beyond
+the bytes actually sent. M29 measures it.
+
+**Echo and touch, per strip and not per tick.** The WebSocket's echo rule is per tick: a push is
+withheld from the origin that caused a change only when one origin caused the whole tick (§7a). A
+surface cannot live with that — two faders moved by two people in one tick would each be told what
+they had just done, and a motor would fight a finger — so the bridge suppresses per strip, which is
+§7a's *"per-address attribution … belongs with Phase 6's real surfaces"* arriving for surfaces, and
+only for them. No motor bytes go to a fader while the touch table has its `target` held by this
+surface, and none when the value is the one that fader just sent. When this surface lets go, the
+target's value is sent back once, so the fader ends up agreeing with the engine — the touch table's
+own rule since PR 1.9. §3.16's *(proposed)* filter, a touch counting only once the fader has moved,
+is not built (§16.10).
+
+**A motor never crosses its whole travel in one message.** Driven end to end a fader hits its stop
+at full speed, and the bottom of the range is where a parked channel lives
+(`docs/D700_CONTROL_GUIDE.md` §4.1). So each tick it moves at most a twentieth of the travel towards
+its target, 819 of 16 383, which is the guide's *"roughly 20 steps"* at the tick rate: a full-travel
+flight takes twenty ticks, four tenths of a second. And it is never clamped short of the ends, in
+the guide's own words: *"a fader that cannot reach −∞ misrepresents the desk, which is worse than
+the wear."*
+
+**Colour is quantised, rate-limited and re-asserted.** Eight levels per component, at most ten
+writes a second per element — §3.30's *"no faster than about ten times a second"* — and at idle the
+colour is written again every two seconds, because the firmware's idle animation takes the LEDs back
+when nothing drives them (§3.16). While a clip sounds a strip shows the run's timbre; at idle, the
+cue's authored colour — §3.30's *(proposed)* policy, built as the default, with no switch yet to
+turn timbre off. The master dial keeps the idle colour, and a generic `mcu` surface drives no colour
+at all. The rate and the interval are M27's and M28's to revise.
+
+**The displays.** An `mcu` strip shows the short name on its first row, and on its second the level
+while a fader rides and the strip's word otherwise. A `d700` strip (PR 6.7) has three rows — the
+short name in twelve; the level, as `-6.2 dB`, while a fader rides, else the word; the role or kind
+in eight — and the cue number in the track-number field, sent on change; never `0x12` to a D700.
+Every write is padded to its field. Which field goes on which row is *(proposed)* and the author's
+to reassign, and so is one thing the rows imply: where nobody authored a short name the display cuts
+the name to its width, the truncation §3.16 says a display should never have to rely on. A blank
+cell or the cue number is the alternative, and either is a one-line change.
+
+**Connecting, reconnecting, and M-B's debt.** `refreshSurfaces` runs in the after-tick where the
+show's revision is checked, beside `refreshMountDeclarations` (§15.3), so a GO, which moves no
+revision, pays nothing for it. It rebuilds the surface table from `<Surfaces>`, resolves each named
+port's binding with its `rx` and `tx`, and sets `connected` and `problem`; a surface that becomes
+connected is **re-asserted whole**, so one plugged in during a show is painted rather than left
+blank until something changes, and an unbound port leaves it `connected = false` with a sentence,
+sending and hearing nothing. **`rx` off gates what comes in and `tx` off silences what goes out**,
+with the reason in `problem` (plan decision 18) — the symmetry with a network device (§15.4), and
+the first code to read a MIDI port's `rx` and `tx` at all. And as far as surfaces need it, the rest
+of M-B's debt: a port whose device rows change in the show is re-opened (`MidiInputs::openAs`; the
+output unbound and bound again), enumerating on the show edit and never on an idle tick, and
+`midi.rescan` is registered for the explicit gesture.
+
+**The seam that lets a test play a surface.** `MidiInputs` gets one door, `route (port, bytes)`. It
+asks the consumer first, under the mutex triggers already take, and if no surface claims the port it
+converts the bytes with a JUCE-free `eventFromBytes` and matches triggers exactly as today. The JUCE
+callback becomes one call to `route`, and `inject (port, bytes)` — public, and meant for tests — is
+another. So bytes in, bridge, commands, runner and bytes out is a test with no hardware in the room,
+which is how the standing test runs (§16.8).
+
+**`wfg replay` installs no bridge and no consumer.** Everything a surface did is a record with its
+origin on it, and a replay applies the records and needs nothing else.
+
+### 16.7 The client
+
+Two places, as decision AB drew them, both in the desktop client — and two edits to the page.
+
+**`model/Surfaces` is what both read** — std-only, one pass over the snapshot gathered by
+identifier, as `model/MidiPorts` reads ports — and a strip's row carries everything a column draws,
+down to its colour: the holder's timbre while it sounds, the cue's colour otherwise. The gestures
+are commands and nothing else — `createSurface`, `createStrip`, `createDca`, `pressStrip (strip,
+velocity)`, `releaseStrip`, `touchNode`, `releaseNode` — each checked against the real registry in
+`ClientTests`, the rule M2 set (§14.16).
+
+**The Surfaces tab** is the MIDI tab's shape, three times over, and nothing on it is applied: every
+cell is a `node.set` and the after-tick re-read makes it real — §15.7's rule for a tab with no
+hardware to reopen. The **surfaces**: name; profile, as text once the surface exists; ports, one
+chooser per bank from the ports the MIDI tab declares; preset; enabled; the state word; and a
+delete. The **strips** of the surface picked above: index, a role menu, a DCA menu. The **DCAs**:
+name, short name, a parent menu, a delete. The buttons are **ADD SURFACE**, **ADD STRIP** and **ADD
+DCA** — three different words, because the tests find a button by its text and take the first. A
+D700 row whose preset is empty says *"set the Configurator to Mackie"*.
+
+**The virtual panel**, under Show → *Surfaces…*, is a window of its own and not a subject of the
+foot (plan decision 11): the foot follows the pick and is about one cue, and the panel is the whole
+desk and has to stay put while the operator picks cues. One column per strip across every surface,
+in surface order and then by index: the number or short name, the state word, a colour cell, a fader
+and a pad. **The fader is ridden the way a D700 fader is** — `node.touch` on the strip's `target`
+when the mouse goes down, `node.set` as it drags, at most one per timer pass, and `node.release`
+when it comes up, on `model/Fader.h`'s curve with the send mixer's drag — so the touch table gates
+the panel exactly as it gates the hardware, and fader-start works from the mouse. **The pad is
+pressed**: mouse down is `strip.press` with a velocity from one to 127, taken from where on the pad
+the click landed, mouse up is `strip.release`, and the keys 1 to 8 are pads one to eight at velocity
+100 while the window has focus. A dca strip's fader rides its DCA's trim. The origin is `window`,
+and the panel reads only what `Client.cpp`'s timer hands it — the one call site that takes a
+snapshot, which `check-client-boundary.py` counts.
+
+**The inspector** gains the rows: on a media cue `dca`, `release`, `secondPress`, `velocity`,
+`velocityFloor`, `pressure` and `releaseFade`; on a group `takeover` and `dca`; on a fade `dca`; and
+`shortName` on every cue, right after `name`. A `dca` row is a menu of DCAs, as a port row is a menu
+of ports. The sampler rows are greyed on a member whose group is not a sampler group — the shape
+`stereoToMono` already has — and `secondPress` is greyed when `release` is `hold`, where it cannot
+apply. Eight cues selected and one DCA chosen is eight `node.set`s, which is how §3.28's
+multi-select assignment is met with nothing new.
+
+**The cue list and the run pane say it in words.** A sampler group's row shows `pads` where a
+timeline group shows its mark. In the run pane a sampler group's run reads, say, `armed 5/8 ·
+pending 3`, counted from its children, and a member shows its strip's word and `on 3`.
+
+**The page gets two list edits and nothing else**: the inspector's order of rows
+(`views/inspector.js`) and Didi's flag for a sampler group (`views/didi.js`). Its generic inspector
+already rides a DCA's trim through `node.set` (§16.4), which was the point of that choice.
+
+The author judges it after PR 6.5, before anything is plugged in (decision AC).
+
+### 16.8 The fixtures and drivers
+
+**Two bundles.** `tests/fixtures/bundles/sampler/` is the show the phase is judged on: `tracks="2"`,
+a virtual surface with four sampler strips and one dca strip, a DCA, a sampler group of four media
+members with their `release`, `secondPress` and `velocity` mixed, a second sampler group of two
+members with `takeover="strip"`, and a transport cue aimed at the first. Two tracks for four members
+is deliberate: two members show `pending voice` the moment the group arms, so the voice wait is
+exercised by the fixture itself rather than by a test that had to arrange it. Its `media/` is empty,
+as every fixture's is, and the drivers generate their sounds in a temporary copy.
+`tests/fixtures/bundles/surfaces/` is the standing test's rig: a virtual surface and an `mcu`
+surface on one port, each with a dca strip on the same DCA.
+
+**Two replay logs**, hand-written as `triggers.wfglog` was. `tests/fixtures/logs/dca-trim.wfglog`: a
+`dca.create`, trim writes, a `go` on a marked cue, a fade aimed at the DCA, and the runs ending.
+`tests/fixtures/logs/sampler.wfglog`: an arm, presses and releases, a takeover, a voice wait. Both
+are replayed under both locales and must say *reproduced exactly*; the trims' `f:` values go through
+the number formatter (§9's shortest round trip), which is what the second locale is there to catch.
+
+**Two black-box drivers**, against the shipped binary. `tests/blackbox/phase6_sampler.py` runs
+`--hosted --render` on a copy of the sampler bundle with generated sounds: it arms the group,
+presses strips over OSC (`/godot/cmd/strip/press`), reads `run/state` and `slot/<id>/word`, finds
+sound after a press and silence after a hold is released in the rendered file, and replays the
+session's log. `tests/blackbox/phase6_surfaces.py` runs with no MIDI device at all: every hardware
+surface must read `connected = false` with its sentence and the virtual one `true`, a press over OSC
+must play, and the log must replay.
+
+**The unit tests**, a file per part — `McuCodecTests`, `DcaTests`, `SamplerTests` (on the `GoTests`
+rig with its fake player) and `SurfaceBridgeTests` — beside the document, slot, tree and client
+tests the PRs extend.
+
+**The standing test** is PRD §3.16's — *"two surfaces on different protocols bound to the same
+node"* — which the devplan has carried since it was written. On `bundles/surfaces/`, the virtual
+panel and an MCU surface share one DCA. A `node.set` from the window moves the MCU's motor; a fader
+message from the MCU moves the DCA's trim and produces no motor bytes back while the fader is
+touched, and exactly one resend when it is let go; and the touch table holds the address for
+`surface:<id>` and not for `window`. The two protocols are the client's commands and Mackie's bytes,
+and both end as `node.set` on one address, which is the whole of the claim.
+
+### 16.9 What Phase 6 has to measure
+
+Phase 5's numbering ended at M25.
+
+| | what | what it decides |
+|---|---|---|
+| **M26** | a pad press to sound, in ticks and milliseconds: presses over OSC at known ticks, onsets found in the render | whether a pad feels like an instrument — and if it does not, the lever is the tick rate |
+| **M27** | the colour write rate the D700 tolerates: a bench driver repainting all seventeen RGB elements at 10, 20 and 50 a second, the operator saying which rate first stutters | PRD §6.11's first colour question, and the ten-a-second limit |
+| **M28** | how soon the D700's idle animation takes the LEDs back once the host stops painting — paint, stop, a stopwatch | §6.11's second, and the two-second re-assert |
+| **M29** | the tick thread's cost of a full sixteen-strip refresh — M25's A/B, a `d700` surface unbound so nothing is sent, against the same surface bound to a loopback, reading `latenessMax` | whether the after-tick bridge fits beside the publish |
+
+**M26 has an answer to expect before it is taken.** A press is applied in the drain of the tick it
+arrives in and launched from the next hook, `1 + launchLatencyTicks` after it is applied (§13.1's
+arithmetic), plus up to a tick in the inbox; a fader-start pays one tick more, because the start
+edge is a decision the hook takes after the trim has been applied. A figure beyond that is a
+finding. If the author finds a pad slow, the lever is the tick rate, parked at 50 Hz on 2026-09-18:
+a faster tick shortens every term above.
+
+**M27 and M28 need the unit on the bench and a person watching it**, which is why the devplan lists
+them among the author's. Until they are taken the profile holds to ten colour writes a second and
+re-asserts every two seconds, and both numbers live in one place (plan decision 14).
+
+Each is an instrument that prints — `tests/blackbox/m26_pad_latency.py`, `m27_d700_colour_rate.py`,
+`m28_d700_idle_resume.py` and `m29_surface_refresh_cost.py`, in `m25_window_cost.py`'s idiom — and
+none is a ctest gate, for §14.14's reason: a wall clock on a shared CI runner is a flaky test that
+teaches people to re-run the suite. The figures are recorded here and in PRD §6.11 when they are
+taken, and the Mac mini's cross-checks are owed as they are for M22 to M25.
+
+### 16.10 The direction this phase does not build
+
+**Banking** (§3.9d) — decided with the hardware in hand, as the PRD asks. The bank and channel
+arrows do nothing, and a bank with more members than there are sampler strips arms what fits and
+says *partially armed*. §3.9d's other rule holds by construction: a show written for a D700 that is
+not in the room degrades rather than fails, because its strips still exist and the virtual panel
+draws them all.
+
+**A member pinning its strip** (§3.27 *(proposed)*). Derived from order is the half that exists
+first.
+
+**The touch-without-move filter** (§3.16 *(proposed)*). The resend on release is there; the filter —
+a touch counting as adjusting only once the fader has moved past the hysteresis — is not, so a fader
+brushed by an arm reaching for the master section is held for as long as it is touched. The author's
+to decide with the D700 in hand.
+
+**The dwell for faders without touch** (§3.9a *(proposed)*). Without it, anything that writes a trim
+and never touches — a script, a slider on the page — is treated as a fader let go wherever it stops,
+so bringing a hold clip's trim to the bottom stops it. §3.9a's fallback, *such a fader is play-out
+only*, is the other reading, and the author's.
+
+**A mapping per DCA assignment.** §3.28 has each assignment say what the DCA controls on that member
+and with what mapping; this phase's mark is one identifier, and a DCA moves level, one to one in dB.
+Composition by parameter type — multiplicative on an opacity, in metres on a position — arrives with
+the parameters it composes, video's in Phase 8.
+
+**§14.9's parameter undo domain** — still reserved and still not built (§16.4).
+
+**Recording a ride into a take.** The author's words of 2026-09-19 expected it in this phase:
+*"record all the cue starts (and controller level changes once this is implemented in the next
+phase)"*. The presses are recorded (§16.5); the rides are not, because a take has nowhere to put
+them — they want a lane recorded from the gesture (§3.10), which is its own piece of work. Every
+ride is in the log meanwhile, so nothing played tonight is lost to a later recorder. Named here
+because the author asked for it by phase.
+
+**Fader-start outside a sampler group.** §3.7's fader-movement trigger on an ordinary cue, and
+§3.27's show-long soundboard of fader triggers in a parallel list, are not built: a fader starts
+what a sampler group has put under it, a soundboard is a sampler group armed once and never taken
+over, and the devplan's *"a fader-start cue fires from the D700"* is met by a sampler member. Nor is
+a start value other than silence (§3.9a): every handover flies to the bottom.
+
+**Bindings in general** (§3.10) — automation modes, cue-scoped lifetimes, an explicit update-cue
+capture. A strip's `target` is the only binding this phase has, derived rather than authored, and it
+rides trims and nothing else.
+
+**HUI, Stream Deck, meters, the rate endpoint class, and the Icon V1 and P1.** HUI is §6.10's and
+not first; a Stream Deck is §3.16's triggering surface and a later profile; meters want a per-track
+level readout the engine does not have; a SpaceMouse or a pedal has no strip to ride; and the Icon
+units are the author's *"not in the scope here"* — new words in the profile table when they arrive.
+**Timbre as a layout option** that can be switched off (§3.30 *(proposed)*) is not built either:
+authored colour at idle and timbre while sounding is the default, with no switch.
+
+### 16.11 Decisions to overrule early
+
+Taken with the plan rather than by the author, each built on, and each cited above as *plan decision
+N*:
+
+1. **`Surfaces` and `Dcas` are two containers beside `Network`**, not a `Dca` under `Audio`; both
+   cost every fixture a line.
+2. **A strip's `index` is derived from its position and a surface's `strips` is a count**; strips
+   are made by `surface.create` and `strip.create`, never by writing a number.
+3. **The claim is positional**: member *i* to sampler strip *i* across surfaces, in both takeover
+   modes. `group` closes the other groups whole and `strip` closes only the strips it takes,
+   recorded as `lostStrips` on the group that lost them. A member beyond the last strip is unarmed
+   and the row says *partially armed*.
+4. **The voice wait is the word `voice` in `run/pending`**, the retry is `run.arm`, and `armMedia`
+   does not fail `no-track` for a run marked as waiting for a voice.
+5. **A fresh run's trim is −120 dB under a fader and 0 dB under a pad**; a pad pressed on a parked
+   fader strip lifts the trim to nought, or to the velocity's level.
+6. **No reply to the Mackie handshake**; the query is decoded for the serial only.
+7. **Trims are written with `node.set`**, through a dispatch in front of the document, and not by
+   `dca.trim` and `run.trim` commands — against the `list.aim` precedent, for the touch table and
+   the generic inspector (§16.4).
+8. **Esc and double Esc leave DCA trims where they are.**
+9. **A press is a history step `p`, with no velocity**; load-to-time skips it and the live recorder
+   keeps it.
+10. **`cue.fire` and `trigger.fire` on a member with a strip are a press**; without one they are
+    refused `needs-strip`.
+11. **The virtual panel is a window of its own**, under Show → *Surfaces…*, and not a subject of the
+    foot.
+12. **The gate on `mcu` and `d700` is the V-Pot press**; SELECT is reserved.
+13. **The bridge's inbox drains before `runner.beforeTick`**, in the same hook.
+14. **The constants**: parked at or below −118 dB and a start above −110 dB; colour at most ten
+    writes a second and re-asserted every two seconds at idle; a motor at most a twentieth of its
+    travel a tick. Each is named in one place, and revised by M27–M29 and the room.
+15. **A pressure of nought is ignored**; one to 127 map on velocity's line (`levelForByte`).
+16. **`fade/dca` is a second row**, rather than a widened `fade/target`.
+17. **The D700's display fields**: name, level-or-word, role, with the cue number in the number
+    field; meters not driven.
+18. **`rx` off gates a surface's input and `tx` off silences its output**, with the sentence in
+    `surface/problem` — the symmetry with network devices.
+
+### 16.12 What Phase 6 built, against what §16 drew
+
+Written at close-out by PR 6.8, in §14.17's shape: the corrections dated inside the subsections they
+correct, and this subsection saying which way each disagreement went.
