@@ -483,7 +483,13 @@ namespace wfg::client
                     case menuDeleteCue: return { juce::KeyPress::backspaceKey, mod, 0 };
                     case menuLock:      return { 'l', mod, 0 };
                     case menuLoadToTime: return { 't', mod, 0 };
-                    case menuWaveform:  return { 'e', mod, 0 };
+                    /*  W FOR THE WAVEFORM (author, 2026-09-22: "the waveform
+                        editor should have a keyboard shortcut (Ctrl/Cmd+W)").
+                        It is the one letter on this table another application
+                        would spend on closing a window; Go.dot has no close
+                        item to spend it on - a show window is shut by shutting
+                        the show - so it goes to the thing it names. */
+                    case menuWaveform:  return { 'w', mod, 0 };
                     case menuUndoHistory: return { 'u', mod | shift, 0 };
                     case menuRecord:     return { 'r', mod | shift, 0 };
                     //  No accelerator: both are reached through the menu only.
