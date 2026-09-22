@@ -83,6 +83,18 @@ namespace wfg::tree
         {
             { "/ui",    "its client" },
             { "/media", "the timbre pyramids of the show's media" },
+
+            /*  AND THE ENGINE'S OWN TREE (2026-09-22). It reads as though it
+                were always covered - the comment below says a prefix of "/"
+                would land "on top of /godot" - but nothing refused a mount at
+                /godot itself, or under it, and a device published there would
+                shadow the addresses every client and every command use.
+
+                It was a theoretical hazard while a prefix could only be
+                hand-written into show.xml by somebody who knew what it was.
+                It stopped being theoretical when the settings window grew a
+                box a person types one into. */
+            { "/godot", "the engine's own parameters" },
         };
 
         /*  A prefix has to be an absolute OSC address with no trailing slash
@@ -417,9 +429,73 @@ namespace wfg::tree
         return result;
     }
 
+    MountResult MountTable::declare (const MountDeclaration& mount)
+    {
+        /*  The prefix is checked here exactly as `load` checks it through
+            `readNamespace`, and for the same reasons: a prefix of "/" would
+            mount over the whole tree, and one under `/godot` would put a
+            device where the engine already answers. An opaque device writes
+            nothing into the tree, but its prefix is still what `mountOf`
+            matches every outgoing address against, so a bad one would silently
+            claim cues meant for somebody else. */
+        std::string why;
+
+        if (! prefixIsUsable (mount.prefix, why))
+            return MountResult::failed (mount.id + ": " + why);
+
+        MountResult result;
+        result.ok = true;
+
+        mounts[mount.id] = Entry { mount, {} };
+        ++version;
+
+        return result;
+    }
+
+    bool MountTable::updateDeclaration (const MountDeclaration& mount)
+    {
+        const auto found = mounts.find (mount.id);
+
+        if (found == mounts.end())
+            return false;
+
+        /*  THE NODES STAY. What changed is where the box is or how it is
+            spoken to, and neither is a fact about what it has: re-reading the
+            namespace here would throw away every value the tree holds for this
+            device, and every read-back a verified cue is waiting on, to arrive
+            at the same list of nodes. The caller decides that a changed prefix
+            or namespace file needs a reload; this is for everything else. */
+        found->second.declaration = mount;
+        ++version;
+
+        return true;
+    }
+
+    void MountTable::setProblem (const std::string& mountId, std::string problem)
+    {
+        /*  Kept even for a mount that has no entry - a device refused for
+            having no port never became one, and this sentence is the only
+            thing anybody can act on. Cleared with an empty string rather than
+            by a second method, so the caller that succeeds says so the same
+            way the caller that fails does. */
+        if (problem.empty())
+            problems.erase (mountId);
+        else
+            problems[mountId] = std::move (problem);
+
+        ++version;
+    }
+
+    std::string MountTable::problemOf (const std::string& mountId) const
+    {
+        const auto found = problems.find (mountId);
+        return found == problems.end() ? std::string {} : found->second;
+    }
+
     bool MountTable::unload (const std::string& mountId)
     {
         ++version;
+        problems.erase (mountId);
         return mounts.erase (mountId) > 0;
     }
 
@@ -427,6 +503,7 @@ namespace wfg::tree
     {
         ++version;
         mounts.clear();
+        problems.clear();
     }
 
     bool MountTable::isLoaded (const std::string& mountId) const
@@ -525,6 +602,17 @@ namespace wfg::tree
         return {};
     }
 
+    std::vector<std::string> MountTable::ids() const
+    {
+        std::vector<std::string> out;
+        out.reserve (mounts.size());
+
+        for (const auto& [id, entry] : mounts)
+            out.push_back (id);
+
+        return out;
+    }
+
     Node* MountTable::findNode (const std::string& address)
     {
         for (auto& entry : mounts)
@@ -549,7 +637,34 @@ namespace wfg::tree
         auto* node = findNode (address);
 
         if (node == nullptr)
-            return { false, reason::badAddress, {}, {} };
+        {
+            /*  NO NODE HERE, AND THAT IS EITHER A MISTAKE OR THE WHOLE POINT.
+
+                Against a DESCRIBED device it is a mistake, and the refusal is
+                the reason to describe one at all: the show said what that box
+                has, this address is not among it, and saying so now is better
+                than a datagram that leaves and is ignored. UDP will never tell
+                anybody it was wrong.
+
+                Against an OPAQUE device there is nothing to be wrong about.
+                Nobody said what the desk has; somebody said where it is and
+                what to send it. So the value goes out exactly as the cue
+                spells it - no coercion, because there is no declared type to
+                coerce to - and nothing is stored, because a value nobody can
+                read back is not a fact about the device, only about what was
+                sent. `sent` on the mount is what a rehearsal reads instead.
+
+                An address under no device at all is still `bad-address`: it
+                is a cue aimed at nothing, which is what the target menu and
+                validate both exist to catch. */
+            const auto owner = mountOf (address);
+            const auto* declaration = declarationOf (owner);
+
+            if (declaration == nullptr || ! declaration->opaque())
+                return { false, reason::badAddress, {}, {} };
+
+            return { true, {}, owner, value };
+        }
 
         if (node->access != Access::write && node->access != Access::readWrite)
             return { false, reason::readOnly, {}, {} };

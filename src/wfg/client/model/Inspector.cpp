@@ -16,6 +16,7 @@
 
 #include <wfg/client/model/Inspector.h>
 
+#include <wfg/client/model/Devices.h>
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Text.h>
@@ -46,7 +47,7 @@ namespace wfg::client::model
                 { "fade",    { "target", "level", "curve", "points", "stopWhenDone" } },
                 { "transport", { "target", "verb", "range", "curve" } },
                 { "start",   { "target" } },
-                { "osc",     { "address", "value", "wait", "timeout" } },
+                { "osc",     { "device", "address", "value", "wait", "timeout" } },
                 { "midi",    { "port", "channel", "type", "number", "data", "sysex", "wait" } },
                 { "group",   { "mode", "advance", "selection", "play", "loops", "seed" } },
                 { "range",   { "name", "in", "out", "loops" } },
@@ -215,6 +216,60 @@ namespace wfg::client::model
                 }
             }
         }
+
+        /*  WHICH DEVICE A NETWORK CUE IS AIMED AT, as a line of its own above
+            the address it is derived from.
+
+            IT IS NOT A ROW. No attribute in the document says a cue's target,
+            deliberately: the address carries its device's prefix, and a second
+            field naming the device would be a second truth to keep in step
+            with the first. So the menu reads the front of the address and
+            writes the whole address back, which is why its `address` is the
+            cue's `address` row and its choices are whole addresses.
+
+            LABELLED "target" AND NAMED "device", because the row a person
+            reads and the key the panel is built from are different questions:
+            `target` is already the name of a cueRef row on three other kinds,
+            and two rows of one name in one panel would collide in `shapeOf`.
+
+            Only when the show HAS devices. A menu with one entry reading
+            "(none)" tells nobody anything and takes a line from a panel that
+            is short of them; a show with no device declared is one where the
+            address box is the whole answer. */
+        void aimAtADevice (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                           std::vector<Field>& decided)
+        {
+            const auto devices = readDevices (snapshot);
+
+            if (devices.empty())
+                return;
+
+            for (const auto& field : decided)
+                if (field.name == "device")
+                    return;
+
+            for (const auto& field : decided)
+            {
+                if (field.name != "address" || ! field.writable)
+                    continue;
+
+                Field aim;
+                aim.address = field.address;
+                aim.name = "device";
+                aim.label = "target";
+                aim.control = Control::deviceRef;
+                aim.value = field.value;
+                aim.typeTags = field.typeTags;
+                aim.writable = true;
+                aim.choices = targetChoices (field.value, devices);
+                aim.description = "Which of the show's devices this cue writes to."
+                                  " Choosing one rewrites the address below it, because"
+                                  " the address is where a cue says where it is going.";
+
+                decided.push_back (std::move (aim));
+                return;
+            }
+        }
     }
 
     std::vector<Field> openersFor (const std::string& kind, const std::string& cueId)
@@ -308,6 +363,12 @@ namespace wfg::client::model
             human reaction time the comment above weighs. */
         if (out.kind == "media")
             fitToTheRig (snapshot, cueId, decided);
+
+        /*  And the same kind of second pass for a network cue, for the same
+            reason: which devices exist is a fact about THIS show and cannot
+            come from the parameter table. */
+        if (out.kind == "osc")
+            aimAtADevice (snapshot, cueId, decided);
 
         //  The four blocks, in the order somebody fills them in.
         const auto kindRows = [&out]
@@ -411,6 +472,20 @@ namespace wfg::client::model
 
             for (const auto& first : block.fields)
             {
+                /*  THE TARGET MENU IS NOT OFFERED OVER A SELECTION, and it is
+                    the one line here that could not be.
+
+                    Every other row writes the same text to N addresses, which
+                    is what `addresses` is for. This one writes a REWRITE of
+                    each cue's own address, and every cue has a different one -
+                    so one value cannot be committed to all of them, and a menu
+                    that quietly aimed six cues at one address would be the
+                    worst kind of helpful. Aiming several cues at a device is
+                    worth having and is a command that does not exist yet;
+                    until it does, the honest drawing is no menu. */
+                if (first.control == Control::deviceRef)
+                    continue;
+
                 auto field = first;
                 field.addresses.clear();
                 field.addresses.push_back (first.address);

@@ -290,6 +290,15 @@ he designs it in; the ramp's colours once the sine / noise / sweep bundle is on
 screen; PRD §3.30's *(proposed)* idle-colour policy; and the twelve decisions
 §14 marks as the implementer's, each taken early so it can be overruled early.
 
+**The show settings window (2026-09-22).** The audio settings window became **Show settings**,
+and its first new tab is **Network**: the boxes a show talks to, each with a name, an address, a
+port and a pair of Rx/Tx switches, plus one filter deciding whether a message from a sender
+nobody declared is obeyed. A device IS a mount, made editable, and one with no namespace file is
+*opaque* — sent to blind, which is what a lighting desk gets. Every OSC cue gained a **target**
+menu that rewrites the front of its address. Built as M-A; the author's decisions and the
+mechanics are in `docs/godot-namespace-draft-0.1.md` §15. **Still owed: M-B**, the MIDI tab and
+ports bound from the document, and **M-C**, the network interfaces Go.dot listens on.
+
 **Queued behind Half B (2026-09-18):** the group join setting and the range
 crossfade of PRD §3.6 and §3.24 — gap, gapless, crossfade with a user-defined
 overlap. Decided, not *(proposed)*; planned and built as its own plan once the

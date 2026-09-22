@@ -100,6 +100,21 @@ namespace wfg::client::model
             an output. */
         busRef,
 
+        /*  A MENU OF THE SHOW'S DEVICES, and the one control here that does
+            not write the row it is drawn on.
+
+            A network cue carries the whole address it writes, prefix and all,
+            so which box it is aimed at is not a field: it is the front of that
+            address. Rather than adding a second place for the answer to live -
+            which could then disagree with the address - this line is DERIVED
+            from the address and commits back to it. Picking a device rewrites
+            the cue's `address`, which is an ordinary `node.set` and needs no
+            new command, no new attribute and no new refusal.
+
+            Its `choices` therefore hold whole addresses as keys, not
+            identifiers. See `model::targetChoices`. */
+        deviceRef,
+
         /*  A BUTTON THAT OPENS THE PANEL AT THE FOOT on this cue (author,
             2026-09-21: "it would be great if the controls to show the
             waveform, the send levels, the EQ, the group timeline were in the

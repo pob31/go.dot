@@ -3298,6 +3298,27 @@ namespace wfg::cue
             somebody happened to look. */
         const auto* declaration = mounts->declarationOf (written.mountId);
 
+        /*  UNLESS THE DEVICE IS SWITCHED OFF, which is the one case where
+            those two are meant to disagree.
+
+            `tx` off says: this box is not in the room tonight. The write still
+            lands in the tree and in the log, so the show runs, a replay
+            reproduces it and a client sees the value the cue asked for - and
+            nothing goes on the wire. The run ends DONE carrying `not-sent`
+            (see `runWarning::notSent`), because the operator turned it off on
+            purpose and a column of red would teach them to stop reading the
+            colour that matters.
+
+            Before the verify is set up, deliberately: a cue whose wait is
+            `verified` against a device nobody is talking to would sit asking
+            until it timed out, which is a failure produced by a setting rather
+            than by anything in the rig. */
+        if (declaration != nullptr && ! declaration->tx)
+        {
+            job.notSent = true;
+            return;
+        }
+
         if (sender_ != nullptr && declaration != nullptr)
             job.ticket = sender_->queue (written.mountId,
                                          { declaration->host, declaration->port,
@@ -3482,6 +3503,25 @@ namespace wfg::cue
                                   job.address, job.typeTag });
                 }
 
+                continue;
+            }
+
+            /*  NOTHING WAS SENT, BECAUSE NOBODY IS LISTENING BY CHOICE.
+
+                Ended rather than failed, and the warning is set on the run
+                here rather than submitted as a command for the reason
+                `no-channel` is: it is a fact about how this run went, it is
+                already being published from the run table, and a second
+                command carrying it would be a record of nothing anybody
+                decided. `run.ended` is the decision, and a replay takes the
+                same branch off the same document. */
+            if (job.notSent)
+            {
+                if (auto* run = runs.find (job.self))
+                    run->warning = runWarning::notSent;
+
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                job.finished = true;
                 continue;
             }
 

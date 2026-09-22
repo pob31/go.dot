@@ -96,6 +96,36 @@ namespace wfg::tree
                                                       MountTable& mounts,
                                                       const juce::File& bundleFolder);
 
+    /*  RE-READS WHAT THE DOCUMENT SAYS ABOUT EVERY DEVICE, and moves the table
+        to match it.
+
+        Mounts used to be read once, when the bundle opened, and never again -
+        which was right while the only way to change a host was to edit the file
+        and reopen the show. Since the rows became writable (2026-09-22) a
+        person can retype a port during a tech rehearsal, and this is what makes
+        that reach the socket.
+
+        CALLED FROM THE AFTER-TICK, and only when the show revision moved, so a
+        GO pays nothing: a GO writes the standby, which is a state row and moves
+        no revision. What it costs when it does run is a dozen attribute reads
+        per declared device, all in memory.
+
+        WHAT IT DOES WITH EACH KIND OF CHANGE, and the difference matters:
+          - a device the table has never seen is loaded (or declared, when it
+            has no namespace file);
+          - a changed PREFIX or namespace file is a reload, because both decide
+            what is mounted and where;
+          - anything else - host, port, query port, read-back, rate cap, rx, tx,
+            the name - replaces the declaration and keeps the nodes, so a value
+            the tree holds and a read-back in flight both survive a retyped
+            port;
+          - a device the document no longer has is unloaded.
+
+        Problems are left on the table for a client to read, rather than
+        returned: the caller is a tick-thread hook with nowhere to print. */
+    void refreshMountDeclarations (const doc::ShowDocument& document, MountTable& mounts,
+                                   const juce::File& bundleFolder);
+
     /*  Adds `mount.load`, which re-reads one mount's description.
 
         `bundleFolder` is held BY REFERENCE and read at call time, because which

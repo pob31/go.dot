@@ -9,12 +9,12 @@ namespace wfg::tree { class TreeSnapshot; }
 namespace wfg::client::model { struct Theme; }
 namespace wfg::client::ui
 {
-    class AudioSettingsWindow final : public juce::DocumentWindow
+    class ShowSettingsWindow final : public juce::DocumentWindow
     {
     public:
-        AudioSettingsWindow (const model::Theme&, const tree::TreeSnapshot&,
+        ShowSettingsWindow (const model::Theme&, const tree::TreeSnapshot&,
                              std::function<void (Event)> send, std::function<void()> panic = {});
-        ~AudioSettingsWindow() override;
+        ~ShowSettingsWindow() override;
         void refresh (const tree::TreeSnapshot&);
         void closeButtonPressed() override;
         bool keyPressed (const juce::KeyPress&) override;

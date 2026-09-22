@@ -96,6 +96,34 @@ namespace wfg::tree
         std::string prefix;           ///< where it lands: "/wfs"
         std::string namespaceFile;    ///< bundle-relative: "namespaces/wfs-diy.json"
 
+        /*  WHAT A PERSON CALLS IT, and it is not the prefix.
+
+            The prefix is an address and is what every cue aimed here carries;
+            the name is for a menu and a list, and renaming a device must move
+            no cue at all - the reason a MIDI port has both (PRD 4.10). Empty
+            reads as the prefix, so a device is never a blank row. */
+        std::string name;
+
+        /*  WHETHER IT IS HEARD, AND WHETHER IT IS SPOKEN TO.
+
+            `rx` is read by one thing today: with strict senders on, a datagram
+            from a host no declared device holds with this set is dropped
+            rather than obeyed. What is DONE with what a device sends is a
+            later piece of work, and the flag is stored now because it is a
+            decision about the rig rather than something the machine noticed.
+
+            `tx` is the one that acts. Off, a cue aimed here still runs, still
+            lands in the tree and still lands in the log - it finishes at once
+            carrying `not-sent` - so a rehearsal in a room without the desk
+            plays the show instead of printing a column of failures. */
+        bool rx = false;
+        bool tx = true;
+
+        /*  Which of this machine's interfaces it is reached through, by
+            identifier, and empty is the first one bound. Read from the
+            document today and acted on when the listeners become plural. */
+        std::string interfaceId;
+
         /*  Where the box is, and how to reach it.
 
             `host` is a literal address rather than a name on purpose: a socket
@@ -123,12 +151,41 @@ namespace wfg::tree
         std::string readback = "none";
         int queryPort = 0;
 
-        /** Whether a verified cue can be aimed at this target at all. */
-        bool canBeAsked() const noexcept { return readback == "oscquery" && queryPort > 0; }
+        /*  WHETHER THIS DEVICE DESCRIBES ITSELF, which is the difference
+            between the two kinds of target a show can hold.
+
+            A DESCRIBED device has a namespace file: its nodes are known, so a
+            cue aimed at one is checked before the show, the value is coerced
+            to the type the node declared, and - if it says so - it can be
+            asked what it holds afterwards. That is PRD 3.22's first half and
+            the only kind Go.dot had until 2026-09-22.
+
+            An OPAQUE device has no file, and is the ordinary case for a desk
+            somebody typed an address into. Nothing is published under its
+            prefix, nothing is checked, and the value goes out exactly as it
+            was written. It is deliberately not a weaker version of the first:
+            "I know what is there" and "somebody told me where to send it" are
+            different claims, and the second is honest about being the second. */
+        bool opaque() const noexcept { return namespaceFile.empty(); }
+
+        /*  Whether a verified cue can be aimed at this target at all. An
+            opaque device can never be asked, whatever it declares: there is
+            no node to ask about, so a `verified` cue aimed at one would wait
+            for an answer that has nowhere to come from. */
+        bool canBeAsked() const noexcept
+        {
+            return ! opaque() && readback == "oscquery" && queryPort > 0;
+        }
 
         double rateCap = 50.0;
         bool anticipatable = false;
         std::string panic = "park";
+
+        /*  Whether two declarations say the same thing, which is how the
+            after-tick refresh tells a document edit that touched this device
+            from one that touched the cue next to it. Defaulted rather than
+            written out, so a field added later cannot be forgotten here. */
+        bool operator== (const MountDeclaration&) const = default;
     };
 
     struct MountResult
@@ -165,6 +222,39 @@ namespace wfg::tree
     public:
         /** Loads or reloads one mount. Replaces whatever was there before. */
         MountResult load (const MountDeclaration& mount, std::string_view json);
+
+        /*  DECLARES A DEVICE THAT DESCRIBES NOTHING - an opaque one, which has
+            no namespace file to read.
+
+            It is not `load` with an empty string, and the difference is worth
+            the second method: `load` fails a namespace that describes no nodes,
+            deliberately, because a description file with nothing in it is a
+            file somebody got wrong. A device with no file at all has nothing
+            to get wrong. The entry holds a declaration and an empty node list,
+            which is exactly what `write` reads to decide that an unknown
+            address under this prefix is a message rather than a mistake. */
+        MountResult declare (const MountDeclaration& mount);
+
+        /*  REPLACES WHAT A DEVICE SAYS ABOUT ITSELF, keeping its nodes.
+
+            Every row but the prefix and the namespace file can be edited while
+            the show is open - the host, the port, the ports it answers on, the
+            rate cap, rx and tx - and none of them changes what is mounted.
+            Re-reading the namespace for a changed host would throw away every
+            value the tree holds for that device and every read-back in flight,
+            to arrive at the same nodes. False when there is no such mount. */
+        bool updateDeclaration (const MountDeclaration& mount);
+
+        /*  WHY THIS DEVICE CANNOT BE USED AS DECLARED, in one sentence, and
+            empty when it can.
+
+            These refusals used to be a line on the terminal at startup and
+            nothing else, so a device that would never work looked exactly like
+            one that works, in every client, until a cue failed during the
+            show. Kept here rather than in the document because it is what the
+            machine found, not what anybody decided (PRD 4.10). */
+        void setProblem (const std::string& mountId, std::string problem);
+        std::string problemOf (const std::string& mountId) const;
 
         /** Forgets a mount and everything under it. */
         bool unload (const std::string& mountId);
@@ -275,6 +365,11 @@ namespace wfg::tree
         /** The mount whose prefix covers an address, or an empty string. */
         std::string mountOf (const std::string& address) const;
 
+        /*  Every mount the table holds, by identifier, in a stable order.
+            What the refresh walks to find the devices the document no longer
+            declares. */
+        std::vector<std::string> ids() const;
+
     private:
         struct Entry
         {
@@ -297,5 +392,10 @@ namespace wfg::tree
         /** Observations, by address, and the tick each was taken on. See `noteObservation`. */
         std::map<std::string, osc::Value> observations;
         std::map<std::string, std::int64_t> observedTicks;
+
+        /*  By mount id, and kept for mounts that are not in `mounts` at all -
+            a device refused for having no port never became an entry, and the
+            sentence saying so is the only thing anybody can act on. */
+        std::map<std::string, std::string> problems;
     };
 }

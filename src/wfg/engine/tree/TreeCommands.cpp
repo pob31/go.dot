@@ -16,6 +16,7 @@
 
 #include <wfg/engine/tree/TreeCommands.h>
 
+#include <algorithm>
 #include <functional>
 
 #include <wfg/engine/document/Bundle.h>
@@ -84,6 +85,19 @@ namespace wfg::tree
         declaration.anticipatable =
             document.getAttribute (base + "anticipatable").value_or (std::string ("false")) == "true";
 
+        /*  WHAT A PERSON CALLS IT, AND WHETHER IT IS HEARD OR SPOKEN TO
+            (2026-09-22). The name moves no cue and the two flags are read
+            elsewhere - `rx` by the sender gate, `tx` by the runner - but they
+            arrive here because this is the one place the document becomes a
+            declaration, and a second reader would be a second chance to
+            disagree with it. */
+        declaration.name = document.getAttribute (base + "name").value_or (std::string {});
+
+        declaration.rx =
+            document.getAttribute (base + "rx").value_or (std::string ("false")) == "true";
+        declaration.tx =
+            document.getAttribute (base + "tx").value_or (std::string ("true")) == "true";
+
         /*  WHERE IT SENDS. `transport` was declared in Phase 1 and read by
             nobody; from Phase 2 it decides whether anything can be sent at all,
             and a mount naming a transport Go.dot cannot speak is refused when
@@ -123,8 +137,6 @@ namespace wfg::tree
         if (! declaration.has_value())
             return MountResult::failed ("no mount " + mountId + " in this show");
 
-        if (declaration->namespaceFile.empty())
-            return MountResult::failed (mountId + " declares no namespace file");
 
         /*  WHERE IT SENDS, CHECKED WHEN THE SHOW OPENS, and refusing the whole
             mount rather than letting it load and fail one cue at a time.
@@ -135,16 +147,42 @@ namespace wfg::tree
             anybody that nobody was listening. Refusing here puts the problem in
             front of whoever opened the file, alongside every other thing wrong
             with the bundle, which is the moment it costs least. */
+        const auto refuse = [&mounts, &mountId] (std::string why)
+        {
+            /*  THE SENTENCE GOES WHERE A CLIENT CAN READ IT, not only to the
+                terminal the caller prints on. Until 2026-09-22 these refusals
+                were a line at startup and nothing else, so a device that could
+                never work looked exactly like one that works - in the page, in
+                the window, everywhere - until a cue failed during the show. */
+            mounts.setProblem (mountId, why);
+            return MountResult::failed (mountId + ": " + why);
+        };
+
         if (declaration->transport != "udp")
-            return MountResult::failed (mountId + ": transport \"" + declaration->transport
-                                        + "\" is declared but not implemented -"
-                                          " Go.dot speaks udp to a mount today");
+            return refuse ("transport \"" + declaration->transport
+                           + "\" is declared but not implemented -"
+                             " Go.dot speaks udp to a mount today");
 
         if (declaration->port <= 0 || declaration->port > 65535)
-            return MountResult::failed (mountId + ": no usable port. A mount has to say"
-                                                  " which port its target listens on;"
-                                                  " nothing can be inferred and UDP will"
-                                                  " never tell you it was wrong");
+            return refuse ("no usable port. A device has to say which port it listens"
+                           " on; nothing can be inferred and UDP will never tell you it"
+                           " was wrong");
+
+        /*  A DEVICE THAT DESCRIBES NOTHING IS DECLARED AND NOT READ.
+
+            This used to be the first refusal in this function, and it made the
+            description file the price of having a device at all. Most desks
+            have no such file and never will (PRD 3.22): what a show knows
+            about an X32 is where it is and what to send it. So an empty
+            namespace now means an OPAQUE device - see `MountDeclaration::
+            opaque` for what that costs - and the checks above still apply,
+            because a device with no port is useless whether or not anybody
+            described it. */
+        if (declaration->opaque())
+        {
+            mounts.setProblem (mountId, {});
+            return mounts.declare (*declaration);
+        }
 
         /*  Bundle-relative, and it has to STAY inside the bundle. A namespace
             path of "../../etc/passwd" is not a threat model Phase 1 has, but a
@@ -153,21 +191,27 @@ namespace wfg::tree
         const auto file = bundleFolder.getChildFile (juce::String (declaration->namespaceFile));
 
         if (! file.isAChildOf (bundleFolder))
-            return MountResult::failed (mountId + ": \"" + declaration->namespaceFile
-                                        + "\" points outside the bundle");
+            return refuse ("\"" + declaration->namespaceFile
+                           + "\" points outside the bundle");
 
         if (! file.existsAsFile())
-            return MountResult::failed (mountId + ": no " + declaration->namespaceFile
-                                        + " in this bundle");
+            return refuse ("no " + declaration->namespaceFile + " in this bundle");
 
         juce::MemoryBlock bytes;
 
         if (! file.loadFileAsData (bytes))
-            return MountResult::failed (mountId + ": cannot read " + declaration->namespaceFile);
+            return refuse ("cannot read " + declaration->namespaceFile);
 
-        return mounts.load (*declaration,
-                            std::string_view (static_cast<const char*> (bytes.getData()),
-                                              bytes.getSize()));
+        auto result = mounts.load (*declaration,
+                                   std::string_view (static_cast<const char*> (bytes.getData()),
+                                                     bytes.getSize()));
+
+        /*  The problems a namespace has are already sentences naming this
+            mount; the first is what a one-line readout shows. */
+        mounts.setProblem (mountId, result.ok || result.problems.empty()
+                                      ? std::string {} : result.problems.front());
+
+        return result;
     }
 
     std::vector<std::string> loadAllMountsFromBundle (const doc::ShowDocument& document,
@@ -187,6 +231,48 @@ namespace wfg::tree
         return problems;
     }
 
+
+    //==============================================================================
+    void refreshMountDeclarations (const doc::ShowDocument& document, MountTable& mounts,
+                                   const juce::File& bundleFolder)
+    {
+        const auto declared = declaredMountIds (document);
+
+        for (const auto& id : declared)
+        {
+            const auto wanted = mountDeclarationFor (document, id);
+
+            if (! wanted.has_value())
+                continue;
+
+            const auto* held = mounts.declarationOf (id);
+
+            /*  NEW, OR MOVED TO ANOTHER ADDRESS SPACE: read it properly. The
+                prefix decides every mounted node's address and the namespace
+                file decides which nodes there are, so either one changing
+                means what is loaded is about a different thing. */
+            if (held == nullptr
+                  || held->prefix != wanted->prefix
+                  || held->namespaceFile != wanted->namespaceFile)
+            {
+                loadMountFromBundle (document, mounts, bundleFolder, id);
+                continue;
+            }
+
+            /*  EVERYTHING ELSE KEEPS THE NODES. A retyped port is a different
+                destination for the same device, not a different device. */
+            if (! (*held == *wanted))
+                mounts.updateDeclaration (*wanted);
+        }
+
+        /*  AND A DEVICE SOMEBODY DELETED STOPS BEING ONE. Without this its
+            nodes would answer for the rest of the session and its prefix would
+            go on claiming addresses, so a cue re-aimed at its replacement
+            would still be matched to the ghost. */
+        for (const auto& id : mounts.ids())
+            if (std::find (declared.begin(), declared.end(), id) == declared.end())
+                mounts.unload (id);
+    }
 
     //==============================================================================
     void registerMountCommands (CommandRegistry& registry, const doc::ShowDocument& document,

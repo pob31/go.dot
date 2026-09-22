@@ -142,6 +142,20 @@ namespace wfg::cue
             GO. Phase 4's revocation (PR 4.5); declared here so the enum does
             not grow under a client that has already read it. */
         inline constexpr const char* revoked = "revoked";
+
+        /*  The cue ran and nothing left the machine, because the device it is
+            aimed at has its `tx` turned off - or, for a MIDI cue, its port
+            does.
+
+            A WARNING AND NOT A FAILURE, and the difference is the point of it.
+            The request was legal, the cue did everything it was asked to do,
+            and the one thing it did not do is the thing somebody deliberately
+            switched off: a designer rehearsing in a room with no lighting desk
+            turns the desk off and plays the show. Reporting that as an error
+            would fill a running pane with red for a decision the operator took
+            five minutes ago, and teach them to ignore the state that means
+            something is actually wrong. In words, never colour alone (4.8). */
+        inline constexpr const char* notSent = "not-sent";
     }
 
     /*  How far ahead a cue has been got ready. `/godot/cue/<id>/prepare`.

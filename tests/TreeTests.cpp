@@ -165,13 +165,91 @@ TEST_CASE ("tree: an address that names nothing produces nothing")
     CHECK (OscQueryJson::describe (*snapshot, "/nope").empty());
 }
 
+TEST_CASE ("tree: a device says what it is called, whether it is heard and spoken to, and what is wrong with it")
+{
+    /*  The rows the show settings window reads and writes (2026-09-22). They
+        are asserted here rather than only through the window because the
+        window is one reader of them: the page's generic inspector is another,
+        and an external script is a third.
+
+        THE POINT OF THE CASE IS THE ACCESS, not the values. Every one of these
+        was READ-ONLY until this round - a mount was a thing you wrote into
+        show.xml and reopened the show to change - so a client offering to edit
+        one would have been refused at the door with `read-only`, which reads
+        like a bug in the client and is a fact about the table. */
+    Rig rig;
+
+    const auto made = rig.document.createMount ("/desk", {});
+    REQUIRE (made.ok);
+
+    const auto base = "/godot/mount/" + made.id + "/";
+    const auto snapshot = rig.publish (0);
+
+    for (const auto& name : { "name", "rx", "tx", "host", "port", "prefix",
+                              "queryPort", "readback", "namespace" })
+    {
+        INFO ("row: " << name);
+
+        const auto* node = snapshot->find (base + name);
+        REQUIRE (node != nullptr);
+
+        CHECK (node->access == Access::readWrite);
+    }
+
+    /*  AND THE THREE THE MACHINE OWNS STAY READ-ONLY. They are what it found,
+        not what anybody decided (PRD 4.10), and a client that could write
+        `sent` could tell a tech rehearsal a message had left when none had. */
+    for (const auto& name : { "loaded", "nodeCount", "sent", "problem" })
+    {
+        INFO ("row: " << name);
+
+        const auto* node = snapshot->find (base + name);
+        REQUIRE (node != nullptr);
+
+        CHECK (node->access == Access::read);
+    }
+
+    /*  AND THE DEVICE IS OPAQUE, which is what a create with no namespace
+        file makes and what the settings window's ADD sends. The row is
+        published and empty rather than absent: a client reads "no description"
+        from a value, not from a missing address. */
+    const auto* described = snapshot->find (base + "namespace");
+    REQUIRE (described != nullptr);
+    REQUIRE (described->values.size() == 1u);
+    CHECK (described->values.front().getString().empty());
+}
+
+TEST_CASE ("tree: the show says whether it listens to strangers, and how many it has turned away")
+{
+    Rig rig;
+    const auto snapshot = rig.publish (0);
+
+    /*  A DECISION AND A READOUT, under one container and from opposite halves
+        of the snapshot: `strictSenders` is what somebody chose and is cached
+        against the document, `refused` climbs while the document sits still
+        and has to come from the runtime half - which is exactly why the
+        document half owns the container node between them. */
+    const auto* strict = snapshot->find ("/godot/network/strictSenders");
+    REQUIRE (strict != nullptr);
+    CHECK (strict->access == Access::readWrite);
+
+    const auto* refused = snapshot->find ("/godot/network/refused");
+    REQUIRE (refused != nullptr);
+    CHECK (refused->access == Access::read);
+
+    const auto* container = snapshot->find ("/godot/network");
+    REQUIRE (container != nullptr);
+    CHECK (container->isContainer());
+}
+
 TEST_CASE ("tree: the root holds one of each subtree, and every address exactly once")
 {
     Rig rig;
     const auto snapshot = rig.publish (0);
 
     for (const auto& address : { "/", "/godot", "/godot/engine", "/godot/document",
-                                 "/godot/list", "/godot/cue", "/godot/mount", "/godot/cmd" })
+                                 "/godot/list", "/godot/cue", "/godot/mount",
+                                 "/godot/network", "/godot/cmd" })
     {
         INFO ("address: " << address);
         const auto* node = snapshot->find (address);

@@ -168,6 +168,18 @@ namespace wfg
         inline constexpr const char* retiredId       = "retired-id";
         inline constexpr const char* malformedPacket = "malformed-packet";
 
+        /*  The datagram was well formed and came from somebody this show does
+            not know: strict senders is on and no declared device holds that
+            address with `rx` set.
+
+            Its own code rather than `malformed-packet`, which says the bytes
+            were wrong and sends somebody to look at their encoder. This one
+            says the bytes were fine and the SENDER was not on the list, and
+            the remedy is one row in the show settings - which is a different
+            afternoon entirely. It is what a `Drop` record carries, so the log
+            of a quiet evening says who was talking and was not heard. */
+        inline constexpr const char* unlistedSender  = "unlisted-sender";
+
         /*  The bytes did not reach the disk: a full volume, a folder that went
             away, a replace the platform refused. The command was well formed
             and everything it named was found; what failed is the writing.

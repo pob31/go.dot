@@ -75,6 +75,10 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # `rackChannel` are what each kind adds. There is no `rack`:
                 # Audio/Rack is a container element like Mounts and carries no
                 # rows of its own.
+                # The show's own network side. `network` is a CONTAINER token
+                # like `lists`, addressed /godot/network/strictSenders with no
+                # identifier in the middle, because a show has one of it.
+                "network",
                 "slots", "slot", "processorInput", "rackChannel", "feed", "insert",
                 # A cue's send into a mix channel, at a level. A sibling of
                 # `feed` rather than of `route`: both name a destination the

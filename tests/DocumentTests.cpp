@@ -177,11 +177,28 @@ TEST_CASE ("schema: a derived value is not an attribute of anything")
     CHECK (schema.attribute ("List", "order") == nullptr);
 
     /*  Read-only is a DIFFERENT thing from derived, and conflating them was a
-        real bug here: a mount's prefix is decided by someone, lives in the file,
-        and still may not be written over OSC while a show runs. */
+        real bug here: a bus's first channel is decided by the engine's own
+        repacking, lives in the file, and may not be written over OSC - which
+        would leave two outputs summing into one interface channel.
+
+        A MOUNT'S PREFIX USED TO BE THE EXAMPLE HERE and is no longer one
+        (2026-09-22). Every row a device carries became writable when the show
+        settings window grew a Network tab: they had been read-only since Phase
+        1 for a reason that was true then - a mount was something you wrote into
+        show.xml and reopened the show to change - and stopped being true the
+        moment somebody could retype a port during a tech rehearsal. The
+        distinction the case is about is unchanged; what it needed was an
+        example that is still an example. */
+    const auto* firstChannel = schema.attribute ("Bus", "firstChannel");
+    REQUIRE (firstChannel != nullptr);
+    CHECK (firstChannel->access() == Access::read);
+    CHECK (firstChannel->persist() == Persist::show);
+
+    /*  And the row that stopped being one, asserted so that a change back
+        would be noticed here rather than in a window nobody is looking at. */
     const auto* prefix = schema.attribute ("Mount", "prefix");
     REQUIRE (prefix != nullptr);
-    CHECK (prefix->access() == Access::read);
+    CHECK (prefix->access() == Access::readWrite);
     CHECK (prefix->persist() == Persist::show);
 }
 
@@ -972,11 +989,18 @@ TEST_CASE ("document: a write is checked before it lands")
     CHECK (document.setAttribute (address + "nonsense", "x").reason == reason::badAddress);
     CHECK (document.setAttribute ("/godot/cue/ZZZZZZZZ/name", "x").reason == reason::badAddress);
 
-    // Read-only means read-only, even though the value IS stored.
+    /*  Read-only means read-only, even though the value IS stored - and the
+        row that shows it is a bus's first channel, which the engine's repacking
+        owns. A mount's prefix was this example until 2026-09-22 and is now
+        writable, which the case below asserts rather than leaves implied. */
+    const auto bus = document.createBus ("direct", 1);
+    REQUIRE (bus.ok);
+    CHECK (document.setAttribute ("/godot/bus/" + bus.id + "/firstChannel", "4").reason
+             == reason::readOnly);
+
     const auto mount = document.createMount ("/wfs", "namespaces/wfs.json");
     REQUIRE (mount.ok);
-    CHECK (document.setAttribute ("/godot/mount/" + mount.id + "/prefix", "/other").reason
-             == reason::readOnly);
+    CHECK (document.setAttribute ("/godot/mount/" + mount.id + "/prefix", "/other").ok);
 
     // A refused write changes nothing.
     CHECK (document.getAttribute (address + "preWait") == std::string ("2.5"));
@@ -1895,6 +1919,13 @@ TEST_CASE ("edit lock: every create is refused under the lock, and each is appli
         { "insert",  [&document, &media, &channel] { return document.createInsert (media.id, channel.id); } },
         { "trigger", [&document, &media] { return document.createTrigger (media.id, "osc"); } },
         { "mount",   [&document] { return document.createMount ("/ext/locked", "namespaces/locked.json"); } },
+
+        /*  And the one the settings window sends: a device with no description
+            file, which since 2026-09-22 is what "add a device" makes. It goes
+            through the same door and is refused by the same line, but a create
+            that is reached from a button is worth naming here on its own -
+            this table is the list of things the lock is known to stop. */
+        { "device",  [&document] { return document.createMount ("/locked", {}); } },
     };
 
     REQUIRE (document.setAttribute (lockAddress, "true").ok);

@@ -89,7 +89,7 @@ def main():
         # types remain forbidden here too. Apply still goes through submit().
         hits = [p for p in files if pattern.search(code[p])
                 and not (token == "ValueTree" and p.relative_to(CLIENT).as_posix()
-                         == "ui/AudioSettingsWindow.cpp")]
+                         == "ui/ShowSettingsWindow.cpp")]
         if hits:
             failures.append("(b) %s is named in: %s" % (token, ", ".join(str(p.relative_to(REPO_ROOT)) for p in hits)))
     if not any(f.startswith("(b)") for f in failures):

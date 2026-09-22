@@ -708,6 +708,12 @@ namespace wfg::doc
                                  const std::string& id,
                                  const std::vector<std::pair<std::string_view, std::string>>& attributes);
 
+        /*  The containers every show has, added to a root that is missing
+            any of them. Called by the constructor and by `adopt`, so a show
+            that arrived from a file is shaped like one that was just made.
+            Silent: no history, no change count. */
+        static void ensureContainers (juce::ValueTree& root);
+
         void collectIds (const juce::ValueTree& node, std::vector<std::string>& out) const;
 
         /*  THE ONE DOOR THAT MAY WRITE A READ-ONLY ROW, and it is private so

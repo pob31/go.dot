@@ -1,8 +1,9 @@
 /* Go.dot — Copyright (C) 2026 Pierre-Olivier Boulant
    SPDX-License-Identifier: GPL-3.0-or-later */
-#include <wfg/client/ui/AudioSettingsWindow.h>
+#include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/model/Gestures.h>
+#include <wfg/client/model/Devices.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -864,9 +865,440 @@ namespace wfg::client::ui
             juce::Label regime, summary, polyphonyLabel;
             juce::TextEditor polyphony;
         };
+
+        /*  THE BOXES THIS SHOW TALKS TO.
+
+            The author's shape for this is their own desk's (WFS-DIY's Network
+            tab): a table of connections, each with a name, an address, a port
+            and a pair of ON/OFF switches for whether it is heard and whether
+            it is spoken to - and one button under it deciding whether messages
+            from anybody else are obeyed at all. The words here are that tab's
+            words on purpose, because it is the same person reading them.
+
+            WHAT IS DIFFERENT, and why. There is no fixed ceiling of six rows:
+            a device is a document object and `ADD` makes one. There is a
+            PREFIX column, which WFS-DIY has no need of - a Go.dot cue carries
+            the whole address it writes, so the prefix is the root of every cue
+            aimed here, and it is what the inspector's target menu swaps. And
+            there is no Protocol column yet: every device this window makes
+            speaks plain OSC (the author, 2026-09-22: *"let's start with vanilla
+            OSC"*), and a column offering one choice is a column that teaches
+            nothing. Described devices - the ones with an OSCQuery namespace
+            file - still appear here and read exactly like the rest; what they
+            know about themselves is not edited from this tab.
+
+            EVERY CELL IS A `node.set` AND NOTHING IS APPLIED. A device has no
+            hardware to reopen, so there is no Apply button and no `applying`
+            state: a retyped port reaches the socket on the next tick, through
+            the after-tick's re-read of the declarations. That is the whole
+            difference between this tab and the Interface tab beside it.
+        */
+        class NetworkPage final : public juce::Component,
+                                  private juce::ListBoxModel
+        {
+        public:
+            NetworkPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch))
+            {
+                list.setModel (this);
+                list.setRowHeight (34);
+                list.setOutlineThickness (0);
+                list.setColour (juce::ListBox::backgroundColourId,
+                                Look::colour (themeToUse, "panel-in"));
+                addAndMakeVisible (list);
+
+                addAndMakeVisible (addDevice);
+                addDevice.setTooltip ("Declare a box this show sends to: a lighting desk, a"
+                                      " processor, anything that listens for OSC.");
+                addDevice.onClick = [this]
+                {
+                    if (send)
+                        send (gesture::createDevice (freePrefix()));
+                };
+
+                /*  HIDDEN UNTIL A CELL IS CLICKED, and a child of the page
+                    rather than of the list, so scrolling cannot leave it drawn
+                    over the wrong row: it is placed from the row's live
+                    position each time it opens. One editor rather than one per
+                    cell - only one cell can be being typed into. */
+                addChildComponent (cellEditor);
+                cellEditor.setEditable (false, true, false);
+                cellEditor.setColour (juce::Label::backgroundColourId,
+                                      Look::colour (themeToUse, "panel-in"));
+                cellEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                cellEditor.onEditorHide = [this] { commitCell(); };
+
+                addAndMakeVisible (filter);
+                filter.setTooltip ("Filter incoming OSC: accept every sender, or only the devices"
+                                   " above whose Rx is on. Refused messages are written to the log"
+                                   " with the address that sent them.");
+                filter.onClick = [this]
+                {
+                    if (send)
+                        send (gesture::setNode ("/godot/network/strictSenders",
+                                                strict ? "false" : "true"));
+                };
+
+                addAndMakeVisible (summary);
+                summary.setJustificationType (juce::Justification::centredLeft);
+            }
+
+            void show (std::vector<model::DeviceRow> devices, bool strictNow,
+                       int refusedNow, bool editable)
+            {
+                const auto sameRows = devices.size() == rows.size()
+                                        && std::equal (devices.begin(), devices.end(), rows.begin(),
+                                                       [] (const model::DeviceRow& a,
+                                                           const model::DeviceRow& b)
+                                                       {
+                                                           return a.id == b.id && a.name == b.name
+                                                               && a.prefix == b.prefix
+                                                               && a.host == b.host && a.port == b.port
+                                                               && a.rx == b.rx && a.tx == b.tx
+                                                               && a.sent == b.sent
+                                                               && a.problem == b.problem;
+                                                       });
+
+                const auto sameLock = locked == ! editable;
+
+                rows = std::move (devices);
+                locked = ! editable;
+                strict = strictNow;
+
+                addDevice.setVisible (editable);
+
+                /*  TWO SETTINGS, AND THE WORD SAYS WHICH ONE IS IN FORCE -
+                    never a light that is on or off (4.8). WFS-DIY's own two
+                    labels, because it is the same switch. */
+                filter.setButtonText (strict ? "OSC Filter: Registered Only"
+                                             : "OSC Filter: Accept All");
+                filter.setEnabled (editable);
+
+                summary.setText (strict
+                                   ? juce::String (refusedNow) + " message"
+                                       + (refusedNow == 1 ? "" : "s") + " refused since the show"
+                                         " opened. Only the devices above with Rx on are heard."
+                                   : juce::String ("Every sender is heard. Switch to Registered"
+                                                   " Only to take messages from the devices above"
+                                                   " alone."),
+                                 juce::dontSendNotification);
+
+                if (! sameRows)
+                    list.updateContent();
+
+                if (! sameRows || ! sameLock || refusedNow != refused)
+                    list.repaint();
+
+                refused = refusedNow;
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (10);
+
+                auto bar = area.removeFromTop (30);
+                addDevice.setBounds (bar.removeFromLeft (128).reduced (3, 0));
+
+                auto foot = area.removeFromBottom (32);
+                filter.setBounds (foot.removeFromLeft (220).reduced (3, 2));
+                foot.removeFromLeft (10);
+                summary.setBounds (foot);
+
+                area.removeFromTop (6);
+                heading = area.removeFromTop (20);
+                area.removeFromTop (2);
+                list.setBounds (area);
+            }
+
+            void paint (juce::Graphics& g) override
+            {
+                /*  THE COLUMN NAMES, painted rather than a header component:
+                    the list has no header of its own and a row of labels would
+                    have to be kept in step with the painter's arithmetic by
+                    hand. One carve, used three times.
+
+                    CARVED FROM THE ROW'S WIDTH AND NOT THE PAGE'S. A scrollbar
+                    makes the two differ, and a heading carved from the wrong
+                    one slides away from the column it names the moment a show
+                    has more devices than the list can show at once - which is
+                    the same arithmetic mistake the cue list made, one pane
+                    over. */
+                g.setFont (Look::font (theme, 11.0f));
+                g.setColour (Look::colour (theme, "ink-off"));
+
+                auto cells = cellsFor (heading.withWidth (rowWidth()));
+
+                const char* names[] { "Name", "Prefix", "IPv4 Address", "Tx Port",
+                                      "Rx", "Tx", "Sent" };
+
+                for (auto at = 0; at < 7; ++at)
+                    g.drawText (names[at], cells[static_cast<std::size_t> (at)],
+                                juce::Justification::centredLeft);
+            }
+
+        private:
+            /*  How wide a row actually is, which is the list's width less
+                whatever the scrollbar is taking. Asked of the viewed component
+                rather than the list, because that is the component a row is
+                laid out in and the one a click's coordinates come from. */
+            int rowWidth() const
+            {
+                if (const auto* viewport = list.getViewport())
+                    if (const auto* viewed = viewport->getViewedComponent())
+                        if (viewed->getWidth() > 0)
+                            return viewed->getWidth();
+
+                return list.getWidth();
+            }
+
+            /*  ONE CARVE, USED BY THE PAINTER AND BY THE HIT TEST, so a click
+                cannot land somewhere the eye says is another column. The cue
+                list learned this the hard way and says so in its own header.
+
+                Order from the right: the cross, then the readouts, then the
+                two switches, then the numbers; the name takes what is left,
+                because it is the one that wants room. */
+            static std::array<juce::Rectangle<int>, 9> cellsFor (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+
+                const auto cross = area.removeFromRight (24);
+                const auto problem = area.removeFromRight (150);
+                const auto sent = area.removeFromRight (54);
+                const auto tx = area.removeFromRight (42);
+                const auto rx = area.removeFromRight (42);
+                const auto port = area.removeFromRight (70);
+                const auto host = area.removeFromRight (130);
+                const auto prefix = area.removeFromRight (110);
+
+                return { area, prefix, host, port, rx, tx, sent, problem, cross };
+            }
+
+            /*  What a click at this x is on, by the same arithmetic. Named
+                rather than an index, because a column moving should break a
+                compile and not a gesture. */
+            enum class Cell { name, prefix, host, port, rx, tx, none, problem, cross };
+
+            static Cell cellAt (int x, int width)
+            {
+                const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, 34));
+                const Cell order[] { Cell::name, Cell::prefix, Cell::host, Cell::port,
+                                     Cell::rx, Cell::tx, Cell::none, Cell::problem, Cell::cross };
+
+                for (auto at = 0; at < 9; ++at)
+                    if (x >= cells[static_cast<std::size_t> (at)].getX()
+                          && x < cells[static_cast<std::size_t> (at)].getRight())
+                        return order[at];
+
+                return Cell::none;
+            }
+
+            int getNumRows() override { return static_cast<int> (rows.size()); }
+
+            void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return;
+
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                g.setColour (Look::colour (theme, row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                const auto cells = cellsFor (juce::Rectangle<int> (0, 0, width, height));
+
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawText (juce::String (entry.name), cells[0],
+                            juce::Justification::centredLeft, true);
+
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (entry.prefix), cells[1], juce::Justification::centredLeft, true);
+                g.drawText (juce::String (entry.host), cells[2], juce::Justification::centredLeft, true);
+
+                /*  A PORT OF NOUGHT IS NOT A PORT. The row's own default is
+                    nothing at all, deliberately - no number could be right for
+                    every device - so an empty cell is the honest drawing and a
+                    bold nought would look like a decision somebody took. */
+                g.drawText (entry.port > 0 ? juce::String (entry.port) : juce::String(),
+                            cells[3], juce::Justification::centredLeft);
+
+                /*  THE TWO SWITCHES, AS WORDS. WFS-DIY's ON and OFF, and the
+                    word carries it rather than the colour (4.8). */
+                for (auto at = 0; at < 2; ++at)
+                {
+                    const auto on = at == 0 ? entry.rx : entry.tx;
+
+                    g.setColour (Look::colour (theme, on ? "ink" : "ink-off"));
+                    g.drawText (on ? "ON" : "OFF", cells[static_cast<std::size_t> (4 + at)],
+                                juce::Justification::centredLeft);
+                }
+
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (entry.sent), cells[6], juce::Justification::centredLeft);
+
+                /*  AND WHAT IS WRONG WITH IT, in the engine's own sentence.
+                    This is the whole reason the row exists rather than a line
+                    on a terminal at startup: a device that can never work used
+                    to look exactly like one that works, in every client, until
+                    a cue failed during the show. */
+                if (! entry.problem.empty())
+                {
+                    g.setColour (Look::colour (theme, "failed"));
+                    g.drawText (juce::String (entry.problem), cells[7],
+                                juce::Justification::centredLeft, true);
+                }
+
+                if (! locked)
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells[8],
+                                juce::Justification::centred);
+                }
+            }
+
+            void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+            {
+                if (locked || row < 0 || static_cast<std::size_t> (row) >= rows.size() || ! send)
+                    return;
+
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                /*  THE ROW'S WIDTH, NOT THE LIST'S: a scrollbar makes the two
+                    differ and every cell carved from the wrong one is off by
+                    its width. */
+                const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                   : list.getWidth();
+
+                const auto base = "/godot/mount/" + entry.id + "/";
+
+                switch (cellAt (event.x, width))
+                {
+                    case Cell::cross:  send (gesture::deleteObject (entry.id)); return;
+                    case Cell::rx:     send (gesture::setNode (base + "rx", entry.rx ? "false" : "true")); return;
+                    case Cell::tx:     send (gesture::setNode (base + "tx", entry.tx ? "false" : "true")); return;
+
+                    case Cell::name:
+                    case Cell::prefix:
+                    case Cell::host:
+                    case Cell::port:   editAt (row, cellAt (event.x, width), width); return;
+
+                    case Cell::problem:
+                    case Cell::none:   return;
+                }
+            }
+
+            void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
+
+            /*  EDITED IN PLACE, the output list's gesture exactly: one click
+                opens an editor over the cell, Return or clicking away commits,
+                Escape puts it back. */
+            void editAt (int row, Cell cell, int width)
+            {
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                const auto cells = cellsFor (place.withWidth (width).withX (list.getX()));
+                const auto index = cell == Cell::name ? 0 : cell == Cell::prefix ? 1
+                                 : cell == Cell::host ? 2 : 3;
+
+                editing = entry.id;
+                editingCell = cell;
+
+                cellEditor.setBounds (cells[static_cast<std::size_t> (index)]);
+                cellEditor.setText (cell == Cell::name   ? juce::String (entry.name)
+                                  : cell == Cell::prefix ? juce::String (entry.prefix)
+                                  : cell == Cell::host   ? juce::String (entry.host)
+                                  : entry.port > 0 ? juce::String (entry.port) : juce::String(),
+                                    juce::dontSendNotification);
+                cellEditor.setVisible (true);
+                cellEditor.showEditor();
+            }
+
+            void commitCell()
+            {
+                const auto id = editing;
+                const auto cell = editingCell;
+
+                editing.clear();
+                cellEditor.setVisible (false);
+
+                if (id.empty() || ! send)
+                    return;
+
+                const auto typed = cellEditor.getText().trim();
+
+                for (const auto& entry : rows)
+                {
+                    if (entry.id != id)
+                        continue;
+
+                    /*  UNCHANGED IS NOT A WRITE. Every one of these is an undo
+                        step and a line in the log, so a click that opened an
+                        editor and a click that closed it must not leave a
+                        record of somebody deciding nothing. */
+                    const auto was = cell == Cell::name   ? juce::String (entry.name)
+                                   : cell == Cell::prefix ? juce::String (entry.prefix)
+                                   : cell == Cell::host   ? juce::String (entry.host)
+                                   : entry.port > 0 ? juce::String (entry.port) : juce::String();
+
+                    if (typed == was)
+                        return;
+
+                    const auto name = cell == Cell::name   ? "name"
+                                    : cell == Cell::prefix ? "prefix"
+                                    : cell == Cell::host   ? "host" : "port";
+
+                    send (gesture::setNode ("/godot/mount/" + id + "/" + name,
+                                            typed.toStdString()));
+                    return;
+                }
+            }
+
+            /*  A PREFIX NOTHING ELSE IS USING, so `ADD` always makes a device
+                rather than a refusal. `/device1`, `/device2`: a word a person
+                can read in an address, and one they will rename anyway. */
+            std::string freePrefix() const
+            {
+                for (auto at = 1; at < 1000; ++at)
+                {
+                    const auto candidate = "/device" + std::to_string (at);
+                    auto taken = false;
+
+                    for (const auto& entry : rows)
+                        if (entry.prefix == candidate)
+                            taken = true;
+
+                    if (! taken)
+                        return candidate;
+                }
+
+                return "/device";
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+
+            juce::ListBox list;
+            juce::TextButton addDevice { "ADD" };
+            juce::TextButton filter { "OSC Filter: Accept All" };
+            juce::Label summary;
+            juce::Rectangle<int> heading;
+
+            juce::Label cellEditor;
+            std::string editing;
+            Cell editingCell = Cell::name;
+
+            std::vector<model::DeviceRow> rows;
+            bool locked = false, strict = false;
+            int refused = 0;
+        };
     }
 
-    class AudioSettingsWindow::Panel final : public juce::Component
+    class ShowSettingsWindow::Panel final : public juce::Component
     {
     public:
         Panel (const model::Theme& theme, const tree::TreeSnapshot& snapshot,
@@ -893,6 +1325,7 @@ namespace wfg::client::ui
             inputs = std::make_unique<PatchPage> (theme, true, in, 0);
             outputs = std::make_unique<PatchPage> (theme, false, out, minimumOutputs, send);
             outputList = std::make_unique<OutputPage> (theme, send);
+            network = std::make_unique<NetworkPage> (theme, send);
 
             /*  THE FIRST HAND EDIT OF THE OUTPUT PATCH IS WHAT SETTLES IT
                 (PRD §6.2). Sent BEFORE the edit lands, so that the engine's own
@@ -917,10 +1350,15 @@ namespace wfg::client::ui
 
             addAndMakeVisible (tabs);
             const auto background = Look::colour (theme, "panel");
-            tabs.addTab ("Interface", background, &interfacePage, false);
+            /*  "Audio" and not "Interface", since this window stopped being
+                only about audio (2026-09-22): the tab at the end is about the
+                network, and two tabs named after the thing they configure read
+                better than one named after a word both could use. */
+            tabs.addTab ("Audio", background, &interfacePage, false);
             tabs.addTab ("Outputs", background, outputList.get(), false);
             tabs.addTab ("Input patch", background, inputs.get(), false);
             tabs.addTab ("Output patch", background, outputs.get(), false);
+            tabs.addTab ("Network", background, network.get(), false);
             for (auto* component : std::initializer_list<juce::Component*> { &enabled, &type, &output, &input,
                      &buffer, &typeLabel, &outputLabel, &inputLabel, &bufferLabel, &rate, &explanation, &rescan })
                 interfacePage.addAndMakeVisible (*component);
@@ -973,6 +1411,17 @@ namespace wfg::client::ui
                 outputs->setOutputs (model::channelLabels (rows, 0),
                                      model::outputChannelCount (rows));
             }
+            /*  THE DEVICES ARE THE DOCUMENT'S, so they are re-read every pass
+                like the outputs above them rather than held as a draft:
+                `mount.create` and every `node.set` under it land at once and
+                are undoable. Nothing on that tab is applied - a device has no
+                hardware to reopen, so a retyped port reaches the socket on the
+                next tick through the engine's own re-read. */
+            network->show (model::readDevices (snapshot),
+                           model::isYes (model::flag (snapshot, "/godot/network/strictSenders")),
+                           juce::String (model::text (snapshot, "/godot/network/refused")).getIntValue(),
+                           ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+
             if (readCapabilities (snapshot)) capabilities();
             const auto state = model::text (snapshot, "/godot/audio/settingsStatus");
             const auto error = model::text (snapshot, "/godot/audio/settingsError");
@@ -1017,7 +1466,7 @@ namespace wfg::client::ui
             const auto locked = model::isYes (model::flag (snapshot, "/godot/document/locked"));
             apply.setEnabled (! waiting && state != "applying" && ! locked);
             tabs.setEnabled (! waiting && state != "applying" && ! locked);
-            if (locked) status.setText ("Unlock the show to change audio settings.", juce::dontSendNotification);
+            if (locked) status.setText ("Unlock the show to change the show settings.", juce::dontSendNotification);
         }
 
         void stopTest() { outputs->stopTest(); }
@@ -1163,6 +1612,7 @@ namespace wfg::client::ui
         juce::Component interfacePage;
         std::unique_ptr<PatchPage> inputs, outputs;
         std::unique_ptr<OutputPage> outputList;
+        std::unique_ptr<NetworkPage> network;
         bool settled = false;
         juce::TabbedComponent tabs;
         juce::ComboBox type, output, input, buffer;
@@ -1173,7 +1623,7 @@ namespace wfg::client::ui
         std::string errorCount, errorCountAtApply, sequence, sequenceAtApply;
     };
 
-    AudioSettingsWindow::AudioSettingsWindow (const model::Theme& theme, const tree::TreeSnapshot& snapshot,
+    ShowSettingsWindow::ShowSettingsWindow (const model::Theme& theme, const tree::TreeSnapshot& snapshot,
                                              std::function<void (Event)> send, std::function<void()> onPanic)
         : DocumentWindow ("Audio settings", Look::colour (theme, "ground"), juce::DocumentWindow::closeButton),
           panic (std::move (onPanic))
@@ -1182,10 +1632,10 @@ namespace wfg::client::ui
         setUsingNativeTitleBar (true); setResizable (true, false); setResizeLimits (740, 550, 1500, 1100);
         setContentNonOwned (panel.get(), true); centreWithSize (880, 650); setVisible (true);
     }
-    AudioSettingsWindow::~AudioSettingsWindow() { panel->stopTest(); clearContentComponent(); }
-    void AudioSettingsWindow::refresh (const tree::TreeSnapshot& snapshot) { panel->refresh (snapshot); }
-    void AudioSettingsWindow::closeButtonPressed() { panel->stopTest(); setVisible (false); }
-    bool AudioSettingsWindow::keyPressed (const juce::KeyPress& key)
+    ShowSettingsWindow::~ShowSettingsWindow() { panel->stopTest(); clearContentComponent(); }
+    void ShowSettingsWindow::refresh (const tree::TreeSnapshot& snapshot) { panel->refresh (snapshot); }
+    void ShowSettingsWindow::closeButtonPressed() { panel->stopTest(); setVisible (false); }
+    bool ShowSettingsWindow::keyPressed (const juce::KeyPress& key)
     {
         if (key != juce::KeyPress (juce::KeyPress::escapeKey)) return false;
         panel->stopTest();

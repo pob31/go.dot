@@ -472,6 +472,97 @@ TEST_CASE ("network cue: firing one writes the node and puts it on the wire")
     CHECK (decoded.packet.args.front() == osc::Value::float32 (0.75f));
 }
 
+//==============================================================================
+/*  A DEVICE THAT IS NOT IN THE ROOM TONIGHT (2026-09-22).
+
+    `tx` off is a rehearsal without the desk. The cue must still RUN - it is a
+    legal request, the show is playing, and a designer working at home should
+    get the show rather than a column of red - and nothing must leave the
+    machine. The warning is what makes the difference visible without making it
+    an error.
+*/
+TEST_CASE ("network cue: with tx off the cue runs and nothing leaves the machine")
+{
+    NetworkRig rig;
+
+    auto quiet = *rig.mounts.declarationOf ("K3PV7WRB");
+    quiet.tx = false;
+    REQUIRE (rig.mounts.updateDeclaration (quiet));
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0.75", "sent");
+    const auto outcome = rig.fire (cueId);
+
+    CHECK (outcome.applied == 1u);
+
+    /*  IT REACHED THE TREE, exactly as it would have. The value a client reads
+        back and the record a replay reproduces are both about what the show
+        DECIDED, and turning a device off decides nothing about the cue. */
+    const auto* value = rig.mounts.valueOf ("/desk/fader");
+    REQUIRE (value != nullptr);
+    CHECK (*value == osc::Value::float32 (0.75f));
+
+    //  AND IT DID NOT REACH THE WIRE.
+    rig.tickOnce();
+    CHECK (rig.listener.all().empty());
+
+    /*  The run ENDED rather than failing, carrying the word. An error here
+        would fill a running pane with red for a decision the operator took
+        five minutes ago, and teach them to stop reading the colour that means
+        something is actually wrong. */
+    const auto* run = rig.runOf (cueId);
+    REQUIRE (run != nullptr);
+    CHECK (run->state == cue::runState::done);
+    CHECK (run->error.empty());
+    CHECK (run->warning == std::string (cue::runWarning::notSent));
+}
+
+TEST_CASE ("network cue: a verified cue on a silenced device does not sit waiting")
+{
+    /*  The trap this guards: `verified` asks the device and waits for an
+        answer. With nothing sent there is nothing to answer, so without the
+        early finish the cue would wait out its whole timeout and then fail -
+        a failure produced by a setting rather than by anything in the rig. */
+    NetworkRig rig;
+
+    auto quiet = *rig.mounts.declarationOf ("K3PV7WRB");
+    quiet.tx = false;
+    REQUIRE (rig.mounts.updateDeclaration (quiet));
+
+    const auto cueId = rig.makeOsc ("/desk/fader", "f:0.75", "verified");
+    rig.fire (cueId);
+    rig.tickOnce();
+
+    const auto* run = rig.runOf (cueId);
+    REQUIRE (run != nullptr);
+    CHECK (run->state == cue::runState::done);
+    CHECK (run->warning == std::string (cue::runWarning::notSent));
+}
+
+TEST_CASE ("network cue: turning a device back on sends again")
+{
+    NetworkRig rig;
+
+    auto quiet = *rig.mounts.declarationOf ("K3PV7WRB");
+    quiet.tx = false;
+    REQUIRE (rig.mounts.updateDeclaration (quiet));
+
+    rig.fire (rig.makeOsc ("/desk/fader", "f:0.25", "sent"));
+    rig.tickOnce();
+    REQUIRE (rig.listener.all().empty());
+
+    quiet.tx = true;
+    REQUIRE (rig.mounts.updateDeclaration (quiet));
+
+    rig.fire (rig.makeOsc ("/desk/fader", "f:0.75", "sent"));
+
+    /*  Nothing is remembered and nothing is caught up: what was not sent while
+        the device was off is not sent when it comes back. A queue of messages
+        from a rehearsal arriving at once is the opposite of what an operator
+        switching a desk back on wants. */
+    REQUIRE (rig.listener.waitFor (1));
+    CHECK (rig.listener.all().size() == 1u);
+}
+
 TEST_CASE ("network cue: a run of its own, running from the tick it fires")
 {
     /*  A network cue is a cue: pressing GO on it is a thing that happened, it

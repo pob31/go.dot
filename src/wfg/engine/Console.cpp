@@ -44,6 +44,7 @@
 #include <wfg/engine/audio/HostedAudioDriver.h>
 #include <wfg/engine/clock/DummyAudioClock.h>
 #include <wfg/engine/clock/TickThread.h>
+#include <wfg/engine/osc/SenderGate.h>
 #include <wfg/engine/osc/UdpEndpoint.h>
 #include <wfg/engine/oscquery/EngineNamespace.h>
 #include <wfg/engine/oscquery/OscQueryServer.h>
@@ -2423,6 +2424,22 @@ namespace
             is built between the endpoint's construction and its start, which is
             what lets the handler hold it and the namespace hold the endpoint
             without either waiting on the other. */
+        /*  WHO THIS SHOW WILL HEAR FROM, when it has been told to be careful
+            (2026-09-22). Off by default, so an engine that nobody has
+            configured behaves exactly as it always has. Published from the
+            after-tick below, read on the socket thread; see SenderGate.h.
+
+            DECLARED BEFORE THE ENDPOINT THAT READS IT, and that is the whole
+            reason it is up here rather than beside the handler it belongs to.
+            The receive thread holds a reference to both of these, and the
+            orderly shutdown below joins that thread with `udp.stop()` - but
+            the early returns between here and there do not, and destructors
+            run in reverse. Declared after the endpoint, these two would be
+            destroyed while a socket thread was still reading them, on exactly
+            the paths nobody exercises twice. */
+        wfg::osc::SenderGate senders;
+        std::atomic<std::uint64_t> refusedDatagrams { 0 };
+
         wfg::osc::UdpEndpoint udp;
 
         wfg::oscquery::EngineNamespace nameSpace { engine, parameters, touches, udp };
@@ -2534,8 +2551,34 @@ namespace
             analyser.queue (named);
 
         if (! udp.start (requestedOsc,
-                         [&engine, &nameSpace] (wfg::osc::Datagram datagram)
+                         [&engine, &nameSpace, &senders, &refusedDatagrams]
+                         (wfg::osc::Datagram datagram)
                          {
+                             /*  BEFORE THE BYTES ARE EVEN LOOKED AT, because
+                                 what this refuses is a SENDER and not a
+                                 message: decoding first would spend the work
+                                 and, worse, would make a malformed packet from
+                                 a stranger report the wrong reason.
+
+                                 A refusal is a record and never a silence. The
+                                 whole failure mode of a filter like this is a
+                                 surface that does nothing with no way to find
+                                 out why, so what arrives goes into the log
+                                 with the address that sent it, and the count
+                                 below is what somebody watches while they
+                                 press the button again. */
+                             if (! senders.allows (datagram.senderIp))
+                             {
+                                 refusedDatagrams.fetch_add (1, std::memory_order_relaxed);
+
+                                 wfg::Drop refused;
+                                 refused.origin = datagram.origin();
+                                 refused.reason = wfg::reason::unlistedSender;
+                                 refused.payload = std::move (datagram.bytes);
+                                 engine.submit (std::move (refused));
+                                 return;
+                             }
+
                              const auto decoded = wfg::osc::decode (datagram.bytes.data(),
                                                                     datagram.bytes.size());
 
@@ -3074,6 +3117,51 @@ namespace
                                         row, and walks nothing. */
                                     for (const auto& named : wfg::audio::mediaFilesNamedBy (document))
                                         analyser.queue (named);
+
+                                    /*  AND WHAT THE SHOW NOW SAYS ABOUT ITS
+                                        DEVICES reaches the table that talks to
+                                        them (2026-09-22).
+
+                                        Mounts were read once, when the bundle
+                                        opened, and never again - which was
+                                        right while the only way to change a
+                                        host was to edit the file and reopen
+                                        the show. Now that a person can retype
+                                        a port during a tech rehearsal, this is
+                                        what carries it to the socket. A dozen
+                                        attribute reads per declared device, on
+                                        a show edit only: a GO writes the
+                                        standby, which is a state row and moves
+                                        no revision at all. */
+                                    wfg::tree::refreshMountDeclarations (document, mounts,
+                                                                         target);
+
+                                    /*  AND WHO MAY BE HEARD FROM, built here
+                                        for the same reason the trigger index
+                                        is: the socket thread cannot read a
+                                        document, so the tick thread hands it
+                                        something immutable. */
+                                    auto rule = std::make_shared<wfg::osc::Allowed>();
+                                    rule->strict = document.getAttribute (
+                                                       "/godot/network/strictSenders")
+                                                     .value_or (std::string ("false")) == "true";
+
+                                    for (const auto& mountId : wfg::tree::declaredMountIds (document))
+                                    {
+                                        const auto base = "/godot/mount/" + mountId + "/";
+
+                                        if (document.getAttribute (base + "rx")
+                                              .value_or (std::string ("false")) != "true")
+                                            continue;
+
+                                        const auto host = document.getAttribute (base + "host")
+                                                            .value_or (std::string ("127.0.0.1"));
+
+                                        if (! host.empty())
+                                            rule->hosts.insert (host);
+                                    }
+
+                                    senders.publish (std::move (rule));
                                 }
 
                                 /*  And whether an earlier session's afternoon is
@@ -3170,6 +3258,9 @@ namespace
                                     nameSpace.publishTriggers (triggerIndex);
                                     midiIn.publishTriggers (triggerIndex);
                                 }
+
+                                state.refusedDatagrams =
+                                    refusedDatagrams.load (std::memory_order_relaxed);
 
                                 auto current = parameters.publish (outcome.tick, state);
 

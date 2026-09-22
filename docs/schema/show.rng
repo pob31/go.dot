@@ -49,6 +49,9 @@
       <optional>
         <ref name="MidiPorts"/>
       </optional>
+      <optional>
+        <ref name="Network"/>
+      </optional>
     </element>
   </define>
 
@@ -1185,8 +1188,14 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="name">
+          <a:documentation>What the show calls this device - &apos;Lighting desk&apos;, &apos;The WFS&apos; - which is what a target menu shows and what somebody reads in a list. The prefix stays the address: a name is for people and renaming one must not move a single cue, which is the reason a MIDI port has both too. Empty shows the prefix instead, so a device is never a blank row.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="namespace">
-          <a:documentation>The bundle-relative OSCQuery namespace file describing the target.</a:documentation>
+          <a:documentation>The bundle-relative OSCQuery namespace file describing the target, and EMPTY is the ordinary case for a device somebody typed an address into. Empty declares an OPAQUE device: nothing is published under its prefix, a cue aimed under it is sent exactly as it was written with no coercion and no read-back, and a cue whose wait is verified is refused when the show loads because there is nothing there to ask. A described device is the other half of PRD 3.22 and is unchanged: its nodes are checked, typed and askable.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -1210,7 +1219,7 @@
       </optional>
       <optional>
         <attribute name="prefix">
-          <a:documentation>The address the foreign namespace is mounted at.</a:documentation>
+          <a:documentation>The address this device is reached at, and the root every cue aimed at it carries. EDITING IT DOES NOT REWRITE THE CUES: a cue holds the whole address it writes, so a prefix somebody changes leaves every cue under the old one aiming at nothing, which wfg validate says out loud. Moving a cue from one device to another is the target menu&apos;s job, which rewrites the address rather than the device.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -1241,6 +1250,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="rx">
+          <a:documentation>Whether what this device sends is accepted. It is read today by one thing only: with strict senders on, a datagram from a host no declared device holds with rx set is dropped and logged rather than obeyed. What is DONE with what a device sends - a state machine watching it, a desk writing cues into the show - comes later, and the flag is stored now because it is a decision about the rig rather than a thing the machine noticed (PRD 4.10).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="transport">
           <a:documentation>How the mounted target is reached. Only udp carries messages today; tcp and ws are declared because a document should be able to say what a device is before Go.dot can talk to it, and a mount declaring either is refused when the show loads rather than going quiet during it.</a:documentation>
           <choice>
@@ -1250,9 +1268,32 @@
           </choice>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="tx">
+          <a:documentation>Whether cues aimed at this device are put on the wire. Off, the cue still runs and still lands in the tree and the log - it finishes at once carrying the warning not-sent - so a rehearsal in a room without the desk plays the show instead of printing a column of failures. On is the default because a device somebody declared is a device they mean to talk to.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
       <zeroOrMore>
         <ref name="Slot"/>
       </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Network">
+    <element name="Network">
+      <optional>
+        <attribute name="strictSenders">
+          <a:documentation>Whether messages are taken only from the devices this show declares. On, a datagram whose sender is not a declared device with rx set is dropped and written to the log as a refusal naming who sent it; off, which is the default and what Go.dot has always done, anybody who can reach the port is heard. It gates the OSC port alone: a client on the WebSocket is a client rather than a device, and gating those would lock the page and the tablet out of their own engine.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
     </element>
   </define>
 

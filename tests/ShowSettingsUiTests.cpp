@@ -1,7 +1,7 @@
 /* Go.dot — Copyright (C) 2026 Pierre-Olivier Boulant
    SPDX-License-Identifier: GPL-3.0-or-later */
 #include <3rd_party/doctest/tracktion_doctest.hpp>
-#include <wfg/client/ui/AudioSettingsWindow.h>
+#include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/engine/audio/DeviceLayer.h>
 #include <wfg/engine/Engine.h>
@@ -63,7 +63,7 @@ namespace
                 applying a buffer size did not ask for that. */
             const auto wantedPatch = document.getAttribute ("/godot/audio/outputPatch")
                                        .value_or (std::string {});
-            client::ui::AudioSettingsWindow panel (theme, *publish(),
+            client::ui::ShowSettingsWindow panel (theme, *publish(),
                 [this] (Event event) { sent.push_back (std::move (event)); });
             checkClock();
             auto* rescan = button (panel, "Rescan interfaces");
@@ -122,7 +122,7 @@ TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch s
     const auto mix = rig.document.createBus ("mix", 2);
     REQUIRE (mix.ok);
 
-    client::ui::AudioSettingsWindow panel (rig.theme, *rig.publish(),
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
         [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
 
     /*  A TAB'S CONTENT IS ONLY A LIVE CHILD WHILE IT SHOWS, which is
@@ -197,6 +197,68 @@ TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch s
     CHECK_FALSE (rig.sent.back().args[6].getString().empty());
 }
 
+TEST_CASE ("show settings UI: the Network tab declares devices and switches the sender filter")
+{
+    Rig rig;
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    /*  THE WINDOW IS NOT ONLY ABOUT AUDIO ANY MORE (2026-09-22), and the tab
+        strip is where that shows: the first one is named after the hardware it
+        configures rather than after "Interface", which the network tab could
+        equally have claimed. */
+    CHECK (tabs->getTabNames()[0] == "Audio");
+    CHECK (tabs->getTabNames()[4] == "Network");
+
+    tabs->setCurrentTabIndex (4);
+
+    /*  A TAB'S CONTENT IS ONLY A LIVE CHILD WHILE IT SHOWS - juce::
+        TabbedComponent's own arrangement - so nothing below can be found until
+        the line above has run. */
+
+    /*  ADD MAKES A DEVICE, with no namespace file, which is what makes it an
+        opaque one: a desk at an address, not a described tree. Everything else
+        about it - the name, the host, the port - is written afterwards with
+        `node.set`, which is why this is the only structure gesture the tab
+        has. */
+    auto* add = button (panel, "ADD");
+    REQUIRE (add != nullptr);
+
+    const auto beforeAdd = rig.sent.size();
+    add->onClick();
+
+    REQUIRE (rig.sent.size() == beforeAdd + 1);
+    CHECK (rig.sent.back().command == "mount.create");
+    REQUIRE (rig.sent.back().args.size() == 2u);
+    CHECK (rig.sent.back().args[1].getString().empty());
+
+    /*  THE FILTER SAYS WHICH SETTING IS IN FORCE IN WORDS, never as a light
+        that is on or off (4.8) - and they are WFS-DIY's own two labels,
+        because it is the same switch and the same person reading it. */
+    auto* filter = button (panel, "OSC Filter: Accept All");
+    REQUIRE (filter != nullptr);
+
+    const auto beforeFilter = rig.sent.size();
+    filter->onClick();
+
+    REQUIRE (rig.sent.size() == beforeFilter + 1);
+    CHECK (rig.sent.back().command == "node.set");
+    REQUIRE (rig.sent.back().args.size() == 2u);
+    CHECK (rig.sent.back().args[0].getString() == "/godot/network/strictSenders");
+    CHECK (rig.sent.back().args[1].getString() == "true");
+
+    /*  AND UNDER THE LOCK THE STRIP GOES DEAD, devices included. A show in
+        show mode is one nobody can restructure, and a device is structure. */
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+
+    CHECK_FALSE (tabs->isEnabled());
+}
+
 TEST_CASE ("audio settings UI: held output tests clear on tab exit and window close")
 {
     Rig rig;
@@ -216,7 +278,7 @@ TEST_CASE ("audio settings UI: held output tests clear on tab exit and window cl
     REQUIRE (rig.document.configureAudio (settings).ok);
     rig.state.audioStatus = "running"; rig.state.audioDevice = settings.outputDevice;
     rig.state.hardwareOutputs = 2;
-    client::ui::AudioSettingsWindow panel (rig.theme, *rig.publish(),
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
         [&] (Event event) { rig.sent.push_back (std::move (event)); });
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);

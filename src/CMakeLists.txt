@@ -186,6 +186,7 @@ add_library(wfg_engine STATIC
     wfg/engine/osc/OscCodec.h
     wfg/engine/osc/OscValue.cpp
     wfg/engine/osc/OscValue.h
+    wfg/engine/osc/SenderGate.h
     wfg/engine/osc/UdpEndpoint.cpp
     wfg/engine/osc/UdpEndpoint.h
     wfg/engine/oscquery/EngineNamespace.cpp
@@ -271,6 +272,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Curve.h
     wfg/client/model/Curve.cpp
     wfg/client/model/DirectOuts.h
+    wfg/client/model/Devices.cpp
+    wfg/client/model/Devices.h
     wfg/client/model/DirectOuts.cpp
     wfg/client/model/Fader.h
     wfg/client/model/Fader.cpp
@@ -311,8 +314,8 @@ target_link_libraries(wfg_client_model
     PRIVATE wfg::warnings)
 
 add_library(wfg_client_ui STATIC
-    wfg/client/ui/AudioSettingsWindow.h
-    wfg/client/ui/AudioSettingsWindow.cpp
+    wfg/client/ui/ShowSettingsWindow.h
+    wfg/client/ui/ShowSettingsWindow.cpp
     wfg/client/Client.h
     wfg/client/ui/Client.cpp
     wfg/client/ui/FootPanelComponent.cpp

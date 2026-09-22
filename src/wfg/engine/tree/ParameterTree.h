@@ -198,6 +198,15 @@ namespace wfg::tree
             that fails on the writer belongs to a command that was applied.
             `doc::DocumentSession::writeError` says when it goes out. */
         std::string documentWriteError;
+
+        /*  HOW MANY DATAGRAMS THE SENDER GATE HAS DROPPED since the show
+            opened, and nought when strict senders is off - which is not the
+            same as nought when it is on, and is why this is published rather
+            than inferred. A surface that has gone quiet is the case it is for:
+            a number that climbs as somebody presses a button says the message
+            is arriving and being refused. Counted on the socket thread and
+            read here once a tick, like everything else in this struct. */
+        std::uint64_t refusedDatagrams = 0;
     };
 
     class ParameterTree

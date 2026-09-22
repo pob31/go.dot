@@ -128,6 +128,247 @@ namespace
 }
 
 //==============================================================================
+/*  A DEVICE THAT DESCRIBES NOTHING (2026-09-22).
+
+    Until this round a mount without a namespace file was refused outright, so
+    the price of having a device at all was an OSCQuery description of it -
+    which almost no desk ships and nobody wants to hand-write for a box they
+    are about to send three messages to. These cases are the other half of PRD
+    3.22: what an OPAQUE device can and cannot do, said as assertions rather
+    than as a comment, because the temptation with a pass-through is to let it
+    swallow everything and the whole value of a DESCRIBED device is that it
+    does not.
+*/
+TEST_CASE ("mount: a device with no description is declared rather than refused")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    MountTable mounts;
+    MountDeclaration desk;
+    desk.id = "DESK0001";
+    desk.prefix = "/desk";
+    desk.host = "192.168.1.20";
+    desk.port = 10023;
+
+    REQUIRE (desk.opaque());
+
+    const auto result = mounts.declare (desk);
+
+    CHECK (result.ok);
+    CHECK (result.problems.empty());
+    CHECK (mounts.isLoaded ("DESK0001"));
+
+    /*  NO NODES, which is the whole of what opaque means: there is nothing to
+        publish under the prefix because nobody said what is there. */
+    CHECK (mounts.nodeCount ("DESK0001") == 0);
+
+    REQUIRE (mounts.declarationOf ("DESK0001") != nullptr);
+    CHECK (mounts.declarationOf ("DESK0001")->host == "192.168.1.20");
+
+    /*  AND IT CAN NEVER BE ASKED, whatever it declares. A verified cue aimed
+        here would wait for an answer with nowhere to come from, so the refusal
+        belongs at load and `canBeAsked` is what says so. */
+    desk.readback = "oscquery";
+    desk.queryPort = 5005;
+    CHECK_FALSE (desk.canBeAsked());
+}
+
+TEST_CASE ("mount: a prefix that would mount over the engine is refused, described or not")
+{
+    MountTable mounts;
+    MountDeclaration bad;
+    bad.id = "BAD00001";
+    bad.prefix = "/godot/cue";
+    bad.port = 9000;
+
+    const auto result = mounts.declare (bad);
+
+    /*  The same check a described mount goes through, and it has to be: an
+        opaque device publishes no nodes, but its PREFIX is still what every
+        outgoing address is matched against, so a bad one would silently claim
+        cues meant for somebody else.
+
+        `/godot` was added to the reserved list in the same round (2026-09-22).
+        Nothing had refused it before - a mount there would shadow the engine's
+        own addresses - and it had been harmless only because a prefix could
+        only be hand-written by somebody who knew what it was. The settings
+        window is a box a person types one into. */
+    CHECK_FALSE (result.ok);
+    CHECK_FALSE (mounts.isLoaded ("BAD00001"));
+}
+
+TEST_CASE ("mount: a write to an opaque device goes as it was typed, and to a described one it is checked")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+
+    MountDeclaration desk;
+    desk.id = "DESK0001";
+    desk.prefix = "/desk";
+    desk.port = 10023;
+    REQUIRE (rig.mounts.declare (desk).ok);
+
+    SUBCASE ("an address nobody described is a message, not a mistake")
+    {
+        const auto written = rig.mounts.write ("/desk/ch/01/mix/fader",
+                                               osc::Value::float32 (0.5f));
+
+        CHECK (written.ok);
+        CHECK (written.mountId == "DESK0001");
+
+        /*  AS TYPED. There is no declared type to coerce to, so the value that
+            goes on the wire is the one the cue spells - which is why the cue's
+            own atom carries its type. */
+        CHECK (written.value.isFloat32());
+
+        /*  AND NOTHING IS STORED. A value nobody can read back is not a fact
+            about the device, only about what was sent; `sent` on the mount is
+            what a rehearsal reads instead. */
+        CHECK (rig.mounts.valueOf ("/desk/ch/01/mix/fader") == nullptr);
+    }
+
+    SUBCASE ("the same address under a DESCRIBED device is still refused")
+    {
+        /*  The fixture's own mount, which has a namespace file. This is the
+            case the pass-through must not swallow: the show said what that box
+            has, this is not among it, and saying so now beats a datagram that
+            leaves and is ignored. */
+        const auto written = rig.mounts.write ("/wfs/not/a/node", osc::Value::float32 (0.5f));
+
+        CHECK_FALSE (written.ok);
+        CHECK (written.reason == reason::badAddress);
+    }
+
+    SUBCASE ("and an address under no device at all is refused")
+    {
+        const auto written = rig.mounts.write ("/nowhere/at/all", osc::Value::float32 (0.5f));
+
+        CHECK_FALSE (written.ok);
+        CHECK (written.reason == reason::badAddress);
+    }
+
+    SUBCASE ("a prefix is a boundary, not a string start")
+    {
+        /*  "/desktop" is not under "/desk", and the pass-through must not
+            claim it: a device whose prefix happens to begin another's would
+            otherwise take its cues. */
+        const auto written = rig.mounts.write ("/desktop/fader", osc::Value::float32 (0.5f));
+
+        CHECK_FALSE (written.ok);
+    }
+}
+
+TEST_CASE ("mount: a retyped port keeps the nodes and the values")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+
+    const auto* before = rig.mounts.declarationOf ("G1JS4VWE");
+    REQUIRE (before != nullptr);
+
+    const auto nodes = rig.mounts.nodeCount ("G1JS4VWE");
+    REQUIRE (nodes > 0);
+
+    /*  Something the tree holds, so the test can prove it survives. */
+    const auto address = rig.mounts.allNodes().front().address;
+    rig.mounts.noteReadback (address, osc::Value::float32 (0.25f));
+
+    auto moved = *before;
+    moved.host = "10.0.0.7";
+    moved.port = 9001;
+
+    const auto version = rig.mounts.revision();
+
+    CHECK (rig.mounts.updateDeclaration (moved));
+
+    /*  THE DESTINATION MOVED AND THE DEVICE DID NOT. Re-reading the namespace
+        for a changed host would throw away every value and every read-back in
+        flight to arrive at the same nodes - which, during a tech rehearsal
+        where somebody is retyping an address, is the whole session. */
+    CHECK (rig.mounts.declarationOf ("G1JS4VWE")->host == "10.0.0.7");
+    CHECK (rig.mounts.nodeCount ("G1JS4VWE") == nodes);
+    REQUIRE (rig.mounts.readbackOf (address) != nullptr);
+
+    /*  And the table says it moved, so the published tree is rebuilt. */
+    CHECK (rig.mounts.revision() != version);
+
+    CHECK_FALSE (rig.mounts.updateDeclaration (MountDeclaration {}));
+}
+
+TEST_CASE ("mount: why a device cannot be used is kept where a client can read it")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    MountTable mounts;
+
+    CHECK (mounts.problemOf ("DESK0001").empty());
+
+    /*  KEPT FOR A MOUNT THAT HAS NO ENTRY. A device refused for having no port
+        never became one, and this sentence is the only thing anybody can act
+        on - which is precisely the case that used to be a line on a terminal
+        at startup and nothing else. */
+    mounts.setProblem ("DESK0001", "no usable port");
+    CHECK (mounts.problemOf ("DESK0001") == "no usable port");
+    CHECK_FALSE (mounts.isLoaded ("DESK0001"));
+
+    mounts.setProblem ("DESK0001", {});
+    CHECK (mounts.problemOf ("DESK0001").empty());
+}
+
+TEST_CASE ("mount: the document is what the table follows, and a refresh carries an edit to it")
+{
+    INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
+
+    Rig rig;
+
+    /*  A device made the way the settings window makes one: a prefix, no
+        namespace file, and everything else written afterwards. */
+    const auto made = rig.document.createMount ("/desk", {}, {});
+    REQUIRE (made.ok);
+
+    const auto id = made.id;
+
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+
+    /*  It has no port yet, so it is refused - and says why, rather than
+        looking exactly like a device that works. */
+    CHECK_FALSE (rig.mounts.isLoaded (id));
+    CHECK_FALSE (rig.mounts.problemOf (id).empty());
+
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + id + "/port", "10023").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+
+    CHECK (rig.mounts.isLoaded (id));
+    CHECK (rig.mounts.problemOf (id).empty());
+    REQUIRE (rig.mounts.declarationOf (id) != nullptr);
+    CHECK (rig.mounts.declarationOf (id)->port == 10023);
+
+    /*  AND THE ROWS THE WINDOW WRITES REACH THE DECLARATION. This is what
+        makes a retyped address reach the socket without reopening the show. */
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + id + "/host", "192.168.1.20").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + id + "/tx", "false").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + id + "/rx", "true").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/mount/" + id + "/name", "Lighting desk").ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+
+    const auto* held = rig.mounts.declarationOf (id);
+    REQUIRE (held != nullptr);
+    CHECK (held->host == "192.168.1.20");
+    CHECK_FALSE (held->tx);
+    CHECK (held->rx);
+    CHECK (held->name == "Lighting desk");
+
+    /*  AND A DEVICE SOMEBODY DELETED STOPS BEING ONE. Without this its prefix
+        would go on claiming addresses for the rest of the session, so a cue
+        re-aimed at its replacement would still be matched to the ghost. */
+    REQUIRE (rig.document.remove (id).ok);
+    refreshMountDeclarations (rig.document, rig.mounts, rig.folder);
+    CHECK_FALSE (rig.mounts.isLoaded (id));
+}
+
+//==============================================================================
 TEST_CASE ("mount: a captured description and a hand-written one load the same way")
 {
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));

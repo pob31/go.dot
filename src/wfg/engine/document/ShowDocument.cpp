@@ -303,9 +303,10 @@ namespace wfg::doc
             spelled differently. The parameter table's owner token is `lists`
             because a table row belongs to an element; the address is what a
             person types. */
-        if (element == "Show")  return "document";
-        if (element == "Audio") return "audio";
-        if (element == "Lists") return "list";
+        if (element == "Show")    return "document";
+        if (element == "Audio")   return "audio";
+        if (element == "Lists")   return "list";
+        if (element == "Network") return "network";
         return {};
     }
 
@@ -334,6 +335,13 @@ namespace wfg::doc
         if (element == "Bus")                       return "bus";
         if (element == "Show")                      return "document";
         if (element == "Audio")                     return "audio";
+
+        /*  WHETHER THIS SHOW LISTENS TO STRANGERS, and later which interfaces
+            it listens on. A container beside Audio carrying a value of its
+            own, for the reason Audio does: whether a message from a sender
+            nobody declared is obeyed is a fact about the whole show, not
+            about any one device in it. */
+        if (element == "Network")                   return "network";
 
         /*  A SLOT AND A RACK CHANNEL ANSWER DIFFERENTLY, and they have to: this
             is the by-kind half of the `refers` check, so `feed/@slot` naming a
@@ -365,6 +373,31 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    void ShowDocument::ensureContainers (juce::ValueTree& root)
+    {
+        /*  THE CONTAINERS EVERY SHOW HAS, made here so that a document which
+            arrived from a file has them too.
+
+            A fresh document gets them from the constructor, and for a long
+            while that was the whole story - but `adopt` REPLACES the root, so
+            a show read off a disk has exactly the containers its file happened
+            to carry. A hand-written show.xml with no <Mounts/> could not be
+            given a device at all: `createMount` asks for the container by name
+            and inserts into whatever it gets, which for an absent one is an
+            invalid tree and a refusal nobody could act on. That was latent
+            long before this file grew a <Network/>; it is fixed here rather
+            than in each create, because the next container would forget it too.
+
+            EMPTY AND SILENT. The caller is either the constructor, before the
+            listener is attached, or `adopt`, which is a swap and not an edit -
+            so no history, no change count, and a show that is opened and saved
+            untouched gains an empty element or two in its file and nothing
+            else. */
+        for (const auto* name : { "Lists", "Mounts", "Network" })
+            if (! root.getChildWithName (name).isValid())
+                root.addChild (juce::ValueTree (name), -1, nullptr);
+    }
+
     ShowDocument::ShowDocument()
         : showNode (juce::Identifier (juce::String (std::string (Schema::rootElement)))),
           registry (IdRegistry::withSystemEntropy())
@@ -373,8 +406,7 @@ namespace wfg::doc
             still has a Lists element, so the file has an obvious place to put
             the first one and a diff that adds a list touches one line rather
             than three. */
-        showNode.addChild (juce::ValueTree ("Lists"), -1, nullptr);
-        showNode.addChild (juce::ValueTree ("Mounts"), -1, nullptr);
+        ensureContainers (showNode);
 
         /*  Audio is a container like the other two, but unlike them it carries
             a value of its own, and that value has no default: `tracks` is the
@@ -513,6 +545,10 @@ namespace wfg::doc
         showNode = std::move (newRoot);
         registry = std::move (newRegistry);
 
+        /*  BEFORE THE LISTENER, so that giving a loaded show the containers it
+            was missing does not count as an edit to it. See ensureContainers. */
+        ensureContainers (showNode);
+
         showNode.addListener (this);
 
         /*  A load is the largest change there is - to the show half as much as
@@ -579,6 +615,7 @@ namespace wfg::doc
         if (segment == "document") return showNode;
         if (segment == "audio")    return showNode.getChildWithName ("Audio");
         if (segment == "list")     return showNode.getChildWithName ("Lists");
+        if (segment == "network")  return showNode.getChildWithName ("Network");
         return {};
     }
 
@@ -1931,8 +1968,23 @@ namespace wfg::doc
     {
         auto mounts = showNode.getChildWithName ("Mounts");
 
-        return insertObject (mounts, endOfSequence, "Mount", id,
-                             { { "prefix", prefix }, { "namespace", namespaceFile } });
+        /*  AN EMPTY NAMESPACE IS NOT AN ATTRIBUTE, it is the absence of one.
+
+            A device somebody typed an address into has no description file,
+            and since 2026-09-22 that is the ordinary case rather than a
+            degenerate one (PRD 3.22): the show says where the box is, and the
+            cues say what to write. Writing namespace="" would put a value in
+            the file that the canonical writer drops again anyway, since it
+            equals the row's default - so it is left out here, where the reason
+            is visible, rather than in the writer, where it would look like a
+            coincidence. */
+        std::vector<std::pair<std::string_view, std::string>> attributes {
+            { "prefix", prefix } };
+
+        if (! namespaceFile.empty())
+            attributes.push_back ({ "namespace", namespaceFile });
+
+        return insertObject (mounts, endOfSequence, "Mount", id, attributes);
     }
 
     //==============================================================================
@@ -2472,13 +2524,22 @@ namespace wfg::doc
                     rule lives on `tree::MountDeclaration`, which is what the
                     engine asks at run time; this is the read-time half, and the
                     two say the same sentence because question K's answer is one
-                    sentence. */
+                    sentence.
+
+                    AND A DEVICE THAT DESCRIBES NOTHING CAN NEVER BE ASKED
+                    (2026-09-22), whatever else it declares. There is no node
+                    to ask about, so a verified cue aimed at an opaque device
+                    would wait for an answer with nowhere to come from - which
+                    is precisely the failure this check was written to move
+                    from half past seven to the moment the file is read. */
                 const auto readback = mount[juce::Identifier ("readback")].toString();
                 const auto queryPort = static_cast<int> (mount[juce::Identifier ("queryPort")]);
+                const auto described = mount[juce::Identifier ("namespace")]
+                                         .toString().isNotEmpty();
 
                 mountFacts.push_back ({ mount[juce::Identifier ("id")].toString().toStdString(),
                                         prefix,
-                                        readback == "oscquery" && queryPort > 0 });
+                                        described && readback == "oscquery" && queryPort > 0 });
             }
         }
 

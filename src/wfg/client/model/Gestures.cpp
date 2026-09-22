@@ -164,6 +164,14 @@ namespace wfg::client::gesture
     Event recordStart() { return plain ("record.start"); }
     Event recordStop()  { return plain ("record.stop"); }
 
+    Event createDevice (const std::string& prefix)
+    {
+        /*  The empty second argument is the namespace file, and it is what
+            makes this an opaque device. See the header. */
+        return { origin::window, "mount.create",
+                 { osc::Value::string (prefix), osc::Value::string ({}) } };
+    }
+
     Event createBus (const std::string& kind, int width, int index)
     {
         return { origin::window, "bus.create",

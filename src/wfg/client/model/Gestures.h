@@ -190,6 +190,20 @@ namespace wfg::client::gesture
     Event moveBus (const std::string& busId, int index);
     Event setBusWidth (const std::string& busId, int width);
 
+    /*  A DEVICE THIS SHOW TALKS TO, declared at a prefix.
+
+        WITH NO NAMESPACE FILE, which is what makes it an opaque device: the
+        window has no way to write one and a desk almost never has one (PRD
+        §3.22). The engine's command still takes the argument, because a
+        described device is made by hand in the file and the command has to be
+        able to say so - and because a replayed session holds the three-argument
+        form. Everything else about the device is written afterwards, with
+        `setNode`, like every other row a person edits.
+
+        The identifier comes back on the applied record, which is what the
+        window reads to know which row to put a name into. */
+    Event createDevice (const std::string& prefix);
+
     /*  THAT THE PATCH HAS STOPPED FOLLOWING THE LIST. Sent by the settings
         window before the first hand edit of the output matrix lands, and by
         its "follow the list" button with false to hand the outputs back to

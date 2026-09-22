@@ -240,6 +240,7 @@ namespace wfg::client::ui
                     break;
 
                 case model::Control::busRef:
+                case model::Control::deviceRef:
                     /*  THE ITEMS THEMSELVES CAN HAVE MOVED, which no other
                         control here has to think about: a `choice`'s options
                         come from the parameter table and are fixed for the
@@ -516,7 +517,9 @@ namespace wfg::client::ui
 
                 content.addAndMakeVisible (line->choice);
             }
-            else if (field.control == model::Control::busRef && field.writable)
+            else if ((field.control == model::Control::busRef
+                        || field.control == model::Control::deviceRef)
+                       && field.writable)
             {
                 /*  A MENU THE SHOW WROTE, not one the parameter table
                     declares: the legal values are the outputs of THIS rig, so
@@ -545,19 +548,30 @@ namespace wfg::client::ui
 
                 content.addAndMakeVisible (line->choice);
 
-                /*  AND THE DOOR TO THE MIX BESIDE IT. It opens on the cue this
-                    panel is about, through the same door the waveform opener
-                    uses, so the panel at the foot has exactly one way in. */
-                /*  READ WHEN PRESSED AND NOT REMEMBERED. A line now outlives
-                    the cue it was built for - two cues of one kind share a
-                    panel - so a button holding the identifier it was made with
-                    would open the panel on whichever cue happened to be picked
-                    when the row was first drawn. */
-                line->sends.setWantsKeyboardFocus (false);
-                line->sends.setTooltip ("Send levels from this cue into the show's mix channels");
-                line->sends.onClick = [this] { if (actions.openPanel) actions.openPanel (drawnCue, "sends"); };
+                /*  AND THE DOOR TO THE MIX BESIDE IT - for an OUTPUT only.
 
-                content.addAndMakeVisible (line->sends);
+                    A DEVICE HAS NO SEND LEVELS. What a network cue writes is
+                    one value at one address; a button opening a mixer on it
+                    would be a door onto an empty room. The two menus share
+                    everything above this line because both are lists the SHOW
+                    wrote rather than lists the parameter table declares, and
+                    they part company here. */
+                if (field.control == model::Control::busRef)
+                {
+                    /*  It opens on the cue this panel is about, through the
+                        same door the waveform opener uses, so the panel at the
+                        foot has exactly one way in. */
+                    /*  READ WHEN PRESSED AND NOT REMEMBERED. A line now
+                        outlives the cue it was built for - two cues of one
+                        kind share a panel - so a button holding the identifier
+                        it was made with would open the panel on whichever cue
+                        happened to be picked when the row was first drawn. */
+                    line->sends.setWantsKeyboardFocus (false);
+                    line->sends.setTooltip ("Send levels from this cue into the show's mix channels");
+                    line->sends.onClick = [this] { if (actions.openPanel) actions.openPanel (drawnCue, "sends"); };
+
+                    content.addAndMakeVisible (line->sends);
+                }
             }
             else if (field.control == model::Control::loopCount)
             {

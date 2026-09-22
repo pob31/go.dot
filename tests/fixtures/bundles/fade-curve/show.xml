@@ -12,4 +12,5 @@
   <Audio tracks="4">
     <Bus id="J3MT5XYA" name="Main L/R" width="2"/>
   </Audio>
+  <Network/>
 </Show>

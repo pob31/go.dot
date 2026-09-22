@@ -116,7 +116,7 @@ namespace wfg::doc
         const std::vector<Containment>& containmentTable()
         {
             static const std::vector<Containment> table {
-                { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts" },
+                { "Show",   false, { "Lists", "Mounts", "Audio", "MidiPorts", "Network" },
                                                                           { "document" } },
                 /*  THE CONTAINER CARRIES A VALUE, which is why it is no
                     longer an empty pair of brackets. `focus` is a fact about
@@ -279,6 +279,18 @@ namespace wfg::doc
                 { "Port",   true,  {},                     { "port" } },
                 { "Mounts", false, { "Mount" },            {} },
                 { "Mount",  true,  { "Slot" },             { "mount" } },
+
+                /*  THE SHOW'S OWN NETWORK SIDE. A container beside Audio, and
+                    like Audio it carries a value rather than being an empty
+                    pair of brackets: whether this show takes messages from
+                    senders nobody declared is a fact about the whole show.
+
+                    Empty of children today. The interfaces Go.dot listens on
+                    land here next, which is why it is a container at all
+                    rather than an attribute on <Show>: one of them will have
+                    an identifier, a name and two port numbers, and an
+                    attribute cannot grow children. */
+                { "Network", false, {},                    { "network" } },
                 { "Audio",  false, { "Bus", "Rack" },      { "audio" } },
                 { "Bus",    true,  {},                     { "bus" } },
 

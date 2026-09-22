@@ -40,4 +40,5 @@
     <Bus id="P3BSA001" name="Main L/R" width="2"/>
     <Bus id="P3BSB001" firstChannel="2" name="Foldback" width="2"/>
   </Audio>
+  <Network/>
 </Show>

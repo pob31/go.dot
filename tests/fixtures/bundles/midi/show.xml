@@ -14,4 +14,5 @@
     <Port id="MDXP0002" name="The desk"/>
     <Port id="MDXP0003" name="Nobody bound this"/>
   </MidiPorts>
+  <Network/>
 </Show>

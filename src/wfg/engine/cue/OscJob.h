@@ -108,6 +108,15 @@ namespace wfg::cue
             reported where reporting is allowed, which is not the same place. */
         std::string failure;
 
+        /*  NOTHING LEFT THE MACHINE, because the device this is aimed at has
+            its `tx` turned off - a rehearsal in a room without the desk.
+
+            Set beside `failure` and carried the same way, but it ends the run
+            as DONE with a warning rather than failing it: the request was
+            legal and the cue did everything it was asked to. See
+            `runWarning::notSent`. */
+        bool notSent = false;
+
         /*  READ BEFORE WRITE: the state a PREPARED network cue starts in.
 
             PRD §3.12's anticipation only works if it can be undone, and §13.1

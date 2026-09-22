@@ -231,6 +231,18 @@ nothing in a parallel parent, because nothing is waiting to be told.
 | `/godot/mount/<id>/host` | `s` | ro | where the target is; default `127.0.0.1` (PR 2.5) |
 | `/godot/mount/<id>/port` | `i` | ro | **required, no default** — where it sends (PR 2.5) |
 | `/godot/mount/<id>/sent` | `i` | ro | messages that have left for this target (PR 2.5) |
+| `/godot/mount/<id>/name` | `s` | rw | what the show calls this device (2026-09-22) |
+| `/godot/mount/<id>/rx` | `T`/`F` | rw | whether what it sends is accepted (2026-09-22) |
+| `/godot/mount/<id>/tx` | `T`/`F` | rw | whether cues aimed at it reach the wire (2026-09-22) |
+| `/godot/mount/<id>/problem` | `s` | ro | why it cannot be used as declared (2026-09-22) |
+
+**Every row above but the last four readouts became `rw` on 2026-09-22**, when the show settings
+window grew a Network tab. They had been read-only since Phase 1, for a reason that was true
+then — a mount was a thing you wrote into `show.xml` and reopened the show to change — and stopped
+being true the moment a person could type a port into a box during a tech rehearsal. `loaded`,
+`nodeCount`, `sent` and `problem` stay read-only: they are what the machine found, not what
+anybody decided (PRD §4.10). What carries an edit to the socket is `refreshMountDeclarations`,
+called from the after-tick when the show revision moves — see §15.
 
 **Added in PR 2.5, and the reason `port` is required.** Phase 1's table had no destination in
 it at all, which was correct while nothing was sent and a gap the moment something was. `port`
@@ -7793,3 +7805,173 @@ that MSVC warns on; the ▲-then-▼ that does not round-trip out of a non-manua
 `siblingAfter`'s remaining hole, where a `<Trigger>` or a disabled cue is a member by the sequence
 rule and refused as a standby — whose honest repair is for that walk to ask the cursor rather than
 the children, a decision about the standby and not about the index.
+
+
+## 15. Devices, ports and interfaces — what the show settings window needs
+
+*Written 2026-09-22, after the author asked for "a network tab in the parameter panel, show
+settings … several clients, enable Rx and Tx for each, with the IP, port and NIC", a target
+menu on every OSC cue, and the same for MIDI. Drawn against `main` at `4ff724a`.*
+
+### 15.1 The four decisions the author took
+
+**D1 — a network device IS a mount, made editable.** Not a second object beside it. A mount
+already holds a prefix, a host, a port, an OSCQuery port and a read-back mode; what it lacked was
+a name, two switches and the ability to be written at all. Adding a `<Device>` element would have
+meant two resolution paths in the runner and a cue having to say which kind it was aimed at.
+
+**D2 — the cue's target menu rewrites the address prefix; no new cue attribute.** A network cue
+carries the whole address it writes. Which device it is aimed at is therefore the front of that
+address, and the menu reads it and writes it back. The alternative — a `target` row naming the
+device — is a second truth that can disagree with the first, and the disagreement would be
+invisible until a show night. What it costs: every device has one root its cues share, so a desk
+with no single root (an X32: `/ch/…`, `/bus/…`) needs a prefix that is not really its own. The
+author accepted that, and the prefix-stripping flag that would fix it is in PRD §6.9 as a
+proposal.
+
+**D3 — the machine-side bindings live in the show**, as the audio interface already does
+(`audio/outputDevice` is `rw`, `persist=show`). The command-line flags keep overriding, so every
+driver and every test is unchanged, and something this machine does not have is a warning and a
+fallback rather than a refusal to open.
+
+**D4 — strict senders now, per-device Rx stored but not processed.** The author's words: *"Have a
+toggle to strictly parse who sends and if they are among the targets or not. Rx would be for
+processing data sent by the device. This will come a bit later with the state machine processing
+or for a device that can send itself commands to create the cues."*
+
+**D5 — vanilla OSC first.** *"We might make specialised targets with extra features (tree with
+values, OSCQuery enabled 2 way communication, device programming Go.dot directly...) But for now,
+let's start with vanilla OSC."* So a device made from the window is an OPAQUE mount, and what
+makes a device vanilla is simply the absence of a namespace file. No `kind` row is added until
+there is a second kind to name.
+
+### 15.2 An opaque device, and what it costs
+
+A mount with no `namespace` used to be refused at load. It is now DECLARED: `MountTable::declare`
+puts an entry with no nodes in the table, `MountDeclaration::opaque()` is the test, and
+`MountTable::write` passes an unknown address through when — and only when — the mount that covers
+it is opaque. Under a DESCRIBED device the same address is still `bad-address`, which is the
+whole value of describing one: the show said what that box has, this is not among it, and saying
+so now beats a datagram that leaves and is ignored.
+
+What an opaque device gives up, and each is a refusal rather than a silence:
+
+- **nothing is published under its prefix**, so no client can browse it;
+- **no coercion** — the atom the cue spells is what goes out, which is why a cue carries its own
+  type;
+- **nothing is stored** — a value nobody can read back is not a fact about the device, only about
+  what was sent, so `mount/sent` is what a rehearsal reads;
+- **it can never be asked**, so `wait="verified"` against one is refused when the show is read.
+  `canBeAsked()` and its read-time twin in `ShowDocument::validate` both test it.
+
+**`/godot` joined the reserved prefixes in the same round.** Nothing had refused a mount there.
+It had been harmless only because a prefix could only be hand-written by somebody who knew what
+it was; the settings window is a box a person types one into, and a device mounted at `/godot`
+would shadow every address the engine and its clients use.
+
+### 15.3 What carries an edit to the socket
+
+`refreshMountDeclarations (document, mounts, bundleFolder)`, called from the after-tick inside the
+`showRevision` block — beside the analyser re-offer, and for the same reason: a GO writes the
+standby, which is a state row and moves no revision, so the GO path pays nothing. A show edit
+pays a dozen attribute reads per declared device, in memory.
+
+It distinguishes three kinds of change, and the distinction is the point:
+
+- a device the table has never seen is **loaded** (or declared, with no namespace file);
+- a changed **prefix or namespace file** is a reload, because both decide what is mounted;
+- **anything else** — host, port, query port, read-back, rate cap, name, rx, tx — replaces the
+  declaration and KEEPS THE NODES. Re-reading a namespace because somebody retyped a host would
+  throw away every value the tree holds for that device and every read-back in flight, to arrive
+  at the same list of nodes. During a tech rehearsal, that is the whole session;
+- a device the document no longer declares is **unloaded**, or its prefix would go on claiming
+  addresses for the rest of the session.
+
+### 15.4 Tx off, and why it is a warning
+
+`writeOscNow` marks the job `notSent` and returns before it queues, and before it sets up a
+verify — a `verified` cue against a device nobody is talking to would otherwise wait out its
+whole timeout and fail, which is a failure produced by a setting rather than by anything in the
+rig. `advanceSends` then ends the run as `done` carrying `runWarning::notSent`.
+
+A warning and not an error, deliberately. The request was legal and the cue did everything it was
+asked to; the one thing it did not do is the thing somebody switched off five minutes ago.
+Reporting it as a failure would fill a running pane with red and teach an operator to stop reading
+the colour that means something is actually wrong (§4.8).
+
+### 15.5 Strict senders
+
+`osc::SenderGate` is the `TriggerIndex` shape: the tick thread builds an immutable `Allowed`
+(the flag, plus the hosts of every declared device with `rx` set) and publishes a `shared_ptr`;
+the UDP handler takes one reference under a short mutex and reads it. The set a datagram is judged
+against may be one tick old, which is correct — it was the rule when the datagram arrived.
+
+The check happens **before the bytes are decoded**, because what it refuses is a SENDER and not a
+message: decoding first would spend the work and, worse, would make a malformed packet from a
+stranger report the wrong reason. A refusal is a `Drop` record carrying `reason::unlistedSender`
+and the sender's origin, and `/godot/network/refused` counts them — the whole failure mode of a
+filter like this is a surface that does nothing with no way to find out why.
+
+**It gates the OSC port and not the WebSocket.** A client is a client and a device is a device;
+gating clients would lock an operator out of the very setting that locked them out. The black-box
+driver turns the filter off through that door on purpose, which is also the proof that it exists.
+
+**Matched on the address alone**, not the port: a device's source port is whatever the operating
+system gave it and is not what anybody typed into the show. Two boxes behind one NAT share an
+entry, which is a real limitation of the setting and is why the default is off.
+
+### 15.6 The document gains a container
+
+`<Show><Network/></Show>`, owner `network`, carrying `strictSenders` today and the interfaces
+next. A container rather than an attribute on `<Show>` because an interface will have an
+identifier, a name and two port numbers, and an attribute cannot grow children.
+
+`ShowDocument::ensureContainers` is new and is called by the constructor AND by `adopt`. `adopt`
+replaces the root, so a show read off a disk had exactly the containers its file happened to
+carry — which is also why `createMount` could not give a device to a hand-written `show.xml` with
+no `<Mounts/>`. That was latent long before this round; it is fixed here rather than in each
+create, because the next container would forget it too. Every fixture gained one empty
+`<Network/>` line, and so will every existing show the first time it is saved.
+
+### 15.7 The client
+
+`model/Devices.{h,cpp}` is std-only and pure: `readDevices` (one `all()` pass gathered by
+identifier, the `readOutputs` shape — `childrenOf` is banned), `deviceOf` (longest prefix, ending
+on a separator, restating `MountTable::mountOf` so the menu and the engine cannot disagree),
+`retarget` and `targetChoices`.
+
+**The target line is derived and is not a row.** `Control::deviceRef`, named `device` and labelled
+`target`, inserted by `aimAtADevice` beside the media pass that builds the direct-out menu. Its
+`address` is the cue's `address` row and its choices are WHOLE ADDRESSES — so picking one commits
+through the `node.set` the panel already has, and the current device is found by matching the
+choice key against the current value. No new command, no new attribute, no new refusal.
+
+It is named `device` and not `target` because `target` is already a cueRef row on three other
+kinds and `shapeOf` keys on the row name. It is **not offered over a multi-selection**: every
+other row writes one value to N addresses, and this one would write a rewrite of each cue's own
+address. Aiming several cues at a device is worth having and is a command that does not exist.
+
+`AudioSettingsWindow` became `ShowSettingsWindow`; the menu item is "Show settings...", the first
+tab is "Audio" rather than "Interface", and `NetworkPage` is the fifth. Its words are WFS-DIY's
+Network tab's words — Name, IPv4 Address, Tx Port, Rx, Tx, ADD, and the `OSC Filter: Accept All` /
+`Registered Only` button — because it is the same person reading them. What it adds: a Prefix
+column (a Go.dot cue carries its device's root), no six-row ceiling, and no Protocol column until
+there is a second kind. **Nothing on that tab is applied**: a device has no hardware to reopen, so
+every cell is a `node.set` and the after-tick re-read is what makes it real.
+
+### 15.8 What M-B and M-C still owe
+
+**M-B, MIDI.** `port,outputDevice` / `inputDevice` / `rx` / `tx` / `bound` / `problem`, an owner
+`ports` for `/godot/port/inputs|outputs`, binding from the document at open with the CLI flags
+overriding, `port.create`, `midi.rescan`, a MIDI tab of the same shape, and `portRef` menus on
+`midi,port` and a MIDI trigger's `port`. One engine fact found while planning and not yet acted
+on: **a MIDI trigger's `port` is matched against the JUCE device name, not the declared port's
+identifier** (`MidiInputs.cpp` stamps `source->getName()`), so the CSV's "the declared port" has
+never been what the code does. The transition is to match either.
+
+**M-C, interfaces.** `<Network><Interface/></Network>` with `address`, `oscPort`, `queryPort`,
+`enabled` and their readouts; `mount,interface`; N `UdpEndpoint`s and N `OscQueryServer`s (the
+fork takes a bind address — `SimpleWebSocketServer::start(port, suffix, localAddress, reuse)` —
+and JUCE 8's `DatagramSocket::bindToPort(port, localAddress)` exists); `MountSender` choosing a
+socket per device; and `network.apply` in `audio.setup`'s shape, because rebinding drops every
+WebSocket subscription and must not happen under a GO.

@@ -48,6 +48,7 @@
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
+#include <wfg/client/model/Devices.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/LoadToTime.h>
 #include <wfg/client/model/Media.h>
@@ -552,6 +553,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::recover(), gesture::discardRecovery(),
         gesture::setLocked (true), gesture::setLocked (false),
         gesture::createBus ("direct", 1, -1), gesture::createBus ("mix", 2, 0),
+        gesture::createDevice ("/desk"),
         gesture::deleteBus ("J3MT5XYA"), gesture::moveBus ("J3MT5XYA", 2),
         gesture::setBusWidth ("J3MT5XYA", 2),
         gesture::setPatchSettled (true), gesture::setPatchSettled (false),
@@ -2837,6 +2839,245 @@ TEST_CASE ("client: the mixer draws a strip per mix channel, not per send")
         //  And another cue's sends are not this one's.
         CHECK (model::readSends (*after, "F7HR8TVD").front().present() == false);
     }
+}
+
+//==============================================================================
+/*  THE SHOW'S DEVICES, AND AIMING A CUE AT ONE (2026-09-22).
+
+    A network cue carries the whole address it writes, so which box it is aimed
+    at is the front of that address rather than a field. These cases pin the
+    two halves of that: reading the devices out of the tree, and the rewrite the
+    inspector's target menu commits. The rewrite is pure and is tested as such -
+    the menu is the only place in the window where picking an item writes a
+    value the window computed rather than one the engine offered, and the thing
+    that would make it dangerous is getting the arithmetic wrong.
+*/
+TEST_CASE ("client: the show's devices are read out of the tree")
+{
+    Rig rig;
+
+    const auto devices = model::readDevices (*rig.publish (0));
+
+    //  The fixture declares two, both described.
+    REQUIRE (devices.size() == 2);
+
+    const auto* wfs = &devices[0];
+
+    for (const auto& row : devices)
+        if (row.prefix == "/wfs")
+            wfs = &row;
+
+    CHECK (wfs->prefix == "/wfs");
+    CHECK (wfs->port == 8000);
+    CHECK_FALSE (wfs->opaque());
+
+    /*  A device with no name reads as its prefix, so a list never has a blank
+        row in it and a menu always has something to point at. */
+    CHECK (wfs->name.empty());
+    CHECK (wfs->label() == "/wfs");
+
+    rig.apply (1, "window", "node.set",
+               { osc::Value::string ("/godot/mount/" + wfs->id + "/name"),
+                 osc::Value::string ("The WFS") });
+
+    CHECK (model::readDevices (*rig.publish (2)).front().label() != "/wfs");
+}
+
+TEST_CASE ("client: which device an address is aimed at, and the rewrite that moves it")
+{
+    std::vector<model::DeviceRow> devices;
+
+    model::DeviceRow desk;
+    desk.id = "DESK0001";
+    desk.prefix = "/desk";
+    desk.name = "Lighting desk";
+    devices.push_back (desk);
+
+    model::DeviceRow wfs;
+    wfs.id = "WFS00001";
+    wfs.prefix = "/wfs";
+    devices.push_back (wfs);
+
+    /*  A NESTED PREFIX, because this is what makes "the longest wins" a rule
+        rather than a detail: both cover the address and the cue belongs to the
+        more specific one. */
+    model::DeviceRow aux;
+    aux.id = "AUX00001";
+    aux.prefix = "/desk/aux";
+    devices.push_back (aux);
+
+    SUBCASE ("the longest prefix wins, and the boundary is a separator")
+    {
+        CHECK (model::deviceOf ("/desk/fader", devices) == "DESK0001");
+        CHECK (model::deviceOf ("/desk/aux/1/level", devices) == "AUX00001");
+
+        /*  "/desktop" is not under "/desk". The whole reason this is written
+            out rather than a string-start test. */
+        CHECK (model::deviceOf ("/desktop/fader", devices).empty());
+
+        //  The prefix itself is not under itself: there is no node there.
+        CHECK (model::deviceOf ("/desk", devices).empty());
+        CHECK (model::deviceOf ("/nowhere", devices).empty());
+    }
+
+    SUBCASE ("aiming a cue at another device swaps the front of its address")
+    {
+        CHECK (model::retarget ("/desk/fader", devices, "WFS00001") == "/wfs/fader");
+        CHECK (model::retarget ("/desk/aux/1/level", devices, "WFS00001") == "/wfs/1/level");
+
+        //  Aiming it where it already points changes nothing, which is what
+        //  lets the menu find the current device by matching on the address.
+        CHECK (model::retarget ("/desk/fader", devices, "DESK0001") == "/desk/fader");
+    }
+
+    SUBCASE ("an address under no device gets the prefix put in front of it")
+    {
+        /*  So a cue somebody typed by hand is aimable without retyping, which
+            is the case that makes the menu worth having at all. */
+        CHECK (model::retarget ("/go", devices, "DESK0001") == "/desk/go");
+    }
+
+    SUBCASE ("and aiming it at nothing strips the prefix rather than keeping it")
+    {
+        /*  HONEST RATHER THAN HELPFUL. It leaves an address the engine refuses
+            when the cue fires - which is exactly what "this cue is aimed at no
+            device" means, and what validate says out loud afterwards. Silently
+            keeping the old prefix would be a menu that lies about what it did. */
+        CHECK (model::retarget ("/desk/fader", devices, {}) == "/fader");
+        CHECK (model::retarget ("/fader", devices, {}) == "/fader");
+    }
+
+    SUBCASE ("a device that is not there changes nothing")
+    {
+        CHECK (model::retarget ("/desk/fader", devices, "GONE0001") == "/desk/fader");
+    }
+
+    SUBCASE ("the menu offers whole addresses, with none first")
+    {
+        const auto choices = model::targetChoices ("/desk/fader", devices);
+
+        REQUIRE (choices.size() == 4);
+        CHECK (choices[0].second == "(none)");
+        CHECK (choices[0].first == "/fader");
+
+        /*  THE KEY IS AN ADDRESS. That is what lets the inspector commit a
+            choice with the `node.set` it already has, and what lets the menu
+            find its own current value without a second field to compare. */
+        CHECK (choices[1].first == "/desk/fader");
+        CHECK (choices[1].second == "Lighting desk");
+
+        auto found = false;
+
+        for (const auto& choice : choices)
+            if (choice.first == "/desk/fader" && choice.second == "Lighting desk")
+                found = true;
+
+        CHECK (found);
+    }
+}
+
+TEST_CASE ("client: a network cue's target is a menu, and picking one rewrites its address")
+{
+    Rig rig;
+
+    const auto devices = model::readDevices (*rig.publish (0));
+    REQUIRE (devices.size() == 2);
+
+    const std::string cue = "N4T9B2QE";
+
+    rig.apply (1, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                 osc::Value::string ("osc"), osc::Value::string ("Desk go"),
+                 osc::Value::string (cue) });
+
+    rig.apply (2, "window", "node.set",
+               { osc::Value::string ("/godot/cue/" + cue + "/address"),
+                 osc::Value::string ("/wfs/source/1/gain") });
+
+    const auto inspection = model::inspect (*rig.publish (3), cue);
+
+    const model::Field* target = nullptr;
+    const model::Field* address = nullptr;
+
+    for (const auto& block : inspection.blocks)
+        for (const auto& field : block.fields)
+        {
+            if (field.name == "device")  target = &field;
+            if (field.name == "address") address = &field;
+        }
+
+    REQUIRE (target != nullptr);
+    REQUIRE (address != nullptr);
+
+    CHECK (target->control == model::Control::deviceRef);
+    CHECK (target->label == "target");
+    CHECK (target->writable);
+
+    /*  IT WRITES THE ADDRESS ROW. There is no target attribute in the document
+        and there must not be one: the address already says where the cue is
+        going, and a second field naming the device would be a second truth to
+        keep in step with the first. */
+    CHECK (target->address == address->address);
+    CHECK (target->address == "/godot/cue/" + cue + "/address");
+
+    /*  And its current value is the address, so the menu selects the device
+        the cue is already aimed at without anything else being consulted. */
+    CHECK (target->value == "/wfs/source/1/gain");
+
+    auto aimedHere = false;
+
+    for (const auto& choice : target->choices)
+        if (choice.first == target->value)
+            aimedHere = true;
+
+    CHECK (aimedHere);
+
+    //  It is read before the address it is derived from, which is the order
+    //  somebody fills a network cue in.
+    for (const auto& block : inspection.blocks)
+    {
+        auto seenTarget = false;
+
+        for (const auto& field : block.fields)
+        {
+            if (field.name == "device")  seenTarget = true;
+            if (field.name == "address") CHECK (seenTarget);
+        }
+    }
+}
+
+TEST_CASE ("client: the target menu is not offered over a selection of cues")
+{
+    Rig rig;
+
+    const std::string first = "N4T9B2QE", second = "N5T8B3QF";
+
+    for (const auto& id : { first, second })
+        rig.apply (1, "window", "cue.create",
+                   { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                     osc::Value::string ("osc"), osc::Value::string ("Desk go"),
+                     osc::Value::string (id) });
+
+    const auto inspection = model::inspectMany (*rig.publish (2), { first, second });
+
+    /*  EVERY OTHER ROW WRITES ONE VALUE TO N ADDRESSES. This one would write a
+        rewrite of each cue's own address, and every cue has a different one -
+        so a menu that quietly aimed six cues at one address would be the worst
+        kind of helpful. Aiming several cues at a device is worth having and is
+        a command that does not exist yet. */
+    for (const auto& block : inspection.blocks)
+        for (const auto& field : block.fields)
+            CHECK (field.name != "device");
+
+    //  The ordinary rows still are, so this is a rule about one line.
+    auto sawAddress = false;
+
+    for (const auto& block : inspection.blocks)
+        for (const auto& field : block.fields)
+            if (field.name == "address")
+                sawAddress = true;
+
+    CHECK (sawAddress);
 }
 
 TEST_CASE ("client: the direct-out row is a menu of the show's own outputs")

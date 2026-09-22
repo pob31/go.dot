@@ -1060,6 +1060,8 @@ namespace wfg::tree
                             text = std::to_string (mounts.nodeCount (id));
                         else if (name == "sent")
                             text = std::to_string (sender != nullptr ? sender->sentFor (id) : 0u);
+                        else if (name == "problem")
+                            text = mounts.problemOf (id);
                         else
                             text = storedText (attribute, mount);
 
@@ -1110,6 +1112,28 @@ namespace wfg::tree
                         nodes.push_back (makeLeaf (base + "/" + std::string (row->name),
                                                    *row, storedText (attribute, port)));
                     }
+                }
+            }
+            else if (containerName == "Network")
+            {
+                /*  THE SHOW'S OWN NETWORK SIDE, which today is one decision:
+                    whether a message from a sender nobody declared is obeyed.
+
+                    The STORED half only, like Audio below and for the same
+                    reason - how many datagrams have been refused is what the
+                    machine has been doing, not what anybody decided, and this
+                    half is cached against the document. It is published on the
+                    runtime side beside the tick. */
+                for (const auto* row : doc::Schema::rowsForOwner ("network"))
+                {
+                    if (row->persist == doc::Persist::none)
+                        continue;
+
+                    const doc::Attribute attribute { "Network", row };
+
+                    nodes.push_back (makeLeaf (std::string (godot) + "/network/"
+                                                 + std::string (row->name),
+                                               *row, storedText (attribute, container)));
                 }
             }
             else if (containerName == "Audio")
@@ -1553,6 +1577,28 @@ namespace wfg::tree
             engineValue (*row, "audio", text);
         }
 
+        /*  AND WHAT THE NETWORK SIDE HAS BEEN DOING. One number today: how
+            many datagrams the sender gate has dropped since the show opened.
+
+            Here rather than in the cached half because it climbs while the
+            document sits still - which is the whole use of it. Somebody whose
+            surface has gone quiet presses a button and watches: a number that
+            moves says the message is arriving and being refused, which is a
+            different evening from one that never arrives at all. */
+        for (const auto* row : doc::Schema::rowsForOwner ("network"))
+        {
+            if (row->persist != doc::Persist::none)
+                continue;
+
+            const auto name = std::string (row->name);
+            std::string text;
+
+            if (name == "refused") text = std::to_string (state.refusedDatagrams);
+            else                   text = std::string (row->defaultText);
+
+            engineValue (*row, "network", text);
+        }
+
         /*  EVERY RUN, EVERY TICK. A run changes several times a second while
             nothing about the show does, which is exactly why it is here and not
             in the cached half: published from there it would have been frozen
@@ -1877,6 +1923,14 @@ namespace wfg::tree
             std::string (rootAddress), std::string (godot),
             std::string (godot) + "/document",
             std::string (godot) + "/audio",
+
+            /*  `/godot/network` belongs to the document half for the reason
+                `/godot/audio` does: both halves publish rows under it -
+                `strictSenders` is a decision and `refused` is a count - and
+                whichever one minted the container would decide what `find`
+                answered for it. The show's half owns it, since a show always
+                has a Network element and may have no engine running. */
+            std::string (godot) + "/network",
             std::string (godot) + "/cue",
             std::string (godot) + "/list",
             std::string (godot) + "/slot" };

@@ -119,11 +119,11 @@ target_link_libraries(wfg_tests PRIVATE wfg::engine wfg::client_model wfg::warni
 # These native-window checks need a Windows desktop and exercise the actual
 # settings panel with a live device; keep the ordinary unit runner headless.
 if(WIN32)
-    add_executable(wfg_audio_ui_tests TestMain.cpp AudioSettingsUiTests.cpp RunPaneUiTests.cpp)
+    add_executable(wfg_audio_ui_tests TestMain.cpp ShowSettingsUiTests.cpp RunPaneUiTests.cpp)
     target_link_libraries(wfg_audio_ui_tests PRIVATE wfg::engine wfg::client_ui wfg::warnings)
-    add_test(NAME ui.audio-settings.C COMMAND wfg_audio_ui_tests --wfg-locale=C)
-    add_test(NAME ui.audio-settings.fr_FR COMMAND wfg_audio_ui_tests --wfg-locale=${WFG_LOCALE_FR})
-    set_tests_properties(ui.audio-settings.C ui.audio-settings.fr_FR PROPERTIES
+    add_test(NAME ui.show-settings.C COMMAND wfg_audio_ui_tests --wfg-locale=C)
+    add_test(NAME ui.show-settings.fr_FR COMMAND wfg_audio_ui_tests --wfg-locale=${WFG_LOCALE_FR})
+    set_tests_properties(ui.show-settings.C ui.show-settings.fr_FR PROPERTIES
                          RUN_SERIAL TRUE TIMEOUT 120)
     add_test(NAME ui.cue-errors.C COMMAND wfg_audio_ui_tests "--test-case=active cue errors:*" --wfg-locale=C)
     add_test(NAME ui.cue-errors.fr_FR COMMAND wfg_audio_ui_tests "--test-case=active cue errors:*" --wfg-locale=${WFG_LOCALE_FR})
@@ -544,6 +544,19 @@ add_test(NAME wfg.validate.slots.fr_FR
          COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/slots"
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# And the devices bundle: one device that describes itself and one that does
+# not, plus a cue aimed under no device at all. It is the only fixture carrying
+# an opaque mount - a <Mount> with no namespace file - which before 2026-09-22
+# was refused outright, so it is what proves the grammar, the containment table
+# and the load-time checks agree that a device is allowed not to describe
+# itself. Through `schema.fixtures` below it also goes in front of lxml.
+add_test(NAME wfg.validate.devices.C
+         COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/devices"
+                 --wfg-locale=C)
+add_test(NAME wfg.validate.devices.fr_FR
+         COMMAND wfg validate "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/devices"
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # And a bundle saved LOCKED: `<Show locked="true"/>` in its state.xml, which is
 # the first entry any fixture has carried for the Show root and the first time
 # the container branch of state.xml has been put in front of lxml or of this
@@ -682,6 +695,25 @@ add_test(NAME blackbox.output-layout.C
 add_test(NAME blackbox.output-layout.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/output_layout.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.output-layout.C blackbox.output-layout.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
+
+# The devices a show talks to: an opaque one loading, its rows retyped from a
+# client and reaching the socket, a cue putting real bytes on a real UDP port,
+# `tx` off leaving the show running and the wire quiet, and strict senders
+# dropping and counting a datagram from somebody the show does not declare.
+#
+# It owns the far end - a socket it binds itself - so "it was sent" is the
+# datagram rather than a number the engine keeps about itself. Not hosted:
+# nothing here needs audio, and a network cue holds no voice.
+add_test(NAME blackbox.devices.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/devices.py"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/devices
+                 --wfg-locale=C)
+add_test(NAME blackbox.devices.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/devices.py"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/devices
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.devices.C blackbox.devices.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 120)
 
 # -----------------------------------------------------------------------------

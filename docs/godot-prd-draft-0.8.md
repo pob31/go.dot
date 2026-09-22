@@ -126,6 +126,23 @@ Each node declares:
   the current state); third-party defaults to false
 - **panic value**: park | snap-to | declared safe value
 
+*Added in 0.8, at the author's direction (2026-09-22).* Each mount is a
+**device** in the show settings, and declares four more things about itself, all
+editable while the show is open: a **name**, which is what a person reads and
+what the cue inspector's target menu offers — renaming one moves no cue, because
+a cue carries the prefix and not the name; **rx**, whether what it sends is
+accepted; **tx**, whether cues aimed at it are put on the wire; and the local
+**interface** it is reached through. Turning **tx** off leaves the cue running
+and the show playing — the run ends carrying `not-sent` rather than failing,
+which is what a rehearsal in a room without the desk needs.
+
+The show itself declares **strict senders**: with it on, a message is taken only
+from a declared device whose `rx` is set, and anything else is dropped and
+written to the log naming who sent it. Off — the default, and what Go.dot has
+always done — anybody who can reach the port is heard. It gates the OSC port
+alone: a client on the WebSocket is a client rather than a device, and gating
+those would lock an operator out of their own engine.
+
 ### 3.4 Two clocks
 
 - **Audio clock** — the engine's audio callback.
@@ -841,6 +858,14 @@ wait: `none` / `sent` / `verified` (**default for own processors**); a
 read. Enables relative moves computed from actual state, and failure visible in
 the list rather than discovered by ear.
 
+*Added in 0.8, at the author's direction (2026-09-22).* A device that carries no
+namespace description is **opaque**, and that is the ordinary case rather than a
+degenerate one: what a show knows about a lighting desk is where it is and what
+to send it. Nothing is published under an opaque device's prefix, a cue aimed
+there is sent exactly as it was written with no coercion, and it can never be
+asked — so `verified` against one is refused when the show is read, by the same
+rule and in the same sentence as a device that declares no read-back.
+
 ### 3.12 Prepare / commit
 
 Anticipation is a property of the **parameter**, not the cue. A value is
@@ -1421,6 +1446,14 @@ devices that cannot. So the template format **is** an OSCQuery namespace
 description: generate one by querying a compliant device, hand-write one for a
 stubborn console, and the engine cannot tell the difference. ADM-OSC ships
 built in. Community templates live in the same repo as device profiles.
+
+*Added in 0.8, at the author's direction (2026-09-22).* A template is
+**optional**. A device declared with none is opaque (§3.11): the show settings
+make one from an address and a port, which is what a desk gets, and a template
+is what upgrades it to a device whose nodes are checked, typed and askable. The
+specialised kinds the author has in mind — a described tree with values,
+two-way OSCQuery, a device that writes cues into the show itself — are that
+upgrade path and are not yet built *(proposed)*.
 
 ### 3.23 Choufleur integration (script following and cue prompting)
 
@@ -2454,6 +2487,27 @@ persistent media (§3.29).
 
 Added 2026-09-09: authored colour at idle and timbre while sounding, as a
 layout option (§3.30).
+
+Added 2026-09-22, with the network devices (§3.3, §3.11, §3.22):
+
+- **An opaque device stripping its prefix on the wire.** A cue carries the whole
+  address it writes, so every device has one root its cues share. A desk with
+  no single root — an X32 answers `/ch/…` and `/bus/…` — cannot be addressed
+  that way without a prefix that is not really its own. A flag on an opaque
+  device, taking the prefix off as the datagram leaves, would cover it; it is
+  not built, and the workaround is a prefix of `/` segments the desk ignores.
+- **`tx` off finishing a run with the warning `not-sent`**, rather than failing
+  it. Built that way, because the alternative makes a rehearsal without the
+  desk a list of red rows; flagged because it is a new word in `run/warning`
+  and the author may want a different one.
+- **Renaming a device's prefix does not rewrite the cues aimed at it**, which
+  leaves them aimed at nothing until somebody re-aims them. `wfg validate` says
+  so. A rename-and-rewrite command would fix it and does not exist.
+- **Machine-level defaults for the network side**, the twin of
+  `audio-defaults.xml`: the devices a machine usually talks to, copied into new
+  shows. Not built, and worth leaving until the tabs have been used.
+- **The specialised device kinds** (§3.22): a described tree with values,
+  two-way OSCQuery, a device that writes its own cues into the show.
 
 Added 2026-09-10: a touch counting as adjusting only once the fader has moved,
 with the value resent on release (§3.16).

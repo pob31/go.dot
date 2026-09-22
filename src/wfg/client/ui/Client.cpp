@@ -64,7 +64,7 @@
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/ui/Look.h>
-#include <wfg/client/ui/AudioSettingsWindow.h>
+#include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/MainWindow.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
@@ -94,7 +94,7 @@ namespace wfg::client
         {
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
-            menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuAudioSettings,
+            menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
             menuWaveform
         };
 
@@ -541,7 +541,7 @@ namespace wfg::client
                     case menuRecord:     return { 'r', mod | shift, 0 };
                     //  No accelerator: both are reached through the menu only.
                     case menuRevert:
-                    case menuAudioSettings: break;
+                    case menuShowSettings: break;
                     
                 }
 
@@ -586,7 +586,7 @@ namespace wfg::client
                     case menuLoadToTime: return ! last.listId.empty();
                     case menuUndoHistory: return unlocked;
                     case menuRecord:     return model::isYes (last.recording) ? unlocked : true;
-                    case menuAudioSettings: return true;
+                    case menuShowSettings: return true;
 
                     /*  Offered for a media cue, and for shutting the panel
                         whatever is picked - a panel that could be opened and
@@ -671,7 +671,7 @@ namespace wfg::client
                     addMenuItem (menu, menuRecord, model::isYes (last.recording) ? "Stop the live recorder"
                                                                                   : "Start the live recorder");
                     menu.addSeparator();
-                    addMenuItem (menu, menuAudioSettings, "Audio settings...");
+                    addMenuItem (menu, menuShowSettings, "Show settings...");
                 }
 
                 return menu;
@@ -697,11 +697,11 @@ namespace wfg::client
                     case menuLoadToTime: toggleLoadToTime(); break;
                     case menuUndoHistory: toggleUndoHistory(); break;
                     case menuWaveform:  toggleWaveform(); break;
-                    case menuAudioSettings:
+                    case menuShowSettings:
                         if (latest)
                         {
                             if (! audioSettings)
-                                audioSettings = std::make_unique<ui::AudioSettingsWindow> (theme, *latest,
+                                audioSettings = std::make_unique<ui::ShowSettingsWindow> (theme, *latest,
                                     [this] (Event event) { send (std::move (event)); }, [this] { panic(); });
                             audioSettings->setVisible (true);
                             audioSettings->toFront (true);
@@ -1613,7 +1613,7 @@ namespace wfg::client
                 if (lowest.empty())
                 {
                     shell->transport.setNotice ("This show has no direct out yet, so the cue has "
-                                                "nowhere to play - Show, Audio settings, Outputs.");
+                                                "nowhere to play - Show, Show settings, Outputs.");
                     return;
                 }
 
@@ -1997,7 +1997,7 @@ namespace wfg::client
                 (§4.8): without one, setTooltip is a value nothing reads. */
             juce::TooltipWindow tooltips { nullptr, 700 };
             std::unique_ptr<ui::MainWindow> window;
-            std::unique_ptr<ui::AudioSettingsWindow> audioSettings;
+            std::unique_ptr<ui::ShowSettingsWindow> audioSettings;
             ui::Shell* shell = nullptr;                     // owned by the window
 
             /*  The rows, cached against the show's revision. Declared after the
