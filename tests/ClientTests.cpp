@@ -44,6 +44,8 @@
 
 #include <optional>
 
+#include <wfg/client/model/DirectOuts.h>
+#include <wfg/client/model/Fader.h>
 #include <wfg/client/model/Gestures.h>
 #include <wfg/client/model/Inspector.h>
 #include <wfg/client/model/LoadToTime.h>
@@ -56,6 +58,7 @@
 #include <wfg/client/model/View.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
+#include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Scrub.h>
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/ShowModel.h>
@@ -552,6 +555,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::createRange ("B3N8R5TW", 1.0, 4.0),
         gesture::fireCue ("B3N8R5TW"),
         gesture::splitRange ("B3N8R5TW", 6.0),
+        gesture::createSend ("B3N8R5TW", "J3MT5XYA"),
     };
 
     for (const auto& event : gestures)
@@ -2199,6 +2203,294 @@ TEST_CASE ("client: each thing a drop would do wears its own colour")
         CHECK (std::find (model::Theme::colourNames().begin(),
                           model::Theme::colourNames().end(), tone)
                  != model::Theme::colourNames().end());
+    }
+}
+
+TEST_CASE ("client: a fader's throw bends where a hand expects it to")
+{
+    /*  A straight -120..+12 scale puts unity nine tenths of the way up and
+        spends its bottom half below audibility. The taper is four points and
+        straight between them, and what has to be true of it is that it goes
+        both ways exactly: a hand drags to a place, reads a number, types the
+        number back, and lands on the same place. */
+    CHECK (model::fractionForDb (model::silenceDb) == doctest::Approx (0.0));
+    CHECK (model::fractionForDb (0.0) == doctest::Approx (0.85));
+    CHECK (model::fractionForDb (model::loudestDb) == doctest::Approx (1.0));
+
+    //  Unity sits high, which is the whole reason for the bend.
+    CHECK (model::fractionForDb (0.0) > 0.8);
+
+    for (const auto decibels : { -120.0, -90.0, -60.0, -24.0, -6.0, 0.0, 6.0, 12.0 })
+    {
+        INFO (decibels << " dB");
+        CHECK (model::dbForFraction (model::fractionForDb (decibels))
+                 == doctest::Approx (decibels));
+    }
+
+    //  And nothing outside the range can be asked for, from either end.
+    CHECK (model::dbForFraction (-1.0) == doctest::Approx (model::silenceDb));
+    CHECK (model::dbForFraction (2.0) == doctest::Approx (model::loudestDb));
+    CHECK (model::stepDb (model::loudestDb, 5, false) == doctest::Approx (model::loudestDb));
+    CHECK (model::stepDb (model::silenceDb, -5, false) == doctest::Approx (model::silenceDb));
+
+    //  A click is a decibel, a shift-click a tenth.
+    CHECK (model::stepDb (-6.0, 1, false) == doctest::Approx (-5.0));
+    CHECK (model::stepDb (-6.0, 1, true) == doctest::Approx (-5.9));
+
+    /*  THE WORD AND NOT THE NUMBER AT THE BOTTOM: "-120.0" reads as very quiet
+        where what it means is nothing at all. */
+    CHECK (model::faderText (model::silenceDb) == "-inf");
+    CHECK (model::faderText (-125.0) == "-inf");
+    CHECK (model::faderText (0.0) == "0");
+    CHECK (model::faderText (-6.25) == "-6.3");
+}
+
+TEST_CASE ("client: the mixer draws a strip per mix channel, not per send")
+{
+    /*  The document holds a `Send` only where somebody set one, so a mixer
+        built from the sends would be one you cannot raise a new send on. The
+        strips come from the RIG; what is up is what somebody pushed. */
+    Rig rig;
+
+    //  `minimal` has two direct outs; make one of them a mix to send into.
+    const auto rows = model::readOutputs (*rig.publish (0));
+    REQUIRE (rows.size() == 2);
+
+    rig.apply (1, "window", "node.set",
+               { osc::Value::string ("/godot/bus/" + rows[1].id + "/kind"),
+                 osc::Value::string ("mix") });
+
+    /*  AND A CUE THAT PLAYS SOMETHING. `minimal`'s own cues are memos, which
+        have no sends and no direct out - only a media cue has anywhere for a
+        sound to go. */
+    const std::string cue = "M3D7A5XZ";
+
+    rig.apply (2, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                 osc::Value::string ("media"), osc::Value::string ("Thunder"),
+                 osc::Value::string (cue) });
+
+    const auto snapshot = rig.publish (3);
+
+    /*  Asserted rather than assumed: an identifier outside the alphabet, or a
+        parent that is not a container, would leave every check below failing
+        for a reason that has nothing to do with sends. */
+    REQUIRE (model::text (*snapshot, "/godot/cue/" + cue + "/kind") == "media");
+
+    auto strips = model::readSends (*snapshot, cue);
+    REQUIRE (strips.size() == 1);
+    CHECK (strips[0].busId == rows[1].id);
+    CHECK (strips[0].name == "Foldback");
+
+    /*  NO SEND IS DRAWN AT SILENCE, which is what it sounds like - and what
+        marks it out is that there is no object behind it to delete. */
+    CHECK (strips[0].present() == false);
+    CHECK (strips[0].levelDb == doctest::Approx (model::silenceDb));
+
+    SUBCASE ("and one the cue actually sends into carries its level")
+    {
+        rig.apply (4, "window", "send.create",
+                   { osc::Value::string (cue), osc::Value::string (rows[1].id) });
+
+        const auto after = rig.publish (5);
+        auto raised = model::readSends (*after, cue);
+
+        REQUIRE (raised.size() == 1);
+        CHECK (raised[0].present());
+        CHECK (raised[0].levelDb == doctest::Approx (0.0));
+
+        //  And another cue's sends are not this one's.
+        CHECK (model::readSends (*after, "F7HR8TVD").front().present() == false);
+    }
+}
+
+TEST_CASE ("client: the direct-out row is a menu of the show's own outputs")
+{
+    Rig rig;
+
+    const auto rows = model::readOutputs (*rig.publish (0));
+    REQUIRE (rows.size() == 2);
+
+    //  One direct out and one mix, so the menu has something to leave out.
+    rig.apply (1, "window", "node.set",
+               { osc::Value::string ("/godot/bus/" + rows[1].id + "/kind"),
+                 osc::Value::string ("mix") });
+
+    const std::string cue = "M3D7A5XZ";
+
+    rig.apply (2, "window", "cue.create",
+               { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (0),
+                 osc::Value::string ("media"), osc::Value::string ("Thunder"),
+                 osc::Value::string (cue) });
+
+    const auto snapshot = rig.publish (3);
+    const auto inspection = model::inspect (*snapshot, cue);
+
+    const model::Field* directOut = nullptr;
+    const model::Field* fold = nullptr;
+
+    for (const auto& block : inspection.blocks)
+        for (const auto& field : block.fields)
+        {
+            if (field.name == "directOut")    directOut = &field;
+            if (field.name == "stereoToMono") fold = &field;
+        }
+
+    REQUIRE (directOut != nullptr);
+    CHECK (directOut->control == model::Control::busRef);
+
+    /*  "(none)" AND THE DIRECT OUTS, and the mix channel left out: a mix is
+        reached through a send, at a level, which is the whole difference. */
+    REQUIRE (directOut->choices.size() == 2);
+    CHECK (directOut->choices[0].first.empty());
+    CHECK (directOut->choices[0].second == "(none)");
+    CHECK (directOut->choices[1].first == rows[0].id);
+
+    /*  AND IT CARRIES THE MARK, in words rather than by colour (4.8). Nothing
+        else in this show lands anywhere, so the one direct out is free. */
+    CHECK (directOut->choices[1].second == "Main L/R · Stereo — free");
+
+    /*  AND THE FOLD IS GREYED ON A CUE WHOSE FILE IS NOT STEREO. Drawn rather
+        than hidden: an absence reads as "this program cannot do that". */
+    REQUIRE (fold != nullptr);
+    CHECK (fold->applies == false);
+
+    SUBCASE ("and it applies once the cue says it has two channels")
+    {
+        rig.apply (4, "window", "node.set",
+                   { osc::Value::string ("/godot/cue/" + cue + "/channels"),
+                     osc::Value::string ("2") });
+
+        const auto after = model::inspect (*rig.publish (5), cue);
+
+        for (const auto& block : after.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == "stereoToMono")
+                    CHECK (field.applies);
+    }
+}
+
+TEST_CASE ("client: the menu marks an output taken, undecided, or free - and never hides one")
+{
+    /*  The author, 2026-09-22: *"mark clearly the available direct outs and
+        the ones taken... when uncertain, cue playing out until its end, then
+        just don't mark it, the user will decide"* - and *"don't block
+        assignation. In any case sum if there is an overlap."* So three states,
+        and every output offered whatever its state. */
+    Rig rig;
+
+    const auto rows = model::readOutputs (*rig.publish (0));
+    REQUIRE (rows.size() == 2);
+
+    const auto out = rows[0].id;
+
+    const auto make = [&rig, &out] (std::int64_t tick, int at, const char* id, const char* name)
+    {
+        rig.apply (tick, "window", "cue.create",
+                   { osc::Value::string ("7K2QM9X4"), osc::Value::int32 (at),
+                     osc::Value::string ("media"), osc::Value::string (name),
+                     osc::Value::string (id) });
+
+        rig.apply (tick + 1, "window", "node.set",
+                   { osc::Value::string (std::string ("/godot/cue/") + id + "/directOut"),
+                     osc::Value::string (out) });
+    };
+
+    /*  THE BED FIRST AND THE VOICE AFTER IT, which is the order the question
+        is about: a cue that has not been fired yet is on no output, however
+        long it would go on for once it had. */
+    make (1, 0, "BEDXXXX1", "The bed");
+    make (3, 1, "VCEXXXX1", "Voice");
+
+    const auto marked = [] (const tree::TreeSnapshot& snapshot, const std::string& cue,
+                            const std::string& bus)
+    {
+        for (const auto& mark : model::readOutMarks (snapshot, cue))
+            if (mark.busId == bus)
+                return mark;
+
+        return model::OutMark {};
+    };
+
+    SUBCASE ("a finite cue in a manual list decides nothing, because a person is in between")
+    {
+        /*  Both cues sit at the top of a manual list with nothing saying when
+            either ends. The first may well have finished long before the
+            second's GO, and it may equally still be sounding - so the honest
+            answer is neither taken nor free. */
+        const auto snapshot = rig.publish (5);
+        const auto mark = marked (*snapshot, "VCEXXXX1", out);
+
+        CHECK (mark.state == model::OutMark::State::undecided);
+        CHECK (mark.byCue == "The bed");
+
+        //  And the menu shows the output all the same, with no word after it.
+        CHECK (model::markedLabel ("Main L/R", "Stereo", mark) == "Main L/R · Stereo");
+    }
+
+    SUBCASE ("a bed that loops for ever is provably still on it")
+    {
+        /*  `Walk::unbounded`: a cue that ends on its own is over by the time a
+            later manual step is reached, and one that does not is still going.
+            A range looping for ever is the second. */
+        rig.apply (5, "window", "range.create",
+                   { osc::Value::string ("BEDXXXX1"), osc::Value::float64 (0.0),
+                     osc::Value::float64 (4.0), osc::Value::string ("RNGXXXX1") });
+
+        rig.apply (6, "window", "node.set",
+                   { osc::Value::string ("/godot/range/RNGXXXX1/loops"),
+                     osc::Value::string ("0") });
+
+        const auto snapshot = rig.publish (7);
+        const auto mark = marked (*snapshot, "VCEXXXX1", out);
+
+        INFO ("busy: " << model::text (*snapshot, "/godot/cue/VCEXXXX1/outsBusy")
+                << " / maybe: " << model::text (*snapshot, "/godot/cue/VCEXXXX1/outsMaybe"));
+
+        CHECK (mark.state == model::OutMark::State::taken);
+        CHECK (mark.byCue == "The bed");
+
+        CHECK (model::markedLabel ("Main L/R", "Stereo", mark)
+                 == "Main L/R · Stereo — taken by \"The bed\"");
+
+        SUBCASE ("and a cue landing nowhere is in nobody's way")
+        {
+            rig.apply (8, "window", "node.set",
+                       { osc::Value::string ("/godot/cue/BEDXXXX1/directOut"),
+                         osc::Value::string ("") });
+
+            const auto after = rig.publish (9);
+
+            CHECK (marked (*after, "VCEXXXX1", out).state == model::OutMark::State::free);
+        }
+    }
+
+    SUBCASE ("a move that creates the overlap says so, and one that changes nothing stays quiet")
+    {
+        rig.apply (5, "window", "range.create",
+                   { osc::Value::string ("BEDXXXX1"), osc::Value::float64 (0.0),
+                     osc::Value::float64 (4.0), osc::Value::string ("RNGXXXX1") });
+
+        rig.apply (6, "window", "node.set",
+                   { osc::Value::string ("/godot/range/RNGXXXX1/loops"),
+                     osc::Value::string ("0") });
+
+        const auto snapshot = rig.publish (7);
+
+        const auto free = std::vector<model::OutMark> { { out, {}, model::OutMark::State::free } };
+        const auto now = model::readOutMarks (*snapshot, "VCEXXXX1");
+
+        const auto said = model::newClash (free, now, out, "Main L/R", "Voice");
+
+        REQUIRE (said.has_value());
+        CHECK (said->find ("Voice") != std::string::npos);
+        CHECK (said->find ("The bed") != std::string::npos);
+        CHECK (said->find ("Main L/R") != std::string::npos);
+
+        /*  AND IT NEVER SAYS THE SAME THING TWICE. An overlap that was already
+            there before the move is not news, and a notice that fires for a
+            state somebody has already looked at is one they learn to ignore. */
+        CHECK_FALSE (model::newClash (now, now, out, "Main L/R", "Voice").has_value());
     }
 }
 

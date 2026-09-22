@@ -82,6 +82,7 @@ namespace wfg::audio
         bool stop (int track) override;
         bool stopAtSample (int track, int slot, std::int64_t sample) override;
         void setLevelDb (int track, double levelDb) override;
+        void setRouting (int track, const std::vector<cue::Coefficient>&) override;
         bool isPlaying (int track) const override;
         bool isArmReady (int track) const override;
 

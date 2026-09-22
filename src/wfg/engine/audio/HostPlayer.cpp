@@ -156,6 +156,40 @@ namespace wfg::audio
             matrix->setLevelDb (static_cast<float> (levelDb));
     }
 
+    void HostPlayer::setRouting (int track, const std::vector<cue::Coefficient>& coefficients)
+    {
+        auto* matrix = audioHost.trackMatrix (track);
+
+        if (matrix == nullptr)
+            return;
+
+        /*  ONE PASS, EVERY CELL, each written once with the value it is to
+            end at. Clearing the matrix and then filling it - which is what an
+            arm does - would leave every target at nought in between, and a
+            block processed in that window would start every smoother sliding
+            towards silence and back. An arm can afford it because the voice is
+            not sounding; this cannot, because the whole reason it exists is
+            that the voice is.
+
+            The search is linear in a list of a few dozen coefficients, over a
+            matrix of a couple of thousand cells, on an edit rather than on a
+            tick. */
+        for (int input = 0; input < matrix->numInputs(); ++input)
+            for (int output = 0; output < matrix->numOutputs(); ++output)
+            {
+                auto gain = 0.0f;
+
+                for (const auto& coefficient : coefficients)
+                    if (coefficient.input == input && coefficient.output == output)
+                    {
+                        gain = coefficient.gain;
+                        break;
+                    }
+
+                matrix->setGain (input, output, gain);
+            }
+    }
+
     bool HostPlayer::isPlaying (int track) const
     {
         return audioHost.trackPlayState (track).playing;

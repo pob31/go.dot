@@ -177,7 +177,7 @@ namespace wfg::doc
                     like any other, and it is addressed at /godot/cue/<id> so a
                     client holding an identifier never has to know which kind it
                     got. */
-                { "Media",  true,  { "Route", "Feed", "Insert", "Range", "Trigger" },
+                { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger" },
                                                           { "cue", "media" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
@@ -305,6 +305,14 @@ namespace wfg::doc
                     not a choice (§3.9b). */
                 { "Feed",    true,  {},                    { "feed" } },
                 { "Insert",  true,  {},                    { "insert" } },
+
+                /*  AND A SEND IS THE OTHER HALF OF THE OUTPUT LIST. A direct
+                    out is an attribute of the cue, because a cue has one or
+                    none; a mix channel is a child, because a cue sends into as
+                    many as it likes and each at its own level. Identified for
+                    the reason `Route` is: deleting the first send must not
+                    re-point a client holding the second. */
+                { "Send",    true,  {},                    { "send" } },
             };
 
             return table;

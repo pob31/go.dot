@@ -28,6 +28,7 @@
 
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Theme.h>
+#include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
 
 #include <juce_gui_basics/juce_gui_basics.h>
@@ -53,6 +54,9 @@ namespace wfg::client::ui
 
             /** `range.split` at the playhead. */
             std::function<void (const std::string& cueId, double at)> splitRange;
+
+            /** `send.create`, when a silent fader in the mixer is raised. */
+            std::function<void (const std::string& cueId, const std::string& busId)> createSend;
 
             /** The transport of whatever the panel is showing: fire, kill, seek. */
             std::function<void (const std::string& cueId)> play;
@@ -102,6 +106,7 @@ namespace wfg::client::ui
         juce::String title, note;
 
         std::unique_ptr<WaveformEditorComponent> waveform;
+        std::unique_ptr<SendMixerComponent> sends;
         juce::TextButton shut { "x" };
         int columnWidth = 0, columnGap = 0;
 

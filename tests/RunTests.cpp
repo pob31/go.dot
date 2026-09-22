@@ -518,6 +518,7 @@ namespace
         bool stop (int) override                            { return true; }
         bool stopAtSample (int, int, std::int64_t) override { return true; }
         void setLevelDb (int, double) override              {}
+        void setRouting (int, const std::vector<cue::Coefficient>&) override {}
         bool isPlaying (int) const override                 { return false; }
         bool isArmReady (int track) const override          { return ready.count (track) > 0; }
 

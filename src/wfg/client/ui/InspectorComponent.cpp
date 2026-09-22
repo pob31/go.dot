@@ -47,6 +47,13 @@ namespace wfg::client::ui
         /** The file control's other half: the box takes a name, this goes looking. */
         juce::TextButton browse { "..." };
 
+        /*  The direct-out menu's other half: a door to the send mixer, beside
+            the output the cue lands on rather than on a row of its own
+            (author, 2026-09-22: "add a button next to this drop down menu").
+            The two belong together - where a cue goes, and how much of it goes
+            everywhere else, are one question asked twice. */
+        juce::TextButton sends { "Sends" };
+
         /*  A DOOR RATHER THAN A DECISION: the button that opens the panel at
             the foot on this cue. It spans the row instead of sitting in the
             value column, because everything in that column is a number or a
@@ -230,6 +237,15 @@ namespace wfg::client::ui
                     line.choice.setText (shown (field), juce::dontSendNotification);
                     break;
 
+                case model::Control::busRef:
+                    /*  BY ITEM AND NOT BY TEXT, because the text is a name and
+                        the value is an identifier: setting the text would
+                        clear the menu the moment an output was renamed, and
+                        would show the identifier to somebody who never typed
+                        one. */
+                    line.choice.setSelectedId (idForChoice (field), juce::dontSendNotification);
+                    break;
+
                 case model::Control::loopCount:
                 {
                     /*  THE THREE TOGETHER, and only when the engine's answer
@@ -327,6 +343,19 @@ namespace wfg::client::ui
         return field.mixed ? juce::String ("(mixed)") : juce::String (field.value);
     }
 
+    int InspectorComponent::idForChoice (const model::Field& field)
+    {
+        for (std::size_t at = 0; at < field.choices.size(); ++at)
+            if (field.choices[at].first == field.value)
+                return static_cast<int> (at) + 1;
+
+        /*  NOTHING SELECTED rather than the first item, which would be this
+            panel quietly telling somebody their cue plays out of an output
+            they never chose. A mixed selection lands here too, and an empty
+            menu is the honest drawing of "they do not agree". */
+        return 0;
+    }
+
     void InspectorComponent::rebuild (const model::Inspection& inspection)
     {
         lines.clear();
@@ -422,6 +451,46 @@ namespace wfg::client::ui
                 };
 
                 content.addAndMakeVisible (line->choice);
+            }
+            else if (field.control == model::Control::busRef && field.writable)
+            {
+                /*  A MENU THE SHOW WROTE, not one the parameter table
+                    declares: the legal values are the outputs of THIS rig, so
+                    they arrive with the reading rather than with the schema.
+                    The item's index is the position in `choices`, which is how
+                    the identifier is found again on the way back - the name is
+                    what a designer reads and never what gets written. */
+                auto at = 1;
+
+                for (const auto& choice : field.choices)
+                    line->choice.addItem (juce::String (choice.second), at++);
+
+                line->choice.setSelectedId (idForChoice (field), juce::dontSendNotification);
+                line->choice.setWantsKeyboardFocus (false);
+
+                auto* raw = line.get();
+
+                line->choice.onChange = [this, raw]
+                {
+                    const auto at_ = raw->choice.getSelectedId() - 1;
+
+                    if (at_ >= 0 && at_ < static_cast<int> (raw->field.choices.size()))
+                        commitField (raw->field,
+                                     raw->field.choices[static_cast<std::size_t> (at_)].first);
+                };
+
+                content.addAndMakeVisible (line->choice);
+
+                /*  AND THE DOOR TO THE MIX BESIDE IT. It opens on the cue this
+                    panel is about, through the same door the waveform opener
+                    uses, so the panel at the foot has exactly one way in. */
+                const auto id = drawnCue;
+
+                line->sends.setWantsKeyboardFocus (false);
+                line->sends.setTooltip ("Send levels from this cue into the show's mix channels");
+                line->sends.onClick = [this, id] { if (actions.openPanel) actions.openPanel (id, "sends"); };
+
+                content.addAndMakeVisible (line->sends);
             }
             else if (field.control == model::Control::loopCount)
             {
@@ -625,13 +694,25 @@ namespace wfg::client::ui
             /*  ASKED OF THE CONTROL AND NOT OF THE OTHER COMPONENTS' VISIBILITY,
                 which is what this used to do and was a pass behind: each row
                 knows which control it is, so each says so directly. */
+            const auto isMenu = line->field.control == model::Control::choice
+                                  || line->field.control == model::Control::busRef;
+
             line->box.setVisible (! hidden && ! line->isHeading
                                     && line->field.control != model::Control::toggle
-                                    && line->field.control != model::Control::choice);
+                                    && ! isMenu);
             line->toggle.setVisible (! hidden && line->toggle.getParentComponent() != nullptr
                                        && line->field.control == model::Control::toggle);
             line->choice.setVisible (! hidden && line->choice.getParentComponent() != nullptr
-                                       && line->field.control == model::Control::choice);
+                                       && isMenu);
+            line->sends.setVisible (! hidden && line->sends.getParentComponent() != nullptr
+                                      && line->field.control == model::Control::busRef);
+
+            /*  GREYED WHERE THE ROW IS LEGAL BUT MEANS NOTHING FOR THIS CUE -
+                a fold on a mono file. Still drawn, still labelled: an absence
+                reads as "this program cannot do that", which is a different
+                and wrong sentence. */
+            line->toggle.setEnabled (line->field.applies);
+            line->choice.setEnabled (line->field.applies);
             line->repeats.setVisible (! hidden
                                         && line->field.control == model::Control::loopCount);
             line->forever.setVisible (! hidden
@@ -698,6 +779,13 @@ namespace wfg::client::ui
                 if (line->browse.isVisible())
                     line->browse.setBounds (boxArea.removeFromRight (juce::jmin (row + row / 2,
                                                                                  boxArea.getWidth() / 3)));
+
+                /*  Taken off the right of the value column, as the file row's
+                    browse button is, so a menu and its door share one line and
+                    the panel keeps one column of values. */
+                if (line->sends.isVisible())
+                    line->sends.setBounds (boxArea.removeFromRight (juce::jmin (row * 3,
+                                                                                boxArea.getWidth() / 2)));
 
                 line->box.setBounds (boxArea);
                 line->toggle.setBounds (boxArea);

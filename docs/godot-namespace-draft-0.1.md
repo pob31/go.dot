@@ -1193,6 +1193,36 @@ A media cue's `level` is what was decided. The level a running instance is actua
 `/godot/run/<id>/level` (§11.3), which is what a fade writes. The two never merge (§4.10).
 A missing media file is reported at load and fails the arm, never the load.
 
+**A media cue's output side, added 2026-09-22.** Four more rows on the cue and one more child
+element, all `rw` and `persist = show` except where said:
+
+| Node | Type | Meaning |
+|---|---|---|
+| `/godot/cue/<id>/channels` | `i`, 0, `0..512` | how many channels the file has, decided at import and written into the cue. The file travels between machines and may be absent tonight, so the routing is shaped by this rather than by the disk. Nought is "nobody has said" |
+| `/godot/cue/<id>/stereoToMono` | `T`, false | fold a two-channel file to one, each side at half, so a stereo recording can play out of a mono direct out. Ignored unless `channels` is 2 |
+| `/godot/cue/<id>/directOut` | `s`, "", refers `bus` | the direct out this cue's channels land on. Empty routes it nowhere by this road |
+| `/godot/cue/<id>/sharedOut` | `T`, false | this cue is MEANT to share that out with another (§3.9c). Silences that pair's overlap warning and nothing else |
+| `/godot/send/<id>/bus` | `s`, refers `bus` | the mix channel a `Send` child feeds. One per bus per cue; a second naming the same one is refused at `send.create` |
+| `/godot/send/<id>/level` | `d`, 0, `−120..12` dB | how loud this cue arrives there. −120 is silence and contributes no coefficient at all |
+| `/godot/send/<id>/cue` | `s`, `r` | the cue it belongs to, derived from where it sits. As `feed/cue` |
+
+**A DIRECT OUT IS AN ATTRIBUTE AND A SEND IS A CHILD**, and the asymmetry is the shape of the
+thing rather than a preference: a cue lands on one direct out or none, so that is a word on the
+cue; it sends into as many mix channels as it likes and each at its own level, so those are
+identified objects, deleted by `object.delete` like every other.
+
+**And both are below the cue's level, which is what makes the fade a DCA.** `CueMatrix` sums
+every coefficient and multiplies the sum by `run/<id>/level`, once, after all of them - so a fade
+on the cue moves the direct out and every send together (author, 2026-09-22: *"there is a general
+level for the file and a send level for each mix channel. The fades operate as a DCA on top of
+this"*). Nothing in the graph had to be added for that; it is where the level already was.
+
+**Heard while it is playing.** A send level or a direct out changed on a cue that is sounding
+reaches the matrix on the next tick, through a door that writes coefficients and touches neither
+the level nor the smoothers - an arm snaps them, which is right while a voice is silent and wrong
+in the middle of a fade. Gated on `showRevision`, so a tick with nothing edited costs one
+comparison.
+
 ### 11.3 `/godot/run` — what is happening
 
 A run is the live instance of a launched cue. Phase 2 has one per launched cue; Phase 3
@@ -2364,6 +2394,24 @@ explicit and never automatic. What makes it not tedious is the authoring gesture
 names — copy-assignment and multi-select edit — rather than a default that is right until the day
 it is not.
 
+*Amended 2026-09-22 — and a direct out is not an exception to it.* `media/@directOut` and a
+`Send` carry no matrix and the engine synthesises their coefficients, which looks like the
+inference this paragraph refuses and is not. The difference is what the rule is made of:
+
+- A `Route` or a `Feed` is a matrix because the DESTINATION says nothing about what should go
+  where — a source among twelve processor inputs is a decision only a designer can make, and
+  defaulting it would be guessing at intent.
+- A direct out and a mix channel derive theirs from facts the document **states**: the cue's
+  `channels`, the bus's `width`, and `stereoToMono` where a fold was asked for. Channel to
+  channel where they match, one channel onto all of them where the cue is mono (which is the
+  rule `route.default` already applies), both sides at half where the fold says so — and a
+  REFUSAL, `bad-route`, where the cue is wider than the destination and nobody asked for a fold.
+  Nothing is inferred; a rule is applied to declared numbers, and the one case a rule cannot
+  cover is the one it refuses.
+
+That last clause is what keeps §3.9b's *"refuse silent downmix or upmix"* true. A fold is a
+downmix somebody ASKED for, which is a different thing entirely from one that happened.
+
 **`List/Persistent` — a section of its own** (§3.29, and §13.11). An optional identified child of
 `List` holding ordinary cues, the `Header`/`Footer` precedent exactly: identified because
 `cue.create` addresses a parent by identifier, carrying no attributes of its own, at most one per
@@ -2469,6 +2517,53 @@ rule, and the override it asks for is the `shared` mark, which one attribute alr
 | Node | Type | Access | Persist | Meaning |
 |---|---|---|---|---|
 | `/godot/document/warnings` | `s` | ro | none | every warning the document has, one per line, each naming its own kind: the dangling references `ShowDocument::warnings()` already finds, and the overlaps this adds. Newline-separated rather than space-separated, because a warning is a sentence and sentences contain spaces |
+
+*Amended 2026-09-22 — the third resource kind, and the third answer.* Phase 5 adds **direct outs**
+to the same analysis, over the same live ranges: a media cue's `directOut` is a claim exactly as a
+`Feed` is, `bus/usage` and `bus/overlaps` publish it exactly as `slot/usage` and `slot/overlaps` do,
+and `media/@sharedOut` silences a pair exactly as `feed/@shared` does. A **mix channel is never
+analysed** — many cues arriving at one mix is what a mix is for, so nothing about it is a claim.
+
+What is genuinely new is that a second question is asked of the same ranges. The menu that picks a
+cue's direct out has to mark each output **free, taken or undecided**, and "overlap or nothing"
+cannot say the third. So a claim now carries **two** bounds:
+
+| bound | what it says | an intersection of two is |
+|---|---|---|
+| `mayLast` | where the release rules say the claim is certainly **back** | POSSIBLE |
+| `mustLast` | where it is certainly still **held** | PROVEN |
+
+**The release row is an upper bound, and reading it as a lower one is a lie.** Three finite media
+cues in a MANUAL group all release at the group's end, so by `mayLast` the first covers the third —
+but the operator held the GO for forty seconds during a scene change and the first finished
+thirty-seven seconds ago. What actually proves a claim is still live across a manual boundary is
+that the cue **never ends on its own** (`Walk::unbounded`, whose own comment is the rule: *"a cue
+that ends on its own is over by the time a later manual step is reached and one that does not is
+still going"*). That, plus exact seconds inside a timeline or automatic chain, is the whole of what
+can be proven; everything a person's GO separates is undecided.
+
+| Node | Type | Meaning |
+|---|---|---|
+| `/godot/bus/<id>/usage` | `s` | as `slot/usage`, for a direct out; empty for a mix channel |
+| `/godot/bus/<id>/overlaps` | `s` | as `slot/overlaps`; a warning, never a refusal, and never a reason to refuse an assignment |
+| `/godot/cue/<id>/outsBusy` | `s` | `<bus> <cue>` pairs: outputs provably carrying another cue while this one plays |
+| `/godot/cue/<id>/outsMaybe` | `s` | the same, for outputs that might be |
+
+**The cue-side rows are capped at one pair per output**, naming the *nearest* blocker. Uncapped they
+would be quadratic in the show: `tests/fixtures/make_large_show.py` already measures ~300 pairs per
+resource on a 500-cue manual list, which cue-keyed is ~125,000 pairs and megabytes of text merged
+into every snapshot. The menu has one mark per row and room for one name, so one is what is
+published — and the nearest one is the useful one.
+
+**They are the cue-side twin of `usage` and NOT of `overlaps`**, which decides what `sharedOut` does:
+it removes the pair from the warnings and leaves the mark standing. Which outputs carry sound is a
+fact; the warning is a complaint; a designer who said they meant the sharing answered the complaint
+and did not change the fact.
+
+**And a client could not compute any of this.** It has no `advance` row, no walk, and no way to
+reach a group's length — that is `ShowWalk`, engine-only. Re-implementing it behind the client
+boundary is exactly what `scripts/check-client-boundary.py` exists to prevent, so the engine
+publishes the answer and the window reads it.
 
 **And an overlap must not change `wfg validate`'s exit code, which is a distinction that verb does
 not draw today.** It currently returns 1 for *any* problem, a dangling reference included — fine for

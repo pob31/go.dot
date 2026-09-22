@@ -57,6 +57,8 @@
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
+#include <wfg/client/model/DirectOuts.h>
+#include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
@@ -74,6 +76,7 @@
 
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -216,8 +219,25 @@ namespace wfg::client
                 listActions.move            = [this] (const std::string& id, const std::string& parent,
                                                       int index)
                                               {
-                                                  if (! refusedWhileLocked())
-                                                      send (gesture::moveObject (id, parent, index));
+                                                  if (refusedWhileLocked())
+                                                      return;
+
+                                                  /*  WHAT THIS CUE'S OUTPUT LOOKED LIKE
+                                                      BEFORE THE MOVE, so the pass after
+                                                      it can say what the move did (PRD
+                                                      3.9c: "the reorder warning is
+                                                      liveness re-analysis on edit").
+
+                                                      AFTER AND NOT BEFORE, deliberately:
+                                                      the analysis runs on the document
+                                                      and the document has not moved yet,
+                                                      so the only honest way to know what
+                                                      a move does is to make it and look.
+                                                      Nothing is blocked, the two cues sum
+                                                      in the meantime, and undo is one
+                                                      gesture away. */
+                                                  rememberOutsOf (id);
+                                                  send (gesture::moveObject (id, parent, index));
                                               };
                 listActions.setTarget       = [this] (const std::string& aimed, const std::string& at)
                                               {
@@ -272,6 +292,8 @@ namespace wfg::client
 
                     if (subject == "waveform")
                         wanted = model::Subject::Kind::waveform;
+                    else if (subject == "sends")
+                        wanted = model::Subject::Kind::sends;
 
                     if (wanted == model::Subject::Kind::none)
                         return;
@@ -358,6 +380,9 @@ namespace wfg::client
 
                 footActions.splitRange = [this] (const std::string& cueId, double at)
                                          { send (gesture::splitRange (cueId, at)); };
+
+                footActions.createSend = [this] (const std::string& cueId, const std::string& busId)
+                                         { send (gesture::createSend (cueId, busId)); };
 
                 /*  THE PANEL'S TRANSPORT, through the ordinary doors: the cue
                     is fired by name, the run it made is killed by identifier,
@@ -1021,6 +1046,9 @@ namespace wfg::client
                     shell->foot.show (model::readFoot (*snapshot, subject), mediaTable);
                 }
 
+                //  What a move just did to the moved cue's own output, if anything.
+                sayIfTheMoveClashed (*snapshot, reading.revision);
+
                 //  And any import or create still waiting for the cue it made.
                 finishImports (*snapshot, reading.revision);
                 finishCreations (*snapshot, reading.revision);
@@ -1351,18 +1379,132 @@ namespace wfg::client
                 pending = std::move (waiting);
             }
 
+            /*  WHAT AN IMPORTED FILE IS POINTED AT, and it is two plain
+                writes rather than the matrix `route.default` used to build.
+
+                The old command wrote a `Route` with its coefficients spelled
+                out; it stays registered and tested so every log written before
+                today still replays. What a cue says now is the same thing in
+                the words a designer uses - how many channels the file has, and
+                which direct out it lands on - and the coefficients are
+                derived from those by `resolveRouting`. The difference matters
+                at the menu: a matrix is not something a dropdown can show, and
+                a designer changing where a cue goes should not be rewriting
+                numbers.
+
+                THE COUNT IS READ HERE AND WRITTEN DOWN rather than read off
+                the disk when it is wanted, exactly as before: the file travels
+                between machines and may be absent tonight, and a replay must
+                not depend on it being present or readable. */
+            /*  Held between a move being sent and the pass that sees its
+                result. One cue at a time, because a hand moves one at a time
+                and a second move before the first has landed is a sentence
+                about the second. */
+            struct MovedCue
+            {
+                std::string cue;
+                std::string ownOut;
+                std::vector<model::OutMark> before;
+                std::uint64_t sentAt = 0;
+            };
+
+            std::optional<MovedCue> watchingMove;
+
+            void rememberOutsOf (const std::string& cueId)
+            {
+                watchingMove.reset();
+
+                if (latest == nullptr || cueId.empty())
+                    return;
+
+                const auto out = model::text (*latest, "/godot/cue/" + cueId + "/directOut");
+
+                //  Only a cue that lands somewhere can start sharing it.
+                if (out.empty())
+                    return;
+
+                MovedCue held;
+                held.cue = cueId;
+                held.ownOut = out;
+                held.before = model::readOutMarks (*latest, cueId);
+                held.sentAt = last.revision;
+
+                watchingMove = std::move (held);
+            }
+
+            void sayIfTheMoveClashed (const tree::TreeSnapshot& snapshot,
+                                      std::uint64_t revision)
+            {
+                if (! watchingMove.has_value())
+                    return;
+
+                /*  WAIT FOR THE DOCUMENT TO HAVE MOVED. The move is a command,
+                    applied on the tick thread, and the pass that sent it sees
+                    the tree from before. Compared too early this would report
+                    the state it already knew. */
+                if (revision == watchingMove->sentAt)
+                    return;
+
+                const auto held = *watchingMove;
+                watchingMove.reset();
+
+                const auto said = model::newClash (
+                    held.before, model::readOutMarks (snapshot, held.cue), held.ownOut,
+                    model::text (snapshot, "/godot/bus/" + held.ownOut + "/name"),
+                    model::text (snapshot, "/godot/cue/" + held.cue + "/name"));
+
+                if (said.has_value() && shell != nullptr)
+                    shell->transport.setNotice (juce::String (*said));
+            }
+
             void routeImportedMedia (const std::string& cueId, const std::string& name)
             {
                 // Read the copied file's header off the tick/audio threads.
-                // Channel count is part of the logged command, so replay never
-                // depends on the file still being present or readable.
                 juce::AudioFormatManager formats;
                 formats.registerBasicFormats();
                 const std::unique_ptr<juce::AudioFormatReader> reader (
                     formats.createReaderFor (mediaFolder().getChildFile (juce::String (name))));
                 if (! reader) return;
-                send ({ "window", "route.default", { osc::Value::string (cueId),
-                    osc::Value::int32 (static_cast<int> (reader->numChannels)) } });
+
+                send (gesture::setNode ("/godot/cue/" + cueId + "/channels",
+                                        std::to_string (reader->numChannels)));
+
+                /*  THE FIRST DIRECT OUT, which is a default and not an
+                    assignment: PRD 3.9b's "no auto-assignment, ever" is about
+                    nothing choosing a DESTINATION for a cue, and a show with
+                    one direct out has no choice to take. Where there are
+                    several the lowest is where a rig starts, and the menu is
+                    one click away. Where there are none the cue keeps its
+                    file and says nothing about where it goes, which is
+                    honest - and the line below says why it is silent, because
+                    a cue that plays nothing with no explanation is the worst
+                    of the three. */
+                const auto lowest = firstDirectOut();
+
+                if (lowest.empty())
+                {
+                    shell->transport.setNotice ("This show has no direct out yet, so the cue has "
+                                                "nowhere to play - Show, Audio settings, Outputs.");
+                    return;
+                }
+
+                send (gesture::setNode ("/godot/cue/" + cueId + "/directOut", lowest));
+            }
+
+            /*  Read from the pass's own snapshot, which `latest` is holding for
+                exactly this: an import arrives between passes and has no
+                reading of its own, and taking a second one would be a second
+                call site the boundary check counts. */
+            std::string firstDirectOut() const
+            {
+                if (latest == nullptr)
+                    return {};
+
+                for (const auto& row : model::readOutputs (*latest))
+                    if (row.kind == "direct")
+                        return row.id;
+
+                return {};
             }
 
             /*  THE NATIVE OPEN, which is the other half of decision Y: a drop

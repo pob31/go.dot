@@ -29,6 +29,13 @@
 #include <wfg/engine/clock/TickClock.h>
 #include <wfg/engine/osc/OscValue.h>
 
+/*  For `juce::Decibels` alone, which turns a send's level into a coefficient.
+    Written out rather than leaned on: this file reaches it today through
+    Tracktion's own headers, and the strict Linux job compiles against
+    libstdc++, where a transitive include that happens to work here is exactly
+    the kind of thing that does not there. */
+#include <juce_audio_basics/juce_audio_basics.h>
+
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -2574,6 +2581,97 @@ namespace wfg::cue
             return bus;
         };
 
+        /*  HOW A CUE'S CHANNELS SPREAD ACROSS A DESTINATION, for the two
+            places that do not carry a written matrix: the direct out and every
+            send. A Route and a Feed say it themselves, coefficient by
+            coefficient, because a designer placing a source among twelve
+            processor inputs means something no rule could guess. A direct out
+            and a mix channel are the ordinary cases, and the rule for them is
+            short enough to be read:
+
+              - stereo folded to one: both channels at half, onto everything
+              - a mono cue: its one channel onto everything, at full
+              - as wide as the destination, or narrower: channel to channel
+              - wider than the destination: refused, and the run says so
+
+            Refusing the last is the point. PRD 3.9b says width is explicit and
+            a silent downmix is not on offer; the fold above is a downmix
+            somebody ASKED for, which is a different thing entirely.
+
+            `what` is the destination in words, so the refusal names the thing
+            the designer was looking at rather than a kind they never chose. */
+        const auto spreadOf = [&] (const juce::ValueTree& mediaCue, int width,
+                                   double gain, const char* what,
+                                   std::string& why) -> std::vector<double>
+        {
+            const auto channels = schema.integer (mediaCue, "media", "channels");
+
+            if (channels <= 0)
+            {
+                why = "the cue's channel count is not known";
+                return { 0.0 };   // a non-empty list, so `emit` reports rather than passes
+            }
+
+            /*  `flag` and not `text(...) == "true"`: a stored `T` reads back
+                as "1" through `var::toString`, so the text comparison is
+                silently always false. The Reader knows both spellings. */
+            const auto fold = channels == 2 && schema.flag (mediaCue, "media", "stereoToMono");
+
+            if (! fold && channels > width)
+            {
+                why = std::string ("the cue is wider than its ") + what;
+                return { 0.0 };
+            }
+
+            /*  A FOLD KEEPS BOTH ROWS, and it has to: folding is SUMMING the
+                two sides, so each one needs its own row into the destination
+                at half. One row of half would be the left channel alone at
+                -6 dB, which is not a fold, and `emit` reads the row count back
+                out of the length so it would never notice. */
+            std::vector<double> gains (static_cast<std::size_t> (channels)
+                                         * static_cast<std::size_t> (width), 0.0);
+
+            for (auto input = 0; input < channels; ++input)
+                for (auto channel = 0; channel < width; ++channel)
+                {
+                    const auto at = static_cast<std::size_t> (input * width + channel);
+
+                    if (fold)
+                        gains[at] = gain * 0.5;
+                    else if (channels == 1 || input == channel)
+                        gains[at] = gain;
+                }
+
+            return gains;
+        };
+
+        /*  THE DIRECT OUT, where this cue's own channels land. Empty is every
+            cue until somebody chooses one, and is silent rather than wrong -
+            the same reading `emit` gives an empty gains list. */
+        if (const auto directOut = schema.text (cue, "media", "directOut"); ! directOut.empty())
+        {
+            const auto bus = busNamed (directOut);
+
+            if (! bus.isValid())
+            {
+                problem = "the cue's direct out is no bus of this show";
+                return {};
+            }
+
+            std::string why;
+            const auto width = schema.integer (bus, "bus", "width");
+            const auto gains = spreadOf (cue, width, 1.0, "direct out", why);
+
+            if (! why.empty())
+            {
+                problem = why;
+                return {};
+            }
+
+            if (! emit (schema.integer (bus, "bus", "firstChannel"), width, gains))
+                return {};
+        }
+
         for (const auto& destination : cue)
         {
             const auto element = destination.getType().toString();
@@ -2592,6 +2690,65 @@ namespace wfg::cue
                 if (! emit (schema.integer (bus, "bus", "firstChannel"),
                             schema.integer (bus, "bus", "width"),
                             gainsOf (destination)))
+                    return {};
+
+                continue;
+            }
+
+            if (element == "Send")
+            {
+                /*  A SEND IS A DESTINATION WITH A LEVEL, which is the whole
+                    difference between it and a Route above. A Route carries a
+                    matrix, because a designer placing a source among twelve
+                    processor inputs means something no rule could guess; a
+                    send carries one number, because a mix channel is somewhere
+                    many cues arrive and what anybody wants to say about it is
+                    how loud. The matrix it becomes is the same shape the
+                    direct out gets, scaled.
+
+                    AND IT IS BELOW THE CUE'S LEVEL, not beside it. The
+                    coefficients here are summed by `CueMatrix` and the cue's
+                    own level multiplies that sum, once, after all of them - so
+                    a fade on the cue moves the direct out and every send
+                    together, which is what a designer means by fading a cue
+                    and what a console calls a DCA. Nothing here arranges that;
+                    it falls out of where the level is applied. */
+                const auto bus = busNamed (destination[juce::Identifier ("bus")]
+                                             .toString().toStdString());
+
+                if (! bus.isValid())
+                {
+                    problem = "send names no bus of this show";
+                    return {};
+                }
+
+                const auto level = schema.number (destination, "send", "level");
+
+                /*  SILENCE CONTRIBUTES NOTHING AT ALL rather than a very small
+                    number: -120 dB is how this document spells silence
+                    everywhere else, and a track with nothing to add should
+                    cost nothing to mix. `emit` drops exact zeroes anyway; this
+                    saves building the matrix. */
+                if (level <= -120.0)
+                    continue;
+
+                std::string why;
+                const auto width = schema.integer (bus, "bus", "width");
+                const auto gain = juce::Decibels::decibelsToGain (level, -120.0);
+                const auto gains = spreadOf (cue, width, gain, "mix channel", why);
+
+                /*  ASKED HERE rather than left to `emit`, which cannot always
+                    tell: a refused spread answers with one zero, and against a
+                    mono destination that is a legal matrix of one silent
+                    coefficient - so the send would be dropped quietly instead
+                    of failing the run with a reason somebody can read. */
+                if (! why.empty())
+                {
+                    problem = why;
+                    return {};
+                }
+
+                if (! emit (schema.integer (bus, "bus", "firstChannel"), width, gains))
                     return {};
 
                 continue;
@@ -4866,6 +5023,7 @@ namespace wfg::cue
         armStandby (engine);
         advanceFades (engine, tick);
         applyLevels();
+        applyRouting();
         advanceSends (engine);
         observeAfterStep (engine, tick);
         assertPersistent (engine, tick);
@@ -5410,6 +5568,61 @@ namespace wfg::cue
                 members, each of which has just had it added to its own. */
             if (audio != nullptr && run->track >= 0)
                 audio->setLevelDb (run->track, effective);
+        }
+    }
+
+    void Runner::applyRouting()
+    {
+        /*  WHERE A SOUNDING CUE GOES, kept up with the document (author,
+            2026-09-22: a send fader and a direct-out menu are things you move
+            while listening, or they are things you guess at).
+
+            GATED ON THE SHOW'S REVISION AND NOT ON A PER-RUN CACHE. A cache of
+            what was last pushed would be bookkeeping to invalidate, and
+            `applyLevels` above says in its own comment why that is where a
+            stale value gets left behind. The revision is one number: while
+            nobody edits, this does nothing at all; on the tick after an edit it
+            re-resolves the handful of runs that are actually sounding, which is
+            a document read each and no allocation the tick thread was not
+            already making.
+
+            `showRevision` and not `revision`, because the second moves for
+            state rows as well - a fold, a standby - and routing is decided by
+            show rows alone.
+
+            NOTHING IS REPORTED WHEN IT FAILS. A cue whose direct out has just
+            been deleted resolves to a problem, and the honest thing is to leave
+            the sound exactly as it is: the run is already playing, GO has
+            already happened, and `bad-route` is an answer to "can this cue
+            start", not to "should this cue stop". `wfg validate` and the
+            document's warnings are where that is said. */
+        if (audio == nullptr)
+            return;
+
+        const auto revision = document.showRevision();
+
+        if (revision == routingRevision)
+            return;
+
+        routingRevision = revision;
+
+        for (const auto& snapshot : runs.all())
+        {
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr || run->isFinished() || run->track < 0)
+                continue;
+
+            const auto cue = document.findById (run->cue);
+
+            if (! cue.isValid() || ! cue.hasType ("Media"))
+                continue;
+
+            std::string problem;
+            const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem);
+
+            if (problem.empty())
+                audio->setRouting (run->track, routing);
         }
     }
 

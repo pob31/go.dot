@@ -658,6 +658,36 @@ being written and a rig that has been wired, and it is WFS-DIY's own behaviour
 is kept in `state.xml`, because what has happened to a rig is not a decision
 about what the show plays.
 
+*Amended 2026-09-22, at the author's direction — the dropdown marks, and never
+refuses.* The bullet above says the dropdown "lists only what is free at that
+point in the list". It now lists **every** direct out and says of each one
+whether it is free, taken, or undecided, and it never withholds one.
+
+Three reasons, all the author's:
+
+- **Hiding a taken output is a refusal wearing a disguise.** *"Don't block
+  assignation. In any case sum if there is an overlap — better have two summed
+  signals in the same channel than none or a broken cue or cuelist."* A cue that
+  cannot be pointed anywhere is a cue that makes no sound, and on the night that
+  is worse than two cues arriving at one output.
+- **What is taken is the fact a designer needs.** An output that is busy is
+  exactly the one they are deciding about; removing it from the menu removes the
+  decision rather than informing it.
+- **And a third answer exists, which "free or not" cannot express.** Between one
+  GO and the next there is a person, so a finite cue playing out at the top of a
+  manual list may or may not still be sounding when the next one starts. That is
+  neither free nor taken, and the honest drawing of it is **no mark at all**
+  (author: *"when uncertain — cue playing out until its end — then just don't
+  mark it, the user will decide"*).
+
+The analysis behind the marks is §3.9c's, over the same live ranges: an output
+is **taken** where a cue that never ends on its own holds it, or where two cues'
+seconds overlap inside a timeline or automatic chain; **undecided** where their
+rows overlap but a person's GO sits between them; **free** where nothing does.
+An overlap is a warning and never a refusal, `media/@sharedOut` says one pair was
+meant, and the mark stays even then — which outs carry sound is a fact, and only
+the complaint about it can be answered.
+
 Lifecycle:
 
 - **Claim happens in prepare** (§3.12). The header claims the slot and verifies
@@ -696,6 +726,19 @@ liveness re-analysis on edit.
   this by hand for radio mic channels and will read it instantly.
 
 One allocator, one plot, one warning system, three resource kinds.
+
+*Implementation note, 2026-09-22.* Two of the three kinds are built and share one analysis: processor
+slots (Phase 4) and **interface channels**, as a media cue's direct out (Phase 5). Faders are not.
+The **usage-over-show-time plot** is not built either; the data behind it is published per resource
+as `usage`, and the plot is the natural next subject for the panel at the foot.
+
+One refinement the build forced, and it is a correction rather than an addition: *"it can prove
+possible overlap, never prove impossible"* is right, and it is not the only thing a designer needs.
+A menu picking an output has to say free, taken or **undecided**, and the third is the common case in
+a manual list — so the analysis distinguishes an overlap it can PROVE (a cue that never ends on its
+own; exact seconds inside a chain) from one it merely cannot rule out. Both are warned about; only
+the first is marked. `docs/godot-namespace-draft-0.1.md` §13.5 has the two bounds that make that
+work.
 
 #### 3.9d Banking — decide with the hardware in hand
 

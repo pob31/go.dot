@@ -3,6 +3,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 #include <wfg/client/ui/FootPanelComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
+#include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
 
@@ -300,6 +301,143 @@ TEST_CASE ("inspector: an opener is a button that asks the window to open the pa
 
     //  And it is a door, not a decision: nothing was written.
     CHECK (written.empty());
+}
+
+TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes the send first")
+{
+    /*  The author, 2026-09-22: "there is a general level for the file and a
+        send level for each mix channel. The fades operate as a DCA on top of
+        this." The master strip is `media/level` and nothing new - which is
+        what makes that sentence true rather than approximately true. */
+    std::vector<std::pair<std::string, std::string>> written;
+    std::vector<std::pair<std::string, std::string>> made;
+
+    ui::SendMixerComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text)
+    { written.emplace_back (address, text); };
+
+    actions.createSend = [&] (const std::string& cueId, const std::string& busId)
+    { made.emplace_back (cueId, busId); };
+
+    ui::SendMixerComponent mixer (model::Theme {}, actions);
+    mixer.setSize (420, 180);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::sends, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.cueLevel = -3.0;
+
+    model::SendStrip reverb;
+    reverb.busId = "BUS00001";
+    reverb.name = "Reverb";
+    reverb.widthWord = "Stereo";
+    reverb.channelWord = "5-6";
+
+    model::SendStrip foldback;
+    foldback.busId = "BUS00002";
+    foldback.name = "Foldback";
+    foldback.widthWord = "Stereo";
+    foldback.channelWord = "7-8";
+    foldback.sendId = "SND00001";
+    foldback.levelDb = -6.0;
+
+    reading.sends = { reverb, foldback };
+
+    mixer.show (reading);
+
+    juce::Image canvas (juce::Image::ARGB, 420, 180, true);
+    {
+        juce::Graphics g (canvas);
+        mixer.paintEntireComponent (g, true);
+    }
+
+    /*  ONE CROSS PER SEND THAT EXISTS, and none for the mix the cue does not
+        feed yet: the asymmetry shows as the cross appearing rather than as a
+        fader that will not move. */
+    const auto crosses = buttonsUnder (mixer);
+    CHECK (crosses.size() == 1);
+
+    /*  THE VALUE BOXES, which are also how this test moves a fader. Typing a
+        number is the same gesture as dragging one - both end in
+        `levelWanted` - and it is the one a test can make without inventing a
+        mouse event, which is how every other case in this file works. */
+    std::vector<juce::Label*> boxes;
+
+    for (auto* child : mixer.getChildren())
+        for (auto* inner : child->getChildren())
+            if (auto* label = dynamic_cast<juce::Label*> (inner))
+                boxes.push_back (label);
+
+    REQUIRE (boxes.size() == 3);        // the master, and one per mix channel
+
+    SUBCASE ("the numbers are drawn, because a fader's position is not enough")
+    {
+        /*  4.8: colour is never the sole carrier of information, and a strip
+            read across a booth at a glance is read by its number. */
+        CHECK (boxes[0]->getText() == "-3");
+        CHECK (boxes[1]->getText() == "-inf");
+        CHECK (boxes[2]->getText() == "-6");
+    }
+
+    SUBCASE ("raising a strip with no send behind it makes the send before the level")
+    {
+        /*  The document holds a `Send` only where somebody set one, so the
+            first move of a silent fader is two writes - and the level cannot
+            go out first, because the address it would be written to does not
+            exist yet. */
+        boxes[1]->setText ("0", juce::sendNotificationSync);
+
+        REQUIRE (made.size() == 1);
+        CHECK (made[0].first == "CUE00001");
+        CHECK (made[0].second == "BUS00001");
+
+        //  And nothing was written to an address that is not there yet.
+        CHECK (written.empty());
+
+        /*  THEN THE LEVEL, once the tree has the object in it. The reading
+            comes back with the send present, and the level the hand asked for
+            goes out addressed to it. */
+        reading.sends[0].sendId = "SND00002";
+        mixer.show (reading);
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0].first == "/godot/send/SND00002/level");
+        CHECK (written[0].second == "0");
+    }
+
+    SUBCASE ("a send that is already there is written straight to")
+    {
+        boxes[2]->setText ("-12", juce::sendNotificationSync);
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0].first == "/godot/send/SND00001/level");
+        CHECK (written[0].second == "-12");
+        CHECK (made.empty());
+    }
+
+    SUBCASE ("and the master writes the cue's own level, which is the DCA")
+    {
+        boxes[0]->setText ("0", juce::sendNotificationSync);
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0].first == "/godot/cue/CUE00001/level");
+        CHECK (written[0].second == "0");
+        CHECK (made.empty());
+    }
+
+    SUBCASE ("and a show with no mix channels says so rather than drawing an empty desk")
+    {
+        reading.sends.clear();
+        reading.notice = "This show declares no mix channels yet.";
+        mixer.show (reading);
+
+        CHECK (buttonsUnder (mixer).empty());
+
+        juce::Image blank (juce::Image::ARGB, 420, 180, true);
+        juce::Graphics g (blank);
+        mixer.paintEntireComponent (g, true);
+    }
 }
 
 TEST_CASE ("active cue errors: collapsed drawer retains failures and respects edit mode")

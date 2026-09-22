@@ -251,6 +251,24 @@ namespace wfg::cue
             tick while a fade runs, and one relaxed atomic store. */
         virtual void setLevelDb (int track, double levelDb) = 0;
 
+        /*  Where a SOUNDING cue's channels go, changed under it. Tick thread,
+            on an edit and never per tick.
+
+            SEPARATE FROM AN ARM, and the separation is the whole point. An arm
+            happens while the voice is silent, so it snaps every smoother to its
+            target; doing that here would take a fade that is halfway down and
+            put it back wherever the document says, in the middle of the sound.
+            This writes the coefficients and touches neither the level nor the
+            smoothers, so the 50 ms slew carries the change - which is what
+            makes a send fader something you can move against the sound rather
+            than something you set and then fire the cue to hear.
+
+            Every cell is written, the silent ones included: whatever the last
+            routing reached has to be taken back, and clearing first and setting
+            after would leave the whole matrix at nought for any block that fell
+            between the two passes. */
+        virtual void setRouting (int track, const std::vector<Coefficient>&) = 0;
+
         /*  Whether that track's cue is sounding, out of any of its slots.
             Tick thread. Track-wide for the reason `stop` is: the question is
             about the cue. */
@@ -665,6 +683,7 @@ namespace wfg::cue
             as a pass, a group trim reaches every descendant on the tick it
             moves, including the ones nothing else is touching. */
         void applyLevels();
+        void applyRouting();
 
         /*  What arming the standby means when the pointer is on a GROUP.
 
@@ -1015,6 +1034,11 @@ namespace wfg::cue
 
         std::uint64_t stepsSeen = 0, asked = 0;
         std::map<std::string, std::int64_t> observedAt;
+
+        /*  The show revision `applyRouting` last pushed at. Nought is "never",
+            so the first tick after a load pushes once and every tick after it
+            does nothing until somebody edits. */
+        std::uint64_t routingRevision = 0;
 
         /*  THE PERSISTENT ASSERTION (§3.29, §13.11): after every applied
             trigger, what the section declares is checked against what is

@@ -54,6 +54,7 @@
 
 #include <cstddef>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace wfg::tree { class TreeSnapshot; }
@@ -89,6 +90,15 @@ namespace wfg::client::model
     enum class Control
     {
         text, toggle, choice, loopCount, file, cueRef, longText,
+
+        /*  A MENU OF THE SHOW'S OUTPUTS, which is a choice whose options the
+            parameter table cannot declare: a bus is an object somebody made,
+            so the legal values are a fact about THIS show and change as the
+            rig is written. `choices` carries them, id and label apart, because
+            the row stores an identifier and a designer reads a name - and a
+            menu that wrote the name would break the moment somebody renamed
+            an output. */
+        busRef,
 
         /*  A BUTTON THAT OPENS THE PANEL AT THE FOOT on this cue (author,
             2026-09-21: "it would be great if the controls to show the
@@ -128,6 +138,19 @@ namespace wfg::client::model
 
         /** A closed set of legal values, when the row declares one: a choice, not typing. */
         std::vector<std::string> options;
+
+        /*  The same idea for a set the SHOW declares rather than the table:
+            what is stored first, what is read second. Used by `busRef`, and by
+            whatever else comes to point at an object by identifier. */
+        std::vector<std::pair<std::string, std::string>> choices;
+
+        /*  WHETHER THIS ROW MEANS ANYTHING FOR THIS CUE, as opposed to being
+            legal for its kind. A fold is a statement about a two-channel file
+            and says nothing about a mono one, so it is drawn greyed rather
+            than hidden: hiding it would leave a designer hunting for a control
+            they have seen before, and greying says "not this cue" where an
+            absence says "not this program". */
+        bool applies = true;
 
         bool hasMinimum = false, hasMaximum = false;
         double minimum = 0.0, maximum = 0.0;

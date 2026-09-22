@@ -548,11 +548,17 @@ namespace wfg::tree
             }
         }
 
+        /*  `analysis` is here for the two media rows that say which outputs
+            are busy where this cue plays. Handed down rather than looked up,
+            because this walk is already the one place that knows which cue it
+            is at, and a second lookup would be a second thing to keep in step
+            with the first. */
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
                          std::vector<Node>& out,
                          const std::map<std::string, double>* durations,
                          std::vector<std::string>& roster,
                          std::vector<std::pair<std::string, std::string>>& mediaRoster,
+                         const cue::SlotAnalysis& analysis,
                          const char* role = "member")
         {
             const auto element = node.getType().toString().toStdString();
@@ -682,6 +688,26 @@ namespace wfg::tree
                              ? osc::formatDouble (found->second)
                              : osc::formatDouble (0.0);
                 }
+                else if (name == "outsBusy" && isMedia)
+                {
+                    /*  WHICH OUTPUTS ARE TAKEN WHERE THIS CUE PLAYS, from the
+                        same revision-keyed cache the slot rows come from.
+
+                        PUBLISHED PER CUE AND NOT PER BUS, and the asymmetry is
+                        the question rather than a preference. `bus/usage`
+                        answers "who is on this output"; a menu asks "what is
+                        in the way of THIS cue", and a client cannot work the
+                        second out of the first - it would have to reconstruct
+                        row order across nested groups, headers and footers,
+                        and it could not compute the seconds rule at all. That
+                        is re-implementing `ShowWalk` in a client, which is
+                        what the boundary check exists to prevent. */
+                    text = analysis.busyOutsOf (id);
+                }
+                else if (name == "outsMaybe" && isMedia)
+                {
+                    text = analysis.maybeOutsOf (id);
+                }
                 else if (name == "headerDerived")
                 {
                     std::vector<std::string> derived;
@@ -755,9 +781,12 @@ namespace wfg::tree
                     left unlisted would be published at `/godot/cue/<id>` with
                     the rows of a kind it is not - which is the failure mode the
                     comment above names, and the reason this is a lookup. */
-                if (childElement == "Feed" || childElement == "Insert")
+                if (childElement == "Feed" || childElement == "Insert"
+                      || childElement == "Send")
                 {
-                    const auto* owner = childElement == "Feed" ? "feed" : "insert";
+                    const auto* owner = childElement == "Feed"   ? "feed"
+                                      : childElement == "Insert" ? "insert"
+                                                                 : "send";
 
                     /*  A LITERAL, because `Attribute::element` is a view. It was
                         built from `childElement.toStdString()`, a temporary that
@@ -767,7 +796,9 @@ namespace wfg::tree
                         element - which is why it only showed as a warning
                         (clang's dangling-gsl), and why it is fixed before the
                         first reader of `element` finds it the other way. */
-                    const auto* elementName = childElement == "Feed" ? "Feed" : "Insert";
+                    const auto* elementName = childElement == "Feed"   ? "Feed"
+                                            : childElement == "Insert" ? "Insert"
+                                                                       : "Send";
                     const auto childId = child[idProperty].toString().toStdString();
 
                     if (! childId.empty())
@@ -833,12 +864,13 @@ namespace wfg::tree
                     for (const auto& roleChild : child)
                         if (roleChild.hasProperty (idProperty))
                             collectCue (roleChild, id, roleIndex++, out, durations, roster,
-                                        mediaRoster, childRole);
+                                        mediaRoster, analysis, childRole);
 
                     continue;
                 }
 
-                collectCue (child, id, childIndex++, out, durations, roster, mediaRoster);
+                collectCue (child, id, childIndex++, out, durations, roster, mediaRoster,
+                            analysis);
             }
         }
     }
@@ -982,7 +1014,8 @@ namespace wfg::tree
                             continue;
 
                         if (cue.hasProperty (idProperty))
-                            collectCue (cue, id, index++, nodes, durations, cueOrder, mediaOrder);
+                            collectCue (cue, id, index++, nodes, durations, cueOrder, mediaOrder,
+                                        analysis);
                     }
 
                     if (const auto section = list.getChildWithName ("Persistent");
@@ -993,7 +1026,7 @@ namespace wfg::tree
                         for (const auto& cue : section)
                             if (cue.hasProperty (idProperty))
                                 collectCue (cue, id, persistentIndex++, nodes, durations,
-                                            cueOrder, mediaOrder, "persistent");
+                                            cueOrder, mediaOrder, analysis, "persistent");
                     }
                 }
             }
@@ -1122,9 +1155,20 @@ namespace wfg::tree
                     for (const auto* row : doc::Schema::rowsForOwner ("bus"))
                     {
                         const doc::Attribute attribute { "Bus", row };
+                        const auto name = std::string (row->name);
 
-                        nodes.push_back (makeLeaf (base + "/" + std::string (row->name),
-                                                   *row, storedText (attribute, bus)));
+                        /*  `usage` and `overlaps` ARE FROM HERE, exactly as a
+                            slot's are and for the same reason: they change
+                            when somebody edits the show and at no other time,
+                            so they are a reading of the document like `name`
+                            and `width`, and this is the cached half. Empty for
+                            a mix channel, because nothing about a mix is a
+                            claim. */
+                        const auto text = name == "usage"    ? analysis.usageOf (id)
+                                        : name == "overlaps" ? analysis.overlapsOf (id)
+                                                             : storedText (attribute, bus);
+
+                        nodes.push_back (makeLeaf (base + "/" + name, *row, text));
                     }
                 }
 

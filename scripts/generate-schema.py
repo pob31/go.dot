@@ -71,7 +71,12 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # `rackChannel` are what each kind adds. There is no `rack`:
                 # Audio/Rack is a container element like Mounts and carries no
                 # rows of its own.
-                "slots", "slot", "processorInput", "rackChannel", "feed", "insert")
+                "slots", "slot", "processorInput", "rackChannel", "feed", "insert",
+                # A cue's send into a mix channel, at a level. A sibling of
+                # `feed` rather than of `route`: both name a destination the
+                # designer chose and carry what reaching it costs, while a
+                # route carries a matrix.
+                "send")
 
 VALUE_TYPES = {
     "s": "string",

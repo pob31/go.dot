@@ -125,6 +125,11 @@ namespace wfg::client::gesture
         project - so the panel finds what it made on the next pass. */
     Event createRange (const std::string& cueId, double in, double out);
 
+    /*  Gives a media cue a send into one mix channel. The level follows as an
+        ordinary `node.set` once the object exists, which is why this carries
+        none: there is one way values are written. */
+    Event createSend (const std::string& cueId, const std::string& busId);
+
     /*  Cuts one of a media cue's ranges in two where the playhead is. One
         command rather than a create, a shortening and a reorder, so it is one
         undo step and one record - see `ShowDocument::splitRange`. */

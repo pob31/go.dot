@@ -124,6 +124,39 @@ namespace
             return cue.id;
         }
 
+        /** A second bus, so there is a direct out and a mix to tell apart. */
+        std::string addBus (const char* id, const char* name, const char* kind, int firstChannel)
+        {
+            auto audio = document.root().getChildWithName ("Audio");
+
+            juce::ValueTree bus { "Bus" };
+            bus.setProperty (juce::Identifier ("id"), id, nullptr);
+            bus.setProperty (juce::Identifier ("name"), name, nullptr);
+            bus.setProperty (juce::Identifier ("kind"), kind, nullptr);
+            bus.setProperty (juce::Identifier ("firstChannel"), firstChannel, nullptr);
+            bus.setProperty (juce::Identifier ("width"), 2, nullptr);
+            audio.addChild (bus, -1, nullptr);
+
+            return id;
+        }
+
+        /** Where a media cue's own channels land. */
+        void aimAt (const std::string& cueId, const std::string& busId, bool shared = false)
+        {
+            document.setAttribute ("/godot/cue/" + cueId + "/directOut", busId);
+
+            if (shared)
+                document.setAttribute ("/godot/cue/" + cueId + "/sharedOut", "true");
+        }
+
+        /** A range that never ends, which is what makes a bed a bed. */
+        void loopForEver (const std::string& cueId)
+        {
+            const auto range = document.createRange (cueId, 0.0, 4.0);
+            REQUIRE (range.ok);
+            document.setAttribute ("/godot/range/" + range.id + "/loops", "0");
+        }
+
         /** And what it feeds. */
         std::string feed (const std::string& cueId, const std::string& slotId,
                           bool shared = false)
@@ -519,6 +552,149 @@ TEST_CASE ("analysis: it is published on the slot and on the document")
 }
 
 //==============================================================================
+TEST_CASE ("analysis: a direct out is a resource, and a mix channel is never one")
+{
+    /*  PRD 3.9c asks for ONE allocator over three resource kinds, and an
+        interface channel is the third. But only a DIRECT out: many cues
+        arriving at one mix channel is what a mix channel is for, so nothing
+        about it is a claim and nothing about it is ever a warning. */
+    AnalysisRig rig;
+
+    const auto direct = rig.addBus ("BS000002", "Main L/R", "direct", 12);
+    const auto mix = rig.addBus ("BS000003", "Reverb", "mix", 14);
+
+    const auto bed = rig.media (rig.listId, 0, "The bed");
+    const auto voice = rig.media (rig.listId, 1, "Voice");
+
+    SUBCASE ("two cues on one direct out are a pair the show can be asked about")
+    {
+        rig.aimAt (bed, direct);
+        rig.aimAt (voice, direct);
+        rig.loopForEver (bed);
+
+        CHECK (rig.analysed().usageOf (direct).empty() == false);
+        CHECK (rig.analysed().overlapsOf (direct) == bed + " " + voice);
+
+        //  And the sentence names the output and the remedy, not a slot.
+        REQUIRE (rig.analysed().overlapWarnings().size() == 1);
+        CHECK (rig.analysed().overlapWarnings().front().find ("Bus[") != std::string::npos);
+        CHECK (rig.analysed().overlapWarnings().front().find ("sharedOut") != std::string::npos);
+    }
+
+    SUBCASE ("and two cues on one mix channel are not a pair at all")
+    {
+        rig.aimAt (bed, mix);
+        rig.aimAt (voice, mix);
+        rig.loopForEver (bed);
+
+        CHECK (rig.analysed().usageOf (mix).empty());
+        CHECK (rig.analysed().overlapsOf (mix).empty());
+        CHECK (rig.analysed().overlapWarnings().empty());
+    }
+}
+
+TEST_CASE ("analysis: a manual group's end does not prove a member is still sounding")
+{
+    /*  THE MUTATION CHECK for the certainty rule, and the case that made it.
+
+        Three finite media cues in a MANUAL group all release at the group's
+        end, so by the release row alone the first covers the third. But the
+        operator held the GO for forty seconds during a scene change and the
+        first finished thirty-seven seconds ago: a menu saying TAKEN there is
+        simply wrong. `Span::mustLast` is `firstRow` for anything that ends on
+        its own - change it to `lastRow` and this case fails, and only this
+        one. */
+    AnalysisRig rig;
+
+    const auto direct = rig.addBus ("BS000002", "Main L/R", "direct", 12);
+    const auto manual = rig.group (rig.listId, 0, "Scene", "sequence", "manual");
+
+    const auto first = rig.media (manual, 0, "First");
+    rig.media (manual, 1, "Second");
+    const auto third = rig.media (manual, 2, "Third");
+
+    rig.aimAt (first, direct);
+    rig.aimAt (third, direct);
+
+    //  Possible, and said so: the rows do overlap and nobody can say more.
+    CHECK (rig.analysed().overlapsOf (direct) == first + " " + third);
+
+    //  But NOT proven, which is what the menu reads.
+    CHECK (rig.analysed().maybeOutsOf (third) == direct + " " + first);
+    CHECK (rig.analysed().busyOutsOf (third).empty());
+
+    SUBCASE ("while a bed that never ends on its own is proven to be on it")
+    {
+        rig.loopForEver (first);
+
+        CHECK (rig.analysed().busyOutsOf (third) == direct + " " + first);
+        CHECK (rig.analysed().maybeOutsOf (third).empty());
+    }
+
+    SUBCASE ("and inside an automatic chain the seconds decide instead")
+    {
+        /*  Four-second files one after another with no person in between, so
+            the arithmetic is exact and they do not overlap at all. */
+        rig.document.setAttribute ("/godot/cue/" + manual + "/advance", "auto");
+
+        CHECK (rig.analysed().busyOutsOf (third).empty());
+        CHECK (rig.analysed().maybeOutsOf (third).empty());
+        CHECK (rig.analysed().overlapsOf (direct).empty());
+    }
+}
+
+TEST_CASE ("analysis: sharedOut silences the warning and leaves the mark standing")
+{
+    /*  The author, 2026-09-22: the menu marks what is taken and never refuses.
+        So `sharedOut` answers the COMPLAINT - a designer saying they meant it -
+        and does not change the FACT, which is that the output carries another
+        cue. `usageOf` has no `shared` test either, and these are its cue-side
+        twin. */
+    AnalysisRig rig;
+
+    const auto direct = rig.addBus ("BS000002", "Main L/R", "direct", 12);
+
+    const auto bed = rig.media (rig.listId, 0, "The bed");
+    const auto voice = rig.media (rig.listId, 1, "Voice");
+
+    rig.aimAt (bed, direct);
+    rig.aimAt (voice, direct);
+    rig.loopForEver (bed);
+
+    REQUIRE (rig.analysed().overlapsOf (direct) == bed + " " + voice);
+    REQUIRE (rig.analysed().busyOutsOf (voice) == direct + " " + bed);
+
+    rig.aimAt (bed, direct, true);
+
+    CHECK (rig.analysed().overlapsOf (direct).empty());
+    CHECK (rig.analysed().overlapWarnings().empty());
+    CHECK (rig.analysed().busyOutsOf (voice) == direct + " " + bed);
+}
+
+TEST_CASE ("analysis: a cue with no direct out still gets an answer, because the menu asks for one")
+{
+    /*  The question the menu has is "what is in the way of THIS cue", and it
+        is asked of a cue that has picked nothing yet - which is every cue
+        before somebody picks. So a live range is computed for every enabled
+        media cue, claim or no claim. */
+    AnalysisRig rig;
+
+    const auto direct = rig.addBus ("BS000002", "Main L/R", "direct", 12);
+
+    const auto bed = rig.media (rig.listId, 0, "The bed");
+    const auto fresh = rig.media (rig.listId, 1, "Nothing chosen yet");
+
+    rig.aimAt (bed, direct);
+    rig.loopForEver (bed);
+
+    //  It claims nothing, and it is still told what is busy where it plays.
+    CHECK (rig.analysed().busyOutsOf (fresh) == direct + " " + bed);
+
+    //  And a disabled cue is not a claim and asks nothing.
+    rig.document.setAttribute ("/godot/cue/" + bed + "/enabled", "false");
+    CHECK (rig.analysed().busyOutsOf (fresh).empty());
+}
+
 TEST_CASE ("M18: the analysis is a cache asked and not told, counted rather than timed")
 {
     /*  MEASUREMENT M18 (§13.14). What the design guarantees is countable and

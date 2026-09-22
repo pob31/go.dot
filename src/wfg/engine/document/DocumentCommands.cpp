@@ -177,6 +177,24 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });
 
+        registry.add ({ "send.create",
+                        "Adds a send from a media cue into one mix channel. The level is written"
+                        " afterwards, like any other value. Refuses a second send into a bus this"
+                        " cue already sends to.",
+                        { { "cue", 's', false }, { "bus", 's', false },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.createSend (args[0].getString(),
+                                                                   args[1].getString(),
+                                                                   id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
         registry.add ({ "group.wrap", "Create a group containing the selected cues in show order.",
                         { { "cues", 's', false }, { "id", 's', true } }, true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)

@@ -65,6 +65,12 @@ namespace wfg::client::gesture
                    osc::Value::string (kind), osc::Value::string (name) } };
     }
 
+    Event createSend (const std::string& cueId, const std::string& busId)
+    {
+        return { origin::window, "send.create",
+                 { osc::Value::string (cueId), osc::Value::string (busId) } };
+    }
+
     Event splitRange (const std::string& cueId, double at)
     {
         return { origin::window, "range.split",

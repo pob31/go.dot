@@ -105,6 +105,18 @@ namespace
             levels.push_back ({ track, levelDb });
         }
 
+        /*  Kept per track and COUNTED, because the two things worth asserting
+            about a live routing change are what it became and that it did not
+            also disturb the level. */
+        void setRouting (int track, const std::vector<cue::Coefficient>& coefficients) override
+        {
+            routings[track] = coefficients;
+            ++routingPushes;
+        }
+
+        std::map<int, std::vector<cue::Coefficient>> routings;
+        int routingPushes = 0;
+
         bool isPlaying (int track) const override
         {
             return playing.count (track) > 0;
@@ -709,6 +721,92 @@ namespace
             cue.appendChild (route, nullptr);
         }
 
+        /*  What the file is, which is a fact the cue carries rather than one
+            the disk is asked for: the file travels between machines and may be
+            absent tonight, and a replay must not depend on it at all. */
+        void setMedia (const std::string& cueId, int channels, bool fold = false)
+        {
+            auto cue = document.findById (cueId);
+            cue.setProperty (juce::Identifier ("channels"), channels, nullptr);
+
+            if (fold)
+                cue.setProperty (juce::Identifier ("stereoToMono"), true, nullptr);
+        }
+
+        void aimAt (const std::string& cueId, const std::string& busId)
+        {
+            document.findById (cueId)
+                .setProperty (juce::Identifier ("directOut"), juce::String (busId), nullptr);
+        }
+
+        std::string addSend (const std::string& cueId, const std::string& busId, double levelDb)
+        {
+            auto cue = document.findById (cueId);
+
+            juce::ValueTree send { "Send" };
+            const auto id = runIds.generate();
+
+            send.setProperty (juce::Identifier ("id"), juce::String (id), nullptr);
+            send.setProperty (juce::Identifier ("bus"), juce::String (busId), nullptr);
+            send.setProperty (juce::Identifier ("level"), levelDb, nullptr);
+
+            cue.appendChild (send, nullptr);
+            return id;
+        }
+
+        /** "input>output@gain", in emission order, for a readable assertion. */
+        std::string spreadOf (const std::string& cueId, std::string& problem)
+        {
+            std::string out;
+
+            for (const auto& one : routingOf (cueId, problem))
+            {
+                if (! out.empty()) out += ' ';
+                out += std::to_string (one.input) + ">" + std::to_string (one.output) + "@"
+                         + juce::String (one.gain, 3).toStdString();
+            }
+
+            return out;
+        }
+
+        /*  Plays the media cue and leaves it sounding, which is the state the
+            live-routing pass is about. The same sequence `FadeRig::startMedia`
+            uses; it is spelled again here rather than shared because the two
+            rigs declare different shows and the shape is four lines. */
+        std::string play()
+        {
+            submitAndTick ("cue.fire", { osc::Value::string (mediaId) });
+            audio.completeArms (engine);
+            tickOnce();
+            tickOnce();
+
+            const auto id = runs.all().front().id;
+            audio.playing.insert (runs.find (id)->track);
+            tickOnce();
+
+            return id;
+        }
+
+        /** The same spelling, for what was actually pushed at a playing track. */
+        std::string pushedOn (int track) const
+        {
+            std::string out;
+
+            const auto found = audio.routings.find (track);
+
+            if (found == audio.routings.end())
+                return out;
+
+            for (const auto& one : found->second)
+            {
+                if (! out.empty()) out += ' ';
+                out += std::to_string (one.input) + ">" + std::to_string (one.output) + "@"
+                         + juce::String (one.gain, 3).toStdString();
+            }
+
+            return out;
+        }
+
         std::vector<cue::Coefficient> routingOf (const std::string& cueId,
                                                  std::string& problem)
         {
@@ -743,6 +841,168 @@ TEST_CASE ("routing: a bus is a place on the rig, and the cue never names a chan
     CHECK (routing[1].input == 1);
     CHECK (routing[1].output == 5);
     CHECK (routing[1].gain == doctest::Approx (1.0f));
+}
+
+TEST_CASE ("direct out: a cue's channels spread across the output it is aimed at")
+{
+    /*  A Route says its coefficients one by one, because a designer placing a
+        source among twelve processor inputs means something no rule could
+        guess. A DIRECT OUT is the ordinary case and derives them, and this is
+        the whole of the derivation. Foldback starts at hardware 4, so every
+        output below is 4 or 5. */
+    RoutedRig rig;
+    std::string problem;
+
+    SUBCASE ("as wide as the output, channel to channel")
+    {
+        rig.setMedia (rig.mediaId, 2);
+        rig.aimAt (rig.mediaId, rig.foldback);
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@1.000 1>5@1.000");
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("a mono cue feeds every channel of a stereo out")
+    {
+        rig.setMedia (rig.mediaId, 1);
+        rig.aimAt (rig.mediaId, rig.foldback);
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@1.000 0>5@1.000");
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("a fold is a downmix somebody asked for: both sides at half")
+    {
+        /*  BOTH ROWS, which is what makes it a fold rather than a left
+            channel at -6 dB: folding is summing the two sides, so each needs
+            its own row into the destination. */
+        rig.setMedia (rig.mediaId, 2, true);
+        rig.aimAt (rig.mediaId, rig.addBus ("Voice", 8, 1));
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>8@0.500 1>8@0.500");
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("and a silent one is refused rather than performed")
+    {
+        /*  PRD 3.9b: width is explicit and a quiet downmix is not on offer.
+            The toggle above is the way to ask for one. */
+        rig.setMedia (rig.mediaId, 2);
+        rig.aimAt (rig.mediaId, rig.addBus ("Voice", 8, 1));
+        rig.routingOf (rig.mediaId, problem);
+        CHECK (problem == "the cue is wider than its direct out");
+    }
+
+    SUBCASE ("a cue whose channel count nobody has written cannot be placed")
+    {
+        rig.aimAt (rig.mediaId, rig.foldback);
+        rig.routingOf (rig.mediaId, problem);
+        CHECK (problem == "the cue's channel count is not known");
+    }
+
+    SUBCASE ("and an output that has gone fails the run rather than the load")
+    {
+        rig.setMedia (rig.mediaId, 2);
+        rig.aimAt (rig.mediaId, "NOSUCHBS");
+        rig.routingOf (rig.mediaId, problem);
+        CHECK (problem == "the cue's direct out is no bus of this show");
+    }
+}
+
+TEST_CASE ("sends: a mix channel is a destination with a level, and silence costs nothing")
+{
+    RoutedRig rig;
+    std::string problem;
+
+    rig.setMedia (rig.mediaId, 2);
+
+    SUBCASE ("the level scales the same spread a direct out would get")
+    {
+        rig.addSend (rig.mediaId, rig.foldback, -6.0);
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@0.501 1>5@0.501");
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("silence contributes no coefficient at all")
+    {
+        /*  -120 dB is how this document spells silence everywhere else, and a
+            track with nothing to add should cost nothing to mix. */
+        rig.addSend (rig.mediaId, rig.foldback, -120.0);
+        CHECK (rig.spreadOf (rig.mediaId, problem).empty());
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("a cue may hold a direct out and several sends at once")
+    {
+        /*  PRD 3.9b: a cue's destinations are a LIST and not a choice - a
+            source into the processor plus a stereo feed to foldback is
+            ordinary, and so is a direct out plus a mix. */
+        rig.aimAt (rig.mediaId, rig.main);
+        rig.addSend (rig.mediaId, rig.foldback, 0.0);
+        CHECK (rig.spreadOf (rig.mediaId, problem)
+                 == "0>0@1.000 1>1@1.000 0>4@1.000 1>5@1.000");
+        CHECK (problem.empty());
+    }
+
+    SUBCASE ("and a send to an output that has gone fails the run")
+    {
+        rig.addSend (rig.mediaId, "NOSUCHBS", 0.0);
+        rig.routingOf (rig.mediaId, problem);
+        CHECK (problem == "send names no bus of this show");
+    }
+}
+
+TEST_CASE ("sends: a fader moved while the cue is sounding is heard, and moves no level")
+{
+    /*  The author, 2026-09-22, asked for a send mixer, and a mixer whose
+        faders only take effect at the next GO is a mixer nobody can mix on.
+
+        THE LEVEL IS THE THING THAT MUST NOT MOVE. An arm snaps every smoother
+        to its target because the voice is silent; doing that here would take a
+        fade that is halfway down and put it back wherever the document says,
+        in the middle of the sound. So the coefficients go through their own
+        door and the level goes through none. */
+    RoutedRig rig;
+
+    rig.setMedia (rig.mediaId, 2);
+    rig.aimAt (rig.mediaId, rig.main);
+
+    const auto run = rig.play();
+    REQUIRE (rig.runs.find (run) != nullptr);
+
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+
+    /*  NOTHING HAS BEEN PUSHED THROUGH THIS DOOR YET, and that is the design
+        rather than a gap: a cue that has just been armed got its coefficients
+        from the arm, which snapped them while the voice was silent. This pass
+        exists only for what changes AFTER that. */
+    rig.tickOnce();
+    CHECK (rig.pushedOn (track).empty());
+
+    const auto levelWrites = rig.audio.levels.size();
+
+    //  A send raised to unity on the cue that is already playing.
+    const auto send = rig.addSend (rig.mediaId, rig.foldback, 0.0);
+    juce::ignoreUnused (send);
+
+    rig.tickOnce();
+
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>4@1.000 1>5@1.000");
+
+    /*  AND NOTHING TOUCHED THE LEVEL. `applyLevels` writes only when the
+        number changes, so a routing edit that disturbed it would show up here
+        as a write that should not exist. */
+    CHECK (rig.audio.levels.size() == levelWrites);
+
+    SUBCASE ("and a tick with nothing edited pushes nothing at all")
+    {
+        /*  Gated on the show's revision, so the ordinary case - fifty ticks a
+            second with nobody typing - costs one comparison. */
+        const auto pushes = rig.audio.routingPushes;
+
+        for (int i = 0; i < 10; ++i)
+            rig.tickOnce();
+
+        CHECK (rig.audio.routingPushes == pushes);
+    }
 }
 
 TEST_CASE ("feed: a slot and a bus written without their default widths still route")

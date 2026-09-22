@@ -345,6 +345,7 @@ namespace wfg::doc
         if (element == "Channel")                   return "rackChannel";
         if (element == "Feed")                      return "feed";
         if (element == "Insert")                    return "insert";
+        if (element == "Send")                      return "send";
 
         /*  `Rack` is addressed by nothing, like `Mounts` and like a header: a
             container that holds channels and carries nothing of its own. */
@@ -1487,15 +1488,26 @@ namespace wfg::doc
                     here - months later, in a room with an audience in it. */
                 std::vector<juce::ValueTree> orphans;
                 std::vector<juce::ValueTree> clear;
+                std::vector<juce::ValueTree> unpoint;
 
                 const auto visit = [&] (const juce::ValueTree& node_, auto&& recurse) -> void
                 {
                     for (const auto& child : node_)
                     {
-                        if (child.hasType ("Route") && child["bus"].toString().toStdString() == id)
+                        /*  A SEND GOES THE WAY A ROUTE DOES. Both are objects
+                            whose whole content is a destination and what
+                            reaching it costs; with the destination gone there
+                            is nothing left for either to be, and a send
+                            naming no bus would be a strip in the mixer that
+                            feeds nowhere. */
+                        if ((child.hasType ("Route") || child.hasType ("Send"))
+                              && child["bus"].toString().toStdString() == id)
                             orphans.push_back (child);
                         else if (child.hasType ("Slot") && child["bus"].toString().toStdString() == id)
                             clear.push_back (child);
+                        else if (child.hasType ("Media")
+                                   && child["directOut"].toString().toStdString() == id)
+                            unpoint.push_back (child);
 
                         recurse (child, recurse);
                     }
@@ -1520,6 +1532,14 @@ namespace wfg::doc
                     an address and a width somebody typed. */
                 for (const auto& slot : clear)
                     setAttribute ("/godot/slot/" + slot[idProperty].toString().toStdString() + "/bus", "");
+
+                /*  AND A CUE KEEPS EVERYTHING BUT THE POINTER. Deleting the
+                    cue, or leaving it aimed at a bus that is gone, would both
+                    be worse than saying it lands nowhere: the file, the level
+                    and the ranges are what somebody wrote, and only the
+                    destination has stopped existing. */
+                for (const auto& cue : unpoint)
+                    setAttribute ("/godot/cue/" + cue[idProperty].toString().toStdString() + "/directOut", "");
 
                 std::vector<std::string> released;
                 collectIds (node, released);
@@ -1695,6 +1715,36 @@ namespace wfg::doc
 
         return insertObject (cue, endOfSequence, "Insert", id,
                              { { "channel", channelId } });
+    }
+
+    EditResult ShowDocument::createSend (const std::string& cueId,
+                                         const std::string& busId,
+                                         const std::string& id)
+    {
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (cue.getType().toString() != "Media")
+            return EditResult::failed (reason::typeMismatch);
+
+        /*  ONE SEND PER BUS PER CUE, refused here rather than tolerated.
+
+            Two sends into one mix channel would sum to a level that is on no
+            fader: the mixer would draw two strips for one destination and the
+            sound would be the sum of both, so moving either would be a
+            surprise. A send is the level of a cue at a mix, and there is one
+            of those. `badValue` rather than `typeMismatch` because both
+            identifiers name what they claim to - it is the pairing that
+            already exists. */
+        for (const auto& child : cue)
+            if (child.hasType ("Send")
+                 && child.getProperty ("bus").toString().toStdString() == busId)
+                return EditResult::failed (reason::badValue);
+
+        return insertObject (cue, endOfSequence, "Send", id,
+                             { { "bus", busId } });
     }
 
     EditResult ShowDocument::createRange (const std::string& cueId, double in, double out,
@@ -2901,6 +2951,124 @@ namespace wfg::doc
         };
 
         Persistents { problems }.visit (showNode);
+
+        /*  A DESTINATION THAT NAMES THE WRONG KIND OF OUTPUT.
+
+            The `refers` column above has already said whether the identifier
+            names a bus at all; this says whether it names one that could be
+            what it is being used as. A direct out is where ONE cue's own
+            channels land and a mix channel is where MANY cues arrive at a
+            level, and the word on the bus is what puts it in one menu or the
+            other - so a cue aimed at a mix channel, or a send into a direct
+            out, is a routing somebody will not find in the window they go
+            looking in.
+
+            A WARNING AND NOT A REFUSAL, and here the reason is sharper than
+            usual: BOTH STILL SOUND. `resolveRouting` reads a bus's channels
+            and its width and neither depends on the word, so the cue plays out
+            of exactly the channels the designer pointed it at. What is wrong
+            is the bookkeeping, not the sound, and refusing to open a show over
+            bookkeeping would be refusing to open a show that works. */
+        struct Kinds
+        {
+            std::vector<std::string>& problems;
+            const std::map<std::string, std::string>& busKind;
+
+            void say (const std::string& where, const std::string& busId,
+                      const char* used, const char* is)
+            {
+                const auto found = busKind.find (busId);
+
+                //  An identifier naming no bus is the References visitor's.
+                if (found == busKind.end() || found->second != is)
+                    return;
+
+                problems.push_back (where + ": names \"" + busId + "\", which is a " + is
+                                      + " channel and not a " + used + " - it will sound out of"
+                                        " that output all the same, but it is not what either"
+                                        " menu offers");
+            }
+
+            void visit (const juce::ValueTree& node)
+            {
+                const auto element = node.getType().toString().toStdString();
+                const auto id = node[idProperty].toString().toStdString();
+
+                if (element == "Media")
+                {
+                    const auto out = node[juce::Identifier ("directOut")].toString().toStdString();
+
+                    if (! out.empty())
+                        say ("/Show/.../Media[" + id + "]/@directOut", out, "direct out", "mix");
+                }
+                else if (element == "Send")
+                {
+                    const auto bus = node[juce::Identifier ("bus")].toString().toStdString();
+
+                    if (! bus.empty())
+                        say ("/Show/.../Send[" + id + "]/@bus", bus, "mix channel", "direct");
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        /*  THE WORD EACH BUS CARRIES, gathered once. `Rack` holds channels and
+            not buses, so it is skipped the way every other walk of `<Audio>`
+            skips it. */
+        std::map<std::string, std::string> busKind;
+
+        if (const auto audioNode = showNode.getChildWithName (juce::Identifier ("Audio"));
+            audioNode.isValid())
+            for (const auto& bus : audioNode)
+                if (bus.hasType ("Bus"))
+                {
+                    const auto word = bus[juce::Identifier ("kind")].toString().toStdString();
+
+                    busKind[bus[idProperty].toString().toStdString()]
+                        = word.empty() ? std::string ("direct") : word;
+                }
+
+        Kinds { problems, busKind }.visit (showNode);
+
+        /*  AND A CUE THAT ARRIVES AT ONE OUTPUT TWICE.
+
+            A cue's destinations are a list and not a choice (PRD 3.9b), so
+            holding a direct out AND a route is ordinary - a source into the
+            processor plus a feed to foldback is the example the section gives.
+            Holding both onto the SAME bus is not: the coefficients are summed,
+            so the cue arrives there at roughly double, and the designer who
+            set a level on one of them will hear something else. Said rather
+            than refused, because which of the two to drop is theirs to pick. */
+        struct Doubles
+        {
+            std::vector<std::string>& problems;
+
+            void visit (const juce::ValueTree& node)
+            {
+                if (node.hasType ("Media"))
+                {
+                    const auto out = node[juce::Identifier ("directOut")].toString().toStdString();
+
+                    if (! out.empty())
+                        for (const auto& child : node)
+                            if ((child.hasType ("Route") || child.hasType ("Send"))
+                                  && child[juce::Identifier ("bus")].toString().toStdString() == out)
+                                problems.push_back (
+                                    "/Show/.../Media[" + node[idProperty].toString().toStdString()
+                                      + "]: its direct out and its "
+                                      + child.getType().toString().toStdString()
+                                      + " both name \"" + out + "\", so the cue arrives there"
+                                        " twice and sums with itself");
+                }
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+        };
+
+        Doubles { problems }.visit (showNode);
 
         struct Presets
         {

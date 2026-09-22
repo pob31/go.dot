@@ -1276,7 +1276,7 @@ namespace
         }
 
         /*  ONE WALK FOR BOTH ANSWERS. `SlotAnalysis` holds the show's dangling
-            references beside its slot overlaps because both are functions of
+            references beside its overlaps because both are functions of
             the document at one revision, and asking `warnings()` here as well
             would be the same depth-first walk of the whole show a second time
             for the same list. */
@@ -1319,8 +1319,12 @@ namespace
 
         if (overlaps != 0)
         {
+            /*  NOT "slot overlaps" any more: the same analysis now reports
+                direct outs as well, and a count that named one kind while
+                counting two would send somebody looking in the wrong place.
+                The sentences above say which each one is. */
             std::cout << what << " is valid, with " << overlaps
-                      << (overlaps == 1 ? " slot overlap" : " slot overlaps")
+                      << (overlaps == 1 ? " overlap" : " overlaps")
                       << " reported above" << std::endl;
             return 0;
         }

@@ -47,6 +47,7 @@
 #include <vector>
 
 #include <wfg/client/model/Ranges.h>
+#include <wfg/client/model/Sends.h>
 
 namespace wfg::tree { class TreeSnapshot; }
 
@@ -56,7 +57,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform };
+        enum class Kind { none, waveform, sends };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -83,6 +84,15 @@ namespace wfg::client::model
         double startOffset = 0.0;
 
         std::vector<RangeRow> ranges;
+
+        /*  THE MIX CHANNELS AND WHAT THIS CUE SENDS INTO THEM, filled only
+            when the sends are what is open. `cueLevel` is the cue's own
+            `media/level`, which the mixer draws as its master strip: it is not
+            a fourth kind of number, it is the same one the inspector shows and
+            the same one a fade drives, and putting it at the left of the mixer
+            is what makes the picture true. */
+        std::vector<SendStrip> sends;
+        double cueLevel = 0.0;
 
         /*  Where the playhead is, when a run of this cue is sounding, and
             whether there is one at all. A cue with no run has no playhead, and

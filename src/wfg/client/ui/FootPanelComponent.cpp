@@ -57,9 +57,27 @@ namespace wfg::client::ui
             with it. A kind that is not showing holds no component, so a panel
             on a waveform is not also carrying a fader bank nobody asked for. */
         waveform.reset();
+        sends.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::sends:
+            {
+                SendMixerComponent::Actions mixing;
+                mixing.set = actions.set;
+                mixing.createSend = actions.createSend;
+                mixing.removeSend = actions.removeObject;
+                mixing.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                sends = std::make_unique<SendMixerComponent> (theme, std::move (mixing));
+                addAndMakeVisible (*sends);
+                break;
+            }
+
             case model::Subject::Kind::waveform:
             {
                 WaveformEditorComponent::Actions editing;
@@ -101,6 +119,10 @@ namespace wfg::client::ui
                 wanted = "Waveform";
                 break;
 
+            case model::Subject::Kind::sends:
+                wanted = "Send levels";
+                break;
+
             case model::Subject::Kind::none:
                 break;
         }
@@ -117,6 +139,13 @@ namespace wfg::client::ui
 
         if (waveform != nullptr)
             waveform->show (reading, std::move (media));
+
+        /*  NOT HIDDEN WHEN THERE IS NOTHING TO DRAW: the mixer says why
+            itself, as the waveform editor does. A panel that went blank would
+            leave somebody wondering whether the show has no mixes, whether
+            this cue plays nothing, or whether the window has stopped. */
+        if (sends != nullptr)
+            sends->show (reading);
     }
 
     bool FootPanelComponent::overGrip (juce::Point<int> where) const
@@ -170,6 +199,9 @@ namespace wfg::client::ui
             waveform->setRightColumn (columnWidth, columnGap);
             waveform->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
         }
+
+        if (sends != nullptr)
+            sends->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
     }
 
     void FootPanelComponent::mouseMove (const juce::MouseEvent& event)

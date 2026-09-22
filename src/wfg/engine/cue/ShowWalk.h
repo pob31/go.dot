@@ -109,7 +109,7 @@ namespace wfg::cue
                 which is the same writer. The defaults come from here now, as
                 every cue's do. */
             for (const auto* owner : { "cue", "group", "media", "range", "fade",
-                                       "stop", "feed", "insert",
+                                       "stop", "feed", "insert", "send",
                                        "bus", "processorInput", "rackChannel" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))
                     defaults[std::string (owner) + "/" + std::string (row->name)]

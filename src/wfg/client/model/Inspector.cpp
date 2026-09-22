@@ -16,6 +16,8 @@
 
 #include <wfg/client/model/Inspector.h>
 
+#include <wfg/client/model/DirectOuts.h>
+#include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -39,7 +41,8 @@ namespace wfg::client::model
         {
             static const std::map<std::string, std::vector<std::string>> table
             {
-                { "media",   { "file", "level", "startOffset" } },
+                { "media",   { "file", "channels", "stereoToMono", "directOut",
+                               "level", "startOffset" } },
                 { "fade",    { "target", "level", "curve", "points", "stopWhenDone" } },
                 { "stop",    { "target", "verb", "curve" } },
                 { "start",   { "target" } },
@@ -147,6 +150,71 @@ namespace wfg::client::model
                                   return a.name < b.name;
                               });
         }
+
+        /*  THE TWO MEDIA ROWS THAT DEPEND ON THE SHOW RATHER THAN ON THE
+            TABLE, decided after the scan because both need facts the scan has
+            to have finished gathering: how many channels the file has, and
+            which outputs the rig declares. */
+        void fitToTheRig (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                          std::vector<Field>& decided)
+        {
+            const auto channels = text (snapshot, "/godot/cue/" + cueId + "/channels");
+
+            for (auto& field : decided)
+            {
+                if (field.name == "stereoToMono")
+                {
+                    /*  A fold is a statement about a two-channel file and the
+                        engine ignores it otherwise, so the window says so
+                        rather than offering a switch that does nothing. Greyed
+                        and not hidden: an absence reads as "this program does
+                        not do that", which is the wrong thing to say. */
+                    field.applies = channels == "2";
+                    continue;
+                }
+
+                if (field.name != "directOut")
+                    continue;
+
+                field.control = Control::busRef;
+
+                /*  EMPTY IS A CHOICE AND NOT AN ABSENCE. No direct out is
+                    what every cue is until somebody picks one, and it has to
+                    be possible to go back to. */
+                field.choices.push_back ({ "", "(none)" });
+
+                /*  THE DIRECT OUTS ONLY. `bus/kind`'s own description says the
+                    word decides which menu a bus appears in: a mix channel is
+                    reached through a send, at a level, which is the whole
+                    difference between the two.
+
+                    AND EVERY ONE OF THEM, marked rather than filtered (PRD
+                    3.9b, amended 2026-09-22): an output that is busy is
+                    exactly the one somebody is deciding about, and leaving it
+                    out would remove the decision instead of informing it. */
+                const auto outputs = readOutputs (snapshot);
+                const auto marks = readOutMarks (snapshot, cueId, outputs);
+
+                std::size_t at = 0;
+
+                for (const auto& row : outputs)
+                {
+                    if (row.kind != "direct")
+                        continue;
+
+                    const auto name = row.name.empty() ? row.id : row.name;
+
+                    /*  The marks are the direct outs in the same order, so
+                        they walk in step rather than being looked up. */
+                    field.choices.push_back (
+                        { row.id, at < marks.size()
+                                    ? markedLabel (name, row.widthWord(), marks[at])
+                                    : name + " · " + row.widthWord() });
+
+                    ++at;
+                }
+            }
+        }
     }
 
     std::vector<Field> openersFor (const std::string& kind, const std::string& cueId)
@@ -211,6 +279,18 @@ namespace wfg::client::model
 
             (field.writable ? decided : reported).push_back (std::move (field));
         }
+
+        /*  WHAT THE SHOW'S OUTPUTS ARE, for the rows that point at one.
+
+            A SECOND SCAN, AND ONLY FOR A MEDIA CUE. `readOutputs` walks the
+            tree again rather than this loop gathering buses as it goes, and
+            that is a trade taken deliberately: doing it by hand here would be
+            a second copy of how a bus is read, and the two would drift the
+            first time a column was added to that row. What it costs is one
+            more linear pass when somebody clicks a media cue, against the same
+            human reaction time the comment above weighs. */
+        if (out.kind == "media")
+            fitToTheRig (snapshot, cueId, decided);
 
         //  The four blocks, in the order somebody fills them in.
         const auto kindRows = [&out]

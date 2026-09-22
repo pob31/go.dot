@@ -317,6 +317,23 @@ namespace wfg::doc
         EditResult createInsert (const std::string& cueId, const std::string& channelId,
                                  const std::string& id = {});
 
+        /*  Gives a media cue a send into one mix channel, at a level written
+            afterwards through the ordinary node path - as a route's gains are,
+            and for the same reason: one way in for values.
+
+            A DIRECT OUT IS AN ATTRIBUTE AND A SEND IS A CHILD, which is the
+            shape of the thing rather than a preference. A cue lands on one
+            direct out or none, so that is a word on the cue; it sends into as
+            many mix channels as it likes and each at its own level, so those
+            are objects, identified, and deleted by `object.delete` like every
+            other.
+
+            Fails `unknownId` when no such cue, `typeMismatch` when the cue
+            plays nothing, and `badValue` when this cue already sends into that
+            bus. */
+        EditResult createSend (const std::string& cueId, const std::string& busId,
+                               const std::string& id = {});
+
         /*  CUTS A RANGE IN TWO where the playhead is (author, 2026-09-21:
             *"even if the ranges amount to the full file, pressing the [+]
             range button will split the range where the cursor is. No split if

@@ -348,8 +348,23 @@
         <ref name="identifier"/>
       </attribute>
       <optional>
+        <attribute name="channels">
+          <a:documentation>How many channels the file has, decided when it was imported and written into the cue rather than read off the disk whenever it is wanted. The file travels between machines and may be absent tonight, and the routing below is shaped by this number - a cue whose count nobody knows cannot be pointed at an output without guessing what a guess would cost. Nought means nobody has said, which is every show written before the number existed.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">512</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="colour">
           <a:documentation>A #RRGGBB decoration. Never the sole carrier of information.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="directOut">
+          <a:documentation>The direct out this cue-s channels land on, by identifier; empty routes it nowhere by this road and is what every cue starts as. A mono cue feeds every channel of a stereo out; a cue wider than its out fails the run as bad-route rather than being quietly folded, unless stereoToMono says to fold it. Chosen among the outputs whose kind is direct - a mix channel is reached through a Send, at a level, which is the whole difference between the two.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>
@@ -418,6 +433,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="sharedOut">
+          <a:documentation>This cue is MEANT to share its direct out with another. PRD 3.9c-s -allow marking deliberate sharing-, as feed/shared already gives a processor slot: the live-range analysis is conservative by design and reports overlaps it cannot prove impossible, so this is how a designer says of one pair that they considered it. It silences that pair-s warning and NOTHING ELSE - the menu still marks the out as taken, because which outs carry sound is a fact and the warning is a complaint, and only a complaint can be answered.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="startOffset">
           <a:documentation>How far into the file playback begins. A cue that starts at the downbeat rather than at the top of the recording.</a:documentation>
           <data type="double">
@@ -425,9 +449,19 @@
           </data>
         </attribute>
       </optional>
+      <optional>
+        <attribute name="stereoToMono">
+          <a:documentation>Fold a two-channel file to one before it is routed, each side at half, so a stereo recording can play out of a mono direct out. Ignored unless channels is 2: a fold is a statement about a stereo file, and applying it to a mono or a six-channel one would mean inventing a rule nobody asked for. PRD 3.18 leaves stereo-to-mono out of the RACK classes deliberately; this is the cue output stage, where the coefficients are the cue-s own and a fold costs nothing.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
       <zeroOrMore>
         <choice>
           <ref name="Route"/>
+          <ref name="Send"/>
           <ref name="Feed"/>
           <ref name="Insert"/>
           <ref name="Range"/>
@@ -1458,6 +1492,29 @@
             <value>true</value>
             <value>false</value>
           </choice>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Send">
+    <element name="Send">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="bus">
+          <a:documentation>The mix channel this send feeds. One Send per bus per cue: a second naming the same one is refused when it is created, because two sends into one mix are a level nobody can read off a fader.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="level">
+          <a:documentation>How loud this cue arrives at that mix channel, on top of the cue-s own level - so a fade on the cue moves every send with it, which is what a designer means by fading a cue. -120 dB is silence rather than a very small number: a send at silence contributes no coefficient at all, and a track with nothing to add costs nothing to mix.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-120</param>
+            <param name="maxInclusive">12</param>
+          </data>
         </attribute>
       </optional>
     </element>

@@ -109,6 +109,13 @@ namespace wfg::client::ui
         /** What a box shows for a field: its value, or that the cues disagree. */
         static juce::String shown (const model::Field& field);
 
+        /*  Which item of a `busRef` menu stands for what the row currently
+            says, counting from one as a ComboBox does. Nought when the stored
+            identifier is in the menu nowhere - an output deleted out from
+            under a cue - which leaves the menu showing nothing rather than
+            silently picking the first one. */
+        static int idForChoice (const model::Field& field);
+
         Actions actions;
         model::Theme theme;
 

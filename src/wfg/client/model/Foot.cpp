@@ -40,7 +40,12 @@ namespace wfg::client::model
                 are not about the picked cue at all: a rack channel's plugins
                 belong to the rack. Each says so here rather than in its own
                 editor, so the rule is one list rather than a habit. */
+            /*  AND SO DO THE SENDS, for the same reason: "how much of this
+                cue goes to the reverb" is a question about whichever cue is
+                in hand, and a mixer that stayed pointed at the last one would
+                be a mixer that lies. */
             case Subject::Kind::waveform:  return true;
+            case Subject::Kind::sends:     return true;
             case Subject::Kind::none:      break;
         }
 
@@ -85,6 +90,18 @@ namespace wfg::client::model
                 out.notice = "The length of this file is not known yet - it is read when the show "
                              "opens, so a file imported in this session has none until the show is "
                              "reopened.";
+        }
+
+        if (subject.kind == Subject::Kind::sends)
+        {
+            out.cueLevel = osc::parseDouble (at (cue + "level")).value_or (0.0);
+            out.sends = readSends (snapshot, subject.objectId);
+
+            if (out.cueKind != "media")
+                out.notice = "Only a media cue has send levels.";
+            else if (out.sends.empty())
+                out.notice = "This show declares no mix channels yet - Show, Audio settings, "
+                             "Outputs, add a mix channel.";
         }
 
         /*  AND THE PLAYHEAD, from whichever run is sounding this cue. Read from

@@ -17,8 +17,16 @@
 #pragma once
 
 /*
-    Which cues can be holding the same slot at the same time, worked out by
+    Which cues can be holding the same resource at the same time, worked out by
     reading the show rather than by running it.
+
+    TWO KINDS OF RESOURCE SO FAR, and PRD §3.9c says they are one problem:
+    faders, processor slots and interface channels get ONE allocator rather than
+    three mechanisms with slightly different bugs. A `Feed` or an `Insert`
+    claims a slot; a media cue's `directOut` claims a DIRECT OUT, which is the
+    third kind arriving (2026-09-22). A mix channel is never analysed - many
+    cues arriving at one mix is what a mix is for, so nothing about it is a
+    claim.
 
     PRD §3.9c: each binding has a live range over show time, overlapping ranges
     cannot share a resource, and re-analysis on edit is what turns a reorder
@@ -45,9 +53,33 @@
     POSSIBLE overlap and can never prove impossible, and every answer it gives
     leans that way. Which is why an overlap is a warning and never a refusal
     (§3.9c: *warn, don't refuse*), why it never changes `wfg validate`'s exit
-    code, and why `shared` on either cue's `Feed` or `Insert` silences the pair
-    - that is a designer saying, permanently and in the document, that they
-    considered it.
+    code, and why `shared` on either cue's `Feed` or `Insert` - or `sharedOut`
+    on the cue, for a direct out - silences the pair: that is a designer saying,
+    permanently and in the document, that they considered it.
+
+    AND A SECOND QUESTION, WHICH NEEDS A THIRD ANSWER (2026-09-22). The menu
+    that picks a cue's direct out wants to mark each output free, taken or
+    undecided, and "overlap or nothing" cannot say the third. So every claim
+    carries TWO bounds rather than one:
+
+      - `mayLast`, where the release rules say the claim is certainly BACK. An
+        intersection of two of these is POSSIBLE.
+      - `mustLast`, where it is certainly still HELD, which is a different
+        question and a much smaller answer. An intersection of two of THESE is
+        PROVEN.
+
+    THE RELEASE ROW IS AN UPPER BOUND AND READING IT AS A LOWER ONE IS A LIE,
+    and it is worth spelling out because it looks reasonable. Three finite media
+    cues in a MANUAL group all release at the group's end, so by `mayLast` the
+    first covers the third - but the operator held the GO for forty seconds
+    during a scene change and the first finished thirty-seven seconds ago. A
+    menu saying TAKEN there is simply wrong. What actually proves a claim is
+    still live across a manual boundary is that the cue never ends on its own -
+    `Walk::unbounded`, whose own comment is the rule: *"a cue that ends on its
+    own is over by the time a later manual step is reached and one that does not
+    is still going"*. That, plus exact seconds inside a chain, is the whole of
+    what can be proven. Everything a person's GO separates is undecided, and
+    saying so is more use than picking one.
 
     WHERE A CLAIM ENDS, in rows, in the order the answers are looked for:
 
@@ -96,10 +128,19 @@ namespace wfg::doc { class ShowDocument; }
 
 namespace wfg::cue
 {
+    /** What kind of thing a claim is on. §3.9c's one allocator, two kinds so far. */
+    enum class ResourceKind { slot, directOut };
+
+    /** Whether an intersection is proven or merely possible. */
+    enum class Certainty { possible, proven };
+
     /** One claim, and how long it is live for. */
     struct SlotUse
     {
-        /** The slot claimed, by identifier. */
+        /** Which kind, because the sentence and the address differ by it. */
+        ResourceKind kind = ResourceKind::slot;
+
+        /** The resource claimed, by identifier: a Slot, a Channel, or a Bus. */
         std::string slot;
 
         /** The cue that claims it. */
@@ -117,6 +158,12 @@ namespace wfg::cue
             footer. Inclusive at both ends. */
         int firstRow = 0;
         int lastRow = 0;
+
+        /*  WHERE THE CLAIM IS CERTAINLY STILL HELD, which is `lastRow` for a
+            cue that never ends on its own and `firstRow` for every other - see
+            the header. The lower bound of the two, and the only thing rows can
+            ever prove. */
+        int mustLast = 0;
 
         /*  Either the `Feed` or the `Insert` carrying this claim is marked
             `shared`: the designer says the sharing is meant. Silences every
@@ -136,12 +183,26 @@ namespace wfg::cue
         double to = 0.0;
     };
 
-    /** Two claims on one slot whose live ranges intersect. */
+    /** Two claims on one resource whose live ranges intersect. */
     struct SlotClash
     {
+        ResourceKind kind = ResourceKind::slot;
         std::string slot;
         std::string first;
         std::string second;
+        Certainty certainty = Certainty::possible;
+    };
+
+    /*  ONE DIRECT OUT SOMETHING ELSE CAN BE ON while a given media cue plays,
+        and how sure of it the document lets anybody be. At most one per output
+        per cue: the menu has one mark per row and can name one cue, and
+        publishing every intersecting claim would be quadratic in the show -
+        a 500-cue manual list on one out is 125,000 pairs. */
+    struct OutMark
+    {
+        std::string bus;
+        std::string cue;            ///< the nearest one in the way
+        Certainty certainty = Certainty::possible;
     };
 
     //==============================================================================
@@ -174,6 +235,16 @@ namespace wfg::cue
             `/godot/slot/<id>/overlaps`. */
         std::string overlapsOf (const std::string& slotId) const;
 
+        /*  `<bus> <cue>` pairs for one media cue, for
+            `/godot/cue/<id>/outsBusy` and `/godot/cue/<id>/outsMaybe`.
+
+            The cue-side twin of `usageOf`, and NOT of `overlapsOf`: a pair
+            marked `sharedOut` is left out of the warnings and kept here,
+            because which outs carry sound is a fact and only the complaint
+            about it can be answered. */
+        std::string busyOutsOf (const std::string& cueId) const;
+        std::string maybeOutsOf (const std::string& cueId) const;
+
         /** One sentence per intersecting pair. Printed by `wfg validate`, and
             it does NOT change that verb's exit code. */
         const std::vector<std::string>& overlapWarnings() const noexcept { return overlapText; }
@@ -192,6 +263,11 @@ namespace wfg::cue
     private:
         std::vector<SlotUse> liveRanges;
         std::vector<SlotClash> intersections;
+
+        /*  One entry per enabled media cue, in document order, whether or not
+            it claims anything: the menu has to place a cue that has no direct
+            out yet, and that cue has a live range all the same. */
+        std::map<std::string, std::vector<OutMark>> marksByCue;
         std::vector<std::string> overlapText;
         std::vector<std::string> referenceText;
 

@@ -476,6 +476,7 @@ namespace
         }
 
         void setLevelDb (int, double) override {}
+        void setRouting (int, const std::vector<cue::Coefficient>&) override {}
         bool isPlaying (int track) const override  { return playing.count (track) > 0; }
         bool isArmReady (int) const override       { return armsReady; }
 
