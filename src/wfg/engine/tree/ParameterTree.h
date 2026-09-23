@@ -54,6 +54,7 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/SlotAnalysis.h>
+#include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountSender.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -267,6 +268,13 @@ namespace wfg::tree
             reads nought, its resting value, which is also the truth. */
         void setDcas (const cue::DcaTable* dcasToRead) noexcept { dcas = dcasToRead; }
 
+        /*  What each plugin of the show's set turned out to be tonight - up,
+            missing, failed, late by how much, how many parameters - for the
+            four `none` rows under /godot/plugin/<id>. The surface table's
+            shape and its reason: a replay or a tree dump loads no plugin, so
+            every entry reads unloaded, which is the truth. */
+        void setPlugins (const plugin::PluginTable* tableToRead) noexcept { pluginTable = tableToRead; }
+
         /*  How long each media file is, read once when the show was opened, for
             `/godot/cue/<id>/duration`. Keyed by the `file` the document names.
 
@@ -365,6 +373,7 @@ namespace wfg::tree
         const midi::PortTable* ports = nullptr;
         const surface::SurfaceTable* surfaces = nullptr;
         const cue::DcaTable* dcas = nullptr;
+        const plugin::PluginTable* pluginTable = nullptr;
         /*  What a test handed in, when one did. Otherwise the lengths come
             from `mediaInfo` at the top of every publish. */
         const std::map<std::string, double>* fixedDurations = nullptr;
@@ -418,6 +427,9 @@ namespace wfg::tree
             published against from the runtime half, because a trim is what a
             fader is doing tonight and the document half is a cache. */
         std::vector<std::string> declaredDcas;
+
+        /** Every plugin of the set, in document order - the chain's order. */
+        std::vector<std::string> declaredPlugins;
 
         /*  Every strip, in document order, with the two decisions its live rows
             are read against - its role, and the DCA a dca strip rides. The

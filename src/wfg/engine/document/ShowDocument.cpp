@@ -320,6 +320,9 @@ namespace wfg::doc
             `/godot/dca/<id>/trim`. */
         if (element == "Surfaces") return "surface";
         if (element == "Dcas")     return "dca";
+
+        /*  And Phase 9a's: `/godot/plugin/order` beside `/godot/plugin/<id>/name`. */
+        if (element == "Plugins")  return "plugin";
         return {};
     }
 
@@ -383,6 +386,10 @@ namespace wfg::doc
         if (element == "Strip")                     return "strip";
         if (element == "Dcas")                      return "dcas";
         if (element == "Dca")                       return "dca";
+
+        /*  PHASE 9a. The plugin set and its entries, under Audio. */
+        if (element == "Plugins")                   return "plugins";
+        if (element == "Plugin")                    return "plugin";
 
         return {};
     }
@@ -2175,6 +2182,56 @@ namespace wfg::doc
 
         return insertObject (showNode.getChildWithName ("Dcas"), endOfSequence, "Dca", id,
                              attributes);
+    }
+
+    EditResult ShowDocument::createPlugin (const std::string& name, const std::string& identifier,
+                                          const std::string& format, const std::string& path,
+                                          const std::string& id)
+    {
+        /*  ASKED HERE AS WELL AS AT THE DOOR, for createRackChannel's reason:
+            the container below is made on demand before the door is reached,
+            and a locked show must not gain an empty one from a refusal. */
+        if (auto refusal = refuseIfLocked())
+            return *refusal;
+
+        auto audio = showNode.getChildWithName ("Audio");
+
+        if (! audio.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        auto plugins = audio.getChildWithName ("Plugins");
+
+        if (! plugins.isValid())
+        {
+            /*  AT A FIXED PLACE - after the last bus, before the rack -
+                whichever container was asked for first, so the canonical
+                bytes of a show do not depend on the order two creates
+                happened in. The rack appends itself at the end; a bus made
+                afterwards lands among the buses through its own create. */
+            int at = 0;
+
+            for (int i = 0; i < audio.getNumChildren(); ++i)
+                if (audio.getChild (i).hasType ("Bus"))
+                    at = i + 1;
+
+            plugins = juce::ValueTree ("Plugins");
+            audio.addChild (plugins, at, nullptr);
+        }
+
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        attributes.push_back ({ "identifier", identifier });
+
+        if (! format.empty())
+            attributes.push_back ({ "format", format });
+
+        if (! path.empty())
+            attributes.push_back ({ "path", path });
+
+        return insertObject (plugins, endOfSequence, "Plugin", id, attributes);
     }
 
     //==============================================================================

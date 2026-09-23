@@ -529,6 +529,28 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  PHASE 9a'S PLUGIN SET (decision AE): the processors every voice
+            carries, declared once as the tracks are. All four words are
+            explicit on the record, so a replay on a machine that has never
+            scanned makes the same entry; the drawn identifier rides last. */
+        registry.add ({ "plugin.create",
+                        "Declares a plugin in the show's set: every voice carries it, switched off,"
+                        " until a cue switches it in. Name, the scan's identifier, format and path.",
+                        { { "name", 's', false }, { "identifier", 's', false },
+                          { "format", 's', false }, { "path", 's', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 4 ? args[4].getString() : std::string {};
+                            const auto edit = document.createPlugin (args[0].getString(),
+                                                                     args[1].getString(),
+                                                                     args[2].getString(),
+                                                                     args[3].getString(), id);
+
+                            return fromEdit (edit, withId (args, 4, edit.id));
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "mount.create",
                         "Declares a foreign namespace to be mounted at a prefix.",
                         { { "prefix", 's', false }, { "namespace", 's', false },

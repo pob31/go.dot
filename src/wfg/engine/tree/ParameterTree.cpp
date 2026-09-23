@@ -957,6 +957,7 @@ namespace wfg::tree
         /*  And every DCA, for its `trim` - what a fader is doing tonight, which
             the runtime half publishes. */
         std::vector<std::string> dcaOrder;
+        std::vector<std::string> pluginOrder;
 
         /*  And every strip, for what it is riding and its word. */
         std::vector<DeclaredStrip> stripOrder;
@@ -1393,6 +1394,63 @@ namespace wfg::tree
                             slotOrder.push_back (channelId);
                     }
                 }
+
+                /*  THE PLUGIN SET (Phase 9a, decision AE): the processors this
+                    show carries on every voice, in document order - which is
+                    the order of the chain. The four rows the machine fills are
+                    read off the plugin table and published from this half as a
+                    surface's `connected` is: the host that fills the table
+                    marks the tree stale when they change. The container's own
+                    rows are published whether or not the container exists, so
+                    a show with no set reads an empty order rather than nothing. */
+                {
+                    const auto plugins = container.getChildWithName ("Plugins");
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("plugins"))
+                    {
+                        const auto name = std::string (row->name);
+                        const auto text = name == "order" && plugins.isValid()
+                                            ? orderOf (plugins, "Plugin") : std::string {};
+
+                        nodes.push_back (makeLeaf (std::string (godot) + "/plugin/" + name, *row, text));
+                    }
+
+                    if (plugins.isValid())
+                    {
+                        for (const auto& entry : plugins)
+                        {
+                            if (entry.getType().toString() != "Plugin")
+                                continue;
+
+                            const auto id = entry[idProperty].toString().toStdString();
+
+                            if (id.empty())
+                                continue;
+
+                            const auto base = std::string (godot) + "/plugin/" + id;
+                            const auto status = pluginTable != nullptr ? pluginTable->statusOf (id)
+                                                                       : plugin::PluginTable::Status {};
+
+                            for (const auto* row : doc::Schema::rowsForOwner ("plugin"))
+                            {
+                                const doc::Attribute attribute { "Plugin", row };
+                                const auto name = std::string (row->name);
+
+                                std::string text;
+
+                                if (name == "state")               text = status.state;
+                                else if (name == "problem")        text = status.problem;
+                                else if (name == "latencySamples") text = std::to_string (status.latencySamples);
+                                else if (name == "paramCount")     text = std::to_string (status.paramCount);
+                                else                               text = storedText (attribute, entry);
+
+                                nodes.push_back (makeLeaf (base + "/" + name, *row, text));
+                            }
+
+                            pluginOrder.push_back (id);
+                        }
+                    }
+                }
             }
         }
 
@@ -1430,6 +1488,7 @@ namespace wfg::tree
         declaredMedia = std::move (mediaOrder);
         declaredLists = std::move (listOrder);
         declaredDcas = std::move (dcaOrder);
+        declaredPlugins = std::move (pluginOrder);
         declaredStrips = std::move (stripOrder);
 
         //----------------------------------------------------------------------
@@ -2233,10 +2292,17 @@ namespace wfg::tree
                 publish under it - a DCA's name from the show, its trim from
                 the fader - and whichever minted the container would decide
                 what `find` answered for it. */
-            std::string (godot) + "/dca" };
+            std::string (godot) + "/dca",
+
+            /*  `/godot/plugin` for the same reason: the set's rows from the
+                show, and later the catalogue and the known list beside them. */
+            std::string (godot) + "/plugin" };
 
         for (const auto& id : declaredDcas)
             ownedByTheDocument.push_back (std::string (godot) + "/dca/" + id);
+
+        for (const auto& id : declaredPlugins)
+            ownedByTheDocument.push_back (std::string (godot) + "/plugin/" + id);
 
         for (const auto& id : declaredLists)
             ownedByTheDocument.push_back (std::string (godot) + "/list/" + id);

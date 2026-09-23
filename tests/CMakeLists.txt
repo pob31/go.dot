@@ -96,6 +96,7 @@ add_executable(wfg_tests
     SlotTests.cpp
     MidiTests.cpp
     SurfaceTests.cpp
+    PluginSetTests.cpp
     McuCodecTests.cpp
     DcaTests.cpp
     SamplerTests.cpp
@@ -451,6 +452,17 @@ add_test(NAME wfg.replay.eq.C
 add_test(NAME wfg.replay.eq.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/eq.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/eq
+                 --wfg-locale=${WFG_LOCALE_FR})
+# PHASE 9a'S PLUGIN SET AS RECORDS: an entry declared with its four words and
+# its drawn identifier, renamed, deleted and the delete undone - the set made
+# on demand under Audio, reproduced exactly under both locales (§17.9).
+add_test(NAME wfg.replay.plugins.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/plugins.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fx
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.plugins.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/plugins.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fx
                  --wfg-locale=${WFG_LOCALE_FR})
 add_test(NAME wfg.replay.group-fade.C
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/group-fade.wfglog"

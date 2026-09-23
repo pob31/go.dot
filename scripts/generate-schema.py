@@ -94,7 +94,12 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # /godot/slot/<id> and carries `slot` rows beside its own; a
                 # DCA is a trim cues and groups are marked with (PRD 3.28).
                 # `surfaces` and `dcas` are CONTAINER tokens like `lists`.
-                "surfaces", "surface", "strip", "dcas", "dca")
+                "surfaces", "surface", "strip", "dcas", "dca",
+                # Phase 9a (2026-09-23, decision AE). The show's PLUGIN SET:
+                # the processors every voice carries, declared once as the
+                # tracks are. `plugins` is a CONTAINER token like `dcas`,
+                # addressed /godot/plugin/order beside /godot/plugin/<id>.
+                "plugins", "plugin")
 
 VALUE_TYPES = {
     "s": "string",

@@ -291,7 +291,7 @@ namespace wfg::doc
                     an identifier, a name and two port numbers, and an
                     attribute cannot grow children. */
                 { "Network", false, {},                    { "network" } },
-                { "Audio",  false, { "Bus", "Rack" },      { "audio" } },
+                { "Audio",  false, { "Bus", "Rack", "Plugins" }, { "audio" } },
                 { "Bus",    true,  {},                     { "bus" } },
 
                 /*  PHASE 4'S SLOTS (PRD §3.9e). A slot is one position in a
@@ -355,6 +355,17 @@ namespace wfg::doc
                     no more an audio object than a group is. */
                 { "Dcas",     false, { "Dca" },            { "dcas" } },
                 { "Dca",      true,  {},                   { "dca" } },
+
+                /*  PHASE 9a'S PLUGIN SET (PRD §3.18, decision AE, 2026-09-23):
+                    the processors every voice carries, declared once under
+                    Audio as the tracks are, in the order of the chain. Made
+                    on demand by the first plugin.create, at a fixed place
+                    after the buses, so no fixture gains a line and the
+                    canonical bytes do not depend on which container was
+                    asked for first. `Plugins` carries `plugins` for its
+                    `order`, as `Dcas` carries `dcas`. */
+                { "Plugins",  false, { "Plugin" },         { "plugins" } },
+                { "Plugin",   true,  {},                   { "plugin" } },
             };
 
             return table;

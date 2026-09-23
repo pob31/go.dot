@@ -394,6 +394,16 @@ namespace wfg::doc
         /** A DCA (PRD §3.28), at the end of the show's DCAs. */
         EditResult createDca (const std::string& name, const std::string& id = {});
 
+        /*  PHASE 9a: an entry in the show's plugin set - name, the scan's
+            identifier, format and path, all four explicit so a replay on a
+            machine that has never scanned needs no known list. <Plugins> is
+            made on demand under <Audio>, after the last <Bus> and before
+            <Rack>, so the canonical bytes do not depend on which of the two
+            containers was asked for first. */
+        EditResult createPlugin (const std::string& name, const std::string& identifier,
+                                 const std::string& format, const std::string& path,
+                                 const std::string& id = {});
+
         /** How many strips a fresh surface of this profile is made with, or
             -1 for a word that is not a profile. */
         static int stripsForProfile (std::string_view profile);

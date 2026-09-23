@@ -1723,6 +1723,9 @@
         <optional>
           <ref name="Rack"/>
         </optional>
+        <optional>
+          <ref name="Plugins"/>
+        </optional>
         <zeroOrMore>
           <ref name="Bus"/>
         </zeroOrMore>
@@ -2063,6 +2066,56 @@
       <optional>
         <attribute name="shortName">
           <a:documentation>The name for a seven-character scribble strip, written by somebody rather than cut by the machine (PRD 3.16). Empty, a display cuts the name to its width.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Plugins">
+    <element name="Plugins">
+      <zeroOrMore>
+        <ref name="Plugin"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Plugin">
+    <element name="Plugin">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="format">
+          <a:documentation>Which kind of plugin it is, from the scan. LV2 is listed and not built (Phase 9b).</a:documentation>
+          <choice>
+            <value>VST3</value>
+            <value>AU</value>
+            <value>LV2</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="identifier">
+          <a:documentation>The plugin as the machine knows it: the identifier string of JUCE from the scan, fixed at creation and written only by plugin.create. What this show needs; whether the machine of tonight has it is state.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the plugin is called on screen and on a scribble strip - the name the scan gave when it was added, editable since two instances of one plugin in a set want telling apart.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="path">
+          <a:documentation>Where the file was on the machine it was added from. A fact about that machine kept for the operator who has to find it on another; the identifier is what a load resolves by.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="preset">
+          <a:documentation>The preset the plugin is put into when the show opens: a .vstpreset file under the plugins/ folder of the bundle, by name, or empty for the own defaults of the plugin. Applied once per instance in the child; the own values of a cue sit on top of it, so a parameter a cue does not mention rests at the value of this preset. A file and not the bytes, for the reason media/file is.</a:documentation>
           <data type="string"/>
         </attribute>
       </optional>

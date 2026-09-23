@@ -1,0 +1,21 @@
+<Show>
+  <Lists>
+    <List id="FX000001" name="Sound">
+      <Media id="FX000002" file="tone.wav" name="Steady" number="1">
+        <Route id="FX000003" bus="FX000004" gains="1 0 0 1"/>
+      </Media>
+      <Cue id="FX000005" name="Clear" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="1">
+    <Bus id="FX000004" name="Main L/R" width="2"/>
+    <Plugins>
+      <Plugin id="FX000006" format="VST3" identifier="godot:test-gain" name="Test gain"/>
+    </Plugins>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>
