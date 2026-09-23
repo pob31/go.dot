@@ -98,6 +98,7 @@ add_executable(wfg_tests
     SurfaceTests.cpp
     PluginSetTests.cpp
     PluginCatalogueTests.cpp
+    ProxyTests.cpp
     McuCodecTests.cpp
     DcaTests.cpp
     SamplerTests.cpp

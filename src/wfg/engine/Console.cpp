@@ -26,7 +26,10 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/PluginCommands.h>
+#include <wfg/engine/plugin/PluginHostChild.h>
 #include <wfg/engine/plugin/PluginScan.h>
+#include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/midi/MidiInputs.h>
 #include <wfg/engine/midi/MidiSender.h>
@@ -271,6 +274,11 @@ namespace
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+        /*  The sandbox's two records, with no host to restart: a replay and a
+            listing apply them to a table of their own (Phase 9a). */
+        wfg::plugin::PluginTable pluginTable;
+        wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, {});
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
@@ -535,6 +543,11 @@ namespace
             has to replay on a laptop with no show open. */
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+        /*  The sandbox's two records, with no host to restart: a replay and a
+            listing apply them to a table of their own (Phase 9a). */
+        wfg::plugin::PluginTable pluginTable;
+        wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, {});
 
         /*  The mounts, and deliberately no sender. A network cue replayed
             reaches the same tree it reached live and puts nothing on any wire -
@@ -1125,6 +1138,11 @@ namespace
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+        /*  The sandbox's two records, with no host to restart: a replay and a
+            listing apply them to a table of their own (Phase 9a). */
+        wfg::plugin::PluginTable pluginTable;
+        wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, {});
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
@@ -1695,6 +1713,9 @@ namespace
             show is reloaded (`no-slot`). */
         int slots = 1;
 
+        /** The show's plugin set, in document order (Phase 9a). */
+        std::vector<wfg::audio::PluginSpec> plugins;
+
         std::string problem;
     };
 
@@ -1796,6 +1817,22 @@ namespace
             shape.outputs = std::max (shape.outputs, first + width);
         }
 
+        /*  THE SET (Phase 9a, decision AE): every Plugin under Audio/Plugins in
+            document order, which is the chain's order on every voice. The
+            preset is the row's word here; serve resolves it under the bundle. */
+        for (const auto plugins : audio)
+            if (plugins.hasType ("Plugins"))
+                for (const auto entry : plugins)
+                    if (entry.hasType ("Plugin"))
+                    {
+                        wfg::audio::PluginSpec plugin;
+                        plugin.id = entry["id"].toString().toStdString();
+                        plugin.identifier = entry["identifier"].toString().toStdString();
+                        plugin.name = entry["name"].toString().toStdString();
+                        plugin.presetPath = entry["preset"].toString().toStdString();
+                        shape.plugins.push_back (std::move (plugin));
+                    }
+
         if (shape.tracks > 0 && shape.outputs <= 0)
         {
             shape.problem = "the show has audio tracks and no buses, so there is"
@@ -1823,6 +1860,7 @@ namespace
         request.edit.tracks = shape.tracks;
         request.edit.channelsPerTrack = shape.channelsPerTrack;
         request.edit.slots = shape.slots;
+        request.edit.plugins = shape.plugins;
         wfg::audio::readPatch (settings.inputPatch, request.inputPatch);
         wfg::audio::readPatch (settings.outputPatch, request.outputPatch);
         request.logicalOutputs = std::max (shape.outputs, static_cast<int> (request.outputPatch.size()));
@@ -1927,6 +1965,12 @@ namespace
         auto blockSize = args.containsOption ("--buffer")
                             ? args.getValueForOption ("--buffer").getIntValue() : 256;
         const auto hosted = args.containsOption ("--hosted");
+
+        /*  The proxies' spin limit, for a measurement (M31); nought is the
+            rule - the smaller of 250 µs and a quarter of the block. */
+        const auto proxyDeadlineUs = args.containsOption ("--proxy-deadline-us")
+                                       ? args.getValueForOption ("--proxy-deadline-us").getLargeIntValue()
+                                       : static_cast<juce::int64> (0);
 
         /*  `--window`: the compiled client, in this process (namespace draft
             §14.16). OFF BY DEFAULT, and that is the design rather than a
@@ -2296,6 +2340,47 @@ namespace
 
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
+
+        /*  THE SANDBOX'S TABLE AND ITS TWO COMMANDS (Phase 9a, §17.3). The
+            restart reaches the audio host once there is one - the hook is
+            filled in where the graph is built - and answers with a sentence
+            until then. What the proxies need from outside is gathered here
+            too, and handed to whichever driver builds the graph. */
+        wfg::plugin::PluginTable pluginTable;
+        std::function<bool (const std::string&, std::string&)> restartPlugin;
+
+        {
+            wfg::plugin::PluginCommandHooks hooks;
+            hooks.restart = [&restartPlugin] (const std::string& id, std::string& problem)
+            {
+                if (restartPlugin)
+                    return restartPlugin (id, problem);
+
+                problem = "no audio graph holds the plugin tonight";
+                return false;
+            };
+            hooks.knows = [&document] (const std::string& id)
+            {
+                const auto plugins = document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+
+                for (const auto& entry : plugins)
+                    if (entry.hasType ("Plugin") && entry["id"].toString().toStdString() == id)
+                        return true;
+
+                return false;
+            };
+            wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
+        }
+
+        wfg::audio::ProxyServices proxyServices;
+        proxyServices.table = &pluginTable;
+        proxyServices.onFailed = [&engine] (const std::string& id, const std::string& problem)
+        {
+            /*  ONE record per failure, never per miss: the queue is finite
+                and a miss is a number, not an event. */
+            engine.submit (wfg::origin::engine, "plugin.failed",
+                           { wfg::osc::Value::string (id), wfg::osc::Value::string (problem) });
+        };
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
@@ -2431,6 +2516,17 @@ namespace
             if (args.containsOption ("--buffer")) activeDeviceRequest.blockSize = blockSize;
             deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
                 engineCacheFolder().getFullPathName().toStdString());
+            deviceDriver->host().setProxyServices (proxyServices);
+            restartPlugin = [&deviceDriver] (const std::string& id, std::string& problem)
+            {
+                if (deviceDriver == nullptr)
+                {
+                    problem = "no audio interface is open tonight";
+                    return false;
+                }
+
+                return deviceDriver->host().restartProxy (id, problem);
+            };
             if (! deviceDriver->open (activeDeviceRequest))
             {
                 const auto error = deviceDriver->lastError();
@@ -2617,6 +2713,7 @@ namespace
                               wfg::midi::MidiSender::availableDevices());
         parameters.setMidiPorts (&midiPorts);
         parameters.setDcas (&dcas);
+        parameters.setPlugins (&pluginTable);
 
         /*  WHAT THIS MACHINE KNOWS OF THE PLUGINS THE SHOW DECLARES (Phase 9a,
             §17.7): the catalogue cache, one file per identifier under the
@@ -3169,6 +3266,18 @@ namespace
             wfg::audio::EditSpec spec;
             spec.tracks = shape.tracks;
             spec.slots = shape.slots;
+            spec.plugins = shape.plugins;
+            spec.proxyDeadlineMicroseconds = static_cast<std::int64_t> (proxyDeadlineUs);
+
+            /*  A preset is a file under the bundle's plugins/ folder, by name
+                (§17.7); the child gets the path. */
+            for (auto& plugin : spec.plugins)
+                if (! plugin.presetPath.empty())
+                    plugin.presetPath = target.getChildFile ("plugins")
+                                            .getChildFile (juce::String (plugin.presetPath))
+                                            .getFullPathName().toStdString();
+
+            driver->host().setProxyServices (proxyServices);
 
             if (! driver->host().buildEdit (spec))
             {
@@ -3221,6 +3330,22 @@ namespace
             player = std::make_unique<wfg::audio::HostPlayer> (driver->host(), engine);
             runner.setPlayer (player.get());
             runner.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
+
+            /*  And the restart, now there is a graph to restart in. */
+            restartPlugin = [&driver] (const std::string& id, std::string& problem)
+            {
+                return driver->host().restartProxy (id, problem);
+            };
+
+            for (std::size_t slot = 0; slot < spec.plugins.size(); ++slot)
+            {
+                const auto& plugin = spec.plugins[slot];
+                const auto* proxy = driver->host().proxy (static_cast<int> (slot));
+
+                std::cout << "wfg: plugin " << plugin.name << " (" << plugin.id << ") hosted as "
+                          << plugin.identifier << " on " << shape.tracks << " voices, child pid "
+                          << (proxy != nullptr ? proxy->childPid() : 0) << std::endl;
+            }
 
             state.launchLatencyTicks = runner.latencyTicks();
 
@@ -3701,6 +3826,7 @@ namespace
                 if (! deviceDriver)
                     deviceDriver = std::make_unique<wfg::audio::DeviceAudioDriver> (
                         engineCacheFolder().getFullPathName().toStdString());
+                deviceDriver->host().setProxyServices (proxyServices);
                 if (! shape.problem.empty()) error = shape.problem;
                 else if (! deviceDriver->open (wanted)) error = deviceDriver->lastError();
                 else if (! wfg::TickClock::create (deviceDriver->settings().sampleRate))
@@ -4066,6 +4192,12 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
     if (wfg::plugin::runScanChildIfAsked (argc, argv))
         return 0;
 
+    /*  AND THE PLUGIN HOST CHILD (Phase 9a, §17.6): `wfg plugin-host …` is
+        one plugin's sandbox and nothing else, dispatched before the locale
+        and the verbs for the same reason. */
+    if (int childExit = 0; wfg::plugin::runPluginHostIfAsked (argc, argv, childExit))
+        return childExit;
+
     if (const auto localeFailure = applyLocaleAndStrip (argc, argv); localeFailure != 0)
         return localeFailure;
 
@@ -4179,7 +4311,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       } });
 
     app.addCommand ({ "serve",
-                      "serve <bundle> --sample-rate=N --buffer=N"
+                      "serve <bundle> --sample-rate=N --buffer=N [--proxy-deadline-us=N]"
                       " [--hosted [--render=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"

@@ -19,6 +19,7 @@
 
 #include <wfg/engine/audio/CueOutputPlugin.h>
 #include <wfg/engine/audio/EqPlugin.h>
+#include <wfg/engine/audio/ProxyPlugin.h>
 #include <wfg/engine/clock/AudioClockSource.h>
 
 /*  juce_core and juce_events are named directly even though tracktion_engine.h
@@ -209,6 +210,7 @@ namespace wfg::audio
                 PluginManager::initialise has already run inside it. */
             engine->getPluginManager().createBuiltInType<CueOutputPlugin>();
             engine->getPluginManager().createBuiltInType<EqPlugin>();
+            engine->getPluginManager().createBuiltInType<ProxyPlugin>();
 
             auto& hosted = engine->getDeviceManager().getHostedAudioDeviceInterface();
 
@@ -261,6 +263,12 @@ namespace wfg::audio
                 return false;
             }
 
+            /*  THE PROXIES FIRST, before the Edit whose plugins hold the lanes
+                they are bound to: a host unbinds its lanes as it goes. */
+            proxies.clear();
+            lanes.clear();
+            proxySlots = 0;
+
             edit.reset();
             matrices.clear();
             eqs.clear();
@@ -298,6 +306,7 @@ namespace wfg::audio
             options.defaultMasterVolumedB = 0.0f;
 
             edit = te::Edit::createEdit (std::move (options));
+            proxySlots = static_cast<int> (spec.plugins.size());
 
             if (edit == nullptr)
             {
@@ -392,11 +401,36 @@ namespace wfg::audio
                     error = "the EQ plugin would not insert";
                     edit.reset();
                     matrices.clear();
+                    lanes.clear();
                     eqs.clear();
                     return false;
                 }
 
                 eqs.push_back (&eqStage->eq());
+
+                /*  THE SET'S PROXIES, between the EQ and the output stage, in
+                    plugins/order (Phase 9a, decisions AE and AF): one per entry
+                    on every voice, unbound - and so untouched passthrough -
+                    until its host has made the region and bound it. */
+                for (int slot = 0; slot < proxySlots; ++slot)
+                {
+                    auto proxyPlugin = track->pluginList.insertPlugin (
+                        ProxyPlugin::create (spec.channelsPerTrack, slot), -1);
+
+                    auto* proxy = dynamic_cast<ProxyPlugin*> (proxyPlugin.get());
+
+                    if (proxy == nullptr)
+                    {
+                        error = "the plugin proxy would not insert";
+                        lanes.clear();
+                        edit.reset();
+                        matrices.clear();
+                        eqs.clear();
+                        return false;
+                    }
+
+                    lanes.push_back (&proxy->lane());
+                }
 
                 auto plugin = track->pluginList.insertPlugin (
                     CueOutputPlugin::create (spec.channelsPerTrack, current.outputChannels), -1);
@@ -408,6 +442,7 @@ namespace wfg::audio
                     error = "the cue output plugin would not insert";
                     edit.reset();
                     matrices.clear();
+                    lanes.clear();
                     eqs.clear();
                     return false;
                 }
@@ -449,6 +484,7 @@ namespace wfg::audio
                         " be built at a fallback rate nobody asked for";
                 edit.reset();
                 matrices.clear();
+                lanes.clear();
                 eqs.clear();
                 return false;
             }
@@ -482,6 +518,7 @@ namespace wfg::audio
                 {
                     error = "the Edit's tempo does not make one beat one second, so every"
                             " launch would be placed at the wrong distance";
+                    lanes.clear();
                     edit.reset();
                     matrices.clear();
                     plugins.clear();
@@ -517,12 +554,78 @@ namespace wfg::audio
             anchorSample.store (0, std::memory_order_relaxed);
             referenceSkew.store (0, std::memory_order_relaxed);
 
+            /*  THE CHILDREN, beside the transport that already plays (§17.6):
+                one host per entry, handed every voice's lane for its slot.
+                Here, on the message thread, and never on the GO path; a child
+                that will not start is a failed entry in the table, not a
+                failed show. */
+            startProxies (spec);
+
             error.clear();
             return true;
         }
 
+        void startProxies (const EditSpec& spec)
+        {
+            proxies.clear();
+
+            /*  No voices, nothing to host: the entries stay `unloaded`, which
+                is the truth about a show with plugins and no tracks. */
+            if (matrices.empty())
+                return;
+
+            const auto voices = static_cast<int> (matrices.size());
+
+            for (int slot = 0; slot < proxySlots; ++slot)
+            {
+                const auto& entry = spec.plugins[static_cast<std::size_t> (slot)];
+
+                plugin::ProxySpec proxySpec;
+                proxySpec.pluginId = entry.id;
+                proxySpec.identifier = entry.identifier;
+                proxySpec.name = entry.name;
+                proxySpec.presetPath = entry.presetPath;
+                proxySpec.lanes = voices;
+                proxySpec.channels = editChannels;
+                proxySpec.maxSamples = current.blockSize;
+                proxySpec.sampleRate = current.sampleRate;
+                proxySpec.deadlineMicroseconds = spec.proxyDeadlineMicroseconds;
+                proxySpec.regionFolder = storageFolder.getChildFile ("proxy").getFullPathName().toStdString();
+                proxySpec.launch = services.launch;
+
+                std::vector<plugin::ProxyLane*> slotLanes;
+                slotLanes.reserve (static_cast<std::size_t> (voices));
+
+                for (int track = 0; track < voices; ++track)
+                    slotLanes.push_back (lanes[static_cast<std::size_t> (track * proxySlots + slot)]);
+
+                auto host = std::make_unique<plugin::ProxyHost> (std::move (proxySpec), std::move (slotLanes),
+                                                                 services.table);
+
+                if (services.onFailed)
+                    host->onFailed (services.onFailed);
+
+                if (services.onChanged)
+                    host->onChanged (services.onChanged);
+
+                /*  Started only when somebody gave the host a table to write:
+                    a test rig with no services builds the graph and no child. */
+                if (services.table != nullptr)
+                {
+                    std::string problem;
+                    host->start (problem);
+                }
+
+                proxies.push_back (std::move (host));
+            }
+        }
+
         void stop()
         {
+            proxies.clear();
+            lanes.clear();
+            proxySlots = 0;
+
             edit.reset();
             matrices.clear();
             eqs.clear();
@@ -1387,6 +1490,15 @@ namespace wfg::audio
         std::vector<CueEq*> eqs;
         std::vector<CueOutputPlugin*> plugins;
 
+        /*  THE SANDBOX'S HALF (Phase 9a): every voice's lane for every set
+            entry, flat and track-major as the handles are, so the tick
+            thread reaches one with a multiply; and the hosts, one per entry,
+            destroyed before the Edit because the lanes live in it. */
+        std::vector<plugin::ProxyLane*> lanes;
+        int proxySlots = 0;
+        std::vector<std::unique_ptr<plugin::ProxyHost>> proxies;
+        ProxyServices services;
+
         /*  RESOLVED ONCE, AT BUILD, because reaching them is not free. Every
             path to a clip goes through getAudioTracks(), which unconditionally
             does ensureStorageAllocated(32), and getClipSlots(), which returns a
@@ -1546,6 +1658,75 @@ namespace wfg::audio
             eq->set (settings);
             eq->reset();
         }
+    }
+
+    //==============================================================================
+    void AudioHost::setProxyServices (ProxyServices services)
+    {
+        impl->services = std::move (services);
+    }
+
+    int AudioHost::proxyCount() const noexcept
+    {
+        return impl->proxySlots;
+    }
+
+    plugin::ProxyHost* AudioHost::proxy (int slot) noexcept
+    {
+        if (slot < 0 || slot >= static_cast<int> (impl->proxies.size()))
+            return nullptr;
+
+        return impl->proxies[static_cast<std::size_t> (slot)].get();
+    }
+
+    plugin::ProxyLane* AudioHost::proxyLane (int trackIndex, int slot) noexcept
+    {
+        if (trackIndex < 0 || slot < 0 || slot >= impl->proxySlots)
+            return nullptr;
+
+        const auto index = static_cast<std::size_t> (trackIndex) * static_cast<std::size_t> (impl->proxySlots)
+                             + static_cast<std::size_t> (slot);
+
+        return index < impl->lanes.size() ? impl->lanes[index] : nullptr;
+    }
+
+    void AudioHost::setTrackFxEnabled (int trackIndex, int slot, bool enabled) noexcept
+    {
+        if (auto* lane = proxyLane (trackIndex, slot))
+            lane->setEnabled (enabled);
+    }
+
+    void AudioHost::setTrackFxParameter (int trackIndex, int slot, int parameter, float normalised) noexcept
+    {
+        if (auto* lane = proxyLane (trackIndex, slot))
+            lane->setParameter (parameter, normalised);
+    }
+
+    void AudioHost::snapTrackFx (int trackIndex, int slot, bool enabled,
+                                 const std::vector<std::pair<int, float>>& values) noexcept
+    {
+        if (auto* lane = proxyLane (trackIndex, slot))
+        {
+            lane->setValues (values);
+            lane->setEnabled (enabled);
+            lane->requestReset();
+        }
+    }
+
+    void AudioHost::pollProxies()
+    {
+        for (auto& proxy : impl->proxies)
+            proxy->poll();
+    }
+
+    bool AudioHost::restartProxy (const std::string& pluginId, std::string& problem)
+    {
+        for (auto& proxy : impl->proxies)
+            if (proxy->pluginId() == pluginId)
+                return proxy->restart (problem);
+
+        problem = "no plugin of the set has the id " + pluginId + " in this graph";
+        return false;
     }
 
     AudioHost::NodeIdReport AudioHost::inspectNodeIds() const  { return impl->inspectNodeIds(); }

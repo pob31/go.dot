@@ -496,6 +496,11 @@ namespace wfg::tree
         std::shared_ptr<const std::vector<Node>> mountPart;
         std::uint64_t mountRevision = 0;
 
+        /*  The plugin table's revision the document half was built from: the
+            proxy host writes that table on the message thread, which must not
+            mark the tree stale, so the tree asks instead (Phase 9a). */
+        std::uint64_t pluginRevision = 0;
+
         /*  How many times the mounted half has actually been rebuilt.
 
             PUBLISHED SO THE SPLIT CAN BE ASSERTED RATHER THAN TIMED. M9's

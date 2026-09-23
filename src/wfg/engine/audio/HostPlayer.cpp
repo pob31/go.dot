@@ -133,6 +133,10 @@ namespace wfg::audio
     void HostPlayer::timerCallback()
     {
         serviceArms();
+
+        /*  And the sandbox's judgement, on the same ten milliseconds: whether
+            each child is up, answering, or to be marked failed (Phase 9a). */
+        audioHost.pollProxies();
     }
 
     //==============================================================================

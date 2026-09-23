@@ -124,6 +124,16 @@ add_library(wfg_engine STATIC
     wfg/engine/plugin/Catalogue.cpp
     wfg/engine/plugin/PluginScan.h
     wfg/engine/plugin/PluginScan.cpp
+    wfg/engine/plugin/ProcessUtil.h
+    wfg/engine/plugin/SharedRegion.h
+    wfg/engine/plugin/ProxyLane.h
+    wfg/engine/plugin/ProxyLane.cpp
+    wfg/engine/plugin/ProxyHost.h
+    wfg/engine/plugin/ProxyHost.cpp
+    wfg/engine/plugin/PluginHostChild.h
+    wfg/engine/plugin/PluginHostChild.cpp
+    wfg/engine/plugin/PluginCommands.h
+    wfg/engine/plugin/PluginCommands.cpp
     wfg/engine/audio/AudioCommands.h
     wfg/engine/audio/AudioCommands.cpp
     wfg/engine/audio/AudioHost.h
@@ -136,6 +146,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/CueEq.cpp
     wfg/engine/audio/EqPlugin.h
     wfg/engine/audio/EqPlugin.cpp
+    wfg/engine/audio/ProxyPlugin.h
+    wfg/engine/audio/ProxyPlugin.cpp
     wfg/engine/audio/DeviceLayer.h
     wfg/engine/audio/DeviceLayer.cpp
     wfg/engine/audio/MediaInfo.h

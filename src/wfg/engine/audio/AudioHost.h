@@ -18,6 +18,9 @@
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/EqSettings.h>
 #include <wfg/engine/plugin/PluginScan.h>
+#include <wfg/engine/plugin/PluginTable.h>
+#include <wfg/engine/plugin/ProxyHost.h>
+#include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/clock/SampleClock.h>
 
 #include <array>
@@ -65,6 +68,29 @@ namespace wfg::audio
         int inputChannels = 0;
     };
 
+    /** One plugin of the show's set, as the document declares it (Phase 9a). */
+    struct PluginSpec
+    {
+        std::string id;
+        std::string identifier;
+        std::string name;
+
+        /** A preset file, resolved under the bundle, or empty. */
+        std::string presetPath;
+    };
+
+    /*  What the proxies need from outside the host (Phase 9a, §17.6): the
+        table their state is written to, how to launch a child, and who hears
+        of a failure. Set before buildEdit; a host with none builds its proxies
+        and starts no child, and every entry stays `unloaded`. */
+    struct ProxyServices
+    {
+        plugin::PluginTable* table = nullptr;
+        plugin::ProxyLaunch launch;
+        std::function<void (const std::string& pluginId, const std::string& problem)> onFailed;
+        std::function<void()> onChanged;
+    };
+
     /** The shape of the show's audio, read out of the document's <Audio>. */
     struct EditSpec
     {
@@ -88,6 +114,14 @@ namespace wfg::audio
             One is the Phase 2 shape and stays the default: a cue with no ranges
             plays as it always has. */
         int slots = 1;
+
+        /*  THE SHOW'S PLUGIN SET, in `plugins/order` (Phase 9a, decision AE):
+            one proxy per entry on every voice, between the EQ and the output
+            stage, fixed with the graph like everything else here. */
+        std::vector<PluginSpec> plugins;
+
+        /** The proxies' spin limit; nought means the rule (§17.6). */
+        std::int64_t proxyDeadlineMicroseconds = 0;
     };
 
     /*  Somewhere for a block to go once the graph has produced it.
@@ -465,6 +499,41 @@ namespace wfg::audio
             cleared at the next block, while the voice is silent. Message
             thread, beside setTrackRouting. */
         void snapTrackEq (int trackIndex, const EqSettings& settings) noexcept;
+
+        //======================================================================
+        /*  THE SANDBOX (Phase 9a, §17.6). One proxy per set entry on every
+            voice, one child process per entry; the host owns both, because
+            the lanes live in the Edit and the children must be gone before
+            it is. */
+
+        /** Before buildEdit. */
+        void setProxyServices (ProxyServices services);
+
+        /** How many entries the graph was built with. */
+        int proxyCount() const noexcept;
+
+        /** The entry's host, or null for an index no entry answers to. */
+        plugin::ProxyHost* proxy (int slot) noexcept;
+
+        /** A voice's lane for an entry, or null. Any thread. */
+        plugin::ProxyLane* proxyLane (int trackIndex, int slot) noexcept;
+
+        /*  The tick thread, on an edit to a sounding cue: the cue's switch
+            for one entry, and one value. Atomics, nothing else. */
+        void setTrackFxEnabled (int trackIndex, int slot, bool enabled) noexcept;
+        void setTrackFxParameter (int trackIndex, int slot, int parameter, float normalised) noexcept;
+
+        /*  An arm: the cue's switch and every value for one entry, and the
+            instance reset before its next block. Message thread, beside
+            snapTrackEq. */
+        void snapTrackFx (int trackIndex, int slot, bool enabled,
+                          const std::vector<std::pair<int, float>>& values) noexcept;
+
+        /** Message thread, every ten milliseconds: HostPlayer's timer. */
+        void pollProxies();
+
+        /** `plugin.restart`: false with a sentence for an id not in the set. */
+        bool restartProxy (const std::string& pluginId, std::string& problem);
 
         /*  The loudest sample the track's output plugin saw arriving and
             leaving, since the last reset.

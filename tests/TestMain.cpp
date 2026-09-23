@@ -34,6 +34,8 @@
 
 #include "TestSupport.h"
 
+#include <wfg/engine/plugin/PluginHostChild.h>
+
 #include <juce_events/juce_events.h>
 
 #include <clocale>
@@ -59,6 +61,13 @@ namespace wfgtest
 //==============================================================================
 int main (int argc, char** argv)
 {
+    /*  THE PLUGIN HOST CHILD, when this binary is launched as one (Phase
+        9a, §17.6): the proxy tests name the test executable as the child,
+        so no other build product has to exist for them. Before JUCE and
+        before doctest, as the console dispatches it before any verb. */
+    if (int childExit = 0; wfg::plugin::runPluginHostIfAsked (argc, argv, childExit))
+        return childExit;
+
     /*  JUCE IS INITIALISED ONCE, FOR THE WHOLE PROCESS, and this is a fix
         rather than tidiness.
 

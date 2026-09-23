@@ -1591,6 +1591,7 @@ namespace wfg::tree
         sortByAddress (nodes);
 
         documentPart = std::make_shared<const std::vector<Node>> (std::move (nodes));
+        pluginRevision = pluginTable != nullptr ? pluginTable->revision() : 0;
         stale = false;
     }
 
@@ -1731,7 +1732,11 @@ namespace wfg::tree
 
         analysis.ensureBuilt (document, durations);
 
-        if (stale || documentPart == nullptr)
+        /*  AND THE PLUGIN TABLE ASKED THE SAME WAY (Phase 9a): the sandbox
+            writes it from the message thread, and its `state` rows are on
+            this cached half. */
+        if (stale || documentPart == nullptr
+             || (pluginTable != nullptr && pluginTable->revision() != pluginRevision))
             rebuildDocumentPart();
 
         /*  ASKED RATHER THAN TOLD. The mount table bumps its own revision on
