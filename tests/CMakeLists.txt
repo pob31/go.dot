@@ -95,6 +95,7 @@ add_executable(wfg_tests
     SlotTests.cpp
     MidiTests.cpp
     SurfaceTests.cpp
+    McuCodecTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp
