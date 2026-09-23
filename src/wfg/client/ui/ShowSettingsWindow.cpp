@@ -6,6 +6,7 @@
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Fx.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -2931,6 +2932,283 @@ namespace wfg::client::ui
             std::string picked;
             bool locked = false;
         };
+        /*  THE PLUGINS TAB (Phase 9a, PR 9a.9). Two lists: what this machine's
+            scan found, and the show's set - each entry with what became of it
+            tonight in a WORD (loaded, loading, missing, failed) and its
+            sentence beside it, never a colour alone (PRD §4.8). Add puts a
+            known plugin in the set with the four words a replay needs; Remove
+            is object.delete; Restart is plugin.restart, for an entry that
+            failed; Preset file… copies a .vstpreset into the bundle's plugins/
+            folder and names it on the row, the way a media file is named
+            (§17.7). Scanning stays a verb: with nothing scanned the left list
+            says which one. */
+        class PluginsPage final : public juce::Component
+        {
+        public:
+            PluginsPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch)),
+                  knownLister (*this, Which::known), setLister (*this, Which::set)
+            {
+                for (auto* list : { &knownList, &setList })
+                {
+                    list->setRowHeight (rowHeight);
+                    list->setOutlineThickness (0);
+                    list->setColour (juce::ListBox::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                    addAndMakeVisible (*list);
+                }
+
+                knownList.setModel (&knownLister);
+                setList.setModel (&setLister);
+
+                for (auto* label : { &knownHeading, &setHeading, &notice })
+                {
+                    label->setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                    addAndMakeVisible (*label);
+                }
+
+                knownHeading.setText ("This machine", juce::dontSendNotification);
+                setHeading.setText ("The show's set, in chain order", juce::dontSendNotification);
+                notice.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
+                notice.setJustificationType (juce::Justification::centredLeft);
+
+                for (auto* button : { &addButton, &removeButton, &restartButton, &presetButton })
+                    addAndMakeVisible (*button);
+
+                addButton.setTooltip ("Declare the picked plugin in the show's set: every voice carries"
+                                      " it, and a media cue switches it in from its FX.");
+                removeButton.setTooltip ("Take the picked entry out of the set. Cues that switched it in"
+                                         " keep their Fx, aimed at nothing.");
+                restartButton.setTooltip ("A fresh child process for the picked entry - for one that"
+                                          " failed, or that stays down after failing twice.");
+                presetButton.setTooltip ("A .vstpreset file for the picked entry, copied into the bundle's"
+                                         " plugins/ folder and applied when the show opens.");
+
+                addButton.onClick = [this]
+                {
+                    if (send && ! locked && pickedKnown >= 0 && pickedKnown < static_cast<int> (known.size()))
+                    {
+                        const auto& k = known[static_cast<std::size_t> (pickedKnown)];
+                        send (gesture::createPlugin (k.name, k.identifier, k.format, k.path));
+                    }
+                };
+
+                removeButton.onClick = [this]
+                {
+                    if (send && ! locked && pickedSet >= 0 && pickedSet < static_cast<int> (set.size()))
+                        send (gesture::deleteObject (set[static_cast<std::size_t> (pickedSet)].id));
+                };
+
+                restartButton.onClick = [this]
+                {
+                    if (send && pickedSet >= 0 && pickedSet < static_cast<int> (set.size()))
+                        send (gesture::restartPlugin (set[static_cast<std::size_t> (pickedSet)].id));
+                };
+
+                presetButton.onClick = [this] { choosePreset(); };
+            }
+
+            void show (std::vector<model::KnownPluginRow> knownNow, std::vector<model::PluginRow> setNow,
+                       std::string bundlePathNow, bool editable)
+            {
+                const auto knownWere = keyOf (known);
+                const auto setWere = keyOf (set);
+                const auto wasLocked = locked;
+
+                known = std::move (knownNow);
+                set = std::move (setNow);
+                bundlePath = std::move (bundlePathNow);
+                locked = ! editable;
+
+                if (pickedKnown >= static_cast<int> (known.size())) pickedKnown = -1;
+                if (pickedSet >= static_cast<int> (set.size()))     pickedSet = -1;
+
+                notice.setText (known.empty()
+                                  ? "Nothing scanned yet: run  wfg plugins --scan  and reopen the show."
+                                  : juce::String (known.size()) + " plugin(s) known to this machine.",
+                                juce::dontSendNotification);
+
+                for (auto* button : { &addButton, &removeButton, &presetButton })
+                    button->setVisible (editable);
+
+                addButton.setEnabled (pickedKnown >= 0);
+                removeButton.setEnabled (pickedSet >= 0);
+                presetButton.setEnabled (pickedSet >= 0 && ! bundlePath.empty());
+                restartButton.setEnabled (pickedSet >= 0);
+
+                const auto lockMoved = wasLocked != locked;
+
+                if (knownWere != keyOf (known)) knownList.updateContent();
+                if (knownWere != keyOf (known) || lockMoved) knownList.repaint();
+                if (setWere != keyOf (set)) setList.updateContent();
+                if (setWere != keyOf (set) || lockMoved) setList.repaint();
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (8);
+                auto left = area.removeFromLeft (area.getWidth() / 2).withTrimmedRight (4);
+                auto right = area.withTrimmedLeft (4);
+
+                knownHeading.setBounds (left.removeFromTop (22));
+                notice.setBounds (left.removeFromBottom (22));
+                addButton.setBounds (left.removeFromBottom (26).removeFromLeft (120));
+                knownList.setBounds (left.withTrimmedBottom (4));
+
+                setHeading.setBounds (right.removeFromTop (22));
+                auto buttons = right.removeFromBottom (26);
+                removeButton.setBounds (buttons.removeFromLeft (90));
+                buttons.removeFromLeft (6);
+                restartButton.setBounds (buttons.removeFromLeft (90));
+                buttons.removeFromLeft (6);
+                presetButton.setBounds (buttons.removeFromLeft (110));
+                setList.setBounds (right.withTrimmedBottom (4));
+            }
+
+        private:
+            enum class Which { known, set };
+
+            struct Lister final : public juce::ListBoxModel
+            {
+                Lister (PluginsPage& ownerToUse, Which whichToUse) : owner (ownerToUse), which (whichToUse) {}
+                int getNumRows() override { return owner.rowsIn (which); }
+                void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+                {
+                    owner.paintRow (which, row, g, width, height);
+                }
+                void listBoxItemClicked (int row, const juce::MouseEvent&) override { owner.pick (which, row); }
+                PluginsPage& owner;
+                Which which;
+            };
+
+            static constexpr int rowHeight = 28;
+
+            static std::string keyOf (const std::vector<model::KnownPluginRow>& rows)
+            {
+                std::string out;
+                for (const auto& row : rows) out += row.identifier + '\n';
+                return out;
+            }
+
+            static std::string keyOf (const std::vector<model::PluginRow>& rows)
+            {
+                std::string out;
+                for (const auto& row : rows)
+                    out += row.id + '|' + row.name + '|' + row.state + '|' + row.problem + '|' + row.preset + '|'
+                             + std::to_string (row.latencySamples) + '\n';
+                return out;
+            }
+
+            int rowsIn (Which which) const
+            {
+                return static_cast<int> (which == Which::known ? known.size() : set.size());
+            }
+
+            void pick (Which which, int row)
+            {
+                if (which == Which::known) pickedKnown = row < static_cast<int> (known.size()) ? row : -1;
+                else                       pickedSet = row < static_cast<int> (set.size()) ? row : -1;
+
+                addButton.setEnabled (pickedKnown >= 0 && ! locked);
+                removeButton.setEnabled (pickedSet >= 0 && ! locked);
+                presetButton.setEnabled (pickedSet >= 0 && ! locked && ! bundlePath.empty());
+                restartButton.setEnabled (pickedSet >= 0);
+                knownList.repaint();
+                setList.repaint();
+            }
+
+            void paintRow (Which which, int row, juce::Graphics& g, int width, int height)
+            {
+                if (row < 0 || row >= rowsIn (which))
+                    return;
+
+                const auto picked = which == Which::known ? row == pickedKnown : row == pickedSet;
+                g.setColour (Look::colour (theme, picked ? "panel-raised" : row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+                g.setColour (Look::colour (theme, "ink"));
+                g.setFont (Look::font (theme, 14.0f));
+
+                auto cell = juce::Rectangle<int> (0, 0, width, height).reduced (6, 0);
+
+                if (which == Which::known)
+                {
+                    const auto& k = known[static_cast<std::size_t> (row)];
+                    g.drawText (k.name, cell.removeFromLeft (cell.getWidth() / 2), juce::Justification::centredLeft, true);
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (k.format + "  " + k.manufacturer, cell, juce::Justification::centredLeft, true);
+                    return;
+                }
+
+                const auto& entry = set[static_cast<std::size_t> (row)];
+                const auto nameCell = cell.removeFromLeft (cell.getWidth() / 3);
+                g.drawText (juce::String (row + 1) + ". " + entry.name, nameCell, juce::Justification::centredLeft, true);
+
+                /*  The state is a WORD, and the sentence follows it: what a
+                    person reads at 04:12 when a strip has gone quiet. */
+                juce::String said = entry.state;
+
+                if (entry.latencySamples > 0)
+                    said += ", " + juce::String (entry.latencySamples) + " samples late";
+
+                if (! entry.preset.empty())
+                    said += ", preset " + juce::String (entry.preset);
+
+                if (! entry.problem.empty())
+                    said += " - " + juce::String (entry.problem);
+
+                g.setColour (Look::colour (theme, entry.state == "failed" || entry.state == "missing" ? "ink" : "ink-dim"));
+                g.drawText (said, cell, juce::Justification::centredLeft, true);
+            }
+
+            /*  THE CHOOSER IS A MEMBER because launchAsync returns at once
+                (Client.cpp's reason); the answer copies the file into the
+                bundle's plugins/ folder and names it on the row - a file, not
+                the bytes, for the reason media/file is. */
+            void choosePreset()
+            {
+                if (pickedSet < 0 || pickedSet >= static_cast<int> (set.size()) || bundlePath.empty() || locked)
+                    return;
+
+                const auto entry = set[static_cast<std::size_t> (pickedSet)];
+                chooser = std::make_unique<juce::FileChooser> ("A preset for " + entry.name, juce::File(),
+                                                               "*.vstpreset;*.preset;*");
+
+                chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                      [safe = juce::Component::SafePointer<PluginsPage> (this), entry] (const juce::FileChooser& answered)
+                                      {
+                                          if (safe == nullptr)
+                                              return;
+
+                                          const auto file = answered.getResult();
+
+                                          if (! file.existsAsFile())
+                                              return;
+
+                                          const auto folder = juce::File (juce::String (safe->bundlePath)).getChildFile ("plugins");
+                                          folder.createDirectory();
+                                          const auto copy = folder.getChildFile (file.getFileName());
+
+                                          if (! file.copyFileTo (copy) || ! safe->send)
+                                              return;
+
+                                          safe->send (gesture::setNode ("/godot/plugin/" + entry.id + "/preset",
+                                                                        file.getFileName().toStdString()));
+                                      });
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+            std::vector<model::KnownPluginRow> known;
+            std::vector<model::PluginRow> set;
+            std::string bundlePath;
+            bool locked = false;
+            int pickedKnown = -1, pickedSet = -1;
+            Lister knownLister, setLister;
+            juce::ListBox knownList, setList;
+            juce::Label knownHeading, setHeading, notice;
+            juce::TextButton addButton { "Add to set" }, removeButton { "Remove" }, restartButton { "Restart" },
+                             presetButton { "Preset file..." };
+            std::unique_ptr<juce::FileChooser> chooser;
+        };
     }
 
     class ShowSettingsWindow::Panel final : public juce::Component
@@ -2963,6 +3241,7 @@ namespace wfg::client::ui
             network = std::make_unique<NetworkPage> (theme, send);
             midi = std::make_unique<MidiPage> (theme, send);
             surfaces = std::make_unique<SurfacesPage> (theme, send);
+            plugins = std::make_unique<PluginsPage> (theme, send);
 
             /*  THE FIRST HAND EDIT OF THE OUTPUT PATCH IS WHAT SETTLES IT
                 (PRD §6.2). Sent BEFORE the edit lands, so that the engine's own
@@ -3001,6 +3280,10 @@ namespace wfg::client::ui
             /*  AFTER MIDI, because a surface is reached through the ports
                 declared there: the tab a person fills in first comes first. */
             tabs.addTab ("Surfaces", background, surfaces.get(), false);
+
+            /*  AFTER SURFACES: the set is what a cue's FX switches in, and the
+                tab is where a plugin is declared before a cue can (Phase 9a). */
+            tabs.addTab ("Plugins", background, plugins.get(), false);
             for (auto* component : std::initializer_list<juce::Component*> { &enabled, &type, &output, &input,
                      &buffer, &typeLabel, &outputLabel, &inputLabel, &bufferLabel, &rate, &explanation, &rescan })
                 interfacePage.addAndMakeVisible (*component);
@@ -3083,6 +3366,13 @@ namespace wfg::client::ui
             surfaces->show (model::readSurfaces (snapshot), model::readStrips (snapshot),
                             model::readDcas (snapshot), ports,
                             ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+
+            /*  THE SET AND THE MACHINE'S LIST, re-read every pass for the same
+                reason; the state words are the sandbox's and move when a child
+                comes up or goes down. */
+            plugins->show (model::readKnownPlugins (snapshot), model::readPluginSet (snapshot),
+                           model::text (snapshot, "/godot/document/path"),
+                           ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
 
             if (readCapabilities (snapshot)) capabilities();
             const auto state = model::text (snapshot, "/godot/audio/settingsStatus");
@@ -3277,6 +3567,7 @@ namespace wfg::client::ui
         std::unique_ptr<NetworkPage> network;
         std::unique_ptr<MidiPage> midi;
         std::unique_ptr<SurfacesPage> surfaces;
+        std::unique_ptr<PluginsPage> plugins;
         bool settled = false;
         juce::TabbedComponent tabs;
         juce::ComboBox type, output, input, buffer;

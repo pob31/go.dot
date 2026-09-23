@@ -1627,6 +1627,7 @@ namespace wfg::tree
                             leaf ("identifier", "The identifier plugin.create takes for it", known.identifier);
                             leaf ("format", "Its format: VST3, AudioUnit", known.format);
                             leaf ("manufacturer", "Who made it, as the file says", known.manufacturer);
+                            leaf ("path", "Where its file is on this machine - plugin.create's fourth word", known.path);
                         }
                     }
                 }

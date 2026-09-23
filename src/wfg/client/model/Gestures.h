@@ -130,6 +130,15 @@ namespace wfg::client::gesture
         none: there is one way values are written. */
     Event createSend (const std::string& cueId, const std::string& busId);
 
+    /*  PHASE 9a, PR 9a.9: an insert on a media cue - one entry of the show's
+        set switched in, made by the first switch on the FX panel; an entry
+        declared in the set from the machine's known list, with the four words
+        a replay needs; and a fresh child for an entry that failed. */
+    Event createFx (const std::string& cueId, const std::string& pluginId);
+    Event createPlugin (const std::string& name, const std::string& identifier,
+                        const std::string& format, const std::string& path);
+    Event restartPlugin (const std::string& pluginId);
+
     /** `eq.reset`: a media cue's EQ back to flat, one transaction (Phase 9a). */
     Event eqReset (const std::string& cueId);
 

@@ -61,6 +61,8 @@
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/Eq.h>
+#include <wfg/client/model/Fx.h>
+#include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Timeline.h>
 #include <wfg/client/model/Scrub.h>
@@ -538,6 +540,10 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     doc::registerBundleCommands (rig.engine.commands(), rig.document, session, writer);
     cue::registerGoCommands (rig.engine.commands(), rig.engine, runner, rig.document, focus, runIds);
 
+    /*  And the sandbox's two, so the Plugins tab's restart is a pin like the rest (Phase 9a). */
+    plugin::PluginTable pluginTable;
+    plugin::registerPluginCommands (rig.engine.commands(), pluginTable, {});
+
     const std::vector<Event> gestures
     {
         gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
@@ -567,6 +573,9 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::splitRange ("B3N8R5TW", 6.0),
         gesture::createSend ("B3N8R5TW", "J3MT5XYA"),
         gesture::eqReset ("B3N8R5TW"),
+        gesture::createFx ("B3N8R5TW", "PG7N0001"),
+        gesture::createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "C:/plugins/verb.vst3"),
+        gesture::restartPlugin ("PG7N0001"),
         gesture::createPort ("Lights"),
 
         /*  PHASE 6: the Surfaces tab's three ADD buttons, and the virtual
@@ -4645,6 +4654,94 @@ TEST_CASE ("client: a sampler row is greyed on a cue no hand can press, and draw
     and drawn from the maths the voice plays. The rows are the document's; the
     reader turns nineteen of them into `audio::EqSettings`; the curve asks
     `audio/EqMath.h`, which CueEqTests pins to the sound. */
+TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and never worked out")
+{
+    /*  Decision AE, read from the client's side (PR 9a.9): the strips come
+        from the set in chain order, whether or not the cue has an Fx for
+        them; where it has, the value and the plugin's own text are the cue's
+        nodes; where it has not, the value shown is the catalogue's default
+        and the text is empty. The Plugins tab's two lists read beside it. */
+    Rig rig ("first-sound");
+    const std::string cue = "B3N8R5TW";
+
+    rig.apply (1, "window", "plugin.create", { osc::Value::string ("Test gain"),
+                                               osc::Value::string ("godot:test-gain"),
+                                               osc::Value::string ("VST3"), osc::Value::string ("") });
+    rig.apply (2, "window", "plugin.create", { osc::Value::string ("Verb"),
+                                               osc::Value::string ("VST3-0badf00d-verb"),
+                                               osc::Value::string ("VST3"), osc::Value::string ("C:/plugins/verb.vst3") });
+
+    auto snapshot = rig.publish (3);
+    const auto set = model::readPluginSet (*snapshot);
+    REQUIRE (set.size() == 2u);
+    CHECK (set[0].name == "Test gain");
+    CHECK (set[0].identifier == "godot:test-gain");
+    CHECK (set[0].state == "unloaded");
+    CHECK (set[1].name == "Verb");
+    CHECK (set[1].path == "C:/plugins/verb.vst3");
+    const auto gainId = set[0].id;
+    const auto verbId = set[1].id;
+
+    //  Nothing switched in yet: two strips, neither present.
+    auto reading = model::readFx (*snapshot, cue);
+    REQUIRE (reading.present);
+    CHECK (reading.notice.empty());
+    REQUIRE (reading.strips.size() == 2u);
+    CHECK (reading.strips[0].pluginId == gainId);
+    CHECK (reading.strips[0].index == 0);
+    CHECK_FALSE (reading.strips[0].present());
+    CHECK_FALSE (reading.strips[0].enabled);
+    CHECK (reading.strips[1].pluginId == verbId);
+    CHECK (reading.strips[1].index == 1);
+
+    //  The catalogue is the tree's business; a rig with no store sees no parameters, honestly.
+    CHECK (reading.strips[1].params.empty());
+
+    rig.apply (4, "window", "fx.create", { osc::Value::string (cue), osc::Value::string (gainId) });
+    snapshot = rig.publish (5);
+    reading = model::readFx (*snapshot, cue);
+    REQUIRE (reading.strips.size() == 2u);
+    CHECK (reading.strips[0].present());
+    CHECK (reading.strips[0].enabled);
+    CHECK_FALSE (reading.strips[0].fxId.empty());
+    CHECK_FALSE (reading.strips[1].present());
+
+    const auto fxId = reading.strips[0].fxId;
+    CHECK (model::fxAddress (fxId, "enabled") == "/godot/fx/" + fxId + "/enabled");
+    CHECK (model::fxParameterAddress (fxId, 3) == "/godot/fx/" + fxId + "/p3");
+
+    rig.apply (6, "window", "node.set", { osc::Value::string ("/godot/fx/" + fxId + "/enabled"),
+                                          osc::Value::boolean (false) });
+    snapshot = rig.publish (7);
+    reading = model::readFx (*snapshot, cue);
+    CHECK (reading.strips[0].present());
+    CHECK_FALSE (reading.strips[0].enabled);
+
+    SUBCASE ("and the machine's known list reads beside the set, empty when no scan was run")
+    {
+        CHECK (model::readKnownPlugins (*snapshot).empty());
+    }
+
+    SUBCASE ("and a cue that is not media has none, and says so")
+    {
+        Rig memo;
+        const auto plain = memo.publish (1);
+        const auto none = model::readFx (*plain, "B3N8R5TW");
+        CHECK_FALSE (none.present);
+        CHECK (none.notice.find ("media") != std::string::npos);
+    }
+
+    SUBCASE ("and a show with no set says so, with the strips empty")
+    {
+        Rig bare ("first-sound");
+        const auto plain = bare.publish (1);
+        const auto none = model::readFx (*plain, cue);
+        CHECK (none.present);
+        CHECK (none.strips.empty());
+        CHECK (none.notice.find ("Plugins") != std::string::npos);
+    }
+}
+
 TEST_CASE ("client: a media cue's EQ is read back as the value the voice gets, and drawn from the same maths")
 {
     Rig rig ("first-sound");

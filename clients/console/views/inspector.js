@@ -125,6 +125,12 @@ const KIND_ORDER = {
   range:   ["name", "in", "out", "loops"],
   trigger: ["kind", "enabled", "address", "value", "port", "channel",
             "type", "number", "data", "at"],
+  // A cue's insert and an entry of the show's plugin set (Phase 9a): the row a hand
+  // reads first is the one that says which plugin, then the switch, then the values -
+  // one sparse row here; the p<n> nodes beneath it are the door a rotary takes.
+  fx:      ["plugin", "enabled", "values", "name", "index"],
+  plugin:  ["name", "identifier", "format", "path", "preset", "state", "problem",
+            "latencySamples", "paramCount"],
 };
 
 /*  THE NAMES A KIND CLAIMS - or, when several cues are chosen at once, the

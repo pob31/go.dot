@@ -71,6 +71,25 @@ namespace wfg::client::gesture
                  { osc::Value::string (cueId), osc::Value::string (busId) } };
     }
 
+    Event createFx (const std::string& cueId, const std::string& pluginId)
+    {
+        return { origin::window, "fx.create",
+                 { osc::Value::string (cueId), osc::Value::string (pluginId) } };
+    }
+
+    Event createPlugin (const std::string& name, const std::string& identifier,
+                        const std::string& format, const std::string& path)
+    {
+        return { origin::window, "plugin.create",
+                 { osc::Value::string (name), osc::Value::string (identifier),
+                   osc::Value::string (format), osc::Value::string (path) } };
+    }
+
+    Event restartPlugin (const std::string& pluginId)
+    {
+        return { origin::window, "plugin.restart", { osc::Value::string (pluginId) } };
+    }
+
     Event eqReset (const std::string& cueId)
     {
         return { origin::window, "eq.reset", { osc::Value::string (cueId) } };

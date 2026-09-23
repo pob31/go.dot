@@ -322,6 +322,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Sends.cpp
     wfg/client/model/Eq.h
     wfg/client/model/Eq.cpp
+    wfg/client/model/Fx.h
+    wfg/client/model/Fx.cpp
     wfg/client/model/Timeline.h
     wfg/client/model/Timeline.cpp
     wfg/client/model/View.h
