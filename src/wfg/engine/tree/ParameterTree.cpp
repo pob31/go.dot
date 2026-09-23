@@ -1018,6 +1018,15 @@ namespace wfg::tree
     //==============================================================================
     void ParameterTree::rebuildDocumentPart()
     {
+        /*  THE REVISIONS ARE READ FIRST, before a single table row is: a child
+            that comes up while this rebuild runs bumps its table between the
+            read below and the end, and a revision taken at the end would
+            say the half is current when it published `loading`. The Linux
+            CI job found it: a slow rebuild, a quick child, and an entry that
+            read `loading` for the rest of the session. */
+        const auto pluginRevisionSeen = pluginTable != nullptr ? pluginTable->revision() : 0;
+        const auto catalogueRevisionSeen = catalogues != nullptr ? catalogues->revision() : 0;
+
         std::vector<Node> nodes;
 
         const auto showNode = document.root();
@@ -1793,8 +1802,8 @@ namespace wfg::tree
         sortByAddress (nodes);
 
         documentPart = std::make_shared<const std::vector<Node>> (std::move (nodes));
-        pluginRevision = pluginTable != nullptr ? pluginTable->revision() : 0;
-        catalogueRevision = catalogues != nullptr ? catalogues->revision() : 0;
+        pluginRevision = pluginRevisionSeen;
+        catalogueRevision = catalogueRevisionSeen;
         stale = false;
     }
 

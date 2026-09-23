@@ -2695,7 +2695,13 @@ Mackie vs HUI first — first week with the D700.
   **M30** (the EQ's block cost and the tree's node-count delta), **M31** (the
   proxy's round trip at 1, 8 and 16 voices by 1, 2 and 4 plugins), **M32** (a
   failed strip: misses before the threshold, blocks to `failed`, the cost
-  before and after) and **M33** (a parameter write to its sound). Not yet taken.
+  before and after) and **M33** (a parameter write to its sound). *Taken
+  2026-09-23, in §17.9:* the EQ costs 5.3 µs a voice with every section in and
+  nothing when flat; a round trip through a real VST3 is 1.5 µs at p50 with no
+  miss at sixteen voices; a dead child reads `failed` 9 ms after the kill, after
+  three misses of 252 µs each, and costs nothing after; a parameter write
+  reaches the sound in two ticks, 41 ms; a real plugin's child is 36 MB plus
+  1.2 MB a voice and every entry of the set loads in about a second.
 - **Pause and resume at an offset** (§3.29): whether a relaunch at a remembered
   position is clean when the offset is set in prepare, and when a playing clip
   is nudged instead — the same question load-to-time asks. *Half answered*

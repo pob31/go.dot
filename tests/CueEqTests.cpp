@@ -29,12 +29,15 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/audio/CueEq.h>
+
+#include <juce_core/juce_core.h>
 #include <wfg/engine/audio/EqMath.h>
 #include <wfg/engine/rt/RtCheck.h>
 
 #include "TestSupport.h"
 
 #include <bit>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <random>
@@ -456,4 +459,63 @@ TEST_CASE ("cue eq: channels beyond what was prepared are left alone")
 
     CHECK (eq.numChannels() == 1);
     CHECK (eq.sampleRate() == doctest::Approx (rate));
+}
+
+//==============================================================================
+/*  M30 - the EQ's block cost (§17.9, PRD §6.11): thirty-two voices of two
+    channels at 96 kHz in blocks of sixty-four, ten thousand blocks each way -
+    every section in (the high-pass, the low-pass, four peaks), a flat EQ (the
+    identity fast path), and the EQ switched off - as microseconds per block
+    for all thirty-two, against a block period of 667 us. Run with --no-skip
+    on a quiet machine; the figures go to §17.9. */
+TEST_CASE ("M30: the EQ's block cost for thirty-two voices - every section in, flat, and off" * doctest::skip())
+{
+    constexpr int voices = 32, channels = 2, blockSize = 64, blocks = 10000;
+    constexpr double sampleRate = 96000.0;
+
+    std::vector<audio::CueEq> eqs (voices);
+    std::vector<std::vector<float>> audio (voices, std::vector<float> (channels * blockSize, 0.1f));
+
+    for (auto& eq : eqs)
+        eq.prepare (channels, sampleRate, blockSize);
+
+    const auto run = [&] (const audio::EqSettings& settings, const char* what)
+    {
+        for (auto& eq : eqs)
+            eq.set (settings);
+
+        std::vector<float*> pointers (channels);
+
+        //  A warm-up so the first block's coefficient build is not in the figure.
+        for (int v = 0; v < voices; ++v)
+        {
+            for (int c = 0; c < channels; ++c) pointers[static_cast<std::size_t> (c)] = audio[static_cast<std::size_t> (v)].data() + c * blockSize;
+            eqs[static_cast<std::size_t> (v)].process (pointers.data(), channels, blockSize);
+        }
+
+        const auto t0 = std::chrono::steady_clock::now();
+
+        for (int n = 0; n < blocks; ++n)
+            for (int v = 0; v < voices; ++v)
+            {
+                for (int c = 0; c < channels; ++c) pointers[static_cast<std::size_t> (c)] = audio[static_cast<std::size_t> (v)].data() + c * blockSize;
+                eqs[static_cast<std::size_t> (v)].process (pointers.data(), channels, blockSize);
+            }
+
+        const auto us = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count() / blocks;
+        MESSAGE (std::string (what) << ": " << juce::String (us, 2) << " us per block for " << voices << " voices ("
+                 << juce::String (us / voices, 3) << " us a voice), of a " << juce::String (blockSize * 1.0e6 / sampleRate, 1) << " us block");
+    };
+
+    audio::EqSettings busy = audio::EqSettings::flat();
+    busy.hpf = true;
+    busy.lpf = true;
+    for (auto& band : busy.band) band.gain = 3.0f;
+    run (busy, "every section in");
+
+    run (audio::EqSettings::flat(), "flat (identity)");
+
+    auto off = audio::EqSettings::flat();
+    off.on = false;
+    run (off, "switched off");
 }

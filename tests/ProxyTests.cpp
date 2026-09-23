@@ -43,6 +43,7 @@
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_core/juce_core.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstring>
@@ -728,6 +729,245 @@ TEST_CASE ("proxy: a real VST3 from this machine's scan comes up, reports its ca
         lanes[0].process (block.data(), 2, 256);
         CHECK (lanes[0].misses() == 0);
     }
+
+    host.stop();
+}
+
+//==============================================================================
+namespace
+{
+    struct Percentiles { double p50 = 0.0, p99 = 0.0, max = 0.0; };
+
+    Percentiles percentilesOf (std::vector<double> samples)
+    {
+        if (samples.empty())
+            return {};
+
+        std::sort (samples.begin(), samples.end());
+        const auto at = [&samples] (double fraction)
+        {
+            return samples[std::min (samples.size() - 1, static_cast<std::size_t> (static_cast<double> (samples.size()) * fraction))];
+        };
+        return { at (0.5), at (0.99), samples.back() };
+    }
+
+    /*  One lane driven `blocks` times, each call timed; the first call after an
+        idle spell timed on its own (the worker sleeps in one-millisecond polls
+        while no lane is switched in, and the host's poll tells it to spin). */
+    struct RoundTrip
+    {
+        Percentiles all;
+        double firstAfterIdleUs = 0.0;
+        std::uint32_t misses = 0;
+    };
+
+    RoundTrip driveLane (plugin::ProxyLane& lane, int channels, int block, int blocks)
+    {
+        Block audio (channels, block, 0.25f);
+        std::vector<double> times;
+        times.reserve (static_cast<std::size_t> (blocks));
+
+        const auto missesBefore = lane.misses();
+
+        for (int i = 0; i < blocks; ++i)
+        {
+            const auto t0 = std::chrono::steady_clock::now();
+            lane.process (audio.data(), channels, block);
+            const auto us = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count();
+
+            if (i == 0)
+                continue;   // the first call carries the wake-up; measured below
+
+            times.push_back (us);
+        }
+
+        RoundTrip out;
+        out.all = percentilesOf (times);
+        out.misses = lane.misses() - missesBefore;
+
+        /*  Idle for a while with the lane off, so the worker goes to its
+            millisecond polls; then one call. */
+        lane.setEnabled (false);
+        std::this_thread::sleep_for (std::chrono::milliseconds (50));
+        lane.setEnabled (true);
+        const auto t0 = std::chrono::steady_clock::now();
+        lane.process (audio.data(), channels, block);
+        out.firstAfterIdleUs = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count();
+        return out;
+    }
+}
+
+/*  M31 - the proxy's round trip (§17.9, PRD §6.11): p50, p99 and max of one
+    lane's process() with the test child, at 1, 8 and 16 lanes on one child,
+    each lane switched in and driven in turn; the wake-up cost of the first
+    request after the worker's idle poll; and, with WFG_REAL_VST3 set, the same
+    through a real plugin. A generous deadline, so a late answer is measured
+    rather than dropped; the misses column says how many were later than
+    that. Run with --no-skip on a quiet machine; the figures go to §17.9. */
+TEST_CASE ("M31: the proxy's round trip at one, eight and sixteen lanes, the wake-up after idle, and a real plugin"
+           * doctest::skip())
+{
+    const auto realIdentifier = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_VST3", {}).toStdString();
+    const auto storage = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                            .getChildFile ("Go.dot").getChildFile ("engine").getFullPathName().toStdString();
+
+    MESSAGE ("M31 on " << juce::SystemStats::getOperatingSystemName() << ", "
+             << juce::SystemStats::getCpuModel() << ", " << juce::SystemStats::getNumCpus() << " cores");
+    MESSAGE ("plugin | lanes | block | p50 us | p99 us | max us | misses of 2000 | first after idle us");
+
+    for (const auto& identifier : std::vector<std::string> { plugin::Catalogue::testGainIdentifier(), realIdentifier })
+    {
+        if (identifier.empty())
+            continue;
+
+        std::string xml;
+
+        if (identifier != plugin::Catalogue::testGainIdentifier())
+        {
+            xml = plugin::describePlugin (storage, identifier);
+
+            if (xml.empty())
+            {
+                MESSAGE ("the scan does not know " << identifier << "; skipped");
+                continue;
+            }
+        }
+
+        for (const auto laneCount : { 1, 8, 16 })
+        {
+            for (const auto block : { 64, 256 })
+            {
+                Folder folder;
+                plugin::PluginTable table;
+                std::vector<plugin::ProxyLane> lanes (static_cast<std::size_t> (laneCount));
+                std::vector<plugin::ProxyLane*> pointers;
+
+                for (auto& lane : lanes)
+                    pointers.push_back (&lane);
+
+                auto spec = testGainSpec (folder, laneCount, 2, block);
+                spec.identifier = identifier;
+                spec.descriptionXml = xml;
+                spec.deadlineMicroseconds = 20000;
+                plugin::ProxyHost host (spec, pointers, &table);
+
+                std::string problem;
+                REQUIRE (host.start (problem));
+                const auto up = waitForState (host, "loaded", 20000);
+                INFO (host.status().state << ": " << host.status().problem);
+                REQUIRE (up);
+
+                for (auto& lane : lanes)
+                {
+                    lane.setDeadlineMicroseconds (20000);
+                    lane.setEnabled (true);
+                }
+
+                host.poll();
+
+                /*  Every lane driven, as a block does when every voice is in;
+                    the lane reported is the last, warmed by the rest. */
+                std::vector<double> times;
+                RoundTrip last;
+
+                for (int round = 0; round < 2000; ++round)
+                {
+                    Block audio (2, block, 0.25f);
+
+                    for (int i = 0; i < laneCount; ++i)
+                    {
+                        const auto t0 = std::chrono::steady_clock::now();
+                        lanes[static_cast<std::size_t> (i)].process (audio.data(), 2, block);
+
+                        if (i == laneCount - 1 && round > 0)
+                            times.push_back (std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count());
+                    }
+                }
+
+                const auto stats = percentilesOf (times);
+                std::uint32_t misses = 0;
+
+                for (const auto& lane : lanes)
+                    misses += lane.misses();
+
+                last = driveLane (lanes.back(), 2, block, 200);
+
+                MESSAGE (std::string (identifier == plugin::Catalogue::testGainIdentifier() ? "test-gain" : "real") << " | "
+                         << laneCount << " | " << block << " | " << juce::String (stats.p50, 1) << " | "
+                         << juce::String (stats.p99, 1) << " | " << juce::String (stats.max, 1) << " | "
+                         << misses << " | " << juce::String (last.firstAfterIdleUs, 1));
+
+                host.stop();
+            }
+        }
+    }
+}
+
+/*  M32 - a failed strip (§17.9): blocks late before the threshold trips, the
+    time from the child's death to `failed` at the host's poll cadence, and
+    what a block costs before and after. */
+TEST_CASE ("M32: a strip that fails - misses to the trip, kill to failed, the block's cost before and after"
+           * doctest::skip())
+{
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lane;
+    plugin::ProxyHost host (testGainSpec (folder, 1, 2, 64), { &lane }, &table);
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+
+    lane.setDeadlineMicroseconds (250);
+    lane.setEnabled (true);
+    host.poll();
+
+    Block audio (2, 64, 0.25f);
+
+    for (int i = 0; i < 200; ++i)
+        lane.process (audio.data(), 2, 64);
+
+    const auto before = driveLane (lane, 2, 64, 500);
+    MESSAGE ("healthy, 250 us deadline: p50 " << juce::String (before.all.p50, 1) << " us, p99 "
+             << juce::String (before.all.p99, 1) << " us, max " << juce::String (before.all.max, 1)
+             << " us, misses " << before.misses << " of 500");
+
+    host.killChild();
+    const auto killedAt = std::chrono::steady_clock::now();
+
+    /*  Blocks at the block rate until the host trips it. */
+    auto blocksUntilTrip = 0;
+    std::vector<double> lateCosts;
+
+    while (host.status().state == "loaded")
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        lane.process (audio.data(), 2, 64);
+        lateCosts.push_back (std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count());
+        ++blocksUntilTrip;
+        host.poll();
+        std::this_thread::sleep_for (std::chrono::microseconds (1333));
+    }
+
+    const auto failedAfterMs = std::chrono::duration<double, std::milli> (std::chrono::steady_clock::now() - killedAt).count();
+    const auto late = percentilesOf (lateCosts);
+
+    std::vector<double> afterCosts;
+
+    for (int i = 0; i < 500; ++i)
+    {
+        const auto t0 = std::chrono::steady_clock::now();
+        lane.process (audio.data(), 2, 64);
+        afterCosts.push_back (std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - t0).count());
+    }
+
+    const auto after = percentilesOf (afterCosts);
+
+    MESSAGE ("kill to failed: " << juce::String (failedAfterMs, 1) << " ms, " << blocksUntilTrip
+             << " blocks at the block rate, each a miss costing p50 " << juce::String (late.p50, 1)
+             << " us, max " << juce::String (late.max, 1) << " us");
+    MESSAGE ("failed, not called: p50 " << juce::String (after.p50, 2) << " us, max " << juce::String (after.max, 2) << " us");
+    CHECK (host.status().state == "failed");
 
     host.stop();
 }

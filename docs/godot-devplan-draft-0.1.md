@@ -502,9 +502,10 @@ the code as §17 of that draft, as §11 to §16 were, and the plan's PR table is
 | 9a.10 | Measurements M30–M34 | 9a.2, 9a.7, 9a.8 |
 | 9a.11 | Close-out: §17.12, the PRD ticked, this section ticked, the handoff and the pages draft's §8 answered | all |
 
-*Status, 2026-09-23 late:* 9a.0–9a.8 on `main` and CI green; 9a.9 landed without the FX panel at the
-foot (the model, the Plugins tab and the gestures are in; the component is the next session's);
-9a.10 waits for a quiet machine; §17.12, the pages draft's §8 and the handoff are written.
+*Status, 2026-09-23 late:* 9a.0–9a.8 on `main`; 9a.9 landed without the FX panel at the foot (the
+model, the Plugins tab and the gestures are in; the component is the next session's); 9a.10 taken
+on the author's box once it was quiet and written into §17.9 and PRD §6.11; §17.12, the pages
+draft's §8 and the handoff are written.
 
 After 9a.0, four streams run on disjoint files — the DSP, the document object,
 the hosting and the transport — and the FX entries land on top of all four.

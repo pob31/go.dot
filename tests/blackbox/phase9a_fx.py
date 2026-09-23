@@ -126,8 +126,13 @@ def run(locale: "str | None") -> int:
         killed_at = 0
         fx_id = None
 
+        # A DEADLINE A CI RUNNER CAN MEET. This driver proves the path, not the
+        # round trip: at the 250 us default a slow shared box misses on and off,
+        # and the render averages between dry and processed - which both Linux
+        # and macOS CI showed. What the round trip costs is M31's question.
         with Server(bundle, log=log, locale=locale, sample_rate=RATE,
-                    buffer_size=BLOCK, hosted=True, render=render) as server:
+                    buffer_size=BLOCK, hosted=True, render=render,
+                    proxy_deadline_us=20000) as server:
             hand = Hand(server)
             try:
                 report.equal(wait_for(server, "/godot/audio/status", "running"), "running",

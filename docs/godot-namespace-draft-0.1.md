@@ -9814,6 +9814,67 @@ about a hybrid-core laptop repeated.
 | **M33** | a parameter write to its sound — `node.set p0` at a known tick, the step found in the render, M26's idiom | whether a rotary feels live; the tick rate is the lever, parked at 50 Hz on 2026-09-18 |
 | **M34** | the set at load: from `buildEdit` to every child `loaded`, and the working set, for N × P instances of a real plugin | §6.11's *"bypassed stack at load"*, answered; decision AE's cost in numbers |
 
+**The figures, taken 2026-09-23 on the author's Windows box (Intel Core Ultra 7 255H, 16 cores,
+Debug build, the box otherwise idle), through the instruments named in each row: `M30`, `M31` and
+`M32` are skipped doctest cases run with `--no-skip`; `M33` and `M34` are `tests/blackbox/
+m33_param_latency.py` and `m34_set_load.py`.**
+
+- **M30 — the EQ's block cost.** Thirty-two voices of two channels at 96 kHz, sixty-four frames,
+  ten thousand blocks: **168.5 µs a block with every section in (5.3 µs a voice), of a 667 µs
+  block**; **3.6 µs flat** and **3.6 µs switched off** (0.11 µs a voice) — the identity fast path
+  costs the same as the switch. Four bands and two filters on every voice of the widest show fit
+  in a quarter of the block. The tree's delta is nineteen nodes a media cue, by construction.
+- **M31 — the proxy's round trip.** A 20 ms deadline so a late answer is measured rather than
+  dropped; every lane switched in and driven in turn, the last lane timed over 2,000 blocks:
+
+  | plugin | lanes | block | p50 | p99 | max | misses | first after idle |
+  |---|---|---|---|---|---|---|---|
+  | test gain | 1 | 64 | 0.6 µs | 0.8 µs | 318.6 µs | 0 | 19.2 µs |
+  | test gain | 8 | 64 | 0.5 µs | 0.7 µs | 5.3 µs | 0 | 106.1 µs |
+  | test gain | 16 | 64 | 0.5 µs | 0.7 µs | 12.3 µs | 0 | 15.5 µs |
+  | test gain | 16 | 256 | 1.1 µs | 1.3 µs | 3.9 µs | 0 | 20.7 µs |
+  | WFS-DIY Track | 1 | 64 | 1.6 µs | 2.3 µs | 86.9 µs | 0 | 26.0 µs |
+  | WFS-DIY Track | 8 | 64 | 1.5 µs | 2.0 µs | 7.8 µs | 0 | 26.9 µs |
+  | WFS-DIY Track | 16 | 64 | 1.5 µs | 1.8 µs | 4.7 µs | 0 | 19.4 µs |
+  | WFS-DIY Track | 16 | 256 | 1.8 µs | 2.1 µs | 17.6 µs | 0 | 19.0 µs |
+
+  Spike 07's 0.9 µs, held with a real plugin; the worst outliers are the first blocks of a
+  configuration. Sixteen voices through one child cost 16 × 1.5 µs a block. The first request
+  after the worker's idle poll costs 15–106 µs — the one-millisecond sleep's wake — which is
+  what the hot spin buys back while a lane is in (plan decision 14 stands; the spin-between-
+  first-and-last variant is not needed at these numbers). **Not measured here: the same on
+  a shared CI runner, where the 250 µs default misses on and off** — the fx driver saw it on both
+  Linux and macOS and now serves at 20 ms, because a driver proves the path.
+- **M32 — a failed strip.** Healthy at the 250 µs default: p50 0.6 µs, p99 4.3 µs, no miss in
+  500. The child killed: **three blocks at the block rate, each a miss costing 252 µs (the
+  deadline and nothing more), and `failed` 8.8 ms after the kill** — the dead-child check trips
+  before the eighth miss would. Failed and not called: **0.00 µs p50, 1.1 µs max**. The
+  automatic restart then brings the child back in two seconds (the driver shows it, and shows
+  the second death staying down).
+- **M33 — a parameter write to its sound.** `node.set p0` on the test gain, the render searched
+  for the step against the engine's own tick: **40–61 ms, median 41 ms** over ten writes — two
+  ticks: the write lands on one tick, `applyFx` runs at the next tick's start, then the block.
+  A first draft read the render file's size for the moment of the write and saw the writer's
+  flush cadence as a half-second on every other write; the engine's tick is the reference. If a
+  rotary wants one tick rather than two, `applyFx` after the tick's command drain is the lever
+  before the tick rate is (§16's parking of 50 Hz stands).
+- **M34 — the set at load.** Served hosted, from the ports printed to every entry `loaded`, and
+  the working set off the operating system:
+
+  | plugin | voices | entries | ports → loaded | parent | each child |
+  |---|---|---|---|---|---|
+  | test gain | 1 | 1 | 705 ms | 48 MB | 32 MB |
+  | test gain | 16 | 3 | 961 ms | 57 MB | 33 MB |
+  | WFS-DIY Track | 1 | 1 | 759 ms | 48 MB | 36 MB |
+  | WFS-DIY Track | 8 | 3 | 1,002 ms | 55 MB | 45 MB |
+  | WFS-DIY Track | 16 | 1 | 1,077 ms | 58 MB | 55 MB |
+  | WFS-DIY Track | 16 | 3 | 1,151 ms | 60 MB | 55 MB |
+
+  Decision AE's cost in numbers: **about a second to load whatever the shape, and a child of
+  36 MB plus 1.2 MB a voice for this plugin** — the children come up in parallel, so three
+  entries cost a hundred milliseconds more than one, not three times. §6.11's *"bypassed stack
+  at load"* is answered for the proxy; the inline figure is Phase 9b's.
+
 ### 17.10 The direction this phase does not build
 
 **The surface pages** — the focus row, the page model, the EQ page's three encoders a band, the FX
@@ -9937,16 +9998,24 @@ the sandbox, fifteen parameters catalogued, twenty blocks answered without a mis
 - **AU hosting is not compiled yet**; VST3 on every platform is. The Mac mini's link line decides.
 - **The macOS child needs `initialiseNSApplication()`** before its dispatch loop, as the console's
   serve loop does; the macOS CI job found the child leaving before it answered a block.
+- **The tree reads a table's revision BEFORE the table**, not after: a child that came up during
+  a slow rebuild was published `loading` for the rest of the session on the Linux CI job.
+- **The fx driver serves at a 20 ms deadline.** At the 250 µs default a shared CI box misses on
+  and off and the render averages between dry and processed; a driver proves the path, and M31
+  measures the round trip on a quiet machine.
 - **The child's test mode also writes its catalogue file**, so the parent's pickup runs in CI.
 
 **What is not built, of §17's own list:** the **FX panel at the foot** of the desktop window - the
 strip-per-entry view with a switch and a slider a parameter that `client/model/Fx.h` is written for
 (the model, the addresses, the gestures and the Plugins tab are in; the component is the next
-session's); **M30–M34**, which want a quiet machine and were not taken while the box was building
-for another session; the surface pages, the virtual panel's rotaries, a system EQ, a fade on a
+session's); the surface pages, the virtual panel's rotaries, a system EQ, a fade on a
 parameter, inline hosting and LV2 as §17.10 said.
 
-**The figures M30–M34 gave:** not yet; §17.9 keeps the table and PRD §6.11 says *not yet taken*.
+**The figures M30–M34 gave:** in §17.9, taken the same evening once the box was quiet. In one line
+each: the EQ costs 5.3 µs a voice with every section in and nothing flat; a round trip through a
+real plugin is 1.5 µs at p50 with no miss at sixteen voices; a dead child is `failed` in 9 ms after
+three 252 µs misses and costs nothing after; a write reaches the sound in two ticks, 41 ms; a real
+plugin's child is 36 MB plus 1.2 MB a voice and every entry loads in about a second.
 
 **What only the author can settle:** what he sees on the desktop - the EQ panel's feel (plan
 decisions 1, 5, 7), the deadline and the spin policy once M31 is in (12, 14), and whether the

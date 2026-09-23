@@ -486,7 +486,8 @@ class Server:
                  hosted: bool = False, render: "Path | None" = None,
                  ui: "Path | None" = None, device: "str | None" = None,
                  window: bool = False, theme: "Path | None" = None,
-                 device_type: "str | None" = None):
+                 device_type: "str | None" = None,
+                 proxy_deadline_us: "int | None" = None):
         argv = [str(find_binary()), "serve", str(bundle), "--http-port=0", "--osc-port=0"]
         if sample_rate is not None:
             argv.append(f"--sample-rate={sample_rate}")
@@ -517,6 +518,8 @@ class Server:
             argv.append(f"--device={device}")
         if device_type is not None:
             argv.append(f"--device-type={device_type}")
+        if proxy_deadline_us is not None:
+            argv.append(f"--proxy-deadline-us={proxy_deadline_us}")
 
         # --window opens the compiled client over this same engine, in this
         # same process (namespace draft section 14.16). Off by default here as
