@@ -2665,13 +2665,15 @@ Mackie vs HUI first — first week with the D700.
   *2026-09-23:* Phase 6 takes it as M27 (`docs/godot-namespace-draft-0.1.md`
   §16.9) — all seventeen elements repainted at 10, 20 and 50 a second on the
   unit, the operator saying which rate first stutters — and holds to ten a
-  second until then.
+  second until then. The instrument is `tests/blackbox/m27_d700_colour_rate.py`
+  (it needs `python-rtmidi` and the unit); not yet taken.
 - **How soon the D700's idle animation resumes** (§3.16), which sets the
   interval a profile repaints an idle colour at — unless the switch that
   disables it is found in the configuration block first.
   *2026-09-23:* Phase 6 takes it as M28 (`docs/godot-namespace-draft-0.1.md`
   §16.9) — paint, stop, and time the animation's return on the unit — and
-  re-asserts an idle colour every two seconds until then.
+  re-asserts an idle colour every two seconds until then. The instrument is
+  `tests/blackbox/m28_d700_idle_resume.py`; not yet taken.
 
 ---
 

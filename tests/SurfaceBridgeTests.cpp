@@ -63,9 +63,11 @@
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <optional>
@@ -362,7 +364,7 @@ namespace
         `pressure` - and a target, `/godot/run/<id>/trim`. */
     struct Stage
     {
-        explicit Stage (const std::string& profile)
+        explicit Stage (const std::string& profile, int memberCount = 2)
         {
             engine.log().openInMemory ({});
 
@@ -392,7 +394,7 @@ namespace
             groupId = document.createCue (listId, 0, "group", "Bank").id;
             set ("/godot/cue/" + groupId + "/mode", "sampler");
 
-            for (int i = 0; i < 2; ++i)
+            for (int i = 0; i < memberCount; ++i)
             {
                 const auto member = document.createCue (groupId, i, "media", "Clip " + std::to_string (i)).id;
                 set ("/godot/cue/" + member + "/file", "clip" + std::to_string (i) + ".wav");
@@ -1745,4 +1747,112 @@ TEST_CASE ("surface bridge: the standing test - two surfaces on different protoc
     //  AND THE PANEL IS NEVER SENT A BYTE: it has no port, and needs none.
     for (const auto& message : desk.sink.sent)
         CHECK (message.port == "PORTMCU1");
+}
+
+//==============================================================================
+TEST_CASE ("m29: what a full refresh of a sixteen-strip D700 costs the tick thread" * doctest::skip())
+{
+    /*  M29 - AN INSTRUMENT, NOT A GATE (namespace draft §16.9). Skipped in
+        every ordinary run, and taken with
+
+            wfg_tests --test-case="m29*" --no-skip
+
+        on a Release build of a machine nobody else is using: a Debug figure is
+        a figure about the Debug build. It prints what the bridge's after-tick
+        costs the tick thread for a D700 with all sixteen strips filled, in the
+        three shapes a tick comes in - nothing changed, every fader riding, every
+        strip's name changing - against the twenty milliseconds a tick has.
+        What it cannot see is the sending: the bytes are queued for the MIDI
+        sender's worker, and what that thread spends is not the tick's. */
+    Stage stage { "d700", 16 };
+    stage.audio.tracks = 16;
+
+    for (std::size_t n = 0; n < stage.members.size(); ++n)
+        stage.set ("/godot/cue/" + stage.members[n] + "/colour", n % 2 == 0 ? "#FF8000" : "#2080FF");
+
+    stage.arm();
+
+    surface::SurfaceSpec spec;
+    spec.id = stage.surfaceId;
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1", "PORTBNK2" };
+    spec.strips = stage.strips;
+    stage.bridge.declare ({ spec }, [] (const std::string& port) { return plugged (port); });
+
+    /*  A WARM-UP THE FIGURES LEAVE OUT: the first ticks after a declaration
+        paint everything and fill every cache, which is not what a show pays
+        on every tick after it. */
+    stage.ticks (200);
+
+    const auto measure = [&stage] (const char* label, int count, const std::function<void (int)>& change)
+    {
+        std::vector<double> micros;
+        std::vector<double> publishing;
+        micros.reserve (static_cast<std::size_t> (count));
+        publishing.reserve (static_cast<std::size_t> (count));
+        std::size_t bytes = 0;
+
+        for (int n = 0; n < count; ++n)
+        {
+            change (n);
+
+            //  A tick as serve runs it, with the bridge's after-tick timed alone.
+            stage.bridge.beforeTick (stage.submit, stage.tick);
+            stage.runner.beforeTick (stage.engine, stage.tick);
+            stage.engine.processTick (stage.tick);
+            stage.parameters.markStale();
+
+            /*  THE PUBLISH IT SITS BESIDE, timed the same way: the question is
+                whether the bridge fits next to it, so the answer is a ratio. */
+            const auto publishStarted = std::chrono::steady_clock::now();
+            stage.snapshot = stage.parameters.publish (stage.tick, stage.state);
+            publishing.push_back (std::chrono::duration<double, std::micro> (
+                                      std::chrono::steady_clock::now() - publishStarted).count());
+
+            stage.sink.sent.clear();
+
+            const auto started = std::chrono::steady_clock::now();
+            stage.bridge.afterTick (stage.snapshot, stage.touches, stage.tick);
+            const auto took = std::chrono::steady_clock::now() - started;
+
+            micros.push_back (std::chrono::duration<double, std::micro> (took).count());
+
+            for (const auto& message : stage.sink.sent)
+                bytes += message.bytes.size();
+
+            ++stage.tick;
+        }
+
+        std::sort (micros.begin(), micros.end());
+        std::sort (publishing.begin(), publishing.end());
+
+        MESSAGE (std::string (label) << ": median " << micros[micros.size() / 2] << " us, p99 "
+                       << micros[micros.size() * 99 / 100] << " us, worst " << micros.back()
+                       << " us; " << bytes / static_cast<std::size_t> (count) << " bytes a tick"
+                       << " - beside a publish of " << publishing[publishing.size() / 2] << " us");
+    };
+
+    measure ("idle, nothing changed", 500, [] (int) {});
+
+    /*  EVERY FADER RIDING, below the start threshold so no clip launches and
+        every tick has sixteen motors, sixteen level rows and sixteen rings to
+        move. */
+    measure ("every fader riding", 500, [&stage] (int n)
+    {
+        for (const auto& member : stage.members)
+            if (const auto* run = stage.liveRunOf (member))
+                REQUIRE (stage.engine.submit ("window", "node.set",
+                                              { osc::Value::string ("/godot/run/" + run->id + "/trim"),
+                                                osc::Value::float64 (-120.0 + static_cast<double> (n % 9)) }));
+    });
+
+    //  EVERY NAME CHANGING, which is every display row written again.
+    measure ("every name changing", 200, [&stage] (int n)
+    {
+        for (std::size_t m = 0; m < stage.members.size(); ++m)
+            stage.set ("/godot/cue/" + stage.members[m] + "/name",
+                       "Clip " + std::to_string (m) + "." + std::to_string (n));
+    });
+
+    CHECK (stage.bridge.refusedSysEx() == 0u);
 }

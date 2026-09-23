@@ -8949,6 +8949,38 @@ none is a ctest gate, for §14.14's reason: a wall clock on a shared CI runner i
 teaches people to re-run the suite. The figures are recorded here and in PRD §6.11 when they are
 taken, and the Mac mini's cross-checks are owed as they are for M22 to M25.
 
+*Taken, and built, 2026-09-23.*
+
+- **M26, a first reading on the wrong machine** — a Debug build, on a box shared with a compiler, at
+  48 kHz with a 64-sample buffer, so `launchLatencyTicks` is 2. A press applied on tick T is placed
+  by the hook of T + 1 and sounds 2.4 to 2.5 ticks after that: **3.4 to 3.5 ticks, 68 to 70 ms, from
+  the press being applied to its sound, plus up to 20 ms queued for the tick boundary.** That is the
+  answer expected above; the half tick past it is where a Debug tick thread runs inside its tick,
+  behind the audio clock. The instrument counts apart the presses whose tick thread was far behind,
+  which sound as late as it was, because those are the machine and not the path. It is slow for an
+  instrument, and the levers are as written: the tick rate first; then placing a press's launch in
+  the tick it is applied, which saves a whole tick but needs a press-shaped exception to *the hook
+  decides*; the buffer moves `launchLatencyTicks` only above 320 samples. To be retaken on a Release
+  build of a quiet machine.
+- **M27 and M28** are scripts that talk to the D700 directly with `python-rtmidi` - colour notes on
+  channels 2 to 4 and nothing else, no SysEx at all - so they need the library, the unit under the
+  Mackie preset, and the Configurator closed. Not taken: the library is not on the build machine, and
+  the unit is the author's.
+- **M29 is not the script the table names.** The build machine has no loopback MIDI port, and the
+  bridge paints only a connected surface, so an A/B through `serve` would have compared nothing with
+  nothing. It is a skipped case in `SurfaceBridgeTests` - `wfg_tests --test-case="m29*" --no-skip` -
+  that times the bridge's after-tick alone, for a sixteen-strip D700 with every strip filled, in the
+  three shapes a tick comes in, after a warm-up it leaves out, and times the publish it sits beside
+  the same way. Median per tick, Release: **0.10 ms** idle, **0.11 ms** with every fader riding,
+  **0.10 ms** with every name changing - the cost is the dozen lookups each strip makes, not what
+  changed - beside a stale publish of **1.5 ms**. So the bridge fits: a fifteenth of the publish,
+  half a percent of the tick. **The finding is the publish, in Debug:** 4 to 4.5 ms of bridge beside
+  **93 to 106 ms** of publish - a Debug build rebuilding this small show's tree takes five ticks to
+  do it, which is why a Debug `serve` falls behind its audio clock (M26's late presses,
+  `first_sound.py`'s 670 ms of `latenessMax`) and why every timing in this phase is to be retaken
+  on a Release build. What it does not count is the sending, which is the MIDI sender's worker's
+  and not the tick's.
+
 ### 16.10 The direction this phase does not build
 
 **Banking** (§3.9d) — decided with the hardware in hand, as the PRD asks. The bank and channel
