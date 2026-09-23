@@ -38,7 +38,10 @@
 */
 
 #include <array>
+#include <cstdint>
 #include <map>
+#include <memory>
+#include <mutex>
 #include <memory>
 #include <string>
 #include <vector>
@@ -93,9 +96,15 @@ namespace wfg::plugin
     };
 
     /*  The catalogues this machine has, by identifier, kept as one JSON file
-        each under a folder the engine owns. Loaded on demand and never on the
-        tick thread: `ensureLoaded` is called by the serve loop when the show
-        changes, `find` by the tree when it rebuilds. */
+        each under a folder the engine owns.
+
+        THREADING: a mutex of its own, and a revision (PluginTable's idiom).
+        The serve loop loads files on the tick thread when the show changes;
+        the proxy host puts a child's report in from the message thread
+        (PR 9a.7); the tree reads on the tick thread when it rebuilds and
+        compares the revision at every publish. find() hands out a
+        shared_ptr rather than a pointer, so a catalogue replaced while a
+        rebuild is reading it stays alive until the rebuild is done. */
     class CatalogueStore
     {
     public:
@@ -105,7 +114,11 @@ namespace wfg::plugin
         const std::string& folder() const noexcept { return root; }
 
         /** What is known for an identifier, or null. Never reads the disk. */
-        const Catalogue* find (const std::string& identifier) const noexcept;
+        std::shared_ptr<const Catalogue> find (const std::string& identifier) const noexcept;
+
+        /** Moves with every put that changed something, so a reader that
+            cached what it read can tell. */
+        std::uint64_t revision() const noexcept;
 
         /** Reads the identifier's file if one exists and it is not held yet.
             The built-in test catalogue is always known. */
@@ -118,10 +131,12 @@ namespace wfg::plugin
         /** Where the identifier's file is, whether or not it exists. */
         std::string fileFor (const std::string& identifier) const;
 
-        std::size_t size() const noexcept { return held.size(); }
+        std::size_t size() const noexcept;
 
     private:
         std::string root;
-        std::map<std::string, std::unique_ptr<Catalogue>> held;
+        mutable std::mutex mutex;
+        std::map<std::string, std::shared_ptr<const Catalogue>> held;
+        std::uint64_t revisionCount = 0;
     };
 }

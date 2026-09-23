@@ -485,6 +485,18 @@ namespace wfg::plugin
         return knownFrom (*engine);
     }
 
+    std::string describePlugin (const std::string& storageFolder, const std::string& identifier)
+    {
+        auto engine = engineOn (storageFolder);
+
+        if (const auto description = engine->getPluginManager().knownPluginList
+                                           .getTypeForIdentifierString (juce::String (identifier)))
+            if (const auto xml = description->createXml())
+                return xml->toString().toStdString();
+
+        return {};
+    }
+
     std::vector<std::string> skippedPlugins (const std::string& storageFolder)
     {
         auto engine = engineOn (storageFolder);

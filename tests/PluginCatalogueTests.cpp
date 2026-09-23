@@ -200,7 +200,7 @@ TEST_CASE ("catalogue: the store keeps one file per identifier under its folder,
     plugin::CatalogueStore store { folder.path() };
 
     //  The test child's, always, with two parameters: a gain and the kill switch.
-    const auto* testGain = store.find (plugin::Catalogue::testGainIdentifier());
+    const auto testGain = store.find (plugin::Catalogue::testGainIdentifier());
     REQUIRE (testGain != nullptr);
     REQUIRE (testGain->params.size() == 2u);
     CHECK (testGain->params[0].name == "Gain");

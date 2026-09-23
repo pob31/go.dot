@@ -1634,16 +1634,89 @@ namespace
         error. A file that hangs the child past the deadline is skipped and
         named, and stays skipped until --retry-skipped. --catalogue=<identifier>
         arrives with the child that can host one (PR 9a.7). */
+    /*  `wfg plugins --catalogue=<identifier>`: the plugin brought up once, in
+        a child of its own with no region, its parameters read off the
+        instance and kept in the machine's cache (§17.7) - so a show can be
+        edited on a machine that will not play it, with the names and the
+        value text in front of the person editing. The child talks JSON on
+        its stdout, and this is the one child that is given a pipe: there is
+        no audio and no socket in this verb for it to inherit. */
+    int runPluginCatalogue (const std::string& identifier, const std::string& storage)
+    {
+        wfg::plugin::CatalogueStore store {
+            juce::File (juce::String (storage)).getChildFile ("plugins").getChildFile ("catalogue")
+                .getFullPathName().toStdString() };
+
+        juce::StringArray command;
+        command.add (juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName());
+        command.add (wfg::plugin::pluginHostVerb);
+        command.add ("--catalogue-only");
+        command.add ("--plugin=" + juce::String (identifier));
+
+        juce::File descriptionFile;
+
+        if (identifier != wfg::plugin::Catalogue::testGainIdentifier())
+        {
+            const auto xml = wfg::plugin::describePlugin (storage, identifier);
+
+            if (xml.empty())
+            {
+                std::cerr << "wfg plugins: this machine's scan does not know " << identifier
+                          << "; run wfg plugins --scan" << std::endl;
+                return 2;
+            }
+
+            descriptionFile = juce::File::createTempFile ("plugin.xml");
+            descriptionFile.replaceWithText (juce::String (xml), false, false, "\n");
+            command.add ("--description=" + descriptionFile.getFullPathName());
+        }
+
+        juce::ChildProcess child;
+
+        if (! child.start (command, juce::ChildProcess::wantStdOut))
+        {
+            std::cerr << "wfg plugins: could not start the plugin host" << std::endl;
+            descriptionFile.deleteFile();
+            return 2;
+        }
+
+        const auto text = child.readAllProcessOutput();
+        child.waitForProcessToFinish (30000);
+        descriptionFile.deleteFile();
+
+        wfg::plugin::Catalogue catalogue;
+        std::string problem;
+
+        if (child.getExitCode() != 0 || ! wfg::plugin::Catalogue::fromJson (text.toStdString(), catalogue, problem))
+        {
+            std::cerr << "wfg plugins: the plugin host could not read " << identifier
+                      << (problem.empty() ? "" : ": " + problem) << std::endl;
+            return 2;
+        }
+
+        store.put (catalogue);
+
+        std::cout << "# " << catalogue.name << " | " << catalogue.params.size() << " parameter(s) | latency "
+                  << catalogue.latencySamples << " samples | cached at " << store.fileFor (identifier) << std::endl;
+        std::cout << "# n | name | short | unit | default | steps | bipolar | text at 0 .. 1" << std::endl;
+
+        for (std::size_t n = 0; n < catalogue.params.size(); ++n)
+        {
+            const auto& p = catalogue.params[n];
+            std::cout << n << " | " << p.name << " | " << p.shortName << " | " << p.unit << " | "
+                      << p.defaultValue << " | " << (p.discrete ? p.steps : 0) << " | " << (p.bipolar ? "yes" : "no")
+                      << " | " << p.text.front() << " .. " << p.text.back() << std::endl;
+        }
+
+        return 0;
+    }
+
     int runPlugins (const juce::ArgumentList& args)
     {
         const auto storage = engineCacheFolder().getFullPathName().toStdString();
 
         if (args.containsOption ("--catalogue"))
-        {
-            std::cerr << "wfg plugins: --catalogue needs the plugin host, which arrives with PR 9a.7"
-                      << std::endl;
-            return 2;
-        }
+            return runPluginCatalogue (args.getValueForOption ("--catalogue").toStdString(), storage);
 
         std::vector<wfg::plugin::KnownPlugin> known;
 
@@ -2726,6 +2799,9 @@ namespace
         std::vector<wfg::plugin::KnownPlugin> knownPlugins;
         parameters.setCatalogues (&catalogues);
         parameters.setKnownPlugins (&knownPlugins);
+
+        /*  And the children report into the same cache (PR 9a.7). */
+        proxyServices.catalogues = &catalogues;
 
         const auto loadShowCatalogues = [&catalogues, &document]
         {
@@ -4301,7 +4377,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
         `--device` alone opens the default device, and `--device-type` takes
         the heading `wfg devices` prints above each group of names. */
     app.addCommand ({ "plugins",
-                      "plugins [--scan[=vst3|au|lv2]] [--path=<dir>] [--retry-skipped] [--list]",
+                      "plugins [--scan[=vst3|au|lv2]] [--path=<dir>] [--retry-skipped] [--list] [--catalogue=<identifier>]",
                       "Scans this machine for plugins, out of process, or lists what the last scan found",
                       {},
                       [] (const juce::ArgumentList& args)

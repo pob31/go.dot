@@ -1436,7 +1436,8 @@ namespace wfg::tree
                                 instance (§17.7). It answers `paramCount` when the
                                 child has not, and every `param/<n>` node below. */
                             const auto identifier = entry[juce::Identifier ("identifier")].toString().toStdString();
-                            const auto* catalogue = catalogues != nullptr ? catalogues->find (identifier) : nullptr;
+                            const auto catalogue = catalogues != nullptr ? catalogues->find (identifier)
+                                                                         : std::shared_ptr<const plugin::Catalogue> {};
                             const auto knownCount = catalogue != nullptr ? static_cast<int> (catalogue->params.size()) : 0;
 
                             for (const auto* row : doc::Schema::rowsForOwner ("plugin"))
@@ -1592,6 +1593,7 @@ namespace wfg::tree
 
         documentPart = std::make_shared<const std::vector<Node>> (std::move (nodes));
         pluginRevision = pluginTable != nullptr ? pluginTable->revision() : 0;
+        catalogueRevision = catalogues != nullptr ? catalogues->revision() : 0;
         stale = false;
     }
 
@@ -1736,7 +1738,8 @@ namespace wfg::tree
             writes it from the message thread, and its `state` rows are on
             this cached half. */
         if (stale || documentPart == nullptr
-             || (pluginTable != nullptr && pluginTable->revision() != pluginRevision))
+             || (pluginTable != nullptr && pluginTable->revision() != pluginRevision)
+             || (catalogues != nullptr && catalogues->revision() != catalogueRevision))
             rebuildDocumentPart();
 
         /*  ASKED RATHER THAN TOLD. The mount table bumps its own revision on

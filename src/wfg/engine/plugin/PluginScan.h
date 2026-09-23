@@ -90,6 +90,10 @@ namespace wfg::plugin
     /** What the last scan found, from storage; empty when nothing was scanned. */
     std::vector<KnownPlugin> knownPlugins (const std::string& storageFolder);
 
+    /*  The scan's description of one identifier, as XML, for a child to
+        make the plugin from; empty when the scan does not know it. */
+    std::string describePlugin (const std::string& storageFolder, const std::string& identifier);
+
     /** The files earlier scans gave up on - hung past the deadline, or took
         the child down - which a scan skips until told to retry them. */
     std::vector<std::string> skippedPlugins (const std::string& storageFolder);

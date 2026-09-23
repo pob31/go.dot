@@ -501,6 +501,9 @@ namespace wfg::tree
             mark the tree stale, so the tree asks instead (Phase 9a). */
         std::uint64_t pluginRevision = 0;
 
+        /** The catalogue store's revision the document half was built from. */
+        std::uint64_t catalogueRevision = 0;
+
         /*  How many times the mounted half has actually been rebuilt.
 
             PUBLISHED SO THE SPLIT CAN BE ASSERTED RATHER THAN TIMED. M9's

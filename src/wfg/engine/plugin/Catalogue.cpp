@@ -215,7 +215,7 @@ namespace wfg::plugin
         /*  THE TEST CATALOGUE IS ALWAYS KNOWN, on every machine, so the whole
             surface a real plugin presents - the param nodes, the text nodes,
             the count - is exercised in CI with no plugin installed. */
-        held[Catalogue::testGainIdentifier()] = std::make_unique<Catalogue> (Catalogue::testGain());
+        held[Catalogue::testGainIdentifier()] = std::make_shared<const Catalogue> (Catalogue::testGain());
     }
 
     std::string CatalogueStore::fileFor (const std::string& identifier) const
@@ -229,17 +229,34 @@ namespace wfg::plugin
                    .getFullPathName().toStdString();
     }
 
-    const Catalogue* CatalogueStore::find (const std::string& identifier) const noexcept
+    std::shared_ptr<const Catalogue> CatalogueStore::find (const std::string& identifier) const noexcept
     {
+        const std::lock_guard<std::mutex> lock { mutex };
         const auto found = held.find (identifier);
-        return found != held.end() ? found->second.get() : nullptr;
+        return found != held.end() ? found->second : nullptr;
+    }
+
+    std::uint64_t CatalogueStore::revision() const noexcept
+    {
+        const std::lock_guard<std::mutex> lock { mutex };
+        return revisionCount;
+    }
+
+    std::size_t CatalogueStore::size() const noexcept
+    {
+        const std::lock_guard<std::mutex> lock { mutex };
+        return held.size();
     }
 
     bool CatalogueStore::ensureLoaded (const std::string& identifier)
     {
-        if (identifier.empty() || held.count (identifier) > 0)
-            return held.count (identifier) > 0;
+        if (identifier.empty())
+            return false;
 
+        if (find (identifier) != nullptr)
+            return true;
+
+        /*  The disk is read outside the lock; only the map is under it. */
         const juce::File file { juce::String (fileFor (identifier)) };
 
         if (! file.existsAsFile())
@@ -257,7 +274,9 @@ namespace wfg::plugin
         if (read.identifier != identifier)
             return false;
 
-        held[identifier] = std::make_unique<Catalogue> (std::move (read));
+        const std::lock_guard<std::mutex> lock { mutex };
+        held[identifier] = std::make_shared<const Catalogue> (std::move (read));
+        ++revisionCount;
         return true;
     }
 
@@ -267,10 +286,17 @@ namespace wfg::plugin
             return false;
 
         const auto text = catalogue.toJson();
-        const auto found = held.find (catalogue.identifier);
-        const auto changed = found == held.end() || found->second->toJson() != text;
+        auto changed = false;
 
-        held[catalogue.identifier] = std::make_unique<Catalogue> (catalogue);
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            const auto found = held.find (catalogue.identifier);
+            changed = found == held.end() || found->second->toJson() != text;
+            held[catalogue.identifier] = std::make_shared<const Catalogue> (catalogue);
+
+            if (changed)
+                ++revisionCount;
+        }
 
         const juce::File file { juce::String (fileFor (catalogue.identifier)) };
         file.getParentDirectory().createDirectory();

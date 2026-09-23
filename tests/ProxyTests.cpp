@@ -34,11 +34,13 @@
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/engine/plugin/PluginTable.h>
+#include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/plugin/SharedRegion.h>
 #include <wfg/engine/rt/RtCheck.h>
 
+#include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_core/juce_core.h>
 
 #include <chrono>
@@ -492,20 +494,32 @@ TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked fai
     host.stop();
 }
 
-TEST_CASE ("proxy: the child refuses an identifier it cannot host, with a sentence, and the entry reads failed")
+TEST_CASE ("proxy: a plugin the scan describes but the child cannot make reads failed, with the child's sentence")
 {
     Folder folder;
     plugin::PluginTable table;
     plugin::ProxyLane lane;
 
+    /*  A description the scan could have written, of a file that is not
+        there: the child takes it, asks the format for an instance, and is
+        told no - which is the path a plugin uninstalled since the scan, or
+        one that will not load tonight, takes. */
+    juce::PluginDescription nothing;
+    nothing.name = "Nothing Here";
+    nothing.pluginFormatName = "VST3";
+    nothing.fileOrIdentifier = folder.path.getChildFile ("Nothing Here.vst3").getFullPathName();
+    nothing.uniqueId = 0x4e6f7468;
+    nothing.deprecatedUid = nothing.uniqueId;
+
     auto spec = testGainSpec (folder, 1);
-    spec.identifier = "VST3-Nothing Here-00000000-00000000";
+    spec.identifier = nothing.createIdentifierString().toStdString();
+    spec.descriptionXml = nothing.createXml()->toString().toStdString();
     plugin::ProxyHost host (spec, { &lane }, &table);
 
     std::string problem;
     REQUIRE (host.start (problem));
-    REQUIRE (waitForState (host, "failed", 5000));
-    CHECK (host.status().problem.find ("9a.7") != std::string::npos);
+    REQUIRE (waitForState (host, "failed", 10000));
+    CHECK (host.status().problem.find ("Nothing Here") != std::string::npos);
     CHECK_FALSE (lane.isCallEnabled());
     host.stop();
 }
@@ -561,6 +575,161 @@ TEST_CASE ("proxy: plugin.failed writes the table and plugin.restart reaches the
     plugin::registerPluginCommands (quiet, table, {});
     outcome = dispatch (quiet, context, "plugin.restart", { osc::Value::string ("PG7N0001") });
     CHECK (outcome.applied);
+}
+
+//==============================================================================
+TEST_CASE ("proxy: a plugin this machine's scan does not know reads missing, with a sentence, and launches nothing")
+{
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lane;
+
+    auto spec = testGainSpec (folder, 1);
+    spec.identifier = "VST3-Nowhere-00000000-00000000";
+    spec.descriptionXml.clear();
+    plugin::ProxyHost host (spec, { &lane }, &table);
+
+    std::string problem;
+    CHECK_FALSE (host.start (problem));
+    CHECK (host.status().state == "missing");
+    CHECK (host.status().problem.find ("wfg plugins --scan") != std::string::npos);
+    CHECK_FALSE (host.childIsRunning());
+    CHECK (table.statusOf ("PG7N0001").state == "missing");
+    host.stop();
+}
+
+TEST_CASE ("proxy: the child's catalogue is written beside the region, read into the store once it is up, and gone after stop")
+{
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::CatalogueStore store { folder.path.getChildFile ("catalogue").getFullPathName().toStdString() };
+    plugin::ProxyLane lane;
+
+    auto spec = testGainSpec (folder, 1);
+    spec.catalogues = &store;
+    plugin::ProxyHost host (spec, { &lane }, &table);
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+
+    const juce::File catalogueFile = juce::File (host.regionPath()).withFileExtension ("catalogue.json");
+    CHECK (catalogueFile.existsAsFile());
+
+    /*  The pickup is a put of what the child wrote: the test child's
+        catalogue is the built-in one, so the store's content is unchanged
+        and its revision does not move - which is the right answer, and the
+        file's existence is the proof the path ran. */
+    host.poll();
+    const auto held = store.find (plugin::Catalogue::testGainIdentifier());
+    REQUIRE (held != nullptr);
+    CHECK (held->params.size() == 2u);
+
+    host.stop();
+    CHECK_FALSE (catalogueFile.existsAsFile());
+}
+
+TEST_CASE ("proxy: the catalogue-only verb answers the test child's catalogue as JSON on its stdout")
+{
+    juce::StringArray command;
+    command.add (juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName());
+    command.add ("plugin-host");
+    command.add ("--catalogue-only");
+    command.add (juce::String ("--plugin=") + plugin::Catalogue::testGainIdentifier());
+
+    juce::ChildProcess child;
+    REQUIRE (child.start (command, juce::ChildProcess::wantStdOut));
+    const auto text = child.readAllProcessOutput();
+    CHECK (child.waitForProcessToFinish (10000));
+    CHECK (child.getExitCode() == 0);
+
+    plugin::Catalogue catalogue;
+    std::string problem;
+    REQUIRE (plugin::Catalogue::fromJson (text.toStdString(), catalogue, problem));
+    CHECK (catalogue.identifier == plugin::Catalogue::testGainIdentifier());
+    REQUIRE (catalogue.params.size() == 2u);
+    CHECK (catalogue.params[0].name == "Gain");
+    CHECK (catalogue.params[1].discrete);
+}
+
+/*  A REAL PLUGIN, on a machine that has one: skipped unless asked for with
+    `--no-skip` and WFG_REAL_VST3 set to an identifier from `wfg plugins
+    --list`. The child is this test binary, which links the same hosting code
+    the console does; the description comes off the machine's own scan. What
+    it proves is the whole of 9a.7 against a plugin nobody wrote for it: the
+    instances come up, the catalogue has its names, a block goes through and
+    comes back, a value written reaches the instance. M31 and M34 measure. */
+TEST_CASE ("proxy: a real VST3 from this machine's scan comes up, reports its catalogue, and processes a block"
+           * doctest::skip())
+{
+    const auto identifier = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_VST3", {}).toStdString();
+    REQUIRE_MESSAGE (! identifier.empty(), "set WFG_REAL_VST3 to an identifier from wfg plugins --list");
+
+    const auto storage = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                            .getChildFile ("Go.dot").getChildFile ("engine").getFullPathName().toStdString();
+    const auto xml = plugin::describePlugin (storage, identifier);
+    REQUIRE_MESSAGE (! xml.empty(), "the scan does not know " << identifier);
+
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::CatalogueStore store { folder.path.getChildFile ("catalogue").getFullPathName().toStdString() };
+    plugin::ProxyLane lanes[2];
+
+    auto spec = testGainSpec (folder, 2, 2, 256);
+    spec.identifier = identifier;
+    spec.name = "real";
+    spec.descriptionXml = xml;
+    spec.catalogues = &store;
+    plugin::ProxyHost host (spec, { &lanes[0], &lanes[1] }, &table);
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    const auto up = waitForState (host, "loaded", 20000);
+    INFO ("state " << host.status().state << ": " << host.status().problem);
+    REQUIRE (up);
+
+    for (int i = 0; i < 50 && store.find (identifier) == nullptr; ++i)
+    {
+        host.poll();
+        std::this_thread::sleep_for (std::chrono::milliseconds (20));
+    }
+
+    const auto catalogue = store.find (identifier);
+    REQUIRE (catalogue != nullptr);
+    MESSAGE (catalogue->name << ": " << catalogue->params.size() << " parameters, latency "
+             << catalogue->latencySamples << " samples");
+
+    for (std::size_t n = 0; n < std::min<std::size_t> (8, catalogue->params.size()); ++n)
+        MESSAGE ("  p" << n << " " << catalogue->params[n].name << " [" << catalogue->params[n].unit << "] default "
+                 << catalogue->params[n].defaultValue << " text " << catalogue->params[n].text.front()
+                 << " .. " << catalogue->params[n].text.back() << std::string (catalogue->params[n].bipolar ? " bipolar" : ""));
+
+    CHECK (host.status().paramCount == static_cast<int> (catalogue->params.size()));
+
+    lanes[0].setDeadlineMicroseconds (200000);
+    lanes[0].setEnabled (true);
+    host.poll();
+
+    Block block (2, 256, 0.25f);
+
+    for (int i = 0; i < 20; ++i)
+    {
+        std::fill (block.storage.begin(), block.storage.end(), 0.25f);
+        lanes[0].process (block.data(), 2, 256);
+    }
+
+    MESSAGE ("blocks " << lanes[0].blocks() << ", answered " << lanes[0].answered() << ", misses " << lanes[0].misses());
+    CHECK (lanes[0].answered() >= 1);
+
+    if (! catalogue->params.empty())
+    {
+        lanes[0].setParameter (0, 1.0f);
+        std::fill (block.storage.begin(), block.storage.end(), 0.25f);
+        lanes[0].process (block.data(), 2, 256);
+        CHECK (lanes[0].misses() == 0);
+    }
+
+    host.stop();
 }
 
 //==============================================================================

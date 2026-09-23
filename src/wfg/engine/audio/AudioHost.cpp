@@ -592,6 +592,16 @@ namespace wfg::audio
                 proxySpec.deadlineMicroseconds = spec.proxyDeadlineMicroseconds;
                 proxySpec.regionFolder = storageFolder.getChildFile ("proxy").getFullPathName().toStdString();
                 proxySpec.launch = services.launch;
+                proxySpec.catalogues = services.catalogues;
+
+                /*  THE DESCRIPTION, off this machine's scan (PR 9a.7): what the
+                    child makes the plugin from. An identifier the scan does not
+                    know leaves it empty, and the host reads `missing`. */
+                if (entry.identifier != plugin::Catalogue::testGainIdentifier())
+                    if (const auto description = engine->getPluginManager().knownPluginList
+                                                       .getTypeForIdentifierString (juce::String (entry.identifier)))
+                        if (const auto xml = description->createXml())
+                            proxySpec.descriptionXml = xml->toString().toStdString();
 
                 std::vector<plugin::ProxyLane*> slotLanes;
                 slotLanes.reserve (static_cast<std::size_t> (voices));

@@ -16,6 +16,7 @@
 
 #pragma once
 
+#include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/plugin/SharedRegion.h>
@@ -74,6 +75,15 @@ namespace wfg::plugin
 
         /** A preset file, or empty for the plugin's own defaults. */
         std::string presetPath;
+
+        /*  The plugin's description as the scan recorded it, as XML, for the
+            child to instantiate from (PR 9a.7). Empty for the test child;
+            empty for anything else means this machine's scan does not know
+            the identifier, and the entry reads `missing`. */
+        std::string descriptionXml;
+
+        /** Where a child's catalogue report goes once it arrives; may be null. */
+        CatalogueStore* catalogues = nullptr;
 
         /** One lane per voice. */
         int lanes = 0;

@@ -150,7 +150,7 @@ namespace wfg::plugin
     //==============================================================================
     struct ProxyHost::Impl
     {
-        enum class State { unloaded, loading, loaded, failed };
+        enum class State { unloaded, loading, loaded, missing, failed };
 
         Impl (ProxySpec specToUse, std::vector<ProxyLane*> lanesToUse, PluginTable* tableToUse)
             : spec (std::move (specToUse)), lanes (std::move (lanesToUse)), table (tableToUse)
@@ -165,6 +165,7 @@ namespace wfg::plugin
             {
                 case State::loading: return "loading";
                 case State::loaded:  return "loaded";
+                case State::missing: return "missing";
                 case State::failed:  return "failed";
                 case State::unloaded: break;
             }
@@ -311,6 +312,20 @@ namespace wfg::plugin
             if (! spec.presetPath.empty())
                 command.add ("--preset=" + juce::String (spec.presetPath));
 
+            /*  The description beside the region, for the child to make the
+                plugin from; and where its catalogue goes, beside both. */
+            if (! spec.descriptionXml.empty())
+            {
+                descriptionFile = regionFile.withFileExtension ("plugin.xml");
+                descriptionFile.replaceWithText (juce::String (spec.descriptionXml), false, false, "\n");
+                command.add ("--description=" + descriptionFile.getFullPathName());
+            }
+
+            catalogueFile = regionFile.withFileExtension ("catalogue.json");
+            catalogueFile.deleteFile();
+            catalogueRead = false;
+            command.add ("--catalogue-file=" + catalogueFile.getFullPathName());
+
             /*  No pipes for its output: nothing reads them, and a full pipe
                 is what hangs a child that prints. */
             child = std::make_unique<ChildHandle>();
@@ -447,6 +462,23 @@ namespace wfg::plugin
 
             if (state == State::loaded)
             {
+                /*  THE CATALOGUE, read once when the child says it is there,
+                    into the machine's cache - which the tree compares at every
+                    publish, so the param nodes follow without anyone marking
+                    it stale from this thread. */
+                if (! catalogueRead && spec.catalogues != nullptr
+                     && header->catalogueReady.load (std::memory_order_acquire) != 0)
+                {
+                    catalogueRead = true;
+                    Catalogue catalogue;
+                    std::string why;
+
+                    if (catalogueFile.existsAsFile()
+                         && Catalogue::fromJson (catalogueFile.loadFileAsString().toStdString(), catalogue, why)
+                         && catalogue.identifier == spec.identifier)
+                        spec.catalogues->put (catalogue);
+                }
+
                 auto anyEnabled = false;
 
                 for (std::size_t i = 0; i < lanes.size(); ++i)
@@ -503,6 +535,8 @@ namespace wfg::plugin
             header = nullptr;
             mapping.reset();
             regionFile.deleteFile();
+            descriptionFile.deleteFile();
+            catalogueFile.deleteFile();
 
             if (state != State::unloaded)
             {
@@ -520,6 +554,9 @@ namespace wfg::plugin
         ChangeHandler changed;
 
         juce::File regionFile;
+        juce::File descriptionFile;
+        juce::File catalogueFile;
+        bool catalogueRead = false;
         std::unique_ptr<juce::MemoryMappedFile> mapping;
         region::Header* header = nullptr;
         std::unique_ptr<ChildHandle> child;
@@ -557,6 +594,19 @@ namespace wfg::plugin
         {
             problem = "a proxy needs at least one lane, one channel and a block size";
             impl->state = Impl::State::failed;
+            impl->problem = problem;
+            impl->publish();
+            return false;
+        }
+
+        /*  MISSING IS ITS OWN WORD (§17.2): the show names a plugin this
+            machine's scan does not know. No child is launched for it; the
+            entry says so, and every voice plays dry through the slot. */
+        if (impl->spec.descriptionXml.empty() && impl->spec.identifier != Catalogue::testGainIdentifier())
+        {
+            problem = "this machine's scan does not know " + impl->spec.identifier
+                        + "; run wfg plugins --scan, or install it";
+            impl->state = Impl::State::missing;
             impl->problem = problem;
             impl->publish();
             return false;

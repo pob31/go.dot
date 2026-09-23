@@ -86,6 +86,9 @@ namespace wfg::audio
     struct ProxyServices
     {
         plugin::PluginTable* table = nullptr;
+
+        /** Where a child's catalogue report goes (PR 9a.7); may be null. */
+        plugin::CatalogueStore* catalogues = nullptr;
         plugin::ProxyLaunch launch;
         std::function<void (const std::string& pluginId, const std::string& problem)> onFailed;
         std::function<void()> onChanged;
