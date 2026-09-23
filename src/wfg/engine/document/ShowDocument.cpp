@@ -371,6 +371,7 @@ namespace wfg::doc
         if (element == "Feed")                      return "feed";
         if (element == "Insert")                    return "insert";
         if (element == "Send")                      return "send";
+        if (element == "Fx")                        return "fx";
 
         /*  `Rack` is addressed by nothing, like `Mounts` and like a header: a
             container that holds channels and carries nothing of its own. */
@@ -1836,6 +1837,37 @@ namespace wfg::doc
 
         return insertObject (cue, endOfSequence, "Send", id,
                              { { "bus", busId } });
+    }
+
+    EditResult ShowDocument::createFx (const std::string& cueId,
+                                       const std::string& pluginId,
+                                       const std::string& id)
+    {
+        auto cue = findById (cueId);
+
+        if (! cue.isValid())
+            return EditResult::failed (reason::unknownId);
+
+        if (cue.getType().toString() != "Media")
+            return EditResult::failed (reason::typeMismatch);
+
+        /*  AN ENTRY OF THE SET, by its id: a plugin the show declared, whether
+            or not tonight's machine has it. */
+        const auto entry = findById (pluginId);
+
+        if (! entry.isValid() || entry.getType().toString() != "Plugin")
+            return EditResult::failed (reason::unknownId);
+
+        /*  ONE FX PER ENTRY PER CUE, for createSend's reason: the entry is on
+            the voice once, and two children switching it in would be two
+            sets of values for one instance. */
+        for (const auto& child : cue)
+            if (child.hasType ("Fx")
+                 && child.getProperty ("plugin").toString().toStdString() == pluginId)
+                return EditResult::failed (reason::badValue);
+
+        return insertObject (cue, endOfSequence, "Fx", id,
+                             { { "plugin", pluginId } });
     }
 
     EditResult ShowDocument::createRange (const std::string& cueId, double in, double out,

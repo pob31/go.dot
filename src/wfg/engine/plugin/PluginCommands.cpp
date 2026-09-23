@@ -18,6 +18,20 @@
 
 namespace wfg::plugin
 {
+    std::function<bool (const std::string& pluginId)> pluginKnownBy (const doc::ShowDocument& document)
+    {
+        return [&document] (const std::string& id)
+        {
+            const auto plugins = document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+
+            for (const auto& entry : plugins)
+                if (entry.hasType ("Plugin") && entry.getProperty ("id").toString().toStdString() == id)
+                    return true;
+
+            return false;
+        };
+    }
+
     void registerPluginCommands (CommandRegistry& registry, PluginTable& table, PluginCommandHooks hooks)
     {
         const auto known = [&table, knows = hooks.knows] (const std::string& id)

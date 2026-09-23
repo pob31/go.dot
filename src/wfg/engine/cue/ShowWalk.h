@@ -108,7 +108,7 @@ namespace wfg::cue
                 every feed in it as `bad-route`. Found on a recovered show,
                 which is the same writer. The defaults come from here now, as
                 every cue's do. */
-            for (const auto* owner : { "cue", "group", "media", "range", "fade",
+            for (const auto* owner : { "cue", "group", "media", "range", "fx", "plugin", "fade",
                                        "transport", "feed", "insert", "send",
                                        "bus", "processorInput", "rackChannel" })
                 for (const auto* row : doc::Schema::rowsForOwner (owner))

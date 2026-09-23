@@ -34,6 +34,15 @@
 #include <memory>
 #include <thread>
 
+#if JUCE_MAC
+/*  DECLARED HERE because JUCE does not declare it in a header - Console.cpp
+    has the same line and the reason: runDispatchLoop is [NSApp run], and it
+    runs against nothing at all unless the application object was made.
+    The macOS CI job found it the honest way: the child said ready, its
+    loop returned at once, and it left before answering a block. */
+namespace juce { void initialiseNSApplication(); }
+#endif
+
 namespace wfg::plugin
 {
     namespace
@@ -649,9 +658,35 @@ namespace wfg::plugin
 
         header.childReady.store (1, std::memory_order_release);
 
+       #if JUCE_MAC
+        juce::initialiseNSApplication();
+       #endif
+
         ExitWatch watch (&header, parentPid);
         watch.startTimer (100);
         juce::MessageManager::getInstance()->runDispatchLoop();
+        watch.stopTimer();
+
+        /*  A READY CHILD NEVER LEAVES BEFORE IT IS TOLD. Should the dispatch
+            loop return with nobody having asked - a platform where it could
+            not run - the plain poll of PR 9a.6 keeps the worker answering
+            until the parent says leave or has gone. */
+        auto lastParentCheck = std::chrono::steady_clock::now();
+
+        while (header.childShouldExit.load (std::memory_order_acquire) == 0)
+        {
+            const auto now = std::chrono::steady_clock::now();
+
+            if (parentPid > 0 && now - lastParentCheck >= std::chrono::seconds (1))
+            {
+                lastParentCheck = now;
+
+                if (! process::isAlive (parentPid))
+                    break;
+            }
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (100));
+        }
 
         stop.store (true, std::memory_order_relaxed);
 

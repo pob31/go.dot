@@ -22,6 +22,7 @@
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/FxRows.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
@@ -278,7 +279,11 @@ namespace
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
         wfg::plugin::PluginTable pluginTable;
-        wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, {});
+        {
+            wfg::plugin::PluginCommandHooks hooks;
+            hooks.knows = wfg::plugin::pluginKnownBy (document);
+            wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
+        }
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, nowhere);
         wfg::doc::registerBundleCommands (engine.commands(), document, session, writer);
@@ -547,7 +552,11 @@ namespace
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
         wfg::plugin::PluginTable pluginTable;
-        wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, {});
+        {
+            wfg::plugin::PluginCommandHooks hooks;
+            hooks.knows = wfg::plugin::pluginKnownBy (document);
+            wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
+        }
 
         /*  The mounts, and deliberately no sender. A network cue replayed
             reaches the same tree it reached live and puts nothing on any wire -
@@ -657,7 +666,8 @@ namespace
                     session wrote it through - a fader's trim or a DCA's - so the
                     record applies as it did rather than being refused by a
                     document that cannot hold it. */
-                wfg::cue::liveWriteFor (runs, dcas, document));
+                wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document),
+                                    wfg::cue::fxWriteFor (document, nullptr)));
 
             wfg::cue::registerCueCommands (engine.commands(), document, focus);
             wfg::tree::registerTreeCommands (engine.commands(), touches);
@@ -1142,7 +1152,11 @@ namespace
         /*  The sandbox's two records, with no host to restart: a replay and a
             listing apply them to a table of their own (Phase 9a). */
         wfg::plugin::PluginTable pluginTable;
-        wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, {});
+        {
+            wfg::plugin::PluginCommandHooks hooks;
+            hooks.knows = wfg::plugin::pluginKnownBy (document);
+            wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
+        }
         wfg::tree::registerTreeCommands (engine.commands(), touches);
         wfg::tree::registerMountCommands (engine.commands(), document, mounts, target);
         wfg::audio::registerAudioCommands (engine.commands(), audioState);
@@ -2376,6 +2390,14 @@ namespace
             applied and logged like everything else the machine learns. */
         wfg::tree::MountProbe probe { engine };
 
+        /*  THE MACHINE'S CATALOGUE CACHE, declared here because the FX door
+            below asks it whether a parameter exists (Phase 9a); filled for
+            the show's set once the tree is wired, further down. */
+        wfg::plugin::CatalogueStore catalogues {
+            engineCacheFolder().getChildFile ("plugins").getChildFile ("catalogue")
+                .getFullPathName().toStdString() };
+        std::vector<wfg::plugin::KnownPlugin> knownPlugins;
+
         wfg::doc::registerDocumentCommands (
             engine.commands(), document,
             [&mounts, &sender] (const std::string& address, const wfg::osc::Value& value)
@@ -2409,7 +2431,13 @@ namespace
             /*  A RIDE ON A LIVE ROW (Phase 6): a strip's fader on the run it
                 holds, or a DCA's. What a hand is doing tonight, so answered in
                 front of the document, which cannot hold it. */
-            wfg::cue::liveWriteFor (runs, dcas, document));
+            /*  AND A CUE'S INSERT PARAMETER, through the document (Phase 9a,
+                PR 9a.8): the p<n> nodes rewrite the cue's values row, so the
+                lock, the transaction and the coalescing apply. The two doors
+                as one: a live row is answered first, in front of the
+                document; an FX parameter through it. */
+            wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document),
+                                wfg::cue::fxWriteFor (document, &catalogues)));
 
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
@@ -2432,16 +2460,7 @@ namespace
                 problem = "no audio graph holds the plugin tonight";
                 return false;
             };
-            hooks.knows = [&document] (const std::string& id)
-            {
-                const auto plugins = document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
-
-                for (const auto& entry : plugins)
-                    if (entry.hasType ("Plugin") && entry["id"].toString().toStdString() == id)
-                        return true;
-
-                return false;
-            };
+            hooks.knows = wfg::plugin::pluginKnownBy (document);
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
 
@@ -2793,10 +2812,6 @@ namespace
             engine's own folder, read here for every entry of the set - at
             start and again when the show changes - and never on a tick that
             edits nothing. The known list is filled once the host is up. */
-        wfg::plugin::CatalogueStore catalogues {
-            engineCacheFolder().getChildFile ("plugins").getChildFile ("catalogue")
-                .getFullPathName().toStdString() };
-        std::vector<wfg::plugin::KnownPlugin> knownPlugins;
         parameters.setCatalogues (&catalogues);
         parameters.setKnownPlugins (&knownPlugins);
 

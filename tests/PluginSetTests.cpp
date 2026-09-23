@@ -300,3 +300,68 @@ TEST_CASE ("plugin set: a locked show refuses the create, and gains no empty con
     CHECK (rig.audioChildren().empty());
     CHECK (rig.at ("/godot/plugin/order") == "");        // the container's row is there, and empty
 }
+
+//==============================================================================
+TEST_CASE ("plugin set: an Fx is one entry switched in on one media cue, made once, and refused where it makes no sense")
+{
+    Rig rig;
+
+    REQUIRE (rig.apply ("list.create", { osc::Value::string ("Main") }).applied == 1);
+    const auto listId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("cue.create", { osc::Value::string (listId), osc::Value::int32 (0),
+                                        osc::Value::string ("media"), osc::Value::string ("Tone") }).applied == 1);
+    const auto mediaId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("cue.create", { osc::Value::string (listId), osc::Value::int32 (1),
+                                        osc::Value::string ("memo"), osc::Value::string ("Note") }).applied == 1);
+    const auto memoId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("plugin.create", { osc::Value::string ("Test gain"),
+                                           osc::Value::string ("godot:test-gain"),
+                                           osc::Value::string ("VST3"), osc::Value::string ("") }).applied == 1);
+    const auto gainId = rig.lastApplied().back();
+
+    /*  Refused: a cue that plays nothing, an entry that is not there, a cue
+        that is not there. */
+    CHECK (rig.apply ("fx.create", { osc::Value::string (memoId), osc::Value::string (gainId) }).applied == 0);
+    CHECK (rig.apply ("fx.create", { osc::Value::string (mediaId), osc::Value::string ("PG7N0999") }).applied == 0);
+    CHECK (rig.apply ("fx.create", { osc::Value::string ("XX000000"), osc::Value::string (gainId) }).applied == 0);
+
+    REQUIRE (rig.apply ("fx.create", { osc::Value::string (mediaId), osc::Value::string (gainId) }).applied == 1);
+    const auto fxId = rig.lastApplied().back();
+
+    /*  Once per entry per cue. */
+    CHECK (rig.apply ("fx.create", { osc::Value::string (mediaId), osc::Value::string (gainId) }).applied == 0);
+
+    /*  Under the cue, with the entry named and nothing else stored: the
+        switch and the values are defaults the canonical writer omits. */
+    const auto fx = rig.document.findById (fxId);
+    REQUIRE (fx.isValid());
+    CHECK (fx.hasType ("Fx"));
+    CHECK (fx.getParent().getProperty ("id").toString().toStdString() == mediaId);
+    CHECK (fx.getProperty ("plugin").toString().toStdString() == gainId);
+    CHECK_FALSE (fx.hasProperty ("values"));
+    CHECK_FALSE (fx.hasProperty ("enabled"));
+
+    CHECK (rig.at ("/godot/fx/" + fxId + "/plugin") == gainId);
+    CHECK (rig.at ("/godot/fx/" + fxId + "/enabled") == "true");
+    CHECK (rig.at ("/godot/fx/" + fxId + "/cue") == mediaId);
+    CHECK (rig.at ("/godot/fx/" + fxId + "/name") == "Test gain");
+    CHECK (rig.at ("/godot/fx/" + fxId + "/index") == "0");
+    CHECK (rig.at ("/godot/cue/" + mediaId + "/fx") == fxId);
+
+    /*  With an explicit id, as a replay makes it. */
+    REQUIRE (rig.apply ("plugin.create", { osc::Value::string ("Verb"),
+                                           osc::Value::string ("VST3-0badf00d-verb"),
+                                           osc::Value::string ("VST3"), osc::Value::string ("") }).applied == 1);
+    const auto verbId = rig.lastApplied().back();
+    REQUIRE (rig.apply ("fx.create", { osc::Value::string (mediaId), osc::Value::string (verbId),
+                                       osc::Value::string ("FX7N0002") }).applied == 1);
+    CHECK (rig.lastApplied().back() == "FX7N0002");
+    CHECK (rig.at ("/godot/fx/FX7N0002/index") == "1");
+
+    /*  Deleted like any object, and undone whole. */
+    REQUIRE (rig.apply ("object.delete", { osc::Value::string (fxId) }).applied == 1);
+    CHECK_FALSE (rig.exists ("/godot/fx/" + fxId + "/plugin"));
+    CHECK (rig.at ("/godot/cue/" + mediaId + "/fx") == "FX7N0002");
+    REQUIRE (rig.apply ("undo").applied == 1);
+    CHECK (rig.at ("/godot/fx/" + fxId + "/plugin") == gainId);
+}

@@ -177,7 +177,7 @@ namespace wfg::doc
                     like any other, and it is addressed at /godot/cue/<id> so a
                     client holding an identifier never has to know which kind it
                     got. */
-                { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger" },
+                { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger", "Fx" },
                                                           { "cue", "media" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
@@ -325,6 +325,7 @@ namespace wfg::doc
                     the reason `Route` is: deleting the first send must not
                     re-point a client holding the second. */
                 { "Send",    true,  {},                    { "send" } },
+                { "Fx",      true,  {},                    { "fx" } },
 
                 /*  PHASE 6'S SURFACES (PRD §3.16, 2026-09-23). A surface is a
                     box of faders, pads and displays the show talks to through

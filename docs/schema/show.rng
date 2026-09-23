@@ -749,6 +749,7 @@
           <ref name="Insert"/>
           <ref name="Range"/>
           <ref name="Trigger"/>
+          <ref name="Fx"/>
         </choice>
       </zeroOrMore>
     </element>
@@ -1929,6 +1930,35 @@
             <param name="minInclusive">-120</param>
             <param name="maxInclusive">12</param>
           </data>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
+  <define name="Fx">
+    <element name="Fx">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="enabled">
+          <a:documentation>Whether the plugin is in this cue-s signal. Off keeps the values and takes the plugin out - the click that switches an insert in and out on a page - and costs the voice nothing: a proxy that is off is never signalled.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="plugin">
+          <a:documentation>Which entry of the show-s set this cue switches in, by the entry-s id - the id and not the scan-s identifier, because a set may hold one plugin twice and a cue must say which. One Fx per entry per cue: a second naming the same one is refused when it is created, because an entry is on the voice once.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="values">
+          <a:documentation>The parameter values this cue sets, as index:value pairs space-separated, each value normalised 0..1 as the plugin takes it, and only the parameters somebody changed: one absent rests at the set entry-s preset. Writable whole for a script; a hand writes ONE parameter through the p&lt;n&gt; nodes beneath, one node a parameter, so a rotary-s turn is one address and one undo step (PRD 4.10).</a:documentation>
+          <data type="string"/>
         </attribute>
       </optional>
     </element>

@@ -15,6 +15,8 @@
 */
 
 #include <wfg/engine/tree/ParameterTree.h>
+#include <wfg/engine/cue/FxRows.h>
+#include <wfg/engine/cue/ShowWalk.h>
 
 #include <wfg/engine/midi/PortTable.h>
 #include <wfg/engine/surface/SurfaceTable.h>
@@ -358,6 +360,99 @@ namespace wfg::tree
             one cue, which the document says by containment, and it has no
             position anybody can act on. What it needs is a bus and a run of
             coefficients. */
+        /*  The set entry a cue's Fx names, and where it sits in the chain: read
+            off the document root, which every node can reach. */
+        struct SetEntry
+        {
+            juce::ValueTree element;
+            int index = -1;
+        };
+
+        SetEntry setEntryFor (const juce::ValueTree& anyNode, const std::string& pluginId)
+        {
+            const auto plugins = anyNode.getRoot().getChildWithName ("Audio").getChildWithName ("Plugins");
+            auto index = 0;
+
+            for (const auto entry : plugins)
+            {
+                if (! entry.hasType ("Plugin"))
+                    continue;
+
+                if (entry[idProperty].toString().toStdString() == pluginId)
+                    return { entry, index };
+
+                ++index;
+            }
+
+            return {};
+        }
+
+        bool fxIsEnabled (const juce::ValueTree& fx)
+        {
+            /*  Through the schema: the row's default is true and the canonical
+                writer omits a default, and a stored flag is a bool var, not
+                the word - both of which the Reader knows. */
+            static const cue::Reader schema;
+            return schema.flag (fx, "fx", "enabled");
+        }
+
+        /*  The cue's enabled inserts in CHAIN order - the set's order, not the
+            children's - for `media/fx` (pages draft §8, item 3). */
+        std::string enabledFxInChainOrder (const juce::ValueTree& cue)
+        {
+            std::vector<std::pair<int, std::string>> found;
+
+            for (const auto child : cue)
+            {
+                if (! child.hasType ("Fx") || ! fxIsEnabled (child))
+                    continue;
+
+                const auto entry = setEntryFor (cue, child["plugin"].toString().toStdString());
+
+                if (entry.index >= 0)
+                    found.emplace_back (entry.index, child[idProperty].toString().toStdString());
+            }
+
+            std::sort (found.begin(), found.end());
+            std::string out;
+
+            for (const auto& [index, fxId] : found)
+            {
+                if (! out.empty())
+                    out += ' ';
+
+                out += fxId;
+            }
+
+            return out;
+        }
+
+        /*  One insert of one media cue, at an address of its own (Phase 9a). */
+        void collectFx (const juce::ValueTree& fx, const std::string& cueId, std::vector<Node>& out)
+        {
+            const auto fxId = fx[idProperty].toString().toStdString();
+
+            if (fxId.empty())
+                return;
+
+            const auto entry = setEntryFor (fx, fx["plugin"].toString().toStdString());
+            const auto base = std::string (godot) + "/fx/" + fxId;
+
+            for (const auto* row : doc::Schema::rowsForOwner ("fx"))
+            {
+                const doc::Attribute attribute { "Fx", row };
+                const auto name = std::string (row->name);
+                std::string text;
+
+                if (name == "cue")        text = cueId;
+                else if (name == "name")  text = entry.element.isValid() ? entry.element["name"].toString().toStdString() : std::string {};
+                else if (name == "index") text = std::to_string (std::max (0, entry.index));
+                else                      text = storedText (attribute, fx);
+
+                out.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
+        }
+
         void collectRoute (const juce::ValueTree& node, std::vector<Node>& out)
         {
             const auto id = node[idProperty].toString().toStdString();
@@ -686,6 +781,7 @@ namespace wfg::tree
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
                 else if (name == "role")   text = role;
+                else if (name == "fx" && isMedia) text = enabledFxInChainOrder (node);
                 else if (name == "duration" && isMedia)
                 {
                     /*  READ ONCE WHEN THE SHOW WAS OPENED, and nought when
@@ -803,6 +899,16 @@ namespace wfg::tree
                     left unlisted would be published at `/godot/cue/<id>` with
                     the rows of a kind it is not - which is the failure mode the
                     comment above names, and the reason this is a lookup. */
+                /*  AN INSERT (Phase 9a, PR 9a.8): its rows at /godot/fx/<id>, the
+                    name and the index read off the set. Its parameter nodes are
+                    a pass of their own, after the walk, because they need the
+                    catalogue and this walk has no reach to it. */
+                if (childElement == "Fx")
+                {
+                    collectFx (child, id, out);
+                    continue;
+                }
+
                 if (childElement == "Feed" || childElement == "Insert"
                       || childElement == "Send")
                 {
@@ -1586,6 +1692,100 @@ namespace wfg::tree
                 node.typeTags += param.typeTag;
 
             nodes.push_back (std::move (node));
+        }
+
+        /*  EVERY INSERT'S PARAMETER NODES (Phase 9a, PR 9a.8): for each Fx of
+            each media cue, `p<n>` - a value a hand writes, one node a
+            parameter, through the FX door - and `t<n>`, the plugin's own
+            text for it, off the catalogue's table with no round trip. Only
+            when the catalogue knows the plugin: with nothing known there is
+            nothing to name, and the row `values` still holds what was written.
+            A value a cue stores rests at the catalogue's default when the cue
+            does not set it. */
+        {
+            std::function<void (const juce::ValueTree&)> walk = [&] (const juce::ValueTree& element)
+            {
+                if (element.hasType ("Fx"))
+                {
+                    const auto fxId = element[idProperty].toString().toStdString();
+                    const auto entry = setEntryFor (element, element["plugin"].toString().toStdString());
+
+                    if (fxId.empty() || ! entry.element.isValid() || catalogues == nullptr)
+                        return;
+
+                    const auto catalogue = catalogues->find (entry.element["identifier"].toString().toStdString());
+
+                    if (catalogue == nullptr)
+                        return;
+
+                    const auto stored = cue::parseFxValues (element["values"].toString().toStdString());
+                    const auto base = std::string (godot) + "/fx/" + fxId + "/";
+
+                    for (std::size_t n = 0; n < catalogue->params.size(); ++n)
+                    {
+                        const auto& parameter = catalogue->params[n];
+                        const auto found = stored.find (static_cast<int> (n));
+                        const auto value = found != stored.end() ? static_cast<float> (found->second)
+                                                                 : parameter.defaultValue;
+
+                        Node p;
+                        p.address = base + "p" + std::to_string (n);
+                        p.kind = Kind::state;
+                        p.access = Access::readWrite;
+                        p.typeTags = "d";
+                        p.description = parameter.name.empty() ? "Parameter " + std::to_string (n) : parameter.name;
+                        p.unit = parameter.unit;
+                        p.hasMinimum = true;
+                        p.minimum = 0.0;
+                        p.hasMaximum = true;
+                        p.maximum = 1.0;
+
+                        if (parameter.discrete)
+                            p.enumValues = parameter.stepText;
+
+                        p.values.push_back (osc::Value::float64 (static_cast<double> (value)));
+                        nodes.push_back (std::move (p));
+
+                        Node t;
+                        t.address = base + "t" + std::to_string (n);
+                        t.kind = Kind::state;
+                        t.access = Access::read;
+                        t.typeTags = "s";
+                        t.description = "What the plugin calls the value of p" + std::to_string (n) + ", in its own words";
+                        t.values.push_back (osc::Value::string (parameter.textFor (value)));
+                        nodes.push_back (std::move (t));
+                    }
+
+                    /*  A stored index past the count is published as it is: a
+                        show written against another version of the plugin keeps
+                        what it wrote, and says so by having a node the catalogue
+                        cannot name. */
+                    for (const auto& [index, value] : stored)
+                    {
+                        if (index < static_cast<int> (catalogue->params.size()))
+                            continue;
+
+                        Node p;
+                        p.address = base + "p" + std::to_string (index);
+                        p.kind = Kind::state;
+                        p.access = Access::readWrite;
+                        p.typeTags = "d";
+                        p.description = "A value written against a version of the plugin with more parameters than this one";
+                        p.hasMinimum = true;
+                        p.hasMaximum = true;
+                        p.maximum = 1.0;
+                        p.values.push_back (osc::Value::float64 (value));
+                        nodes.push_back (std::move (p));
+                    }
+
+                    return;
+                }
+
+                for (const auto child : element)
+                    walk (child);
+            };
+
+            walk (showNode.getChildWithName ("Lists"));
         }
 
         addContainers (nodes, {}, true);

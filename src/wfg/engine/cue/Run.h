@@ -49,6 +49,9 @@
 
 #include <wfg/engine/audio/EqSettings.h>
 
+#include <bit>
+#include <utility>
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -259,6 +262,34 @@ namespace wfg::cue
     }
 
     //==============================================================================
+    /*  ONE ENTRY OF THE SET AS A CUE SWITCHES IT IN (Phase 9a, PR 9a.8): which
+        slot of the voice, whether it is in, and the values the cue sets -
+        sorted by index, only the ones somebody wrote; the rest rest at the
+        entry's preset. A plain value, for ArmRequest's reason. */
+    struct FxSetting
+    {
+        int slot = 0;
+        std::string fxId;
+        bool enabled = false;
+        std::vector<std::pair<int, float>> values;
+
+        /** Field-wise, the floats by bit pattern (-Wfloat-equal). */
+        bool sameAs (const FxSetting& other) const noexcept
+        {
+            if (slot != other.slot || enabled != other.enabled || fxId != other.fxId
+                 || values.size() != other.values.size())
+                return false;
+
+            for (std::size_t i = 0; i < values.size(); ++i)
+                if (values[i].first != other.values[i].first
+                     || std::bit_cast<std::uint32_t> (values[i].second)
+                          != std::bit_cast<std::uint32_t> (other.values[i].second))
+                    return false;
+
+            return true;
+        }
+    };
+
     struct Run
     {
         /** Generated, and logged as applied like every generated identifier. */
@@ -368,6 +399,11 @@ namespace wfg::cue
             what changed for THIS run and push only that, and a tick with no
             edit compares nothing at all. Never logged: the rows are. */
         audio::EqSettings eq;
+
+        /*  THE INSERTS THE VOICE WAS LAST GIVEN (Phase 9a, PR 9a.8): one per
+            entry of the show's set in chain order, as the arm carried them and
+            as `Runner::applyFx` last pushed them. Kept for `eq`'s reason. */
+        std::vector<FxSetting> fx;
 
         /*  A SAMPLER MEMBER'S STRIP (PRD §3.27, Phase 6): the fader or pad this
             run holds - or waits for, while another group's clip finishes on

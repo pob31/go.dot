@@ -204,6 +204,10 @@ namespace wfg::cue
             applied while the voice is silent, as the routing is. A value for
             the reason everything else here is one. */
         audio::EqSettings eq;
+
+        /*  And its inserts, one per entry of the set in chain order (PR
+            9a.8): switched in or not, and the values the cue sets. */
+        std::vector<FxSetting> fx;
     };
 
     /*  The audio side, as the cue layer sees it.
@@ -284,6 +288,13 @@ namespace wfg::cue
             by default rather than pure, so a Player that plays no EQ - a
             replay's, a test's - is still a complete configuration. */
         virtual void setEq (int, const audio::EqSettings&) {}
+
+        /*  A sounding cue's inserts, changed under it (Phase 9a, PR 9a.8):
+            one entry switched in or out, one value moved - or `-1`, which
+            is "back to the preset". Tick thread, on an edit and never per
+            tick; atomics on the audio side. No-ops by default, as setEq. */
+        virtual void setFxEnabled (int, int, bool) {}
+        virtual void setFxParameter (int, int, int, float) {}
 
         /*  Whether that track's cue is sounding, out of any of its slots.
             Tick thread. Track-wide for the reason `stop` is: the question is
@@ -756,6 +767,11 @@ namespace wfg::cue
             flat EQ - which the writer omits - reads as flat. */
         audio::EqSettings eqOf (const juce::ValueTree& cue) const;
 
+        /*  The cue's inserts against the show's set, in chain order: one
+            FxSetting per entry, disabled and empty where the cue has no Fx
+            for it (PR 9a.8). Through the schema for eqOf's reason. */
+        std::vector<FxSetting> fxOf (const juce::ValueTree& cue) const;
+
         /*  Counts the pass a ranged run is on and places the boundary out of
             it, once, when it comes into the placement horizon.
 
@@ -797,6 +813,7 @@ namespace wfg::cue
             routing pass's shape, gated on the same revision, pushing only
             the runs whose nineteen rows differ from what the voice holds. */
         void applyEq();
+        void applyFx();
 
         /*  What arming the standby means when the pointer is on a GROUP.
 
@@ -1243,6 +1260,7 @@ namespace wfg::cue
 
         /** The show revision `applyEq` last pushed at; `routingRevision`'s twin. */
         std::uint64_t eqRevision = 0;
+        std::uint64_t fxRevision = 0;
 
         /*  THE PERSISTENT ASSERTION (§3.29, §13.11): after every applied
             trigger, what the section declares is checked against what is

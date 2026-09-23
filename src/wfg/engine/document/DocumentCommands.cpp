@@ -195,6 +195,24 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });
 
+        registry.add ({ "fx.create",
+                        "Adds an insert to a media cue: one entry of the show's plugin set switched"
+                        " in, its values written afterwards through the p<n> nodes beneath it."
+                        " Refuses a second Fx for an entry this cue already has.",
+                        { { "cue", 's', false }, { "plugin", 's', false },
+                          { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.createFx (args[0].getString(),
+                                                                 args[1].getString(),
+                                                                 id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
         registry.add ({ "group.wrap", "Create a group containing the selected cues in show order.",
                         { { "cues", 's', false }, { "id", 's', true } }, true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)

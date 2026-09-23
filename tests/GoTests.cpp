@@ -75,10 +75,12 @@ namespace
         {
             arms.push_back (request);
             lastArmEq = request.eq;
+            lastArmFx = request.fx;
         }
 
         /** The EQ the last arm carried (Phase 9a); `completeArms` clears `arms`. */
         audio::EqSettings lastArmEq;
+        std::vector<cue::FxSetting> lastArmFx;
 
         int slotCount() const override             { return slots; }
         int sampleRate() const override            { return rate; }
@@ -132,6 +134,25 @@ namespace
 
         std::map<int, audio::EqSettings> eqs;
         int eqPushes = 0;
+
+        /*  The inserts, for the EQ's reason (Phase 9a, PR 9a.8): what was
+            switched and what moved, in order, so a test can say an edit
+            reached the voice as exactly the pushes it should. */
+        struct FxEnable { int track; int slot; bool enabled; };
+        struct FxValue { int track; int slot; int parameter; float value; };
+
+        void setFxEnabled (int track, int slot, bool enabled) override
+        {
+            fxEnables.push_back ({ track, slot, enabled });
+        }
+
+        void setFxParameter (int track, int slot, int parameter, float value) override
+        {
+            fxValues.push_back ({ track, slot, parameter, value });
+        }
+
+        std::vector<FxEnable> fxEnables;
+        std::vector<FxValue> fxValues;
 
         bool isPlaying (int track) const override
         {
@@ -7194,6 +7215,96 @@ TEST_CASE ("persistent: the plan is what the section declares, and a disabled cu
 }
 
 //==============================================================================
+TEST_CASE ("fx: the arm carries the cue's inserts against the set, an edit pushes what moved, a withdrawn value goes back to the preset")
+{
+    /*  Decision AE and §17.4: every voice carries the whole set; a cue says
+        which entries it switches in and what values it sets. At the arm the
+        request carries one FxSetting per entry in chain order; while the cue
+        sounds, an edit to the row pushes only what changed - one value, one
+        switch, one value withdrawn as -1 - and a quiet tick pushes nothing. */
+    RoutedRig rig;
+    rig.setMedia (rig.mediaId, 2);
+    rig.aimAt (rig.mediaId, rig.main);
+
+    const auto gain = rig.document.createPlugin ("Test gain", "godot:test-gain", "VST3", "", "");
+    REQUIRE (gain.ok);
+    const auto verb = rig.document.createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "", "");
+    REQUIRE (verb.ok);
+
+    /*  Only the gain is switched in, with one value; the verb has no Fx at all. */
+    const auto fx = rig.document.createFx (rig.mediaId, gain.id, "");
+    REQUIRE (fx.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/fx/" + fx.id + "/values", "0:0.25").ok);
+
+    const auto run = rig.play();
+    REQUIRE (rig.runs.find (run) != nullptr);
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+
+    const auto& armed = rig.audio.lastArmFx;
+    REQUIRE (armed.size() == 2u);
+    CHECK (armed[0].slot == 0);
+    CHECK (armed[0].enabled);
+    CHECK (armed[0].fxId == fx.id);
+    REQUIRE (armed[0].values.size() == 1u);
+    CHECK (armed[0].values[0].first == 0);
+    CHECK (armed[0].values[0].second == doctest::Approx (0.25f));
+    CHECK (armed[1].slot == 1);
+    CHECK_FALSE (armed[1].enabled);
+    CHECK (armed[1].values.empty());
+
+    for (int i = 0; i < 3; ++i)
+        rig.tickOnce();
+
+    CHECK (rig.audio.fxValues.empty());
+    CHECK (rig.audio.fxEnables.empty());
+
+    //  Edited while it sounds: p0 moved, p1 appeared.
+    rig.submitAndTick ("node.set", { osc::Value::string ("/godot/fx/" + fx.id + "/values"),
+                                     osc::Value::string ("0:0.75 1:1") });
+    rig.tickOnce();
+    REQUIRE (rig.audio.fxValues.size() == 2u);
+    CHECK (rig.audio.fxValues[0].track == track);
+    CHECK (rig.audio.fxValues[0].slot == 0);
+    CHECK (rig.audio.fxValues[0].parameter == 0);
+    CHECK (rig.audio.fxValues[0].value == doctest::Approx (0.75f));
+    CHECK (rig.audio.fxValues[1].parameter == 1);
+    CHECK (rig.audio.fxValues[1].value == doctest::Approx (1.0f));
+    CHECK (rig.audio.fxEnables.empty());
+
+    SUBCASE ("a value withdrawn from the row is pushed as -1, back to the preset")
+    {
+        rig.submitAndTick ("node.set", { osc::Value::string ("/godot/fx/" + fx.id + "/values"),
+                                         osc::Value::string ("1:1") });
+        rig.tickOnce();
+        REQUIRE (rig.audio.fxValues.size() == 3u);
+        CHECK (rig.audio.fxValues[2].parameter == 0);
+        CHECK (rig.audio.fxValues[2].value == doctest::Approx (-1.0f));
+    }
+
+    SUBCASE ("the switch is pushed once, and only the switch")
+    {
+        rig.submitAndTick ("node.set", { osc::Value::string ("/godot/fx/" + fx.id + "/enabled"),
+                                         osc::Value::string ("false") });
+        rig.tickOnce();
+        REQUIRE (rig.audio.fxEnables.size() == 1u);
+        CHECK (rig.audio.fxEnables[0].track == track);
+        CHECK (rig.audio.fxEnables[0].slot == 0);
+        CHECK_FALSE (rig.audio.fxEnables[0].enabled);
+        CHECK (rig.audio.fxValues.size() == 2u);
+    }
+
+    SUBCASE ("and a tick with nothing edited pushes nothing at all")
+    {
+        const auto pushes = rig.audio.fxValues.size();
+
+        for (int i = 0; i < 10; ++i)
+            rig.tickOnce();
+
+        CHECK (rig.audio.fxValues.size() == pushes);
+    }
+}
+
 TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a quiet tick not at all")
 {
     /*  PHASE 9a's parameter path, on the tick thread's side: the nineteen rows

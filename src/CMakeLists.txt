@@ -103,6 +103,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/DcaTable.h
     wfg/engine/cue/LiveRows.h
     wfg/engine/cue/LiveRows.cpp
+    wfg/engine/cue/FxRows.h
+    wfg/engine/cue/FxRows.cpp
     wfg/engine/midi/MidiInputs.h
     wfg/engine/midi/MidiInputs.cpp
     wfg/engine/midi/MidiSink.h

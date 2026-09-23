@@ -84,6 +84,8 @@ namespace wfg::audio
         void setLevelDb (int track, double levelDb) override;
         void setRouting (int track, const std::vector<cue::Coefficient>&) override;
         void setEq (int track, const EqSettings&) override;
+        void setFxEnabled (int track, int slot, bool enabled) override;
+        void setFxParameter (int track, int slot, int parameter, float normalised) override;
         bool isPlaying (int track) const override;
         bool isArmReady (int track) const override;
 

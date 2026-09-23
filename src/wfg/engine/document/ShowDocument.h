@@ -331,6 +331,14 @@ namespace wfg::doc
             Fails `unknownId` when no such cue, `typeMismatch` when the cue
             plays nothing, and `badValue` when this cue already sends into that
             bus. */
+        /*  An insert on a media cue: one entry of the show's plugin set
+            switched in (Phase 9a, PR 9a.8). Refuses `unknownId` for a cue or
+            an entry that is not there, `typeMismatch` for a cue that plays
+            nothing, and `badValue` for a second Fx naming an entry this cue
+            already has. The values come afterwards, through the p<n> door. */
+        EditResult createFx (const std::string& cueId, const std::string& pluginId,
+                             const std::string& id);
+
         EditResult createSend (const std::string& cueId, const std::string& busId,
                                const std::string& id = {});
 

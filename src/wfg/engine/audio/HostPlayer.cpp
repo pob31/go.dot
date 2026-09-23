@@ -120,6 +120,12 @@ namespace wfg::audio
                 previous cue's tail is not in them (Phase 9a). */
             audioHost.snapTrackEq (request.track, request.eq);
 
+            /*  And its inserts: each entry switched in or out with the values
+                the cue sets, the instance reset before its next block (Phase
+                9a, PR 9a.8). */
+            for (const auto& fx : request.fx)
+                audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values);
+
             /*  The voice is yours. Whether the sound would come out YET is a
                 different question, asked separately through isArmReady - the
                 graph is ready long before the disk is, and a launch in that gap
@@ -205,6 +211,16 @@ namespace wfg::audio
             one per number that moved, and a release per section so the
             audio thread rebuilds only those. No message thread anywhere. */
         audioHost.setTrackEq (track, settings);
+    }
+
+    void HostPlayer::setFxEnabled (int track, int slot, bool enabled)
+    {
+        audioHost.setTrackFxEnabled (track, slot, enabled);
+    }
+
+    void HostPlayer::setFxParameter (int track, int slot, int parameter, float normalised)
+    {
+        audioHost.setTrackFxParameter (track, slot, parameter, normalised);
     }
 
     bool HostPlayer::isPlaying (int track) const

@@ -43,6 +43,11 @@
  #include <unistd.h>
 #endif
 
+#if JUCE_MAC
+/*  As PluginHostChild.cpp and Console.cpp: the loop below is [NSApp run]. */
+namespace juce { void initialiseNSApplication(); }
+#endif
+
 namespace wfg::plugin
 {
     namespace te = tracktion::engine;
@@ -420,6 +425,10 @@ namespace wfg::plugin
         if (const auto pidPath = juce::SystemStats::getEnvironmentVariable (pidFileVariable, {});
             pidPath.isNotEmpty())
             juce::File (pidPath).replaceWithText (juce::String (currentProcessId()), false, false, "\n");
+
+       #if JUCE_MAC
+        juce::initialiseNSApplication();
+       #endif
 
         StopTheLoop deadline;
         deadline.startTimer (static_cast<int> (std::chrono::milliseconds (std::chrono::minutes (10)).count()));

@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/FxRows.h>
 
 #include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/tree/Touches.h>
@@ -39,6 +40,7 @@
 #include <juce_audio_basics/juce_audio_basics.h>
 
 #include <algorithm>
+#include <bit>
 #include <cctype>
 #include <cmath>
 #include <cstdlib>
@@ -1746,6 +1748,8 @@ namespace wfg::cue
             what changed later. */
         request.eq = eqOf (cue);
         run.eq = request.eq;
+        request.fx = fxOf (cue);
+        run.fx = request.fx;
 
         /*  READ THE SAME WAY THE LEVEL IS, and the reason it is worth a line of
             its own: this row has existed since Phase 2, the grammar has always
@@ -6060,6 +6064,7 @@ namespace wfg::cue
         applyLevels();
         applyRouting();
         applyEq();
+        applyFx();
         advanceSends (engine);
         observeAfterStep (engine, tick);
         assertPersistent (engine, tick);
@@ -6683,6 +6688,118 @@ namespace wfg::cue
 
             if (problem.empty())
                 audio->setRouting (run->track, routing);
+        }
+    }
+
+    std::vector<FxSetting> Runner::fxOf (const juce::ValueTree& cue) const
+    {
+        static const Reader schema;
+        std::vector<FxSetting> out;
+
+        const auto plugins = document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+        auto slot = 0;
+
+        for (const auto entry : plugins)
+        {
+            if (! entry.hasType ("Plugin"))
+                continue;
+
+            FxSetting setting;
+            setting.slot = slot++;
+            const auto entryId = entry.getProperty ("id").toString().toStdString();
+
+            for (const auto child : cue)
+            {
+                if (! child.hasType ("Fx") || child.getProperty ("plugin").toString().toStdString() != entryId)
+                    continue;
+
+                setting.fxId = child.getProperty ("id").toString().toStdString();
+                setting.enabled = schema.flag (child, "fx", "enabled");
+
+                for (const auto& [index, value] : parseFxValues (schema.text (child, "fx", "values")))
+                    setting.values.emplace_back (index, static_cast<float> (value));
+
+                break;
+            }
+
+            out.push_back (std::move (setting));
+        }
+
+        return out;
+    }
+
+    void Runner::applyFx()
+    {
+        /*  applyEq's shape, for its reasons: gated on the show's revision, only
+            the sounding runs, only what moved - one entry switched, one value
+            changed, one value withdrawn (pushed as -1, "back to the preset").
+            A set that changed under a running show is not re-shaped here
+            (§3.25): the slots the voice was built with are the ones pushed. */
+        if (audio == nullptr)
+            return;
+
+        const auto revision = document.showRevision();
+
+        if (revision == fxRevision)
+            return;
+
+        fxRevision = revision;
+
+        for (const auto& snapshot : runs.all())
+        {
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr || run->isFinished() || run->track < 0)
+                continue;
+
+            const auto cue = document.findById (run->cue);
+
+            if (! cue.isValid() || ! cue.hasType ("Media"))
+                continue;
+
+            auto wanted = fxOf (cue);
+            const auto slots = std::min (wanted.size(), run->fx.size());
+
+            for (std::size_t k = 0; k < slots; ++k)
+            {
+                const auto& next = wanted[k];
+                const auto& last = run->fx[k];
+
+                if (next.sameAs (last))
+                    continue;
+
+                if (next.enabled != last.enabled)
+                    audio->setFxEnabled (run->track, next.slot, next.enabled);
+
+                /*  Both sorted by index: one walk finds what moved, what
+                    appeared and what went. */
+                std::size_t a = 0, b = 0;
+
+                while (a < next.values.size() || b < last.values.size())
+                {
+                    if (b >= last.values.size() || (a < next.values.size() && next.values[a].first < last.values[b].first))
+                    {
+                        audio->setFxParameter (run->track, next.slot, next.values[a].first, next.values[a].second);
+                        ++a;
+                    }
+                    else if (a >= next.values.size() || last.values[b].first < next.values[a].first)
+                    {
+                        audio->setFxParameter (run->track, next.slot, last.values[b].first, -1.0f);
+                        ++b;
+                    }
+                    else
+                    {
+                        if (std::bit_cast<std::uint32_t> (next.values[a].second)
+                              != std::bit_cast<std::uint32_t> (last.values[b].second))
+                            audio->setFxParameter (run->track, next.slot, next.values[a].first, next.values[a].second);
+
+                        ++a;
+                        ++b;
+                    }
+                }
+            }
+
+            run->fx = std::move (wanted);
         }
     }
 

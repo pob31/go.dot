@@ -1,0 +1,30 @@
+# wfg-log 1
+# fixture fx - a cue's insert made, its parameters turned, switched off, and a turn undone (Phase 9a, PR 9a.8).
+#
+# WHAT IT IS FOR: that a session in which an Fx was made on a media cue for an entry of the
+# show's set, one parameter turned twice through its p<n> node, the insert switched off, a
+# second parameter written and that write undone, reproduces exactly on a machine with no
+# child process and no plugin - the door accepting every index the log carries, the row
+# spelled canonically, the undo landing on the step the hand made. Recorded from a real
+# `wfg serve` of tests/fixtures/bundles/fx driven over OSC with no audio device; the header
+# lines below are the session's own.
+#
+# bundle fx sha256:decba7b2295be26cf827b57037eabfb9afe0e4c01dc152cf822ff7546a198b07
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+# media tone.wav 0 0.000
+#
+# MADE WITH AN EXPLICIT ID, on the media cue, for the set's one entry.
+A 1 0 udp:127.0.0.1:56855 fx.create s:"FX000002" s:"FX000006" s:"FX7N0001"
+#
+# ONE PARAMETER TURNED TWICE, close together, from one hand: two node.set records on the
+# p0 node, one undo step - the door rewrites the cue's values row each time, and the
+# coalescing is keyed on the address the hand sent, not on the row.
+A 14 1 udp:127.0.0.1:56855 node.set s:"/godot/fx/FX7N0001/p0" f:0.25
+A 27 2 udp:127.0.0.1:56855 node.set s:"/godot/fx/FX7N0001/p0" f:0.75
+#
+# SWITCHED OFF: the values stay, the cue's chain no longer lists it.
+A 40 3 udp:127.0.0.1:56855 node.set s:"/godot/fx/FX7N0001/enabled" F
+#
+# A SECOND PARAMETER, AND ITS WRITE UNDONE: the row is back to the first parameter alone.
+A 53 4 udp:127.0.0.1:56855 node.set s:"/godot/fx/FX7N0001/p1" f:1
+A 66 5 udp:127.0.0.1:56855 undo s:"document" s:"node.set"

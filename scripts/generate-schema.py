@@ -69,7 +69,7 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # is not a cue that stops, and the verb list had grown past the
                 # name: hard, fade, afterMember, afterIteration, advance - the
                 # last of which says "do not stop, move on".
-                "fade", "transport", "osc", "trigger", "midi", "port", "start",
+                "fade", "transport", "osc", "trigger", "midi", "port", "start", "fx",
                 # Phase 4's slots (PRD 3.9e). `slot` is what both declared kinds
                 # share and what a Feed refers to; `processorInput` and
                 # `rackChannel` are what each kind adds. There is no `rack`:

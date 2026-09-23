@@ -99,6 +99,7 @@ add_executable(wfg_tests
     PluginSetTests.cpp
     PluginCatalogueTests.cpp
     ProxyTests.cpp
+    FxRowsTests.cpp
     McuCodecTests.cpp
     DcaTests.cpp
     SamplerTests.cpp
@@ -464,6 +465,17 @@ add_test(NAME wfg.replay.plugins.C
                  --wfg-locale=C)
 add_test(NAME wfg.replay.plugins.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/plugins.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fx
+                 --wfg-locale=${WFG_LOCALE_FR})
+
+# A cue's insert made, turned, switched off and a turn undone (Phase 9a, PR 9a.8):
+# the FX door's records replay on a machine with no child and no plugin.
+add_test(NAME wfg.replay.fx.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/fx.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fx
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.fx.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/fx.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fx
                  --wfg-locale=${WFG_LOCALE_FR})
 add_test(NAME wfg.replay.group-fade.C
@@ -997,6 +1009,21 @@ add_test(NAME blackbox.phase9a-eq.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9a_eq.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.phase9a-eq.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# A cue's insert, heard (Phase 9a, PR 9a.8): the test-gain child on a voice through
+# the sandbox - the render at a half, a value written through the p<n> door moving it,
+# the kill switch taking the child down and the voice playing dry with the entry
+# reading failed in words, and the session replaying with no child at all.
+add_test(NAME blackbox.phase9a-fx.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9a_fx.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.phase9a-fx.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9a-fx.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9a_fx.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase9a-fx.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # The client the engine serves at /ui: the page, its files as bytes, and since

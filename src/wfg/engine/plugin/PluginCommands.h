@@ -35,6 +35,7 @@
 */
 
 #include <wfg/engine/command/CommandRegistry.h>
+#include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/plugin/PluginTable.h>
 
 #include <functional>
@@ -54,4 +55,10 @@ namespace wfg::plugin
     };
 
     void registerPluginCommands (CommandRegistry& registry, PluginTable& table, PluginCommandHooks hooks);
+
+    /*  The `knows` hook every session should use: whether the id names an
+        entry of the show's set, read off the document - which a replay has
+        as the live session had it, while a table it never filled says
+        nothing. The document must outlive the registry. */
+    std::function<bool (const std::string& pluginId)> pluginKnownBy (const doc::ShowDocument& document);
 }
