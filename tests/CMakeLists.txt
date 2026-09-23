@@ -925,6 +925,23 @@ add_test(NAME blackbox.triggers.fr_FR
 set_tests_properties(blackbox.triggers.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# PHASE 6'S PADS, HEARD: a sampler bank armed by GO and played by hand over
+# the network, with a real Tracktion graph under it and the render read back as
+# arithmetic - a press at velocity 64 is a tenth of the constant, a hold clip is
+# the constant until the hand lets go, and the session replays. The fixture's
+# copy is given a bus and routes; the committed bundle stays the one
+# sampler.wfglog was recorded from.
+add_test(NAME blackbox.phase6-sampler.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase6_sampler.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.phase6-sampler.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase6-sampler.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase6_sampler.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase6-sampler.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The client the engine serves at /ui: the page, its files as bytes, and since
 # PR 5.10 its modules - the graph walked from app.js the way a browser loads it,
 # every file answering as JavaScript and none left that nothing imports - and
