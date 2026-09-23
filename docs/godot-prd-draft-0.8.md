@@ -1324,6 +1324,32 @@ processing; and on Apple Silicon a sandbox would additionally need the **child
 process** inside the audio workgroup, which is the problem Apple designed
 workgroups for and is separate work.
 
+*Amended in 0.8, at the author's direction (2026-09-23) — decisions AD, AE and
+AF, `docs/godot-namespace-draft-0.1.md` §9 and §17.* Three of this section's
+questions are answered, and the answers pull most of Phase 9 forward as Phase
+9a:
+
+- **The bypassed stack is a yes, on the voice tracks.** The show declares a
+  **plugin set** as `Show/Audio/@tracks` declares polyphony; every voice
+  carries the whole set, each plugin instantiated when the show opens and
+  bypassed; a media cue says which of the set it switches in and carries its
+  own parameter values, applied at arm and written live while it sounds. The
+  cost is N × P instances (M34, §6.11) and a set fixed at open. Rack channels
+  as the paragraph above draws them — a cue claiming a channel with a chain —
+  stay for the live-input rack of Phase 9b; nothing about them is withdrawn.
+- **The built-in set begins with an EQ of Go.dot's own** on every voice —
+  high-pass, low-pass, four parametric bands — written from the tick thread
+  through atomics as the cue's level is, with no message-thread handover and
+  no lock; its settings are nineteen rows on the media cue.
+- **The proxy comes first.** Third-party plugins are hosted out of process
+  from the first VST insert, not after an in-process interim: one child per
+  plugin of the set hosting one instance per voice, the deadline the smaller of
+  250 µs and a quarter of the block, a strip failed after eight consecutive
+  misses and then never called, one automatic relaunch. And because a plugin
+  behind the proxy has no Tracktion parameter at all, its parameters travel
+  tick thread → shared memory → child: §3.4's message-thread handover applies
+  only to a plugin hosted inline, which Phase 9a does not build.
+
 ### 3.19 Video
 
 Built in, by decision (§2, no Alt-Tab). Millumin over OSC remains the escape
@@ -1883,7 +1909,10 @@ in circuit. It is the wrong lever.
 **Scope: nothing before Phase 9 is affected either way.** PDC only engages when
 something in the Edit *declares* latency. Recorded-media playback declares none,
 Go.dot's built-in plugin set is its own to keep at zero, and the out-of-process
-proxy (§3.18) declares zero by design.
+proxy (§3.18) declares zero by design. *2026-09-23:* Phase 9a brings the EQ and
+the proxy forward (§3.18, decisions AD–AF); both declare zero, so the sentence
+still holds. A plugin's own latency arrives uncompensated inside the proxy's
+answer and is published as `plugin/latencySamples`.
 
 The proxy plugin itself is **feasible and cheap**: a custom TE plugin type
 wrapping a shared-memory round trip to a second process measured **0.9 µs** at
@@ -2633,6 +2662,20 @@ from a parked fader (§3.9a). Still *(proposed)* and not built: a member pinning
 its strip (§3.27), the dwell for faders without touch (§3.9a), and a touch
 counting as adjusting only once the fader has moved (§3.16).
 
+*Answered 2026-09-23, at the author's direction, in the evening* (decisions AD,
+AE, AF and AG, `docs/godot-namespace-draft-0.1.md` §9 and §17.1): the bypassed
+stack (§3.18) — yes, on the voice tracks rather than in rack channels, the show
+declaring a plugin set every voice carries; the first of the built-in set is an
+EQ of Go.dot's own on every voice (§3.18); the out-of-process proxy is built
+before any VST insert rather than after an in-process interim (§3.18); and the
+scope of the phase stops at the inspectors, the surface pages of
+`docs/godot-surface-pages-draft-0.1.md` following in their own session. Built
+as defaults by Phase 9a and the author's to overturn once seen working
+(namespace draft §17.11): the EQ as rows on the cue rather than an object of
+its own; a preset as a file under the bundle's `plugins/`; the failed-strip
+threshold, the deadline and the automatic relaunch; the child's worker
+spinning hot while a plugin is in use.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -2646,6 +2689,13 @@ Mackie vs HUI first — first week with the D700.
   decision and not a measurement (§3.25).
 - **The bypassed stack at load** (§3.18): instantiation time and memory for a
   realistic stack per channel, in-process and through the proxy.
+  *2026-09-23:* Phase 9a takes it as **M34** (`docs/godot-namespace-draft-0.1.md`
+  §17.9) — the set on every voice, N × P instances of a real plugin through the
+  proxy, from `buildEdit` to every child loaded, and the working set — beside
+  **M30** (the EQ's block cost and the tree's node-count delta), **M31** (the
+  proxy's round trip at 1, 8 and 16 voices by 1, 2 and 4 plugins), **M32** (a
+  failed strip: misses before the threshold, blocks to `failed`, the cost
+  before and after) and **M33** (a parameter write to its sound). Not yet taken.
 - **Pause and resume at an offset** (§3.29): whether a relaunch at a remembered
   position is clean when the offset is set in prepare, and when a playing clip
   is nudged instead — the same question load-to-time asks. *Half answered*

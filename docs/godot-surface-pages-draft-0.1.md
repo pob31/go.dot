@@ -257,7 +257,12 @@ Three facts already recorded shape all of this:
   nothing**; only building the chain does.
 - **Plugin parameters can only be written from the message thread** — Tracktion asserts it — so
   every rotary turn hops across from the tick thread. Measured affordable: about **4 µs a write** in
-  a Release build, 512 parameters at 50 Hz an eighth of a tick.
+  a Release build, 512 parameters at 50 Hz an eighth of a tick. *(Footnote, 2026-09-23 evening, from
+  the EQ/inserts session: this holds for a plugin hosted inline. Phase 9a hosts every third-party
+  plugin behind the out-of-process proxy, which has no Tracktion parameter at all, so its values go
+  tick thread → shared memory → child, and the EQ is Go.dot's own with atomics written from the
+  tick thread as the level is. No rotary turn hops threads in what Phase 9a builds — namespace draft
+  §17.4.)*
 - **Editing a cue that is not playing** is the subtle case. Its settings live in the show file, so
   the rotaries can always change them — but a VST's own value text comes from an **instance**, and
   there is one only where the cue is armed. *Play it, tweak, stop* works as it is; editing silently

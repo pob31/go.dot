@@ -410,6 +410,9 @@ Deck+ and the Icon controllers. The conversation is written down in
 `docs/godot-surface-pages-draft-0.1.md`, with eleven questions still his. The
 per-cue **EQ and VST inserts are built first, in another session**
 (`docs/handoffs/2026-09-23-eq-inserts-and-surfaces.md`); the pages follow.
+*Later the same day:* that session is **Phase 9a** below — the EQ, the plugin
+sandbox and the inserts, decisions AD–AG — and two of the draft's eleven
+questions (7, the EQ; 8, where the inserts live) are answered by it.
 
 ---
 
@@ -467,27 +470,74 @@ list; blend-space choice confirmation.
 
 **Goal:** third-party processing that cannot take the show down.
 
-- Built-in plugin set, in-process, lipogram-compliant.
-- **Out-of-process proxy plugin** as a custom TE plugin type wrapping
-  shared-memory IPC with a hard deadline (PRD §3.18 / §6.1 #7). Opt-in inline.
-- **Out-of-process scanning**, always.
+*Split on 2026-09-23 into 9a, pulled forward and being built, and 9b, what is
+left. No later phase is renumbered.*
+
+### Phase 9a — EQ on media cues, the plugin sandbox, and VST inserts · L
+
+Started 2026-09-23 on `main` at `c3d75fe`, the day Phase 6 landed. **Four
+decisions of 2026-09-23 shape it** — **AD**, **AE**, **AF** and **AG** in
+`godot-namespace-draft-0.1.md` §9, the author asked directly; two
+recommendations were declined and the reasons are in §17.1. The EQ is Go.dot's
+own, a fixed stage on every voice written from the tick thread like the level
+(AD). Inserts are a chain on every voice: the show declares a plugin set, every
+voice carries it bypassed, a cue switches plugins in and carries its own values
+— the PRD's bypassed stack answered yes on the voices (AE). The out-of-process
+proxy is built before any VST insert (AF). The scope stops at the inspectors;
+the surface pages follow in their own session (AG). The phase is drawn before
+the code as §17 of that draft, as §11 to §16 were, and the plan's PR table is:
+
+| PR | What | Depends on |
+|---|---|---|
+| 9a.0 | Docs first: namespace draft §17, decisions AD–AG in §9, the PRD amendments, this section | — |
+| 9a.1 | The EQ DSP, pure: `CueEq`, `EqMath.h`, `EqSettings.h`, tested against magnitude responses | 9a.0 |
+| 9a.2 | The EQ on every voice: `EqPlugin`, nineteen `media` rows, the arm and the live push, `eq.reset`, render test, replay fixture, driver | 9a.1 |
+| 9a.3 | The desktop EQ panel — the curve drawn from the DSP's own function — and the page's rows | 9a.2 |
+| 9a.4 | The plugin set as a document object: `<Audio><Plugins><Plugin>`, rows, `plugin.create`, tree, fixture, replay | 9a.0 |
+| 9a.5 | Hosting compiled in, `wfg plugins --scan|--list|--catalogue`, the known list, the catalogue and its cache, the tree subtree | 9a.0 |
+| 9a.6 | The proxy transport: the region, `ProxyPlugin`, `ProxyHost`, the `godot:test-gain` child, misses and the failed state, rtsan clean | 9a.4 |
+| 9a.7 | The child hosting a real VST3/AU: instances, preset, parameters and enables, catalogue reporting, baseline | 9a.5, 9a.6 |
+| 9a.8 | The cue's `<Fx>` entries: rows, `fx.create`, the `p<n>` door, the arm and the live push, full-loop tests, driver | 9a.2, 9a.4, 9a.6 |
+| 9a.9 | The desktop FX panel, the Plugins tab, preset import, the page's rows | 9a.8 |
+| 9a.10 | Measurements M30–M34 | 9a.2, 9a.7, 9a.8 |
+| 9a.11 | Close-out: §17.12, the PRD ticked, this section ticked, the handoff and the pages draft's §8 answered | all |
+
+After 9a.0, four streams run on disjoint files — the DSP, the document object,
+the hosting and the transport — and the FX entries land on top of all four.
+
+**Done when:** a media cue's EQ is heard and drawn from one function; every EQ
+and insert parameter is a `node.set`-able node with its name, range, default,
+bipolar flag and value text published beside it, and the insert order is
+readable (the pages draft's §8, all four items); a third-party VST3 plays on a
+cue through the sandbox with its parameters ridden live; a plugin killed
+mid-show leaves the cue dry, the strip marked failed in words and the block
+cost bounded; M30–M34 recorded; CI green on all six jobs.
+
+**Needs from the author:** what he sees on the desktop once 9a.3 and 9a.9 land
+(plan decisions 1, 5, 7, 12 and 14 of §17.11 are the ones a look settles); the
+deadline and the failed-strip budget once M31 and M32 are taken; and whether
+the pages session should start on the EQ page when 9a.3 lands rather than wait
+for the inserts.
+
+### Phase 9b — The live rack, and what 9a leaves · L
+
 - **Live rack** with a stated latency budget; TE PDC behaviour on live tracks
-  understood and controlled (spike #6).
-- VST3 / AU / LV2 all exercised.
+  understood and controlled (spike #6). Live input through the sandbox.
 - **Rack channels as slots** (PRD §3.18, 2026-09-07): plain tracks with a plugin
   list, never Tracktion Racks; sends as coefficients fixed at load; width
-  classes mono→mono, mono→stereo, stereo→stereo. Bypass toggles nothing
-  structural (verified against the pin); the **bypassed stack** is
-  *(proposed)*, and a channel's summed latency is shown the moment a plugin is
-  added to it.
+  classes mono→mono, mono→stereo, stereo→stereo — the chains behind Phase 4's
+  `Media/Insert` and `Rack/Channel`, and the shared reverb channel.
+- **Inline hosting** (PRD §3.18's opt-in) with §3.4's message-thread handover;
+  **LV2**; AU presets; plugin editor windows; curated per-plugin parameter maps
+  (the pages draft's §7.2); macOS audio workgroups for the child.
 
 **Done when:** live input runs through a sandboxed third-party plugin, the plugin
 is killed mid-show, and the show continues with the strip marked failed; a cue
 claims an exclusive rack channel and enables one plugin of its chain without a
 graph rebuild.
 
-**Needs from the author:** the built-in plugin list; the rack's latency budget;
-whether a channel holds a bypassed stack (§3.18 *(proposed)*).
+**Needs from the author:** the rest of the built-in plugin list; the rack's
+latency budget.
 
 ---
 

@@ -9,6 +9,13 @@ the part addressed to you**.
 
 ## Start from `phase6`, not from `main`
 
+*Superseded the same evening: `phase6` was fast-forwarded onto `main` at `c3d75fe` and the
+EQ/inserts session works on `main` as **Phase 9a** — plan decisions AD–AG in
+`docs/godot-namespace-draft-0.1.md` §9, the phase drawn as §17. The author's answers to this
+note's two open questions: the EQ is Go.dot's own, and the inserts are a chain on every voice
+track — the show's plugin set, every voice carrying it — behind the out-of-process proxy, built
+first. The file list below stays true as a list of what Phase 9a touches.*
+
 **Phase 6 is on the local branch `phase6` and is neither pushed nor merged** (commits `f43d104`
 to `9a4dbd6` and the one that added this note). Work begun on `main` will collide with it in
 exactly the files an EQ and inserts will touch:

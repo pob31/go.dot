@@ -886,7 +886,7 @@ back on if nobody feels strongly by then.
   (§14.16) and that nothing is built on the page in the meantime. What forced the question is a
   fact about browsers rather than a preference: **a page is never told a dropped file's path.** It
   is given the name and the bytes, deliberately, so the web client cannot say *"the file is at
-  D:udioain.wav"* — it can only offer to COPY one into the show. And `media/@file` is
+  D:\audio\rain.wav"* — it can only offer to COPY one into the show. And `media/@file` is
   deliberately relative to the bundle's `media/` folder, for the reason the parameter table gives
   in as many words: *"a show travels between machines and an absolute path is a fact about the
   machine it was authored on."* So the page's only honest route is an import, and the engine has
@@ -931,6 +931,41 @@ back on if nobody feels strongly by then.
   driven in CI the same way; real faders come through a Mackie Control bridge any MCU unit answers;
   colour, the three-row display, the rings and the second bank are a layer over it. HUI is not in
   the phase, and the Icon V1 and P1 are new profile words when they arrive. §16.1.
+
+- **AD — The EQ is Go.dot's own** (settled 2026-09-23, with the Phase 9a plan; the recommendation
+  taken): a fixed stage on every voice track in `CueOutputPlugin`'s shape — a custom Tracktion
+  plugin type, its settings atomics the tick thread writes as it writes the level, no
+  `AutomatableParameter`, no message-thread hop, no lock; high-pass, low-pass and four parametric
+  bands; the settings nineteen rows on the media cue, every gain resting at 0 dB. Declined:
+  Tracktion's own four-band equaliser (a lock on the audio thread, message-thread parameters, no
+  filters) and an EQ plugin chosen per cue (parameters a page could not be laid out for). §17.1
+  and §17.5.
+
+- **AE — Inserts are a chain on every voice track** (settled 2026-09-23, AGAINST the
+  recommendation of PRD §3.18's rack channels): the show declares a plugin set as it declares its
+  tracks; every voice carries the whole set, instantiated at open and switched off; a media cue
+  says which of the set it switches in and carries its own values; at arm the voice gets them and
+  while the cue sounds a `node.set` reaches the voice live. PRD §3.18's *(proposed)* bypassed
+  stack, answered yes and placed on the voices rather than in a rack. What it buys is no allocation
+  to fail — every voice has every plugin; what it costs is N × P instances (M34) and a set fixed
+  at open. Phase 4's `Media/Insert` and `Rack/Channel` stay as they are, for Phase 9b's live rack.
+  §17.1 and §17.2.
+
+- **AF — The out-of-process proxy is built first** (settled 2026-09-23, AGAINST the
+  recommendation of in-process hosting now): §3.18's sandbox pulled forward from Phase 9 — a custom
+  Tracktion plugin type on every voice handing each block to a child process through shared
+  memory on a bounded spin with a hard deadline, a miss passing the dry block through, a strip that
+  keeps missing marked failed and no longer called, the child hosting the real plugin one instance
+  per voice, and scanning out of process always. The author's reason is §3.18's: when a plugin
+  dies, the show survives. The cost is that every VST insert waits on the proxy, which is weeks;
+  the EQ waits on none of it. A consequence that is a gain: a plugin behind the proxy has no
+  Tracktion parameter at all, so §3.4's message-thread handover applies only to inline hosting,
+  which is not built. §17.1 and §17.6.
+
+- **AG — The scope: EQ, inserts, the pages draft's §8 contract, the inspectors, tests and
+  measurements** (settled 2026-09-23; the recommendation taken): not the surface pages, not the
+  virtual panel's rotaries — the pages session's, built on this in the order
+  `docs/godot-surface-pages-draft-0.1.md` §11 set. §17.1 and §17.10.
 
 ### Open, with the subphase that forces each
 
@@ -9269,3 +9304,591 @@ motor, so nothing the bridge could mistake for a hand. `latenessMax` over the se
 samples (6.7 ms), which is M29's bound half, taken in serve rather than in-process. What only
 somebody looking at the desk can say — the displays, the rings, the colours, the motors' feel, a
 touch — is still the afternoon's.
+
+## 17. Phase 9a — EQ on media cues, the plugin sandbox, and VST inserts: what the tree, the commands and the log gain
+
+Written on 2026-09-23, before the code, as §11 to §16 were: the approved Phase 9a plan drawn as a
+text the pull requests 9a.1–9a.11 can be reviewed against rather than against memory. It is drawn
+against `main` at `c3d75fe`, where Phase 6 landed whole and the surface-pages draft with it. Rows
+reach `docs/parameters/godot-parameters.csv` with the PR that implements each of them, never
+before. Where this section and the code come to disagree, §17.12 at close-out says which won.
+
+The request was the author's, on 2026-09-23: *"I would like to look into EQ on media files and
+VST inserts too. The rotaries of the hardware controller will be used at times to control the EQ
+and VST parameters. There are toggles to switch to 'EQ' and 'FX' modes on the D700 for
+instance."* The rotaries and the toggles are the surface pages of
+`docs/godot-surface-pages-draft-0.1.md`, designed the same day and built afterwards by another
+session on top of this phase; what that session needs from this one is §8 of that draft, and it is
+the contract every subsection below serves: **every EQ and insert parameter is a node under its
+cue**, carrying its value and published beside its name, short name, default, range or steps,
+bipolar flag and the plugin's own value text; **written with `node.set`** from any origin, the
+touch table gating it, undo coalescing a turn into one step, any thread hop the engine's and never
+a client's; **the insert order readable**, each with its plugin's name; and **names and ranges
+readable without a playing instance**.
+
+**What the phase is, before any of its names.** Until now a media cue's sound was its file, a
+level, and where it went. Phase 9a gives the cue a sound of its own: an **EQ** every media cue has
+from birth, four bands and two filters, flat until somebody shapes it; a **plugin set** the show
+declares once, as it declares its tracks — the third-party processors this show uses, loaded
+when the show opens and carried, switched off, on every voice; and on each cue the plugins of
+that set it **switches in** and the **values** it sets on them. A hand turning a rotary on any of
+it writes the cue — a decision, saved, undone as one step — and a clip already sounding follows
+within a tick. And because a third-party plugin is the one thing in the process that Go.dot did
+not write, it runs **outside the process**, in a child that can die without taking the show down.
+
+Four decisions the author took with the plan shape it — **AD**, **AE**, **AF** and **AG** in §9,
+after AC — and §17.1 says what each means for a show:
+
+| | decision | what it shapes |
+|---|---|---|
+| **AD** | the EQ is Go.dot's own — a fixed stage on every voice, written from the tick thread like the level | §17.5, nineteen `media` rows, and no message-thread hop anywhere in the EQ |
+| **AE** | inserts are a chain on every voice track — the show's plugin set on every voice, a cue enabling and setting | §17.2's `Plugins` and `Fx` objects, and the N × P instances §17.9 measures |
+| **AF** | the out-of-process proxy is built first — Phase 9's sandbox, pulled forward | §17.6, and the order of every pull request after the EQ |
+| **AG** | the scope: EQ, inserts, the §8 contract, the inspectors, tests and measurements — not the pages, not the panel | §17.8 stops at the inspectors; §17.10 names the pages as the next session's |
+
+Twenty-one further decisions were taken with the plan rather than by the author. They are numbered
+in §17.11 and cited in place as *plan decision N*, each an implementer's call written down so that
+it can be overruled early rather than late — §14's convention, kept. Where this phase builds
+something the PRD still marks *(proposed)*, it says so where it builds it, and PRD §6.9 says which.
+
+**Where it starts, in the code rather than in the plan.** One custom plugin sits at the end of
+every voice track, `CueOutputPlugin` (`src/wfg/engine/audio/AudioHost.cpp:371-385`), registered
+with `createBuiltInType` at `:203`; its level and routing matrix are atomics on `CueMatrix`,
+written from the tick thread by `HostPlayer::setLevelDb`
+(`src/wfg/engine/audio/HostPlayer.cpp:151-157`) — one relaxed store, and the audio thread
+interpolates. `cue::Player` (`src/wfg/engine/cue/Runner.h:210-309`) names no Tracktion type;
+`ArmRequest` (`:164-201`) is a plain value that crosses to the message thread, where
+`HostPlayer::serviceArms` runs on a 10 ms timer (`HostPlayer.cpp:38, 68-126`) and every arm
+already rebuilds the graph, `source` being on Tracktion's restart list. `Runner::applyRouting`
+(`src/wfg/engine/cue/Runner.cpp:6587-6640`) pushes a document edit to every sounding run under a
+`showRevision` gate, which is the precedent for pushing an EQ or an insert edit. A door in front
+of the document answers `node.set` for the live rows (`src/wfg/engine/cue/LiveRows.{h,cpp}`,
+composed at `DocumentCommands.cpp:631-663`), and `ShowDocument::resolve` accepts exactly four-part
+addresses (`ShowDocument.cpp:656-731`) — which is why every address below is flat and the nested
+shape the pages draft sketched in §8 is not used. No `JUCE_PLUGINHOST_*` is compiled;
+`cmake/WfgOptions.cmake:22-24` reserved the one place for it. Delay compensation is off
+(`AudioHost.cpp:302`). Tracktion's own equaliser takes a lock on the audio thread
+(`tracktion_Equaliser.cpp:271`) and its `AutomatableParameter::setParameter` asserts the message
+thread (`tracktion_AutomatableParameter.cpp:1412, 1466`); neither is used by anything below. The
+sandbox was proved in spike 07 (`spikes/spike07_proxy_plugin/main.cpp`,
+`docs/spikes/spike07-proxy-plugin.md`): a custom plugin type, a shared-memory round trip at 0.9 µs,
+a 250 µs deadline held, a child killed mid-playback and the playback surviving. Spikes never
+migrate into `src/`; the design does.
+
+Three rules hold over all of it. **GO never blocks** — no plugin is ever instantiated after the
+show opens; the children come up beside the transport, which is already playing, and a cue that
+lands before they are ready plays dry and says so. **The audio thread is a lipogram** — the EQ and
+the proxy allocate nothing, lock nothing and enter the kernel nowhere; the one concession, a clock
+read every sixty-four turns of a bounded spin, is the one PRD §3.18 already recorded. And **a turn
+writes the cue** (PRD §4.10): what a rotary does to an EQ band or a plugin parameter is a decision
+about the show, saved, undoable and coalesced, and never a live override of the kind a fader's
+trim is.
+
+### 17.1 The four decisions the author took (2026-09-23)
+
+Asked directly, one question each with a recommendation beside it. Two recommendations were taken
+and two were declined; where a recommendation was declined, the reason the author's answer is the
+better product is given with it, and the cost is stated rather than hidden.
+
+**AD — the EQ is Go.dot's own.** A fixed stage on every voice track, in `CueOutputPlugin`'s shape:
+a custom Tracktion plugin type registered once, no automatable parameters, its settings atomics
+that the tick thread writes exactly as it writes the level, so a rotary's turn reaches the sound
+without crossing to the message thread and without a lock. High-pass, low-pass, four parametric
+bands each with a frequency, a gain and a width; the settings live on the cue, and every gain
+rests at 0 dB, which is §4.6's resting state by construction. The alternatives were Tracktion's
+own four-band equaliser — a lock on the audio thread, parameters writable only from the message
+thread, and no high-pass or low-pass — and an EQ plugin chosen per cue like any insert, whose
+parameters would be whatever that plugin exposes, so that an EQ page could not be laid out for
+the hands. Known parameters are what the pages draft's §7.1 was drawn for: three encoders a band.
+
+**AE — inserts are a chain on every voice track.** The recommendation was PRD §3.18's rack
+channels as written — a channel being a track with a plugin chain loaded at open, a cue claiming
+one and playing on it, cues sharing instances and carrying their own settings. The author chose
+the other shape: **the show declares a plugin set**, as `Show/Audio/@tracks` declares polyphony;
+**every voice carries the whole set**, each plugin instantiated when the show opens and switched
+off; **a media cue says which of the set it switches in and carries its own values**; at arm the
+voice gets them, and while the cue sounds a `node.set` reaches the voice live. This is the stack
+PRD §3.18 proposed on 2026-09-07 — *"a channel may hold a stack of candidate plugins, all
+bypassed, and a cue enables the ones it wants"* — answered yes, and placed on the voices rather
+than in a rack. What it buys: no allocation to fail. Every voice has every plugin, so a cue never
+plays dry because a channel was busy, and a designer never counts channels; a cue's inserts are a
+property of the cue and nothing else, which is §4.12's *content describes output* read
+literally. What it costs: N × P instances, one of every plugin on every voice, their memory and
+their time at load (§17.9's M34 puts numbers on it), and a plugin set that is fixed once the show
+opens (§3.25's rule about the graph), so adding a plugin to the set mid-session takes effect at
+the next open. Phase 4's `Media/Insert` and `Rack/Channel` — a cue claiming a rack channel — stay
+exactly as they are, bookkeeping for the live-input rack that is still Phase 9b's.
+
+**AF — the out-of-process proxy is built first.** The recommendation was to host VST3 and AU in
+process now, behind the one build switch, and to build §3.18's sandbox with Phase 9. The author
+chose the sandbox first. The reason is §3.18's own: *"when a plugin dies, the show survives"*, and
+a plugin that is not Go.dot's is the one thing in the process whose failure nobody here can
+prevent. So the shape spike 07 proved is built: a **proxy** — a custom Tracktion plugin type on
+every voice, one per plugin of the set — that hands each block to a **child process** through
+shared memory and waits for it with a hard deadline, on a bounded spin; a miss passes the dry
+block through; a strip that keeps missing is **marked failed and stops being called**, which is
+the requirement spike 07 found; and the child hosts the real plugin, one instance per voice. The
+cost is order and time: every VST insert waits on the proxy, the proxy is most of what devplan
+Phase 9 drew, and it is weeks. The EQ, being Go.dot's own, waits on none of it. One consequence
+is a gain: a plugin behind the proxy has no Tracktion `AutomatableParameter` at all, so its
+parameters travel tick thread → shared memory → child, and §3.4's message-thread handover — the
+one spike 05 measured — applies only to a plugin hosted inline, which this phase does not build.
+
+**AG — the scope.** The EQ, the inserts, the four items of the pages draft's §8, the desktop and
+page inspectors that edit them, the tests and the measurements. Not the surface pages — the focus
+row, the page model, the EQ and FX pages on the D700 — and not the virtual panel's rotaries: those
+are the pages session's, built on this, in the order the author set in the draft's §11.
+
+| decision | the PRD sentence it answers or amends | written where, 2026-09-23 |
+|---|---|---|
+| **AD** | §3.18's *"a built-in plugin set covers basic needs and runs in-process"* — the first of that set | §3.18 in place, and §6.9 |
+| **AE** | §3.18's *(proposed)* bypassed stack — yes, on the voices | §3.18 in place, and §6.9 |
+| **AF** | §3.18's *"third-party plugins are hosted out-of-process by default"* — the order, and the parameter path | §3.18 in place, §3.25's *"nothing before Phase 9"*, and §6.11 |
+| **AG** | the pages draft's §8 and §11 | §7.3 of that draft, and its §8 at close-out |
+
+### 17.2 The objects and their rows
+
+**A media cue's EQ is nineteen rows on the cue, not an object of its own** (plan decision 1).
+Every voice carries the EQ from load, so every media cue has one whether or not anybody has
+touched it, and an object that had to be created before its first write would say otherwise. Flat
+rows on `media` give a page a direct address from the focus cue's identifier — `/godot/cue/<id>/
+eqB2Gain` — with no scan of a second owner and no `eq/cue` indirection; `node.set` and undo's
+coalescing work through the document's own door on the first day; and the canonical writer omits
+an attribute at its default, so a flat EQ writes nothing into `show.xml`. The price is nineteen
+nodes on every media cue in the tree, and M30 records what they cost a publish.
+
+**The show's plugin set is a container under `<Audio>`**, `<Plugins>` holding one `<Plugin>` per
+processor the show uses, published at `/godot/plugin/<id>` with `/godot/plugin/order` beside it —
+the `Dcas` shape. It sits under `Audio` beside `Bus` and `Rack` because it is an audio fact of the
+rig, and it is made on demand by the first `plugin.create`, as `createRackChannel` makes `<Rack/>`,
+so no fixture gains a line. An entry names the plugin the way the machine's scan names it, keeps
+the name and the file path for the person who has to find it on another machine, and names a
+**preset** — a file under the bundle's `plugins/` folder, never the bytes in a row (plan decision
+17): a `.vstpreset` is tens of kilobytes, the tree publishes every `show` row, and a page polls the
+tree ten times a second; §14.11's rule that a client never hands an unbounded engine string to a
+fixed-size control is a rule about what the engine publishes too. The preset arrives the way media
+does (decision Y): a native dialog, a copy into `plugins/`, one `node.set` naming the file.
+
+**A cue's insert is an `<Fx>` child of `<Media>`** (plan decision 2), owner `fx`, published at
+`/godot/fx/<id>` with a derived `cue`, the `Send` shape exactly (§13.3). `Insert` was not
+available: it is Phase 4's rack-channel claim and stays so. `Plugin` under `Media` would have
+collided with `Audio/Plugins/Plugin`, since `ShowDocument::ownerForElement` is keyed on the element's
+name alone. `Fx` is the author's own word for it — the D700's button, the pages draft's §7.2. An
+`Fx` names one plugin of the set, says whether it is switched in, and holds the values this cue
+sets — **only the ones somebody changed**, as a sparse list; a parameter the cue does not mention
+rests at the set entry's preset, which is what the plugin was put into at load.
+
+**The nodes a plugin's parameters become are generated, not rows.** A plugin's parameter list is
+known only from an instance, and its length differs from one plugin to the next, so the CSV cannot
+name them. Two kinds of node are built by the tree from the machine's **catalogue** (§17.7): under
+every `Fx`, one `p<n>` per parameter — writable, a normalised number in 0..1, described by the
+parameter's name, carrying its unit and, for a stepped parameter, its step texts as `enumValues` —
+and beside each a read-only `t<n>`, the plugin's own text for the value the cue holds. Under every
+`Plugin` entry, `param/<n>/{name, shortName, default, min, max, steps, unit, bipolar}`, read-only,
+the catalogue itself; and under `/godot/plugin/known/<n>/{name, identifier, format, manufacturer}`
+what this machine's scan found, so a client can offer them. The `p<n>` nodes are what §8's first
+two items ask for; `param/<n>` is what its fourth asks for.
+
+**The containment**, in `Schema.cpp`'s table:
+
+```
+{ "Audio",   false, { "Bus", "Rack", "Plugins" },                         { "audio" } },
+{ "Plugins", false, { "Plugin" },                                         { "plugins" } },
+{ "Plugin",  true,  {},                                                   { "plugin" } },
+{ "Media",   true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger", "Fx" }, … },
+{ "Fx",      true,  {},                                                   { "fx" } },
+```
+
+`<Plugins>` is written at a fixed place under `<Audio>` — after the last `<Bus>`, before `<Rack>` —
+whichever was created first, so that the canonical bytes of a show do not depend on the order two
+containers happened to be asked for.
+
+The rows, grouped by where they are published. Every one carries the panic policy `park`, and its
+resting value is its default.
+
+| Node | Type, default | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/cue/<id>/eqOn` | `T`, true | rw | show | whether the cue's EQ is in the signal at all; off, every band is skipped and the audio passes untouched |
+| `…/eqHpf`, `…/eqLpf` | `T`, false | rw | show | whether the high-pass or the low-pass is in — a flag, not a frequency parked at the edge, because a rotary's click switches a filter in and out |
+| `…/eqHpfFreq` | `d`, 80 Hz (20..2000) | rw | show | where the high-pass turns over, second-order Butterworth |
+| `…/eqLpfFreq` | `d`, 12000 Hz (1000..20000) | rw | show | where the low-pass turns over, second-order |
+| `…/eqB1Shape` | `s`, `peak` (`peak\|lowShelf`) | rw | show | what band one is; the low band is the one that wants to be a shelf |
+| `…/eqB4Shape` | `s`, `peak` (`peak\|highShelf`) | rw | show | what band four is |
+| `…/eqB{1..4}Freq` | `d`, 100 / 500 / 2000 / 8000 Hz (20..20000) | rw | show | the band's centre, or the shelf's corner |
+| `…/eqB{1..4}Gain` | `d`, 0 dB (−24..24) | rw | show | the band's gain; nought is the band out of the signal, what every band starts and rests at |
+| `…/eqB{1..4}Q` | `d`, 0.7 (0.1..10) | rw | show | the band's width, higher narrower; on a shelf, how steep the corner is |
+| `/godot/cue/<id>/fx` | `s` | r | none | the identifiers of this cue's switched-in `Fx` children in chain order — §8's third item |
+| `/godot/plugin/order` | `s` | r | none | the set's identifiers in document order, which is the order of the chain on every voice |
+| `/godot/plugin/<id>/name` | `s` | rw | show | what it is called on screen and on a scribble strip; the scan's name when added, editable |
+| `…/identifier` | `s` | r | show | the plugin as the machine knows it, JUCE's identifier string; written only by `plugin.create` |
+| `…/format` | `s` (`VST3\|AU\|LV2`) | r | show | which kind; LV2 listed and not built |
+| `…/path` | `s` | r | show | where the file was on the machine it was added from |
+| `…/preset` | `s` | rw | show | the `.vstpreset` under the bundle's `plugins/` the plugin is put into at open, or empty for its defaults |
+| `…/state` | `s`, `unloaded` (`unloaded\|loading\|loaded\|missing\|failed`) | r | none | what became of it tonight, in a word — never colour alone |
+| `…/problem` | `s` | r | none | why it is not loaded, in one sentence |
+| `…/latencySamples` | `i`, 0 | r | none | the delay the plugin itself declares, uncompensated: a cue through it is late by this much while it is in |
+| `…/paramCount` | `i`, 0 | r | none | how many parameters the catalogue knows; the `param/<n>` nodes count to it |
+| `…/param/<n>/…` | generated | r | — | name, short name, default, min, max, steps, unit, bipolar — §8's fourth item |
+| `/godot/plugin/known/<n>/…` | generated | r | — | this machine's scan: name, identifier, format, manufacturer |
+| `/godot/fx/<id>/plugin` | `s`, `refers=plugin` | rw | show | which plugin of the set this cue switches in; one `Fx` per plugin per cue |
+| `…/enabled` | `T`, true | rw | show | whether it is in this cue's signal; off keeps the values and costs the voice nothing |
+| `…/values` | `s` | rw | show | the values this cue sets, `index:value` pairs, normalised, only the ones somebody changed |
+| `…/p<n>` | generated `d`, 0..1 | rw | — | one parameter: what a hand writes, one address a turn; the door of §17.3 puts it into `values` |
+| `…/t<n>` | generated `s` | r | — | the plugin's own text for that value, from the catalogue's table |
+| `…/cue`, `…/name`, `…/index` | `s`, `s`, `i` | r | none | the cue it belongs to; the plugin's name; where it sits in the chain |
+
+The CSV rows land with the PRs that implement them — the nineteen `media` rows with 9a.2, the
+`plugins`/`plugin` rows with 9a.4, the `fx` rows and `media/fx` with 9a.8 — and are quoted in full
+in the plan; this table is what they mean.
+
+### 17.3 The commands
+
+Three creates, one reset, one restart, one engine record, one new door for a verb that already
+exists, and three verbs of the binary.
+
+| Command | Arguments | What it does, and what it records | What it refuses |
+|---|---|---|---|
+| `plugin.create` | `<name s> <identifier s> <format s> <path s> [id s]` | a `<Plugin>` at the end of `<Plugins>`, made under `<Audio>` if the show has none. All four words explicit, so a replay on a machine that has never scanned needs no known list | `locked` |
+| `fx.create` | `<cue s> <plugin s> [id s]` | an `<Fx>` under a media cue naming one plugin of the set, switched in, with no values | a cue that is not media; a second `Fx` naming the same plugin — `bad-value`, `createSend`'s word for a second send into one bus; `locked` |
+| `eq.reset` | `<cue s>` | the nineteen EQ rows back to their defaults in one transaction, so Undo takes the whole reset back as one step — the pages draft's double-click | a cue that is not media; `locked` |
+| `plugin.restart` | `<plugin s>` | brings a failed entry's child back: relaunched, preset re-applied, every sounding run's values re-armed | an entry that is not failed: applied, nothing |
+| `plugin.failed` | `<plugin s> <problem s>` | engine origin, submitted by the proxy host once per failure: the record that a child died or stopped answering, so a replay knows the cue went dry there. A no-op on replay, as `run.failed` is | — |
+| `object.delete` | `<id>` | already generic: a `Plugin` entry or an `Fx` | as today |
+| `node.set` | `<address s> <value>` — one new door | `/godot/fx/<id>/p<n>`, answered in front of the document (§17.4): the value is put into that `Fx`'s `values` inside the ordinary transaction, so it is undone like any edit and coalesced on the `p<n>` address | not a number or outside 0..1, `type-mismatch`; no such `Fx`, `unknown-id`; `n` beyond what the catalogue knows, `bad-address` — and when the catalogue does not know the plugin, any `n` is accepted (plan decision 8) |
+
+The three verbs of the binary: `wfg plugins --scan[=vst3|au] [--path=<dir>]` scans this machine
+out of process and keeps what it found where Tracktion keeps it; `wfg plugins --list` prints it;
+`wfg plugins --catalogue=<identifier>` loads one plugin in a child and writes its catalogue. And
+one the operator never types: `wfg plugin-host --region=<path> --plugin=<identifier>
+--instances=N --channels=C --parent-pid=P [--preset=<file>]`, the child, the same binary
+re-invoked (§17.6).
+
+**The edit lock draws its line where decision W drew it.** The creates, the reset and every
+`node.set` on an EQ row or a `p<n>` are document mutations and refuse while the show is locked —
+which is the pages draft's own rule, §5.5: the editing pages go dark under the lock. `plugin.
+restart` and the engine's `plugin.failed` are the show being run, and keep working.
+
+### 17.4 The parameter path, end to end
+
+1. **A hand** — the desktop's EQ or FX panel, the page's generic inspector, later a rotary —
+   sends `node.set <address> <value>`. The touch table gates it per address (§16.4); undo joins
+   consecutive writes to one address from one origin inside twenty-five ticks into one transaction
+   (`ShowDocument.h:505-537`), so a turn is one step and two rotaries are two.
+2. **The document.** An EQ row is an ordinary `persist=show` row: `node.set` reaches
+   `ShowDocument::setAttribute` and nothing new is in its way. A `p<n>` is answered by the **FxWrite
+   door** (`cue/FxRows.{h,cpp}`, `liveWriteFor`'s shape with the opposite intent — it writes the
+   document): it parses the number with the row's own parser, reads the `Fx`'s `values`, rewrites
+   entry `n` with the canonical number formatter, and writes the row through the ordinary door,
+   inside the transaction the hook opened. `isLiveWrite` stays false for it; unlike a trim, this IS
+   a decision.
+3. **The tick thread.** `Runner::beforeTick` gains `applyEq` and `applyFx` beside `applyRouting`,
+   under the same `showRevision` gate: for every sounding media run, read the cue again through the
+   schema `Reader` (`ShowWalk.h:98-165` — never a raw `ValueTree` read, the canonical writer having
+   omitted every default), compare with the copy the run holds, and push only what moved through
+   three new virtuals of `cue::Player`: `setEq (track, settings)`, `setFxEnabled (track, slot, on)`
+   and `setFxParameter (track, slot, index, value)`. An undo moves the revision, so it is covered;
+   a tick with no edit costs one integer compare. The virtuals have no-op bodies, so a Player that
+   plays nothing stays a complete configuration and every fake Player in the tests stays as it is
+   (plan decision 18).
+4. **The audio side.** `HostPlayer` forwards to `AudioHost`, which stores: for the EQ, into the
+   atomics of that voice's `CueEq`; for a plugin, into its lane of the child's shared region
+   (§17.6). Relaxed stores, no lock, no allocation, no ValueTree, no message thread.
+5. **The block.** The EQ reads its atomics, recomputes the coefficients of a band whose values
+   moved since the last block, and runs the filters in place. The proxy, if its lane is switched
+   off or its entry has failed, returns before touching the region; else it copies the block in,
+   bumps the lane's parameter revision if a value moved, publishes the request, spins under the
+   deadline, and copies the answer back — or passes the dry block through.
+6. **The child** sees the request, applies the lane's changed values to its instance between
+   blocks, processes, and publishes the answer.
+7. **At arm**, the same values ride the `ArmRequest` as plain values — `request.eq`, `request.fx`
+   — and are applied on the message thread in `serviceArms` and **snapped** while the voice is
+   silent, as the routing is (`HostPlayer.cpp:94-116`); the lane's `resetSeq` is bumped so the
+   child resets its instance and the previous cue's reverb tail does not open the next cue.
+
+**Resting values.** Every EQ gain is 0 dB, the filters off and `eqOn` true, so a cue nobody touched
+is flat by construction and `eq.reset` returns it there. A plugin parameter the cue's `values` do
+not name rests at the set entry's **baseline** — the value the instance holds after the entry's
+preset was applied at open, the factory default with no preset — and the published `default` under
+`param/<n>` is that baseline once the child has reported it. The CSV `panic` column says `park`
+throughout and is metadata still: Phase 10 applies it.
+
+**Replay** runs handlers and no hooks (§12.1), and every write above is a handler: the EQ rows
+and `values` are in the log as `node.set` records, the arms carry them, and `plugin.failed` marks
+where a child died. What a replay cannot reproduce is the sound of a plugin that is not on the
+replaying machine, which is the same truth `run.failed mediaMissing` already tells about a file.
+
+### 17.5 The EQ
+
+`audio/CueEq.{h,cpp}` names no Tracktion or JUCE type, as `CueMatrix` does not, so its arithmetic
+is checked in microseconds against known responses rather than in the seconds an engine takes to
+build. Six second-order sections per channel: the high-pass and the low-pass, second-order
+Butterworth, and four bands from the RBJ cookbook — band one a peak or a low shelf, band four a
+peak or a high shelf, two and three peaks (plan decision 6) — transposed direct form II, double
+state, float in and out. Every number is one `std::atomic<float>`, every flag and shape one
+`std::atomic<int>`, and each band carries a revision the setter bumps; `process` recomputes only
+the bands whose revision moved, at the block boundary, with no crossfade (plan decision 7): a
+rotary at 50 Hz makes small steps, and a one-block ramp is the fix if a large step ever clicks.
+There is no per-band enable — a peak at 0 dB is out, and `eqOn` is the one bypass (plan decision 5).
+
+**When every band is identity the block is not touched**, and that is a test rather than an
+optimisation: every render driver in the tree — `first_sound.py`, `phase6_sampler.py`, whose
+arithmetic is that each output sample equals the gain — runs through this stage from PR 9a.2 on,
+and a flat EQ that moved one sample by one bit would fail them all. The coefficient formulas and
+the magnitude response live in a header-only, std-only `audio/EqMath.h` that the desktop client
+includes too, so the curve the panel draws and the sound the voice makes are one function
+(`check-client-boundary.py` allows it: no JUCE, no document).
+
+`audio/EqPlugin.{h,cpp}` wraps it as `CueOutputPlugin` wraps the matrix — `xmlTypeName
+"godotCueEq"`, the width carried on the state, the `getNumOutputChannelsGivenInputs` override that
+sizes the buffer, zero latency, no sidechain, no automatable parameters, `ScopedNoDenormals` around
+the block — and `AudioHost::buildEdit` inserts one on every voice **before** the output stage:
+the chain on a voice is EQ, then the set's proxies in `plugins/order`, then the output (plan
+decision 4). `initialise` runs once, or on a rate or block-size change (`tracktion_Plugin.cpp:
+503-531`), so the filter state survives the graph rebuild every arm makes and a cue still
+sounding on another voice hears no click.
+
+### 17.6 The proxy
+
+**One child process per plugin of the set, hosting one instance per voice** (plan decision 3).
+It is §3.18's unit of failure — *"a process per third-party plugin"* — so a crash takes out that
+plugin on every voice and nothing else; it makes P processes rather than N × P; and a preset is
+applied once per instance in one place. The N round trips of one plugin in a block are serialised
+through that child's worker, which is what the parent's graph does anyway with one audio CPU
+(`AudioHost.cpp:111-128`); M31 says what N × P round trips cost a block.
+
+**The region**, one memory-mapped file per child under the application's data folder (spike 07
+mapped a temp file and measured 0.9 µs; the folder is the only change), laid out once:
+
+```
+Header   magic, version, layoutHash, maxChannels, maxSamples, lanes N, maxParams K (1024)
+         atomic<u32> sampleRate, blockSize, childShouldExit, childReady, childFailed
+         atomic<u32> catalogueReady, latencySamples, paramCount;  float baseline[K]
+Lane[i]  atomic<u64> requestSeq, responseSeq
+         atomic<u32> numChannels, numSamples
+         atomic<u32> enabled          — Go.dot's bypass; Tracktion's is never toggled
+         atomic<u32> paramRevision    — bumped by the tick thread after a store
+         atomic<u32> resetSeq         — bumped at arm; the child resets the instance
+         atomic<float> params[K]      — normalised; −1 means "the baseline"
+         float audio[maxChannels × maxSamples]
+```
+
+`static_assert (std::atomic<uint64_t>::is_always_lock_free)`, as spike 07. The parent publishes
+with release and spins on acquire, reading the clock every sixty-four turns; the deadline is
+**the smaller of 250 µs and a quarter of the block period**, and `wfg serve --proxy-deadline-us=N`
+overrides it (plan decision 12). **A switched-off proxy costs nothing**: with the lane off,
+`applyToBuffer` returns before it reads the region — no copy, no signal, no spin. Tracktion's own
+`Plugin::isEnabled` is never changed (plan decision 13): it is a `CachedValue` on the Edit's tree,
+message-thread only, and leaving it alone means the node never bypasses the proxy and never builds
+a latency processor for it.
+
+**Misses, and the failed state.** A miss passes the dry block through and bumps the lane's miss
+count. The **proxy host**, on the message thread on a 10 ms timer as `HostPlayer` is, reads the
+counts and asks the child process whether it is running: **eight consecutive misses on any lane,
+or a dead child, marks the whole entry failed** — every lane's call switched off so the proxy
+stops calling, `state = failed`, `problem` a sentence, and one `plugin.failed` record submitted.
+So the cost of a failure is bounded: eight deadlines once, and nothing after — spike 07's
+requirement, met. The host relaunches the child **once, automatically, after two seconds**, with
+the preset re-applied and every sounding run's values re-armed; a second failure inside a minute
+stays failed until `plugin.restart` (plan decision 12). Spike 07's third question — whether the
+spin should yield on a failed strip — does not arise: a failed strip is not called.
+
+**The child.** The same binary re-invoked as `wfg plugin-host …` through `juce::ChildProcess`,
+dispatched at the top of `runConsole` beside Tracktion's own scan child. It runs a JUCE message
+loop on its main thread, because a VST3 needs one to initialise and to take state; it creates its
+N instances there through `juce::AudioPluginFormatManager` with the description the parent passes
+it, applies the preset, reads every parameter back as the **baseline**, reports `latencySamples`,
+`paramCount` and — once per identifier — the catalogue; then a worker thread at real-time priority
+(spatcore's `rt/RtThreadPriority.h`, already vendored) polls the lanes: on a request it applies
+the lane's changed values to that instance, resets it if asked, processes the block, and answers.
+No editor is ever opened; `JUCE_MODAL_LOOPS_PERMITTED` is 0 in the child as in the parent; a
+plugin that insists on a window at load, or refuses the channel count, is a `failed` with a
+sentence, not a hang — five seconds for `childReady`, and then the host gives up. The child exits
+when the parent sets `childShouldExit`, or when the parent's process disappears, which it checks
+once a second, so a crashed parent leaves no orphan behind. **The worker's spin is a stated cost**
+(plan decision 14): it spins hot while the entry is healthy and any lane is switched in — one
+core per plugin of the set — and sleeps in one-millisecond polls while every lane is off or the
+entry has failed; M31 records what the first request after a sleep costs, and whether a worker
+that spins only between a block's first and last request is worth having.
+
+**The test child.** CI has no plugins, and `JUCE_MODULES_ONLY` is on, so no test VST3 can be
+built. The reserved identifier `godot:test-gain` makes the child skip the format manager and do
+what spike 07's child did: `p0` is a linear gain with a baseline of 0.5, and `p1` at 1.0 makes the
+child abort — which is how a driver kills a plugin mid-show with no Task Manager (plan decision
+15). Its catalogue is two parameters, written by hand. So the whole of `/godot/fx`,
+`/godot/plugin/param`, the door, the push and the failed state run in CI on all three platforms; a
+real VST3 runs on the author's machine, as M31 and M34.
+
+**Latency, honestly.** The proxy declares zero and is never Tracktion-bypassed, so no delay line is
+ever built for it. A plugin's own latency — a look-ahead limiter, a linear-phase EQ — arrives
+uncompensated in the child's answer, PDC being off, so a cue through such a plugin is late by that
+much, on that voice, while it is switched in. `latencySamples` says how much, and the Plugins tab
+shows it the moment somebody adds the plugin — §3.18's *"never discovered on the night"*. The
+uniform lateness §3.18 described for a bypassed stack — every voice late by the sum of the stack's
+latencies — belongs to a stack of inline plugins that declare latency while bypassed, and inline is
+not built here.
+
+### 17.7 The scan and the catalogue
+
+**Scanning is out of process, always, and it is a verb** (plan decision 16). `wfg plugins --scan`
+stands an engine up on the application's storage — the folder `AudioHost` is handed
+(`AudioHost.cpp:136-149`) — and uses Tracktion's own machinery: `PluginManager::
+startChildProcessPluginScan` dispatched at the top of `runConsole`, `PluginScanHelpers`' scanner
+launching the current executable, the results persisted by Tracktion where it keeps them.
+**Machine state, never the bundle**: which plugins this machine has is a fact about the machine,
+as its MIDI device identifiers are (§15.8). `wfg plugins --list` prints it, and with nothing scanned
+says so and exits 0. `JUCE_PLUGINHOST_VST3` is compiled on every platform and `JUCE_PLUGINHOST_AU`
+on macOS, in the one place `WfgOptions.cmake` reserved; LV2 is Phase 9b's.
+
+**The catalogue** is what an instance knows and a description does not: for each parameter its
+name, its short name (`getName (7)`), its label, its default, whether it is discrete and its step
+texts, a **bipolar** guess — a default at the middle whose text at nought begins with a minus and
+whose text at one does not (plan decision 11) — and a **table of its value text at a hundred and
+one points** (plan decision 10), exact for a stepped parameter. The child reports it once per
+identifier and the parent caches it at `<storage>/plugins/catalogue/<sha1 (identifier)>.json`;
+`wfg plugins --catalogue=<identifier>` builds one on demand. That cache is why §8's fourth item
+holds without an instance — a page can label a cue that is not sounding, and even show its value
+text — and why `t<n>` is published with no round trip. The `godot:test-gain` catalogue is built in.
+
+A catalogue arriving, or a child reporting a baseline, **marks the tree stale**, or the first
+snapshot would publish `p<n>` from an empty table for ever — §15.8's trap, met before.
+
+### 17.8 The client
+
+The desktop client keeps its rules: one snapshot a pass, `model/` std-only, one call site per
+read door, no `childrenOf`, `Engine::submit` with origin `window`, every gesture a named command
+pinned against the real registry (§14.16).
+
+**The EQ panel** (`model/Eq`, `ui/EqPanelComponent`) is a subject of the foot beside the curve
+editor: the response drawn on a logarithmic axis from 20 Hz to 20 kHz over ±24 dB through
+`audio/EqMath.h` — the DSP's own function, so what is drawn is what is heard — with a handle per
+band the mouse drags (frequency across, gain up, width on the wheel), two handles for the filters,
+a shape menu on bands one and four, the on/off flags, the number always drawn beside every handle
+(§4.8), and a *Flat* button that sends `eq.reset`. A drag sends `node.set` throttled as the send
+mixer does, and the engine coalesces. The nineteen rows leave the generic inspector's media list by
+prefix, the panel being their editor.
+
+**The FX panel** (`model/Fx`, `ui/FxPanelComponent`) reads as the send mixer does — **a row per
+plugin of the set**, not per `Fx` the cue happens to hold — each with its name, its state word and
+problem in words, a switch that sends `fx.create` on the first press and `node.set enabled`
+afterwards (the mixer's create-on-first-move), and an expandable list of its parameters: a slider
+per `p<n>`, centred when the catalogue says bipolar, a menu when it says discrete, the plugin's
+text from `t<n>` beside it, every drag a throttled `node.set`.
+
+**The Plugins tab** joins Audio, Network, MIDI and Surfaces in the show settings: this machine's
+known plugins from `/godot/plugin/known/<n>/…` with *Add to set*, the set with *Remove*, *Restart*
+for a failed one, *Preset file…* (a native dialog, a copy into `plugins/`, one `node.set`), and
+the latency and the state word beside each. With nothing scanned it says *run `wfg plugins --scan`
+to see this machine's plugins* — scanning stays a verb this phase.
+
+**The page** gains the rows and nothing else (plan decision 19): its generic inspector already
+writes any writable node with `node.set`, so §8's second item is free there; the nineteen names
+join `KIND_ORDER.media`; an EQ curve on the page is the tablet phase's to decide.
+
+### 17.9 Fixtures, drivers, and what the phase has to measure
+
+**Fixtures.** `tests/fixtures/bundles/eq/` — a media cue with a shaped EQ, no audio (every fixture
+is a document fixture; drivers generate their WAVs in a copy). `tests/fixtures/bundles/fx/` — a set
+of one, `godot:test-gain`, and a media cue that switches it in. Replay logs, hand-written and run
+under both locales: `eq.wfglog` (a create, a band written, `eq.reset`, `undo`), `plugins.wfglog`
+(`plugin.create`, a rename, a delete, `undo`), `fx.wfglog` (`fx.create`, three writes to `p0`, the
+switch off, `undo`) — each "reproduced exactly", the `f:` values passing through the number
+formatter.
+
+**Drivers**, registered as `blackbox.phase9a-eq` and `blackbox.phase9a-fx` under both locales:
+`phase9a_eq.py` renders a two-tone file through a cue with a −20 dB peak on one tone and measures
+each tone with a Goertzel filter (standard library only): the shaped tone down twenty decibels,
+the other within half a decibel of flat, and a `node.set` mid-play heard in the tail.
+`phase9a_fx.py` renders a constant through the test gain — half while the cue plays, unity after
+`p0` is written to one, and then `p1` written to one: the child dies, `plugin/state` reads `failed`
+within a second with a sentence, the render is dry from there, and the session replays.
+
+**Measurements.** Phase 6's numbering ended at M29. Instruments that print, none a gate (§14.14's
+reason); the figures go here and into PRD §6.11, with the machine named, and spike 07's caveat
+about a hybrid-core laptop repeated.
+
+| | what | what it decides |
+|---|---|---|
+| **M30** | the EQ's block cost — every voice with every band active, against flat, against `eqOn` off, at 96 kHz and 64 frames in M3's shape — and the tree's node-count delta from nineteen rows a media cue | whether four bands a voice fit at the widest show; what the identity fast path is worth; plan decision 1 |
+| **M31** | the proxy's round trip, p50, p99 and worst: the test child on the build box, a real VST3 on the author's machine, at 1, 8 and 16 voices by 1, 2 and 4 plugins; the cost of the first request after the worker slept | the deadline; §3.18's budget stated as deadline × failed strips; plan decision 14 |
+| **M32** | a failed strip: misses before the threshold trips, blocks from the kill to `failed`, the block's cost before and after | the eight-miss threshold; whether the automatic restart is welcome |
+| **M33** | a parameter write to its sound — `node.set p0` at a known tick, the step found in the render, M26's idiom | whether a rotary feels live; the tick rate is the lever, parked at 50 Hz on 2026-09-18 |
+| **M34** | the set at load: from `buildEdit` to every child `loaded`, and the working set, for N × P instances of a real plugin | §6.11's *"bypassed stack at load"*, answered; decision AE's cost in numbers |
+
+### 17.10 The direction this phase does not build
+
+**The surface pages** — the focus row, the page model, the EQ page's three encoders a band, the FX
+page's sixteen parameters and its arrows, the lit buttons — and **the virtual panel's rotaries**:
+the pages session's, on top of this, in the order the author set (`docs/godot-surface-pages-
+draft-0.1.md` §11). The addresses it needs are §17.2's, and it should have them when 9a.3 lands
+rather than at close-out.
+
+**An EQ on a bus or an output** — a system EQ for the room. Every EQ here is a cue's.
+
+**A fade aimed at an EQ band or a plugin parameter.** A fade moves a level or a DCA; a curve on
+any other parameter is §3.10's binding, Phase 10's and later. `advanceFades` is untouched.
+
+**Inline hosting** — §3.18's opt-in, a `te::ExternalPlugin` in the process with §3.4's
+message-thread handover. Not built and given no row, an option nothing reads being rot.
+
+**LV2**, **AU presets**, **any plugin editor window**, **curated per-plugin parameter maps** (the
+pages draft's §7.2, a machine-level library), **a page EQ curve**, and **macOS audio workgroups for
+the child** — a Mac child can be scheduled late, and M31 on the Mac mini says by how much.
+
+**The live-input rack, rack-channel chains and the shared reverb channel** — Phase 9b, with
+`Media/Insert` and `Rack/Channel` waiting for it exactly as Phase 4 left them.
+
+**Panic values applied** — the column stays metadata until Phase 10.
+
+### 17.11 Decisions to overrule early
+
+Taken with the plan rather than by the author, each built on, and each cited above as *plan
+decision N*:
+
+1. **The EQ is nineteen rows on `media`**, not an `<Eq>` child: direct addresses, no create,
+   sparse in the file, dense in the tree.
+2. **The cue's insert is `<Fx>`, owner `fx`**; `Insert` stays Phase 4's claim; no second element
+   named `Plugin`.
+3. **One child process per plugin of the set, hosting one instance per voice**; failure is per
+   plugin across every voice.
+4. **The chain on a voice is EQ, then the set in `plugins/order`, then the output stage**; a cue's
+   `Fx` children do not reorder it.
+5. **The high-pass and the low-pass are flags; a peak band has no enable** — 0 dB is out; `eqOn`
+   is the one bypass.
+6. **Band one is `peak | lowShelf`, band four `peak | highShelf`, bands two and three peaks**;
+   on a shelf, Q is its steepness.
+7. **Coefficients jump at the block boundary, with no crossfade.**
+8. **A cue's values are one sparse `index:value` row, writable whole, with `p<n>` as the door a
+   hand uses**; the key is the parameter's index, so a plugin whose list changes between versions
+   is a re-edit (a stable parameter identifier is the alternative when it bites); a machine whose
+   catalogue does not know the plugin accepts any index.
+9. **A value the cue does not name rests at the set entry's preset baseline**, and the published
+   default is that baseline once the child reports it.
+10. **Value text is a table of a hundred and one samples cached with the catalogue**, not a live
+    question to an instance.
+11. **`bipolar` is guessed** from the default and the texts at the ends, and published; a curated
+    map can overrule it later.
+12. **The deadline is the smaller of 250 µs and a quarter of the block period**, overridable on
+    the command line; **eight consecutive misses or a dead child mark the entry failed; one
+    automatic restart after two seconds, then `plugin.restart`.**
+13. **Tracktion's `Plugin::isEnabled` is never toggled**; Go.dot's lane flag is the bypass.
+14. **The child's worker spins hot while the entry is healthy and any lane is on**, one core per
+    plugin, and sleep-polls otherwise; revised by M31.
+15. **The test plugin is a child mode, `godot:test-gain`**, with `p1` as its kill switch; no VST3
+    is built for the tests.
+16. **Scanning is a verb**, `wfg plugins --scan`, not an engine command; the Plugins tab says so
+    when the list is empty.
+17. **A preset is a `.vstpreset` file under the bundle's `plugins/`**, named by the row and
+    copied by `saveAs`, never bytes in the row.
+18. **The new `Player` virtuals have no-op bodies**, not pure ones; every fake Player stays as it is.
+19. **Inline is not built and has no row; the page gets rows and no curve.**
+20. **A set edited while the show is open changes no graph**: the entry reads `unloaded` with the
+    sentence *added since the show opened; reload to load it*, and a deleted entry's proxy stays,
+    switched off.
+21. **The phase is 9a**: Phase 9 keeps its number and its name and splits into 9a, built now, and
+    9b, the live rack and what §17.10 leaves; no later phase is renumbered. This section is §17,
+    the decisions AD–AG, the measurements M30–M34.
+
+### 17.12 What Phase 9a built, against what §17 drew
+
+*To be written at close-out, in §14.17's and §16.12's shape: what landed, where the build departed
+from the drawing and why, the figures M30–M34 gave, and what only the author can settle.*
