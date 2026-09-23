@@ -80,6 +80,7 @@ add_executable(wfg_tests
     TreeTests.cpp
     AudioTests.cpp
     CueMatrixTests.cpp
+    CueEqTests.cpp
     MountTests.cpp
     NetworkCueTests.cpp
     VerifiedCueTests.cpp
