@@ -6,11 +6,22 @@
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
+#include <wfg/client/ui/SurfacePanelComponent.h>
+
+#include <wfg/client/model/Fader.h>
+#include <wfg/client/model/RunModel.h>
+#include <wfg/client/model/Surfaces.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/audio/Timbre.h>
+#include <wfg/engine/command/Event.h>
+#include <wfg/engine/osc/OscValue.h>
 
+#include <cmath>
 #include <memory>
+#include <string>
+#include <utility>
+#include <vector>
 
 using namespace wfg::client;
 
@@ -494,4 +505,272 @@ TEST_CASE ("active cue errors: collapsed drawer retains failures and respects ed
     CHECK (errors->getListBoxModel()->getNumRows() == 0);
     CHECK_FALSE (clear->isEnabled());
     CHECK (toggle->getButtonText() == "v Errors (0)");
+}
+
+TEST_CASE ("surface panel: a pad press sends strip.press with a velocity, a fader drag touches, sets and releases the strip's target")
+{
+    /*  The author's decision AB (2026-09-23): a virtual surface that arms a
+        sampler group and plays it from the mouse on a machine with no MIDI.
+        Every gesture is a named command (4.11), so what is asserted here is
+        the Events a hand would send - no engine, no snapshot, rows built by
+        hand as the model would read them. */
+    std::vector<wfg::Event> sent;
+
+    ui::SurfacePanelComponent panel (model::Theme {},
+                                     [&sent] (wfg::Event event) { sent.push_back (std::move (event)); });
+    panel.setSize (900, 420);
+
+    model::SurfaceRow desk;
+    desk.id = "SRF00001";
+    desk.name = "Desk";
+    desk.profile = "virtual";
+    desk.strips = 3;
+    desk.connected = true;
+
+    //  An armed member on a sampler strip, its fader parked at the bottom.
+    model::StripRow gunshot;
+    gunshot.id = "STP00001";
+    gunshot.surface = desk.id;
+    gunshot.index = 0;
+    gunshot.role = "sampler";
+    gunshot.endpoint = "absolute";
+    gunshot.target = "/godot/run/RUN00001/trim";
+    gunshot.word = "armed";
+    gunshot.cue = "CUE00001";
+    gunshot.holder = "RUN00001";
+    gunshot.cueName = "Gunshot";
+    gunshot.cueColour = "#c04040";
+    gunshot.hasLevel = true;
+    gunshot.levelDb = -120.0;
+
+    //  A sampler strip with nothing on it: no node for a hand to hold.
+    model::StripRow idle;
+    idle.id = "STP00002";
+    idle.surface = desk.id;
+    idle.index = 1;
+    idle.role = "sampler";
+    idle.endpoint = "absolute";
+    idle.word = "free";
+
+    //  A dca strip, riding its DCA's trim.
+    model::StripRow band;
+    band.id = "STP00003";
+    band.surface = desk.id;
+    band.index = 2;
+    band.role = "dca";
+    band.dca = "DCA00001";
+    band.endpoint = "absolute";
+    band.target = "/godot/dca/DCA00001/trim";
+    band.word = "dca";
+    band.dcaName = "Band";
+    band.hasLevel = true;
+    band.levelDb = -6.0;
+
+    const std::vector<model::SurfaceRow> surfaces { desk };
+    const std::vector<model::StripRow> strips { gunshot, idle, band };
+
+    panel.show (surfaces, strips);
+
+    //  One column per strip, in the order drawn.
+    REQUIRE (panel.columnCount() == 3u);
+
+    //  It draws: a construction fault shows as a stack here rather than on the night.
+    juce::Image canvas (juce::Image::ARGB, 900, 420, true);
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, true);
+    }
+
+    SUBCASE ("a pad press carries the velocity of where it landed, and letting go releases the strip")
+    {
+        //  The top of the pad is the hardest hit.
+        panel.pressPad (0, 1.0);
+
+        REQUIRE (sent.size() == 1u);
+        CHECK (sent[0].command == "strip.press");
+        CHECK (sent[0].origin == "window");
+        REQUIRE (sent[0].args.size() == 2u);
+        CHECK (sent[0].args[0].getString() == "STP00001");
+        CHECK (sent[0].args[1].getInt32() == 127);
+
+        panel.releasePad (0);
+
+        REQUIRE (sent.size() == 2u);
+        CHECK (sent[1].command == "strip.release");
+        CHECK (sent[1].args[0].getString() == "STP00001");
+
+        //  The bottom edge is the softest hit there is, and never no hit at all.
+        panel.pressPad (0, 0.0);
+        panel.releasePad (0);
+
+        REQUIRE (sent.size() == 4u);
+        REQUIRE (sent[2].args.size() == 2u);
+        CHECK (sent[2].args[1].getInt32() == 1);
+
+        //  In between is in between.
+        panel.pressPad (0, 0.5);
+
+        REQUIRE (sent.size() == 5u);
+        REQUIRE (sent[4].args.size() == 2u);
+        CHECK (sent[4].args[1].getInt32() > 1);
+        CHECK (sent[4].args[1].getInt32() < 127);
+
+        panel.releasePad (0);
+        CHECK (sent.size() == 6u);
+    }
+
+    SUBCASE ("a fader ride is a touch, one set a pass, and a release")
+    {
+        const std::string target = "/godot/run/RUN00001/trim";
+
+        /*  THE TOUCH GOES AT ONCE - it is what tells the engine a hand is on
+            the fader, so a dip to the bottom is a ride and not a release. */
+        panel.dragFader (0, model::fractionForDb (0.0));
+
+        REQUIRE (sent.size() == 1u);
+        CHECK (sent[0].command == "node.touch");
+        CHECK (sent[0].args[0].getString() == target);
+
+        //  The value waits for the pass, which is the clock a ride is sent on.
+        panel.show (surfaces, strips);
+
+        REQUIRE (sent.size() == 2u);
+        CHECK (sent[1].command == "node.set");
+        REQUIRE (sent[1].args.size() == 2u);
+        CHECK (sent[1].args[0].getString() == target);
+        CHECK (sent[1].args[1].getString() == "0");
+
+        //  Two moves inside one pass are one write, of the later.
+        panel.dragFader (0, 0.2);
+        panel.dragFader (0, 0.5);
+        CHECK (sent.size() == 2u);
+
+        panel.show (surfaces, strips);
+
+        REQUIRE (sent.size() == 3u);
+        CHECK (sent[2].command == "node.set");
+        CHECK (sent[2].args[1].getString()
+                 == wfg::osc::formatDouble (std::round (model::dbForFraction (0.5) * 10.0) / 10.0));
+
+        //  Letting go sends what no pass has yet, then gives the node back.
+        panel.dragFader (0, 1.0);
+        panel.endFader (0);
+
+        REQUIRE (sent.size() == 5u);
+        CHECK (sent[3].command == "node.set");
+        CHECK (sent[3].args[1].getString() == wfg::osc::formatDouble (model::loudestDb));
+        CHECK (sent[4].command == "node.release");
+        CHECK (sent[4].args[0].getString() == target);
+
+        //  And nothing more on the next pass.
+        panel.show (surfaces, strips);
+        CHECK (sent.size() == 5u);
+    }
+
+    SUBCASE ("a strip riding nothing takes no drag")
+    {
+        panel.dragFader (1, 0.9);
+        panel.show (surfaces, strips);
+        panel.endFader (1);
+
+        CHECK (sent.empty());
+    }
+
+    SUBCASE ("a dca strip's fader rides the DCA, and its pad puts the trim back at unity")
+    {
+        panel.dragFader (2, model::fractionForDb (-12.0));
+        panel.endFader (2);
+
+        REQUIRE (sent.size() == 3u);
+        CHECK (sent[0].command == "node.touch");
+        CHECK (sent[0].args[0].getString() == "/godot/dca/DCA00001/trim");
+        CHECK (sent[1].command == "node.set");
+        CHECK (sent[1].args[1].getString() == "-12");
+        CHECK (sent[2].command == "node.release");
+
+        /*  THE PAD OF A DCA STRIP IS ITS GATE, which resets the trim: a
+            `strip.press` there would only ever be refused. */
+        panel.pressPad (2, 0.5);
+        panel.releasePad (2);
+
+        REQUIRE (sent.size() == 4u);
+        CHECK (sent[3].command == "node.set");
+        CHECK (sent[3].args[0].getString() == "/godot/dca/DCA00001/trim");
+        CHECK (sent[3].args[1].getString() == "0");
+    }
+
+    SUBCASE ("the number keys are the first eight columns, at velocity 100")
+    {
+        CHECK (panel.keyPressed (juce::KeyPress ('1')));
+
+        REQUIRE (sent.size() == 1u);
+        CHECK (sent[0].command == "strip.press");
+        REQUIRE (sent[0].args.size() == 2u);
+        CHECK (sent[0].args[0].getString() == "STP00001");
+        CHECK (sent[0].args[1].getInt32() == 100);
+
+        //  A held key repeats, and a repeat is not a second strike.
+        panel.keyPressed (juce::KeyPress ('1'));
+        CHECK (sent.size() == 1u);
+
+        //  Nobody is at this keyboard, so the key is up and the pad goes.
+        panel.keyStateChanged (false);
+
+        REQUIRE (sent.size() == 2u);
+        CHECK (sent[1].command == "strip.release");
+        CHECK (sent[1].args[0].getString() == "STP00001");
+    }
+}
+
+TEST_CASE ("run pane: a sampler group counts its members in words")
+{
+    /*  §16.7: a sampler group's run reads its members as a count - a bank of
+        pads is a dozen rows saying the same thing - and waiting for a strip
+        or a voice is pending whatever the state says. */
+    model::RunRow group;
+    group.id = "RUN00010";
+    group.cueName = "Bank A";
+    group.kind = "group";
+    group.state = "playing";
+
+    const auto member = [&group] (const char* runId, const char* runState, const char* waitingFor)
+    {
+        model::RunRow row;
+        row.id = runId;
+        row.cueName = "Clip";
+        row.kind = "media";
+        row.state = runState;
+        row.pending = waitingFor;
+        row.parentRun = group.id;
+        return row;
+    };
+
+    std::vector<model::RunRow> rows { group,
+                                      member ("RUN00011", "armed", ""),
+                                      member ("RUN00012", "armed", ""),
+                                      member ("RUN00013", "armed", "voice"),
+                                      member ("RUN00014", "armed", "STP00004"),
+                                      member ("RUN00015", "playing", ""),
+                                      member ("RUN00016", "stopping", "") };
+
+    //  Another group's member is not this group's to count.
+    auto stranger = member ("RUN00020", "playing", "");
+    stranger.parentRun = "RUN00019";
+    rows.push_back (stranger);
+
+    CHECK (model::samplerCounts (rows, group.id)
+             == "armed 2 \xc2\xb7 pending 2 \xc2\xb7 playing 1 \xc2\xb7 stopping 1");
+    CHECK (model::samplerCounts (rows, "RUN00099").empty());
+
+    //  And the pane draws the words without falling over.
+    rows[0].samplerWords = model::samplerCounts (rows, group.id);
+    rows[1].samplerWords = "on 1";
+
+    ui::RunPaneComponent pane (model::Theme {}, {});
+    pane.setSize (450, 300);
+    pane.show (rows, {});
+
+    juce::Image canvas (juce::Image::ARGB, 450, 300, true);
+    juce::Graphics g (canvas);
+    pane.paintEntireComponent (g, true);
 }

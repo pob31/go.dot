@@ -6,13 +6,17 @@
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 #include <spatcore/ui/patch/PatchMatrixComponent.h>
 #include <spatcore/io/TestSignalGenerator.h>
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <functional>
+#include <initializer_list>
 #include <map>
 #include <string>
 #include <utility>
@@ -1720,6 +1724,1213 @@ namespace wfg::client::ui
             bool locked = false, strict = false;
             int refused = 0;
         };
+
+        /*  THE BOXES OF FADERS AND PADS THIS SHOW PLAYS FROM, THE STRIPS ON
+            THEM, AND THE DCAs THOSE STRIPS CAN RIDE (PRD §3.16, §3.27, §3.28;
+            namespace draft §16.7).
+
+            THE MIDI TAB'S SHAPE, THREE TIMES OVER: rows painted by hand, one
+            floating editor and one floating chooser moved to whichever cell
+            was clicked, and every cell one `node.set` that lands at once. A
+            surface has no hardware for this window to reopen - the engine
+            re-reads the declarations after the tick (§16.6) - so nothing here
+            is applied, as nothing on the Network tab is.
+
+            THE STRIPS ARE THE PICKED SURFACE'S. A click anywhere on a
+            surface's row picks it and the list under it follows; the first
+            surface is picked until somebody picks another. Picking is this
+            window's and never the show's, so it still works under the lock
+            when nothing else on the page does.
+
+            THREE BUTTONS, THREE DIFFERENT WORDS. A person scanning a tab reads
+            the word on a button, and so does a test - which takes the first
+            button it finds with a given word, and would never reach a second
+            ADD. */
+        class SurfacesPage final : public juce::Component
+        {
+        public:
+            SurfacesPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch))
+            {
+                for (auto* list : { &surfaceList, &stripList, &dcaList })
+                {
+                    list->setRowHeight (rowHeight);
+                    list->setOutlineThickness (0);
+                    list->setColour (juce::ListBox::backgroundColourId,
+                                     Look::colour (themeToUse, "panel-in"));
+                    addAndMakeVisible (*list);
+                }
+
+                surfaceList.setModel (&surfaceLister);
+                stripList.setModel (&stripLister);
+                dcaList.setModel (&dcaLister);
+
+                for (auto* button : { &addSurfaceButton, &addStripButton, &addDcaButton })
+                    addAndMakeVisible (*button);
+
+                addSurfaceButton.setTooltip ("Declare a surface: the virtual panel this client draws"
+                                             " under Show > Surfaces..., a Mackie Control unit, an"
+                                             " Asparion D700 or a pad controller. Its strips come"
+                                             " with it.");
+                addStripButton.setTooltip ("One more strip at the end of the surface picked above.");
+                addDcaButton.setTooltip ("Declare a DCA: a trim that the cues and groups marked"
+                                         " with it follow, ridden from a dca strip.");
+
+                /*  WHICH KIND OF SURFACE IS ASKED FIRST, in a popup of the
+                    four profiles - the one chooser this page moves about,
+                    opened over the button - because the profile decides how
+                    many strips the surface is made with. */
+                addSurfaceButton.onClick = [this] { chooseProfile(); };
+
+                addStripButton.onClick = [this]
+                {
+                    if (send && ! locked && ! picked.empty())
+                        send (gesture::createStrip (picked));
+                };
+
+                addDcaButton.onClick = [this]
+                {
+                    if (send && ! locked)
+                        send (gesture::createDca (freeDcaName()));
+                };
+
+                /*  HIDDEN UNTIL A CELL IS CLICKED, and a child of the page
+                    rather than of a list, so scrolling cannot leave either one
+                    drawn over the wrong row: each is placed from the row's live
+                    position when it opens. */
+                addChildComponent (cellEditor);
+                cellEditor.setEditable (false, true, false);
+                cellEditor.setColour (juce::Label::backgroundColourId,
+                                      Look::colour (themeToUse, "panel-in"));
+                cellEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                cellEditor.onEditorHide = [this] { commitText(); };
+
+                addChildComponent (chooser);
+                chooser.onChange = [this] { commitChoice(); };
+            }
+
+            void show (std::vector<model::SurfaceRow> surfacesNow, std::vector<model::StripRow> stripsNow,
+                       std::vector<model::DcaRow> dcasNow, std::vector<model::PortRow> portsNow,
+                       bool editable)
+            {
+                const auto wasLocked = locked;
+                const auto surfacesWere = surfacesKey();
+                const auto stripsWere = stripsKey();
+                const auto dcasWere = dcasKey();
+
+                surfaces = std::move (surfacesNow);
+                allStrips = std::move (stripsNow);
+                dcas = std::move (dcasNow);
+                ports = std::move (portsNow);
+                dcaMenu = model::dcaChoices (dcas);
+                locked = ! editable;
+
+                //  The picked surface stays picked while it exists.
+                if (surfaceOf (picked) == nullptr)
+                    picked = surfaces.empty() ? std::string {} : surfaces.front().id;
+
+                strips = model::stripsOf (allStrips, picked);
+
+                for (auto* button : { &addSurfaceButton, &addStripButton, &addDcaButton })
+                    button->setVisible (editable);
+
+                addStripButton.setEnabled (! picked.empty());
+
+                /*  THE LOCK TAKES AN EDIT THAT WAS UNDER WAY WITH IT, rather
+                    than letting it land a moment after the show said no. The
+                    state is cleared first, so the editor's own hide commits
+                    nothing. */
+                if (locked && ! wasLocked)
+                {
+                    editing = Field::none;
+                    editingId.clear();
+
+                    if (cellEditor.isBeingEdited())
+                        cellEditor.hideEditor (true);
+
+                    cellEditor.setVisible (false);
+
+                    choosing = Choice::none;
+                    choosingId.clear();
+                    chooser.setVisible (false);
+                }
+
+                /*  A POPUP DISMISSED WITHOUT A CHOICE says nothing to the
+                    chooser but that it is no longer open; the chooser goes back
+                    under the cell it was covering on the next pass. */
+                if (chooser.isVisible() && ! popupPending && ! chooser.isPopupActive())
+                    chooser.setVisible (false);
+
+                /*  REDRAWN WHEN SOMETHING DRAWN HAS MOVED, and not otherwise:
+                    this is asked twenty-five times a second, and a strip's word
+                    changes at run rate while its role does not. */
+                const auto lockMoved = wasLocked != locked;
+
+                refreshList (surfaceList, surfacesWere != surfacesKey(), lockMoved);
+                refreshList (stripList, stripsWere != stripsKey(), lockMoved);
+                refreshList (dcaList, dcasWere != dcasKey(), lockMoved);
+
+                if (stripsWere != stripsKey())
+                    repaint();      // the strips' title names the picked surface
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (10);
+
+                const auto chrome = 3 * (barHeight + headingHeight) + 2 * sectionGap;
+                const auto room = juce::jmax (0, area.getHeight() - chrome);
+
+                /*  THE STRIPS GET THE MOST ROOM, being the longest list: eight
+                    or sixteen to a surface, against a handful of surfaces and
+                    DCAs. */
+                const int heights[] { room * 30 / 100, room * 42 / 100,
+                                      room - room * 30 / 100 - room * 42 / 100 };
+                juce::ListBox* lists[] { &surfaceList, &stripList, &dcaList };
+                juce::TextButton* buttons[] { &addSurfaceButton, &addStripButton, &addDcaButton };
+
+                for (std::size_t at = 0; at < 3; ++at)
+                {
+                    if (at > 0)
+                        area.removeFromTop (sectionGap);
+
+                    auto bar = area.removeFromTop (barHeight);
+                    titles[at] = bar.removeFromLeft (240);
+                    buttons[at]->setBounds (bar.removeFromLeft (128).reduced (3, 1));
+
+                    headings[at] = area.removeFromTop (headingHeight);
+                    lists[at]->setBounds (area.removeFromTop (heights[at]));
+                }
+            }
+
+            void paint (juce::Graphics& g) override
+            {
+                const auto* pickedSurface = surfaceOf (picked);
+
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawText ("Surfaces", titles[0], juce::Justification::centredLeft);
+                g.drawText (pickedSurface != nullptr ? "Strips of " + juce::String (pickedSurface->label())
+                                                     : juce::String ("Strips"),
+                            titles[1], juce::Justification::centredLeft, true);
+                g.drawText ("DCAs", titles[2], juce::Justification::centredLeft);
+
+                /*  THE COLUMN NAMES, painted and carved from each list's own
+                    row width, as the MIDI tab carves them: a scrollbar makes a
+                    row narrower than its list, and a heading carved from the
+                    wrong one slides off the column it names. */
+                g.setFont (Look::font (theme, 11.0f));
+                g.setColour (Look::colour (theme, "ink-off"));
+
+                const auto surfaceHeads = surfaceCells (headings[0].withWidth (rowWidth (surfaceList)));
+                const char* surfaceNames[] { "Name", "Profile", "Port, bank 1", "Port, bank 2",
+                                             "Preset", "Enabled", "State" };
+
+                for (std::size_t at = 0; at < 7; ++at)
+                    g.drawText (surfaceNames[at], surfaceHeads[at], juce::Justification::centredLeft);
+
+                const auto stripHeads = stripCells (headings[1].withWidth (rowWidth (stripList)));
+                const char* stripNames[] { "Strip", "Role", "DCA", "State" };
+
+                for (std::size_t at = 0; at < 4; ++at)
+                    g.drawText (stripNames[at], stripHeads[at], juce::Justification::centredLeft);
+
+                const auto dcaHeads = dcaCells (headings[2].withWidth (rowWidth (dcaList)));
+                const char* dcaNames[] { "Name", "Short name", "Inside" };
+
+                for (std::size_t at = 0; at < 3; ++at)
+                    g.drawText (dcaNames[at], dcaHeads[at], juce::Justification::centredLeft);
+            }
+
+        private:
+            static constexpr int rowHeight = 28;
+            static constexpr int barHeight = 28;
+            static constexpr int headingHeight = 18;
+            static constexpr int sectionGap = 8;
+
+            enum class Which { surfaces, strips, dcas };
+
+            /*  WHICH LIST IS ASKING. A `ListBoxModel` is told the row and never
+                the list, so each of the three has its own small model that
+                says which one it is and asks the page. */
+            struct Lister final : public juce::ListBoxModel
+            {
+                Lister (SurfacesPage& ownerToUse, Which whichToUse) : owner (ownerToUse), which (whichToUse) {}
+
+                int getNumRows() override { return owner.rowsIn (which); }
+
+                void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+                {
+                    owner.paintRow (which, row, g, width, height);
+                }
+
+                void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+                {
+                    owner.clickRow (which, row, event);
+                }
+
+                //  One click opens the editor; a second lands in it (the output list's reason).
+                void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
+
+                SurfacesPage& owner;
+                Which which;
+            };
+
+            /*  WHAT THE ONE EDITOR IS OVER, and what the one chooser is
+                choosing - named rather than numbered, so a new column breaks a
+                compile and not a gesture. */
+            enum class Field { none, surfaceName, surfacePreset, dcaName, dcaShort };
+            enum class Choice { none, addSurface, profile, bank1, bank2, role, stripDca, dcaParent };
+
+            enum class SurfaceCell { name, profile, bank1, bank2, preset, enabled, state, cross };
+            enum class StripCell { index, role, dca, word, cross };
+            enum class DcaCell { name, shortName, inside, cross, none };
+
+            /*  ONE CARVE PER LIST, used by the painter, the hit test and the
+                headings, so a click cannot land somewhere the eye says is
+                another column. Carved from the right, the cross last where a
+                delete belongs; the name takes what is left. */
+            static std::array<juce::Rectangle<int>, 8> surfaceCells (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+
+                const auto cross = area.removeFromRight (24);
+                const auto state = area.removeFromRight (150);
+                const auto enabled = area.removeFromRight (48);
+                const auto preset = area.removeFromRight (116);
+                const auto bank2 = area.removeFromRight (104);
+                const auto bank1 = area.removeFromRight (104);
+                const auto profile = area.removeFromRight (112);
+
+                return { area, profile, bank1, bank2, preset, enabled, state, cross };
+            }
+
+            static std::array<juce::Rectangle<int>, 5> stripCells (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+
+                const auto cross = area.removeFromRight (24);
+                const auto number = area.removeFromLeft (56);
+                const auto role = area.removeFromLeft (120);
+                const auto dca = area.removeFromLeft (juce::jmin (240, area.getWidth() / 2));
+
+                return { number, role, dca, area, cross };
+            }
+
+            static std::array<juce::Rectangle<int>, 4> dcaCells (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+
+                const auto cross = area.removeFromRight (24);
+                const auto inside = area.removeFromRight (220);
+                const auto shortName = area.removeFromRight (140);
+
+                return { area, shortName, inside, cross };
+            }
+
+            static SurfaceCell surfaceCellAt (int x, int width)
+            {
+                const auto cells = surfaceCells (juce::Rectangle<int> (0, 0, width, rowHeight));
+                const SurfaceCell order[] { SurfaceCell::name, SurfaceCell::profile, SurfaceCell::bank1,
+                                            SurfaceCell::bank2, SurfaceCell::preset, SurfaceCell::enabled,
+                                            SurfaceCell::state, SurfaceCell::cross };
+
+                for (std::size_t at = 0; at < cells.size(); ++at)
+                    if (x >= cells[at].getX() && x < cells[at].getRight())
+                        return order[at];
+
+                return SurfaceCell::state;
+            }
+
+            static StripCell stripCellAt (int x, int width)
+            {
+                const auto cells = stripCells (juce::Rectangle<int> (0, 0, width, rowHeight));
+                const StripCell order[] { StripCell::index, StripCell::role, StripCell::dca,
+                                          StripCell::word, StripCell::cross };
+
+                for (std::size_t at = 0; at < cells.size(); ++at)
+                    if (x >= cells[at].getX() && x < cells[at].getRight())
+                        return order[at];
+
+                return StripCell::word;
+            }
+
+            static DcaCell dcaCellAt (int x, int width)
+            {
+                const auto cells = dcaCells (juce::Rectangle<int> (0, 0, width, rowHeight));
+                const DcaCell order[] { DcaCell::name, DcaCell::shortName, DcaCell::inside, DcaCell::cross };
+
+                for (std::size_t at = 0; at < cells.size(); ++at)
+                    if (x >= cells[at].getX() && x < cells[at].getRight())
+                        return order[at];
+
+                return DcaCell::none;   // the margin either side: nothing to do
+            }
+
+            /*  HOW MANY PORTS A PROFILE IS REACHED THROUGH, one per bank of
+                eight: a Mackie unit with its extender and the D700 have two, a
+                pad controller one, and the virtual panel none - it is this
+                client, not a cable. */
+            static std::size_t banksOf (const std::string& profile)
+            {
+                if (profile == "mcu" || profile == "d700")
+                    return 2;
+
+                return profile == "midiPads" ? std::size_t { 1 } : std::size_t { 0 };
+            }
+
+            static std::string profileLabel (const std::string& profile)
+            {
+                for (const auto& choice : model::profileChoices())
+                    if (choice.first == profile)
+                        return choice.second;
+
+                return profile;
+            }
+
+            static std::vector<std::pair<std::string, std::string>> roleChoices()
+            {
+                return { { "sampler", "sampler" }, { "dca", "DCA" } };
+            }
+
+            static std::string joined (const std::vector<std::string>& parts)
+            {
+                std::string line;
+
+                for (const auto& part : parts)
+                    line += (line.empty() ? "" : " ") + part;
+
+                return line;
+            }
+
+            static void addTo (std::string& key, const std::string& part)
+            {
+                key += part;
+                key += '\x1f';
+            }
+
+            //  What each list draws, as one string: a change is a redraw.
+            std::string surfacesKey() const
+            {
+                auto key = picked;
+                addTo (key, locked ? "locked" : "open");
+
+                for (const auto& entry : surfaces)
+                {
+                    for (const auto* part : { &entry.id, &entry.name, &entry.profile, &entry.preset,
+                                              &entry.problem })
+                        addTo (key, *part);
+
+                    addTo (key, joined (entry.ports));
+                    addTo (key, entry.enabled ? "on" : "off");
+                    addTo (key, entry.stateWord());
+                }
+
+                for (const auto& port : ports)
+                {
+                    addTo (key, port.id);
+                    addTo (key, port.label());
+                }
+
+                return key;
+            }
+
+            std::string stripsKey() const
+            {
+                auto key = picked;
+
+                if (const auto* pickedSurface = surfaceOf (picked))
+                    addTo (key, pickedSurface->label());
+
+                for (const auto& entry : strips)
+                {
+                    for (const auto* part : { &entry.id, &entry.role, &entry.dca, &entry.word })
+                        addTo (key, *part);
+
+                    addTo (key, std::to_string (entry.index));
+                }
+
+                for (const auto& choice : dcaMenu)
+                {
+                    addTo (key, choice.first);
+                    addTo (key, choice.second);
+                }
+
+                return key;
+            }
+
+            std::string dcasKey() const
+            {
+                std::string key;
+
+                for (const auto& entry : dcas)
+                    for (const auto* part : { &entry.id, &entry.name, &entry.shortName, &entry.parent })
+                        addTo (key, *part);
+
+                return key;
+            }
+
+            static void refreshList (juce::ListBox& list, bool changed, bool lockMoved)
+            {
+                if (changed)
+                    list.updateContent();
+
+                if (changed || lockMoved)
+                    list.repaint();
+            }
+
+            int rowWidth (const juce::ListBox& list) const
+            {
+                if (const auto* viewport = list.getViewport())
+                    if (const auto* viewed = viewport->getViewedComponent())
+                        if (viewed->getWidth() > 0)
+                            return viewed->getWidth();
+
+                return list.getWidth();
+            }
+
+            //  Where a row of a list is, in this page's coordinates: where the editor and chooser go.
+            static juce::Rectangle<int> rowOnPage (const juce::ListBox& list, int row, int width)
+            {
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                return place.withWidth (width).withX (list.getX());
+            }
+
+            const model::SurfaceRow* surfaceOf (const std::string& id) const
+            {
+                for (const auto& entry : surfaces)
+                    if (entry.id == id)
+                        return &entry;
+
+                return nullptr;
+            }
+
+            const model::StripRow* stripOf (const std::string& id) const
+            {
+                for (const auto& entry : allStrips)
+                    if (entry.id == id)
+                        return &entry;
+
+                return nullptr;
+            }
+
+            const model::DcaRow* dcaOf (const std::string& id) const
+            {
+                for (const auto& entry : dcas)
+                    if (entry.id == id)
+                        return &entry;
+
+                return nullptr;
+            }
+
+            const model::PortRow* portOf (const std::string& id) const
+            {
+                for (const auto& entry : ports)
+                    if (entry.id == id)
+                        return &entry;
+
+                return nullptr;
+            }
+
+            //  The DCA a menu names this identifier as, or nothing for one the show does not declare.
+            const std::string* dcaLabel (const std::string& id) const
+            {
+                for (const auto& choice : dcaMenu)
+                    if (! choice.first.empty() && choice.first == id)
+                        return &choice.second;
+
+                return nullptr;
+            }
+
+            int rowsIn (Which which) const
+            {
+                switch (which)
+                {
+                    case Which::surfaces: return static_cast<int> (surfaces.size());
+                    case Which::strips:   return static_cast<int> (strips.size());
+                    case Which::dcas:     return static_cast<int> (dcas.size());
+                }
+
+                return 0;
+            }
+
+            void paintRow (Which which, int row, juce::Graphics& g, int width, int height)
+            {
+                /*  A LIST ASKS FOR ROWS PAST ITS END to fill the space under
+                    the last one, and that space is the list's own ground. */
+                if (row < 0 || row >= rowsIn (which))
+                    return;
+
+                g.setColour (Look::colour (theme, row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                switch (which)
+                {
+                    case Which::surfaces: paintSurface (row, g, width, height); return;
+                    case Which::strips:   paintStrip (row, g, width, height); return;
+                    case Which::dcas:     paintDca (row, g, width, height); return;
+                }
+            }
+
+            /*  A DASH AND NOT A BLANK for a cell nobody has filled - an empty
+                cell reads as a value that failed to draw (the MIDI tab's
+                rule). */
+            void drawDash (juce::Graphics& g, juce::Rectangle<int> cell) const
+            {
+                g.setColour (Look::colour (theme, "ink-off"));
+                g.drawText (juce::String::fromUTF8 ("\xe2\x80\x93"), cell, juce::Justification::centredLeft);
+            }
+
+            void drawCross (juce::Graphics& g, juce::Rectangle<int> cell) const
+            {
+                if (locked)
+                    return;
+
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cell, juce::Justification::centred);
+            }
+
+            void paintSurface (int row, juce::Graphics& g, int width, int height)
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= surfaces.size())
+                    return;
+
+                const auto& entry = surfaces[static_cast<std::size_t> (row)];
+                const auto isPicked = entry.id == picked;
+                const auto cells = surfaceCells (juce::Rectangle<int> (0, 0, width, height));
+
+                /*  THE PICKED SURFACE IS MARKED WITH A SHAPE as well as a
+                    shade (§4.8): the strips below are its, and which row that
+                    is must be readable without telling two greys apart. */
+                if (isPicked)
+                {
+                    g.setColour (Look::colour (theme, "panel-high"));
+                    g.fillRect (0, 0, width, height - 1);
+                }
+
+                auto nameCell = cells[0];
+                const auto mark = nameCell.removeFromLeft (14);
+
+                if (isPicked)
+                {
+                    g.setColour (Look::colour (theme, "ink"));
+                    g.setFont (Look::font (theme, 11.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x96\xb8"), mark, juce::Justification::centredLeft);
+                }
+
+                //  Unnamed, it is called what its profile is, drawn dimmer as not somebody's word.
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, entry.name.empty() ? "ink-dim" : "ink"));
+                g.drawText (juce::String (entry.label()), nameCell, juce::Justification::centredLeft, true);
+
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (profileLabel (entry.profile)), cells[1],
+                            juce::Justification::centredLeft, true);
+
+                for (std::size_t bank = 0; bank < 2; ++bank)
+                    paintPort (g, entry, bank, cells[2 + bank]);
+
+                /*  WHAT THE HARDWARE MUST BE SET TO, written down because it
+                    cannot be detected (docs/godot-asparion-d700-protocol-0.1.md
+                    §5): a D700 that nobody has said anything about is told what
+                    it needs, greyed as advice rather than as a value. */
+                if (entry.preset.empty() && entry.profile == "d700")
+                {
+                    g.setColour (Look::colour (theme, "ink-off"));
+                    g.drawText ("set it to Mackie", cells[4], juce::Justification::centredLeft, true);
+                }
+                else if (entry.preset.empty())
+                    drawDash (g, cells[4]);
+                else
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String (entry.preset), cells[4], juce::Justification::centredLeft, true);
+                }
+
+                //  The switch, as a word (WFS-DIY's ON and OFF, as on the Network tab).
+                g.setColour (Look::colour (theme, entry.enabled ? "ink" : "ink-off"));
+                g.drawText (entry.enabled ? "ON" : "OFF", cells[5], juce::Justification::centredLeft);
+
+                /*  THE STATE IN WORDS, and the engine's own sentence when
+                    something is wrong - never a colour on its own. */
+                const auto word = entry.stateWord();
+                const auto failing = ! entry.problem.empty() && word == entry.problem;
+
+                g.setColour (Look::colour (theme, failing ? "failed" : "ink-dim"));
+                g.drawText (juce::String (word), cells[6], juce::Justification::centredLeft, true);
+
+                drawCross (g, cells[7]);
+            }
+
+            void paintPort (juce::Graphics& g, const model::SurfaceRow& entry, std::size_t bank,
+                            juce::Rectangle<int> cell) const
+            {
+                if (bank >= banksOf (entry.profile))
+                {
+                    //  Said once, in the first bank's cell: the panel is this client and has no cable.
+                    if (bank == 0)
+                    {
+                        g.setColour (Look::colour (theme, "ink-off"));
+                        g.drawText ("no port needed", cell, juce::Justification::centredLeft, true);
+                    }
+
+                    return;
+                }
+
+                const auto id = bank < entry.ports.size() ? entry.ports[bank] : std::string {};
+
+                if (id.empty())
+                {
+                    drawDash (g, cell);
+                    return;
+                }
+
+                /*  A PORT THE SHOW NO LONGER DECLARES IS STILL SHOWN, by its
+                    identifier and marked, rather than as a blank: the surface
+                    still names it, and a cell that hid it would make choosing
+                    another port look like a fix rather than a change. */
+                if (const auto* port = portOf (id))
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String (port->label()), cell, juce::Justification::centredLeft, true);
+                }
+                else
+                {
+                    g.setColour (Look::colour (theme, "failed"));
+                    g.drawText (juce::String (id) + "  (not declared)", cell,
+                                juce::Justification::centredLeft, true);
+                }
+            }
+
+            void paintStrip (int row, juce::Graphics& g, int width, int height)
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= strips.size())
+                    return;
+
+                const auto& entry = strips[static_cast<std::size_t> (row)];
+                const auto cells = stripCells (juce::Rectangle<int> (0, 0, width, height));
+
+                //  Fader one is strip one: the index is from nought, the drawing is not.
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (entry.index + 1), cells[0], juce::Justification::centredLeft);
+
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawText (entry.role == "dca" ? "DCA" : "sampler", cells[1], juce::Justification::centredLeft);
+
+                /*  THE DCA ONLY MEANS SOMETHING ON A DCA STRIP. A sampler strip
+                    may still carry one set before its role changed, and the
+                    engine reads it only on a dca strip - so on a sampler strip
+                    the cell is a dash and takes no click. */
+                g.setFont (Look::font (theme, 12.0f));
+
+                if (entry.role != "dca")
+                    drawDash (g, cells[2]);
+                else if (entry.dca.empty())
+                {
+                    g.setColour (Look::colour (theme, "ink-off"));
+                    g.drawText ("(none)", cells[2], juce::Justification::centredLeft);
+                }
+                else if (const auto* named = dcaLabel (entry.dca))
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String (*named), cells[2], juce::Justification::centredLeft, true);
+                }
+                else
+                {
+                    g.setColour (Look::colour (theme, "failed"));
+                    g.drawText (juce::String (entry.dca) + "  (not declared)", cells[2],
+                                juce::Justification::centredLeft, true);
+                }
+
+                //  What it is doing, in the engine's word (§4.8).
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (entry.word), cells[3], juce::Justification::centredLeft, true);
+
+                drawCross (g, cells[4]);
+            }
+
+            void paintDca (int row, juce::Graphics& g, int width, int height)
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= dcas.size())
+                    return;
+
+                const auto& entry = dcas[static_cast<std::size_t> (row)];
+                const auto cells = dcaCells (juce::Rectangle<int> (0, 0, width, height));
+
+                g.setFont (Look::font (theme, 13.0f));
+
+                if (entry.name.empty())
+                    drawDash (g, cells[0]);
+                else
+                {
+                    g.setColour (Look::colour (theme, "ink"));
+                    g.drawText (juce::String (entry.name), cells[0], juce::Justification::centredLeft, true);
+                }
+
+                /*  NO SHORT NAME IS A DASH, and a display then cuts the name to
+                    its width: the short name is somebody's own, never the
+                    machine's (PRD §3.16). */
+                g.setFont (Look::font (theme, 12.0f));
+
+                if (entry.shortName.empty())
+                    drawDash (g, cells[1]);
+                else
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String (entry.shortName), cells[1], juce::Justification::centredLeft, true);
+                }
+
+                if (entry.parent.empty())
+                    drawDash (g, cells[2]);
+                else if (const auto* named = dcaLabel (entry.parent))
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String (*named), cells[2], juce::Justification::centredLeft, true);
+                }
+                else
+                {
+                    g.setColour (Look::colour (theme, "failed"));
+                    g.drawText (juce::String (entry.parent) + "  (not declared)", cells[2],
+                                juce::Justification::centredLeft, true);
+                }
+
+                drawCross (g, cells[3]);
+            }
+
+            juce::ListBox& listFor (Which which)
+            {
+                switch (which)
+                {
+                    case Which::surfaces: return surfaceList;
+                    case Which::strips:   return stripList;
+                    case Which::dcas:     return dcaList;
+                }
+
+                return surfaceList;
+            }
+
+            void clickRow (Which which, int row, const juce::MouseEvent& event)
+            {
+                /*  THE ROW'S WIDTH, NOT THE LIST'S: a scrollbar makes the two
+                    differ, and every cell carved from the wrong one is off by
+                    its width. */
+                const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                   : listFor (which).getWidth();
+
+                switch (which)
+                {
+                    case Which::surfaces: clickSurface (row, event.x, width); return;
+                    case Which::strips:   clickStrip (row, event.x, width); return;
+                    case Which::dcas:     clickDca (row, event.x, width); return;
+                }
+            }
+
+            void pick (const std::string& id)
+            {
+                if (id == picked)
+                    return;
+
+                picked = id;
+                strips = model::stripsOf (allStrips, picked);
+                addStripButton.setEnabled (! picked.empty());
+
+                surfaceList.repaint();
+                stripList.updateContent();
+                stripList.repaint();
+                repaint();
+            }
+
+            void clickSurface (int row, int x, int width)
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= surfaces.size())
+                    return;
+
+                //  A copy: picking rereads the strips, and nothing here should hold a row across that.
+                const auto entry = surfaces[static_cast<std::size_t> (row)];
+
+                pick (entry.id);
+
+                if (locked || ! send)
+                    return;
+
+                const auto cells = surfaceCells (rowOnPage (surfaceList, row, width));
+                const auto base = "/godot/surface/" + entry.id + "/";
+
+                switch (surfaceCellAt (x, width))
+                {
+                    case SurfaceCell::cross:   send (gesture::deleteObject (entry.id)); return;
+                    case SurfaceCell::enabled: send (gesture::setNode (base + "enabled",
+                                                                       entry.enabled ? "false" : "true")); return;
+                    case SurfaceCell::name:    editAt (cells[0], Field::surfaceName, entry.id, entry.name); return;
+                    case SurfaceCell::preset:  editAt (cells[4], Field::surfacePreset, entry.id, entry.preset); return;
+                    case SurfaceCell::profile: openChooser (cells[1], Choice::profile, entry.id,
+                                                            model::profileChoices(), entry.profile); return;
+                    case SurfaceCell::bank1:   choosePort (entry, 0, cells[2]); return;
+                    case SurfaceCell::bank2:   choosePort (entry, 1, cells[3]); return;
+                    case SurfaceCell::state:   return;
+                }
+            }
+
+            void choosePort (const model::SurfaceRow& entry, std::size_t bank, juce::Rectangle<int> cell)
+            {
+                if (bank >= banksOf (entry.profile))
+                    return;
+
+                /*  THE ROW IS A LIST IN BANK ORDER, and a list has no gaps: the
+                    second port written without a first would BE the first,
+                    moving eight strips to the other cable. So the second bank
+                    waits for the first, and the first cannot be emptied from
+                    under the second. */
+                if (bank == 1 && entry.ports.empty())
+                    return;
+
+                auto choices = model::portChoices (ports);
+
+                if (bank == 0 && entry.ports.size() > 1)
+                    choices.erase (std::remove_if (choices.begin(), choices.end(),
+                                                   [] (const auto& choice) { return choice.first.empty(); }),
+                                   choices.end());
+
+                openChooser (cell, bank == 0 ? Choice::bank1 : Choice::bank2, entry.id, choices,
+                             bank < entry.ports.size() ? entry.ports[bank] : std::string {});
+            }
+
+            void clickStrip (int row, int x, int width)
+            {
+                if (locked || ! send || row < 0 || static_cast<std::size_t> (row) >= strips.size())
+                    return;
+
+                const auto entry = strips[static_cast<std::size_t> (row)];
+                const auto cells = stripCells (rowOnPage (stripList, row, width));
+
+                switch (stripCellAt (x, width))
+                {
+                    case StripCell::cross: send (gesture::deleteObject (entry.id)); return;
+                    case StripCell::role:  openChooser (cells[1], Choice::role, entry.id, roleChoices(),
+                                                        entry.role); return;
+                    case StripCell::dca:
+                        if (entry.role == "dca")
+                            openChooser (cells[2], Choice::stripDca, entry.id, dcaMenu, entry.dca);
+                        return;
+                    case StripCell::index:
+                    case StripCell::word:  return;
+                }
+            }
+
+            void clickDca (int row, int x, int width)
+            {
+                if (locked || ! send || row < 0 || static_cast<std::size_t> (row) >= dcas.size())
+                    return;
+
+                const auto entry = dcas[static_cast<std::size_t> (row)];
+                const auto cells = dcaCells (rowOnPage (dcaList, row, width));
+
+                switch (dcaCellAt (x, width))
+                {
+                    case DcaCell::cross:     send (gesture::deleteObject (entry.id)); return;
+                    case DcaCell::name:      editAt (cells[0], Field::dcaName, entry.id, entry.name); return;
+                    case DcaCell::shortName: editAt (cells[1], Field::dcaShort, entry.id, entry.shortName); return;
+                    case DcaCell::inside:
+                    {
+                        /*  EVERY DCA BUT THIS ONE. A cycle further up is the
+                            engine's to refuse, and it does, by name; a DCA
+                            inside itself is not worth offering at all. */
+                        auto choices = dcaMenu;
+                        choices.erase (std::remove_if (choices.begin(), choices.end(),
+                                                       [&entry] (const auto& choice)
+                                                       { return choice.first == entry.id; }),
+                                       choices.end());
+
+                        openChooser (cells[2], Choice::dcaParent, entry.id, choices, entry.parent);
+                        return;
+                    }
+
+                    case DcaCell::none:
+                        return;
+                }
+            }
+
+            //==========================================================================
+            /*  EDITED IN PLACE, the output list's gesture: one click opens the
+                editor over the cell, Return or clicking away commits, Escape
+                puts it back. */
+            void editAt (juce::Rectangle<int> cell, Field field, const std::string& id,
+                         const std::string& current)
+            {
+                editing = field;
+                editingId = id;
+
+                cellEditor.setBounds (cell);
+                cellEditor.setText (juce::String (current), juce::dontSendNotification);
+                cellEditor.setVisible (true);
+                cellEditor.showEditor();
+            }
+
+            void commitText()
+            {
+                const auto field = editing;
+                const auto id = editingId;
+
+                editing = Field::none;
+                editingId.clear();
+                cellEditor.setVisible (false);
+
+                if (id.empty() || ! send || locked)
+                    return;
+
+                const auto typed = cellEditor.getText().trim().toStdString();
+
+                /*  UNCHANGED IS NOT A WRITE: every one of these is an undo
+                    step and a line in the log, so a click that opened the
+                    editor and a click that closed it must leave no record of
+                    somebody deciding nothing. And a row that has gone while it
+                    was being typed into takes the edit with it. */
+                const auto* surface = surfaceOf (id);
+                const auto* dca = dcaOf (id);
+
+                switch (field)
+                {
+                    case Field::surfaceName:
+                        if (surface != nullptr && typed != surface->name)
+                            send (gesture::setNode ("/godot/surface/" + id + "/name", typed));
+                        return;
+
+                    case Field::surfacePreset:
+                        if (surface != nullptr && typed != surface->preset)
+                            send (gesture::setNode ("/godot/surface/" + id + "/preset", typed));
+                        return;
+
+                    case Field::dcaName:
+                        if (dca != nullptr && typed != dca->name)
+                            send (gesture::setNode ("/godot/dca/" + id + "/name", typed));
+                        return;
+
+                    case Field::dcaShort:
+                        if (dca != nullptr && typed != dca->shortName)
+                            send (gesture::setNode ("/godot/dca/" + id + "/shortName", typed));
+                        return;
+
+                    case Field::none:
+                        return;
+                }
+            }
+
+            //==========================================================================
+            /*  ONE CHOOSER, MOVED TO WHICHEVER CELL WAS CLICKED and filled at
+                that moment. A value the menu does not offer - a port or a DCA
+                the show no longer declares - is still in it, at the end and
+                marked, rather than silently absent: the show names it, and a
+                menu that dropped it would make choosing anything else look
+                like a correction rather than a change.
+
+                THE POPUP IS POSTED, NOT OPENED HERE, as JUCE's own ComboBox
+                posts it: the click that asked for it may still be closing
+                another popup. A later open supersedes an earlier one that has
+                not appeared yet, by its ticket. */
+            void openChooser (juce::Rectangle<int> cell, Choice what, const std::string& id,
+                              const std::vector<std::pair<std::string, std::string>>& choices,
+                              const std::string& current)
+            {
+                choosing = what;
+                choosingId = id;
+                choiceValues.clear();
+
+                chooser.clear (juce::dontSendNotification);
+                chooser.setTextWhenNothingSelected (what == Choice::addSurface ? "choose a profile" : "");
+
+                auto selected = 0;
+
+                for (const auto& choice : choices)
+                {
+                    choiceValues.push_back (choice.first);
+
+                    const auto item = static_cast<int> (choiceValues.size());
+                    chooser.addItem (juce::String (choice.second), item);
+
+                    if (what != Choice::addSurface && choice.first == current)
+                        selected = item;
+                }
+
+                if (selected == 0 && what != Choice::addSurface && ! current.empty())
+                {
+                    choiceValues.push_back (current);
+                    selected = static_cast<int> (choiceValues.size());
+                    chooser.addItem (juce::String (current) + "  (not declared)", selected);
+                }
+
+                chooser.setSelectedId (selected, juce::dontSendNotification);
+                chooser.setBounds (cell);
+                chooser.setVisible (true);
+                chooser.toFront (false);
+
+                popupPending = true;
+                const auto ticket = ++popupTicket;
+
+                juce::MessageManager::callAsync ([safe = juce::Component::SafePointer<SurfacesPage> (this), ticket]
+                {
+                    if (safe != nullptr && safe->popupTicket == ticket)
+                        safe->popUp();
+                });
+            }
+
+            void popUp()
+            {
+                popupPending = false;
+
+                if (chooser.isVisible() && ! chooser.isPopupActive())
+                    chooser.showPopup();
+            }
+
+            void chooseProfile()
+            {
+                if (locked || ! send)
+                    return;
+
+                openChooser (addSurfaceButton.getBounds(), Choice::addSurface, {}, model::profileChoices(), {});
+            }
+
+            /*  WHERE THE PROFILE MENU LANDS: one `surface.create`, with the
+                profile's word and no name, so the surface is called what its
+                profile is until somebody names it. */
+            void addSurface (const std::string& profile)
+            {
+                if (send && ! locked)
+                    send (gesture::createSurface (profile));
+            }
+
+            void commitChoice()
+            {
+                const auto what = choosing;
+                const auto id = choosingId;
+                const auto at = chooser.getSelectedId() - 1;
+
+                choosing = Choice::none;
+                choosingId.clear();
+                chooser.setVisible (false);
+
+                if (! send || locked || at < 0 || at >= static_cast<int> (choiceValues.size()))
+                    return;
+
+                const auto value = choiceValues[static_cast<std::size_t> (at)];
+
+                /*  CHOOSING WHAT IS ALREADY THERE IS NOT A WRITE, for the
+                    reason typing it is not: each of these is an undo step. */
+                switch (what)
+                {
+                    case Choice::addSurface:
+                        addSurface (value);
+                        return;
+
+                    case Choice::profile:
+                        if (const auto* entry = surfaceOf (id); entry != nullptr && entry->profile != value)
+                            send (gesture::setNode ("/godot/surface/" + id + "/profile", value));
+                        return;
+
+                    case Choice::bank1:
+                    case Choice::bank2:
+                        if (const auto* entry = surfaceOf (id))
+                            writePorts (*entry, what == Choice::bank1 ? std::size_t { 0 } : std::size_t { 1 },
+                                        value);
+                        return;
+
+                    case Choice::role:
+                        if (const auto* entry = stripOf (id); entry != nullptr && entry->role != value)
+                            send (gesture::setNode ("/godot/slot/" + id + "/role", value));
+                        return;
+
+                    case Choice::stripDca:
+                        if (const auto* entry = stripOf (id); entry != nullptr && entry->dca != value)
+                            send (gesture::setNode ("/godot/slot/" + id + "/dca", value));
+                        return;
+
+                    case Choice::dcaParent:
+                        if (const auto* entry = dcaOf (id); entry != nullptr && entry->parent != value)
+                            send (gesture::setNode ("/godot/dca/" + id + "/dca", value));
+                        return;
+
+                    case Choice::none:
+                        return;
+                }
+            }
+
+            /*  ONE BANK REWRITTEN, THE OTHER KEPT: the row is every port the
+                surface is reached through, space-separated in bank order, and a
+                chooser is about one of them. */
+            void writePorts (const model::SurfaceRow& entry, std::size_t bank, const std::string& value)
+            {
+                auto wanted = entry.ports;
+
+                if (wanted.size() <= bank)
+                    wanted.resize (bank + 1);
+
+                wanted[bank] = value;
+
+                while (! wanted.empty() && wanted.back().empty())
+                    wanted.pop_back();
+
+                //  A gap cannot be written: the port after it would move up a bank.
+                if (std::find (wanted.begin(), wanted.end(), std::string {}) != wanted.end())
+                    return;
+
+                const auto line = joined (wanted);
+
+                if (line != joined (entry.ports))
+                    send (gesture::setNode ("/godot/surface/" + entry.id + "/ports", line));
+            }
+
+            /*  A name nothing else is using, so ADD DCA always makes a DCA
+                rather than two called the same thing. */
+            std::string freeDcaName() const
+            {
+                for (auto at = 1; at < 1000; ++at)
+                {
+                    const auto candidate = "DCA " + std::to_string (at);
+
+                    if (std::none_of (dcas.begin(), dcas.end(),
+                                      [&candidate] (const model::DcaRow& entry) { return entry.name == candidate; }))
+                        return candidate;
+                }
+
+                return "DCA";
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+
+            Lister surfaceLister { *this, Which::surfaces };
+            Lister stripLister { *this, Which::strips };
+            Lister dcaLister { *this, Which::dcas };
+
+            juce::ListBox surfaceList, stripList, dcaList;
+            juce::TextButton addSurfaceButton { "ADD SURFACE" }, addStripButton { "ADD STRIP" },
+                             addDcaButton { "ADD DCA" };
+
+            juce::Rectangle<int> titles[3], headings[3];
+
+            juce::Label cellEditor;
+            Field editing = Field::none;
+            std::string editingId;
+
+            juce::ComboBox chooser;
+            Choice choosing = Choice::none;
+            std::string choosingId;
+            std::vector<std::string> choiceValues;
+            bool popupPending = false;
+            int popupTicket = 0;
+
+            std::vector<model::SurfaceRow> surfaces;
+            std::vector<model::StripRow> allStrips, strips;
+            std::vector<model::DcaRow> dcas;
+            std::vector<model::PortRow> ports;
+            std::vector<std::pair<std::string, std::string>> dcaMenu;
+            std::string picked;
+            bool locked = false;
+        };
     }
 
     class ShowSettingsWindow::Panel final : public juce::Component
@@ -1751,6 +2962,7 @@ namespace wfg::client::ui
             outputList = std::make_unique<OutputPage> (theme, send);
             network = std::make_unique<NetworkPage> (theme, send);
             midi = std::make_unique<MidiPage> (theme, send);
+            surfaces = std::make_unique<SurfacesPage> (theme, send);
 
             /*  THE FIRST HAND EDIT OF THE OUTPUT PATCH IS WHAT SETTLES IT
                 (PRD §6.2). Sent BEFORE the edit lands, so that the engine's own
@@ -1785,6 +2997,10 @@ namespace wfg::client::ui
             tabs.addTab ("Output patch", background, outputs.get(), false);
             tabs.addTab ("Network", background, network.get(), false);
             tabs.addTab ("MIDI", background, midi.get(), false);
+
+            /*  AFTER MIDI, because a surface is reached through the ports
+                declared there: the tab a person fills in first comes first. */
+            tabs.addTab ("Surfaces", background, surfaces.get(), false);
             for (auto* component : std::initializer_list<juce::Component*> { &enabled, &type, &output, &input,
                      &buffer, &typeLabel, &outputLabel, &inputLabel, &bufferLabel, &rate, &explanation, &rescan })
                 interfacePage.addAndMakeVisible (*component);
@@ -1853,10 +3069,20 @@ namespace wfg::client::ui
                 are: every cell here is a `node.set` that lands at once, and a
                 cable plugged in mid-rehearsal has to reach the menu without
                 the show being edited. */
-            midi->show (model::readPorts (snapshot),
+            const auto ports = model::readPorts (snapshot);
+
+            midi->show (ports,
                         model::readMidiInputs (snapshot),
                         model::readMidiOutputs (snapshot),
                         ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+
+            /*  THE SURFACES, THEIR STRIPS AND THE DCAs are the document's and
+                re-read every pass for the ports' reason; the strips' words are
+                the engine's and move at run rate. The ports are the ones read
+                just above - a surface names them, and its menus offer them. */
+            surfaces->show (model::readSurfaces (snapshot), model::readStrips (snapshot),
+                            model::readDcas (snapshot), ports,
+                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
 
             if (readCapabilities (snapshot)) capabilities();
             const auto state = model::text (snapshot, "/godot/audio/settingsStatus");
@@ -2050,6 +3276,7 @@ namespace wfg::client::ui
         std::unique_ptr<OutputPage> outputList;
         std::unique_ptr<NetworkPage> network;
         std::unique_ptr<MidiPage> midi;
+        std::unique_ptr<SurfacesPage> surfaces;
         bool settled = false;
         juce::TabbedComponent tabs;
         juce::ComboBox type, output, input, buffer;

@@ -242,15 +242,17 @@ namespace wfg::client::ui
                 case model::Control::busRef:
                 case model::Control::deviceRef:
                 case model::Control::portRef:
+                case model::Control::dcaRef:
                     /*  THE ITEMS THEMSELVES CAN HAVE MOVED, which no other
                         control here has to think about: a `choice`'s options
                         come from the parameter table and are fixed for the
                         life of the program, while these come from the SHOW -
                         an output renamed, added, deleted, or its mark changing
-                        from free to taken as a cue is moved. The field count
-                        does not change when any of that happens, so the panel
-                        is not rebuilt and the menu would go on offering last
-                        week's names.
+                        from free to taken as a cue is moved; a DCA made or
+                        renamed in the Surfaces tab while this cue stays picked.
+                        The field count does not change when any of that
+                        happens, so the panel is not rebuilt and the menu would
+                        go on offering last week's names.
 
                         Compared rather than repopulated blindly, because
                         refilling a ComboBox twenty-five times a second would
@@ -399,6 +401,15 @@ namespace wfg::client::ui
 
     int InspectorComponent::idForChoice (const model::Field& field)
     {
+        /*  CUES THAT DISAGREE SELECT NOTHING, which the comment at the foot
+            always said and the loop below could not do: a mixed field's value
+            is empty, and empty is exactly the key "(none)" has - so eight cues
+            on three DCAs read as eight cues on none, and picking "(none)" to
+            clear them all sent nothing, the menu thinking it was already
+            there. Asked first, before any key can match. */
+        if (field.mixed)
+            return 0;
+
         for (std::size_t at = 0; at < field.choices.size(); ++at)
             if (field.choices[at].first == field.value)
                 return static_cast<int> (at) + 1;
@@ -543,7 +554,8 @@ namespace wfg::client::ui
             }
             else if ((field.control == model::Control::busRef
                         || field.control == model::Control::deviceRef
-                        || field.control == model::Control::portRef)
+                        || field.control == model::Control::portRef
+                        || field.control == model::Control::dcaRef)
                        && field.writable)
             {
                 /*  A MENU THE SHOW WROTE, not one the parameter table
@@ -551,7 +563,10 @@ namespace wfg::client::ui
                     they arrive with the reading rather than with the schema.
                     The item's index is the position in `choices`, which is how
                     the identifier is found again on the way back - the name is
-                    what a designer reads and never what gets written. */
+                    what a designer reads and never what gets written. A DCA's
+                    menu is the same menu over a different list, and commits
+                    the same way: the identifier, to the row it is drawn on,
+                    once per picked cue. */
                 auto at = 1;
 
                 for (const auto& choice : field.choices)
@@ -799,8 +814,16 @@ namespace wfg::client::ui
             /*  ASKED OF THE CONTROL AND NOT OF THE OTHER COMPONENTS' VISIBILITY,
                 which is what this used to do and was a pass behind: each row
                 knows which control it is, so each says so directly. */
+            /*  EVERY MENU, and not the first two. The device and port menus
+                were built in `rebuild` and then hidden here, because this list
+                stopped at the output's: a row drew its name and nothing beside
+                it, and a menu nobody could see was the one control on the line.
+                The DCA menu would have joined them. */
             const auto isMenu = line->field.control == model::Control::choice
-                                  || line->field.control == model::Control::busRef;
+                                  || line->field.control == model::Control::busRef
+                                  || line->field.control == model::Control::deviceRef
+                                  || line->field.control == model::Control::portRef
+                                  || line->field.control == model::Control::dcaRef;
 
             line->box.setVisible (! hidden && ! line->isHeading
                                     && line->field.control != model::Control::toggle

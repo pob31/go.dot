@@ -231,10 +231,13 @@ function cueRow(id, depth, section, rail, standby, out) {
 
   const flags = [];
 
+  /*  A SAMPLER GROUP SAYS `pads` (Phase 6): GO arms it and hands play it, so
+      neither "auto" nor "manual" is true of it - its `advance` is never read. */
   if (isGroup) {
     const mode = tree.cue(id, "mode", "sequence");
     const advance = tree.cue(id, "advance", "manual");
-    flags.push(mode === "timeline" ? "timeline" : advance === "auto" ? "auto" : "manual");
+    flags.push(mode === "timeline" ? "timeline" : mode === "sampler" ? "pads"
+               : advance === "auto" ? "auto" : "manual");
   }
 
   if (!enabled) flags.push("disabled");

@@ -153,6 +153,21 @@ namespace wfg::client::model
         /** The run that holds this one, or empty at the top. What the nesting is drawn from. */
         std::string parentRun;
 
+        /*  WHAT IT IS WAITING FOR, as `run/pending` spells it: the slots it
+            has claimed and not been given, by identifier, or the word `voice`
+            for a sampler member armed onto a strip while every track is busy
+            (§16.5). Empty when it waits for nothing. */
+        std::string pending;
+
+        /*  WHAT A SAMPLER RUN READS, in words beside its name (namespace
+            draft §16.7). A sampler group's run counts its members - "armed 5
+            · pending 3 · playing 1" - because a bank of pads is a dozen rows
+            that say the same thing, and the count is what somebody looks for.
+            A member says which strip it is on - "on 3", fader three - and,
+            when there is more to say than its mark does, what that strip is
+            doing: pending, held, stopping, closing. Empty for every other run. */
+        std::string samplerWords;
+
         /** Whether it is counting down: a pre-wait or a post-wait, which read alike. */
         bool isWaiting() const noexcept;
 
@@ -188,6 +203,15 @@ namespace wfg::client::model
     /*  The ordering `readRuns` finishes with, on its own so a test can hand it
         rows and assert the rule rather than building a tree to imply it. */
     std::vector<RunRow> inShowOrder (const std::vector<RunRow>& rows);
+
+    /*  A SAMPLER GROUP'S MEMBERS, COUNTED IN WORDS: "armed 5 · pending 3 ·
+        playing 1", from the runs whose parent is `groupRunId`. A member
+        waiting for anything - its strip, or a voice - counts as pending
+        whatever its state says, since it cannot be played until it is given
+        one; one that has been let go and is sounding, or counting down to
+        sounding, is playing. A count of nought is left out, and a group with
+        nothing to count reads empty. On its own so a test can hand it rows. */
+    std::string samplerCounts (const std::vector<RunRow>& rows, const std::string& groupRunId);
 
     /** Session-local history, retained after failed runs leave the active pane.
         Dismissing entries keeps visible failures marked as already observed. */

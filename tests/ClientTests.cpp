@@ -65,6 +65,7 @@
 #include <wfg/client/model/Scrub.h>
 #include <wfg/client/model/Selection.h>
 #include <wfg/client/model/ShowModel.h>
+#include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
@@ -76,6 +77,7 @@
 #include <wfg/engine/command/Event.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/Run.h>
@@ -84,6 +86,7 @@
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/FadePoints.h>
 #include <wfg/engine/document/DocumentWriter.h>
+#include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
 #include <wfg/engine/tree/TreeCommands.h>
@@ -95,6 +98,7 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 using namespace wfg;
@@ -561,6 +565,18 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::fireCue ("B3N8R5TW"),
         gesture::splitRange ("B3N8R5TW", 6.0),
         gesture::createSend ("B3N8R5TW", "J3MT5XYA"),
+        gesture::createPort ("Lights"),
+
+        /*  PHASE 6: the Surfaces tab's three ADD buttons, and the virtual
+            panel's pad and fader - the document's creates, the Runner's two
+            hand gestures, and the touch table's two. */
+        gesture::createSurface ("d700"), gesture::createSurface ("mcu", "The desk"),
+        gesture::createStrip ("SVRF0001"),
+        gesture::createDca ("Band"),
+        gesture::pressStrip ("STRP0001", 100), gesture::pressStrip ("STRP0001", 0),
+        gesture::releaseStrip ("STRP0001"),
+        gesture::touchNode ("/godot/dca/DCA00001/trim"),
+        gesture::releaseNode ("/godot/dca/DCA00001/trim"),
     };
 
     for (const auto& event : gestures)
@@ -586,6 +602,16 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     CHECK (lock.args[0] == osc::Value::string ("/godot/document/locked"));
     CHECK (lock.args[1] == osc::Value::boolean (true));
     CHECK (gesture::setLocked (false).args[1] == osc::Value::boolean (false));
+
+    /*  A HAND WITH NO VELOCITY SENDS NONE, rather than a number nobody struck,
+        and a surface nobody named sends no name: in both the engine decides
+        what the absence means, and the record says it was absent. */
+    const auto struck = gesture::pressStrip ("STRP0001", 100);
+    REQUIRE (struck.args.size() == 2);
+    CHECK (struck.args[1] == osc::Value::int32 (100));
+    CHECK (gesture::pressStrip ("STRP0001", 0).args.size() == 1);
+    CHECK (gesture::createSurface ("virtual").args.size() == 1);
+    CHECK (gesture::createSurface ("mcu", "The desk").args[1] == osc::Value::string ("The desk"));
 }
 
 TEST_CASE ("client: a gesture that reaches the engine is applied, and says the window sent it")
@@ -4100,4 +4126,498 @@ TEST_CASE ("client: cue error history survives retirement and Clear dismisses ob
     CHECK (history.observe ({ failed }));
     CHECK (history.errors().size() == 3);
     CHECK (history.errors().back().error == "bad-route");
+}
+
+//==============================================================================
+namespace
+{
+    /*  A SHOW WITH A DESK IN IT, on the minimal bundle: two ports, a Mackie
+        unit on both of them and the virtual panel, two DCAs one inside the
+        other, and two of the panel's strips made dca strips - one riding
+        "Band", one riding nothing yet. Written through the document and not
+        the engine, because what is under test here is the READING: the
+        commands have SurfaceTests.cpp.
+
+        THE IDENTIFIERS ARE GIVEN, AND BACKWARDS ON PURPOSE. The Mackie unit is
+        declared first and its identifier sorts after the panel's, and the same
+        for the two DCAs, so a reader that answered in identifier order rather
+        than in the show's would put them the wrong way round and fail. */
+    struct Desk
+    {
+        std::string lights, bank2;
+        std::string mcu = "SZZZ0001", panel = "SAAA0001";
+        std::vector<std::string> mcuStrips, panelStrips;
+        std::string everything = "DZZZ0001", band = "DAAA0001";
+    };
+
+    Desk declareADesk (Rig& rig)
+    {
+        Desk desk;
+
+        const auto lights = rig.document.createPort ("Lights");
+        const auto bank2 = rig.document.createPort ("Bank 2");
+        REQUIRE (lights.ok);
+        REQUIRE (bank2.ok);
+        desk.lights = lights.id;
+        desk.bank2 = bank2.id;
+
+        REQUIRE (rig.document.createSurface ("mcu", "Desk", desk.mcu, {}, desk.mcuStrips).ok);
+        REQUIRE (rig.document.createSurface ("virtual", "", desk.panel, {}, desk.panelStrips).ok);
+        REQUIRE (desk.mcuStrips.size() == 8u);
+        REQUIRE (desk.panelStrips.size() == 8u);
+
+        REQUIRE (rig.document.setAttribute ("/godot/surface/" + desk.mcu + "/ports",
+                                            desk.lights + " " + desk.bank2).ok);
+
+        REQUIRE (rig.document.createDca ("Everything", desk.everything).ok);
+        REQUIRE (rig.document.createDca ("Band", desk.band).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/dca/" + desk.band + "/dca", desk.everything).ok);
+        REQUIRE (rig.document.setAttribute ("/godot/dca/" + desk.band + "/shortName", "BND").ok);
+
+        const auto slot = [] (const std::string& strip) { return "/godot/slot/" + strip + "/"; };
+
+        REQUIRE (rig.document.setAttribute (slot (desk.panelStrips[1]) + "role", "dca").ok);
+        REQUIRE (rig.document.setAttribute (slot (desk.panelStrips[1]) + "dca", desk.band).ok);
+        REQUIRE (rig.document.setAttribute (slot (desk.panelStrips[2]) + "role", "dca").ok);
+
+        rig.parameters.markStale();
+        return desk;
+    }
+
+    /*  Whether a row of the panel means anything for the cue it is about, and
+        a failure rather than a crash when the row is not there at all. */
+    bool appliesIn (const model::Inspection& inspection, const std::string& name)
+    {
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == name)
+                    return field.applies;
+
+        FAIL ("no row named " << name);
+        return false;
+    }
+
+    const model::Field* rowIn (const model::Inspection& inspection, const std::string& name)
+    {
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == name)
+                    return &field;
+
+        return nullptr;
+    }
+
+    std::vector<std::string> namesUnder (const model::Inspection& inspection, const std::string& heading)
+    {
+        std::vector<std::string> names;
+
+        for (const auto& block : inspection.blocks)
+            if (block.heading == heading)
+                for (const auto& field : block.fields)
+                    names.push_back (field.name);
+
+        return names;
+    }
+
+    /** Where a name sits in a list of them, or the list's length when it is not there. */
+    std::size_t positionOf (const std::vector<std::string>& names, const std::string& name)
+    {
+        const auto found = std::find (names.begin(), names.end(), name);
+        return static_cast<std::size_t> (found - names.begin());
+    }
+}
+
+TEST_CASE ("client: the surfaces are read in the show's order, with their ports and their state in words")
+{
+    Rig rig;
+    const auto desk = declareADesk (rig);
+
+    auto surfaces = model::readSurfaces (*rig.publish (1));
+    REQUIRE (surfaces.size() == 2u);
+
+    //  The show's order, which is not the identifiers'.
+    CHECK (surfaces[0].id == desk.mcu);
+    CHECK (surfaces[1].id == desk.panel);
+
+    /*  THE PORTS ARE A LIST, one per bank and in bank order: the first carries
+        strips one to eight, the second nine to sixteen. */
+    CHECK (surfaces[0].name == "Desk");
+    CHECK (surfaces[0].label() == "Desk");
+    CHECK (surfaces[0].profile == "mcu");
+    CHECK (surfaces[0].ports == std::vector<std::string> { desk.lights, desk.bank2 });
+    CHECK (surfaces[0].strips == 8);
+    CHECK (surfaces[0].enabled);
+    CHECK_FALSE (surfaces[0].connected);
+
+    /*  A HARDWARE SURFACE NOBODY HAS TALKED TO IS NOT CONNECTED, in those
+        words; the virtual panel is, being this client's own. And a surface
+        nobody named is called what its profile is. */
+    CHECK (surfaces[0].stateWord() == "not connected");
+    CHECK (surfaces[1].name.empty());
+    CHECK (surfaces[1].label() == "Virtual panel");
+    CHECK (surfaces[1].ports.empty());
+    CHECK (surfaces[1].stateWord() == "connected");
+
+    //  The engine's own sentence when it has one, never rewritten here.
+    surface::SurfaceTable table;
+    rig.parameters.setSurfaces (&table);
+
+    table.set (desk.mcu, { false, "the port \"Lights\" has no device behind it", {} });
+    rig.parameters.markStale();
+    surfaces = model::readSurfaces (*rig.publish (2));
+    CHECK (surfaces[0].stateWord() == "the port \"Lights\" has no device behind it");
+
+    table.set (desk.mcu, { true, {}, "D700RTB" });
+    rig.parameters.markStale();
+    surfaces = model::readSurfaces (*rig.publish (3));
+    CHECK (surfaces[0].connected);
+    CHECK (surfaces[0].serial == "D700RTB");
+    CHECK (surfaces[0].stateWord() == "connected");
+
+    /*  OFF IS SOMEBODY'S DECISION, and says so over whatever the cables are
+        doing: a row reading "connected" over a surface the operator switched
+        off would be the window hiding the switch. */
+    REQUIRE (rig.document.setAttribute ("/godot/surface/" + desk.mcu + "/enabled", "false").ok);
+    rig.parameters.markStale();
+    surfaces = model::readSurfaces (*rig.publish (4));
+    CHECK_FALSE (surfaces[0].enabled);
+    CHECK (surfaces[0].stateWord() == "off");
+
+    rig.parameters.setSurfaces (nullptr);
+
+    //  The four profiles, the panel first: the one that works with nothing plugged in.
+    const auto profiles = model::profileChoices();
+    REQUIRE (profiles.size() == 4u);
+    CHECK (profiles[0] == std::pair<std::string, std::string> { "virtual", "Virtual panel" });
+    CHECK (profiles[1] == std::pair<std::string, std::string> { "mcu", "Mackie Control" });
+    CHECK (profiles[2] == std::pair<std::string, std::string> { "d700", "Asparion D700" });
+    CHECK (profiles[3] == std::pair<std::string, std::string> { "midiPads", "Pads" });
+}
+
+TEST_CASE ("client: every strip is read in the order a sampler group fills them, with what it rides")
+{
+    Rig rig;
+    const auto desk = declareADesk (rig);
+
+    cue::DcaTable trims;
+    rig.parameters.setDcas (&trims);
+
+    auto strips = model::readStrips (*rig.publish (1));
+    REQUIRE (strips.size() == 16u);
+
+    /*  SURFACE ORDER, THEN INDEX: the Mackie unit's eight, then the panel's -
+        the order a sampler group fills them in, left to right. */
+    for (std::size_t at = 0; at < 8; ++at)
+    {
+        INFO ("strip " << at);
+
+        CHECK (strips[at].id == desk.mcuStrips[at]);
+        CHECK (strips[at].surface == desk.mcu);
+        CHECK (strips[at].index == static_cast<int> (at));
+
+        CHECK (strips[8 + at].id == desk.panelStrips[at]);
+        CHECK (strips[8 + at].surface == desk.panel);
+        CHECK (strips[8 + at].index == static_cast<int> (at));
+    }
+
+    //  A strip with nothing on it: a fader riding nothing, and the dash.
+    const auto idle = strips[0];
+    CHECK (idle.role == "sampler");
+    CHECK (idle.endpoint == "absolute");
+    CHECK (idle.word == "free");
+    CHECK (idle.target.empty());
+    CHECK (idle.cue.empty());
+    CHECK (idle.holder.empty());
+    CHECK_FALSE (idle.hasLevel);
+    CHECK (idle.label() == "—");
+
+    /*  A DCA STRIP RIDES ITS DCA'S TRIM - the one node its fader writes - and
+        is called by the DCA's short name, which is what a scribble strip is
+        written for. */
+    const auto riding = strips[9];
+    CHECK (riding.role == "dca");
+    CHECK (riding.dca == desk.band);
+    CHECK (riding.word == "dca");
+    CHECK (riding.target == "/godot/dca/" + desk.band + "/trim");
+    CHECK (riding.dcaName == "BND");
+    CHECK (riding.label() == "BND");
+    CHECK (riding.hasLevel);
+    CHECK (riding.levelDb == doctest::Approx (0.0));
+
+    //  One naming no DCA says so in its word, and rides nothing.
+    const auto unassigned = strips[10];
+    CHECK (unassigned.role == "dca");
+    CHECK (unassigned.word == "unassigned");
+    CHECK (unassigned.target.empty());
+    CHECK_FALSE (unassigned.hasLevel);
+    CHECK (unassigned.label() == "—");
+
+    //  The value under the fader is the engine's, not the last one a hand sent.
+    trims.set (desk.band, -6.0);
+    strips = model::readStrips (*rig.publish (2));
+    CHECK (strips[9].levelDb == doctest::Approx (-6.0));
+
+    rig.parameters.setDcas (nullptr);
+
+    //  One surface's strips, in index order; a surface that is not there has none.
+    const auto panel = model::stripsOf (strips, desk.panel);
+    REQUIRE (panel.size() == 8u);
+    CHECK (panel.front().id == desk.panelStrips.front());
+    CHECK (panel.back().index == 7);
+    CHECK (model::stripsOf (strips, "ZZZZZZZZ").empty());
+
+    /*  WHAT A STRIP WITH A CUE ON IT SAYS, which needs a sampler group armed to
+        happen in a show and nothing but the row to decide: the short name the
+        cue's author wrote, then its name, never cut here. */
+    model::StripRow holding;
+    holding.cue = "C1C1C1C1";
+    CHECK (holding.label() == "C1C1C1C1");
+    holding.cueNumber = "4.1";
+    CHECK (holding.label() == "4.1");
+    holding.cueName = "Thunder and lightning";
+    CHECK (holding.label() == "Thunder and lightning");
+    holding.cueShortName = "THNDR";
+    CHECK (holding.label() == "THNDR");
+}
+
+TEST_CASE ("client: the DCAs are read in the show's order, and a menu of them starts with none")
+{
+    Rig rig;
+    const auto desk = declareADesk (rig);
+
+    cue::DcaTable trims;
+    rig.parameters.setDcas (&trims);
+    trims.set (desk.band, -3.5);
+
+    const auto dcas = model::readDcas (*rig.publish (1));
+    REQUIRE (dcas.size() == 2u);
+
+    //  Declared first, read first - although its identifier sorts last.
+    CHECK (dcas[0].id == desk.everything);
+    CHECK (dcas[0].name == "Everything");
+    CHECK (dcas[0].parent.empty());
+    CHECK (dcas[0].label() == "Everything");
+    CHECK (dcas[0].trimDb == doctest::Approx (0.0));
+
+    CHECK (dcas[1].id == desk.band);
+    CHECK (dcas[1].name == "Band");
+    CHECK (dcas[1].parent == desk.everything);
+    CHECK (dcas[1].shortName == "BND");
+    CHECK (dcas[1].label() == "BND");
+    CHECK (dcas[1].trimDb == doctest::Approx (-3.5));
+
+    rig.parameters.setDcas (nullptr);
+
+    /*  "(NONE)" FIRST, with an empty key: no DCA is what every cue is until
+        somebody assigns one. And the WHOLE name in a menu, which has the room
+        a scribble strip does not; the key is the identifier either way. */
+    const auto choices = model::dcaChoices (dcas);
+    REQUIRE (choices.size() == 3u);
+    CHECK (choices[0].first.empty());
+    CHECK (choices[0].second == "(none)");
+    CHECK (choices[1] == std::pair<std::string, std::string> { desk.everything, "Everything" });
+    CHECK (choices[2] == std::pair<std::string, std::string> { desk.band, "Band" });
+
+    //  A show with no DCA still has the one entry that says so.
+    CHECK (model::dcaChoices ({}).size() == 1u);
+}
+
+TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler rows follow what a media cue has")
+{
+    Rig rig;
+    const auto desk = declareADesk (rig);
+
+    const auto media = rig.document.createCue ("7K2QM9X4", 0, "media", "Thunder");
+    const auto fade = rig.document.createCue ("7K2QM9X4", 1, "fade", "Band down");
+    REQUIRE (media.ok);
+    REQUIRE (fade.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + media.id + "/dca", desk.band).ok);
+
+    rig.parameters.markStale();
+    const auto snapshot = rig.publish (1);
+    const auto panel = model::inspect (*snapshot, media.id);
+
+    /*  THE SHORT NAME UNDER THE NAME IT SHORTENS, on every cue: it is what a
+        seven-character display shows for this one. */
+    const auto first = namesUnder (panel, "what it is");
+    REQUIRE (first.size() >= 3u);
+    CHECK (first[0] == "number");
+    CHECK (first[1] == "name");
+    CHECK (first[2] == "shortName");
+
+    /*  A SAMPLER MEMBER'S ROWS AFTER EVERYTHING A MEDIA CUE HAS, in the order a
+        press happens, and straight after the last of those. */
+    const std::vector<std::string> wanted { "level", "startOffset", "dca", "release", "secondPress",
+                                            "velocity", "velocityFloor", "pressure", "releaseFade" };
+    const auto does = namesUnder (panel, "what it does");
+
+    std::vector<std::string> seen;
+
+    for (const auto& name : does)
+        if (std::find (wanted.begin(), wanted.end(), name) != wanted.end())
+            seen.push_back (name);
+
+    CHECK (seen == wanted);
+
+    const auto startOffsetAt = positionOf (does, "startOffset");
+    REQUIRE (startOffsetAt + 1 < does.size());
+    CHECK (does[startOffsetAt + 1] == "dca");
+
+    //  Two words the tree runs together, said as two words.
+    const std::vector<std::pair<std::string, std::string>> spoken {
+        { "secondPress", "second press" }, { "velocityFloor", "velocity floor" },
+        { "releaseFade", "release fade" }, { "shortName", "short name" } };
+
+    for (const auto& said : spoken)
+    {
+        INFO ("row " << said.first);
+
+        const auto* row = rowIn (panel, said.first);
+        REQUIRE (row != nullptr);
+        CHECK (row->label == said.second);
+    }
+
+    /*  THE DCA IS A MENU: the identifier it writes, the name a person reads,
+        and "(none)" first. What the cue is marked with is its value. */
+    const auto* dca = rowIn (panel, "dca");
+    REQUIRE (dca != nullptr);
+    CHECK (dca->control == model::Control::dcaRef);
+    CHECK (dca->writable);
+    CHECK (dca->applies);          // any media cue can be trimmed, pressed or fired
+    CHECK (dca->value == desk.band);
+    CHECK (dca->address == "/godot/cue/" + media.id + "/dca");
+    REQUIRE (dca->choices.size() == 3u);
+    CHECK (dca->choices[0] == std::pair<std::string, std::string> { "", "(none)" });
+    CHECK (dca->choices[1].first == desk.everything);
+    CHECK (dca->choices[2] == std::pair<std::string, std::string> { desk.band, "Band" });
+
+    //  A fade's DCA beside its target - the other thing it can move - and a menu too.
+    const auto fading = model::inspect (*snapshot, fade.id);
+    const auto fadeRows = namesUnder (fading, "what it does");
+    REQUIRE (fadeRows.size() >= 3u);
+    CHECK (fadeRows[0] == "target");
+    CHECK (fadeRows[1] == "dca");
+    CHECK (fadeRows[2] == "level");
+    REQUIRE (rowIn (fading, "dca") != nullptr);
+    CHECK (rowIn (fading, "dca")->control == model::Control::dcaRef);
+
+    //  A group's: `takeover` beside `mode`, and the DCA it answers to after its round.
+    const auto group = model::inspect (*snapshot, "D9FH2JKA");
+    const auto groupRows = namesUnder (group, "what it does");
+    REQUIRE (groupRows.size() >= 2u);
+    CHECK (groupRows[0] == "mode");
+    CHECK (groupRows[1] == "takeover");
+
+    const auto seedAt = positionOf (groupRows, "seed");
+    REQUIRE (seedAt + 1 < groupRows.size());
+    CHECK (groupRows[seedAt + 1] == "dca");
+    REQUIRE (rowIn (group, "dca") != nullptr);
+    CHECK (rowIn (group, "dca")->control == model::Control::dcaRef);
+
+    /*  EIGHT CUES ON ONE DCA IS ONE MENU WRITING EIGHT ROWS - §3.28's
+        multi-select assignment, with nothing new. Cues on different DCAs
+        disagree, and say so rather than showing one of them. */
+    const auto both = model::inspectMany (*snapshot, { media.id, fade.id });
+    const auto* shared = rowIn (both, "dca");
+    REQUIRE (shared != nullptr);
+    CHECK (shared->control == model::Control::dcaRef);
+    CHECK (shared->mixed);
+    CHECK (shared->addresses == std::vector<std::string> { "/godot/cue/" + media.id + "/dca",
+                                                           "/godot/cue/" + fade.id + "/dca" });
+}
+
+TEST_CASE ("client: a sampler row is greyed on a cue no hand can press, and drawn on one a hand can")
+{
+    Rig rig;
+
+    const std::string list = "7K2QM9X4";
+
+    const auto loose = rig.document.createCue (list, 0, "media", "Loose");
+    const auto another = rig.document.createCue (list, 1, "media", "Another");
+    const auto pads = rig.document.createCue (list, 2, "group", "Pads");
+    REQUIRE (loose.ok);
+    REQUIRE (another.ok);
+    REQUIRE (pads.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + pads.id + "/mode", "sampler").ok);
+
+    const auto member = rig.document.createCue (pads.id, 0, "media", "Thunder");
+    REQUIRE (member.ok);
+
+    /*  A HEADER'S CUE HAS THE GROUP FOR ITS PARENT in the tree, and is still no
+        member: a header is the group's preparation, and no strip holds one. */
+    const auto header = rig.document.createRole (pads.id, "header");
+    REQUIRE (header.ok);
+    const auto preload = rig.document.createCue (header.id, 0, "media", "Preload");
+    REQUIRE (preload.ok);
+
+    rig.parameters.markStale();
+    auto snapshot = rig.publish (1);
+
+    const std::vector<std::string> samplerRows { "release", "secondPress", "velocity",
+                                                 "velocityFloor", "pressure", "releaseFade" };
+
+    //  Outside a sampler group nothing presses a cue, so none of them means anything.
+    const auto outside = model::inspect (*snapshot, loose.id);
+
+    for (const auto& name : samplerRows)
+    {
+        INFO ("row " << name);
+        CHECK_FALSE (appliesIn (outside, name));
+    }
+
+    //  The DCA is not one of them: a DCA trims any media cue.
+    CHECK (appliesIn (outside, "dca"));
+
+    const auto prepared = model::inspect (*snapshot, preload.id);
+    CHECK_FALSE (appliesIn (prepared, "release"));
+
+    /*  A MEMBER OF A SAMPLER GROUP: they apply - all but the floor, which is the
+        bottom of a velocity or pressure scale neither of which is on. */
+    auto inside = model::inspect (*snapshot, member.id);
+
+    CHECK (appliesIn (inside, "release"));
+    CHECK (appliesIn (inside, "secondPress"));
+    CHECK (appliesIn (inside, "velocity"));
+    CHECK (appliesIn (inside, "pressure"));
+    CHECK (appliesIn (inside, "releaseFade"));
+    CHECK_FALSE (appliesIn (inside, "velocityFloor"));
+
+    /*  A HOLD CLIP CANNOT BE PRESSED AGAIN by the hand still holding it, so its
+        second press means nothing; and velocity on gives the floor a scale. */
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + member.id + "/release", "hold").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + member.id + "/velocity", "true").ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (2);
+    inside = model::inspect (*snapshot, member.id);
+
+    CHECK (appliesIn (inside, "release"));
+    CHECK_FALSE (appliesIn (inside, "secondPress"));
+    CHECK (appliesIn (inside, "velocityFloor"));
+
+    //  Pressure alone gives it one too.
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + member.id + "/velocity", "false").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/" + member.id + "/pressure", "true").ok);
+    rig.parameters.markStale();
+    snapshot = rig.publish (3);
+    CHECK (appliesIn (model::inspect (*snapshot, member.id), "velocityFloor"));
+
+    //  A group's takeover is a question only a sampler group is asked.
+    CHECK (appliesIn (model::inspect (*snapshot, pads.id), "takeover"));
+    CHECK_FALSE (appliesIn (model::inspect (*snapshot, "D9FH2JKA"), "takeover"));
+
+    /*  AND A SEQUENCE'S QUESTIONS ARE NEVER ASKED OF ONE: the hand launches a
+        sampler group's members, so how it advances and how its rounds are
+        drawn mean nothing there - and still everything to any other group. */
+    for (const auto* name : { "advance", "selection", "play", "loops", "seed" })
+    {
+        INFO ("row " << name);
+        CHECK_FALSE (appliesIn (model::inspect (*snapshot, pads.id), name));
+        CHECK (appliesIn (model::inspect (*snapshot, "D9FH2JKA"), name));
+    }
+
+    /*  SEVERAL CUES: greyed only where it is greyed for every one of them, and
+        whichever of them happens to be first. */
+    CHECK (appliesIn (model::inspectMany (*snapshot, { loose.id, member.id }), "release"));
+    CHECK (appliesIn (model::inspectMany (*snapshot, { member.id, loose.id }), "release"));
+    CHECK_FALSE (appliesIn (model::inspectMany (*snapshot, { loose.id, another.id }), "release"));
 }

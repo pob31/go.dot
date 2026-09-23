@@ -20,12 +20,15 @@
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
 #include <algorithm>
 #include <map>
+#include <string>
+#include <vector>
 
 namespace wfg::client::model
 {
@@ -35,22 +38,47 @@ namespace wfg::client::model
             not code: reordering a kind is a line here rather than a change to
             anything, which is what made it cheap to argue about with the page
             open - and the same has to be true with the window open. */
-        const std::vector<std::string> saidFirst { "number", "name", "colour", "notes" };
+        const std::vector<std::string> saidFirst { "number", "name", "shortName", "colour", "notes" };
         const std::vector<std::string> when      { "preWait", "duration", "postWait" };
         const std::vector<std::string> saidLast  { "enabled", "preset" };
+
+        /*  WHAT ONLY A HAND ON A STRIP ASKS OF A MEDIA CUE (PRD §3.27): what
+            letting go does, what a second press does, how hard it was struck
+            and pressed, and the fade a release ends in. `dca` arrived with them
+            and is not one of them - a DCA trims any cue, fired or pressed. */
+        const std::vector<std::string> samplerRows { "release", "secondPress", "velocity",
+                                                     "velocityFloor", "pressure", "releaseFade" };
+
+        /*  WHAT A SAMPLER GROUP IS NEVER ASKED: how it advances, how a round is
+            drawn and how many rounds it plays. The hand launches its members,
+            in any order and any number of times, and the Runner spawns nothing
+            for one (`beginPhase`), so these are a sequence's questions only. */
+        const std::vector<std::string> roundRows { "advance", "selection", "play", "loops", "seed" };
 
         const std::map<std::string, std::vector<std::string>>& kindOrder()
         {
             static const std::map<std::string, std::vector<std::string>> table
             {
+                /*  A SAMPLER MEMBER'S ROWS AFTER EVERYTHING A MEDIA CUE HAS
+                    (Phase 6): the DCA it answers to, then what a hand on its
+                    strip does, in the order a press happens - it is let go, it
+                    is pressed again, it was struck, it is leant on, it fades. */
                 { "media",   { "file", "channels", "stereoToMono", "directOut",
-                               "level", "startOffset" } },
-                { "fade",    { "target", "level", "curve", "points", "stopWhenDone" } },
+                               "level", "startOffset", "dca", "release", "secondPress",
+                               "velocity", "velocityFloor", "pressure", "releaseFade" } },
+
+                //  What it moves - a cue, or a DCA instead - then where to and how.
+                { "fade",    { "target", "dca", "level", "curve", "points", "stopWhenDone" } },
                 { "transport", { "target", "verb", "range", "curve" } },
                 { "start",   { "target" } },
                 { "osc",     { "device", "address", "value", "wait", "timeout" } },
                 { "midi",    { "port", "channel", "type", "data1", "data2", "sysex", "wait" } },
-                { "group",   { "mode", "advance", "selection", "play", "loops", "seed" } },
+
+                /*  `takeover` BESIDE `mode`, because it is a question only a
+                    sampler group is asked and the answer to `mode` is what
+                    makes it one; the DCA the whole group answers to last. */
+                { "group",   { "mode", "takeover", "advance", "selection", "play", "loops",
+                               "seed", "dca" } },
                 { "range",   { "name", "in", "out", "loops" } },
                 { "trigger", { "kind", "enabled", "address", "value", "port", "channel",
                                "type", "number", "data", "at" } },
@@ -60,18 +88,23 @@ namespace wfg::client::model
         }
 
         /*  WHAT A ROW IS CALLED ON SCREEN when its own name is not what
-            somebody reading it would call it. A short table, and every entry
-            here is one the author asked for while using the panel - not a
-            translation layer over the parameter table, which would go stale
-            the day a row is added by somebody who never opens this file. A
-            name that is not here keeps the tree's own word, so nothing can
-            vanish by being forgotten. */
+            somebody reading it would call it. A short table: an entry is one
+            the author asked for while using the panel, or two words the tree
+            runs together in camelCase, which reads as code rather than as a
+            question - and not a translation layer over the parameter table,
+            which would go stale the day a row is added by somebody who never
+            opens this file. A name that is not here keeps the tree's own word,
+            so nothing can vanish by being forgotten. */
         const std::map<std::string, std::string>& labels()
         {
             static const std::map<std::string, std::string> table
             {
                 { "play", "items to play" },
                 { "stopWhenDone", "stop when done" },
+                { "shortName", "short name" },
+                { "secondPress", "second press" },
+                { "velocityFloor", "velocity floor" },
+                { "releaseFade", "release fade" },
             };
 
             return table;
@@ -308,6 +341,112 @@ namespace wfg::client::model
             }
         }
 
+        /*  WHICH DCA A CUE ANSWERS TO, as a menu rather than as the eight
+            characters of an identifier typed by hand: the port row's shape, and
+            for its reason - the row stores the identifier, a person reads the
+            name, and a DCA renamed must leave every cue marked with it marked.
+
+            ALWAYS A MENU, even before the show has a DCA, when it offers
+            "(none)" alone. Unlike the device line, the row is there anyway on
+            every media cue, group and fade; the question is only how it is
+            asked, and a box would take any eight characters typed from memory -
+            a mark naming a DCA that is not there is a warning when the show is
+            checked, not a refusal at the door - where a menu of one entry says
+            what is true: there is nothing to assign it to yet.
+
+            A SECOND SCAN, and only for a cue that has the row: `readDcas` walks
+            the tree its own way, for the reason `fitToTheRig` reads the outputs
+            through `readOutputs` rather than gathering them in the scan above. */
+        void aimAtADca (const tree::TreeSnapshot& snapshot, std::vector<Field>& decided)
+        {
+            for (auto& field : decided)
+            {
+                if (field.name != "dca" || ! field.writable)
+                    continue;
+
+                field.control = Control::dcaRef;
+                field.choices = dcaChoices (readDcas (snapshot));
+                return;
+            }
+        }
+
+        /*  WHAT ONLY A HAND ON A STRIP ASKS, greyed where no hand can reach it
+            (PRD §3.27). A media cue carries the sampler rows whatever group it
+            is in, and they mean something only on a MEMBER of a SAMPLER group:
+            anywhere else nothing presses it. Greyed and never hidden - the
+            `stereoToMono` rule - so a designer who moves a cue into a sampler
+            group finds the rows where they already saw them.
+
+            A HEADER'S CUES ARE NOT MEMBERS, though the tree names the group as
+            their parent: a header is the group's preparation, fired when it
+            starts, and no strip ever holds one. So the cue's `role` is asked as
+            well as its parent's `mode`.
+
+            AND TWO THAT DEPEND ON THE ROWS BESIDE THEM. A second press cannot
+            reach a hold clip - the hand holding it is still down - so
+            `secondPress` means nothing under `release = hold`. And the floor is
+            the bottom of the velocity and pressure scale, so it means nothing
+            with both of those off.
+
+            A group's `takeover` is the same idea from the other side: what
+            arming this group does to the sampler groups already armed, which is
+            a question only a sampler group is ever asked. */
+        void greyWhatOnlyAHandAsks (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                                    const std::string& kind, std::vector<Field>& decided)
+        {
+            const auto valueOf = [&decided] (const std::string& name)
+            {
+                for (const auto& field : decided)
+                    if (field.name == name)
+                        return field.value;
+
+                return std::string {};
+            };
+
+            if (kind == "group")
+            {
+                const auto sampler = valueOf ("mode") == "sampler";
+
+                for (auto& field : decided)
+                {
+                    if (field.name == "takeover")
+                        field.applies = sampler;
+                    else if (sampler && named (roundRows, field.name))
+                        field.applies = false;
+                }
+
+                return;
+            }
+
+            if (kind != "media")
+                return;
+
+            /*  THE PARENT'S MODE, read where it lives. A cue at the top of a
+                list has a parent with no `mode` row at all, which is not a
+                sampler group and greys the rows as it should. */
+            const auto base = "/godot/cue/" + cueId + "/";
+            const auto parent = text (snapshot, base + "parent");
+            const auto member = text (snapshot, base + "role") == "member";
+            const auto pressable = member && ! parent.empty()
+                                     && text (snapshot, "/godot/cue/" + parent + "/mode") == "sampler";
+
+            const auto holds = valueOf ("release") == "hold";
+            const auto scaled = valueOf ("velocity") == "true" || valueOf ("pressure") == "true";
+
+            for (auto& field : decided)
+            {
+                if (! named (samplerRows, field.name))
+                    continue;
+
+                if (field.name == "secondPress")
+                    field.applies = pressable && ! holds;
+                else if (field.name == "velocityFloor")
+                    field.applies = pressable && scaled;
+                else
+                    field.applies = pressable;
+            }
+        }
+
         /*  WHICH DEVICE A NETWORK CUE IS AIMED AT, as a line of its own above
             the address it is derived from.
 
@@ -471,6 +610,14 @@ namespace wfg::client::model
             nameTheNumbers (decided);
         }
 
+        /*  THE DCA A CUE ANSWERS TO, on the three kinds that carry the row -
+            a media cue and a group marked with one, a fade that moves one - and
+            asked of the rows rather than of the kind, so that whichever kind
+            gains it next gets the menu with no line here. */
+        aimAtADca (snapshot, decided);
+
+        greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
+
         //  The four blocks, in the order somebody fills them in.
         const auto kindRows = [&out]
         {
@@ -607,6 +754,15 @@ namespace wfg::client::model
 
                     if (other->value != field.value)
                         field.mixed = true;
+
+                    /*  GREYED ONLY WHERE IT MEANS NOTHING FOR EVERY ONE OF THEM.
+                        A row that applies to one cue of the selection is a row
+                        somebody may want to set, and the commit writes it to
+                        all of them - where it means nothing, the engine ignores
+                        it, exactly as it does for one cue. Taking the first
+                        cue's answer, as this did, greyed a sampler row over a
+                        selection that happened to start outside the group. */
+                    field.applies = field.applies || other->applies;
                 }
 
                 if (! everywhere)

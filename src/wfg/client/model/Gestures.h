@@ -209,6 +209,44 @@ namespace wfg::client::gesture
         two are different kinds of fact (PRD 4.10). */
     Event createPort (const std::string& name);
 
+    /*  A CONTROL SURFACE, AND THE STRIPS ITS PROFILE IMPLIES, in one command
+        (PRD §3.16): eight for the virtual panel and a Mackie unit, sixteen for
+        the D700 and for pads. `profile` is one of the four words
+        `profileChoices` offers; with no name only the profile is sent, and
+        the surface is called what its profile is until somebody names it.
+        Every identifier the engine draws - the surface's and each strip's -
+        rides on the applied record, so the window finds what it made on the
+        next pass, as it does after `createCue`. */
+    Event createSurface (const std::string& profile, const std::string& name = {});
+
+    /*  ONE MORE STRIP at the end of a surface: the second eight of a Mackie
+        unit with an extender, one more pad. Where it sits is its position and
+        never a number somebody types (namespace draft §16.2). */
+    Event createStrip (const std::string& surfaceId);
+
+    /*  A DCA: a named trim the cues and groups marked with it follow (PRD
+        §3.28). Which DCA it sits inside, and its short name, are written
+        afterwards with `setNode`, like every other row a person edits. */
+    Event createDca (const std::string& name);
+
+    /*  A HAND ON A SAMPLER STRIP, AND THE HAND LIFTED (PRD §3.27): a pad of
+        the virtual panel clicked, a number key held. `velocity` is 1 to 127,
+        from where on the pad the click landed; below 1 the argument is left
+        out, as a fader lifted from the bottom leaves it out, and the clip
+        starts where its strip puts it. The origin is who owns a held clip,
+        which is why a release from this window lets go only of what this
+        window pressed. */
+    Event pressStrip (const std::string& stripId, int velocity);
+    Event releaseStrip (const std::string& stripId);
+
+    /*  A HAND ON A FADER, AND OFF IT: the two halves of a ride, around the
+        `setNode`s that move it. The address is the one the strip publishes as
+        its `target` - a run's trim, a DCA's - so the touch table gates the
+        panel exactly as it gates a motor fader, and a fader-start is the same
+        rule from the mouse as from the hardware (§16.4). */
+    Event touchNode (const std::string& address);
+    Event releaseNode (const std::string& address);
+
     /*  THAT THE PATCH HAS STOPPED FOLLOWING THE LIST. Sent by the settings
         window before the first hand edit of the output matrix lands, and by
         its "follow the list" button with false to hand the outputs back to

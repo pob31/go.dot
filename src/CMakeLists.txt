@@ -281,6 +281,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/DirectOuts.h
     wfg/client/model/MidiPorts.cpp
     wfg/client/model/MidiPorts.h
+    wfg/client/model/Surfaces.cpp
+    wfg/client/model/Surfaces.h
     wfg/client/model/Devices.cpp
     wfg/client/model/Devices.h
     wfg/client/model/DirectOuts.cpp
@@ -325,6 +327,8 @@ target_link_libraries(wfg_client_model
 add_library(wfg_client_ui STATIC
     wfg/client/ui/ShowSettingsWindow.h
     wfg/client/ui/ShowSettingsWindow.cpp
+    wfg/client/ui/SurfacePanelComponent.h
+    wfg/client/ui/SurfacePanelComponent.cpp
     wfg/client/Client.h
     wfg/client/ui/Client.cpp
     wfg/client/ui/FootPanelComponent.cpp

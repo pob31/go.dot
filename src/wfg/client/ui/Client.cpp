@@ -65,6 +65,7 @@
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/ui/Look.h>
 #include <wfg/client/ui/ShowSettingsWindow.h>
+#include <wfg/client/ui/SurfacePanelComponent.h>
 #include <wfg/client/ui/MainWindow.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
@@ -95,7 +96,7 @@ namespace wfg::client
             menuNew = 1, menuOpen, menuSave, menuSaveAs, menuRevert,
             menuUndo, menuRedo, menuCut, menuCopy, menuPaste, menuSelectAll, menuDeleteCue,
             menuLock, menuLoadToTime, menuUndoHistory, menuRecord, menuShowSettings,
-            menuWaveform
+            menuWaveform, menuSurfaces
         };
 
         class Window final : public wfg::Client,
@@ -539,9 +540,12 @@ namespace wfg::client
                     case menuWaveform:  return { 'w', mod, 0 };
                     case menuUndoHistory: return { 'u', mod | shift, 0 };
                     case menuRecord:     return { 'r', mod | shift, 0 };
-                    //  No accelerator: both are reached through the menu only.
+                    /*  No accelerator: these are reached through the menu only.
+                        The surfaces window takes the number keys for its pads
+                        once it is open, and needs no key of its own to open. */
                     case menuRevert:
-                    case menuShowSettings: break;
+                    case menuShowSettings:
+                    case menuSurfaces: break;
                     
                 }
 
@@ -587,6 +591,10 @@ namespace wfg::client
                     case menuUndoHistory: return unlocked;
                     case menuRecord:     return model::isYes (last.recording) ? unlocked : true;
                     case menuShowSettings: return true;
+
+                    /*  OFFERED UNDER THE LOCK TOO: riding a fader and pressing a
+                        pad are playing the show, not editing it. */
+                    case menuSurfaces:  return true;
 
                     /*  Offered for a media cue, and for shutting the panel
                         whatever is picked - a panel that could be opened and
@@ -672,6 +680,11 @@ namespace wfg::client
                                                                                   : "Start the live recorder");
                     menu.addSeparator();
                     addMenuItem (menu, menuShowSettings, "Show settings...");
+
+                    /*  THE VIRTUAL SURFACE: every strip the show declares, as a
+                        desk the mouse can play (decision AB). Beside the
+                        settings, where the surfaces it draws are declared. */
+                    addMenuItem (menu, menuSurfaces, "Surfaces...");
                 }
 
                 return menu;
@@ -705,6 +718,21 @@ namespace wfg::client
                                     [this] (Event event) { send (std::move (event)); }, [this] { panic(); });
                             audioSettings->setVisible (true);
                             audioSettings->toFront (true);
+                        }
+                        break;
+                    case menuSurfaces:
+                        /*  MADE ONCE AND KEPT, as the settings window is: closing it
+                            hides it, and the next open is the same desk. Read at
+                            once from the pass's own snapshot, so it opens drawn
+                            rather than blank until the next pass. */
+                        if (latest)
+                        {
+                            if (! surfaces)
+                                surfaces = std::make_unique<ui::SurfaceWindow> (theme,
+                                    [this] (Event event) { send (std::move (event)); }, [this] { panic(); });
+                            surfaces->setVisible (true);
+                            surfaces->toFront (true);
+                            surfaces->refresh (*latest);
                         }
                         break;
                     case menuRecord:     send (model::isYes (last.recording) ? gesture::recordStop()
@@ -952,6 +980,10 @@ namespace wfg::client
                     replaces it. */
                 latest = snapshot;
                 if (audioSettings) audioSettings->refresh (*snapshot);
+
+                /*  THE VIRTUAL SURFACE, from the same pointer: rule 2's one call
+                    site feeds every window. It reads nothing while hidden. */
+                if (surfaces) surfaces->refresh (*snapshot);
 
                 if (reading.show != last.show)
                     window->setName (titleFor (reading.show));
@@ -1998,6 +2030,7 @@ namespace wfg::client
             juce::TooltipWindow tooltips { nullptr, 700 };
             std::unique_ptr<ui::MainWindow> window;
             std::unique_ptr<ui::ShowSettingsWindow> audioSettings;
+            std::unique_ptr<ui::SurfaceWindow> surfaces;    // Show > Surfaces..., made on first open
             ui::Shell* shell = nullptr;                     // owned by the window
 
             /*  The rows, cached against the show's revision. Declared after the

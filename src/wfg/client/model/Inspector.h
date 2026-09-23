@@ -32,7 +32,7 @@
     `duration` under another owner word entirely - the one ordering nobody
     works in. So four blocks:
 
-        what it is      number, name, colour, notes
+        what it is      number, name, shortName, colour, notes
         when            preWait, duration, postWait
         what it does    the kind's own rows, in that kind's working order
         in the list     enabled, preset
@@ -122,6 +122,15 @@ namespace wfg::client::model
             held that identifier; what was missing was anything to pick it
             from, so it was a box you typed eight characters into. */
         portRef,
+
+        /*  A MENU OF THE SHOW'S DCAS (PRD §3.28), and the port menu's twin: it
+            writes an IDENTIFIER - the mark a media cue, a group or a fade
+            carries - and a person reads the DCA's name, which may change while
+            every cue marked with it stays marked. The mark is on the member
+            and never a list on the DCA (§4.12), so putting eight cues on one
+            DCA is eight writes of the row this menu is drawn on: the `node.set`
+            a selection already sends, and nothing new. */
+        dcaRef,
 
         /*  A BUTTON THAT OPENS THE PANEL AT THE FOOT on this cue (author,
             2026-09-21: "it would be great if the controls to show the

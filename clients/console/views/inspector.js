@@ -76,7 +76,7 @@ function fieldsFor(id, kind) {
 
     SO THE PANEL IS FOUR BLOCKS, in the order somebody fills them in:
 
-      what it is        number, name, colour, notes
+      what it is        number, name, shortName, colour, notes
       when              preWait, duration, postWait
       what it does      the kind's own rows, each kind in its own working order
       in the list       enabled, preset
@@ -98,17 +98,22 @@ function fieldsFor(id, kind) {
     parameter table shows up in a predictable place instead of vanishing. */
 const WHEN = ["preWait", "duration", "postWait"];
 
-const SAID_FIRST = ["number", "name", "colour", "notes"];
+const SAID_FIRST = ["number", "name", "shortName", "colour", "notes"];
 const SAID_LAST = ["enabled", "preset"];
 
+/*  A SAMPLER MEMBER'S ROWS AFTER EVERYTHING A MEDIA CUE HAS (Phase 6): the DCA
+    it answers to, then what a hand on its strip does, in the order a press
+    happens. A group's `takeover` sits beside `mode`, the answer that makes it a
+    question; a fade's `dca` beside `target`, the other thing it can move. */
 const KIND_ORDER = {
-  media:   ["file", "level", "startOffset"],
-  fade:    ["target", "level", "curve", "points", "stopWhenDone"],
+  media:   ["file", "level", "startOffset", "dca", "release", "secondPress", "velocity",
+            "velocityFloor", "pressure", "releaseFade"],
+  fade:    ["target", "dca", "level", "curve", "points", "stopWhenDone"],
   stop:    ["target", "verb", "curve"],
   start:   ["target"],
   osc:     ["address", "value", "wait", "timeout"],
   midi:    ["port", "channel", "type", "data1", "data2", "sysex", "wait"],
-  group:   ["mode", "advance", "selection", "play", "loops", "seed"],
+  group:   ["mode", "takeover", "advance", "selection", "play", "loops", "seed", "dca"],
   range:   ["name", "in", "out", "loops"],
   trigger: ["kind", "enabled", "address", "value", "port", "channel",
             "type", "number", "data", "at"],

@@ -177,6 +177,60 @@ namespace wfg::client::gesture
         return { origin::window, "port.create", { osc::Value::string (name) } };
     }
 
+    Event createSurface (const std::string& profile, const std::string& name)
+    {
+        /*  NO NAME IS NO ARGUMENT, rather than an empty one: the engine's
+            record carries the name in a fixed position either way, and a
+            gesture that said "" would be this window deciding what a surface
+            nobody named is called. */
+        if (name.empty())
+            return { origin::window, "surface.create", { osc::Value::string (profile) } };
+
+        return { origin::window, "surface.create",
+                 { osc::Value::string (profile), osc::Value::string (name) } };
+    }
+
+    Event createStrip (const std::string& surfaceId)
+    {
+        return { origin::window, "strip.create", { osc::Value::string (surfaceId) } };
+    }
+
+    Event createDca (const std::string& name)
+    {
+        return { origin::window, "dca.create", { osc::Value::string (name) } };
+    }
+
+    Event pressStrip (const std::string& stripId, int velocity)
+    {
+        /*  A HAND WITH NO VELOCITY SAYS NONE. The argument is optional because
+            not every hand has one - a key, a fader lifted from the bottom - and
+            a record carrying a number nobody struck would tell a reader of the
+            log that a pad was hit that hard. Left out, the engine starts the
+            clip where its strip puts it - unity under a pad or a fader at the
+            bottom, the fader's own level once it is lifted - as it does for
+            any press without one. */
+        if (velocity < 1)
+            return { origin::window, "strip.press", { osc::Value::string (stripId) } };
+
+        return { origin::window, "strip.press",
+                 { osc::Value::string (stripId), osc::Value::int32 (velocity) } };
+    }
+
+    Event releaseStrip (const std::string& stripId)
+    {
+        return { origin::window, "strip.release", { osc::Value::string (stripId) } };
+    }
+
+    Event touchNode (const std::string& address)
+    {
+        return { origin::window, "node.touch", { osc::Value::string (address) } };
+    }
+
+    Event releaseNode (const std::string& address)
+    {
+        return { origin::window, "node.release", { osc::Value::string (address) } };
+    }
+
     Event createBus (const std::string& kind, int width, int index)
     {
         return { origin::window, "bus.create",

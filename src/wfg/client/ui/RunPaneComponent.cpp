@@ -807,6 +807,23 @@ namespace wfg::client::ui
 
         area.removeFromLeft (entry.depth * unit);
 
+        /*  A SAMPLER RUN'S OWN WORDS, at the right end of its line beside the
+            position: a group's count of its members, a member's strip and what
+            the strip is doing (§16.7). Measured, and never more than half the
+            line, so the name keeps the room it is read by. */
+        if (! entry.samplerWords.empty())
+        {
+            const auto said = juce::String (entry.samplerWords);
+
+            g.setFont (Look::font (theme, 12.0f));
+
+            const auto wide = juce::GlyphArrangement::getStringWidthInt (g.getCurrentFont(), said) + unit;
+            const auto cell = area.removeFromRight (juce::jmin (wide, area.getWidth() / 2));
+
+            g.setColour (Look::colour (theme, "ink-dim"));
+            g.drawText (said, cell, juce::Justification::centredRight, true);
+        }
+
         /*  THE CUE'S NAME, because a run identifier is eight characters the
             engine drew and nobody recognises. A failure says why, in place of
             the name it would otherwise repeat from the row above. */

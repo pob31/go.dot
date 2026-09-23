@@ -4,6 +4,7 @@
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/model/Inspector.h>
+#include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/engine/audio/DeviceLayer.h>
 #include <wfg/engine/Engine.h>
@@ -16,7 +17,9 @@
 #include <algorithm>
 #include <functional>
 #include <chrono>
+#include <string>
 #include <thread>
+#include <vector>
 #include <windows.h>
 
 using namespace wfg;
@@ -386,6 +389,137 @@ TEST_CASE ("show settings UI: the MIDI tab declares ports and offers this machin
     panel.refresh (*rig.publish());
 
     CHECK_FALSE (tabs->isEnabled());
+}
+
+TEST_CASE ("show settings UI: the Surfaces tab declares a surface, its strips and a DCA")
+{
+    Rig rig;
+
+    /*  A SHOW WITH ONE SURFACE AND ONE DCA already in it, made through the
+        document as a replay would make them: the virtual panel's eight
+        strips come with the surface. */
+    std::vector<std::string> made;
+    const auto desk = rig.document.createSurface ("virtual", "Desk", {}, {}, made);
+    REQUIRE (desk.ok);
+    REQUIRE (made.size() == 8u);
+    REQUIRE (rig.document.createDca ("Band").ok);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    /*  FOUND BY ITS NAME, not by where it sits: the tab strip has grown one
+        tab at a time and will again. After MIDI, because a surface is
+        reached through the ports that tab declares. */
+    const auto names = tabs->getTabNames();
+    const auto index = names.indexOf ("Surfaces");
+
+    REQUIRE (index >= 0);
+    CHECK (index > names.indexOf ("MIDI"));
+
+    tabs->setCurrentTabIndex (index);
+
+    //  A tab's content is only a live child while it shows.
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    /*  THREE LISTS, STACKED: the surfaces, the strips of the one picked -
+        the first, until somebody picks another - and the DCAs. */
+    std::vector<juce::ListBox*> lists;
+
+    for (auto* child : page->getChildren())
+        if (auto* list = dynamic_cast<juce::ListBox*> (child))
+            lists.push_back (list);
+
+    REQUIRE (lists.size() == 3u);
+    CHECK (lists[0]->getListBoxModel()->getNumRows() == 1);
+    CHECK (lists[1]->getListBoxModel()->getNumRows() == 8);
+    CHECK (lists[2]->getListBoxModel()->getNumRows() == 1);
+
+    /*  ADD SURFACE ASKS WHICH KIND FIRST, in a popup of the four profiles,
+        and sends nothing until one is chosen. The popup is the page's one
+        chooser, opened over the button; choosing in it is the gesture. */
+    auto* addSurface = button (*page, "ADD SURFACE");
+    REQUIRE (addSurface != nullptr);
+
+    const auto beforeSurface = rig.sent.size();
+    addSurface->onClick();
+
+    CHECK (rig.sent.size() == beforeSurface);
+
+    auto* chooser = component<juce::ComboBox> (*page);
+    REQUIRE (chooser != nullptr);
+    CHECK (chooser->isVisible());
+
+    const auto profiles = client::model::profileChoices();
+    REQUIRE (chooser->getNumItems() == static_cast<int> (profiles.size()));
+
+    std::string d700Label;
+
+    for (const auto& choice : profiles)
+        if (choice.first == "d700")
+            d700Label = choice.second;
+
+    REQUIRE_FALSE (d700Label.empty());
+
+    auto d700 = 0;
+
+    for (auto item = 0; item < chooser->getNumItems(); ++item)
+        if (chooser->getItemText (item) == juce::String (d700Label))
+            d700 = chooser->getItemId (item);
+
+    REQUIRE (d700 != 0);
+
+    chooser->setSelectedId (d700, juce::dontSendNotification);
+    REQUIRE (chooser->onChange != nullptr);
+    chooser->onChange();
+
+    REQUIRE (rig.sent.size() == beforeSurface + 1);
+    CHECK (rig.sent.back().command == "surface.create");
+    CHECK (rig.sent.back().origin == "window");
+    REQUIRE_FALSE (rig.sent.back().args.empty());
+    CHECK (rig.sent.back().args[0].getString() == "d700");
+
+    //  And the chooser goes back out of the way of the button it covered.
+    CHECK_FALSE (chooser->isVisible());
+
+    /*  ADD STRIP ADDS TO THE PICKED SURFACE - here the only one, picked
+        because it is first. */
+    auto* addStrip = button (*page, "ADD STRIP");
+    REQUIRE (addStrip != nullptr);
+
+    const auto beforeStrip = rig.sent.size();
+    addStrip->onClick();
+
+    REQUIRE (rig.sent.size() == beforeStrip + 1);
+    CHECK (rig.sent.back().command == "strip.create");
+    REQUIRE_FALSE (rig.sent.back().args.empty());
+    CHECK (rig.sent.back().args[0].getString() == desk.id);
+
+    //  ADD DCA makes one under a name nothing else has.
+    auto* addDca = button (*page, "ADD DCA");
+    REQUIRE (addDca != nullptr);
+
+    const auto beforeDca = rig.sent.size();
+    addDca->onClick();
+
+    REQUIRE (rig.sent.size() == beforeDca + 1);
+    CHECK (rig.sent.back().command == "dca.create");
+    REQUIRE_FALSE (rig.sent.back().args.empty());
+    CHECK_FALSE (rig.sent.back().args[0].getString().empty());
+    CHECK (rig.sent.back().args[0].getString() != "Band");
+
+    /*  UNDER THE LOCK THE STRUCTURE GOES: no ADD of any kind, as on every
+        other tab - a surface, a strip and a DCA are all structure. */
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+
+    CHECK_FALSE (tabs->isEnabled());
+    CHECK_FALSE (addSurface->isVisible());
+    CHECK_FALSE (addStrip->isVisible());
+    CHECK_FALSE (addDca->isVisible());
 }
 
 TEST_CASE ("audio settings UI: held output tests clear on tab exit and window close")

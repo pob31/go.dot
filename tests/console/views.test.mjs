@@ -160,6 +160,21 @@ test("the inspector puts a cue's fields in the order somebody works through them
   assert.deepEqual(ordered(["points", "curve", "level", "target"], "fade"),
                    ["target", "level", "curve", "points"]);
 
+  /*  PHASE 6'S ROWS WHERE THE WINDOW PUTS THEM (model/Inspector.cpp's table,
+      the same list): a sampler member's after everything a media cue has, in
+      the order a press happens; `takeover` beside the `mode` that makes it a
+      question and a group's DCA last; a fade's DCA beside the other thing it
+      can move; and the short name under the name it shortens. */
+  assert.deepEqual(ordered(["releaseFade", "pressure", "dca", "velocityFloor", "release",
+                            "velocity", "secondPress", "level", "file"], "media"),
+                   ["file", "level", "dca", "release", "secondPress", "velocity",
+                    "velocityFloor", "pressure", "releaseFade"]);
+  assert.deepEqual(ordered(["dca", "advance", "takeover", "mode"], "group"),
+                   ["mode", "takeover", "advance", "dca"]);
+  assert.deepEqual(ordered(["level", "dca", "target"], "fade"), ["target", "dca", "level"]);
+  assert.deepEqual(ordered(["colour", "shortName", "number", "name"], "media"),
+                   ["number", "name", "shortName", "colour"]);
+
   /*  And the whole panel, in blocks: what it is, when, what it does, how it
       sits in the list. */
   assert.deepEqual(
@@ -1042,4 +1057,32 @@ test("a pane beside a model with no set still draws the one row that is picked",
   assert.match(opening(htmlOf(rows, "cue:M9")), /data-picked="no"/);
 
   selection.picked = null;
+});
+
+test("a group's row says in a word how it moves, and a sampler group says pads", () => {
+  /*  A SAMPLER GROUP IS PLAYED BY HAND (Phase 6), so neither "auto" nor
+      "manual" is true of it - and its `advance` is never read, which is why the
+      one here says auto and the row still says pads. */
+  folded.clear();
+  selection.reveal = null;
+
+  serve([
+    leaf("/godot/list/L/order", "T1 P1 A1 S1"),
+    leaf("/godot/cue/T1/kind", "group"),
+    leaf("/godot/cue/T1/mode", "timeline"),
+    leaf("/godot/cue/P1/kind", "group"),
+    leaf("/godot/cue/P1/mode", "sampler"),
+    leaf("/godot/cue/P1/advance", "auto"),
+    leaf("/godot/cue/A1/kind", "group"),
+    leaf("/godot/cue/A1/advance", "auto"),
+    leaf("/godot/cue/S1/kind", "group"),
+  ]);
+
+  const rows = listRows("L", "");
+  const flagOf = (key) => (/class="flag">([^<]*)</.exec(htmlOf(rows, key)) || [])[1];
+
+  assert.equal(flagOf("cue:T1"), "timeline");
+  assert.equal(flagOf("cue:P1"), "pads");
+  assert.equal(flagOf("cue:A1"), "auto");
+  assert.equal(flagOf("cue:S1"), "manual");
 });
