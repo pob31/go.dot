@@ -32,6 +32,12 @@ Between them Rain's fader is pulled to the bottom, which on a play-out clip is
 a mute and not a stop. So the render must read: silence, a tenth, silence,
 the constant, silence - and after the bank is disarmed, digital silence.
 
+AND A TOUCH STARTS A CLIP (author, 2026-09-23): a sample's fader waits at its
+initial level, and a hand landing on it is the start. Door's fader is pulled to
+the bottom first by a write with no hand on it - a level set in advance, which
+starts nothing - so the touch starts it silent and the render keeps its
+arithmetic.
+
 THE FIXTURE IS tests/fixtures/bundles/sampler, which has no audio routing of
 its own (its log is recorded with no device). This copies it and gives it a
 bus and a route per member - a copy of a bundle is exactly the thing to change,
@@ -70,6 +76,7 @@ SURFACE = "SVRF0001"
 
 THUNDER_STRIP = "STRP0001"      # Thunder: release = hold
 RAIN_STRIP = "STRP0002"         # Rain: velocity on, floor -40 dB
+DOOR_STRIP = "STRP0004"         # Door: play-out, touched to start
 BANK_A_STRIPS = ["STRP0001", "STRP0002", "STRP0003", "STRP0004"]
 
 # The constant every file holds, and the two levels the render must show.
@@ -369,10 +376,33 @@ def run(locale: "str | None") -> int:
                 rearmed = value_of(server, f"/godot/slot/{THUNDER_STRIP}/holder")
 
                 if again and rearmed:
-                    report.equal(value_of(server, f"/godot/run/{rearmed}/trim"), -120.0,
-                                 "parked at the bottom, where a fader strip's run starts")
+                    report.equal(value_of(server, f"/godot/run/{rearmed}/trim"), 0.0,
+                                 "back at its initial level, where its fader waits for a touch")
 
                 wait_ticks(server, 25)
+
+                # --- Door, touched ------------------------------------------
+                door = value_of(server, f"/godot/slot/{DOOR_STRIP}/holder") or ""
+                door_trim = f"/godot/run/{door}/trim"
+
+                report.equal(value_of(server, door_trim), 0.0,
+                             "Door's fader waits at its initial level")
+
+                hand.send(door_trim, [-120.0])
+                report.equal(wait_for(server, door_trim, -120.0), -120.0,
+                             "a write with no hand on it moves the level")
+                wait_ticks(server, 5)
+                report.equal(value_of(server, f"/godot/run/{door}/state"), "armed",
+                             "and starts nothing")
+
+                hand.send("/godot/cmd/node/touch", [door_trim])
+                report.equal(wait_for(server, f"/godot/run/{door}/state", "playing"), "playing",
+                             "a hand landing on the fader starts the clip")
+                report.equal(value_of(server, door_trim), -120.0,
+                             "at the level the fader is at, silent here")
+
+                hand.send("/godot/cmd/node/release", [door_trim])
+                wait_ticks(server, 10)
 
                 # --- the bank disarmed --------------------------------------
                 # The transport cue aimed at the bank: every member ends - the
@@ -438,12 +468,15 @@ def run(locale: "str | None") -> int:
 
         presses = [parts for parts in applied if len(parts) > 4 and parts[4] == "strip.press"]
         releases = [parts for parts in applied if len(parts) > 4 and parts[4] == "strip.release"]
+        by_hand = [parts for parts in presses if parts[3].startswith("udp:")]
+        by_touch = [parts for parts in presses if parts[3] == "engine"]
 
-        report.equal(len(presses), 2, "two presses in the log")
-        report.check(all(parts[3].startswith("udp:") for parts in presses),
-                     "each with the origin of the hand that pressed it")
-        report.check(any(parts[-1] == "i:64" for parts in presses),
-                     "and the velocity travels with the press", str(presses))
+        report.equal(len(by_hand), 2, "two presses in the log, with the origin of the hand")
+        report.check(any(parts[-1] == "i:64" for parts in by_hand),
+                     "and the velocity travels with the press", str(by_hand))
+        report.equal(len(by_touch), 1,
+                     "and one the engine made of a touch, a record a replay can be handed",
+                     str(presses))
         report.equal(len(releases), 1, "one release")
 
         # --- and it reproduces ------------------------------------------------

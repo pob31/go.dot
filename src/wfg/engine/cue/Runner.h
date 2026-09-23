@@ -399,16 +399,24 @@ namespace wfg::cue
             once per show revision. */
         const std::vector<std::string>& samplerStrips();
 
-        /*  THE HAND'S EDGES ON FADER STRIPS (PRD §3.9a), in one place each.
-            A fader counts as PARKED when it is at or below `parkedDb` with
-            nobody touching it - released at the bottom; a START is a parked
-            fader lifted past `startDb`, the hysteresis between the two being
-            what stops a parked fader chattering. Debounce is a preference
-            that arrives with Phase 10's others. */
+        /*  THE HAND'S EDGES ON FADER STRIPS, in one place each.
+
+            A START IS A TOUCH (author, 2026-09-23): the fader has flown to the
+            member's `initialLevel` and waits there, and a hand landing on it
+            starts the clip at wherever the fader is. `touchDwellTicks` is how
+            many ticks a touch must last before it counts - nought, so it counts
+            on the tick it arrives. It is a number because the D700's faders
+            report touches nobody meant: 58 of 81 in one capture landed within
+            150 ms of a nearby button press, a hand reaching past (PRD §3.16).
+            If reaching for the master section fires samples, this is what the
+            bench raises, at the price of that much latency on every start.
+
+            A STOP is §3.9a's fader-stop: a hold clip's trim at or below
+            `parkedDb` with nobody touching it - released at the bottom. */
         struct FaderEdge
         {
             static constexpr double parkedDb = -118.0;
-            static constexpr double startDb = -110.0;
+            static constexpr int touchDwellTicks = 0;
         };
 
         /*  The level a velocity or a pressure byte asks for, on one scale:
@@ -1033,10 +1041,6 @@ namespace wfg::cue
             the last strip. */
         std::string stripForMember (const juce::ValueTree& group, const std::string& cueId);
 
-        /** Whether a sampler strip's hand control is a pad (a gate) rather
-            than a fader - which decides where a fresh run's trim starts. */
-        bool stripIsGate (const std::string& stripId);
-
         /*  A sampler group's arming, in the handler: `takeover=group` closes
             every other armed sampler group. Asked when the group fires and at
             every refresh. */
@@ -1157,14 +1161,17 @@ namespace wfg::cue
         bool rosterRead = false;
 
         /*  WHAT THE FADER EDGES REMEMBER BETWEEN TICKS, per strip: which run
-            was under it, whether it counts as parked, and whether a hand was on
-            it a tick ago - the release edge is a hand that WAS there. Hook-side
-            memory, never a model input: the decisions it makes are records. */
+            was under it; whether a hand was on it a tick ago, and for how many
+            ticks - the release edge is a hand that WAS there, and a start is a
+            touch that has lasted; and whether this touch already started
+            something, so one touch starts one clip. Hook-side memory, never a
+            model input: the decisions it makes are records. */
         struct StripEdgeState
         {
             std::string holder;
-            bool parked = true;
             bool wasTouched = false;
+            int touchedTicks = 0;
+            bool fired = false;
             double lastTrim = -120.0;
         };
 

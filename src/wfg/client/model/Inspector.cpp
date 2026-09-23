@@ -42,11 +42,12 @@ namespace wfg::client::model
         const std::vector<std::string> when      { "preWait", "duration", "postWait" };
         const std::vector<std::string> saidLast  { "enabled", "preset" };
 
-        /*  WHAT ONLY A HAND ON A STRIP ASKS OF A MEDIA CUE (PRD §3.27): what
-            letting go does, what a second press does, how hard it was struck
-            and pressed, and the fade a release ends in. `dca` arrived with them
-            and is not one of them - a DCA trims any cue, fired or pressed. */
-        const std::vector<std::string> samplerRows { "release", "secondPress", "velocity",
+        /*  WHAT ONLY A HAND ON A STRIP ASKS OF A MEDIA CUE (PRD §3.27): where
+            its fader waits, what letting go does, what a second press does,
+            how hard it was struck and pressed, and the fade a release ends in.
+            `dca` arrived with them and is not one of them - a DCA trims any
+            cue, fired or pressed. */
+        const std::vector<std::string> samplerRows { "initialLevel", "release", "secondPress", "velocity",
                                                      "velocityFloor", "pressure", "releaseFade" };
 
         /*  WHAT A SAMPLER GROUP IS NEVER ASKED: how it advances, how a round is
@@ -60,12 +61,14 @@ namespace wfg::client::model
             static const std::map<std::string, std::vector<std::string>> table
             {
                 /*  A SAMPLER MEMBER'S ROWS AFTER EVERYTHING A MEDIA CUE HAS
-                    (Phase 6): the DCA it answers to, then what a hand on its
-                    strip does, in the order a press happens - it is let go, it
-                    is pressed again, it was struck, it is leant on, it fades. */
+                    (Phase 6): the DCA it answers to, where its fader waits,
+                    then what a hand on its strip does, in the order a press
+                    happens - it is let go, it is pressed again, it was struck,
+                    it is leant on, it fades. */
                 { "media",   { "file", "channels", "stereoToMono", "directOut",
-                               "level", "startOffset", "dca", "release", "secondPress",
-                               "velocity", "velocityFloor", "pressure", "releaseFade" } },
+                               "level", "startOffset", "dca", "initialLevel", "release",
+                               "secondPress", "velocity", "velocityFloor", "pressure",
+                               "releaseFade" } },
 
                 //  What it moves - a cue, or a DCA instead - then where to and how.
                 { "fade",    { "target", "dca", "level", "curve", "points", "stopWhenDone" } },
@@ -105,6 +108,7 @@ namespace wfg::client::model
                 { "secondPress", "second press" },
                 { "velocityFloor", "velocity floor" },
                 { "releaseFade", "release fade" },
+                { "initialLevel", "initial level" },
             };
 
             return table;

@@ -357,10 +357,13 @@ namespace wfg::client::ui
     {
         /*  WHAT IT SOUNDS LIKE WHILE IT SOUNDS (PRD §3.30): the holder's
             timbre, "h s l" with the hue in degrees, while the strip says it is
-            playing or held. Otherwise, and whenever the analysis has not
-            arrived, the colour somebody gave the cue; and with neither, the
-            theme's own off colour rather than a black that would read as a
-            colour somebody chose. */
+            playing or held - drawn as the D700 lights it (SurfaceBridge's
+            `colourFromTimbre`): the hue and the saturation as analysed, which
+            is how broad the spectrum is (author, 2026-09-23), at full
+            brightness, and silence dark. Otherwise, and whenever the analysis
+            has not arrived, the colour somebody gave the cue; and with
+            neither, the theme's own off colour rather than a black that would
+            read as a colour somebody chose. */
         if ((strip.word == "playing" || strip.word == "held") && ! strip.timbre.empty())
         {
             const auto hsl = model::words (strip.timbre);
@@ -373,12 +376,14 @@ namespace wfg::client::ui
 
                 if (hue.has_value() && saturation.has_value() && lightness.has_value())
                 {
+                    if (! (*lightness > 0.0))
+                        return Look::colour (theme, "ink-off");
+
                     const auto turn = std::fmod (std::fmod (*hue, 360.0) + 360.0, 360.0) / 360.0;
 
-                    return juce::Colour::fromHSL (static_cast<float> (turn),
+                    return juce::Colour::fromHSV (static_cast<float> (turn),
                                                   static_cast<float> (std::clamp (*saturation, 0.0, 1.0)),
-                                                  static_cast<float> (std::clamp (*lightness, 0.0, 1.0)),
-                                                  1.0f);
+                                                  1.0f, 1.0f);
                 }
             }
         }

@@ -145,10 +145,7 @@ namespace wfg::cue
                 second while it lets go would teach an operator to ignore the
                 refusals that mean something. */
             if (auto* run = runs.find (live->id); run != nullptr && ! run->isFinished())
-            {
                 run->trim = *decibels;
-                run->ridden = true;
-            }
 
             return Outcome::ok (args);
         };

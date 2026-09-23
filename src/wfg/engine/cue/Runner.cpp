@@ -3427,12 +3427,6 @@ namespace wfg::cue
         return samplerRoster;
     }
 
-    bool Runner::stripIsGate (const std::string& stripId)
-    {
-        samplerStrips();
-        return gateStrips.count (stripId) > 0;
-    }
-
     std::string Runner::stripForMember (const juce::ValueTree& group, const std::string& cueId)
     {
         /*  POSITIONAL (plan decision 3): the Nth media member of the group is
@@ -3633,23 +3627,28 @@ namespace wfg::cue
 
     void Runner::samplerEdges (Engine& engine)
     {
-        /*  FADER-START AND FADER-STOP, AS RULES OVER A TRIM (PRD §3.9a).
+        /*  TOUCH-START AND FADER-STOP, AS RULES OVER A TOUCH AND A TRIM.
 
             Every surface, the virtual panel and the page ride the run under a
             fader strip through `node.set` on its trim, and hold it with
-            `node.touch` - so the edges are read here, off the trim and the
-            touch table, once, rather than by each thing that moves a fader.
+            `node.touch` - so the edges are read here, off the touch table and
+            the trim, once, rather than by each thing that moves a fader.
 
-            START: the fader was PARKED - at or below `parkedDb` with nobody
-            touching it, released at the bottom - and the trim has come up past
-            `startDb`. A dip to the bottom while touched is a ride, never a
-            release, so a play-out clip does not restart every time a hand
-            brushes the floor.
+            START (author, 2026-09-23): the member's fader has flown to its
+            `initialLevel` and waits there; a NEW touch on it - the hand landing
+            - starts the clip at wherever the fader is. One touch starts one
+            clip, and a touch on a clip already playing is a ride and nothing
+            else, so leaning on a fader to bring a sound down never restarts
+            it. A hand that was on the fader when the strip changed hands holds
+            the OLD node, never the new one - the virtual panel keeps its grab
+            for the whole ride, and a surface lets go at the handover
+            (SurfaceBridge) - so a resting hand cannot start the clip that has
+            just arrived under it; only a hand landing again can.
 
             STOP: a hold clip whose trim is at the bottom with nobody touching
             it, where a hand was a tick ago or the fader came down from above -
-            the release at -inf. A play-out clip is not stopped: silence on its
-            fader is a mute.
+            the release at -inf, §3.9a's fader-stop. A play-out clip is not
+            stopped: silence on its fader is a mute.
 
             Submitted as `strip.press` and `strip.release` from the engine, so
             the log carries each edge and a replay - which runs no hooks - has
@@ -3676,11 +3675,12 @@ namespace wfg::cue
                 edge = StripEdgeState {};
                 edge.holder = holder->id;
                 edge.lastTrim = holder->trim;
-                edge.parked = holder->trim <= FaderEdge::parkedDb;
             }
 
             const auto touched = touches != nullptr
                                    && ! touches->holdersOf ("/godot/run/" + holder->id + "/trim").empty();
+
+            edge.touchedTicks = touched ? edge.touchedTicks + 1 : 0;
 
             const auto launched = holder->launchRequested
                                     || holder->state == runState::playing
@@ -3688,18 +3688,14 @@ namespace wfg::cue
 
             const auto hold = textOf (document.findById (holder->cue), "release") == "hold";
 
-            /*  WHETHER A HAND MOVED IT, as opposed to a press setting it: only a
-                write through `node.set` is a fader moving. */
-            const auto ridden = holder->ridden;
+            if (! touched)
+                edge.fired = false;
 
-            if (auto* bookkeeping = runs.find (holder->id))
-                bookkeeping->ridden = false;
-
-            if (! launched && holder->state == runState::armed && edge.parked && ridden
-                 && holder->trim > FaderEdge::startDb)
+            if (! launched && holder->state == runState::armed && touched && ! edge.fired
+                 && edge.touchedTicks > FaderEdge::touchDwellTicks)
             {
                 engine.submit (origin::engine, "strip.press", one (stripId));
-                edge.parked = false;
+                edge.fired = true;
             }
             else if (launched && hold && holder->trim <= FaderEdge::parkedDb && ! touched
                       && (edge.wasTouched || edge.lastTrim > FaderEdge::parkedDb))
@@ -3707,18 +3703,11 @@ namespace wfg::cue
                 engine.submit (origin::engine, "strip.release", one (stripId));
             }
 
-            /*  PARKED IS WHERE THE FADER IS, NOT ONLY WHAT THE LAST START SAID.
-                At the bottom with nobody on it, it is parked; anywhere above the
-                bottom, it is not - however it got there. A pad pressed on a
-                fader strip lifts the trim to unity without a start edge, and a
-                hold clip let go before its launch was placed stays armed at
-                that level: had `parked` only been cleared by a start, the next
-                tick would have read a parked fader at unity and started the
-                clip nobody pressed (found recording the sampler fixture). */
-            if (holder->trim <= FaderEdge::parkedDb && ! touched)
-                edge.parked = true;
-            else if (holder->trim > FaderEdge::parkedDb)
-                edge.parked = false;
+            /*  A TOUCH THAT FOUND THE CLIP ALREADY GOING started nothing, and
+                is spent: the hand is riding, and letting go of a sound it
+                pressed and touching it again is what starts the next one. */
+            if (touched && launched)
+                edge.fired = true;
 
             edge.wasTouched = touched;
             edge.lastTrim = holder->trim;
@@ -3811,15 +3800,26 @@ namespace wfg::cue
 
         if (run->state == runState::armed && ! run->launchRequested)
         {
-            /*  THE PRESS THAT STARTS IT. Velocity sets the level it starts at
-                when the clip asks for that (decision AA); otherwise a fader
-                parked at the bottom comes up to unity - a pad hit on a fader
-                strip plays at the level the clip was written at - and a fader
-                already lifted keeps where the hand put it. */
+            /*  THE PRESS THAT STARTS IT, at the level the strip's fader is at -
+                the member's `initialLevel`, where it flew when the member was
+                armed, unless a hand has moved it since. Velocity sets the level
+                instead when the clip asks for that (decision AA).
+
+                A FADER SOMEBODY PULLED TO THE BOTTOM is the one exception, for
+                a press that is not the touch - a pad, an encoder, a fired
+                command: it plays at the member's initial level, or at unity if
+                that is the bottom too, because a press is a request to hear it.
+                The touch itself keeps the trim wherever it is: the hand on the
+                fader is the one setting the level, and the motor cannot move
+                under it. The engine's own press is that touch (`samplerEdges`),
+                and its origin is logged, so a replay decides the same. */
             if (byVelocity)
                 run->trim = levelForByte (velocity, floor);
-            else if (run->trim <= FaderEdge::parkedDb)
-                run->trim = 0.0;
+            else if (origin != origin::engine && run->trim <= FaderEdge::parkedDb)
+            {
+                const auto initial = numberOf (cue, "initialLevel");
+                run->trim = initial > FaderEdge::parkedDb ? initial : 0.0;
+            }
 
             run->launchRequested = true;
             run->launchRequestedAtTick = tick;
@@ -4807,7 +4807,7 @@ namespace wfg::cue
                     {
                         adopted->sampler = true;
                         const auto stripId = stripForMember (parentCue, cueId);
-                        adopted->trim = stripIsGate (stripId) ? 0.0 : -120.0;
+                        adopted->trim = numberOf (cue, "initialLevel");
                         claimStripFor (*adopted, stripId);
                     }
 
@@ -4832,13 +4832,14 @@ namespace wfg::cue
             ready and simply waits in the state it was born in. */
         /*  A SAMPLER GROUP'S MEMBER IS ARMED ONTO A STRIP (PRD §3.27): the one
             its place among the group's media members lands on, counted onto
-            the sampler strips of every surface. Its trim starts where the
-            strip's hand control is - a fader PARKED at silence, so lifting it
-            is what starts the clip and §3.9a's "reasserted at every handover"
-            is simply a fresh run; a pad at unity, so a hit plays. A strip
-            another group's clip is still sounding on is WAITED for, and the
-            member is armed when it lands: a voice held for a strip nobody can
-            press would be a voice for nothing. */
+            the sampler strips of every surface. Its trim starts at the
+            member's `initialLevel` (author, 2026-09-23) - where a fader flies
+            to and waits for the touch that starts the clip, and where a pad's
+            press without velocity plays - so §3.9a's start value "reasserted
+            at every handover" is simply a fresh run. A strip another group's
+            clip is still sounding on is WAITED for, and the member is armed
+            when it lands: a voice held for a strip nobody can press would be a
+            voice for nothing. */
         if (kind == "media")
             if (const auto* parent = runs.find (parentRun))
                 if (const auto parentCue = document.findById (parent->cue);
@@ -4846,7 +4847,7 @@ namespace wfg::cue
                 {
                     run->sampler = true;
                     const auto stripId = stripForMember (parentCue, cueId);
-                    run->trim = stripIsGate (stripId) ? 0.0 : -120.0;
+                    run->trim = numberOf (cue, "initialLevel");
                     claimStripFor (*run, stripId);
 
                     if (std::find (run->claims.begin(), run->claims.end(), stripId)
@@ -5390,7 +5391,19 @@ namespace wfg::cue
 
             const auto* awaited = runs.find (job.awaiting);
 
-            if (awaited == nullptr || ! awaited->isFinished())
+            /*  A SAMPLER GROUP IS A WINDOW ON THE SIDE OF THE CUES (author,
+                2026-09-23): its members can be played at any moment, and the
+                list goes on until somebody stops it. So a sequence that plays
+                itself arms one and moves on at once - waiting for it to finish
+                would hold the rest of the scene for as long as the pads were
+                live, which is the whole of the time they are wanted. */
+            const auto handedOver = [this] (const Run& member)
+            {
+                return member.kind == "group" && member.state == runState::playing
+                         && textOf (document.findById (member.cue), "mode") == "sampler";
+            };
+
+            if (awaited == nullptr || ! (awaited->isFinished() || handedOver (*awaited)))
                 continue;
 
             job.awaiting.clear();
@@ -5467,6 +5480,27 @@ namespace wfg::cue
                 }
 
                 ++job.nextMember;
+                continue;
+            }
+
+            /*  AND THE SEQUENCE LASTS UNTIL ITS BANK IS STOPPED: the round is
+                not over while a sampler group it armed is still live, so a
+                scene's pads live as long as the scene, stopping the scene takes
+                them with it, and a second round never arms a second copy of a
+                bank that is still armed. Every other member of a sequence has
+                finished before the next began, so this waits on nothing else -
+                and it waits by AWAITING the bank, which is where the next tick
+                looks: with nothing awaited, the loop above only ever goes
+                looking for an armed member to launch. */
+            if (! allFinished())
+            {
+                for (const auto* child : children)
+                    if (! child->isFinished())
+                    {
+                        job.awaiting = child->id;
+                        break;
+                    }
+
                 continue;
             }
 

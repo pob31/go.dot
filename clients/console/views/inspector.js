@@ -106,8 +106,8 @@ const SAID_LAST = ["enabled", "preset"];
     happens. A group's `takeover` sits beside `mode`, the answer that makes it a
     question; a fade's `dca` beside `target`, the other thing it can move. */
 const KIND_ORDER = {
-  media:   ["file", "level", "startOffset", "dca", "release", "secondPress", "velocity",
-            "velocityFloor", "pressure", "releaseFade"],
+  media:   ["file", "level", "startOffset", "dca", "initialLevel", "release", "secondPress",
+            "velocity", "velocityFloor", "pressure", "releaseFade"],
   fade:    ["target", "dca", "level", "curve", "points", "stopWhenDone"],
   stop:    ["target", "verb", "curve"],
   start:   ["target"],

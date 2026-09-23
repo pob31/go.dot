@@ -8559,6 +8559,15 @@ reasserted at every handover"*:** the strip's `target` moves to the new run's tr
 the bridge fly the fader to the bottom there, and a fader left at −10 by a clip that ended on its
 own never sits over a clip that has not started.
 
+*Overruled by the author, 2026-09-23:* **a sample has an initial level, and its fader flies there.**
+A new sampler-member row, `media/initialLevel` (dB, nought by default — a trim on the cue's own
+level, so the default plays the clip as it was written), is where every fresh run's trim starts,
+under a fader and under a pad alike. The fader waits there for the touch that starts the clip
+(below). §3.9a's *"start value the fader flies to"* is therefore the member's, and *"reasserted at
+every handover"* is still simply a fresh run. A press that is not the touch — a pad, an encoder, a
+fired command — on a fader somebody has pulled to the bottom plays at the initial level, or at unity
+if that is the bottom too.
+
 **The two takeovers** (§3.27): what arming one bank does to a bank already on the strips, decided
 once, on the group that arms — the scene change is where the designer is thinking about it. Both
 follow §3.9e's second shared rule, **eviction is a close, not a kill**, which §13.15 left for this
@@ -8657,6 +8666,30 @@ chatters"*. Both numbers live in one place (`faderEdge::parkedDb`, `faderEdge::s
 bridge's colour and motor constants (plan decision 14), so that what the bench and the room find
 changes one line each; a debounce is a user preference and Phase 10's (§3.7). A replay runs no hooks
 and needs none: it has the `strip.press` and `strip.release` records the hook submitted.
+
+*Overruled by the author, 2026-09-23:* **a start is a touch.** *"The fader flies to this level,
+waiting for the touch command to trigger playback."* The hook submits `strip.press`, engine origin,
+when a new touch lands on the fader of an armed member not yet launched; the press keeps the trim
+where the fader is, because the hand on the fader sets the level and the motor cannot move under
+it. One touch starts one clip, and a touch on a clip already playing is a ride — so leaning on a
+fader to bring a sound back up never restarts it. A move with no touch is a level set in advance and
+starts nothing. **parked** and the −110 dB start threshold are gone, and with them `Run::ridden`,
+which only the lift-start needed; **stop** is unchanged, §3.9a's fader-stop at the bottom on
+release. `faderEdge::touchDwellTicks`, nought, is how long a touch must last before it counts: the
+D700's faders report touches nobody meant — 58 of 81 in one capture landed within 150 ms of a
+nearby button press (PRD §3.16) — so if reaching past a fader fires samples, the bench raises it, at
+that much latency on every start. **A hand resting on a fader through a handover** holds the old
+run's node and never the new one — the panel keeps its grab for the whole ride, and the bridge lets
+go at the handover instead of moving its touch (§16.6) — so a bank changing, or a clip re-arming,
+under a hand that did not move starts nothing.
+
+*Added from the author's review, 2026-09-23:* **a sampler group is a window on the side of the
+cues** — *"they can be triggered at any time by the user; the cue list goes on until we stop the
+sampler group."* At the top of a list that was already so. Inside a sequence that plays itself it
+was not: the sequence waited for each member to finish, and a bank only finishes when somebody stops
+it. Now such a sequence arms the bank and moves on at once, and does not end — no footer, no next
+round — while the bank it armed is live, so a scene's pads live as long as the scene and stopping
+the scene takes them with it. A timeline or a manual group already lived that long.
 
 **`cue.fire` and `trigger.fire` on a member** (plan decision 10). With a live run holding a strip, a
 fire is a press with no velocity. Without one it is refused `needs-strip`: fired by name, a member
@@ -8798,6 +8831,19 @@ when nothing drives them (§3.16). While a clip sounds a strip shows the run's t
 cue's authored colour — §3.30's *(proposed)* policy, built as the default, with no switch yet to
 turn timbre off. The master dial keeps the idle colour, and a generic `mcu` surface drives no colour
 at all. The rate and the interval are M27's and M28's to revise.
+
+*Corrected at the author's direction, 2026-09-23:* **the timbre keeps its saturation** — *"it shows
+how broad the spectrum is."* A timbre was read as HSL, and its lightness is its frequency axis, so a
+bass bed lit a dark LED and a high effect a white one, washing the saturation out at both ends. It is
+read now as the hue and the saturation at full brightness, silence dark — on the LEDs and on the
+virtual panel's swatch alike. Brightness is left free for what the bench decides: modulating it
+slightly with the amplitude or its variation, and a maximum-brightness switch for a booth in the
+house that has to stay dark — both the author's *"we will see"*, neither built.
+
+*And the touch across a handover, 2026-09-23:* a hand resting on a fader when its strip changes hands
+lets go of the old node and holds nothing until it lands again, rather than moving its touch to the
+new node — because a touch now starts a sampler clip (§16.5). The motor stays still under it all the
+same, and what the hand moves goes to the new node, a ride with no touch.
 
 **The displays.** An `mcu` strip shows the short name on its first row, and on its second the level
 while a fader rides and the strip's word otherwise. A `d700` strip (PR 6.7) has three rows — the
@@ -9020,7 +9066,8 @@ because the author asked for it by phase.
 §3.27's show-long soundboard of fader triggers in a parallel list, are not built: a fader starts
 what a sampler group has put under it, a soundboard is a sampler group armed once and never taken
 over, and the devplan's *"a fader-start cue fires from the D700"* is met by a sampler member. Nor is
-a start value other than silence (§3.9a): every handover flies to the bottom.
+a start value other than silence (§3.9a): every handover flies to the bottom. *Overruled
+2026-09-23: the start value is the member's `initialLevel`, and a touch is the start (§16.5).*
 
 **Bindings in general** (§3.10) — automation modes, cue-scoped lifetimes, an explicit update-cue
 capture. A strip's `target` is the only binding this phase has, derived rather than authored, and it
@@ -9049,7 +9096,8 @@ N*:
 4. **The voice wait is the word `voice` in `run/pending`**, the retry is `run.arm`, and `armMedia`
    does not fail `no-track` for a run marked as waiting for a voice.
 5. **A fresh run's trim is −120 dB under a fader and 0 dB under a pad**; a pad pressed on a parked
-   fader strip lifts the trim to nought, or to the velocity's level.
+   fader strip lifts the trim to nought, or to the velocity's level. *Overruled 2026-09-23: every
+   fresh run starts at its member's `initialLevel`, and a touch is the start (§16.5).*
 6. **No reply to the Mackie handshake**; the query is decoded for the serial only.
 7. **Trims are written with `node.set`**, through a dispatch in front of the document, and not by
    `dca.trim` and `run.trim` commands — against the `list.aim` precedent, for the touch table and
@@ -9063,7 +9111,8 @@ N*:
     foot.
 12. **The gate on `mcu` and `d700` is the V-Pot press**; SELECT is reserved.
 13. **The bridge's inbox drains before `runner.beforeTick`**, in the same hook.
-14. **The constants**: parked at or below −118 dB and a start above −110 dB; colour at most ten
+14. **The constants** (*the start threshold overruled 2026-09-23: a touch is the start*): parked
+    at or below −118 dB and a start above −110 dB; colour at most ten
     writes a second and re-asserted every two seconds at idle; a motor at most a twentieth of its
     travel a tick. Each is named in one place, and revised by M27–M29 and the room.
 15. **A pressure of nought is ignored**; one to 127 map on velocity's line (`levelForByte`).
@@ -9197,3 +9246,14 @@ the look of the Surfaces tab and the panel; the three rulings flagged above — 
 sampler group, decision N for other groups, and whether a switched-off surface's port should fire
 triggers; and whether the strip colour should follow the run pane's HSV reading of the timbre
 rather than the HSL the row describes.
+
+**The author's first look, the same day, before the D700 came out.** Four answers, built at once:
+a sample has an initial level its fader flies to, and **a touch is the start** (§16.5) — which made
+the bridge stop moving a resting hand's touch across a handover, or a clip ending under a hand
+would have restarted itself; **the timbre keeps its saturation** on the strips (§16.6); and **a
+sampler group is a window on the side of the cues**, which a sequence that plays itself had not
+honoured (§16.5). The fixture `sampler.wfglog` was re-recorded under the touch-start, and the
+black-box driver now touches a fader and watches the clip start. Still the author's: the stray
+touches the D700 is known for, now that a touch fires a sample (`touchDwellTicks` is the lever);
+brightness and its ceiling; the DCA faders' initial level — *"set at some point; we'll see what feels
+most practical"*; and the rulings above.

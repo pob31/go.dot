@@ -317,9 +317,10 @@ TEST_CASE ("sampler: GO arms every member onto a strip, and the pointer moves on
         CHECK_FALSE (run->launchRequested);
         CHECK (run->track >= 0);
 
-        /*  A FADER STRIP PARKS THE RUN: its trim starts at silence, so lifting
-            the fader is what starts it. */
-        CHECK (run->trim <= -119.0);
+        /*  THE FADER FLIES TO THE MEMBER'S INITIAL LEVEL and waits there for
+            a touch (author, 2026-09-23): nought by default, the level the clip
+            was written at. */
+        CHECK (std::abs (run->trim) < 1.0e-9);
     }
 
     /*  The group runs; standby went to the next sibling and never inside. */
@@ -451,8 +452,8 @@ TEST_CASE ("sampler: a hold clip stops when it is let go, and is armed again for
 
     REQUIRE (rig.tickUntil ([&rig, &heldId] { return rig.runs.find (heldId)->isFinished(); }));
 
-    /*  AND THE MEMBER IS BACK ON ITS STRIP, a fresh run, parked: a clip plays
-        any number of times. */
+    /*  AND THE MEMBER IS BACK ON ITS STRIP, a fresh run at its initial level:
+        a clip plays any number of times. */
     REQUIRE (rig.tickUntil ([&rig, &members, &heldId]
                             {
                                 const auto* again = rig.liveRunOf (members[0]);
@@ -461,17 +462,18 @@ TEST_CASE ("sampler: a hold clip stops when it is let go, and is armed again for
 
     const auto* again = rig.liveRunOf (members[0]);
     CHECK (rig.holds (again, rig.strips[0]));
-    CHECK (again->trim <= -119.0);
+    CHECK (std::abs (again->trim) < 1.0e-9);
     CHECK_FALSE (again->held);
 }
 
 TEST_CASE ("sampler: a pad let go before its clip sounded leaves the fader up, and starts nothing")
 {
-    /*  FOUND RECORDING THE FIXTURE. A pad pressed on a fader strip lifts the
-        trim to unity with no start edge; let go before the launch was placed,
-        the member stays armed at that level. The fader-edge rule had only ever
-        cleared `parked` on a start, so the next tick read a parked fader at
-        unity and started the clip nobody was pressing. */
+    /*  FOUND RECORDING THE FIXTURE, under the lift-start rule since replaced:
+        a pad let go before the launch was placed left the member armed with
+        its trim up, and the next tick read that as a fader lifted from the
+        bottom and started the clip nobody was pressing. A touch starts a clip
+        now, and the case stays: nothing but a hand landing on the fader starts
+        a member that a released press left armed. */
     Rig rig;
     const auto& members = rig.membersOf[rig.bankA];
     rig.set ("/godot/cue/" + members[0] + "/release", "hold");
@@ -573,11 +575,15 @@ TEST_CASE ("sampler: strip takeover takes the strips it lands on and nothing els
     REQUIRE (rig.tickUntil ([&rig] { return rig.liveRunOf (rig.bankB) == nullptr; }));
 }
 
-TEST_CASE ("sampler: a fader lifted from the bottom starts the clip, and let go there stops a hold clip")
+TEST_CASE ("sampler: a touch starts the clip where its fader waits, and let go at the bottom stops a hold clip")
 {
+    /*  THE AUTHOR'S RULE OF 2026-09-23: a sample has an initial level, its
+        fader flies there when it is armed and waits, and a hand landing on the
+        fader starts it - at wherever the fader is by then. */
     Rig rig;
     const auto& members = rig.membersOf[rig.bankA];
     rig.set ("/godot/cue/" + members[0] + "/release", "hold");
+    rig.set ("/godot/cue/" + members[0] + "/initialLevel", "-12");
     rig.set ("/godot/cue/" + members[1] + "/release", "playOut");
     rig.arm (rig.bankA);
 
@@ -586,14 +592,31 @@ TEST_CASE ("sampler: a fader lifted from the bottom starts the clip, and let go 
         return "/godot/run/" + rig.liveRunOf (members[i])->id + "/trim";
     };
 
-    /*  A HAND ON THE FADER, lifting it past the start threshold: fader-start. */
+    const auto at = [&rig, &members] (std::size_t i, double decibels)
+    {
+        return std::abs (rig.liveRunOf (members[i])->trim - decibels) < 1.0e-9;
+    };
+
+    //  IT WAITS AT ITS INITIAL LEVEL, and nothing sounds.
+    CHECK (at (0, -12.0));
+    CHECK_FALSE (rig.liveRunOf (members[0])->launchRequested);
+
+    /*  A MOVE WITH NO HAND ON IT is a level set in advance - the page, or a
+        script - and starts nothing. */
     const auto hold = trimOf (0);
+    rig.send ("node.set", { osc::Value::string (hold), osc::Value::float64 (-9.0) }, "window");
+    rig.tickOnce();
+    rig.tickOnce();
+    CHECK_FALSE (rig.liveRunOf (members[0])->launchRequested);
+    CHECK (at (0, -9.0));
+
+    /*  A HAND LANDS: touch-start, at the level the fader is at - not lifted,
+        not moved, because the motor cannot move under the hand. */
     rig.send ("node.touch", { osc::Value::string (hold) }, "surface:DESK");
-    rig.send ("node.set", { osc::Value::string (hold), osc::Value::float64 (-100.0) }, "surface:DESK");
     rig.tickOnce();
 
     CHECK (rig.liveRunOf (members[0])->launchRequested);
-    CHECK (std::abs (rig.liveRunOf (members[0])->trim - (-100.0)) < 1.0e-9);
+    CHECK (at (0, -9.0));
 
     rig.sound (members[0]);
 
@@ -608,17 +631,194 @@ TEST_CASE ("sampler: a fader lifted from the bottom starts the clip, and let go 
     rig.tickOnce();
     CHECK (rig.runs.find (stoppingId)->state == cue::runState::stopping);
 
-    /*  A PLAY-OUT CLIP taken to the bottom and let go is muted, not stopped. */
+    /*  A PLAY-OUT CLIP, touched, starts at its initial level - nought here -
+        and taken to the bottom and let go it is muted, not stopped. */
     const auto playOut = trimOf (1);
     rig.send ("node.touch", { osc::Value::string (playOut) }, "surface:DESK");
-    rig.send ("node.set", { osc::Value::string (playOut), osc::Value::float64 (-50.0) }, "surface:DESK");
     rig.tickOnce();
+    CHECK (rig.liveRunOf (members[1])->launchRequested);
+    CHECK (at (1, 0.0));
+
     rig.sound (members[1]);
+    const auto playingId = rig.liveRunOf (members[1])->id;
+
     rig.send ("node.set", { osc::Value::string (playOut), osc::Value::float64 (-120.0) }, "surface:DESK");
     rig.send ("node.release", { osc::Value::string (playOut) }, "surface:DESK");
     rig.tickOnce();
     rig.tickOnce();
     CHECK (rig.liveRunOf (members[1])->state == cue::runState::playing);
+
+    /*  AND A HAND ON A CLIP ALREADY PLAYING IS A RIDE: touching the fader to
+        bring the level back up restarts nothing, whatever its second press
+        would do. */
+    const auto launchesBefore = rig.audio.launched.size();
+    rig.send ("node.touch", { osc::Value::string (playOut) }, "surface:DESK");
+    rig.send ("node.set", { osc::Value::string (playOut), osc::Value::float64 (-6.0) }, "surface:DESK");
+    rig.tickOnce();
+    rig.tickOnce();
+
+    CHECK (rig.liveRunOf (members[1])->id == playingId);
+    CHECK (rig.liveRunOf (members[1])->state == cue::runState::playing);
+    CHECK (rig.audio.launched.size() == launchesBefore);
+    CHECK (at (1, -6.0));
+}
+
+TEST_CASE ("sampler: one touch starts one clip, and a hand resting through a re-arm starts nothing")
+{
+    /*  THE CLIP ENDS UNDER A HAND THAT STAYS DOWN, and the member is armed
+        again as a new run. The hand holds the old run's node - the panel keeps
+        its grab for the whole ride, and a surface lets go at the handover
+        rather than touching the new one - so nothing starts the new run until
+        the hand leaves and lands again. */
+    Rig rig;
+    const auto& members = rig.membersOf[rig.bankA];
+    rig.arm (rig.bankA);
+
+    const auto first = "/godot/run/" + rig.liveRunOf (members[0])->id + "/trim";
+    const auto firstId = rig.liveRunOf (members[0])->id;
+
+    rig.send ("node.touch", { osc::Value::string (first) }, "window");
+    rig.tickOnce();
+    REQUIRE (rig.liveRunOf (members[0])->launchRequested);
+
+    rig.sound (members[0]);
+    rig.silence (members[0]);
+
+    REQUIRE (rig.tickUntil ([&rig, &members, &firstId]
+                            {
+                                const auto* again = rig.liveRunOf (members[0]);
+                                return again != nullptr && again->id != firstId;
+                            }));
+
+    for (int n = 0; n < 5; ++n)
+        rig.tickOnce();
+
+    CHECK_FALSE (rig.liveRunOf (members[0])->launchRequested);
+    CHECK (rig.liveRunOf (members[0])->state == cue::runState::armed);
+
+    //  The hand leaves, and lands on the new run's fader: that is a start.
+    rig.send ("node.release", { osc::Value::string (first) }, "window");
+
+    const auto second = "/godot/run/" + rig.liveRunOf (members[0])->id + "/trim";
+    rig.send ("node.touch", { osc::Value::string (second) }, "window");
+    rig.tickOnce();
+    CHECK (rig.liveRunOf (members[0])->launchRequested);
+
+    /*  THE DWELL IS NOUGHT (author, 2026-09-23: a touch starts the clip), so a
+        touch counts on the tick it is seen. The number is there for the bench
+        - the D700's stray touches - and this pins what it is today. */
+    CHECK (cue::Runner::FaderEdge::touchDwellTicks == 0);
+}
+
+TEST_CASE ("sampler: a press on a fader somebody pulled down plays at the initial level, and a pad starts there")
+{
+    Rig rig;
+    const auto& members = rig.membersOf[rig.bankA];
+    rig.set ("/godot/cue/" + members[0] + "/initialLevel", "-6");
+    rig.set ("/godot/cue/" + members[1] + "/initialLevel", "-120");
+    rig.arm (rig.bankA);
+
+    const auto trimOf = [&rig, &members] (std::size_t i)
+    {
+        return "/godot/run/" + rig.liveRunOf (members[i])->id + "/trim";
+    };
+
+    /*  PULLED TO THE BOTTOM WITH NO HAND ON IT, then pressed from a pad or an
+        encoder: a press is a request to hear it, so it plays at the member's
+        initial level... */
+    rig.send ("node.set", { osc::Value::string (trimOf (0)), osc::Value::float64 (-120.0) }, "window");
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "window");
+    CHECK (rig.liveRunOf (members[0])->launchRequested);
+    CHECK (std::abs (rig.liveRunOf (members[0])->trim - (-6.0)) < 1.0e-9);
+
+    //  ...or at unity, when the initial level is the bottom too.
+    CHECK (rig.liveRunOf (members[1])->trim <= -119.0);
+    rig.send ("strip.press", { osc::Value::string (rig.strips[1]) }, "window");
+    CHECK (std::abs (rig.liveRunOf (members[1])->trim) < 1.0e-9);
+}
+
+TEST_CASE ("sampler: a pad's clip starts at its initial level too")
+{
+    /*  THE SAME PANEL MADE A PAD CONTROLLER: its strips become gates, and a
+        member armed on a pad starts at its initial level as one on a fader
+        does - a press without velocity plays it there. */
+    Rig rig;
+    const auto panel = rig.document.findById (rig.strips[0]).getParent()[juce::Identifier ("id")]
+                          .toString().toStdString();
+    rig.set ("/godot/surface/" + panel + "/profile", "midiPads");
+
+    const auto& members = rig.membersOf[rig.bankA];
+    rig.set ("/godot/cue/" + members[0] + "/initialLevel", "-3");
+    rig.arm (rig.bankA);
+
+    CHECK (std::abs (rig.liveRunOf (members[0])->trim - (-3.0)) < 1.0e-9);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) }, "surface:PADS");
+    CHECK (rig.liveRunOf (members[0])->launchRequested);
+    CHECK (std::abs (rig.liveRunOf (members[0])->trim - (-3.0)) < 1.0e-9);
+
+    //  And a pad is never touch-started: a touch on its node is only a ride.
+    const auto trim = "/godot/run/" + rig.liveRunOf (members[1])->id + "/trim";
+    rig.send ("node.touch", { osc::Value::string (trim) }, "surface:PADS");
+    rig.tickOnce();
+    CHECK_FALSE (rig.liveRunOf (members[1])->launchRequested);
+}
+
+TEST_CASE ("sampler: a sequence that plays itself arms a bank and goes on, and lasts until the bank is stopped")
+{
+    /*  A SAMPLER GROUP IS A WINDOW ON THE SIDE OF THE CUES (author,
+        2026-09-23): its clips can be played at any moment, and the cue list
+        goes on until the bank is stopped. At the top of a list that was always
+        so - GO arms it and the pointer moves past. Inside an automatic
+        sequence it was not: the sequence waited for its member to finish, and
+        a bank only finishes when somebody stops it. */
+    Rig rig;
+
+    const auto scene = rig.document.createCue (rig.listId, 3, "group", "Scene").id;
+    rig.set ("/godot/cue/" + scene + "/mode", "sequence");
+    rig.set ("/godot/cue/" + scene + "/advance", "auto");
+
+    const auto before = rig.document.createCue (scene, 0, "memo", "Before").id;
+    const auto pads = rig.document.createCue (scene, 1, "group", "Pads").id;
+    rig.set ("/godot/cue/" + pads + "/mode", "sampler");
+    const auto clip = rig.document.createCue (pads, 0, "media", "Clip").id;
+    rig.set ("/godot/cue/" + clip + "/file", "clip.wav");
+    const auto later = rig.document.createCue (scene, 2, "memo", "Later").id;
+
+    REQUIRE (rig.document.setAttribute (cue::standbyAddressOf (rig.listId), scene).ok);
+    rig.tickOnce();
+    rig.send ("go");
+
+    //  THE BANK IS ARMED, AND THE SEQUENCE WENT ON PAST IT.
+    REQUIRE (rig.tickUntil ([&rig, &later] { return rig.runsOf (later) > 0; }));
+    REQUIRE (rig.tickUntil ([&rig, &later]
+                            {
+                                for (const auto& run : rig.runs.all())
+                                    if (run.cue == later && run.isFinished())
+                                        return true;
+
+                                return false;
+                            }));
+
+    CHECK (rig.runsOf (before) == 1u);
+    REQUIRE (rig.liveRunOf (pads) != nullptr);
+    CHECK (rig.liveRunOf (pads)->state == cue::runState::playing);
+    REQUIRE (rig.liveRunOf (clip) != nullptr);
+    CHECK (rig.holds (rig.liveRunOf (clip), rig.strips[0]));
+
+    //  AND THE SCENE LASTS AS LONG AS ITS PADS: nothing left to play, and not over.
+    for (int n = 0; n < 10; ++n)
+        rig.tickOnce();
+
+    REQUIRE (rig.liveRunOf (scene) != nullptr);
+    CHECK_FALSE (rig.liveRunOf (scene)->isFinished());
+
+    //  STOPPED, THE BANK ENDS - and with it the scene.
+    const auto sceneId = rig.liveRunOf (scene)->id;
+    rig.send ("run.stop", { osc::Value::string (rig.liveRunOf (pads)->id) });
+
+    REQUIRE (rig.tickUntil ([&rig, &sceneId] { return rig.runs.find (sceneId)->isFinished(); }));
+    CHECK (rig.liveRunOf (pads) == nullptr);
 }
 
 TEST_CASE ("sampler: a member fired by name is a press on its strip, and without one it is refused")

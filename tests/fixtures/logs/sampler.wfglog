@@ -1,12 +1,13 @@
 # wfg-log 1
 # fixture sampler - a sampler group armed, played, taken over and disarmed
-# (Phase 6, PR 6.4).
+# (Phase 6, PR 6.4; re-recorded 2026-09-23 when a touch became the start).
 #
 # WHAT IT IS FOR: that the decisions a sampler bank makes - arming onto
-# strips, presses and releases, a fader's edges, a takeover by strip and a
-# disarm - are all records, and reproduce exactly. Recorded from a real
-# `wfg serve` of tests/fixtures/bundles/sampler driven over OSC from one UDP
-# socket, with no audio device; the header lines below are the session's own.
+# strips, presses and releases, a touch that starts a clip, a takeover by
+# strip and a disarm - are all records, and reproduce exactly. Recorded from
+# a real `wfg serve` of tests/fixtures/bundles/sampler driven over OSC from
+# one UDP socket, with no audio device; the header lines below are the
+# session's own.
 #
 # bundle sampler sha256:9b6c6f0f78ff33256c1b057b2a9ee07b6def67ab198fe0ae575943bda9e31b82
 # clock sampleRate=48000 blockSize=128 samplesPerTick=960
@@ -19,62 +20,60 @@
 #
 # The horizon prepares Bank A while the pointer rests on it: a sampler group
 # is a place to stand, and its header - none here - would run ahead.
-A 0 0 engine run.prepare s:"SMP00002" s:"XNJYAXWN"
+A 0 0 engine run.prepare s:"SMP00002" s:"YTGQCZ9P"
 #
 # GO ARMS THE BANK: every media member onto the virtual panel's strips in
-# order, each a run of its own, each waiting for a hand. The standby moves to
-# Bank B and never descends into A.
-A 15 1 udp:127.0.0.1:52497 go s:"XNJYAXWN"
-A 16 2 engine run.prepare s:"SMP00007" s:"52R1PRJQ"
-A 17 3 engine run.spawn s:"XNJYAXWN" s:"SMP00003" s:"TDCRMNNB"
-A 17 4 engine run.spawn s:"XNJYAXWN" s:"SMP00004" s:"B4W5Z007"
-A 17 5 engine run.spawn s:"XNJYAXWN" s:"SMP00005" s:"0CM78DCS"
-A 17 6 engine run.spawn s:"XNJYAXWN" s:"SMP00006" s:"19Q67PKB"
+# order, each a run of its own, each waiting for a hand, each fader at its
+# member's initial level. The standby moves to Bank B and never descends
+# into A: a sampler group is a window on the side of the cues.
+A 15 1 udp:127.0.0.1:52623 go s:"YTGQCZ9P"
+A 16 2 engine run.prepare s:"SMP00007" s:"CWJ3VT4D"
+A 17 3 engine run.spawn s:"YTGQCZ9P" s:"SMP00003" s:"YV3KST15"
+A 17 4 engine run.spawn s:"YTGQCZ9P" s:"SMP00004" s:"BPDDSN4A"
+A 17 5 engine run.spawn s:"YTGQCZ9P" s:"SMP00005" s:"G8M6D5YN"
+A 17 6 engine run.spawn s:"YTGQCZ9P" s:"SMP00006" s:"WMEMYGHZ"
 #
 # Two pads. Thunder is a hold clip, so the hand that pressed it owns it; Rain
 # has velocity on, so 64 sets where it starts. No audio device here, so
 # neither sounds - what the log carries is what the hands decided.
-A 21 7 udp:127.0.0.1:52497 strip.press s:"STRP0001"
-A 21 8 udp:127.0.0.1:52497 strip.press s:"STRP0002" i:64
+A 22 7 udp:127.0.0.1:52623 strip.press s:"STRP0001"
+A 22 8 udp:127.0.0.1:52623 strip.press s:"STRP0002" i:64
 #
 # Thunder let go before it sounded: the launch is withdrawn and the member
-# stays armed. No fader-start follows - a press sets the trim, a hand moving
-# the fader is a node.set, and only the second is a lift (the edge this
-# fixture found).
-A 32 9 udp:127.0.0.1:52497 strip.release s:"STRP0001"
+# stays armed, and nothing starts it again but a hand landing on its fader.
+A 35 9 udp:127.0.0.1:52623 strip.release s:"STRP0001"
 #
-# A HAND ON DOOR'S FADER, lifted past the start threshold: the engine's own
-# strip.press is the fader-start, a record because a replay runs no hooks.
-# Taken back to the bottom and let go, Door is play-out, so it is a mute and
-# not a stop.
-A 43 10 udp:127.0.0.1:52497 node.touch s:"/godot/run/19Q67PKB/trim"
-A 43 11 udp:127.0.0.1:52497 node.set s:"/godot/run/19Q67PKB/trim" f:-100
-A 44 12 engine strip.press s:"STRP0004"
-A 53 13 udp:127.0.0.1:52497 node.set s:"/godot/run/19Q67PKB/trim" f:-120
-A 53 14 udp:127.0.0.1:52497 node.release s:"/godot/run/19Q67PKB/trim"
+# A HAND LANDS ON DOOR'S FADER, which waits at Door's initial level: that is
+# the start (author, 2026-09-23), and the engine's own strip.press is its
+# record, because a replay runs no hooks. Taken to the bottom and let go,
+# Door is play-out, so it is a mute and not a stop.
+A 45 10 udp:127.0.0.1:52623 node.touch s:"/godot/run/WMEMYGHZ/trim"
+A 46 11 engine strip.press s:"STRP0004"
+A 55 12 udp:127.0.0.1:52623 node.set s:"/godot/run/WMEMYGHZ/trim" f:-120
+A 55 13 udp:127.0.0.1:52623 node.release s:"/godot/run/WMEMYGHZ/trim"
 #
 # GO ON BANK B, takeover=strip: its two members land on strips one and two.
 # Thunder, idle, is ended at once so the strip hands over; Rain was asked to
 # launch, so it keeps its strip until its run ends - eviction is a close,
 # not a kill - and Bank B's second member waits for it.
-A 63 15 udp:127.0.0.1:52497 go s:"52R1PRJQ"
-A 65 16 engine run.spawn s:"52R1PRJQ" s:"SMP00008" s:"YBNXCWX2"
-A 65 17 engine run.spawn s:"52R1PRJQ" s:"SMP00009" s:"Z8EAZY81"
-A 66 18 engine run.kill s:"TDCRMNNB"
-A 67 19 engine run.ended s:"TDCRMNNB"
+A 66 14 udp:127.0.0.1:52623 go s:"CWJ3VT4D"
+A 68 15 engine run.spawn s:"CWJ3VT4D" s:"SMP00008" s:"74SMXTQB"
+A 68 16 engine run.spawn s:"CWJ3VT4D" s:"SMP00009" s:"VD63847H"
+A 69 17 engine run.kill s:"YV3KST15"
+A 70 18 engine run.ended s:"YV3KST15"
 #
 # THE STOP CUE AIMED AT BANK A disarms it: its members are killed, it ends,
 # and the strip Rain held goes to the member that was waiting.
-A 91 20 udp:127.0.0.1:52497 go s:"20KZVXYD"
-A 92 21 engine run.kill s:"B4W5Z007"
-A 92 22 engine run.kill s:"0CM78DCS"
-A 92 23 engine run.kill s:"19Q67PKB"
-A 92 24 engine run.ended s:"XNJYAXWN"
-A 92 25 engine run.ended s:"20KZVXYD"
-A 93 26 engine run.ended s:"B4W5Z007"
-A 93 27 engine run.ended s:"0CM78DCS"
-A 93 28 engine run.ended s:"19Q67PKB"
+A 93 19 udp:127.0.0.1:52623 go s:"PRP0QWSQ"
+A 94 20 engine run.kill s:"BPDDSN4A"
+A 94 21 engine run.kill s:"G8M6D5YN"
+A 94 22 engine run.kill s:"WMEMYGHZ"
+A 94 23 engine run.ended s:"YTGQCZ9P"
+A 94 24 engine run.ended s:"PRP0QWSQ"
+A 95 25 engine run.ended s:"BPDDSN4A"
+A 95 26 engine run.ended s:"G8M6D5YN"
+A 95 27 engine run.ended s:"WMEMYGHZ"
 #
 # And the list carries on.
-A 118 29 udp:127.0.0.1:52497 go s:"YJ0QV53Z"
-A 119 30 engine run.ended s:"YJ0QV53Z"
+A 120 28 udp:127.0.0.1:52623 go s:"15H9NZVH"
+A 121 29 engine run.ended s:"15H9NZVH"

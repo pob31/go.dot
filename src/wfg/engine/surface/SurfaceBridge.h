@@ -112,8 +112,11 @@ namespace wfg::surface
     std::optional<Rgb> colourFromHex (std::string_view text);
 
     /*  A run's `timbre` - "h s l", the hue in degrees and the saturation and
-        lightness from nought to one - as HSL turned into RGB, 0..127. A silent
-        frame, "0 0 0", is black, which is off. Nothing for an empty or
+        lightness from nought to one - as the colour an LED shows, 0..127: the
+        hue and the saturation as analysed, at full brightness (author,
+        2026-09-23: the saturation shows how broad the spectrum is, and is
+        kept). The lightness is not read but for silence: a silent frame,
+        lightness nought, is black, which is off. Nothing for an empty or
         malformed text: a run whose analysis has not arrived has no colour yet. */
     std::optional<Rgb> colourFromTimbre (std::string_view text);
 

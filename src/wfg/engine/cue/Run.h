@@ -381,15 +381,6 @@ namespace wfg::cue
         bool held = false;
         std::string heldBy;
 
-        /*  A HAND WROTE `trim` SINCE THE LAST TICK: set by `node.set`'s live
-            door, read and cleared by the fader edges. A fader-start is a fader
-            MOVED up from the bottom, and only a write through that door is a
-            fader moving - a pad press sets the trim too, and must not look like
-            a lift to the tick after it (found by the sampler fixture). Hook-side
-            bookkeeping: never published, and a replay, which runs no hooks,
-            never reads it. */
-        bool ridden = false;
-
         /*  ON A SAMPLER GROUP'S RUN: taken over by another sampler group
             arming with `takeover=group`. A closing group launches nothing
             new, plays out what is playing and ends each idle member so its

@@ -4447,8 +4447,9 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
 
     /*  A SAMPLER MEMBER'S ROWS AFTER EVERYTHING A MEDIA CUE HAS, in the order a
         press happens, and straight after the last of those. */
-    const std::vector<std::string> wanted { "level", "startOffset", "dca", "release", "secondPress",
-                                            "velocity", "velocityFloor", "pressure", "releaseFade" };
+    const std::vector<std::string> wanted { "level", "startOffset", "dca", "initialLevel", "release",
+                                            "secondPress", "velocity", "velocityFloor", "pressure",
+                                            "releaseFade" };
     const auto does = namesUnder (panel, "what it does");
 
     std::vector<std::string> seen;
@@ -4466,7 +4467,8 @@ TEST_CASE ("client: a cue's DCA is a menu of the show's DCAs, and the sampler ro
     //  Two words the tree runs together, said as two words.
     const std::vector<std::pair<std::string, std::string>> spoken {
         { "secondPress", "second press" }, { "velocityFloor", "velocity floor" },
-        { "releaseFade", "release fade" }, { "shortName", "short name" } };
+        { "releaseFade", "release fade" }, { "shortName", "short name" },
+        { "initialLevel", "initial level" } };
 
     for (const auto& said : spoken)
     {
@@ -4553,7 +4555,7 @@ TEST_CASE ("client: a sampler row is greyed on a cue no hand can press, and draw
     rig.parameters.markStale();
     auto snapshot = rig.publish (1);
 
-    const std::vector<std::string> samplerRows { "release", "secondPress", "velocity",
+    const std::vector<std::string> samplerRows { "initialLevel", "release", "secondPress", "velocity",
                                                  "velocityFloor", "pressure", "releaseFade" };
 
     //  Outside a sampler group nothing presses a cue, so none of them means anything.

@@ -280,19 +280,30 @@ namespace wfg::surface
         if (at != text.size())
             return std::nullopt;
 
-        /*  HSL, the usual way: the chroma from the saturation and how far the
-            lightness is from the middle, the hue's sector choosing which
-            component carries it. The timbre's lightness is its frequency axis
-            (Timbre.h: 0.15 low to 0.85 high), so a bass bed is a deep colour
-            and a high effect a pale one, which reads on an LED as it does on
-            the waveform. */
+        /*  THE HUE AND THE SATURATION AS ANALYSED, AND THE LIGHT AT FULL
+            (author, 2026-09-23: keep the saturation - it shows how broad the
+            spectrum is). The saturation is one minus the spectral flatness, a
+            tone vivid and noise pale, and it is what an LED has to carry beside
+            the hue. The timbre's lightness is its frequency axis again
+            (Timbre.h: 0.15 low to 0.85 high); read as HSL it would make a
+            bass bed a dark LED and a high effect a white one, washing the
+            saturation out at both ends, so it is not read - except that
+            nought is silence, and silence is dark. Brightness is left free for
+            what the bench decides to put on it: the amplitude, or at least its
+            variation, and a ceiling for a house that needs a dark booth.
+
+            So HSV at full value: the chroma is the saturation, the hue's sector
+            chooses which component carries it, and the rest is white. */
         const auto hue = std::fmod (std::fmod (hsl[0], 360.0) + 360.0, 360.0) / 60.0;
         const auto saturation = std::clamp (hsl[1], 0.0, 1.0);
         const auto lightness = std::clamp (hsl[2], 0.0, 1.0);
 
-        const auto chroma = (1.0 - std::abs (2.0 * lightness - 1.0)) * saturation;
+        if (! (lightness > 0.0))
+            return Rgb {};
+
+        const auto chroma = saturation;
         const auto second = chroma * (1.0 - std::abs (std::fmod (hue, 2.0) - 1.0));
-        const auto lift = lightness - chroma / 2.0;
+        const auto lift = 1.0 - chroma;
 
         auto red = 0.0;
         auto green = 0.0;
@@ -606,22 +617,20 @@ namespace wfg::surface
 
                 for (auto& strip : box.strips)
                 {
-                    if (! strip.handDown)
+                    /*  A HAND RESTING THROUGH A HANDOVER LETS GO OF THE NODE IT
+                        HELD, and holds nothing until it lands again. A touch
+                        starts a sampler clip (author, 2026-09-23), so a hand
+                        that did not move must not start the clip that has just
+                        arrived under it - a member armed again after its clip
+                        ended, a bank taken over. The fader stays still under
+                        it all the same, since `handDown` holds the motor, and
+                        what it moves goes to the new node: a ride with no
+                        touch, which starts nothing. */
+                    if (! strip.handDown || strip.touched.empty() || targetOf (strip) == strip.touched)
                         continue;
 
-                    const auto& target = targetOf (strip);
-
-                    if (target == strip.touched)
-                        continue;
-
-                    if (! strip.touched.empty())
-                        submit (commandFrom (box.origin, "node.release",
-                                             { osc::Value::string (strip.touched) }));
-
-                    if (! target.empty())
-                        submit (commandFrom (box.origin, "node.touch", { osc::Value::string (target) }));
-
-                    strip.touched = target;
+                    submit (commandFrom (box.origin, "node.release", { osc::Value::string (strip.touched) }));
+                    strip.touched.clear();
                 }
             }
         }

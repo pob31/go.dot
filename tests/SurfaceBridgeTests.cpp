@@ -653,11 +653,18 @@ TEST_CASE ("surface bridge: colours are read from what the show writes, and comp
     CHECK_FALSE (surface::colourFromHex ("#GG8000").has_value());
     CHECK_FALSE (surface::colourFromHex ("").has_value());
 
-    //  A timbre is HSL: the hue in degrees, then saturation and lightness.
+    //  A timbre is "h s l": the hue in degrees, then saturation and lightness.
     CHECK (is (surface::colourFromTimbre ("0 1 0.5"), 127, 0, 0));
     CHECK (is (surface::colourFromTimbre ("120 1 0.5"), 0, 127, 0));
     CHECK (is (surface::colourFromTimbre ("240 1 0.5"), 0, 0, 127));
     CHECK (is (surface::colourFromTimbre ("200 0 1"), 127, 127, 127));
+
+    /*  THE SATURATION IS KEPT, whatever the lightness (author, 2026-09-23): a
+        pure tone is the same vivid red high or low - read as HSL it would have
+        been a dark red low and a pink high - and a broad spectrum is paler. */
+    CHECK (is (surface::colourFromTimbre ("0 1 0.15"), 127, 0, 0));
+    CHECK (is (surface::colourFromTimbre ("0 1 0.85"), 127, 0, 0));
+    CHECK (is (surface::colourFromTimbre ("0 0.5 0.85"), 127, 64, 64));
 
     //  SILENCE HAS NO COLOUR, and on an LED that is dark.
     CHECK (is (surface::colourFromTimbre ("0 0 0"), 0, 0, 0));
@@ -1359,7 +1366,7 @@ TEST_CASE ("surface bridge: a sounding strip wears what it sounds like, and its 
     CHECK (colourOf (sink, "PORTBNK1", 0x20).empty());
 }
 
-TEST_CASE ("surface bridge: a hand held through a handover holds the new target, and lets go of it")
+TEST_CASE ("surface bridge: a hand resting through a handover lets go of the old node, and touches the new one only by landing again")
 {
     RecordingSink sink;
     surface::SurfaceTable table;
@@ -1394,7 +1401,10 @@ TEST_CASE ("surface bridge: a hand held through a handover holds the new target,
     CHECK (events[0].command == "node.touch");
     CHECK (events[0].args[0].getString() == "/godot/run/RUN00001/trim");
 
-    //  THE CLIP ENDS AND THE MEMBER IS ARMED AGAIN: a new run under the same finger.
+    /*  THE CLIP ENDS AND THE MEMBER IS ARMED AGAIN: a new run under the same
+        finger. A touch starts a sampler clip (author, 2026-09-23), so the
+        finger that did not move must not touch the new run - it lets go of the
+        old one and holds nothing. */
     fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00002/trim");
     fake.number ("/godot/run/RUN00002/trim", -120.0);
     bridge.afterTick (fake.publish (2), touches, 2);
@@ -1402,19 +1412,34 @@ TEST_CASE ("surface bridge: a hand held through a handover holds the new target,
     events.clear();
     bridge.beforeTick (recording, 3);
 
-    REQUIRE (events.size() == 2u);
-    CHECK (events[0].command == "node.release");
-    CHECK (events[0].args[0].getString() == "/godot/run/RUN00001/trim");
-    CHECK (events[1].command == "node.touch");
-    CHECK (events[1].args[0].getString() == "/godot/run/RUN00002/trim");
-
-    //  And letting go gives back the one it holds now.
-    events.clear();
-    REQUIRE (bridge.arrived ("PORTMCU1", { 0x90, 0x68, 0x00 }));
-    bridge.beforeTick (recording, 4);
-
     REQUIRE (events.size() == 1u);
     CHECK (events[0].command == "node.release");
+    CHECK (events[0].args[0].getString() == "/godot/run/RUN00001/trim");
+
+    //  Nor on any tick after, while the hand stays where it is.
+    events.clear();
+    bridge.beforeTick (recording, 4);
+    CHECK (events.empty());
+
+    //  WHAT IT MOVES GOES TO THE NEW RUN, a ride with no touch, which starts nothing.
+    REQUIRE (bridge.arrived ("PORTMCU1", surface::faderPosition (0, 9000)));
+    bridge.beforeTick (recording, 5);
+
+    REQUIRE (events.size() == 1u);
+    CHECK (events[0].command == "node.set");
+    CHECK (events[0].args[0].getString() == "/godot/run/RUN00002/trim");
+
+    //  Lifted, nothing is held to give back; landing again touches the new run.
+    events.clear();
+    REQUIRE (bridge.arrived ("PORTMCU1", { 0x90, 0x68, 0x00 }));
+    bridge.beforeTick (recording, 6);
+    CHECK (events.empty());
+
+    REQUIRE (bridge.arrived ("PORTMCU1", { 0x90, 0x68, 0x7f }));
+    bridge.beforeTick (recording, 7);
+
+    REQUIRE (events.size() == 1u);
+    CHECK (events[0].command == "node.touch");
     CHECK (events[0].args[0].getString() == "/godot/run/RUN00002/trim");
 
     for (const auto& event : events)

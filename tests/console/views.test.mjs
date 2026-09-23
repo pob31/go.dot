@@ -166,8 +166,8 @@ test("the inspector puts a cue's fields in the order somebody works through them
       question and a group's DCA last; a fade's DCA beside the other thing it
       can move; and the short name under the name it shortens. */
   assert.deepEqual(ordered(["releaseFade", "pressure", "dca", "velocityFloor", "release",
-                            "velocity", "secondPress", "level", "file"], "media"),
-                   ["file", "level", "dca", "release", "secondPress", "velocity",
+                            "initialLevel", "velocity", "secondPress", "level", "file"], "media"),
+                   ["file", "level", "dca", "initialLevel", "release", "secondPress", "velocity",
                     "velocityFloor", "pressure", "releaseFade"]);
   assert.deepEqual(ordered(["dca", "advance", "takeover", "mode"], "group"),
                    ["mode", "takeover", "advance", "dca"]);
