@@ -402,6 +402,15 @@ M28; M26 retaken on a Release build of a quiet machine; rebinding a port after
 start and `midi.rescan` (M-B's debt, not paid here); and the rulings §16.12
 lists.
 
+**Designed next, not built (2026-09-23): surface pages.** The author wants the
+D700's Pan, EQ, Send and FX buttons repurposed as Go.dot's own pages - the
+faders on a cue's sends, the rotaries on its EQ and VST inserts, buttons as
+programming shortcuts - and the same model on the Stream Deck, the Stream
+Deck+ and the Icon controllers. The conversation is written down in
+`docs/godot-surface-pages-draft-0.1.md`, with eleven questions still his. The
+per-cue **EQ and VST inserts are built first, in another session**
+(`docs/handoffs/2026-09-23-eq-inserts-and-surfaces.md`); the pages follow.
+
 ---
 
 ## Phase 7 — Tablet client · M
