@@ -35,6 +35,7 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/cue/TriggerIndex.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Schema.h>
 #include <wfg/engine/document/ShowDocument.h>
@@ -681,4 +682,65 @@ TEST_CASE ("midi cue: the show declares its ports and the document says nothing 
     REQUIRE (schema.element ("Port") != nullptr);
     CHECK (schema.attribute ("Port", "name") != nullptr);
     CHECK (schema.attribute ("Port", "device") == nullptr);
+}
+
+//==============================================================================
+TEST_CASE ("midi: a surface's port is the surface's, and every other port still reaches the triggers")
+{
+    /*  PHASE 6'S SEAM, and the test door beside it. A control surface's port
+        is offered to a consumer - the bridge - before any trigger sees it, so a
+        D700 moving a fader never fires a cue that listens for pitch bend; and
+        `inject` puts a message on the same road an arriving one takes, which is
+        what lets a surface be tested with no hardware in the room. */
+    doc::ShowDocument document;
+    const auto listId = document.createList ("Main").id;
+    const auto cueId = document.createCue (listId, 0, "memo", "Doors").id;
+
+    const auto keys = document.createPort ("Keys").id;
+    const auto desk = document.createPort ("Desk").id;
+
+    const auto trigger = document.createTrigger (cueId, "midi").id;
+    REQUIRE (document.setAttribute ("/godot/trigger/" + trigger + "/type", "noteOn").ok);
+    REQUIRE (document.setAttribute ("/godot/trigger/" + trigger + "/number", "60").ok);
+
+    Engine engine;
+    midi::MidiInputs inputs;
+    inputs.sendTo (engine);
+    inputs.publishTriggers (cue::TriggerIndex::build (document));
+
+    std::vector<std::string> taken;
+
+    inputs.setConsumer ([&taken, &desk] (const std::string& portId, const midi::Bytes&)
+                        {
+                            if (portId != desk)
+                                return false;
+
+                            taken.push_back (portId);
+                            return true;
+                        });
+
+    const midi::Bytes noteOn { 0x90, 60, 100 };
+
+    /*  THE DESK'S NOTE IS THE DESK'S: taken, and no trigger fires. */
+    inputs.inject (desk, noteOn);
+    CHECK (taken.size() == 1u);
+
+    auto result = engine.processTick (1);
+    CHECK (result.applied + result.rejected + result.dropped == 0u);
+
+    /*  THE KEYS' NOTE IS A TRIGGER'S, as it always was. `trigger.fire` is not
+        registered on this engine, so it arrives and is refused - which is
+        enough to say it was sent. */
+    inputs.inject (keys, noteOn);
+    CHECK (taken.size() == 1u);
+
+    result = engine.processTick (2);
+    CHECK (result.applied + result.rejected + result.dropped == 1u);
+
+    /*  AND WITH NO CONSUMER, every port is the triggers'. */
+    inputs.setConsumer ({});
+    inputs.inject (desk, noteOn);
+
+    result = engine.processTick (3);
+    CHECK (result.applied + result.rejected + result.dropped == 1u);
 }

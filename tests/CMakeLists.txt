@@ -98,6 +98,7 @@ add_executable(wfg_tests
     McuCodecTests.cpp
     DcaTests.cpp
     SamplerTests.cpp
+    SurfaceBridgeTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp
@@ -940,6 +941,21 @@ add_test(NAME blackbox.phase6-sampler.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase6_sampler.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.phase6-sampler.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# A show that declares a Mackie surface, served where there is no MIDI - every
+# CI runner, and a laptop on the train: the surface says which port it cannot
+# reach and why, the virtual panel and the network go on working, a DCA written
+# over OSC trims the cue marked with it, and the session replays (§16.8).
+add_test(NAME blackbox.phase6-surfaces.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase6_surfaces.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.phase6-surfaces.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase6-surfaces.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase6_surfaces.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase6-surfaces.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # The client the engine serves at /ui: the page, its files as bytes, and since

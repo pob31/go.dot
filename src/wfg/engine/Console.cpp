@@ -24,6 +24,8 @@
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
+#include <wfg/engine/surface/SurfaceBridge.h>
+#include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/midi/MidiInputs.h>
 #include <wfg/engine/midi/MidiSender.h>
 #include <wfg/engine/document/DocumentCommands.h>
@@ -2706,6 +2708,89 @@ namespace
         midiOut.start();
         runner.setMidiSink (&midiOut);
 
+        /*  THE CONTROL SURFACES (PRD §3.16, Phase 6): the bridge between the
+            show's declared surfaces and the ports they are on. It turns what
+            arrives from a surface into commands in the before-tick hook, and
+            the published tree into motor moves, displays, LEDs and colour in
+            the after-tick - through `midiOut`'s worker, so a slow port never
+            holds the tick.
+
+            OWNED BY A SHARED POINTER THE INPUT THREAD HOLDS TOO. `midiIn` was
+            declared first and outlives everything after it, and its callback
+            calls the consumer outside its lock - so a bridge that died with this
+            scope could be called from a message already in flight. The consumer
+            keeps the bridge alive for as long as it can be called, and
+            `arrived` touches nothing but the bridge's own inbox, so nothing it
+            refers to has to outlive it. */
+        wfg::surface::SurfaceTable surfaceTable;
+        const auto surfaceBridge = std::make_shared<wfg::surface::SurfaceBridge> (midiOut, surfaceTable);
+        parameters.setSurfaces (&surfaceTable);
+
+        /*  WHAT THE SHOW DECLARES ABOUT ITS SURFACES, read off the document -
+            at start and whenever the show changes - and what this machine has
+            behind each port they name. */
+        const auto declareSurfaces = [&document, &midiPorts, &surfaceBridge]
+        {
+            std::vector<wfg::surface::SurfaceSpec> declared;
+
+            for (const auto& surfaceNode : document.root().getChildWithName ("Surfaces"))
+            {
+                if (surfaceNode.getType().toString() != "Surface")
+                    continue;
+
+                wfg::surface::SurfaceSpec surfaceSpec;
+                surfaceSpec.id = surfaceNode[juce::Identifier ("id")].toString().toStdString();
+
+                const auto surfaceRow = [&document, &surfaceSpec] (const char* row)
+                {
+                    return document.getAttribute ("/godot/surface/" + surfaceSpec.id + "/" + row)
+                               .value_or (std::string {});
+                };
+
+                surfaceSpec.profile = surfaceRow ("profile");
+                surfaceSpec.enabled = surfaceRow ("enabled") != "false";
+                surfaceSpec.channel = juce::String (surfaceRow ("channel")).getIntValue();
+                surfaceSpec.firstNote = juce::String (surfaceRow ("firstNote")).getIntValue();
+
+                for (const auto& portWord : juce::StringArray::fromTokens (juce::String (surfaceRow ("ports")),
+                                                                          " ", ""))
+                    if (portWord.isNotEmpty())
+                        surfaceSpec.ports.push_back (portWord.toStdString());
+
+                for (const auto& stripNode : surfaceNode)
+                    if (stripNode.getType().toString() == "Strip")
+                        surfaceSpec.strips.push_back (stripNode[juce::Identifier ("id")].toString().toStdString());
+
+                declared.push_back (std::move (surfaceSpec));
+            }
+
+            return surfaceBridge->declare (std::move (declared),
+                                           [&document, &midiPorts] (const std::string& portId)
+                                           {
+                                               const auto portRow = [&document, &portId] (const char* row)
+                                               {
+                                                   return document.getAttribute ("/godot/port/" + portId + "/" + row)
+                                                              .value_or (std::string {});
+                                               };
+
+                                               wfg::surface::PortState known;
+                                               known.bound = midiPorts.isBound (portId);
+                                               known.rx = portRow ("rx") != "false";
+                                               known.tx = portRow ("tx") != "false";
+                                               known.name = portRow ("name");
+                                               return known;
+                                           });
+        };
+
+        declareSurfaces();
+
+        /*  A SURFACE'S PORT IS THE SURFACE'S: nothing arriving on it is a trigger. */
+        midiIn.setConsumer ([bridge = surfaceBridge] (const std::string& portId,
+                                                      const wfg::midi::Bytes& message)
+                            {
+                                return bridge->arrived (portId, message);
+                            });
+
         if (! midiOutputBindings.empty())
             std::cout << "wfg: sending on " << midiOutputBindings.size()
                       << " MIDI port(s)" << std::endl;
@@ -3090,6 +3175,19 @@ namespace
 
         ticks.setBeforeTick ([&] (std::int64_t tickIndex)
                              {
+                                 /*  THE HANDS FIRST (plan decision 13): what the
+                                     surfaces did since the last tick reaches the
+                                     queue before the Runner's hook reads the
+                                     trims and the touches it decides edges from,
+                                     so a fader's write and the edge it causes
+                                     land in the same order every time. */
+                                 if (surfaceBridge->beforeTick ([&engine] (wfg::Event event)
+                                                                {
+                                                                    return engine.submit (std::move (event));
+                                                                },
+                                                                tickIndex))
+                                     parameters.markStale();
+
                                  if (audioState.settingsStatus != "applying")
                                      runner.beforeTick (engine, tickIndex);
 
@@ -3318,6 +3416,13 @@ namespace
                                     wfg::tree::refreshMountDeclarations (document, mounts,
                                                                          target);
 
+                                    /*  AND ITS SURFACES (Phase 6), for the same
+                                        reason: a surface added, a port renamed
+                                        or a strip made a DCA strip during a tech
+                                        rehearsal reaches the bridge here. */
+                                    if (declareSurfaces())
+                                        parameters.markStale();
+
                                     /*  AND WHO MAY BE HEARD FROM, built here
                                         for the same reason the trigger index
                                         is: the socket thread cannot read a
@@ -3445,6 +3550,12 @@ namespace
                                     refusedDatagrams.load (std::memory_order_relaxed);
 
                                 auto current = parameters.publish (outcome.tick, state);
+
+                                /*  WHAT THE SURFACES SHOULD SHOW, from the tree
+                                    just published - motors, displays, LEDs,
+                                    rings and colour, the differences only. */
+                                if (current != nullptr)
+                                    surfaceBridge->afterTick (current, touches, outcome.tick);
 
                                 if (previous != nullptr && current != nullptr)
                                     server.publishChanges (wfg::tree::diff (*previous, *current),

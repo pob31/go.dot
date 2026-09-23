@@ -190,6 +190,20 @@ namespace wfg::midi
         triggers = std::move (index);
     }
 
+    void MidiInputs::setConsumer (Consumer consumerToUse)
+    {
+        auto next = consumerToUse ? std::make_shared<const Consumer> (std::move (consumerToUse))
+                                  : std::shared_ptr<const Consumer> {};
+
+        const std::lock_guard<std::mutex> lock { triggerMutex };
+        consumer = std::move (next);
+    }
+
+    void MidiInputs::inject (const std::string& portId, const Bytes& message)
+    {
+        route (portId, message);
+    }
+
     void MidiInputs::closeAll()
     {
         for (auto& input : open_)
@@ -203,24 +217,6 @@ namespace wfg::midi
     void MidiInputs::handleIncomingMidiMessage (juce::MidiInput* source,
                                                 const juce::MidiMessage& message)
     {
-        /*  SOMEBODY ELSE'S THREAD, so this does what every outside input does:
-            reads an immutable index, matches, submits. It never touches the
-            document - which belongs to the tick thread - and never reaches into
-            the model. `Engine::submit` is the one crossing here, and it is the
-            same one the OSC socket already makes. */
-        if (target == nullptr)
-            return;
-
-        std::shared_ptr<const cue::TriggerIndex> index;
-
-        {
-            const std::lock_guard<std::mutex> lock { triggerMutex };
-            index = triggers;
-        }
-
-        if (index == nullptr)
-            return;
-
         /*  THE PORT THE SHOW DECLARES, not the cable it arrived on
             (2026-09-22). A trigger names "Lights"; which socket that is
             changes when somebody moves a cable, and every trigger in the show
@@ -238,6 +234,36 @@ namespace wfg::midi
                 port = found->second;
         }
 
+        const auto* raw = message.getRawData();
+        const auto size = message.getRawDataSize();
+
+        route (port, size > 0 ? Bytes (raw, raw + size) : Bytes {});
+    }
+
+    void MidiInputs::route (const std::string& port, const Bytes& bytes)
+    {
+        /*  SOMEBODY ELSE'S THREAD, so this does what every outside input does:
+            reads an immutable index, matches, submits. It never touches the
+            document - which belongs to the tick thread - and never reaches into
+            the model. `Engine::submit` is the one crossing here, and it is the
+            same one the OSC socket already makes. */
+        std::shared_ptr<const Consumer> taker;
+        std::shared_ptr<const cue::TriggerIndex> index;
+
+        {
+            const std::lock_guard<std::mutex> lock { triggerMutex };
+            taker = consumer;
+            index = triggers;
+        }
+
+        /*  A SURFACE'S PORT IS THE SURFACE'S, and nothing on it is a trigger. */
+        if (taker != nullptr && (*taker) (port, bytes))
+            return;
+
+        if (target == nullptr || index == nullptr || bytes.empty())
+            return;
+
+        const juce::MidiMessage message (bytes.data(), static_cast<int> (bytes.size()));
         const auto event = eventFrom (message, port);
 
         if (event.type.empty())

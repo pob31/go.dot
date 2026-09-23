@@ -113,6 +113,11 @@ add_library(wfg_engine STATIC
     wfg/engine/midi/MidiSender.cpp
     wfg/engine/surface/McuCodec.h
     wfg/engine/surface/McuCodec.cpp
+    wfg/engine/surface/FaderCurve.h
+    wfg/engine/surface/SurfaceProfile.h
+    wfg/engine/surface/SurfaceProfile.cpp
+    wfg/engine/surface/SurfaceBridge.h
+    wfg/engine/surface/SurfaceBridge.cpp
     wfg/engine/surface/SurfaceTable.h
     wfg/engine/audio/AudioCommands.h
     wfg/engine/audio/AudioCommands.cpp

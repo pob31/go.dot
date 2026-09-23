@@ -1,0 +1,45 @@
+<Show>
+  <Lists>
+    <List id="SRF00001" name="Surfaces">
+      <Group id="SRF00002" mode="sampler" name="Pads" number="1">
+        <Media id="SRF00003" file="knock.wav" name="Knock" number="1.1"/>
+        <Media id="SRF00004" file="chime.wav" name="Chime" number="1.2" release="hold"/>
+      </Group>
+      <Media id="SRF00005" dca="SRFD0001" file="bed.wav" name="Bed" number="2"/>
+      <Cue id="SRF00006" name="After" number="3"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="4">
+    <Bus id="SRFB0001" name="Main L/R" width="2"/>
+  </Audio>
+  <MidiPorts>
+    <Port id="SRFP0001" inputDevice="Go.dot test surface (on no machine)" name="Desk port" outputDevice="Go.dot test surface (on no machine)"/>
+  </MidiPorts>
+  <Network/>
+  <Surfaces>
+    <Surface id="SRFS0001" name="Panel">
+      <Strip id="SRFT0001" dca="SRFD0001" role="dca"/>
+      <Strip id="SRFT0002"/>
+      <Strip id="SRFT0003"/>
+      <Strip id="SRFT0004"/>
+      <Strip id="SRFT0005"/>
+      <Strip id="SRFT0006"/>
+      <Strip id="SRFT0007"/>
+      <Strip id="SRFT0008"/>
+    </Surface>
+    <Surface id="SRFS0002" name="Desk" ports="SRFP0001" preset="Mackie" profile="mcu">
+      <Strip id="SRFT0009" dca="SRFD0001" role="dca"/>
+      <Strip id="SRFT000A"/>
+      <Strip id="SRFT000B"/>
+      <Strip id="SRFT000C"/>
+      <Strip id="SRFT000D"/>
+      <Strip id="SRFT000E"/>
+      <Strip id="SRFT000F"/>
+      <Strip id="SRFT000G"/>
+    </Surface>
+  </Surfaces>
+  <Dcas>
+    <Dca id="SRFD0001" name="Band" shortName="Band"/>
+  </Dcas>
+</Show>

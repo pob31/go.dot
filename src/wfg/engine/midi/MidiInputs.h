@@ -38,10 +38,12 @@
 #pragma once
 
 #include <wfg/engine/cue/TriggerIndex.h>
+#include <wfg/engine/midi/MidiSink.h>
 #include <wfg/engine/midi/PortTable.h>
 
 #include <juce_audio_devices/juce_audio_devices.h>
 
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -119,6 +121,24 @@ namespace wfg::midi
             side reads, and for the same reason. */
         void publishTriggers (std::shared_ptr<const cue::TriggerIndex> index);
 
+        /*  A PORT'S TRAFFIC CAN BELONG TO SOMETHING ELSE (Phase 6). A control
+            surface's port is the surface's: its faders, touches and buttons are
+            not trigger sources, and a D700 moving a fader must not fire a cue
+            that happens to listen for pitch bend. So every arriving message is
+            offered to this first, with the port it is stamped with, and a
+            message it takes goes no further. Called on the input thread; set
+            before anything is opened, and replaced whole. */
+        using Consumer = std::function<bool (const std::string& portId, const Bytes& message)>;
+        void setConsumer (Consumer consumerToUse);
+
+        /*  THE TEST SEAM: a message as if it had arrived on `portId`, down the
+            same road an arriving one takes - the consumer first, then the
+            triggers. It is what lets bytes from a surface be followed through
+            the bridge, the commands, the Runner and back out to bytes with no
+            hardware in the room, which is every CI runner. Nothing in the
+            product calls it. */
+        void inject (const std::string& portId, const Bytes& message);
+
         const std::vector<std::string>& problems() const noexcept { return refusals; }
         std::size_t count() const noexcept { return open_.size(); }
 
@@ -126,6 +146,13 @@ namespace wfg::midi
 
     private:
         void handleIncomingMidiMessage (juce::MidiInput*, const juce::MidiMessage&) override;
+
+        /** The one road every message takes: consumer, then triggers. */
+        void route (const std::string& portId, const Bytes& message);
+
+        /*  Swapped whole under `triggerMutex` and called outside it, so a slow
+            consumer never holds the lock a republished trigger index waits on. */
+        std::shared_ptr<const Consumer> consumer;
 
         Engine* target = nullptr;
 

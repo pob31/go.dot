@@ -43,7 +43,10 @@ namespace wfg::client::model
     class Panic
     {
     public:
-        /** How close two presses must be to read as one double press: §4.4's "double Esc". */
+        /** How close two presses must be to read as one double press: §4.4's "double Esc".
+            A control surface's STOP makes the same reading in the engine
+            (`surface::doubleStopTicks`, src/wfg/engine/surface/SurfaceProfile.h),
+            which cannot include this file: the two numbers move together. */
         static constexpr std::int64_t doublePressMs = 750;
 
         /*  Records a press at this time and says whether it is the SECOND

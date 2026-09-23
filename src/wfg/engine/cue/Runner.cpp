@@ -3569,15 +3569,15 @@ namespace wfg::cue
             side there are no tracks to hand out, and nothing is asked. */
         if (audio != nullptr)
         {
-            int free = 0;
+            int freeTracks = 0;
 
             for (int track = 0; track < audio->trackCount(); ++track)
                 if (! runs.isTrackBusy (track))
-                    ++free;
+                    ++freeTracks;
 
             for (const auto* child : runs.childrenOf (job.run))
             {
-                if (free <= 0)
+                if (freeTracks <= 0)
                     break;
 
                 if (child->isFinished() || ! child->sampler || child->track >= 0
@@ -3589,7 +3589,7 @@ namespace wfg::cue
                     continue;
 
                 engine.submit (origin::engine, "run.arm", one (child->id));
-                --free;
+                --freeTracks;
             }
         }
 
