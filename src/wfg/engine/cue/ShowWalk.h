@@ -307,8 +307,12 @@ namespace wfg::cue
             {
                 const auto group = findGroup (groupId);
 
+                /*  Nor inside a sampler group (Phase 6): its members are
+                    played by hand from strips, and a pointer landed on one
+                    would be a GO with nothing to mean. */
                 if (! group.isValid()
                      || reader.text (group, "group", "mode") == "timeline"
+                     || reader.text (group, "group", "mode") == "sampler"
                      || reader.text (group, "group", "advance") == "auto")
                     entry.mayLandHere = false;
             }
@@ -413,6 +417,12 @@ namespace wfg::cue
 
             const auto mode = reader.text (group, "group", "mode");
             const auto advance = reader.text (group, "group", "advance");
+
+            /*  A SAMPLER GROUP IS NEVER A CHAIN, whatever its `advance` says:
+                a hand launches its members, so nothing inside it has a time
+                the document could know. */
+            if (mode == "sampler")
+                return none;
 
             if (mode != "timeline" && advance != "auto")
                 return none;
@@ -551,6 +561,9 @@ namespace wfg::cue
             const auto mode = reader.text (node, "group", "mode");
             const auto advance = reader.text (node, "group", "advance");
 
+            if (mode == "sampler")
+                return std::nullopt;
+
             if (mode != "timeline" && advance != "auto")
                 return std::nullopt;
 
@@ -632,6 +645,12 @@ namespace wfg::cue
 
             if (element != "Group")
                 return true;
+
+            /*  AN ARMED SAMPLER GROUP RUNS UNTIL SOMEBODY DISARMS IT (PRD
+                §3.27): its members are played by hand any number of times, so
+                it never reaches an end the document could see coming. */
+            if (reader.text (node, "group", "mode") == "sampler")
+                return false;
 
             if (reader.integer (node, "group", "loops") <= 0)
                 return false;

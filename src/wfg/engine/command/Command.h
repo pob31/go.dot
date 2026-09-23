@@ -153,6 +153,13 @@ namespace wfg
             group without me" is a thing somebody may well want and is a
             different group from the one they wrote. */
         inline constexpr const char* needsGo          = "needs-go";
+
+        /*  A SAMPLER MEMBER FIRED BY NAME WITH NO STRIP UNDER IT (Phase 6). A
+            member of a sampler group is launched by a hand on a strip; fired
+            by name while it holds one, the firing is a press on that strip,
+            and with none there is nowhere for it to be played from - the
+            group is not armed, or this member is past the last strip. */
+        inline constexpr const char* needsStrip       = "needs-strip";
         /*  The argument's TYPE was right and its VALUE is not one this command
             accepts - a scope that is neither "round" nor "group", a stop verb
             nobody has heard of.

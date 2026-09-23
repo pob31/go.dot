@@ -958,6 +958,9 @@ namespace wfg::tree
             the runtime half publishes. */
         std::vector<std::string> dcaOrder;
 
+        /*  And every strip, for what it is riding and its word. */
+        std::vector<DeclaredStrip> stripOrder;
+
         for (const auto& container : showNode)
         {
             const auto containerName = container.getType().toString().toStdString();
@@ -1258,7 +1261,16 @@ namespace wfg::tree
 
                         if (const auto stripId = strip[idProperty].toString().toStdString();
                             ! stripId.empty())
+                        {
                             slotOrder.push_back (stripId);
+
+                            const auto stripBase = std::string (godot) + "/slot/" + stripId + "/";
+                            stripOrder.push_back ({ stripId,
+                                                    document.getAttribute (stripBase + "role")
+                                                        .value_or (std::string {}),
+                                                    document.getAttribute (stripBase + "dca")
+                                                        .value_or (std::string {}) });
+                        }
                     }
                 }
             }
@@ -1418,6 +1430,7 @@ namespace wfg::tree
         declaredMedia = std::move (mediaOrder);
         declaredLists = std::move (listOrder);
         declaredDcas = std::move (dcaOrder);
+        declaredStrips = std::move (stripOrder);
 
         //----------------------------------------------------------------------
         /*  Commands, as write-only method nodes. `node.set` is deliberately
@@ -2027,6 +2040,77 @@ namespace wfg::tree
             runtime.push_back (makeLeaf (std::string (godot) + "/run/" + std::string (row->name),
                                          *row, runOrder));
 
+        /*  WHAT EACH STRIP IS DOING (PRD §3.16, §3.27), read off the run table
+            the way a slot's holder is: the node its fader rides now, the word
+            its display shows, and the cue on it. A dca strip rides its DCA's
+            trim; a sampler strip rides the trim of the run holding it, which
+            changes at every handover - that is how one fader plays a different
+            sound after a bank change. */
+        for (const auto& strip : declaredStrips)
+        {
+            std::string target;
+            std::string word;
+            std::string cueText;
+
+            if (strip.role == "dca")
+            {
+                word = strip.dca.empty() ? "unassigned" : "dca";
+
+                if (! strip.dca.empty())
+                    target = std::string (godot) + "/dca/" + strip.dca + "/trim";
+            }
+            else if (const auto* holder = runs.holderOf (strip.id); holder != nullptr)
+            {
+                target = std::string (godot) + "/run/" + holder->id + "/trim";
+                cueText = holder->cue;
+
+                const auto* group = runs.find (holder->parent);
+                const auto closing = group != nullptr
+                                       && (group->closing
+                                             || std::find (group->lostStrips.begin(),
+                                                           group->lostStrips.end(), strip.id)
+                                                  != group->lostStrips.end());
+
+                if (closing)
+                    word = "closing";
+                else if (holder->held)
+                    word = "held";
+                else if (holder->state == cue::runState::stopping)
+                    word = "stopping";
+                else if (holder->state == cue::runState::playing
+                          || holder->state == cue::runState::waiting
+                          || holder->launchRequested)
+                    word = "playing";
+                else if (! holder->pending.empty())
+                    word = "pending";
+                else
+                    word = "armed";
+            }
+            else if (const auto waiting = runs.waitersFor (strip.id); ! waiting.empty())
+            {
+                word = "pending";
+                cueText = waiting.front()->cue;
+            }
+            else
+            {
+                word = "free";
+            }
+
+            const auto base = std::string (godot) + "/slot/" + strip.id + "/";
+
+            for (const auto* row : doc::Schema::rowsForOwner ("strip"))
+            {
+                const auto name = std::string (row->name);
+
+                if (name == "target")
+                    runtime.push_back (makeLeaf (base + name, *row, target));
+                else if (name == "word")
+                    runtime.push_back (makeLeaf (base + name, *row, word));
+                else if (name == "cue")
+                    runtime.push_back (makeLeaf (base + name, *row, cueText));
+            }
+        }
+
         /*  WHAT EACH DCA IS TRIMMING BY TONIGHT (PRD §3.28), against the
             roster the document half left behind. From this half because a trim
             is what a fader is doing - it moves fifty times a second while a
@@ -2090,6 +2174,8 @@ namespace wfg::tree
                 else if (name == "pending")   text = joinIds (run.pending);
                 else if (name == "warning")   text = run.warning;
                 else if (name == "asserted")  text = run.asserted ? "true" : "false";
+                else if (name == "strip")     text = run.strip;
+                else if (name == "held")      text = run.held ? "true" : "false";
                 else if (name == "error")     text = run.error;
                 else if (name == "iteration")  text = std::to_string (run.iteration);
                 else if (name == "iterations") text = std::to_string (run.iterations);

@@ -656,6 +656,12 @@ namespace wfg::cue
 
         for (const auto& step : past)
         {
+            /*  A PRESS ON A SAMPLER STRIP IS NOT SOLVED BACK INTO (plan
+                decision 9): the history keeps it so the live recorder can, and
+                a jump re-arms the bank and leaves the hands to play it. */
+            if (step.origin == 'p')
+                continue;
+
             const auto* entry = placedOf (step.cue);
 
             if (entry == nullptr || ! read.flag (entry->node, "cue", "enabled"))

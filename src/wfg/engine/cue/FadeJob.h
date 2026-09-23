@@ -117,6 +117,12 @@ namespace wfg::cue
             fade is over (§3.6). */
         std::string self;
 
+        /*  WHETHER `self` IS A RUN THAT REPORTS. A fade cue's is; the short fade
+            a sampler clip's release or second press starts is a fade with no
+            cue behind it (Phase 6), so nothing reports when it arrives - the
+            clip it silenced ends, and that ending is the report. */
+        bool reportsSelf = true;
+
         double fromDb = 0.0;
         double toDb = 0.0;
 

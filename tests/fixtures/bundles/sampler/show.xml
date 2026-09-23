@@ -1,0 +1,35 @@
+<Show>
+  <Lists>
+    <List id="SMP00001" name="Act One">
+      <Group id="SMP00002" mode="sampler" name="Bank A" number="1">
+        <Media id="SMP00003" file="thunder.wav" name="Thunder" number="1.1" release="hold"/>
+        <Media id="SMP00004" file="rain.wav" name="Rain" number="1.2" velocity="true"/>
+        <Media id="SMP00005" file="bell.wav" name="Bell" number="1.3" secondPress="noop"/>
+        <Media id="SMP00006" file="door.wav" name="Door" number="1.4"/>
+      </Group>
+      <Group id="SMP00007" mode="sampler" name="Bank B" number="2" takeover="strip">
+        <Media id="SMP00008" file="wind.wav" name="Wind" number="2.1"/>
+        <Media id="SMP00009" file="owl.wav" name="Owl" number="2.2"/>
+      </Group>
+      <Transport id="SMP0000A" name="Disarm A" number="3" target="SMP00002"/>
+      <Cue id="SMP0000B" name="After" number="4"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="4"/>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces>
+    <Surface id="SVRF0001" name="Panel">
+      <Strip id="STRP0001"/>
+      <Strip id="STRP0002"/>
+      <Strip id="STRP0003"/>
+      <Strip id="STRP0004"/>
+      <Strip id="STRP0005"/>
+      <Strip id="STRP0006"/>
+      <Strip id="STRP0007"/>
+      <Strip id="STRP0008"/>
+    </Surface>
+  </Surfaces>
+  <Dcas/>
+</Show>

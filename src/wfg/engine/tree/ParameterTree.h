@@ -418,6 +418,20 @@ namespace wfg::tree
             published against from the runtime half, because a trim is what a
             fader is doing tonight and the document half is a cache. */
         std::vector<std::string> declaredDcas;
+
+        /*  Every strip, in document order, with the two decisions its live rows
+            are read against - its role, and the DCA a dca strip rides. The
+            runtime half publishes what the strip is riding, its word and the
+            cue on it against this, because those change with every press and
+            every handover while nothing about the show does. */
+        struct DeclaredStrip
+        {
+            std::string id;
+            std::string role;
+            std::string dca;
+        };
+
+        std::vector<DeclaredStrip> declaredStrips;
         const cue::RunTable& runs;
 
         /*  Which cues can be holding one slot at once, and every dangling

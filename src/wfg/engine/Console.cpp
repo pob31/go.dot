@@ -2162,6 +2162,12 @@ namespace
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
+
+        /*  The touch table, for the fader edges (PRD 3.9a): a fader-start
+            counts only from a fader released at the bottom, and released is
+            what this table knows. Serve only - a replay runs no hooks, and the
+            edges it would read are records in its log. */
+        runner.setTouches (&touches);
         wfg::audio::AudioState audioState;
 
         /*  THE OUTBOUND SIDE OF A MOUNT, which is what stops it being a stub.

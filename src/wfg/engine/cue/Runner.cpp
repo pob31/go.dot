@@ -17,6 +17,7 @@
 #include <wfg/engine/cue/Runner.h>
 
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/tree/Touches.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Solver.h>
 
@@ -312,6 +313,31 @@ namespace wfg::cue
                 return live->id;
             }
 
+        /*  GO ON AN ARMED SAMPLER GROUP IS A REFRESH (PRD §3.27, §3.8's
+            table), and not a second bank. Every member that has lost its strip
+            to another group's takeover claims it back, in this group's own
+            takeover mode - which the scheduler does on its next tick for every
+            member with no run, once `lostStrips` is empty again. A complete
+            group has nothing lost, so the GO changes nothing and decision N
+            needs no exception.
+
+            Only a SAMPLER group, deliberately. The comment above says a group
+            fired again is ignored, and for every other group the code has
+            never checked: a second GO on a running timeline group at the top
+            of a list starts the scene again. Changing that is the author's
+            call and not this phase's (namespace draft §16.12 records it). */
+        if (fireAtOnce && kind == "group" && textOf (cue, "mode") == "sampler")
+            if (const auto* live = runs.liveRunOf (cueId))
+            {
+                if (auto* armed = runs.find (live->id))
+                {
+                    armed->lostStrips.clear();
+                    takeOverFrom (armed->id, cue);
+                }
+
+                return live->id;
+            }
+
         /*  AND A GROUP THE HORIZON PREPARED IS ADOPTED, not made a second time.
 
             This is the other door: `fireStandby`'s descent adopts every group
@@ -386,9 +412,15 @@ namespace wfg::cue
 
     bool Runner::isManualGroup (const juce::ValueTree& cue) const
     {
+        /*  A SAMPLER GROUP IS NOT ONE, whatever its `advance` says (Phase 6):
+            the operator is not its parent the way they are a manual
+            sequence's - no GO steps through its members, a hand on a strip
+            launches them - so the pointer does not descend into it and a
+            surface may fire it by name to arm it. */
         return cue.isValid()
                  && cue.getType().toString() == "Group"
                  && textOf (cue, "mode") != "timeline"
+                 && textOf (cue, "mode") != "sampler"
                  && textOf (cue, "advance") != "auto";
     }
 
@@ -745,7 +777,17 @@ namespace wfg::cue
             run->enterAt = entersAt;
 
             if (enters)
+            {
                 run->state = runState::playing;
+
+                /*  A SAMPLER GROUP ARMING TAKES OVER in this door as in
+                    `fireKind`'s: a group the horizon prepared is entered here,
+                    not fired there, and its takeover must not depend on which
+                    road the GO took. */
+                if (const auto cue = document.findById (run->cue);
+                    cue.isValid() && textOf (cue, "mode") == "sampler")
+                    takeOverFrom (runId, cue);
+            }
 
             /*  AND IT STOPS BEING A PREPARATION. `prepare` answers a question
                 about the future - how ready is this for the GO that has not
@@ -2220,6 +2262,12 @@ namespace wfg::cue
                 return;
             }
 
+            /*  A SAMPLER GROUP ARMING TAKES OVER (PRD §3.27): with
+                `takeover=group` every other armed sampler group is closed, in
+                this handler, so a replay closes the same ones. */
+            if (textOf (cue, "mode") == "sampler")
+                takeOverFrom (runId, cue);
+
             GroupJob job;
             job.run = runId;
             job.enterAt = run->enterAt;
@@ -2440,6 +2488,20 @@ namespace wfg::cue
             rather than round-robin so that a show replayed puts the same cue on
             the same track and two logs of one session compare line for line. */
         const auto track = runs.lowestFreeTrack (audio->trackCount());
+
+        /*  A SAMPLER MEMBER WAITS FOR A VOICE (decision Z, 2026-09-23). Every
+            armed member holds a track so a press sounds at once, and a bank
+            larger than the tracks left is not a failure: the member says
+            `voice` in its pending list - in words, never colour alone - and the
+            scheduler hands it the next track that frees. A cue fired by GO
+            still fails at entry, visibly, as it always has. */
+        if (track < 0 && run->sampler)
+        {
+            if (std::find (run->pending.begin(), run->pending.end(), "voice") == run->pending.end())
+                run->pending.push_back ("voice");
+
+            return;
+        }
 
         if (track < 0)
         {
@@ -3311,6 +3373,590 @@ namespace wfg::cue
         return found != dcaChains.end() ? found->second : none;
     }
 
+    //==============================================================================
+    double Runner::levelForByte (int byte, double floor) noexcept
+    {
+        if (byte >= 127)
+            return 0.0;
+
+        if (byte <= 1)
+            return floor;
+
+        return floor + (0.0 - floor) * static_cast<double> (byte - 1) / 126.0;
+    }
+
+    const std::vector<std::string>& Runner::samplerStrips()
+    {
+        /*  READ ONCE PER SHOW REVISION: a strip's role and a surface's order
+            are edits to the show, and an edit moves the revision. */
+        if (! rosterRead || rosterRevision != document.showRevision())
+        {
+            rosterRead = true;
+            rosterRevision = document.showRevision();
+            samplerRoster.clear();
+            gateStrips.clear();
+
+            for (const auto& box : document.root().getChildWithName ("Surfaces"))
+            {
+                if (box.getType().toString() != "Surface")
+                    continue;
+
+                const auto surfaceId = box[idProperty].toString().toStdString();
+                const auto profile = document.getAttribute ("/godot/surface/" + surfaceId + "/profile")
+                                         .value_or (std::string {});
+
+                for (const auto& strip : box)
+                {
+                    if (strip.getType().toString() != "Strip")
+                        continue;
+
+                    const auto stripId = strip[idProperty].toString().toStdString();
+
+                    if (document.getAttribute ("/godot/slot/" + stripId + "/role")
+                          .value_or (std::string {}) != "sampler")
+                        continue;
+
+                    samplerRoster.push_back (stripId);
+
+                    if (profile == "midiPads")
+                        gateStrips.insert (stripId);
+                }
+            }
+        }
+
+        return samplerRoster;
+    }
+
+    bool Runner::stripIsGate (const std::string& stripId)
+    {
+        samplerStrips();
+        return gateStrips.count (stripId) > 0;
+    }
+
+    std::string Runner::stripForMember (const juce::ValueTree& group, const std::string& cueId)
+    {
+        /*  POSITIONAL (plan decision 3): the Nth media member of the group is
+            on the Nth sampler strip. Counted over media members only, because
+            a sampler's members are clips (§3.27) and a memo among them would
+            otherwise take a strip nothing could be played from. */
+        const auto& strips = samplerStrips();
+        std::size_t position = 0;
+
+        for (const auto& memberId : membersOf (group))
+        {
+            if (kindOfCue (document.findById (memberId)) != "media")
+                continue;
+
+            if (memberId == cueId)
+                return position < strips.size() ? strips[position] : std::string {};
+
+            ++position;
+        }
+
+        return {};
+    }
+
+    void Runner::claimStripFor (Run& run, const std::string& stripId)
+    {
+        run.strip = stripId;
+
+        if (stripId.empty())
+            return;
+
+        const auto* holder = runs.holderOf (stripId);
+
+        if (holder == nullptr)
+        {
+            run.claims.push_back (stripId);
+            return;
+        }
+
+        if (holder->id == run.id)
+            return;
+
+        /*  BUSY: WAIT FOR IT, and the group holding it has lost it (PRD §3.27,
+            `takeover=strip`). The claim is the slot table's own waiting claim
+            (§3.9e): it lands when the holder's run ends, however it ends, and
+            meanwhile this member shows pending. Under `takeover=group` the
+            holding group is already closing, so marking the strip lost changes
+            nothing it was going to do. A member of the SAME group never takes
+            from itself - a re-arm finds its strip free or its own. */
+        run.pending.push_back (stripId);
+
+        if (auto* holderGroup = runs.find (holder->parent);
+            holderGroup != nullptr && holderGroup->id != run.parent)
+            if (std::find (holderGroup->lostStrips.begin(), holderGroup->lostStrips.end(), stripId)
+                  == holderGroup->lostStrips.end())
+                holderGroup->lostStrips.push_back (stripId);
+    }
+
+    void Runner::takeOverFrom (const std::string& groupRunId, const juce::ValueTree& group)
+    {
+        /*  `takeover=group` CLOSES EVERY OTHER ARMED SAMPLER GROUP (PRD §3.27):
+            each launches nothing new and plays out what is playing - the
+            close of §3.9e, not a kill. `strip` closes nothing here: it takes
+            strips one claim at a time, in `claimStripFor`. */
+        if (textOf (group, "takeover") != "group")
+            return;
+
+        for (const auto& other : runs.all())
+        {
+            if (other.id == groupRunId || other.isFinished() || ! other.isGroup()
+                 || other.state == runState::preparing)
+                continue;
+
+            const auto otherCue = document.findById (other.cue);
+
+            if (! otherCue.isValid() || textOf (otherCue, "mode") != "sampler")
+                continue;
+
+            if (auto* closing = runs.find (other.id))
+                closing->closing = true;
+        }
+    }
+
+    void Runner::samplerTick (Engine& engine, GroupJob& job, const juce::ValueTree& group,
+                              const Run& groupRun)
+    {
+        /*  IDLE IS ARMED AND NOT ASKED FOR: nothing has been launched, so
+            ending it loses no sound and hands its strip over at once. */
+        const auto idle = [] (const Run& child)
+        {
+            return child.state == runState::armed && ! child.launchRequested;
+        };
+
+        const auto lost = [&groupRun] (const std::string& stripId)
+        {
+            return std::find (groupRun.lostStrips.begin(), groupRun.lostStrips.end(), stripId)
+                     != groupRun.lostStrips.end();
+        };
+
+        std::map<std::string, const Run*> live;
+
+        for (const auto* child : runs.childrenOf (job.run))
+            if (! child->isFinished() && child->sampler)
+                live[child->cue] = child;
+
+        /*  TAKEN OVER: A CLOSE, NOT A KILL (§3.9e). Nothing new is armed; an
+            idle member is ended so its strip goes to the group that took it at
+            once; a clip that is sounding plays out, and its strip changes
+            hands when its run ends. The group completes - its footer, then
+            its end - when its last member has. */
+        if (groupRun.closing)
+        {
+            for (const auto& entry : live)
+                if (idle (*entry.second))
+                    engine.submit (origin::engine, "run.kill", one (entry.second->id));
+
+            if (live.empty())
+                finishPhase (engine, job, group);
+
+            return;
+        }
+
+        /*  A STRIP ANOTHER GROUP TOOK, under `takeover=strip`: the idle member
+            on it is ended the same way, and nothing is armed there again. */
+        for (const auto& entry : live)
+            if (lost (entry.second->strip) && idle (*entry.second))
+                engine.submit (origin::engine, "run.kill", one (entry.second->id));
+
+        /*  FIRST, A VOICE FOR EACH MEMBER THAT HAS ITS STRIP AND NO TRACK, as
+            tracks free - in the order the runs were made, and no more of them
+            in one tick than there are tracks free, so a bank waiting on one
+            voice does not queue eight asks for it. BEFORE the re-arms below,
+            and the order is the fairness: a member that has been waiting takes
+            a freed track ahead of one whose clip only just ended. With no audio
+            side there are no tracks to hand out, and nothing is asked. */
+        if (audio != nullptr)
+        {
+            int free = 0;
+
+            for (int track = 0; track < audio->trackCount(); ++track)
+                if (! runs.isTrackBusy (track))
+                    ++free;
+
+            for (const auto* child : runs.childrenOf (job.run))
+            {
+                if (free <= 0)
+                    break;
+
+                if (child->isFinished() || ! child->sampler || child->track >= 0
+                     || child->state != runState::armed)
+                    continue;
+
+                if (std::find (child->claims.begin(), child->claims.end(), child->strip)
+                      == child->claims.end())
+                    continue;
+
+                engine.submit (origin::engine, "run.arm", one (child->id));
+                --free;
+            }
+        }
+
+        /*  EVERY MEMBER WITH NO RUN, ARMED ONTO ITS STRIP - at the GO, and
+            again the tick after a member's run ends, however it ended. That
+            is what makes a clip playable any number of times: the strip frees
+            when the run ends, and the member takes it back armed and ready.
+            A member past the last strip is left unarmed; the group is then
+            partially armed, and the row says so. */
+        const auto& strips = samplerStrips();
+        std::size_t position = 0;
+        bool anyStrip = false;
+
+        for (const auto& memberId : membersOf (group))
+        {
+            if (kindOfCue (document.findById (memberId)) != "media")
+                continue;
+
+            if (position >= strips.size())
+                break;
+
+            const auto& stripId = strips[position++];
+
+            if (lost (stripId))
+                continue;
+
+            anyStrip = true;
+
+            if (live.count (memberId) == 0)
+                engine.submit (origin::engine, "run.spawn",
+                               { osc::Value::string (job.run), osc::Value::string (memberId) });
+        }
+
+        /*  A GROUP WITH NO STRIP LEFT AND NOTHING SOUNDING COMPLETES (PRD
+            §3.27): it has nothing left to offer, as an emptied round completes
+            a loop (§3.6). The same for a group armed on a show with no sampler
+            strips at all - it could never play anything. */
+        if (! anyStrip && live.empty())
+            finishPhase (engine, job, group);
+    }
+
+    void Runner::samplerEdges (Engine& engine)
+    {
+        /*  FADER-START AND FADER-STOP, AS RULES OVER A TRIM (PRD §3.9a).
+
+            Every surface, the virtual panel and the page ride the run under a
+            fader strip through `node.set` on its trim, and hold it with
+            `node.touch` - so the edges are read here, off the trim and the
+            touch table, once, rather than by each thing that moves a fader.
+
+            START: the fader was PARKED - at or below `parkedDb` with nobody
+            touching it, released at the bottom - and the trim has come up past
+            `startDb`. A dip to the bottom while touched is a ride, never a
+            release, so a play-out clip does not restart every time a hand
+            brushes the floor.
+
+            STOP: a hold clip whose trim is at the bottom with nobody touching
+            it, where a hand was a tick ago or the fader came down from above -
+            the release at -inf. A play-out clip is not stopped: silence on its
+            fader is a mute.
+
+            Submitted as `strip.press` and `strip.release` from the engine, so
+            the log carries each edge and a replay - which runs no hooks - has
+            them as records. */
+        const auto& strips = samplerStrips();
+
+        for (const auto& stripId : strips)
+        {
+            if (gateStrips.count (stripId) > 0)
+                continue;
+
+            const auto* holder = runs.holderOf (stripId);
+
+            if (holder == nullptr || ! holder->sampler)
+            {
+                stripEdges.erase (stripId);
+                continue;
+            }
+
+            auto& edge = stripEdges[stripId];
+
+            if (edge.holder != holder->id)
+            {
+                edge = StripEdgeState {};
+                edge.holder = holder->id;
+                edge.lastTrim = holder->trim;
+                edge.parked = holder->trim <= FaderEdge::parkedDb;
+            }
+
+            const auto touched = touches != nullptr
+                                   && ! touches->holdersOf ("/godot/run/" + holder->id + "/trim").empty();
+
+            const auto launched = holder->launchRequested
+                                    || holder->state == runState::playing
+                                    || holder->state == runState::waiting;
+
+            const auto hold = textOf (document.findById (holder->cue), "release") == "hold";
+
+            /*  WHETHER A HAND MOVED IT, as opposed to a press setting it: only a
+                write through `node.set` is a fader moving. */
+            const auto ridden = holder->ridden;
+
+            if (auto* bookkeeping = runs.find (holder->id))
+                bookkeeping->ridden = false;
+
+            if (! launched && holder->state == runState::armed && edge.parked && ridden
+                 && holder->trim > FaderEdge::startDb)
+            {
+                engine.submit (origin::engine, "strip.press", one (stripId));
+                edge.parked = false;
+            }
+            else if (launched && hold && holder->trim <= FaderEdge::parkedDb && ! touched
+                      && (edge.wasTouched || edge.lastTrim > FaderEdge::parkedDb))
+            {
+                engine.submit (origin::engine, "strip.release", one (stripId));
+            }
+
+            /*  PARKED IS WHERE THE FADER IS, NOT ONLY WHAT THE LAST START SAID.
+                At the bottom with nobody on it, it is parked; anywhere above the
+                bottom, it is not - however it got there. A pad pressed on a
+                fader strip lifts the trim to unity without a start edge, and a
+                hold clip let go before its launch was placed stays armed at
+                that level: had `parked` only been cleared by a start, the next
+                tick would have read a parked fader at unity and started the
+                clip nobody pressed (found recording the sampler fixture). */
+            if (holder->trim <= FaderEdge::parkedDb && ! touched)
+                edge.parked = true;
+            else if (holder->trim > FaderEdge::parkedDb)
+                edge.parked = false;
+
+            edge.wasTouched = touched;
+            edge.lastTrim = holder->trim;
+        }
+    }
+
+    void Runner::beginReleaseFade (const std::string& runId, double seconds)
+    {
+        auto* target = runs.find (runId);
+
+        if (target == nullptr || target->isFinished())
+            return;
+
+        /*  A FADE OVER A FADE takes over from where the level has got to, as
+            every fade does; the release is simply the last one. */
+        resolveTakeover (runId);
+
+        FadeJob job;
+        job.target = runId;
+        job.reportsSelf = false;
+        job.fromDb = target->ownLevel;
+        job.toDb = silenceDb;
+        job.ticksTotal = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
+        job.curve = FadeCurve::linear;
+        job.stopWhenDone = true;
+        job.stopsAtTick = currentTick + job.ticksTotal;
+
+        target->state = runState::stopping;
+        running.push_back (job);
+    }
+
+    std::string Runner::pressStrip (Engine& engine, std::int64_t tick, const std::string& stripId,
+                                    int velocity, const std::string& origin)
+    {
+        const auto strip = document.findById (stripId);
+
+        if (! strip.isValid() || strip.getType().toString() != "Strip")
+            return reason::unknownId;
+
+        /*  A DCA STRIP IS NOT PRESSED: it rides a trim and holds no clip. */
+        if (document.getAttribute ("/godot/slot/" + stripId + "/role").value_or (std::string {})
+              != "sampler")
+            return reason::badValue;
+
+        /*  NOTHING ON IT IS APPLIED AND DOES NOTHING: a pad hit between banks,
+            or while the member on it waits, is not a mistake. */
+        const auto* holding = runs.holderOf (stripId);
+
+        if (holding == nullptr)
+            return {};
+
+        auto* run = runs.find (holding->id);
+
+        if (run == nullptr || run->isFinished() || ! run->sampler)
+            return {};
+
+        /*  A CLOSING GROUP LAUNCHES NOTHING NEW, and nor does a group on a strip
+            another group has taken: the clip it holds may finish, and that is
+            all. */
+        if (const auto* group = runs.find (run->parent);
+            group != nullptr
+              && (group->closing
+                    || std::find (group->lostStrips.begin(), group->lostStrips.end(), stripId)
+                         != group->lostStrips.end()))
+            return {};
+
+        /*  THE HAND THAT HOLDS IT OWNS IT (PRD §3.27): a press from anywhere
+            else is a no-op while a hold clip is down. */
+        if (run->held && run->heldBy != origin)
+            return {};
+
+        const auto cue = document.findById (run->cue);
+
+        if (! cue.isValid())
+            return {};
+
+        const auto hold = textOf (cue, "release") == "hold";
+        const auto byVelocity = textOf (cue, "velocity") == "true" && velocity > 0;
+        const auto floor = numberOf (cue, "velocityFloor");
+
+        const auto step = [this, &run, tick]
+        {
+            /*  A PRESS IS A STEP, letter `p` (plan decision 9): the live
+                recorder keeps it, so a take replays what the hands played;
+                load-to-time skips it, because a press is not a state the show
+                can be solved back into. */
+            if (const auto listId = listOfCue (run->cue); ! listId.empty())
+                lists.stepped (listId, { tick, run->cue, 'p' });
+        };
+
+        if (run->state == runState::armed && ! run->launchRequested)
+        {
+            /*  THE PRESS THAT STARTS IT. Velocity sets the level it starts at
+                when the clip asks for that (decision AA); otherwise a fader
+                parked at the bottom comes up to unity - a pad hit on a fader
+                strip plays at the level the clip was written at - and a fader
+                already lifted keeps where the hand put it. */
+            if (byVelocity)
+                run->trim = levelForByte (velocity, floor);
+            else if (run->trim <= FaderEdge::parkedDb)
+                run->trim = 0.0;
+
+            run->launchRequested = true;
+            run->launchRequestedAtTick = tick;
+            run->prepare.clear();
+
+            if (hold)
+            {
+                run->held = true;
+                run->heldBy = origin;
+            }
+
+            step();
+            return {};
+        }
+
+        /*  PRESSED AGAIN WHILE IT PLAYS: a hold clip cannot be, by the hand
+            holding it (§3.8's table); a play-out clip does what its
+            `secondPress` says. */
+        if (hold)
+            return {};
+
+        const auto second = textOf (cue, "secondPress");
+
+        if (second == "noop")
+            return {};
+
+        if (second == "stop")
+        {
+            beginReleaseFade (run->id, numberOf (cue, "releaseFade"));
+            return {};
+        }
+
+        if (byVelocity)
+            run->trim = levelForByte (velocity, floor);
+
+        seekMedia (engine, tick, run->id, 0.0);
+        step();
+        return {};
+    }
+
+    std::string Runner::releaseStrip (Engine&, std::int64_t, const std::string& stripId,
+                                      const std::string& origin)
+    {
+        const auto strip = document.findById (stripId);
+
+        if (! strip.isValid() || strip.getType().toString() != "Strip")
+            return reason::unknownId;
+
+        const auto* holding = runs.holderOf (stripId);
+
+        if (holding == nullptr)
+            return {};
+
+        auto* run = runs.find (holding->id);
+
+        if (run == nullptr || run->isFinished() || ! run->sampler)
+            return {};
+
+        /*  ONLY THE HAND THAT PRESSED IT LETS GO OF IT (PRD §3.27). */
+        if (run->held && run->heldBy != origin)
+            return {};
+
+        run->held = false;
+        run->heldBy.clear();
+
+        const auto cue = document.findById (run->cue);
+
+        if (! cue.isValid() || textOf (cue, "release") != "hold")
+            return {};
+
+        /*  LET GO BEFORE IT SOUNDED: the launch had been asked for and not yet
+            placed, so it is simply not placed - the member stays armed for the
+            next press, and nothing was heard to stop. */
+        if (run->state == runState::armed && run->launchRequested)
+        {
+            run->launchRequested = false;
+            return {};
+        }
+
+        if (run->state == runState::armed)
+            return {};
+
+        beginReleaseFade (run->id, numberOf (cue, "releaseFade"));
+        return {};
+    }
+
+    void Runner::armAgain (Engine& engine, const std::string& runId)
+    {
+        auto* run = runs.find (runId);
+
+        if (run == nullptr || run->isFinished() || run->track >= 0)
+            return;
+
+        run->pending.erase (std::remove (run->pending.begin(), run->pending.end(), std::string ("voice")),
+                            run->pending.end());
+
+        const auto cue = document.findById (run->cue);
+
+        if (cue.isValid())
+            armMedia (engine, cue, runId);
+    }
+
+    bool Runner::isSamplerMember (const std::string& cueId) const
+    {
+        const auto cue = document.findById (cueId);
+
+        if (! cue.isValid() || kindOfCue (cue) != "media")
+            return false;
+
+        const auto parent = cue.getParent();
+
+        return parent.isValid() && parent.getType().toString() == "Group"
+                 && textOf (parent, "mode") == "sampler";
+    }
+
+    std::string Runner::pressMember (Engine& engine, std::int64_t tick, const std::string& cueId,
+                                     const std::string& origin)
+    {
+        /*  THE STRIP THE MEMBER HOLDS, through its live run. A member waiting
+            for its strip holds none yet, and a member of a group nobody armed
+            has no run at all: both are `needs-strip`. */
+        for (const auto& candidate : runs.all())
+        {
+            if (candidate.cue != cueId || candidate.isFinished() || ! candidate.sampler
+                 || candidate.strip.empty())
+                continue;
+
+            if (std::find (candidate.claims.begin(), candidate.claims.end(), candidate.strip)
+                  == candidate.claims.end())
+                continue;
+
+            return pressStrip (engine, tick, candidate.strip, -1, origin);
+        }
+
+        return reason::needsStrip;
+    }
+
     void Runner::fireOsc (const juce::ValueTree& cue, const std::string& runId)
     {
         const auto self = runId;
@@ -3880,7 +4526,10 @@ namespace wfg::cue
             if (target == nullptr || (target->isFinished() && ! job.stopWhenDone))
             {
                 job.retired = true;
-                engine.submit (origin::engine, "run.ended", one (job.self));
+
+                if (job.reportsSelf)
+                    engine.submit (origin::engine, "run.ended", one (job.self));
+
                 continue;
             }
 
@@ -3933,7 +4582,9 @@ namespace wfg::cue
                     engine.submit (origin::engine, "run.ended", one (target->id));
             }
 
-            engine.submit (origin::engine, "run.ended", one (job.self));
+            if (job.reportsSelf)
+                engine.submit (origin::engine, "run.ended", one (job.self));
+
             job.retired = true;
         }
 
@@ -4145,6 +4796,21 @@ namespace wfg::cue
                 because the phase that adopted it would refuse to launch it. */
             askedFor (id);
 
+            /*  AND A SAMPLER GROUP'S MEMBER takes its strip even when it was
+                armed ahead - which the horizon does not do for a sampler group,
+                and which costs nothing to be sure of. */
+            if (auto* adopted = runs.find (id); adopted != nullptr && ! adopted->sampler)
+                if (const auto* parent = runs.find (parentRun))
+                    if (const auto parentCue = document.findById (parent->cue);
+                        parentCue.isValid() && textOf (parentCue, "mode") == "sampler"
+                          && kind == "media")
+                    {
+                        adopted->sampler = true;
+                        const auto stripId = stripForMember (parentCue, cueId);
+                        adopted->trim = stripIsGate (stripId) ? 0.0 : -120.0;
+                        claimStripFor (*adopted, stripId);
+                    }
+
             return id;
         }
 
@@ -4164,6 +4830,30 @@ namespace wfg::cue
             the current one is still playing, so the disk is paid for before the
             chain arrives rather than after. Every other kind has nothing to make
             ready and simply waits in the state it was born in. */
+        /*  A SAMPLER GROUP'S MEMBER IS ARMED ONTO A STRIP (PRD §3.27): the one
+            its place among the group's media members lands on, counted onto
+            the sampler strips of every surface. Its trim starts where the
+            strip's hand control is - a fader PARKED at silence, so lifting it
+            is what starts the clip and §3.9a's "reasserted at every handover"
+            is simply a fresh run; a pad at unity, so a hit plays. A strip
+            another group's clip is still sounding on is WAITED for, and the
+            member is armed when it lands: a voice held for a strip nobody can
+            press would be a voice for nothing. */
+        if (kind == "media")
+            if (const auto* parent = runs.find (parentRun))
+                if (const auto parentCue = document.findById (parent->cue);
+                    parentCue.isValid() && textOf (parentCue, "mode") == "sampler")
+                {
+                    run->sampler = true;
+                    const auto stripId = stripForMember (parentCue, cueId);
+                    run->trim = stripIsGate (stripId) ? 0.0 : -120.0;
+                    claimStripFor (*run, stripId);
+
+                    if (std::find (run->claims.begin(), run->claims.end(), stripId)
+                          == run->claims.end())
+                        return id;
+                }
+
         if (kind == "media")
             armMedia (engine, cue, id);
 
@@ -4522,6 +5212,17 @@ namespace wfg::cue
                 the command that drew it, read here. The copy the phase starts
                 with is the same list one tick earlier, because the record has
                 not been applied yet when `beginPhase` returns. */
+            /*  A SAMPLER GROUP'S MEMBERS ARE NOT A ROUND (PRD §3.27): nothing
+                is drawn, nothing is launched by the scheduler, and nothing is
+                waited on in order. What the phase does every tick is keep the
+                bank armed - its own function, because it shares nothing with
+                the loop below but the phase's name. */
+            if (job.phase == groupPhase::members && textOf (group, "mode") == "sampler")
+            {
+                samplerTick (engine, job, group, *run);
+                continue;
+            }
+
             if (job.phase == groupPhase::members && run->iteration > 0)
                 job.phaseCues = run->round;
 
@@ -4784,7 +5485,15 @@ namespace wfg::cue
             group's members: it may be shuffled, it may be a subset (§3.6's
             "play N of M"), and it may have had a member pruned out of it for
             tonight. A header and a footer are always themselves, in order. */
-        auto cues = phase == groupPhase::members
+        /*  A SAMPLER GROUP DRAWS NO ROUND: its members are played by hand in
+            any order, so `selection`, `play` and `loops` mean nothing to it -
+            the manual group's rule (namespace draft §12.5), for the same
+            reason. Its phase is its media members, and the scheduler's tick
+            arms them; nothing is spawned here. */
+        const auto sampler = phase == groupPhase::members && textOf (group, "mode") == "sampler";
+
+        auto cues = sampler ? membersOf (group)
+                  : phase == groupPhase::members
                       ? drawRound (engine, group, job.run)
                       : membersOf (group.getChildWithName (phase == groupPhase::header
                                                               ? "Header" : "Footer"));
@@ -4814,6 +5523,9 @@ namespace wfg::cue
         job.launched = 0;
         job.awaiting.clear();
         job.phaseRuns.clear();
+
+        if (sampler)
+            return true;
 
         const auto timeline = phase == groupPhase::members
                                 && textOf (group, "mode") == "timeline";
@@ -5167,6 +5879,12 @@ namespace wfg::cue
         if (element != "Group")
             return {};
 
+        /*  A SAMPLER GROUP LAUNCHES NOTHING FIRST: GO arms every member onto
+            its strip at once, and a member armed ahead without a strip would be
+            a voice held for a cue no hand could press. */
+        if (textOf (cue, "mode") == "sampler")
+            return {};
+
         const auto timeline = textOf (cue, "mode") == "timeline";
 
         std::vector<std::string> out;
@@ -5256,6 +5974,7 @@ namespace wfg::cue
             theatre. */
         advanceWaits (engine, tick);
         advanceGroups (engine);
+        samplerEdges (engine);
         armStandby (engine);
         advanceFades (engine, tick);
         applyLevels();
@@ -6598,6 +7317,21 @@ namespace wfg::cue
                                   && runner.isManualGroup (cue))
                                 return Outcome::rejected (reason::needsGo);
 
+                            /*  A SAMPLER MEMBER FIRED BY NAME IS A PRESS on the
+                                strip it holds (plan decision 10) - which is what
+                                a take from the live recorder replays - and with
+                                no strip under it there is nowhere to play it
+                                from. The press records its own step. */
+                            if (runner.isSamplerMember (cueId))
+                            {
+                                const auto refusal = runner.pressMember (
+                                    engine, context.tick, cueId,
+                                    context.origin != nullptr ? *context.origin : std::string {});
+
+                                return refusal.empty() ? Outcome::ok ({ args[0] })
+                                                       : Outcome::rejected (refusal);
+                            }
+
                             const auto id = args.size() > 1 ? args[1].getString()
                                                             : std::string {};
 
@@ -6659,6 +7393,19 @@ namespace wfg::cue
                                   && runner.isManualGroup (cue))
                                 return Outcome::rejected (reason::needsGo);
 
+                            /*  A trigger on a sampler member presses its strip,
+                                as `cue.fire` does. A trigger has no release, so
+                                a hold clip it starts plays out (§3.27). */
+                            if (runner.isSamplerMember (cueId))
+                            {
+                                const auto refusal = runner.pressMember (
+                                    engine, context.tick, cueId,
+                                    context.origin != nullptr ? *context.origin : std::string {});
+
+                                return refusal.empty() ? Outcome::ok ({ args[0] })
+                                                       : Outcome::rejected (refusal);
+                            }
+
                             const auto id = args.size() > 1 ? args[1].getString()
                                                             : std::string {};
 
@@ -6673,6 +7420,68 @@ namespace wfg::cue
                             return Outcome::ok (withRun (args, 1,
                                                          runner.fire (engine, context.tick,
                                                                       cueId, id)));
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  A HAND ON A SAMPLER STRIP (PRD §3.27, Phase 6): a pad hit, a button
+            pressed, a fader lifted from the bottom - and let go. Sent by a
+            surface, the virtual panel, the page, and by the engine itself for
+            a fader's edges; the origin is who owns a held clip, so it is read
+            from the context rather than trusted from an argument. Neither
+            moves the standby (§3.5): a sampler is played beside the list, not
+            through it. */
+        registry.add ({ "strip.press",
+                        "A hand on a sampler strip: the clip on it starts, at a level its velocity"
+                        " sets when the clip asks for that.",
+                        { { "strip", 's', false }, { "velocity", 'i', true } },
+                        true,
+                        [&engine, &runner] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto velocity = args.size() > 1 ? args[1].getInt32() : -1;
+
+                            if (args.size() > 1 && (velocity < 0 || velocity > 127))
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto refusal = runner.pressStrip (engine, context.tick,
+                                                                    args[0].getString(), velocity,
+                                                                    context.origin != nullptr
+                                                                      ? *context.origin
+                                                                      : std::string {});
+
+                            return refusal.empty() ? Outcome::ok (args) : Outcome::rejected (refusal);
+                        } });
+
+        registry.add ({ "strip.release",
+                        "The hand lets go of a sampler strip: a hold clip stops, after a short fade.",
+                        { { "strip", 's', false } },
+                        true,
+                        [&engine, &runner] (CommandContext& context, const std::vector<osc::Value>& args)
+                        {
+                            const auto refusal = runner.releaseStrip (engine, context.tick,
+                                                                      args[0].getString(),
+                                                                      context.origin != nullptr
+                                                                        ? *context.origin
+                                                                        : std::string {});
+
+                            return refusal.empty() ? Outcome::ok (args) : Outcome::rejected (refusal);
+                        } });
+
+        /*  A VOICE FREED, AND A SAMPLER MEMBER WAITING FOR ONE TAKES IT
+            (decision Z). What the scheduler sends itself when a track frees;
+            anyone may, as with every engine-origin command. */
+        registry.add ({ "run.arm",
+                        "A sampler member waiting for a voice takes the track that has come free.",
+                        { { "run", 's', false } },
+                        true,
+                        [&engine, &runner] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto runId = args[0].getString();
+
+                            if (! runner.knowsRun (runId))
+                                return Outcome::rejected (reason::unknownId);
+
+                            runner.armAgain (engine, runId);
+                            return Outcome::ok (args);
                         } });
 
         //----------------------------------------------------------------------

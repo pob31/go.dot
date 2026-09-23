@@ -102,6 +102,18 @@ namespace wfg::cue
             false, not the text "false": every value goes into the tree through
             the schema, typed. Comparing the text would have answered "0" and
             matched nothing, which is exactly what the first version did. */
+        /*  A SAMPLER GROUP (PRD §3.27, Phase 6): a hand launches its members
+            from strips, so none of them is a place the pointer stands - §3.27
+            refuses them to standby-set the way a header's cues are refused,
+            and the flag PRD §3.5's widening left on that sentence is honoured
+            by building it as written (namespace draft §16.5). The group ITSELF
+            is a place: GO on it arms the bank. Absent means `sequence`. */
+        bool isSamplerGroup (const juce::ValueTree& cue)
+        {
+            return cue.isValid() && cue.getType().toString() == "Group"
+                     && cue[juce::Identifier ("mode")].toString() == "sampler";
+        }
+
         bool isEnabled (const juce::ValueTree& cue)
         {
             const juce::Identifier enabled { "enabled" };
@@ -246,6 +258,9 @@ namespace wfg::cue
             {
                 if (child[idProperty].toString().toStdString() == cueId)
                     return child;
+
+                if (isSamplerGroup (child))
+                    continue;
 
                 if (const auto found = findOnPath (child, cueId); found.isValid())
                     return found;

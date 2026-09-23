@@ -360,6 +360,50 @@ namespace wfg::cue
             set it are logged, which is what a replay needs. */
         double trim = 0.0;
 
+        /*  A SAMPLER MEMBER'S STRIP (PRD §3.27, Phase 6): the fader or pad this
+            run holds - or waits for, while another group's clip finishes on
+            it. The claim itself is in `claims` and `pending` like any slot's;
+            this says which one is the strip, so a press can find the run and
+            a readout can say which fader a sound is under. Empty on every run
+            that is not a sampler member. */
+        std::string strip;
+
+        /*  Whether this run is a member of a sampler group, which changes one
+            refusal: a member that finds every track busy WAITS for a voice
+            (decision Z, 2026-09-23) - the word `voice` in `pending` - instead
+            of failing `no-track` at entry as a cue fired by GO does. */
+        bool sampler = false;
+
+        /*  A PAD IS DOWN ON IT: pressed and not yet released, for a clip whose
+            `release` is hold. While it is held a press from any other origin
+            is a no-op, and so is that origin's release (PRD §3.27): the hand
+            that started it owns it. */
+        bool held = false;
+        std::string heldBy;
+
+        /*  A HAND WROTE `trim` SINCE THE LAST TICK: set by `node.set`'s live
+            door, read and cleared by the fader edges. A fader-start is a fader
+            MOVED up from the bottom, and only a write through that door is a
+            fader moving - a pad press sets the trim too, and must not look like
+            a lift to the tick after it (found by the sampler fixture). Hook-side
+            bookkeeping: never published, and a replay, which runs no hooks,
+            never reads it. */
+        bool ridden = false;
+
+        /*  ON A SAMPLER GROUP'S RUN: taken over by another sampler group
+            arming with `takeover=group`. A closing group launches nothing
+            new, plays out what is playing and ends each idle member so its
+            strip hands over at once - eviction is a close, not a kill
+            (§3.9e) - and completes, footer and all, when its last member has
+            ended. */
+        bool closing = false;
+
+        /*  ON A SAMPLER GROUP'S RUN: the strips another group has taken from
+            it under `takeover=strip`. The group re-arms nothing on them, and
+            a group that has lost every strip completes. A refresh - GO on the
+            group again - claims them back. */
+        std::vector<std::string> lostStrips;
+
         /*  How many blocks the launch was late by, when GO arrived before the
             arm had finished. Zero is the ordinary case and the number is worth
             having: it is the difference between "GO is instant" as a claim and

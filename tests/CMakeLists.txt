@@ -97,6 +97,7 @@ add_executable(wfg_tests
     SurfaceTests.cpp
     McuCodecTests.cpp
     DcaTests.cpp
+    SamplerTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp
@@ -429,6 +430,14 @@ add_test(NAME wfg.replay.dca-trim.C
 add_test(NAME wfg.replay.dca-trim.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/dca-trim.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/dca
+                 --wfg-locale=${WFG_LOCALE_FR})
+add_test(NAME wfg.replay.sampler.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/sampler.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/sampler
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.sampler.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/sampler.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/sampler
                  --wfg-locale=${WFG_LOCALE_FR})
 add_test(NAME wfg.replay.group-fade.C
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/group-fade.wfglog"

@@ -1909,7 +1909,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "Every slot the show declares, in document order: the processor inputs of every mount, then the rack channels. A VOICE IS NOT IN IT - a track is not an object anybody wrote down, it has no identifier, and Show/Audio/@tracks is a count rather than a list; where a voice is held has been readable at /godot/run/<id>/track since Phase 2. The allocator still treats a track as a slot kind (PRD 3.9e); being one mechanism does not oblige it to be one data structure." },
+          "Every slot the show declares, in document order: the processor inputs of every mount, then the rack channels, then the strips of every surface (Phase 6). A VOICE IS NOT IN IT - a track is not an object anybody wrote down, it has no identifier, and Show/Audio/@tracks is a count rather than a list; where a voice is held has been readable at /godot/run/<id>/track since Phase 2. The allocator still treats a track as a slot kind (PRD 3.9e); being one mechanism does not oblige it to be one data structure." },
         { "slot", "name",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",

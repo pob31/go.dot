@@ -78,6 +78,7 @@ namespace wfg::midi
 
 namespace wfg::tree
 {
+    class TouchTable;
     class MountProbe;
     class MountSender;
     class MountTable;
@@ -355,6 +356,67 @@ namespace wfg::cue
             which case every DCA trims nothing: the Runner's arithmetic is
             unchanged for a show that declares none. */
         void setDcas (DcaTable* table) noexcept { dcas = table; }
+
+        /*  WHO IS HOLDING WHICH NODE, for the fader edges (PRD §3.9a): a
+            fader-start counts only from a fader released at the bottom, and a
+            fader-stop only when the hand lets go there, and the touch table is
+            where "released" is known. Read in the tick hook, which is the
+            thread that owns it. Null in a replay, which runs no hooks and so
+            reads no edges: the presses and releases they caused are records. */
+        void setTouches (const tree::TouchTable* table) noexcept { touches = table; }
+
+        //======================================================================
+        /*  SAMPLER STRIPS (PRD §3.27, Phase 6). A press and a release on a
+            strip, applied - the handlers of `strip.press` and `strip.release`,
+            which a surface, the virtual panel, the page and the fader edges
+            below all send. Answer a refusal word, or empty when applied
+            (which includes a press on a strip with nothing on it: a pad hit
+            between banks is not a mistake).
+
+            `velocity` is 1 to 127, or -1 for a press that carries none - a
+            fader lifted, a button, a cue fired by name. */
+        std::string pressStrip (Engine& engine, std::int64_t tick, const std::string& stripId,
+                                int velocity, const std::string& origin);
+        std::string releaseStrip (Engine& engine, std::int64_t tick, const std::string& stripId,
+                                  const std::string& origin);
+
+        /*  A sampler member waiting for a voice takes one: `run.arm`'s
+            handler. The hook sends it when a track has come free; anyone may,
+            as with every engine-origin command. */
+        void armAgain (Engine& engine, const std::string& runId);
+
+        /*  A SAMPLER MEMBER FIRED BY NAME - `cue.fire`, a trigger, a start
+            cue from the live recorder - is a press on the strip it holds.
+            Answers the refusal word when there is none (`needs-strip`), or
+            empty when the press was made; and whether the cue was a sampler
+            member at all, so every other cue fires as it always did. */
+        bool isSamplerMember (const std::string& cueId) const;
+        std::string pressMember (Engine& engine, std::int64_t tick, const std::string& cueId,
+                                 const std::string& origin);
+
+        /*  The sampler strips of every surface, in the order a group fills
+            them: surfaces in document order, then each strip's index. Read
+            once per show revision. */
+        const std::vector<std::string>& samplerStrips();
+
+        /*  THE HAND'S EDGES ON FADER STRIPS (PRD §3.9a), in one place each.
+            A fader counts as PARKED when it is at or below `parkedDb` with
+            nobody touching it - released at the bottom; a START is a parked
+            fader lifted past `startDb`, the hysteresis between the two being
+            what stops a parked fader chattering. Debounce is a preference
+            that arrives with Phase 10's others. */
+        struct FaderEdge
+        {
+            static constexpr double parkedDb = -118.0;
+            static constexpr double startDb = -110.0;
+        };
+
+        /*  The level a velocity or a pressure byte asks for, on one scale:
+            127 is 0 dB, 1 is `floor`, straight between them in dB; nought is
+            the floor too (a pressure of nought is ignored before it gets
+            here). One function for both, because a pad is a fader without a
+            motor and both bytes are where its fader would be. */
+        static double levelForByte (int byte, double floor) noexcept;
 
         /** The published `/godot/engine/launchLatencyTicks`, or 0 with no audio. */
         int latencyTicks() const noexcept;
@@ -949,6 +1011,42 @@ namespace wfg::cue
         void armStandby (Engine& engine);
         void advanceGroups (Engine& engine);
 
+        /*  A SAMPLER GROUP'S MEMBERS PHASE, every tick: arm every member that
+            has no run onto its strip, let a closing group finish, end the idle
+            members on strips another group took, and hand a voice to a member
+            waiting for one. Decides and submits, as every hook does. */
+        void samplerTick (Engine& engine, GroupJob& job, const juce::ValueTree& group,
+                          const Run& groupRun);
+
+        /*  Fader-start and fader-stop on every sampler strip whose endpoint
+            is a fader: the edges of §3.9a, read off each holder's `trim` and
+            the touch table, and submitted as `strip.press` / `strip.release`. */
+        void samplerEdges (Engine& engine);
+
+        /*  Takes a strip for a sampler member, or queues for it behind the
+            run holding it - which is how a takeover waits for a playing clip
+            to finish rather than cutting it off. */
+        void claimStripFor (Run& run, const std::string& stripId);
+
+        /*  Which strip member `cueId` of `group` lands on: its place among the
+            group's media members, counted onto `samplerStrips()`. Empty past
+            the last strip. */
+        std::string stripForMember (const juce::ValueTree& group, const std::string& cueId);
+
+        /** Whether a sampler strip's hand control is a pad (a gate) rather
+            than a fader - which decides where a fresh run's trim starts. */
+        bool stripIsGate (const std::string& stripId);
+
+        /*  A sampler group's arming, in the handler: `takeover=group` closes
+            every other armed sampler group. Asked when the group fires and at
+            every refresh. */
+        void takeOverFrom (const std::string& groupRunId, const juce::ValueTree& group);
+
+        /*  The short fade to silence a hold clip's release and a play-out
+            clip's `stop` second press both make, then the stop. A fade job
+            with no cue of its own behind it. */
+        void beginReleaseFade (const std::string& runId, double seconds);
+
         /*  Starts a group's header, members or footer, and answers whether
             there was anything to start. False lets the caller fall through to
             the next phase, so a group with no header does not spend a tick in
@@ -1049,6 +1147,28 @@ namespace wfg::cue
         tree::MountSender* sender_ = nullptr;
         midi::MidiSink* midiOut = nullptr;
         DcaTable* dcas = nullptr;
+        const tree::TouchTable* touches = nullptr;
+
+        /*  THE SAMPLER ROSTER, read once per show revision: every sampler
+            strip in fill order, and which of them are pads. */
+        std::vector<std::string> samplerRoster;
+        std::set<std::string> gateStrips;
+        std::uint64_t rosterRevision = 0;
+        bool rosterRead = false;
+
+        /*  WHAT THE FADER EDGES REMEMBER BETWEEN TICKS, per strip: which run
+            was under it, whether it counts as parked, and whether a hand was on
+            it a tick ago - the release edge is a hand that WAS there. Hook-side
+            memory, never a model input: the decisions it makes are records. */
+        struct StripEdgeState
+        {
+            std::string holder;
+            bool parked = true;
+            bool wasTouched = false;
+            double lastTrim = -120.0;
+        };
+
+        std::map<std::string, StripEdgeState> stripEdges;
 
         /*  The DCA chain of every cue that has one, keyed by cue, and the show
             revision it was read at. Rebuilt when the show changes - a mark or a
