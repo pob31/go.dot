@@ -1,0 +1,21 @@
+<Show>
+  <Lists>
+    <List id="DCA00001" name="Act One">
+      <Media id="DCA00002" dca="DCAD0002" file="guitar.wav" level="-3" name="Guitar" number="1"/>
+      <Group id="DCA00003" dca="DCAD0001" mode="timeline" name="The scene" number="2">
+        <Media id="DCA00004" file="rain.wav" name="Rain" number="2.1"/>
+      </Group>
+      <Fade id="DCA00005" dca="DCAD0002" duration="0.5" level="-20" name="Band down" number="3"/>
+      <Cue id="DCA00006" name="Clear" number="4"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="0"/>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas>
+    <Dca id="DCAD0001" name="Everything"/>
+    <Dca id="DCAD0002" dca="DCAD0001" name="Band"/>
+  </Dcas>
+</Show>

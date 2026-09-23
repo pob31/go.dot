@@ -18,6 +18,7 @@
 
 #include <wfg/engine/midi/PortTable.h>
 #include <wfg/engine/surface/SurfaceTable.h>
+#include <wfg/engine/cue/DcaTable.h>
 
 #include <wfg/engine/cue/Solver.h>
 
@@ -2026,6 +2027,18 @@ namespace wfg::tree
             runtime.push_back (makeLeaf (std::string (godot) + "/run/" + std::string (row->name),
                                          *row, runOrder));
 
+        /*  WHAT EACH DCA IS TRIMMING BY TONIGHT (PRD §3.28), against the
+            roster the document half left behind. From this half because a trim
+            is what a fader is doing - it moves fifty times a second while a
+            hand rides it and nothing about the show does - and the other half
+            is a cache. */
+        for (const auto& dcaId : declaredDcas)
+            for (const auto* row : doc::Schema::rowsForOwner ("dca"))
+                if (row->name == "trim")
+                    runtime.push_back (makeLeaf (std::string (godot) + "/dca/" + dcaId + "/trim", *row,
+                                                 osc::formatDouble (dcas != nullptr ? dcas->trimOf (dcaId)
+                                                                                    : 0.0)));
+
         for (const auto& run : runs.all())
         {
             if (run.id.empty())
@@ -2068,6 +2081,7 @@ namespace wfg::tree
                     here throttles it (§14.5). */
                 else if (name == "timbre")    text = timbreText (run, mediaRecords.get());
                 else if (name == "level")     text = osc::formatDouble (run.level);
+                else if (name == "trim")      text = osc::formatDouble (run.trim);
                 else if (name == "late")      text = std::to_string (run.late);
                 else if (name == "parent")    text = run.parent;
                 else if (name == "children")  text = joinIds (run.children);
@@ -2127,7 +2141,16 @@ namespace wfg::tree
             std::string (godot) + "/port",
             std::string (godot) + "/cue",
             std::string (godot) + "/list",
-            std::string (godot) + "/slot" };
+            std::string (godot) + "/slot",
+
+            /*  `/godot/dca` for the reason `/godot/port` is here: both halves
+                publish under it - a DCA's name from the show, its trim from
+                the fader - and whichever minted the container would decide
+                what `find` answered for it. */
+            std::string (godot) + "/dca" };
+
+        for (const auto& id : declaredDcas)
+            ownedByTheDocument.push_back (std::string (godot) + "/dca/" + id);
 
         for (const auto& id : declaredLists)
             ownedByTheDocument.push_back (std::string (godot) + "/list/" + id);

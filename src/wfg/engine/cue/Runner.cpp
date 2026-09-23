@@ -16,6 +16,7 @@
 
 #include <wfg/engine/cue/Runner.h>
 
+#include <wfg/engine/cue/DcaTable.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Solver.h>
 
@@ -2821,6 +2822,17 @@ namespace wfg::cue
         const auto toDb = drawn.points.empty() ? numberOf (cue, "level")
                                                : drawn.points.back().levelDb;
 
+        /*  A FADE THAT NAMES A DCA MOVES THE DCA (Phase 6, `fade/dca`), and
+            `target` is not read: a DCA has no run to find, and a fade that
+            named both would otherwise have to choose which of two levels it
+            meant. `wfg validate` says so when both are written. */
+        if (const auto dcaId = textOf (cue, "dca"); ! dcaId.empty())
+        {
+            beginDcaFade (dcaId, runId, toDb, numberOf (cue, "duration"),
+                          fadeCurveFrom (textOf (cue, "curve")), std::move (drawn.points));
+            return;
+        }
+
         /*  AND WHETHER ARRIVING IS STOPPING (author, 2026-09-18: "a tick box
             to stop a media file once a fade has completed"). Until then a
             fade never stopped anything, even at silence: the run played on,
@@ -3186,6 +3198,117 @@ namespace wfg::cue
                 stopping->state = runState::stopping;
 
         running.push_back (job);
+    }
+
+    void Runner::beginDcaFade (const std::string& dcaId, const std::string& selfRunId,
+                               double toDb, double seconds, FadeCurve curve,
+                               std::vector<doc::FadePoint> points)
+    {
+        auto* selfRun = runs.find (selfRunId);
+
+        if (selfRun == nullptr)
+            return;
+
+        /*  Running from the tick it starts, for the reason a cue fade is: a
+            fade has nothing to arm. */
+        selfRun->state = runState::playing;
+
+        /*  A DCA THIS SHOW DOES NOT DECLARE is a pointer at nothing, the
+            `bad-target` a cue fade gives for a cue that is not there - said
+            out loud from the tick hook, as every report is. */
+        const auto declared = document.findById (dcaId);
+
+        if (! declared.isValid() || declared.getType().toString() != "Dca")
+        {
+            FadeJob orphan;
+            orphan.self = selfRunId;
+            orphan.failure = runError::badTarget;
+            running.push_back (orphan);
+            return;
+        }
+
+        /*  THE TAKEOVER KEY IS THE DCA, spelled so no run identifier can be
+            it: a fade over a fade on one DCA begins from where the first had
+            got to, exactly as a fade over a fade on one cue does. */
+        const auto key = "dca:" + dcaId;
+        resolveTakeover (key);
+
+        FadeJob job;
+        job.target = key;
+        job.dca = dcaId;
+        job.self = selfRunId;
+        job.fromDb = dcas != nullptr ? dcas->trimOf (dcaId) : 0.0;
+        job.toDb = toDb;
+        job.ticksTotal = std::max (0, static_cast<int> (std::lround (seconds * 50.0)));
+        job.curve = curve;
+        job.points = std::move (points);
+
+        running.push_back (job);
+    }
+
+    const std::vector<std::string>& Runner::dcaChainOf (const std::string& cueId)
+    {
+        /*  READ ONCE PER SHOW REVISION, because it is a walk of the document
+            and this is asked for every run on every tick. A mark or a nesting
+            is an edit to the show, and an edit moves the revision; nothing
+            else can change the answer. */
+        if (! dcaChainsRead || dcaChainsRevision != document.showRevision())
+        {
+            dcaChains.clear();
+            dcaChainsRead = true;
+            dcaChainsRevision = document.showRevision();
+
+            const auto root = document.root();
+            const auto dcaList = root.getChildWithName ("Dcas");
+            const juce::Identifier dcaProperty { "dca" };
+
+            /*  UP THE NESTING, bounded by how many DCAs there are: the door
+                refuses a circle and so does the reader, but a sum walked here
+                must not be the thing that finds out it did not. */
+            const auto chainFrom = [&dcaList, &dcaProperty] (std::string first)
+            {
+                std::vector<std::string> chain;
+                const auto bound = dcaList.isValid() ? dcaList.getNumChildren() : 0;
+
+                for (int steps = 0; steps < bound && ! first.empty(); ++steps)
+                {
+                    const auto node = dcaList.getChildWithProperty (idProperty,
+                                                                    juce::String (first));
+
+                    if (! node.isValid())
+                        break;
+
+                    chain.push_back (first);
+                    first = node[dcaProperty].toString().toStdString();
+                }
+
+                return chain;
+            };
+
+            std::function<void (const juce::ValueTree&)> visit;
+            visit = [this, &visit, &chainFrom, &dcaProperty] (const juce::ValueTree& node)
+            {
+                const auto element = node.getType().toString();
+
+                /*  ONLY MEDIA AND GROUPS CARRY A MARK (PRD §3.28): audio and
+                    video cues, and groups. A fade's `dca` is what it moves and
+                    a strip's is what it rides - neither is membership. */
+                if (element == "Media" || element == "Group")
+                    if (const auto mark = node[dcaProperty].toString().toStdString(); ! mark.empty())
+                        if (auto chain = chainFrom (mark); ! chain.empty())
+                            dcaChains[node[idProperty].toString().toStdString()] = std::move (chain);
+
+                for (const auto& child : node)
+                    visit (child);
+            };
+
+            if (const auto showLists = root.getChildWithName ("Lists"); showLists.isValid())
+                visit (showLists);
+        }
+
+        static const std::vector<std::string> none;
+        const auto found = dcaChains.find (cueId);
+        return found != dcaChains.end() ? found->second : none;
     }
 
     void Runner::fireOsc (const juce::ValueTree& cue, const std::string& runId)
@@ -3731,6 +3854,22 @@ namespace wfg::cue
                 one counter did for both. */
             if (! job.isFinished())
                 ++job.ticksDone;
+
+            /*  A FADE ON A DCA writes the DCA's trim and nothing else: there is
+                no run behind it to have gone, and nothing to stop when it
+                arrives. It is over when its level is. */
+            if (! job.dca.empty())
+            {
+                if (dcas != nullptr)
+                    dcas->set (job.dca, job.currentDb());
+
+                if (! job.isFinished())
+                    continue;
+
+                engine.submit (origin::engine, "run.ended", one (job.self));
+                job.retired = true;
+                continue;
+            }
 
             auto* target = runs.find (job.target);
 
@@ -5630,9 +5769,27 @@ namespace wfg::cue
             handful of levels, so the walk is cheaper than any bookkeeping that
             would have to be invalidated - and bookkeeping is where a trim gets
             left behind after the group that owned it has gone. */
-        const auto effectiveOf = [this] (const Run& run)
+        /*  AND SINCE PHASE 6, TWO MORE TERMS OF THE SAME SUM: what a hand is
+            adding (`trim`, a strip's fader or pad) and what every DCA marked on
+            the cue is trimming by, nested DCAs included (PRD §3.28). Sums are
+            order-independent, which is the property that matters - cues arrive
+            in whatever order the operator pressed GO - and a DCA trims a group
+            the way a group trims its members, through the group run's own
+            terms reaching every member underneath it. */
+        const auto dcaTermsOf = [this] (const std::string& cueId)
         {
-            auto total = run.ownLevel;
+            auto total = 0.0;
+
+            if (dcas != nullptr)
+                for (const auto& dcaId : dcaChainOf (cueId))
+                    total += dcas->trimOf (dcaId);
+
+            return total;
+        };
+
+        const auto effectiveOf = [this, &dcaTermsOf] (const Run& run)
+        {
+            auto total = run.ownLevel + run.trim + dcaTermsOf (run.cue);
             auto parent = run.parent;
 
             /*  BOUNDED BY THE TABLE, not by the tree, because a `parent` that
@@ -5645,7 +5802,7 @@ namespace wfg::cue
                 if (above == nullptr)
                     break;
 
-                total += above->ownLevel;
+                total += above->ownLevel + above->trim + dcaTermsOf (above->cue);
                 parent = above->parent;
             }
 

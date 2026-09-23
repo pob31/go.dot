@@ -34,7 +34,9 @@
 #include <wfg/engine/document/ShowDocument.h>
 
 #include <functional>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace wfg::doc
 {
@@ -55,6 +57,19 @@ namespace wfg::doc
         Absent, a foreign address is refused exactly as it was in Phase 1. */
     using ForeignWrite = std::function<Outcome (const std::string& address, const osc::Value&)>;
 
+    /*  AND WHERE A WRITE GOES WHEN THE ADDRESS IS GO.DOT'S BUT NOT THE SHOW'S
+        (Phase 6). A fader rides `/godot/run/<id>/trim` and `/godot/dca/<id>/trim`
+        - `persist=none` rows, what a hand is doing tonight - and the document
+        has nowhere to put one: a `none` row is derived by construction and its
+        write door refuses it. This is asked first, with the value already in
+        its canonical text, and answers nothing for any address it does not
+        own, so the document goes on answering everything else exactly as it
+        did. `cue::liveWriteFor` is the one implementation; a callback because
+        this file knows a show and not a run table. */
+    using LiveWrite = std::function<std::optional<Outcome> (const std::string& address,
+                                                            const std::string& text,
+                                                            const std::vector<osc::Value>& args)>;
+
     void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document,
-                                   ForeignWrite foreign = {});
+                                   ForeignWrite foreign = {}, LiveWrite live = {});
 }

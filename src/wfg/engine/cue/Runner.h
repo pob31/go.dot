@@ -85,6 +85,8 @@ namespace wfg::tree
 
 namespace wfg::cue
 {
+    class DcaTable;
+
     /*  HOW FAR AHEAD A LAUNCH MUST BE PLACED, in ticks.
 
         Derivation, because the number is not obvious and the cost of getting it
@@ -346,6 +348,13 @@ namespace wfg::cue
             nothing reaches a port - exactly as a mount table's absence leaves a
             network cue's record reproducing with nothing on the wire. */
         void setMidiSink (midi::MidiSink* sink) noexcept { midiOut = sink; }
+
+        /*  WHAT EACH DCA IS TRIMMING BY (PRD §3.28), added to the level of
+            every run whose cue - or whose group's cue - is marked with it, and
+            moved by a fade that names one. Null where nothing was handed in, in
+            which case every DCA trims nothing: the Runner's arithmetic is
+            unchanged for a show that declares none. */
+        void setDcas (DcaTable* table) noexcept { dcas = table; }
 
         /** The published `/godot/engine/launchLatencyTicks`, or 0 with no audio. */
         int latencyTicks() const noexcept;
@@ -920,6 +929,20 @@ namespace wfg::cue
                         double toDb, double seconds, FadeCurve, bool stopWhenDone,
                         std::vector<doc::FadePoint> points);
 
+        /*  A FADE AIMED AT A DCA (`fade/dca`, Phase 6): the DCA's trim moves
+            from wherever it stands to `toDb`. No run to find and nothing to
+            stop - a DCA has no sound of its own - and it takes over from a
+            fade already moving the same DCA, from where that one had got to. */
+        void beginDcaFade (const std::string& dcaId, const std::string& selfRunId,
+                           double toDb, double seconds, FadeCurve,
+                           std::vector<doc::FadePoint> points);
+
+        /*  THE DCAS ABOVE A CUE, nearest first: its own mark, the DCA that one
+            sits inside, and so on up - read off the document once per show
+            revision into `dcaChains` and summed per run per tick. Empty for a
+            cue marked with nothing. */
+        const std::vector<std::string>& dcaChainOf (const std::string& cueId);
+
         void advanceFades (Engine& engine, std::int64_t tick);
         void advanceSends (Engine& engine);
         void advanceWaits (Engine& engine, std::int64_t tick);
@@ -1025,6 +1048,14 @@ namespace wfg::cue
         tree::MountTable* mounts = nullptr;
         tree::MountSender* sender_ = nullptr;
         midi::MidiSink* midiOut = nullptr;
+        DcaTable* dcas = nullptr;
+
+        /*  The DCA chain of every cue that has one, keyed by cue, and the show
+            revision it was read at. Rebuilt when the show changes - a mark or a
+            nesting edited - and never on a tick that changed nothing. */
+        std::map<std::string, std::vector<std::string>> dcaChains;
+        std::uint64_t dcaChainsRevision = 0;
+        bool dcaChainsRead = false;
 
         /*  Who asks a target what a value is. Null everywhere a replay or
             a tree dump runs, and a verified cue there finishes on its own

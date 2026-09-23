@@ -105,6 +105,12 @@ namespace wfg::cue
         /** The run whose level moves. */
         std::string target;
 
+        /*  THE DCA WHOSE TRIM MOVES, instead of a run's level (Phase 6), or
+            empty. When it is set, `target` is the key a takeover matches on -
+            `dca:` and the identifier, which no run identifier can be - and not
+            a run: a DCA has no sound of its own to find or to stop. */
+        std::string dca;
+
         /*  The run of the FADE CUE itself, which reports done when the fade
             reaches its end. A fade is a cue, so pressing GO on it creates a run
             like any other - and that run finishing is how a group will know the

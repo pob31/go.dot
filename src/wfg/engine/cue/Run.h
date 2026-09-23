@@ -347,6 +347,19 @@ namespace wfg::cue
             same number and every fade Phase 2 wrote behaves exactly as it did. */
         double ownLevel = 0.0;
 
+        /*  WHAT A HAND IS ADDING, in dB (Phase 6): the fader or the pad on the
+            strip this run holds, written through `node.set` on
+            `/godot/run/<id>/trim` and by nothing else. A term of the same sum
+            as `ownLevel`, and deliberately a SEPARATE term: a fade moves
+            `ownLevel` and the hand moves this, so a fade running under a
+            finger neither fights it nor forgets it, and when the fade arrives
+            the hand's contribution is still exactly what the hand left.
+
+            Nought for every run nobody is riding, which is every run until a
+            sampler strip holds one. Never logged as a level - the writes that
+            set it are logged, which is what a replay needs. */
+        double trim = 0.0;
+
         /*  How many blocks the launch was late by, when GO arrived before the
             arm had finished. Zero is the ordinary case and the number is worth
             having: it is the difference between "GO is instant" as a claim and

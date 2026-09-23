@@ -19,6 +19,8 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -226,6 +228,11 @@ namespace
         wfg::tree::MountTable mounts;
         wfg::cue::RunTable runs;
 
+        /*  What each DCA is trimming by tonight (PRD §3.28): not the show's, so
+            beside the run table rather than in the document, and nought again
+            every time a show opens. */
+        wfg::cue::DcaTable dcas;
+
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
             doing - and the identifier it draws is written into the log as
@@ -239,6 +246,7 @@ namespace
             `wfg tree` have no audio side at all and must still create runs,
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
+        runner.setDcas (&dcas);
         wfg::audio::AudioState audioState;
 
         const auto nowhere = juce::File::getCurrentWorkingDirectory();
@@ -487,6 +495,11 @@ namespace
         wfg::tree::MountTable mounts;
         wfg::cue::RunTable runs;
 
+        /*  What each DCA is trimming by tonight (PRD §3.28): not the show's, so
+            beside the run table rather than in the document, and nought again
+            every time a show opens. */
+        wfg::cue::DcaTable dcas;
+
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
             doing - and the identifier it draws is written into the log as
@@ -500,6 +513,7 @@ namespace
             `wfg tree` have no audio side at all and must still create runs,
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
+        runner.setDcas (&dcas);
         wfg::audio::AudioState audioState;
 
         /*  REGISTERED WHETHER OR NOT A BUNDLE WAS GIVEN, unlike everything
@@ -621,7 +635,12 @@ namespace
                              ? wfg::Outcome::ok ({ wfg::osc::Value::string (address),
                                                    written.value })
                              : wfg::Outcome::rejected (written.reason);
-                });
+                },
+                /*  AND A RIDE ON A LIVE ROW, replayed through the same door the
+                    session wrote it through - a fader's trim or a DCA's - so the
+                    record applies as it did rather than being refused by a
+                    document that cannot hold it. */
+                wfg::cue::liveWriteFor (runs, dcas, document));
 
             wfg::cue::registerCueCommands (engine.commands(), document, focus);
             wfg::tree::registerTreeCommands (engine.commands(), touches);
@@ -642,6 +661,12 @@ namespace
                                                 const std::vector<wfg::osc::Value>& coerced,
                                                 std::int64_t tickIndex)
                                    {
+                                       /*  A RIDE IS NOT AN EDIT: hundreds of
+                                           writes a second, none of them a
+                                           decision (§14.9's reserved domain). */
+                                       if (wfg::cue::isLiveWrite (appliedCommand.name, coerced))
+                                           return;
+
                                        document.beginTransaction (appliedCommand.name, tickIndex,
                                                                   submitted.origin, coerced);
                                    });
@@ -1071,6 +1096,11 @@ namespace
         wfg::tree::MountTable mounts;
         wfg::cue::RunTable runs;
 
+        /*  What each DCA is trimming by tonight (PRD §3.28): not the show's, so
+            beside the run table rather than in the document, and nought again
+            every time a show opens. */
+        wfg::cue::DcaTable dcas;
+
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
             doing - and the identifier it draws is written into the log as
@@ -1084,6 +1114,7 @@ namespace
             `wfg tree` have no audio side at all and must still create runs,
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
+        runner.setDcas (&dcas);
         wfg::audio::AudioState audioState;
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
@@ -2112,6 +2143,11 @@ namespace
         wfg::tree::MountTable mounts;
         wfg::cue::RunTable runs;
 
+        /*  What each DCA is trimming by tonight (PRD §3.28): not the show's, so
+            beside the run table rather than in the document, and nought again
+            every time a show opens. */
+        wfg::cue::DcaTable dcas;
+
         /*  Runs draw from their own registry rather than the document's.
             A run is not an object in the show - it is what the machine is
             doing - and the identifier it draws is written into the log as
@@ -2125,6 +2161,7 @@ namespace
             `wfg tree` have no audio side at all and must still create runs,
             advance standby and produce the same log. */
         wfg::cue::Runner runner { document, runs, runIds, focus };
+        runner.setDcas (&dcas);
         wfg::audio::AudioState audioState;
 
         /*  THE OUTBOUND SIDE OF A MOUNT, which is what stops it being a stub.
@@ -2174,7 +2211,11 @@ namespace
                     integer 1 written to a float node is `f:1` in the log, and a
                     replay puts the same bytes on the wire. */
                 return wfg::Outcome::ok ({ wfg::osc::Value::string (address), written.value });
-            });
+            },
+            /*  A RIDE ON A LIVE ROW (Phase 6): a strip's fader on the run it
+                holds, or a DCA's. What a hand is doing tonight, so answered in
+                front of the document, which cannot hold it. */
+            wfg::cue::liveWriteFor (runs, dcas, document));
 
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
@@ -2199,6 +2240,14 @@ namespace
                                             const std::vector<wfg::osc::Value>& coerced,
                                             std::int64_t tickIndex)
                                {
+                                   /*  A RIDE IS NOT AN EDIT: a fader on a live
+                                       row writes fifty times a second and none
+                                       of it is a decision about the show, so it
+                                       opens no transaction and Undo never moves
+                                       a fader (§14.9's reserved domain). */
+                                   if (wfg::cue::isLiveWrite (appliedCommand.name, coerced))
+                                       return;
+
                                    document.beginTransaction (appliedCommand.name, tickIndex,
                                                               submitted.origin, coerced);
                                });
@@ -2490,6 +2539,7 @@ namespace
         midiPorts.setDevices (wfg::midi::MidiInputs::availableDevices(),
                               wfg::midi::MidiSender::availableDevices());
         parameters.setMidiPorts (&midiPorts);
+        parameters.setDcas (&dcas);
 
         /*  THE SHOW'S OWN BINDINGS FIRST (2026-09-22). A port says which
             device it wants and the engine finds it: the NAME because that is

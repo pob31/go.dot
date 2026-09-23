@@ -74,6 +74,8 @@ namespace wfg::midi { class PortTable; }
 
 namespace wfg::surface { class SurfaceTable; }
 
+namespace wfg::cue { class DcaTable; }
+
 namespace wfg::tree
 {
     /*  The engine's own numbers, handed to the tree each tick because the tree
@@ -260,6 +262,11 @@ namespace wfg::tree
             surfaces = surfacesToRead;
         }
 
+        /*  What each DCA is trimming by tonight, for `/godot/dca/<id>/trim`.
+            Absent - a tree dump, a test that declares no DCAs - every trim
+            reads nought, its resting value, which is also the truth. */
+        void setDcas (const cue::DcaTable* dcasToRead) noexcept { dcas = dcasToRead; }
+
         /*  How long each media file is, read once when the show was opened, for
             `/godot/cue/<id>/duration`. Keyed by the `file` the document names.
 
@@ -357,6 +364,7 @@ namespace wfg::tree
         const MountSender* sender = nullptr;
         const midi::PortTable* ports = nullptr;
         const surface::SurfaceTable* surfaces = nullptr;
+        const cue::DcaTable* dcas = nullptr;
         /*  What a test handed in, when one did. Otherwise the lengths come
             from `mediaInfo` at the top of every publish. */
         const std::map<std::string, double>* fixedDurations = nullptr;

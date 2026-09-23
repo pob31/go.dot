@@ -1,0 +1,50 @@
+# wfg-log 1
+# fixture dca-trim - DCAs ridden and faded while a show runs (Phase 6, PR 6.3).
+#
+# WHAT IT IS FOR: that a session in which faders rode two nested DCAs and one
+# run, and a fade moved a DCA, reproduces exactly - the node.set records on
+# the live rows included. Recorded from a real `wfg serve` of
+# tests/fixtures/bundles/dca driven over OSC with no audio device; the
+# header lines below are the session's own.
+#
+# bundle dca sha256:6dbdd5b69ee3265776e1fe5c580324b50f42ff69935ac44b514f99c6210b936e
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+# media guitar.wav 0 0.000
+# media rain.wav 0 0.000
+#
+# GO on the Guitar, whose cue is marked with Band; Band sits inside
+# Everything. The run it makes is the one the hand rides below. The prepare
+# is the horizon reaching the next row, a group, which it arms ahead.
+A 16 0 udp:127.0.0.1:56236 go s:"R4RANWRD"
+A 17 1 engine run.prepare s:"DCA00003" s:"AEEY385E" s:"M88JQB2P"
+#
+# BOTH DCAS RIDDEN, through node.set on rows the document cannot hold: a
+# trim is what a fader is doing tonight (persist=none), so the live door
+# answers in front of the document. A replay applies them through the same
+# door - without it these two records would come back read-only. The level
+# they produce is not here: continuous readouts never are (§3.15), and the
+# unit suite checks the sum, term by term.
+A 18 2 udp:127.0.0.1:56237 node.set s:"/godot/dca/DCAD0002/trim" f:-6
+A 18 3 udp:127.0.0.1:56238 node.set s:"/godot/dca/DCAD0001/trim" f:-2
+#
+# AND THE HAND ON THE RUN ITSELF: /godot/run/<id>/trim, the fader on the strip
+# a run holds. The identifier is the one the GO above drew and recorded.
+A 28 4 udp:127.0.0.1:56239 node.set s:"/godot/run/R4RANWRD/trim" f:-10
+#
+# GO on the scene, a timeline group marked with Everything: the scheduler
+# draws its round and launches its member, which Everything trims through
+# the group run's terms.
+A 38 5 udp:127.0.0.1:56242 go s:"AEEY385E"
+A 39 6 engine run.round s:"AEEY385E" i:0 s:"DCA00004"
+A 40 7 engine run.launch s:"M88JQB2P"
+#
+# GO on Band down, a fade that NAMES A DCA rather than a cue: half a second
+# of Band's trim moving to -20, then the fade's run reports its end from the
+# tick hook - the only place a report may come from, or a replay would
+# produce it twice.
+A 53 8 udp:127.0.0.1:56243 go s:"1JNK6EJY"
+A 78 9 engine run.ended s:"1JNK6EJY"
+#
+# And a memo, to show the session carried on after the fade had finished.
+A 103 10 udp:127.0.0.1:56244 go s:"7CRR8DRF"
+A 104 11 engine run.ended s:"7CRR8DRF"

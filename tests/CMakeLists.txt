@@ -96,6 +96,7 @@ add_executable(wfg_tests
     MidiTests.cpp
     SurfaceTests.cpp
     McuCodecTests.cpp
+    DcaTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp
@@ -421,6 +422,14 @@ add_test(NAME wfg.replay.ambience.fr_FR
 # and a replay recomputes. So what this asserts is the session around it: a
 # group fired, its members spawned and run, a fade fired over the top of them
 # while they ran, and the fade outliving the group it was trimming.
+add_test(NAME wfg.replay.dca-trim.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/dca-trim.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/dca
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.dca-trim.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/dca-trim.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/dca
+                 --wfg-locale=${WFG_LOCALE_FR})
 add_test(NAME wfg.replay.group-fade.C
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/group-fade.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/group-fade

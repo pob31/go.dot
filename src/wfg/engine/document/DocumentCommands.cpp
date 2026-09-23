@@ -106,7 +106,7 @@ namespace wfg::doc
     }
 
     void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document,
-                                   ForeignWrite foreign)
+                                   ForeignWrite foreign, LiveWrite live)
     {
         registry.add ({ "audio.configure", "Set the show's audio interface and channel patches as one edit.",
                         { { "enabled", 'T', false }, { "deviceType", 's', false },
@@ -632,7 +632,7 @@ namespace wfg::doc
                         "Sets one value, by its address in the parameter tree.",
                         { { "address", 's', false }, { "value", '*', false } },
                         true,
-                        [&document, foreign = std::move (foreign)]
+                        [&document, foreign = std::move (foreign), live = std::move (live)]
                         (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto address = args[0].getString();
@@ -649,6 +649,15 @@ namespace wfg::doc
 
                             if (! text.has_value())
                                 return Outcome::rejected (reason::typeMismatch);
+
+                            /*  A ROW A HAND RIDES, answered in front of the
+                                document because the document cannot hold it:
+                                a fader's trim is `persist=none`. Asked after
+                                the text is canonical, so the live door and the
+                                document parse a value from the same spelling. */
+                            if (live)
+                                if (auto outcome = live (address, *text, args))
+                                    return std::move (*outcome);
 
                             return fromEdit (document.setAttribute (address, *text), args);
                         } });
