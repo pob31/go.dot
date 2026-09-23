@@ -366,6 +366,42 @@ and the idle animation, which need a person watching the unit. The other
 2026-09-23, each a yes or a no whenever the author has seen it working. The
 voices claim shape is answered (decision Z).
 
+**Built on the night of 2026-09-23, on the local branch `phase6`** (not pushed;
+what each PR landed, and where the build disagreed with §16, is §16.12 of the
+namespace draft). Against the done-when, clause by clause:
+
+- *A virtual surface arms a sampler group and plays it from the mouse on a
+  machine with no MIDI* — **built**: Show > Surfaces..., one column per strip,
+  a fader and a pad each. Pinned by `RunPaneUiTests` and heard in a real render
+  by `blackbox.phase6-sampler`; **not yet judged by the author**, which is this
+  clause's real test.
+- *A DCA assigned to two cues in different groups trims both* — **built and
+  tested** (`DcaTests`).
+- *A fader-start cue fires from the D700 with the audio armed* — the engine's
+  rule is built and tested (`SamplerTests`), the bridge turns a fader's bytes
+  into the write that trips it (`SurfaceBridgeTests`); **not tried on the unit**.
+- *A group DCA follows a fade on motorised faders* — a fade aimed at a DCA moves
+  its trim, and a motor follows a trim a twentieth of its travel a tick, never
+  under the hand on it; **not tried on the unit**.
+- *The strip displays show provenance* — MCU scribble strips and the D700's
+  three native rows and number field, byte-tested; **not tried on the unit**.
+- *A sampler group arms onto the D700 and a bank change finishes a playing clip
+  before its strip switches* — a second bank armed over the first closes it and
+  hands each strip over as its clip ends (`SamplerTests`); **not tried on the
+  unit**.
+
+**Measured:** M29 - a full sixteen-strip D700 refresh costs the tick 0.1 ms in
+Release, beside a 1.5 ms publish; in Debug the publish of the same small show
+takes some 100 ms, five ticks, which is why a Debug `serve` falls behind its
+audio clock. M26, once, in Debug: 68-70 ms from a press being applied to its
+sound, plus up to a tick of queueing - structural, and the tick rate is the
+lever.
+
+**Still owed:** the unit on the bench for the four hardware clauses, M27 and
+M28; M26 retaken on a Release build of a quiet machine; rebinding a port after
+start and `midi.rescan` (M-B's debt, not paid here); and the rulings §16.12
+lists.
+
 ---
 
 ## Phase 7 — Tablet client · M

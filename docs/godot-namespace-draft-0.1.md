@@ -9075,5 +9075,125 @@ N*:
 
 ### 16.12 What Phase 6 built, against what §16 drew
 
-Written at close-out by PR 6.8, in §14.17's shape: the corrections dated inside the subsections they
-correct, and this subsection saying which way each disagreement went.
+*Written 2026-09-23, at the end of the night the phase was built in, on the local branch `phase6`
+(not pushed: CI runs on `main`). Everything below was built and tested with no control surface in
+the room; what only the D700 on the desk can settle is listed at the end, and it is the author's.*
+
+**The draft held, and more closely than §14's did — because nothing in it was a layout.** Every PR
+landed as drawn: the document objects (6.2, `f43d104`), the codec (6.1, `d2abe69`), DCAs and the
+live door (6.3, `ace3040`), sampler groups (6.4, `6d62998`, heard in `e39571d`), the client (6.5,
+`897621f`), the bridge (6.6, `9a345cf`), the instruments (6.7, `0b65760`). One step of decision AC's
+order folded into another: the D700 layer arrived *with* the Mackie bridge rather than after it,
+because a D700 is a row in the same profile table and the bridge's paint path asks the row what the
+strip has — so the engine and the panel came first, as decided, and the two hardware steps came
+together. §14.17's lesson — that a pull request whose subject is *how something
+looks* stops being predicted by its number — has not been tested yet: the Surfaces tab and the
+virtual panel are exactly that kind of work, and the author has not looked at them. Expect them to
+change the way Phase 5's views did.
+
+**Where the build disagreed with the drawing, the drawing lost, and each loss is small:**
+
+1. **§16.2 — the objects.** A `midiPads` surface is made with sixteen strips, not eight: most pad
+   controllers have sixteen. `strip.create` works on every profile, not only `virtual` and
+   `midiPads`: a Mackie unit with its extender is one surface of sixteen, and refusing the second
+   eight would make that surface impossible to declare. `surface/profile` is writable and changing it
+   leaves the strips alone. The `refers` check now reads a space-separated value as several
+   references, each checked — `surface/ports` needed it, and no identifier holds a space, so no
+   single-valued row loses anything. `surface.create` checks every strip identifier it is handed
+   *before* making anything, so a replay refused half-way cannot leave a surface short of strips.
+2. **§16.4 — the sum and the door.** An out-of-range trim is refused `type-mismatch`, not
+   `bad-value`, because that is what the document's own door answers for the same mistake on a
+   stored row, and a client should not have to know which door a row goes through. A `DcaTable`
+   sits beside the run table in all four verbs that build a Runner; only `serve` and `replay`
+   install the live door. And a media run takes its own level only through the arm, so with no
+   audio side a run's level stays nought — which the `dca-trim` fixture records honestly rather than
+   hides.
+3. **§16.5 — strips and sampler groups.** *Found by recording the fixture, not by any test written
+   beforehand:* a pad press on a fader strip lifts the trim to unity with no start edge; let go before
+   the launch was placed, the member stayed armed at unity, and the fader-edge rule then read a
+   "parked" fader at unity and started the clip nobody pressed. A fader-start now needs a hand's
+   *write* since the last tick (`Run::ridden`, set only by `node.set`), and any trim above the
+   bottom is not parked. Also as built: a hold clip let go before its launch is placed has the launch
+   withdrawn and stays armed; a member beyond the last sampler strip is left unarmed and the group
+   says *partially armed*; a group with no strip available and nothing sounding completes; the
+   horizon prepares a sampler group, GO adopts the prepared run, so the takeover is applied in
+   `adoptPrepared` as well as `fireKind`; idle members of a closing group end with `run.kill`,
+   sounding ones play out; voices go to waiting members before a finished member re-arms, never
+   more asks a tick than free tracks. **Two things differ from what §16.5 promised, and both are the
+   author's to rule on:** a stop cue aimed at a sampler group kills its sounding clips at once
+   rather than fading each (the existing group stop kills children; Esc does the same), and GO on a
+   running *non*-sampler group at the top of a list still starts a second scene — decision N says a
+   live group is ignored, the comment beside `armInternal` says so too, and the code does not. Only
+   the sampler refresh was added; the general fix waits for the author.
+4. **§16.6 — the bridge.** Built as drawn, with the D700 layer in the same profile table rather than
+   a second bridge. What the drawing did not say and the build had to decide: encoder detents and
+   pad pressure are coalesced like faders, one `node.set` per strip per tick, or two detents in one
+   tick read the same value and one is lost; a dca strip's gate reset is part of that same per-strip
+   write, so a fader moved later in the tick wins; a motor's first move after connecting stops one
+   step short of either end, since nobody knows where the fader is; the D700's middle row reads
+   `-inf dB` at the bottom, as the client's `faderText` does; a surface not connected — including
+   one whose port has tx off — is neither painted nor heard, but its port is still owned, so its
+   traffic never reaches a trigger; a surface switched off in the show, or of a profile nobody knows,
+   owns no port, so that port is an ordinary trigger source again (*a judgment call, flagged*); a
+   port carries one surface, the first that names it, and the second says so in a sentence; a hand
+   held through a handover lets go of the old node and holds the new one; the inbox drops MIDI clock
+   and active sensing and stops at 8192 messages; bank 0's serial wins over bank 1's; the master
+   dial's ring is not driven, since nothing in the show gives it a colour, so the firmware's
+   animation keeps it. **The MIDI seam
+   is new:** every arriving message goes through `MidiInputs::route`, offered to a consumer first —
+   the bridge — and then to the triggers, and `inject` puts bytes on that road with no hardware.
+   The bridge is owned by a shared pointer the input thread holds too, because that thread calls the
+   consumer outside its lock and `midiIn` outlives everything declared after it. **Not built:**
+   rebinding a port after start, and `midi.rescan` (M-B's debt): a surface's connected state follows
+   the bindings made at start and the `rx`/`tx` rows, and re-patching a surface's cable needs a
+   restart.
+5. **§16.7 — the client.** A dca strip's pad on the virtual panel resets its DCA to unity rather than
+   sending `strip.press`, which the engine refuses on a dca strip — §16.6's gate rule, applied to
+   the mouse. A D700 with no preset written says *"set it to Mackie"*, shorter than the
+   *"set the Configurator to Mackie"* drawn above, which the column cuts. The profile stays a
+   chooser after creation (the row is writable), ADD STRIP works on every profile (as the engine
+   does), strip rows have a ×, and a second port bank opens only once the first has a port, since
+   a gap in the space-separated list would move the second port into the first bank. The inspector greys a row only when it is greyed for *every* picked cue (the
+   first cue used to decide, for every greyed row, `stereoToMono` and the MIDI rows included); `dca`
+   is never greyed, since any media cue can be trimmed; a header or footer cue is not a member even
+   though the tree gives it the group as its parent; and a sampler group greys `advance`,
+   `selection`, `play`, `loops` and `seed`, which it never reads. A sampler group with
+   `advance=auto` is no longer offered for scrubbing. **Two old inspector bugs surfaced and were
+   fixed:** the device and port menus were built and then hidden (the layout's menu test knew only
+   `choice` and `busRef`), and a mixed multi-selection showed "(none)" — picking it to clear every
+   picked cue sent nothing.
+6. **§16.8 — fixtures and drivers.** `bundles/surfaces` gained a bus, because `serve --hosted`
+   refuses a show with audio tracks and nowhere for them to go. `phase6_sampler.py` reads its render
+   as arithmetic in `first_sound.py`'s way — a press at velocity 64 over a floor of −40 dB is
+   *exactly* a tenth of the constant — and gives the fixture's copy a bus and routes, so the
+   committed bundle stays the one `sampler.wfglog` was recorded from. The standing test lives in
+   `SurfaceBridgeTests` as drawn; `phase6_surfaces.py` also carries the no-MIDI half of it.
+
+**M26 was taken, once, on the wrong machine, and it already says something (§16.9).** On a Debug
+build, on a box shared with a compiler, at 48 kHz and a 64-sample buffer: a press is *applied* on
+tick T, its launch is *placed* by the next tick's hook, and it sounds `launchLatencyTicks` (two) and
+about half a tick after that — **3.4 to 3.5 ticks, 68–70 ms, from the command to the sound, plus up
+to 20 ms waiting for the tick boundary.** That is structural, not CPU: every term is a tick. It is
+slow for an instrument. The levers, largest first: the tick rate (100 Hz halves every term, parked
+on 2026-09-18 with exactly this in mind); placing a press's launch in the tick it is applied, which
+saves a whole tick but needs a press-specific exception to *the hook decides*; the audio buffer moves
+`launchLatencyTicks` only above 320 samples. A press whose tick thread was behind the audio clock
+lands late by however far behind it was — the instrument counts those apart, and they are the
+machine, not the path.
+
+**M29 answered its question and raised a larger one.** The bridge's after-tick for a sixteen-strip
+D700 with every strip filled costs 0.1 ms a tick in Release, beside a 1.5 ms publish: it fits, a
+fifteenth of the publish. But the same instrument timed the publish in Debug at 93 to 106 ms — five
+ticks for one publish of a sixteen-cue show — which is why a Debug `serve` runs behind its audio
+clock at all, and why the late presses above exist. The author runs Debug builds; the D700 will be
+plugged into one. That is not Phase 6's cost, but it is the first thing to look at if the surface
+feels sluggish on the desk, and a Release build is the first thing to try.
+
+**What only the author can do, with the D700 on the desk:** the four hardware clauses of the
+done-when (a fader-start from the D700 with the audio armed, a group DCA following a fade on the
+motor faders, provenance on the strip displays, a bank change finishing a playing clip before its
+strip switches); M27 and M28 (`python-rtmidi`, the unit under Mackie, the Configurator closed);
+the look of the Surfaces tab and the panel; the three rulings flagged above — the stop cue on a
+sampler group, decision N for other groups, and whether a switched-off surface's port should fire
+triggers; and whether the strip colour should follow the run pane's HSV reading of the timbre
+rather than the HSL the row describes.
