@@ -109,6 +109,12 @@ namespace wfg::audio
                 engine must not go and pick one before we have looked. */
             bool autoInitialiseDeviceManager() override { return false; }
 
+            /*  Scanning is out of process, always (PRD §3.18); the scan verb
+                stands its own engine up to do it, but the flag has to be true
+                here too or the list this engine reads back would refuse the
+                separate-process setting the scan wrote. */
+            bool canScanPluginsOutOfProcess() override { return true; }
+
             /*  One graph thread in Phase 2, deliberately. Tracktion's default is
                 every CPU, and its pool waits on semaphores - which is fine for a
                 DAW and is a thing PRD §4.2 would rather measure before inviting
@@ -1491,6 +1497,32 @@ namespace wfg::audio
             return nullptr;
 
         return impl->matrices[static_cast<std::size_t> (trackIndex)];
+    }
+
+    std::vector<plugin::KnownPlugin> AudioHost::knownPlugins() const
+    {
+        std::vector<plugin::KnownPlugin> out;
+
+        if (impl->engine == nullptr)
+            return out;
+
+        for (const auto& description : impl->engine->getPluginManager().knownPluginList.getTypes())
+        {
+            plugin::KnownPlugin known;
+            known.name = description.name.toStdString();
+            known.identifier = description.createIdentifierString().toStdString();
+            known.format = description.pluginFormatName.toStdString();
+            known.manufacturer = description.manufacturerName.toStdString();
+            known.path = description.fileOrIdentifier.toStdString();
+            out.push_back (std::move (known));
+        }
+
+        std::sort (out.begin(), out.end(), [] (const plugin::KnownPlugin& a, const plugin::KnownPlugin& b)
+        {
+            return a.name < b.name || (a.name == b.name && a.identifier < b.identifier);
+        });
+
+        return out;
     }
 
     CueEq* AudioHost::trackEq (int trackIndex) noexcept

@@ -1431,6 +1431,14 @@ namespace wfg::tree
                             const auto status = pluginTable != nullptr ? pluginTable->statusOf (id)
                                                                        : plugin::PluginTable::Status {};
 
+                            /*  THE CATALOGUE, by the entry's identifier: what this
+                                machine knows of the plugin's parameters without an
+                                instance (§17.7). It answers `paramCount` when the
+                                child has not, and every `param/<n>` node below. */
+                            const auto identifier = entry[juce::Identifier ("identifier")].toString().toStdString();
+                            const auto* catalogue = catalogues != nullptr ? catalogues->find (identifier) : nullptr;
+                            const auto knownCount = catalogue != nullptr ? static_cast<int> (catalogue->params.size()) : 0;
+
                             for (const auto* row : doc::Schema::rowsForOwner ("plugin"))
                             {
                                 const doc::Attribute attribute { "Plugin", row };
@@ -1441,13 +1449,77 @@ namespace wfg::tree
                                 if (name == "state")               text = status.state;
                                 else if (name == "problem")        text = status.problem;
                                 else if (name == "latencySamples") text = std::to_string (status.latencySamples);
-                                else if (name == "paramCount")     text = std::to_string (status.paramCount);
+                                else if (name == "paramCount")     text = std::to_string (status.paramCount > 0 ? status.paramCount : knownCount);
                                 else                               text = storedText (attribute, entry);
 
                                 nodes.push_back (makeLeaf (base + "/" + name, *row, text));
                             }
 
+                            /*  EIGHT NODES A PARAMETER, hand-built as the command
+                                nodes are because no table row can name them - the
+                                list's length is the plugin's. Read-only: a value
+                                is written on a cue's Fx, never here. */
+                            if (catalogue != nullptr)
+                            {
+                                const auto leaf = [&nodes] (std::string address, const char* tags,
+                                                            std::string description, osc::Value value)
+                                {
+                                    Node node;
+                                    node.address = std::move (address);
+                                    node.kind = Kind::state;
+                                    node.access = Access::read;
+                                    node.typeTags = tags;
+                                    node.description = std::move (description);
+                                    node.values.push_back (std::move (value));
+                                    nodes.push_back (std::move (node));
+                                };
+
+                                for (std::size_t n = 0; n < catalogue->params.size(); ++n)
+                                {
+                                    const auto& parameter = catalogue->params[n];
+                                    const auto at = base + "/param/" + std::to_string (n) + "/";
+                                    const auto about = "Parameter " + std::to_string (n) + " of " + catalogue->name + ": ";
+
+                                    leaf (at + "name", "s", about + "its name, as the plugin gives it", osc::Value::string (parameter.name));
+                                    leaf (at + "shortName", "s", about + "its name for a seven-character display", osc::Value::string (parameter.shortName));
+                                    leaf (at + "unit", "s", about + "its unit, as the plugin labels it", osc::Value::string (parameter.unit));
+                                    leaf (at + "default", "d", about + "where it rests, normalised 0..1", osc::Value::float64 (static_cast<double> (parameter.defaultValue)));
+                                    leaf (at + "min", "d", about + "the least a cue may write, normalised", osc::Value::float64 (0.0));
+                                    leaf (at + "max", "d", about + "the most a cue may write, normalised", osc::Value::float64 (1.0));
+                                    leaf (at + "steps", "i", about + "how many steps it has, nought when it is continuous", osc::Value::int32 (parameter.discrete ? parameter.steps : 0));
+                                    leaf (at + "bipolar", "T", about + "whether its middle is the rest and its ends are opposite - a ring fills from the centre", osc::Value::boolean (parameter.bipolar));
+                                }
+                            }
+
                             pluginOrder.push_back (id);
+                        }
+                    }
+
+                    /*  AND WHAT THIS MACHINE'S SCAN FOUND, beside the set, so a client
+                        can offer them: not the show's, and stored nowhere in it. */
+                    if (knownPlugins != nullptr)
+                    {
+                        for (std::size_t n = 0; n < knownPlugins->size(); ++n)
+                        {
+                            const auto& known = (*knownPlugins)[n];
+                            const auto at = std::string (godot) + "/plugin/known/" + std::to_string (n) + "/";
+
+                            const auto leaf = [&nodes, &at] (const char* name, const char* description, const std::string& value)
+                            {
+                                Node node;
+                                node.address = at + name;
+                                node.kind = Kind::state;
+                                node.access = Access::read;
+                                node.typeTags = "s";
+                                node.description = description;
+                                node.values.push_back (osc::Value::string (value));
+                                nodes.push_back (std::move (node));
+                            };
+
+                            leaf ("name", "A plugin this machine has, by the name its file gives", known.name);
+                            leaf ("identifier", "The identifier plugin.create takes for it", known.identifier);
+                            leaf ("format", "Its format: VST3, AudioUnit", known.format);
+                            leaf ("manufacturer", "Who made it, as the file says", known.manufacturer);
                         }
                     }
                 }

@@ -54,6 +54,8 @@
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/ListState.h>
 #include <wfg/engine/cue/SlotAnalysis.h>
+#include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/MountSender.h>
@@ -275,6 +277,17 @@ namespace wfg::tree
             every entry reads unloaded, which is the truth. */
         void setPlugins (const plugin::PluginTable* tableToRead) noexcept { pluginTable = tableToRead; }
 
+        /*  What is known of each plugin's parameters without an instance (§17.7):
+            the machine's catalogue cache, for the `param/<n>` nodes under every
+            entry of the set and for `paramCount` when the child has not
+            answered. Whoever loads a catalogue marks the tree stale. */
+        void setCatalogues (const plugin::CatalogueStore* storeToRead) noexcept { catalogues = storeToRead; }
+
+        /*  What this machine's last scan found, for `/godot/plugin/known/<n>`,
+            so a client can offer them. Absent - a tree dump, a replay - nothing
+            is listed, which is the truth. */
+        void setKnownPlugins (const std::vector<plugin::KnownPlugin>* listToRead) noexcept { knownPlugins = listToRead; }
+
         /*  How long each media file is, read once when the show was opened, for
             `/godot/cue/<id>/duration`. Keyed by the `file` the document names.
 
@@ -374,6 +387,8 @@ namespace wfg::tree
         const surface::SurfaceTable* surfaces = nullptr;
         const cue::DcaTable* dcas = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
+        const plugin::CatalogueStore* catalogues = nullptr;
+        const std::vector<plugin::KnownPlugin>* knownPlugins = nullptr;
         /*  What a test handed in, when one did. Otherwise the lengths come
             from `mediaInfo` at the top of every publish. */
         const std::map<std::string, double>* fixedDurations = nullptr;

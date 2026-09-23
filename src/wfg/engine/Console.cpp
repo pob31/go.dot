@@ -25,6 +25,8 @@
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
+#include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/midi/MidiInputs.h>
 #include <wfg/engine/midi/MidiSender.h>
@@ -1607,6 +1609,73 @@ namespace
                  .getChildFile ("engine");
     }
 
+    /*  `wfg plugins`: what this machine has, and finding out (Phase 9a, §17.7).
+        --scan[=vst3|au|lv2] [--path=<dir>] scans out of process and keeps the
+        result where serve reads it; --list prints it; nothing scanned is a
+        sentence and exit 0, because a machine with no plugins is not an
+        error. A file that hangs the child past the deadline is skipped and
+        named, and stays skipped until --retry-skipped. --catalogue=<identifier>
+        arrives with the child that can host one (PR 9a.7). */
+    int runPlugins (const juce::ArgumentList& args)
+    {
+        const auto storage = engineCacheFolder().getFullPathName().toStdString();
+
+        if (args.containsOption ("--catalogue"))
+        {
+            std::cerr << "wfg plugins: --catalogue needs the plugin host, which arrives with PR 9a.7"
+                      << std::endl;
+            return 2;
+        }
+
+        std::vector<wfg::plugin::KnownPlugin> known;
+
+        if (args.containsOption ("--scan"))
+        {
+            const auto word = args.getValueForOption ("--scan").toLowerCase().toStdString();
+            const auto extra = args.containsOption ("--path")
+                                 ? args.getValueForOption ("--path").toStdString() : std::string {};
+
+            std::string problem;
+            std::vector<std::string> skipped;
+            known = wfg::plugin::scanPlugins (storage, word, extra, args.containsOption ("--retry-skipped"),
+                                              skipped, problem);
+
+            if (! problem.empty())
+            {
+                std::cerr << "wfg plugins: " << problem << std::endl;
+                return 2;
+            }
+
+            std::cout << "# scanned; " << known.size() << " plugin(s) known" << std::endl;
+
+            for (const auto& file : skipped)
+                std::cout << "# skipped, no answer in " << wfg::plugin::perFileSeconds
+                          << " s (wfg plugins --scan --retry-skipped to try again): " << file << std::endl;
+        }
+        else
+        {
+            known = wfg::plugin::knownPlugins (storage);
+
+            for (const auto& file : wfg::plugin::skippedPlugins (storage))
+                std::cout << "# skipped by an earlier scan (wfg plugins --scan --retry-skipped to try again): "
+                          << file << std::endl;
+        }
+
+        if (known.empty())
+        {
+            std::cout << "no plugins scanned; run wfg plugins --scan" << std::endl;
+            return 0;
+        }
+
+        std::cout << "# name | format | manufacturer | identifier | path" << std::endl;
+
+        for (const auto& plugin : known)
+            std::cout << plugin.name << " | " << plugin.format << " | " << plugin.manufacturer
+                      << " | " << plugin.identifier << " | " << plugin.path << std::endl;
+
+        return 0;
+    }
+
     struct AudioShape
     {
         int tracks = 0;
@@ -2549,6 +2618,34 @@ namespace
         parameters.setMidiPorts (&midiPorts);
         parameters.setDcas (&dcas);
 
+        /*  WHAT THIS MACHINE KNOWS OF THE PLUGINS THE SHOW DECLARES (Phase 9a,
+            §17.7): the catalogue cache, one file per identifier under the
+            engine's own folder, read here for every entry of the set - at
+            start and again when the show changes - and never on a tick that
+            edits nothing. The known list is filled once the host is up. */
+        wfg::plugin::CatalogueStore catalogues {
+            engineCacheFolder().getChildFile ("plugins").getChildFile ("catalogue")
+                .getFullPathName().toStdString() };
+        std::vector<wfg::plugin::KnownPlugin> knownPlugins;
+        parameters.setCatalogues (&catalogues);
+        parameters.setKnownPlugins (&knownPlugins);
+
+        const auto loadShowCatalogues = [&catalogues, &document]
+        {
+            auto loaded = false;
+            const auto plugins = document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+
+            for (const auto& entry : plugins)
+                if (entry.hasType ("Plugin"))
+                    if (const auto identifier = entry[juce::Identifier ("identifier")].toString().toStdString();
+                        ! identifier.empty() && catalogues.find (identifier) == nullptr)
+                        loaded = catalogues.ensureLoaded (identifier) || loaded;
+
+            return loaded;
+        };
+
+        loadShowCatalogues();
+
         /*  THE SHOW'S OWN BINDINGS FIRST (2026-09-22). A port says which
             device it wants and the engine finds it: the NAME because that is
             what somebody decided and what reads at the next venue, and the
@@ -3079,6 +3176,13 @@ namespace
                 return 2;
             }
 
+            /*  THE MACHINE'S LIST, read off the engine that just came up: what
+                the last `wfg plugins --scan` left in the shared storage - and
+                the tree told to look again, since the list is published from
+                the cached document half. */
+            knownPlugins = driver->host().knownPlugins();
+            parameters.markStale();
+
             /*  Asked once, at load, about the graph that will play. A duplicate
                 is a defect rather than a warning - two nodes sharing an id
                 adopt one another's state across a rebuild - so it stops the
@@ -3421,6 +3525,12 @@ namespace
                                         or a strip made a DCA strip during a tech
                                         rehearsal reaches the bridge here. */
                                     if (declareSurfaces())
+                                        parameters.markStale();
+
+                                    /*  AND THE CATALOGUES OF ANY PLUGIN JUST
+                                        DECLARED (Phase 9a): a file read on a
+                                        show edit, as the mounts are. */
+                                    if (loadShowCatalogues())
                                         parameters.markStale();
 
                                     /*  AND WHO MAY BE HEARD FROM, built here
@@ -3950,6 +4060,12 @@ namespace
 //==============================================================================
 int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
 {
+    /*  TRACKTION'S SCAN CHILD, dispatched before any verb is read (Phase 9a,
+        §17.7): a plugin scan launches this same binary with a pipe option,
+        and that process is the scan and nothing else. */
+    if (wfg::plugin::runScanChildIfAsked (argc, argv))
+        return 0;
+
     if (const auto localeFailure = applyLocaleAndStrip (argc, argv); localeFailure != 0)
         return localeFailure;
 
@@ -4052,6 +4168,16 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
         the two are different block sources and the verb refuses both at once.
         `--device` alone opens the default device, and `--device-type` takes
         the heading `wfg devices` prints above each group of names. */
+    app.addCommand ({ "plugins",
+                      "plugins [--scan[=vst3|au|lv2]] [--path=<dir>] [--retry-skipped] [--list]",
+                      "Scans this machine for plugins, out of process, or lists what the last scan found",
+                      {},
+                      [] (const juce::ArgumentList& args)
+                      {
+                          if (const auto code = runPlugins (args); code != 0)
+                              juce::ConsoleApplication::fail ({}, code);
+                      } });
+
     app.addCommand ({ "serve",
                       "serve <bundle> --sample-rate=N --buffer=N"
                       " [--hosted [--render=<wav>] | --device[=<name>] [--device-type=<type>]]"

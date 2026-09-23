@@ -258,6 +258,12 @@ target_compile_definitions(wfg_deps INTERFACE
     JUCE_MODAL_LOOPS_PERMITTED=0    # all 20 TE uses are #if-guarded; a modal loop in a show engine is a hang
     JUCE_JACK=0                     # already the default; explicit because it is what keeps libjack-jackd2-dev off the apt line
     JUCE_PLUGINHOST_LADSPA=0        # already the default; explicit because it is what keeps ladspa-sdk off the apt line
+    # Phase 9a (2026-09-23, decision AF): VST3 hosting compiled in, on every
+    # platform, in the one place WfgOptions.cmake reserved for it. What hosts
+    # a plugin is the child process (wfg plugin-host) and the scan child;
+    # the engine's own process never instantiates one. AU waits for the Mac
+    # mini to check its link line; LV2 is Phase 9b's.
+    JUCE_PLUGINHOST_VST3=1
 
     # --- juce_simpleweb, TLS off.
     #     Upstream defaults SECURE support ON, which compiles asio's OpenSSL

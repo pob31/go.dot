@@ -120,6 +120,10 @@ add_library(wfg_engine STATIC
     wfg/engine/surface/SurfaceBridge.cpp
     wfg/engine/surface/SurfaceTable.h
     wfg/engine/plugin/PluginTable.h
+    wfg/engine/plugin/Catalogue.h
+    wfg/engine/plugin/Catalogue.cpp
+    wfg/engine/plugin/PluginScan.h
+    wfg/engine/plugin/PluginScan.cpp
     wfg/engine/audio/AudioCommands.h
     wfg/engine/audio/AudioCommands.cpp
     wfg/engine/audio/AudioHost.h

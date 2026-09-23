@@ -19,9 +19,10 @@
 # The rule for this file: an entry may only exist here if something in the build
 # READS it. An option nothing consumes is not a feature, it is rot — it survives
 # refactors because nobody dares delete it and it silently stops meaning what its
-# help string says. Phase 9 will add JUCE_PLUGINHOST_* in exactly one place
-# (cmake/WfgThirdParty.cmake); adding the switch now, with no hosting code behind
-# it, would buy nothing and start that rot early.
+# help string says. Phase 9a added JUCE_PLUGINHOST_VST3 in exactly one place
+# (cmake/WfgThirdParty.cmake), the day the scan and the sandbox arrived to read
+# it; until then the switch was left out, because a switch nothing consumes is
+# exactly the rot above.
 
 # Two of the author's Phase-0 "Needs from the author" (devplan:49-50) are still OPEN:
 # the default fixed track count, and the target sample rates / buffer sizes.

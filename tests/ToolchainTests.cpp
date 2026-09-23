@@ -100,6 +100,12 @@ TEST_CASE ("toolchain: the wfg::deps compile definitions reached this target")
     static_assert (JUCE_STRICT_REFCOUNTEDPOINTER == 1,
                    "JUCE_STRICT_REFCOUNTEDPOINTER must be 1");
 
+    /*  Phase 9a: the one hosting switch, compiled in on every platform so the
+        scan child and the sandbox can load a VST3. Asserted so a build that
+        lost it fails here rather than at the first plugin nobody can find. */
+    static_assert (JUCE_PLUGINHOST_VST3 == 1,
+                   "JUCE_PLUGINHOST_VST3 must be 1 - see cmake/WfgThirdParty.cmake (Phase 9a)");
+
     // Our own definitions travel the same path, so proving one of them arrives
     // as a usable string literal proves the mechanism, not just the flags.
     CHECK (std::string (WFG_PRODUCT_NAME) == "Go.dot");

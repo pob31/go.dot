@@ -17,6 +17,7 @@
 
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/audio/EqSettings.h>
+#include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/clock/SampleClock.h>
 
 #include <array>
@@ -445,6 +446,11 @@ namespace wfg::audio
             what a media cue writes when it is armed, and what a fade writes at
             50 Hz. Null for an index no track answers to. */
         CueMatrix* trackMatrix (int trackIndex) noexcept;
+
+        /*  WHAT THIS MACHINE'S LAST SCAN FOUND, read off the engine's own list
+            at start (Phase 9a, §17.7). Empty before a scan and on a machine
+            that never had one. */
+        std::vector<plugin::KnownPlugin> knownPlugins() const;
 
         /*  A track's EQ stage, sitting before its output stage: what a media
             cue's nineteen eq rows write (Phase 9a). Null for an index no
