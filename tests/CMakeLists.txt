@@ -441,6 +441,17 @@ add_test(NAME wfg.replay.sampler.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/sampler.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/sampler
                  --wfg-locale=${WFG_LOCALE_FR})
+# PHASE 9a'S EQ AS RECORDS: a band written to a media cue while it sounds,
+# eq.reset, and an undo - decisions about the show, logged as node.set and
+# replayed through the document door under both locales (§17.9).
+add_test(NAME wfg.replay.eq.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/eq.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/eq
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.eq.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/eq.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/eq
+                 --wfg-locale=${WFG_LOCALE_FR})
 add_test(NAME wfg.replay.group-fade.C
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/group-fade.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/group-fade
@@ -957,6 +968,21 @@ add_test(NAME blackbox.phase6-surfaces.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase6_surfaces.py"
                  --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.phase6-surfaces.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# PHASE 9a'S EQ, HEARD: a two-tone file through a media cue whose EQ cuts one
+# of the tones by twenty decibels, served with a real Tracktion graph and
+# rendered; a Goertzel filter per tone reads the cut, and a node.set to the cue
+# while it sounds is heard in the tail. Then the session replays (§17.9).
+add_test(NAME blackbox.phase9a-eq.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9a_eq.py"
+                 --wfg-locale=C)
+set_tests_properties(blackbox.phase9a-eq.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9a-eq.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9a_eq.py"
+                 --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase9a-eq.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # The client the engine serves at /ui: the page, its files as bytes, and since

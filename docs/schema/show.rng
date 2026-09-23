@@ -421,6 +421,177 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="eqB1Freq">
+          <a:documentation>The centre of band one, or the corner of its shelf.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Gain">
+          <a:documentation>The gain of band one. Nought is the band out of the signal, which is what every band starts at and rests at (PRD 4.6): a peak at nought is no peak.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Q">
+          <a:documentation>The width of band one: higher is narrower. 0.7 is a gentle bell, 5 is a notch. On a shelf it sets how steep the corner is.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB1Shape">
+          <a:documentation>What band one is: a peak, or a shelf that lifts or drops everything below its frequency. The low band is the one that wants to be a shelf.</a:documentation>
+          <choice>
+            <value>peak</value>
+            <value>lowShelf</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2Freq">
+          <a:documentation>The centre of band two. Always a peak.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2Gain">
+          <a:documentation>The gain of band two; nought is out.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB2Q">
+          <a:documentation>The width of band two.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3Freq">
+          <a:documentation>The centre of band three. Always a peak.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3Gain">
+          <a:documentation>The gain of band three; nought is out.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB3Q">
+          <a:documentation>The width of band three.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Freq">
+          <a:documentation>The centre of band four, or the corner of its shelf.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Gain">
+          <a:documentation>The gain of band four; nought is out.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">-24</param>
+            <param name="maxInclusive">24</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Q">
+          <a:documentation>The width of band four, or the steepness of its shelf.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0.1</param>
+            <param name="maxInclusive">10</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4Shape">
+          <a:documentation>What band four is: a peak, or a shelf over everything above its frequency. The high band is the one that wants to be a shelf.</a:documentation>
+          <choice>
+            <value>peak</value>
+            <value>highShelf</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqHpf">
+          <a:documentation>Whether the high-pass is in. A flag rather than a frequency parked at the band edge, because the click of a rotary switches a filter in and out, and a click that moved a frequency would move it somewhere.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqHpfFreq">
+          <a:documentation>Where the high-pass turns over: second-order Butterworth, -3 dB here and 12 dB an octave below. 80 Hz takes the rumble out of a voice.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">20</param>
+            <param name="maxInclusive">2000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqLpf">
+          <a:documentation>Whether the low-pass is in. As eqHpf.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqLpfFreq">
+          <a:documentation>Where the low-pass turns over, second-order. 12 kHz takes the hiss off a recording without dulling it.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">1000</param>
+            <param name="maxInclusive">20000</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqOn">
+          <a:documentation>Whether the EQ of this cue is in the signal at all. Off, every band is skipped and the audio passes untouched - the A/B a designer reaches for. On with every band flat is the same sound and the same bytes, by construction.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="file">
           <a:documentation>The media to play, as a path relative to the bundle&apos;s media/ folder. Relative because a show travels between machines and an absolute path is a fact about the machine it was authored on. A file that is missing is reported when the show loads and fails the cue when it is armed - it never fails the load, because a show with one missing sound is still a show somebody has to run tonight.</a:documentation>
           <data type="string"/>

@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/document/Schema.h>
 
 #include <string>
 
@@ -157,6 +158,47 @@ namespace wfg::cue
                                 return Outcome::rejected (reason::notInList);
 
                             return moveStandbyTo (document, list, {}, args);
+                        } });
+
+        //----------------------------------------------------------------------
+        /*  THE FLAT BUTTON, AND THE DOUBLE-CLICK ON A ROTARY (Phase 9a): every
+            one of a media cue's nineteen EQ rows back to its default, in ONE
+            command - so it is one transaction on the show's history and Undo
+            takes the whole reset back as one step, where nineteen node.set
+            records from a client would be nineteen. The defaults are the
+            table's own, read off the rows, so this can never disagree with
+            what a fresh cue is. */
+        registry.add ({ "eq.reset",
+                        "Puts a media cue's EQ back to flat: every band at nought, both filters"
+                        " out, on. One transaction, so Undo takes the whole reset back at once.",
+                        { { "cue", 's', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args[0].getString();
+                            const auto cue = document.findById (id);
+
+                            if (! cue.isValid())
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (! cue.hasType ("Media"))
+                                return Outcome::rejected (reason::badValue);
+
+                            for (const auto* row : doc::Schema::rowsForOwner ("media"))
+                            {
+                                const std::string name { row->name };
+
+                                if (name.rfind ("eq", 0) != 0)
+                                    continue;
+
+                                const auto edit = document.setAttribute ("/godot/cue/" + id + "/" + name,
+                                                                         std::string (row->defaultText));
+
+                                if (! edit.ok)
+                                    return Outcome::rejected (edit.reason);
+                            }
+
+                            return Outcome::ok (args);
                         } });
 
         //----------------------------------------------------------------------

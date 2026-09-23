@@ -221,6 +221,45 @@ namespace wfg::cue
         return out;
     }
 
+    audio::EqSettings Runner::eqOf (const juce::ValueTree& cue) const
+    {
+        /*  THROUGH THE SCHEMA, for the reason resolveRouting gives: the
+            canonical writer omits every attribute at its default, so a cue
+            whose EQ nobody touched has no eq* attribute at all, and a raw read
+            would make a flat EQ into nineteen noughts - a high-pass at 0 Hz, a
+            width of nought. The defaults are the table's and do not change
+            under a running show. */
+        static const Reader schema;
+
+        const auto flag = [&] (const char* name) { return schema.flag (cue, "media", name); };
+        const auto number = [&] (const char* name)
+        {
+            return static_cast<float> (schema.number (cue, "media", name));
+        };
+        const auto shape = [&] (const char* name)
+        {
+            const auto word = schema.text (cue, "media", name);
+
+            if (word == "lowShelf")  return audio::EqSettings::Shape::lowShelf;
+            if (word == "highShelf") return audio::EqSettings::Shape::highShelf;
+
+            return audio::EqSettings::Shape::peak;
+        };
+
+        audio::EqSettings out;
+        out.on = flag ("eqOn");
+        out.hpf = flag ("eqHpf");
+        out.lpf = flag ("eqLpf");
+        out.hpfFreq = number ("eqHpfFreq");
+        out.lpfFreq = number ("eqLpfFreq");
+        out.band[0] = { shape ("eqB1Shape"), number ("eqB1Freq"), number ("eqB1Gain"), number ("eqB1Q") };
+        out.band[1] = { audio::EqSettings::Shape::peak, number ("eqB2Freq"), number ("eqB2Gain"), number ("eqB2Q") };
+        out.band[2] = { audio::EqSettings::Shape::peak, number ("eqB3Freq"), number ("eqB3Gain"), number ("eqB3Q") };
+        out.band[3] = { shape ("eqB4Shape"), number ("eqB4Freq"), number ("eqB4Gain"), number ("eqB4Q") };
+
+        return out;
+    }
+
     //==============================================================================
     std::string Runner::arm (Engine& engine, std::int64_t tick, const std::string& cueId,
                              const std::string& runId)
@@ -1700,6 +1739,13 @@ namespace wfg::cue
         request.levelDb = levelDb;
         request.routing = routing;
         request.ranges = rangesOf (cue);
+
+        /*  THE CUE'S EQ RIDES THE ARM (Phase 9a), read through the schema
+            here and applied on the far side while the voice is silent, as
+            the routing is; and the run keeps the copy so `applyEq` can say
+            what changed later. */
+        request.eq = eqOf (cue);
+        run.eq = request.eq;
 
         /*  READ THE SAME WAY THE LEVEL IS, and the reason it is worth a line of
             its own: this row has existed since Phase 2, the grammar has always
@@ -6013,6 +6059,7 @@ namespace wfg::cue
         advanceFades (engine, tick);
         applyLevels();
         applyRouting();
+        applyEq();
         advanceSends (engine);
         observeAfterStep (engine, tick);
         assertPersistent (engine, tick);
@@ -6636,6 +6683,48 @@ namespace wfg::cue
 
             if (problem.empty())
                 audio->setRouting (run->track, routing);
+        }
+    }
+
+    void Runner::applyEq()
+    {
+        /*  A SOUNDING CUE'S EQ, kept up with the document (Phase 9a): a
+            rotary or a panel writes the cue - a decision, saved and undoable -
+            and the voice playing it follows on the next tick. The routing
+            pass's shape exactly, and its reasons: gated on the show's revision
+            so a tick with nobody editing costs one comparison; only the runs
+            that are sounding; only what differs from what the voice was last
+            given, so an edit to one band pushes one run's settings once and an
+            edit to a memo pushes nothing. An undo moves the revision too. */
+        if (audio == nullptr)
+            return;
+
+        const auto revision = document.showRevision();
+
+        if (revision == eqRevision)
+            return;
+
+        eqRevision = revision;
+
+        for (const auto& snapshot : runs.all())
+        {
+            auto* run = runs.find (snapshot.id);
+
+            if (run == nullptr || run->isFinished() || run->track < 0)
+                continue;
+
+            const auto cue = document.findById (run->cue);
+
+            if (! cue.isValid() || ! cue.hasType ("Media"))
+                continue;
+
+            const auto wanted = eqOf (cue);
+
+            if (wanted.sameAs (run->eq))
+                continue;
+
+            run->eq = wanted;
+            audio->setEq (run->track, wanted);
         }
     }
 

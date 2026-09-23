@@ -4567,3 +4567,209 @@ TEST_CASE ("audio recovery: connection state is logged and failed validation can
     CHECK (state.status == "running");
     CHECK (state.settingsError.empty());
 }
+
+//==============================================================================
+/*  PHASE 9a, HEARD: the EQ on the voice, through the whole chain a show uses -
+    the document's rows, the Runner's arm and its live push, the HostPlayer's
+    two doors, the EqPlugin before the output stage - measured in the render.
+    A sine rather than the steady constant every other case here plays, because
+    a peak at one kilohertz leaves a constant exactly alone. */
+namespace
+{
+    juce::File writeSineTone (const juce::File& folder, int rate, double frequency,
+                              float amplitude, int seconds)
+    {
+        const auto file = folder.getChildFile ("sine.wav");
+        folder.createDirectory();
+
+        juce::WavAudioFormat format;
+        std::unique_ptr<juce::OutputStream> stream { file.createOutputStream() };
+
+        if (stream == nullptr)
+            return {};
+
+        auto writer = format.createWriterFor (stream,
+                                              juce::AudioFormatWriterOptions{}
+                                                .withSampleRate (static_cast<double> (rate))
+                                                .withNumChannels (1)
+                                                .withBitsPerSample (16));
+
+        if (writer == nullptr)
+            return {};
+
+        juce::AudioBuffer<float> buffer { 1, rate * std::max (1, seconds) };
+        auto* data = buffer.getWritePointer (0);
+        const auto step = 2.0 * juce::MathConstants<double>::pi * frequency / rate;
+
+        for (int n = 0; n < buffer.getNumSamples(); ++n)
+            data[n] = amplitude * static_cast<float> (std::sin (step * n));
+
+        writer->writeFromAudioSampleBuffer (buffer, 0, buffer.getNumSamples());
+        return file;
+    }
+
+    double rmsOf (const RecordingSink& sink, int channel)
+    {
+        const auto* samples = sink.buffer.getReadPointer (channel);
+        auto sum = 0.0;
+
+        for (int n = 0; n < sink.written; ++n)
+            sum += static_cast<double> (samples[n]) * static_cast<double> (samples[n]);
+
+        return sink.written > 0 ? std::sqrt (sum / sink.written) : 0.0;
+    }
+}
+
+TEST_CASE ("eq: a peak on the voice doubles a sine at its centre, written live through node.set")
+{
+    constexpr int rate = 48000;
+    constexpr int blockSize = 64;
+    constexpr int samplesPerTick = rate / 50;
+    constexpr int blocksPerTick = samplesPerTick / blockSize;
+    static_assert (blocksPerTick * blockSize == samplesPerTick, "a tick must be whole blocks");
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = blockSize;
+    settings.outputChannels = 2;
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto tone = writeSineTone (rig.storage.folder, rate, 1000.0, 0.25f, 6);
+    REQUIRE (tone.existsAsFile());
+
+    //  --- a show: one media cue routed to one bus ------------------------------
+    Engine engine;
+    doc::ShowDocument document;
+    cue::RunTable runs;
+    cue::Focus focus;
+    auto runIds = doc::IdRegistry::withSeed (23);
+    cue::Runner runner { document, runs, runIds, focus };
+
+    engine.log().openInMemory ({});
+    doc::registerDocumentCommands (engine.commands(), document);
+    cue::registerCueCommands (engine.commands(), document, focus);
+    cue::registerRunCommands (engine.commands(), runs);
+    cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
+
+    const auto listId = document.createList ("Sound").id;
+    const auto mediaId = document.createCue (listId, 0, "media", "Sine").id;
+    document.setAttribute ("/godot/cue/" + mediaId + "/file", tone.getFileName().toStdString());
+
+    auto audioNode = document.root().getChildWithName ("Audio");
+    audioNode.setProperty (juce::Identifier ("tracks"), 1, nullptr);
+
+    juce::ValueTree bus { "Bus" };
+    bus.setProperty (juce::Identifier ("id"), "EQBUS001", nullptr);
+    bus.setProperty (juce::Identifier ("name"), "Main", nullptr);
+    bus.setProperty (juce::Identifier ("firstChannel"), 0, nullptr);
+    bus.setProperty (juce::Identifier ("width"), 1, nullptr);
+    audioNode.appendChild (bus, nullptr);
+
+    auto media = document.findById (mediaId);
+    juce::ValueTree route { "Route" };
+    route.setProperty (juce::Identifier ("id"), "EQRTE001", nullptr);
+    route.setProperty (juce::Identifier ("bus"), "EQBUS001", nullptr);
+    route.setProperty (juce::Identifier ("gains"), "1", nullptr);
+    media.appendChild (route, nullptr);
+
+    document.setAttribute (cue::standbyAddressOf (listId), mediaId);
+
+    //  --- the audio side ----------------------------------------------------------
+    audio::HostPlayer player { rig.host, engine };
+    runner.setPlayer (&player);
+    runner.setSamplesPerTick (samplesPerTick);
+    runner.setMediaFolder (rig.storage.folder.getFullPathName().toStdString());
+
+    std::int64_t tick = 0;
+
+    const auto oneTick = [&]
+    {
+        runner.beforeTick (engine, tick);
+        engine.processTick (tick++);
+        player.serviceArms();
+
+        for (int i = 0; i < blocksPerTick; ++i)
+            rig.host.processBlock();
+    };
+
+    for (int i = 0; i < 4; ++i)
+        oneTick();
+
+    REQUIRE (engine.submit ("udp:127.0.0.1:9000", "go", {}));
+
+    for (int i = 0; i < 600 && ! rig.host.trackPlayState (0).playing; ++i)
+        oneTick();
+
+    REQUIRE (rig.host.trackPlayState (0).playing);
+
+    //  Flat: what a second of it sounds like untouched.
+    for (int i = 0; i < 10; ++i)
+        oneTick();
+
+    RecordingSink flat;
+    flat.prepare (2, rate);
+    rig.host.setBlockSink (&flat);
+
+    for (int i = 0; i < 50; ++i)
+        oneTick();
+
+    rig.host.setBlockSink (nullptr);
+
+    const auto flatRms = rmsOf (flat, 0);
+    REQUIRE (flatRms > 0.1);
+
+    //  +6 dB at 1 kHz, written to the CUE while it sounds - the rotary's path.
+    rt::resetCounts();
+
+    REQUIRE (engine.submit ("cli", "node.set", { osc::Value::string ("/godot/cue/" + mediaId + "/eqB2Freq"),
+                                                 osc::Value::float64 (1000.0) }));
+    REQUIRE (engine.submit ("cli", "node.set", { osc::Value::string ("/godot/cue/" + mediaId + "/eqB2Gain"),
+                                                 osc::Value::float64 (6.0) }));
+
+    //  The tick that applies it, one to push it, and a few for the filter to settle.
+    for (int i = 0; i < 10; ++i)
+        oneTick();
+
+    RecordingSink shaped;
+    shaped.prepare (2, rate);
+    rig.host.setBlockSink (&shaped);
+
+    for (int i = 0; i < 50; ++i)
+        oneTick();
+
+    rig.host.setBlockSink (nullptr);
+
+    const auto shapedRms = rmsOf (shaped, 0);
+    const auto gainDb = 20.0 * std::log10 (shapedRms / flatRms);
+
+    INFO ("flat " << flatRms << " shaped " << shapedRms << " = " << gainDb << " dB");
+    CHECK (gainDb == doctest::Approx (6.0).epsilon (0.03));
+
+    //  And nothing Go.dot's allocated on the audio thread on the way.
+    if (rt::isCounting())
+        CHECK (rt::violations() == 0);
+
+    //  eq.reset takes it back, live.
+    REQUIRE (engine.submit ("cli", "eq.reset", { osc::Value::string (mediaId) }));
+
+    for (int i = 0; i < 10; ++i)
+        oneTick();
+
+    RecordingSink again;
+    again.prepare (2, rate);
+    rig.host.setBlockSink (&again);
+
+    for (int i = 0; i < 50; ++i)
+        oneTick();
+
+    rig.host.setBlockSink (nullptr);
+
+    CHECK (20.0 * std::log10 (rmsOf (again, 0) / flatRms) == doctest::Approx (0.0).scale (1.0).epsilon (0.05));
+}

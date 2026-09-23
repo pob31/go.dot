@@ -18,6 +18,7 @@
 #include <wfg/engine/rt/RtCheck.h>
 
 #include <wfg/engine/audio/CueOutputPlugin.h>
+#include <wfg/engine/audio/EqPlugin.h>
 #include <wfg/engine/clock/AudioClockSource.h>
 
 /*  juce_core and juce_events are named directly even though tracktion_engine.h
@@ -201,6 +202,7 @@ namespace wfg::audio
                 the type string, so doing it after Engine construction is safe -
                 PluginManager::initialise has already run inside it. */
             engine->getPluginManager().createBuiltInType<CueOutputPlugin>();
+            engine->getPluginManager().createBuiltInType<EqPlugin>();
 
             auto& hosted = engine->getDeviceManager().getHostedAudioDeviceInterface();
 
@@ -255,6 +257,7 @@ namespace wfg::audio
 
             edit.reset();
             matrices.clear();
+            eqs.clear();
             plugins.clear();
             handles.clear();
             context = nullptr;
@@ -368,6 +371,27 @@ namespace wfg::audio
                     }
                 }
 
+                /*  THE EQ, BEFORE THE OUTPUT STAGE (Phase 9a, decision AD): one
+                    on every voice, flat until a cue says otherwise and bit-exact
+                    passthrough while it is, so nothing already rendering through
+                    this chain changes by a bit. Its settings are atomics a tick
+                    writes; nothing about it is structural after this line. */
+                auto eqPlugin = track->pluginList.insertPlugin (
+                    EqPlugin::create (spec.channelsPerTrack), -1);
+
+                auto* eqStage = dynamic_cast<EqPlugin*> (eqPlugin.get());
+
+                if (eqStage == nullptr)
+                {
+                    error = "the EQ plugin would not insert";
+                    edit.reset();
+                    matrices.clear();
+                    eqs.clear();
+                    return false;
+                }
+
+                eqs.push_back (&eqStage->eq());
+
                 auto plugin = track->pluginList.insertPlugin (
                     CueOutputPlugin::create (spec.channelsPerTrack, current.outputChannels), -1);
 
@@ -378,6 +402,7 @@ namespace wfg::audio
                     error = "the cue output plugin would not insert";
                     edit.reset();
                     matrices.clear();
+                    eqs.clear();
                     return false;
                 }
 
@@ -418,6 +443,7 @@ namespace wfg::audio
                         " be built at a fallback rate nobody asked for";
                 edit.reset();
                 matrices.clear();
+                eqs.clear();
                 return false;
             }
 
@@ -493,6 +519,7 @@ namespace wfg::audio
         {
             edit.reset();
             matrices.clear();
+            eqs.clear();
             plugins.clear();
             handles.clear();
             context = nullptr;
@@ -1351,6 +1378,7 @@ namespace wfg::audio
         std::unique_ptr<te::Engine> engine;
         std::unique_ptr<te::Edit> edit;
         std::vector<CueMatrix*> matrices;
+        std::vector<CueEq*> eqs;
         std::vector<CueOutputPlugin*> plugins;
 
         /*  RESOLVED ONCE, AT BUILD, because reaching them is not free. Every
@@ -1463,6 +1491,29 @@ namespace wfg::audio
             return nullptr;
 
         return impl->matrices[static_cast<std::size_t> (trackIndex)];
+    }
+
+    CueEq* AudioHost::trackEq (int trackIndex) noexcept
+    {
+        if (trackIndex < 0 || trackIndex >= static_cast<int> (impl->eqs.size()))
+            return nullptr;
+
+        return impl->eqs[static_cast<std::size_t> (trackIndex)];
+    }
+
+    void AudioHost::setTrackEq (int trackIndex, const EqSettings& settings) noexcept
+    {
+        if (auto* eq = trackEq (trackIndex))
+            eq->set (settings);
+    }
+
+    void AudioHost::snapTrackEq (int trackIndex, const EqSettings& settings) noexcept
+    {
+        if (auto* eq = trackEq (trackIndex))
+        {
+            eq->set (settings);
+            eq->reset();
+        }
     }
 
     AudioHost::NodeIdReport AudioHost::inspectNodeIds() const  { return impl->inspectNodeIds(); }

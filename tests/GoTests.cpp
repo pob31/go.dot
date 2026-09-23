@@ -74,7 +74,11 @@ namespace
         void requestArm (const cue::ArmRequest& request) override
         {
             arms.push_back (request);
+            lastArmEq = request.eq;
         }
+
+        /** The EQ the last arm carried (Phase 9a); `completeArms` clears `arms`. */
+        audio::EqSettings lastArmEq;
 
         int slotCount() const override             { return slots; }
         int sampleRate() const override            { return rate; }
@@ -116,6 +120,18 @@ namespace
 
         std::map<int, std::vector<cue::Coefficient>> routings;
         int routingPushes = 0;
+
+        /*  The EQ a voice was last given while sounding (Phase 9a), counted
+            for the same reason the routing is: an edit must reach it once,
+            and a quiet tick must not reach it at all. */
+        void setEq (int track, const audio::EqSettings& settings) override
+        {
+            eqs[track] = settings;
+            ++eqPushes;
+        }
+
+        std::map<int, audio::EqSettings> eqs;
+        int eqPushes = 0;
 
         bool isPlaying (int track) const override
         {
@@ -7175,4 +7191,87 @@ TEST_CASE ("persistent: the plan is what the section declares, and a disabled cu
     plan = cue::solvePersistent (rig.document, nullptr, nullptr, rig.listId, rig.memoId);
     CHECK (plan.runs.empty());
     CHECK (plan.values.size() == 1u);
+}
+
+//==============================================================================
+TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a quiet tick not at all")
+{
+    /*  PHASE 9a's parameter path, on the tick thread's side: the nineteen rows
+        are read through the schema at the arm and ride the request; while the
+        cue sounds, a write to one of them - a rotary, a panel, the page - is
+        pushed to that voice on the next tick and to no other; nothing is
+        pushed while nobody edits; and eq.reset is one command that lands as
+        one push. The audio side is a fake here; the sound is AudioTests'. */
+    RoutedRig rig;
+
+    rig.setMedia (rig.mediaId, 2);
+    rig.aimAt (rig.mediaId, rig.main);
+
+    //  Shaped before it plays, so the arm has something to carry.
+    rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/eqB2Gain", "6");
+    rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/eqB2Freq", "1000");
+
+    const auto run = rig.play();
+    REQUIRE (rig.runs.find (run) != nullptr);
+
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+
+    const auto armed = rig.audio.lastArmEq;
+    CHECK (armed.on);
+    CHECK (armed.band[1].gain == doctest::Approx (6.0f));
+    CHECK (armed.band[1].freq == doctest::Approx (1000.0f));
+    CHECK (armed.band[0].gain == doctest::Approx (0.0f));
+    CHECK_FALSE (armed.hpf);
+
+    /*  THE ARM CARRIED IT, so the first ticks push nothing through the live
+        door: what the voice holds and what the cue says are already one. */
+    for (int i = 0; i < 3; ++i)
+        rig.tickOnce();
+
+    CHECK (rig.audio.eqPushes == 0);
+
+    //  Edited while it sounds: the high-pass switched in.
+    rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/" + rig.mediaId + "/eqHpf"),
+                                     osc::Value::string ("true") });
+    rig.tickOnce();
+
+    CHECK (rig.audio.eqPushes == 1);
+    CHECK (rig.audio.eqs[track].hpf);
+    CHECK (rig.audio.eqs[track].band[1].gain == doctest::Approx (6.0f));
+
+    SUBCASE ("and a tick with nothing edited pushes nothing at all")
+    {
+        const auto pushes = rig.audio.eqPushes;
+
+        for (int i = 0; i < 10; ++i)
+            rig.tickOnce();
+
+        CHECK (rig.audio.eqPushes == pushes);
+    }
+
+    SUBCASE ("and eq.reset is one command, every row back, one push")
+    {
+        const auto pushes = rig.audio.eqPushes;
+
+        rig.submitAndTick ("eq.reset", { osc::Value::string (rig.mediaId) });
+        rig.tickOnce();
+
+        CHECK (rig.audio.eqPushes == pushes + 1);
+        CHECK (rig.audio.eqs[track].isIdentity());
+        CHECK_FALSE (rig.audio.eqs[track].hpf);
+        CHECK (rig.audio.eqs[track].band[1].gain == doctest::Approx (0.0f));
+
+        /*  The document says flat too. The tree keeps a value written at its
+            default - sparseness is the canonical WRITER's, which omits it - so
+            the question is what the row reads, not whether it is there. */
+        CHECK (rig.document.getAttribute ("/godot/cue/" + rig.mediaId + "/eqB2Gain").value_or ("?") == "0");
+        CHECK (rig.document.getAttribute ("/godot/cue/" + rig.mediaId + "/eqHpf").value_or ("?") == "false");
+    }
+
+    SUBCASE ("and eq.reset on a cue that is not media is refused")
+    {
+        const auto outcome = rig.submitAndTick ("eq.reset", { osc::Value::string (rig.memoId) });
+        CHECK (outcome.rejected > 0);
+    }
 }

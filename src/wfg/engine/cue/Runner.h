@@ -47,6 +47,7 @@
     the same commands are applied, and only the sound is missing.
 */
 
+#include <wfg/engine/audio/EqSettings.h>
 #include <wfg/engine/audio/MediaInfo.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/cue/CueList.h>
@@ -198,6 +199,11 @@ namespace wfg::cue
             edit taking effect at the next iteration - happens on the tick
             thread at each boundary, and re-arms through a fresh request. */
         std::vector<RangeSpec> ranges;
+
+        /*  The cue's EQ, read through the schema at the arm (Phase 9a) and
+            applied while the voice is silent, as the routing is. A value for
+            the reason everything else here is one. */
+        audio::EqSettings eq;
     };
 
     /*  The audio side, as the cue layer sees it.
@@ -272,6 +278,12 @@ namespace wfg::cue
             after would leave the whole matrix at nought for any block that fell
             between the two passes. */
         virtual void setRouting (int track, const std::vector<Coefficient>&) = 0;
+
+        /*  A sounding cue's EQ, changed under it (Phase 9a). Tick thread, on an
+            edit and never per tick; on the audio side it is atomics. A no-op
+            by default rather than pure, so a Player that plays no EQ - a
+            replay's, a test's - is still a complete configuration. */
+        virtual void setEq (int, const audio::EqSettings&) {}
 
         /*  Whether that track's cue is sounding, out of any of its slots.
             Tick thread. Track-wide for the reason `stop` is: the question is
@@ -740,6 +752,10 @@ namespace wfg::cue
             tree it may edit meanwhile. */
         std::vector<RangeSpec> rangesOf (const juce::ValueTree& cue) const;
 
+        /** The cue's nineteen EQ rows, read through the schema so a saved
+            flat EQ - which the writer omits - reads as flat. */
+        audio::EqSettings eqOf (const juce::ValueTree& cue) const;
+
         /*  Counts the pass a ranged run is on and places the boundary out of
             it, once, when it comes into the placement horizon.
 
@@ -776,6 +792,11 @@ namespace wfg::cue
             moves, including the ones nothing else is touching. */
         void applyLevels();
         void applyRouting();
+
+        /*  A sounding cue's EQ, kept up with the document (Phase 9a): the
+            routing pass's shape, gated on the same revision, pushing only
+            the runs whose nineteen rows differ from what the voice holds. */
+        void applyEq();
 
         /*  What arming the standby means when the pointer is on a GROUP.
 
@@ -1219,6 +1240,9 @@ namespace wfg::cue
             so the first tick after a load pushes once and every tick after it
             does nothing until somebody edits. */
         std::uint64_t routingRevision = 0;
+
+        /** The show revision `applyEq` last pushed at; `routingRevision`'s twin. */
+        std::uint64_t eqRevision = 0;
 
         /*  THE PERSISTENT ASSERTION (§3.29, §13.11): after every applied
             trigger, what the section declares is checked against what is

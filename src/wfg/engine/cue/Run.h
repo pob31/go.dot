@@ -47,6 +47,8 @@
     several runs make "which one" a real question.
 */
 
+#include <wfg/engine/audio/EqSettings.h>
+
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -359,6 +361,13 @@ namespace wfg::cue
             sampler strip holds one. Never logged as a level - the writes that
             set it are logged, which is what a replay needs. */
         double trim = 0.0;
+
+        /*  THE EQ THE VOICE WAS LAST GIVEN (Phase 9a): the cue's nineteen rows
+            as they were carried by the arm, and as `Runner::applyEq` last
+            pushed them. Kept on the run so a tick after an edit can say
+            what changed for THIS run and push only that, and a tick with no
+            edit compares nothing at all. Never logged: the rows are. */
+        audio::EqSettings eq;
 
         /*  A SAMPLER MEMBER'S STRIP (PRD §3.27, Phase 6): the fader or pad this
             run holds - or waits for, while another group's clip finishes on

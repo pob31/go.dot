@@ -1,0 +1,18 @@
+<Show>
+  <Lists>
+    <List id="EQ000001" name="Sound">
+      <Media id="EQ000002" eqB3Freq="3000" eqB3Gain="-20" eqB3Q="4" file="tones.wav" name="Two tones" number="1">
+        <Route id="EQ000003" bus="EQ000004" gains="1 0 0 1"/>
+      </Media>
+      <Cue id="EQ000005" name="Clear" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="1">
+    <Bus id="EQ000004" name="Main L/R" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

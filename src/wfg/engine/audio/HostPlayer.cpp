@@ -115,6 +115,11 @@ namespace wfg::audio
 
             audioHost.setTrackRouting (request.track, request.levelDb, coefficients);
 
+            /*  And the cue's EQ, snapped with the routing while the voice is
+                silent, its delay lines cleared at the next block so the
+                previous cue's tail is not in them (Phase 9a). */
+            audioHost.snapTrackEq (request.track, request.eq);
+
             /*  The voice is yours. Whether the sound would come out YET is a
                 different question, asked separately through isArmReady - the
                 graph is ready long before the disk is, and a launch in that gap
@@ -188,6 +193,14 @@ namespace wfg::audio
 
                 matrix->setGain (input, output, gain);
             }
+    }
+
+    void HostPlayer::setEq (int track, const EqSettings& settings)
+    {
+        /*  The tick thread, on an edit: relaxed stores into the voice's EQ,
+            one per number that moved, and a release per section so the
+            audio thread rebuilds only those. No message thread anywhere. */
+        audioHost.setTrackEq (track, settings);
     }
 
     bool HostPlayer::isPlaying (int track) const

@@ -16,6 +16,7 @@
 #pragma once
 
 #include <wfg/engine/audio/CueMatrix.h>
+#include <wfg/engine/audio/EqSettings.h>
 #include <wfg/engine/clock/SampleClock.h>
 
 #include <array>
@@ -48,6 +49,8 @@
 */
 namespace wfg::audio
 {
+    class CueEq;
+
     /** How the hosted audio interface is opened. No defaults: a rate Go.dot
         chose for itself is a rate nobody chose, which is the same reason
         `wfg serve` refuses to guess one. */
@@ -442,6 +445,20 @@ namespace wfg::audio
             what a media cue writes when it is armed, and what a fade writes at
             50 Hz. Null for an index no track answers to. */
         CueMatrix* trackMatrix (int trackIndex) noexcept;
+
+        /*  A track's EQ stage, sitting before its output stage: what a media
+            cue's nineteen eq rows write (Phase 9a). Null for an index no
+            track answers to. */
+        CueEq* trackEq (int trackIndex) noexcept;
+
+        /*  The tick thread, on an edit to a sounding cue: atomics, one
+            relaxed store per number that changed. */
+        void setTrackEq (int trackIndex, const EqSettings& settings) noexcept;
+
+        /*  An arm: the cue's settings put in place and the delay lines
+            cleared at the next block, while the voice is silent. Message
+            thread, beside setTrackRouting. */
+        void snapTrackEq (int trackIndex, const EqSettings& settings) noexcept;
 
         /*  The loudest sample the track's output plugin saw arriving and
             leaving, since the last reset.

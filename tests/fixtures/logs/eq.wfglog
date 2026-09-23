@@ -1,0 +1,30 @@
+# wfg-log 1
+# fixture eq - a media cue's EQ written while a show runs (Phase 9a, PR 9a.2).
+#
+# WHAT IT IS FOR: that a session in which a rotary, a panel or the page wrote
+# a media cue's EQ rows - decisions about the show, through the document's own
+# door - then put the whole EQ back with eq.reset and took that back with
+# undo, reproduces exactly. Recorded from a real `wfg serve` of
+# tests/fixtures/bundles/eq driven over OSC with no audio device; the header
+# lines below are the session's own.
+#
+# bundle eq sha256:16df414a4346597f1e28aefdc27357122667d4211b3cf73d672a143b4fc804f8
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+# media tones.wav 0 0.000
+#
+# THREE ROWS WRITTEN, one address each: band two moved to a kilohertz and
+# lifted six decibels, then the high-pass switched in - a T row, carried as
+# the T atom. Each is an ordinary node.set on a persist=show row; nothing
+# stands in front of the document for these, unlike a trim.
+A 1 0 udp:127.0.0.1:50596 node.set s:"/godot/cue/EQ000002/eqB2Freq" f:1000
+A 14 1 udp:127.0.0.1:50596 node.set s:"/godot/cue/EQ000002/eqB2Gain" f:6
+A 26 2 udp:127.0.0.1:50596 node.set s:"/godot/cue/EQ000002/eqHpf" T
+#
+# THE FLAT BUTTON: eq.reset is one command over nineteen rows, so it is one
+# transaction on the show's history - which the undo below takes back whole.
+# The fixture's own -20 dB band three goes to nought here too.
+A 39 3 udp:127.0.0.1:50596 eq.reset s:"EQ000002"
+#
+# AND ITS UNDO, by the transaction's name: band three is -20 dB again, and the
+# three writes above stay - they were three transactions of their own.
+A 52 4 udp:127.0.0.1:50596 undo s:"document" s:"eq.reset"
