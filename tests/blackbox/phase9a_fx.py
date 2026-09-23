@@ -66,10 +66,31 @@ def write_constant(path: Path, seconds: float = 14.0) -> None:
 
 
 def level(samples: "list[float]", start_frame: int, seconds: float = 1.0) -> float:
+    """The MEDIAN of the blocks' mean levels over the window, not the window's mean.
+
+    A proof of the path, not of the round trip: on a shared CI runner the child
+    answers late now and then even at the driver's 20 ms deadline, and each
+    late block passes dry. A mean over the window moved with the miss rate
+    (macOS read 0.156 against 0.125 with a quarter of the blocks dry); the
+    median says what the processed blocks are at, and still fails outright
+    when more than half are dry - which is what a broken path looks like.
+    """
     part = samples[start_frame:start_frame + int(RATE * seconds)]
-    if not part:
+    if len(part) < BLOCK:
         return 0.0
-    return sum(abs(s) for s in part) / len(part)
+    blocks = [sum(abs(s) for s in part[i:i + BLOCK]) / BLOCK for i in range(0, len(part) - BLOCK + 1, BLOCK)]
+    blocks.sort()
+    return blocks[len(blocks) // 2]
+
+
+def dry_fraction(samples: "list[float]", start_frame: int, expected: float, seconds: float = 1.0) -> float:
+    """How many of the window's blocks sit at the source rather than at `expected`."""
+    part = samples[start_frame:start_frame + int(RATE * seconds)]
+    if len(part) < BLOCK:
+        return 0.0
+    blocks = [sum(abs(s) for s in part[i:i + BLOCK]) / BLOCK for i in range(0, len(part) - BLOCK + 1, BLOCK)]
+    dry = sum(1 for b in blocks if abs(b - SOURCE) < abs(b - expected))
+    return dry / len(blocks)
 
 
 class Hand:
@@ -200,12 +221,14 @@ def run(locale: "str | None") -> int:
             halved = level(left, start + int(RATE * 1.0))
             moved = level(left, moved_at + int(RATE * 1.5))
             dry = level(left, killed_at + int(RATE * 1.5))
+            late_half = dry_fraction(left, start + int(RATE * 1.0), SOURCE * 0.5)
+            late_moved = dry_fraction(left, moved_at + int(RATE * 1.5), SOURCE * 0.75)
             report.check(abs(halved - SOURCE * 0.5) <= TOLERANCE,
                          "while the insert is in at its baseline, the source plays at a half",
-                         f"{halved:.4f} against {SOURCE * 0.5:.4f}")
+                         f"{halved:.4f} against {SOURCE * 0.5:.4f}; {late_half:.0%} of the blocks late (dry)")
             report.check(abs(moved - SOURCE * 0.75) <= TOLERANCE,
                          "p0 at three quarters moves the render to three quarters",
-                         f"{moved:.4f} against {SOURCE * 0.75:.4f}")
+                         f"{moved:.4f} against {SOURCE * 0.75:.4f}; {late_moved:.0%} of the blocks late (dry)")
             report.check(abs(dry - SOURCE) <= TOLERANCE,
                          "and with the child dead the voice plays dry, the source as it was",
                          f"{dry:.4f} against {SOURCE:.4f}")

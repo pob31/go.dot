@@ -10003,6 +10003,13 @@ the sandbox, fifteen parameters catalogued, twenty blocks answered without a mis
 - **The fx driver serves at a 20 ms deadline.** At the 250 µs default a shared CI box misses on
   and off and the render averages between dry and processed; a driver proves the path, and M31
   measures the round trip on a quiet machine.
+- **The driver reads a block-wise median, not a mean.** Even at 20 ms the macOS runner had a
+  quarter of the blocks late in one run of two; a median says what the processed blocks are at
+  and still fails when more than half are dry. **The macOS lateness itself is not explained:**
+  the child's worker takes a mach time-constraint policy and then spins hot while a lane is in,
+  and macOS demotes a real-time thread that overruns its constraint - a yield or a short sleep
+  between polls on macOS, or no time-constraint policy for a spinning worker, is the thing to
+  try on the Mac mini with M31 in hand.
 - **The child's test mode also writes its catalogue file**, so the parent's pickup runs in CI.
 
 **What is not built, of §17's own list:** the **FX panel at the foot** of the desktop window - the
