@@ -71,6 +71,11 @@ namespace wfg::client::gesture
                  { osc::Value::string (cueId), osc::Value::string (busId) } };
     }
 
+    Event eqReset (const std::string& cueId)
+    {
+        return { origin::window, "eq.reset", { osc::Value::string (cueId) } };
+    }
+
     Event splitRange (const std::string& cueId, double at)
     {
         return { origin::window, "range.split",

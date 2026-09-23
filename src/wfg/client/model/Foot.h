@@ -47,6 +47,7 @@
 #include <vector>
 
 #include <wfg/client/model/Curve.h>
+#include <wfg/client/model/Eq.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Timeline.h>
@@ -59,7 +60,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform, sends, timeline, curve };
+        enum class Kind { none, waveform, sends, timeline, curve, eq };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -106,6 +107,11 @@ namespace wfg::client::model
             It carries its own notice, as the timeline does: a cue that is not a
             fade and a fade nobody has drawn on are different sentences. */
         CurveReading curve;
+
+        /*  THE CUE'S EQ, filled only when the EQ is what is open (Phase 9a):
+            the nineteen rows as one value, the same value the voice is
+            given, with its own notice for a cue that has none. */
+        EqReading eq;
 
         /*  Where the playhead is, when a run of this cue is sounding, and
             whether there is one at all. A cue with no run has no playhead, and

@@ -528,6 +528,7 @@ namespace wfg::client::model
         if (kind == "media")
         {
             offer ("Waveform, in and out points", "waveform");
+            offer ("EQ, four bands and two filters", "eq");
         }
         else if (kind == "fade")
         {
@@ -621,6 +622,14 @@ namespace wfg::client::model
         aimAtADca (snapshot, decided);
 
         greyWhatOnlyAHandAsks (snapshot, cueId, out.kind, decided);
+
+        /*  THE EQ'S NINETEEN ROWS HAVE AN EDITOR OF THEIR OWN (Phase 9a), the
+            panel at the foot, and are not listed here - by prefix, so a
+            twentieth row joins the panel without a name in this file.
+            They stay reachable: the opener below is the door. */
+        if (out.kind == "media")
+            std::erase_if (decided, [] (const Field& field)
+                                    { return field.name.rfind ("eq", 0) == 0; });
 
         //  The four blocks, in the order somebody fills them in.
         const auto kindRows = [&out]

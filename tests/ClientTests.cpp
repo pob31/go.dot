@@ -60,6 +60,7 @@
 #include <wfg/client/model/View.h>
 #include <wfg/client/model/Reorder.h>
 #include <wfg/client/model/RunModel.h>
+#include <wfg/client/model/Eq.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Timeline.h>
 #include <wfg/client/model/Scrub.h>
@@ -565,6 +566,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::fireCue ("B3N8R5TW"),
         gesture::splitRange ("B3N8R5TW", 6.0),
         gesture::createSend ("B3N8R5TW", "J3MT5XYA"),
+        gesture::eqReset ("B3N8R5TW"),
         gesture::createPort ("Lights"),
 
         /*  PHASE 6: the Surfaces tab's three ADD buttons, and the virtual
@@ -2190,14 +2192,21 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
         nothing would teach somebody the feature is broken rather than absent. */
     const auto onMedia = model::openersFor ("media", "B3N8R5TW");
 
-    REQUIRE (onMedia.size() == 1);
+    /*  TWO SINCE PHASE 9a: the waveform, and the EQ - the second of the four
+        the author named, drawn at the foot as a response a hand can shape. */
+    REQUIRE (onMedia.size() == 2);
     CHECK (onMedia[0].control == model::Control::opener);
     CHECK (onMedia[0].value == "waveform");
     CHECK (onMedia[0].address == "B3N8R5TW");
     CHECK_FALSE (onMedia[0].label.empty());
+    CHECK (onMedia[1].control == model::Control::opener);
+    CHECK (onMedia[1].value == "eq");
+    CHECK (onMedia[1].address == "B3N8R5TW");
+    CHECK (onMedia[1].label.find ("EQ") != std::string::npos);
 
     //  An opener is a door and not a decision: it writes nothing.
     CHECK_FALSE (onMedia[0].writable);
+    CHECK_FALSE (onMedia[1].writable);
 
     /*  A GROUP HAS ONE TOO, since 2026-09-22: its members laid out in time,
         which is a thing only a container has. Offered for a sequence as well
@@ -2242,8 +2251,15 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
             CHECK (block.heading == "what it does");
         }
 
-        //  Nowhere else in the block, which is what "at the end" means.
-        for (std::size_t at = 0; at + 1 < block.fields.size(); ++at)
+        /*  Nowhere else in the block, which is what "at the end" means: the
+            openers are a run at the back - two on a media cue since Phase 9a -
+            and no row sits among them or after them. */
+        auto tail = block.fields.size();
+
+        while (tail > 0 && block.fields[tail - 1].control == model::Control::opener)
+            --tail;
+
+        for (std::size_t at = 0; at < tail; ++at)
             CHECK (block.fields[at].control != model::Control::opener);
     }
 
@@ -4622,4 +4638,72 @@ TEST_CASE ("client: a sampler row is greyed on a cue no hand can press, and draw
     CHECK (appliesIn (model::inspectMany (*snapshot, { loose.id, member.id }), "release"));
     CHECK (appliesIn (model::inspectMany (*snapshot, { member.id, loose.id }), "release"));
     CHECK_FALSE (appliesIn (model::inspectMany (*snapshot, { loose.id, another.id }), "release"));
+}
+
+//==============================================================================
+/*  PHASE 9a: A MEDIA CUE'S EQ, read back as the one value the voice is given,
+    and drawn from the maths the voice plays. The rows are the document's; the
+    reader turns nineteen of them into `audio::EqSettings`; the curve asks
+    `audio/EqMath.h`, which CueEqTests pins to the sound. */
+TEST_CASE ("client: a media cue's EQ is read back as the value the voice gets, and drawn from the same maths")
+{
+    Rig rig ("first-sound");
+    const std::string cue = "B3N8R5TW";
+
+    rig.apply (1, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/eqB2Gain"),
+                                          osc::Value::float64 (6.0) });
+    rig.apply (2, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/eqHpf"),
+                                          osc::Value::boolean (true) });
+    rig.apply (3, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/eqB1Shape"),
+                                          osc::Value::string ("lowShelf") });
+
+    const auto snapshot = rig.publish (4);
+    const auto eq = model::readEq (*snapshot, cue);
+
+    REQUIRE (eq.present);
+    CHECK (eq.notice.empty());
+    CHECK (eq.settings.on);
+    CHECK (eq.settings.hpf);
+    CHECK_FALSE (eq.settings.lpf);
+    CHECK (eq.settings.hpfFreq == doctest::Approx (80.0f));               // the table's default
+    CHECK (eq.settings.band[1].gain == doctest::Approx (6.0f));
+    CHECK (eq.settings.band[1].freq == doctest::Approx (500.0f));         // untouched, the default
+    CHECK (eq.settings.band[0].shape == audio::EqSettings::Shape::lowShelf);
+    CHECK (eq.settings.band[3].shape == audio::EqSettings::Shape::peak);
+    CHECK_FALSE (eq.settings.isIdentity());
+
+    /*  THE PICTURE IS THE MATHS: the drawn point nearest the band's centre
+        reads the band's gain, the axis runs twenty to twenty thousand, and a
+        flat EQ draws nought everywhere. */
+    const auto curve = model::eqCurve (eq.settings, 48000.0, 241);
+    REQUIRE (curve.size() == 241u);
+    CHECK (curve.front().frequency == doctest::Approx (20.0));
+    CHECK (curve.back().frequency == doctest::Approx (20000.0));
+
+    auto nearest = curve.front();
+
+    for (const auto& point : curve)
+        if (std::abs (point.frequency - 500.0) < std::abs (nearest.frequency - 500.0))
+            nearest = point;
+
+    CHECK (nearest.db == doctest::Approx (6.0).epsilon (0.05));
+
+    for (const auto& point : model::eqCurve (audio::EqSettings::flat(), 48000.0, 50))
+        CHECK (point.db == doctest::Approx (0.0));
+
+    //  The spellings the panel writes are the table's.
+    CHECK (model::eqBandRow (1, "Gain") == "eqB2Gain");
+    CHECK (model::eqAddress (cue, "eqHpf") == "/godot/cue/" + cue + "/eqHpf");
+    CHECK (model::eqShapeFor ("highShelf") == audio::EqSettings::Shape::highShelf);
+    CHECK (std::string (model::eqShapeWord (audio::EqSettings::Shape::lowShelf)) == "lowShelf");
+
+    SUBCASE ("and a cue that is not media has none, and says so")
+    {
+        Rig memo;
+        const auto plain = memo.publish (1);
+        const auto none = model::readEq (*plain, "B3N8R5TW");
+
+        CHECK_FALSE (none.present);
+        CHECK (none.notice.find ("media") != std::string::npos);
+    }
 }

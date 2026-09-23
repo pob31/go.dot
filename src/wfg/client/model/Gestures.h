@@ -130,6 +130,9 @@ namespace wfg::client::gesture
         none: there is one way values are written. */
     Event createSend (const std::string& cueId, const std::string& busId);
 
+    /** `eq.reset`: a media cue's EQ back to flat, one transaction (Phase 9a). */
+    Event eqReset (const std::string& cueId);
+
     /*  Cuts one of a media cue's ranges in two where the playhead is. One
         command rather than a create, a shortening and a reorder, so it is one
         undo step and one record - see `ShowDocument::splitRange`. */

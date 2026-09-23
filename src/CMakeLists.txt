@@ -301,6 +301,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Fader.cpp
     wfg/client/model/Sends.h
     wfg/client/model/Sends.cpp
+    wfg/client/model/Eq.h
+    wfg/client/model/Eq.cpp
     wfg/client/model/Timeline.h
     wfg/client/model/Timeline.cpp
     wfg/client/model/View.h
@@ -368,6 +370,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/CurveEditorComponent.cpp
     wfg/client/ui/SendMixerComponent.h
     wfg/client/ui/SendMixerComponent.cpp
+    wfg/client/ui/EqPanelComponent.h
+    wfg/client/ui/EqPanelComponent.cpp
     wfg/client/ui/TimelineComponent.h
     wfg/client/ui/TimelineComponent.cpp
     wfg/client/ui/Shell.h

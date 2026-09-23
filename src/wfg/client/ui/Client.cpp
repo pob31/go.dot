@@ -301,6 +301,8 @@ namespace wfg::client
                         wanted = model::Subject::Kind::timeline;
                     else if (subject == "curve")
                         wanted = model::Subject::Kind::curve;
+                    else if (subject == "eq")
+                        wanted = model::Subject::Kind::eq;
 
                     if (wanted == model::Subject::Kind::none)
                         return;
@@ -400,6 +402,11 @@ namespace wfg::client
 
                 footActions.createSend = [this] (const std::string& cueId, const std::string& busId)
                                          { send (gesture::createSend (cueId, busId)); };
+
+                /*  FLAT IS ONE COMMAND (Phase 9a): nineteen rows back in one
+                    transaction, which is one step to undo. */
+                footActions.resetEq = [this] (const std::string& cueId)
+                                      { send (gesture::eqReset (cueId)); };
 
                 footActions.openTimelineOn = [this] (const std::string& groupId)
                 {

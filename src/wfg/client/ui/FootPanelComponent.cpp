@@ -69,9 +69,26 @@ namespace wfg::client::ui
         sends.reset();
         timeline.reset();
         curve.reset();
+        eq.reset();
 
         switch (showing.kind)
         {
+            case model::Subject::Kind::eq:
+            {
+                EqPanelComponent::Actions shaping;
+                shaping.set = actions.set;
+                shaping.reset = actions.resetEq;
+                shaping.say = [this] (const juce::String& sentence)
+                {
+                    note = sentence;
+                    repaint();
+                };
+
+                eq = std::make_unique<EqPanelComponent> (theme, std::move (shaping));
+                addAndMakeVisible (*eq);
+                break;
+            }
+
             case model::Subject::Kind::curve:
             {
                 CurveEditorComponent::Actions drawing;
@@ -173,6 +190,10 @@ namespace wfg::client::ui
                 wanted = "Fade curve";
                 break;
 
+            case model::Subject::Kind::eq:
+                wanted = "EQ";
+                break;
+
             case model::Subject::Kind::none:
                 break;
         }
@@ -202,6 +223,9 @@ namespace wfg::client::ui
 
         if (curve != nullptr)
             curve->show (reading);
+
+        if (eq != nullptr)
+            eq->show (reading);
     }
 
     bool FootPanelComponent::overGrip (juce::Point<int> where) const
@@ -264,6 +288,9 @@ namespace wfg::client::ui
 
         if (curve != nullptr)
             curve->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
+
+        if (eq != nullptr)
+            eq->setBounds (area.withTrimmedTop (2).withTrimmedBottom (2));
     }
 
     void FootPanelComponent::mouseMove (const juce::MouseEvent& event)

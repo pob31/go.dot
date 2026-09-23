@@ -29,6 +29,7 @@
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CurveEditorComponent.h>
+#include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/TimelineComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
@@ -59,6 +60,9 @@ namespace wfg::client::ui
 
             /** `send.create`, when a silent fader in the mixer is raised. */
             std::function<void (const std::string& cueId, const std::string& busId)> createSend;
+
+            /** `eq.reset` on a media cue, from the EQ panel's Flat button. */
+            std::function<void (const std::string& cueId)> resetEq;
 
             /** Point the panel at another group, from the timeline's own gestures. */
             std::function<void (const std::string& groupId)> openTimelineOn;
@@ -114,6 +118,7 @@ namespace wfg::client::ui
         std::unique_ptr<SendMixerComponent> sends;
         std::unique_ptr<TimelineComponent> timeline;
         std::unique_ptr<CurveEditorComponent> curve;
+        std::unique_ptr<EqPanelComponent> eq;
         juce::TextButton shut { "x" };
         int columnWidth = 0, columnGap = 0;
 

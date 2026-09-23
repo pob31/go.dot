@@ -107,7 +107,15 @@ const SAID_LAST = ["enabled", "preset"];
     question; a fade's `dca` beside `target`, the other thing it can move. */
 const KIND_ORDER = {
   media:   ["file", "level", "startOffset", "dca", "initialLevel", "release", "secondPress",
-            "velocity", "velocityFloor", "pressure", "releaseFade"],
+            "velocity", "velocityFloor", "pressure", "releaseFade",
+            // The EQ (Phase 9a): the switch, the two filters, then four bands - frequency,
+            // gain and width each, the outer two with a shape. The desktop draws these
+            // as a curve at the foot; here they are rows, in the order a hand reads them.
+            "eqOn", "eqHpf", "eqHpfFreq", "eqLpf", "eqLpfFreq",
+            "eqB1Shape", "eqB1Freq", "eqB1Gain", "eqB1Q",
+            "eqB2Freq", "eqB2Gain", "eqB2Q",
+            "eqB3Freq", "eqB3Gain", "eqB3Q",
+            "eqB4Shape", "eqB4Freq", "eqB4Gain", "eqB4Q"],
   fade:    ["target", "dca", "level", "curve", "points", "stopWhenDone"],
   stop:    ["target", "verb", "curve"],
   start:   ["target"],

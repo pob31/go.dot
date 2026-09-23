@@ -3,6 +3,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 #include <wfg/client/ui/FootPanelComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
+#include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
@@ -773,4 +774,173 @@ TEST_CASE ("run pane: a sampler group counts its members in words")
     juce::Image canvas (juce::Image::ARGB, 450, 300, true);
     juce::Graphics g (canvas);
     pane.paintEntireComponent (g, true);
+}
+
+//==============================================================================
+TEST_CASE ("eq panel: the numbers are drawn, a box writes one row, a switch writes a flag, Flat is one command")
+{
+    /*  PHASE 9a's editor for the nineteen rows. What the hand shapes is
+        written to the cue's own rows through node.set - a decision the show
+        keeps - and the numbers are always drawn beside the field (§4.8). */
+    std::vector<std::pair<std::string, std::string>> written;
+    std::vector<std::string> resets;
+
+    ui::EqPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text)
+    { written.emplace_back (address, text); };
+
+    actions.reset = [&] (const std::string& cueId) { resets.push_back (cueId); };
+
+    ui::EqPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (720, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::eq, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.eq.present = true;
+    reading.eq.settings.band[1] = { wfg::audio::EqSettings::Shape::peak, 1000.0f, 6.0f, 1.0f };
+
+    panel.show (reading);
+
+    juce::Image canvas (juce::Image::ARGB, 720, 220, true);
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, true);
+    }
+
+    /*  THE NUMBER BOXES: the two filters' frequencies, then frequency, gain
+        and width for four bands - fourteen, in that order. */
+    std::vector<juce::Label*> boxes;
+
+    for (auto* child : panel.getChildren())
+        if (auto* label = dynamic_cast<juce::Label*> (child))
+            boxes.push_back (label);
+
+    REQUIRE (boxes.size() == 14);
+    CHECK (boxes[0]->getText() == "80");          // the high-pass, at its default
+    CHECK (boxes[2]->getText() == "100");         // band one's frequency, at its default
+    CHECK (boxes[5]->getText() == "1000");        // band two's frequency
+    CHECK (boxes[6]->getText() == "6");           // and its gain
+    CHECK (boxes[7]->getText() == "1");           // and its width
+
+    SUBCASE ("typing into a box writes that one row, and nothing else")
+    {
+        boxes[6]->setText ("3", juce::sendNotificationSync);
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0].first == "/godot/cue/CUE00001/eqB2Gain");
+        CHECK (written[0].second == "3");
+        CHECK (resets.empty());
+    }
+
+    SUBCASE ("a number outside the row's range is clamped before it is sent")
+    {
+        boxes[6]->setText ("40", juce::sendNotificationSync);
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0].first == "/godot/cue/CUE00001/eqB2Gain");
+        CHECK (written[0].second == "24");
+    }
+
+    SUBCASE ("a switch writes a flag")
+    {
+        juce::Button* highPass = nullptr;
+
+        for (auto* button : buttonsUnder (panel))
+            if (button->getButtonText() == "High-pass")
+                highPass = button;
+
+        REQUIRE (highPass != nullptr);
+        highPass->setToggleState (true, juce::dontSendNotification);
+        highPass->onClick();
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0].first == "/godot/cue/CUE00001/eqHpf");
+        CHECK (written[0].second == "true");
+    }
+
+    SUBCASE ("Flat is one command on the cue, and writes no row itself")
+    {
+        juce::Button* flat = nullptr;
+
+        for (auto* button : buttonsUnder (panel))
+            if (button->getButtonText() == "Flat")
+                flat = button;
+
+        REQUIRE (flat != nullptr);
+        flat->onClick();
+
+        REQUIRE (resets.size() == 1);
+        CHECK (resets[0] == "CUE00001");
+        CHECK (written.empty());
+    }
+
+    SUBCASE ("a cue with no EQ says so rather than drawing an empty field")
+    {
+        model::FootReading memo;
+        memo.subject = { model::Subject::Kind::eq, "CUE00002" };
+        memo.cueKind = "memo";
+        memo.eq.present = false;
+        memo.eq.notice = "Only a media cue has an EQ.";
+
+        panel.show (memo);
+
+        std::vector<juce::Label*> none;
+
+        for (auto* child : panel.getChildren())
+            if (auto* label = dynamic_cast<juce::Label*> (child))
+                none.push_back (label);
+
+        CHECK (none.empty());
+        CHECK (buttonsUnder (panel).empty());
+
+        juce::Image blank (juce::Image::ARGB, 720, 220, true);
+        juce::Graphics g (blank);
+        panel.paintEntireComponent (g, true);
+    }
+}
+
+TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
+{
+    /*  NOT AN ASSERTION BUT AN EYE. With WFG_SNAPSHOT_DIR set, the panel is
+        painted into a PNG there, so a look can be had with no screen - the
+        way the Surfaces tab and the virtual panel were first seen. Skipped,
+        silently and green, everywhere else. */
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isEmpty())
+        return;
+
+    ui::EqPanelComponent::Actions actions;
+    ui::EqPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (960, 230);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::eq, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.eq.present = true;
+
+    auto& s = reading.eq.settings;
+    s.hpf = true;
+    s.hpfFreq = 80.0f;
+    s.band[0] = { wfg::audio::EqSettings::Shape::lowShelf, 150.0f, 3.0f, 0.7f };
+    s.band[1] = { wfg::audio::EqSettings::Shape::peak, 700.0f, -8.0f, 1.5f };
+    s.band[2] = { wfg::audio::EqSettings::Shape::peak, 3000.0f, 4.0f, 0.5f };
+    s.band[3] = { wfg::audio::EqSettings::Shape::highShelf, 9000.0f, -2.0f, 0.7f };
+
+    panel.show (reading);
+
+    const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+    const juce::File file { juce::File (dir).getChildFile ("eq-panel.png") };
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+
+    juce::FileOutputStream out { file };
+    REQUIRE (out.openedOk());
+
+    juce::PNGImageFormat png;
+    CHECK (png.writeImageToStream (picture, out));
+    MESSAGE ("wrote " << file.getFullPathName().toStdString());
 }

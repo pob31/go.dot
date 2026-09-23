@@ -56,6 +56,10 @@ namespace wfg::client::model
             /*  AND A CURVE FOLLOWS, which is what makes it able to open by
                 itself: picking a fade is the gesture that asks for it. */
             case Subject::Kind::curve:     return true;
+
+            /*  AND THE EQ FOLLOWS, for the sends' reason: how this cue is
+                shaped is a question about whichever cue is in hand. */
+            case Subject::Kind::eq:        return true;
             case Subject::Kind::none:      break;
         }
 
@@ -107,6 +111,14 @@ namespace wfg::client::model
 
         if (subject.kind == Subject::Kind::curve)
             out.curve = readCurve (snapshot, subject.objectId);
+
+        if (subject.kind == Subject::Kind::eq)
+        {
+            out.eq = readEq (snapshot, subject.objectId);
+
+            if (! out.eq.present)
+                out.notice = out.eq.notice;
+        }
 
         if (subject.kind == Subject::Kind::sends)
         {
