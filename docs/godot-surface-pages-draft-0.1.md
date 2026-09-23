@@ -288,6 +288,26 @@ reopening them:
 4. **A parameter's name and range are readable without a playing instance** where the scan can
    provide them, so a page can label a cue that is not sounding.
 
+*Answered 2026-09-23 by the Phase 9a session (namespace draft §17.2, §17.4, §17.12), all four, with
+flat four-part addresses - the document resolves nothing deeper:*
+
+- **The EQ:** nineteen rows on the cue, `/godot/cue/<id>/eqOn`, `eqHpf`, `eqHpfFreq`, `eqLpf`,
+  `eqLpfFreq`, `eqB1Shape`, and `eqB<n>Freq` / `eqB<n>Gain` / `eqB<n>Q` for bands 1–4 with
+  `eqB4Shape`; each carries its default, range and unit in the table, and `eq.reset <cue>` is
+  the double-click.
+- **An insert's parameters:** `/godot/fx/<fxId>/p<n>` (rw, 0..1, with the parameter's name, unit and
+  step texts on the node) and `/godot/fx/<fxId>/t<n>` (the plugin's own text for it, read-only).
+  The name, short name, default, steps and bipolar flag are also under the set entry at
+  `/godot/plugin/<pluginId>/param/<n>/{name,shortName,unit,default,min,max,steps,bipolar}`,
+  readable without a playing instance from the machine's catalogue cache.
+- **The insert order:** `/godot/cue/<id>/fx` lists the cue's enabled Fx ids in chain order, and
+  `/godot/plugin/order` the set's entry ids; each Fx has `/godot/fx/<fxId>/name` and `index`.
+- **Two rules:** a turn on any of these WRITES THE CUE with `node.set` (saved, undoable, one
+  step per parameter per hand), and a parameter absent from a cue's values rests at the set
+  entry's preset.
+- **The switch:** `/godot/fx/<fxId>/enabled`; a cue with no Fx for an entry gets one with
+  `fx.create <cue> <pluginId>`.
+
 ## 9. Open questions — the author's
 
 Each with the recommendation made in the conversation.

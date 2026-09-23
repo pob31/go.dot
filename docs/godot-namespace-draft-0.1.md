@@ -9890,5 +9890,64 @@ decision N*:
 
 ### 17.12 What Phase 9a built, against what §17 drew
 
-*To be written at close-out, in §14.17's and §16.12's shape: what landed, where the build departed
-from the drawing and why, the figures M30–M34 gave, and what only the author can settle.*
+*Written 2026-09-23, late, at the end of the session that built 9a.0–9a.9; the figures are not
+in yet (below).*
+
+**What landed on `main`, in order:** 9a.0 the docs; 9a.1 the EQ's arithmetic, pure; 9a.2 the EQ on
+every voice with its nineteen rows, the arm, the push and `eq.reset`; 9a.3 the EQ drawn at the foot
+from the DSP's own function; 9a.4 the plugin set as a document object; 9a.5 hosting compiled in,
+the scan verb and the catalogue; 9a.6 the proxy transport; 9a.7 the child hosting a real plugin;
+9a.8 the cue's inserts with the `p<n>` door; 9a.9 the inserts as the client reads them and the
+Plugins tab. Every one has its unit cases, the replay fixtures `eq.wfglog`, `plugins.wfglog` and
+`fx.wfglog` under both locales, and the drivers `phase9a_eq.py` and `phase9a_fx.py` at the black
+box. On the author's machine a real VST3 - his own WFS-DIY Track - came up on two voices through
+the sandbox, fifteen parameters catalogued, twenty blocks answered without a miss, a value taken.
+
+**Where the build departed from the drawing, and why:**
+
+- **`fx/plugin` names the set entry's ID, not the scan's identifier** (§17.2 said identifier). A set
+  may hold one plugin twice, and a cue must say which; the identifier is on the entry.
+- **`plugins/order` is a list of entry ids**, for the same reason, and `fx/index` is the entry's
+  position in it.
+- **The scan owns its file loop and has a deadline.** Tracktion's coordinator waits for a reply
+  without a limit, and the first scan on the author's machine hung for good on a plugin whose
+  licence check never returned; a file overdue by thirty seconds is skipped, blacklisted and named
+  (`--retry-skipped` asks again). And a hung child is terminated by pid, because JUCE's kill is a
+  message on the pipe that a process hung in plugin code never reads - the first scan left one
+  behind at a gigabyte.
+- **The plugin child is launched without handle inheritance on Windows.** JUCE's `ChildProcess`
+  inherits every handle, and a socket is one: the first hosted serve handed its HTTP sockets to
+  the child, and every client waiting for the server to close a connection waited for a process
+  that never would. `ProxyHost` has its own `CreateProcessW` on Windows.
+- **A failed child is put down at once**, not asked politely: the wait ran on the message thread.
+- **`ProxyPlugin` lives under `audio/`**, beside `EqPlugin`, because it names Tracktion; the
+  transport it wraps (`ProxyLane`, `SharedRegion.h`, `ProxyHost`) is under `plugin/` and names no
+  JUCE type in its headers.
+- **A state `missing` is published** for an entry this machine's scan does not know: no child is
+  launched, the sentence says what to do, and every voice plays dry through the slot.
+- **A `.vstpreset` goes through JUCE's VST3 client (`setPreset`)**, anything else through
+  `setStateInformation`; the SDK's own loader either way.
+- **The catalogue store and the plugin table carry a revision the tree compares at every
+  publish** (the mount table's idiom), so a child's report on the message thread reaches a client
+  without anyone marking the tree stale from a thread that must not.
+- **`plugin.failed` on replay knows the set from the document** (`pluginKnownBy`), not from a table
+  a replay never fills; the driver found it.
+- **The bipolar guess is wrong on a shelf**: WFS-DIY's "HF Shelf" runs -24..0 dB about a -12 dB
+  middle and reads as bipolar. The curated map plan decision 11 reserved is where that goes.
+- **AU hosting is not compiled yet**; VST3 on every platform is. The Mac mini's link line decides.
+- **The macOS child needs `initialiseNSApplication()`** before its dispatch loop, as the console's
+  serve loop does; the macOS CI job found the child leaving before it answered a block.
+- **The child's test mode also writes its catalogue file**, so the parent's pickup runs in CI.
+
+**What is not built, of §17's own list:** the **FX panel at the foot** of the desktop window - the
+strip-per-entry view with a switch and a slider a parameter that `client/model/Fx.h` is written for
+(the model, the addresses, the gestures and the Plugins tab are in; the component is the next
+session's); **M30–M34**, which want a quiet machine and were not taken while the box was building
+for another session; the surface pages, the virtual panel's rotaries, a system EQ, a fade on a
+parameter, inline hosting and LV2 as §17.10 said.
+
+**The figures M30–M34 gave:** not yet; §17.9 keeps the table and PRD §6.11 says *not yet taken*.
+
+**What only the author can settle:** what he sees on the desktop - the EQ panel's feel (plan
+decisions 1, 5, 7), the deadline and the spin policy once M31 is in (12, 14), and whether the
+automatic restart is welcome (M32).

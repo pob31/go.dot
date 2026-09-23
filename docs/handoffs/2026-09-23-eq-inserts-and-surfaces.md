@@ -68,3 +68,15 @@ None of this asks for a page, a surface change or a bridge change.
   GCC, and a clang-tidy diagnostics pass with the same flags is the stand-in.
 - Several working-tree files are CRLF (`Console.cpp`, `tests/CMakeLists.txt`, many tests); scripts
   that edit them keep each file's own line endings.
+
+## What was built (2026-09-23, late)
+
+Phase 9a landed on `main` through 9a.9 part one; the namespace draft's §17.12 says what departed
+from the drawing and why, and the pages draft's §8 now carries the addresses. In one line each:
+
+- EQ: `/godot/cue/<id>/eq…` (nineteen rows on the media cue), `eq.reset`, the desktop panel.
+- The set: `/godot/plugin/<id>/…` with `plugins/order`, `plugin.create`, `plugin.restart`, the
+  Plugins tab, `wfg plugins --scan|--list|--catalogue`.
+- Inserts: `/godot/fx/<id>/{plugin,enabled,values,cue,name,index}`, `p<n>` / `t<n>`, `fx.create`,
+  `/godot/cue/<id>/fx`.
+- Still to come: the FX panel at the foot (next session), M30–M34 (a quiet machine).
