@@ -9257,3 +9257,15 @@ black-box driver now touches a fader and watches the clip start. Still the autho
 touches the D700 is known for, now that a touch fires a sample (`touchDwellTicks` is the lever);
 brightness and its ceiling; the DCA faders' initial level — *"set at some point; we'll see what feels
 most practical"*; and the rulings above.
+
+**First contact with the unit, the same day, the author away and the D700 left connected.** The
+bench show (`tests/blackbox/make_d700_bench.py`) served from a Release build with no audio device:
+both ports bound at start under the names Windows gives them (`D 700`, `MIDIIN2 (D 700)`,
+`MIDIOUT2 (D 700)`), the surface connected at once, and **the D700 answered the Mackie handshake**
+— the serial it reports is `D700 MA` — so the road runs both ways. Bank A armed, its faders flew to
+their four initial levels, fader 3 was ridden from the network and the Band DCA faded down and back
+up, and in all of it **the unit sent nothing of its own accord**: no position echoed from a moving
+motor, so nothing the bridge could mistake for a hand. `latenessMax` over the session was 320
+samples (6.7 ms), which is M29's bound half, taken in serve rather than in-process. What only
+somebody looking at the desk can say — the displays, the rings, the colours, the motors' feel, a
+touch — is still the afternoon's.
