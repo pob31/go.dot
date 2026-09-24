@@ -862,8 +862,29 @@ namespace wfg::audio
         {
             auto* clip = clipOn (trackIndex, slotIndex);
 
-            if (clip == nullptr || ! file.existsAsFile())
+            if (clip == nullptr || engine == nullptr || ! file.existsAsFile())
                 return false;
+
+            /*  A FILE THAT IS THERE AND IS NOT AUDIO IS A FAILED ARM, asked with
+                the very predicate Tracktion builds the graph with. Since the
+                pin of 2026-09-24, createNodeForAudioClip builds NO node for a
+                clip whose playback file is not valid (tracktion_EditNodeBuilder
+                .cpp:422-426): a slot pointed at one loses its two nodes at the
+                next rebuild - measured, 18 to 16 on one track - and its launch
+                handle then has nothing behind it. The track itself stays, held
+                in the graph by CueOutputPlugin's producesAudioWhenNoAudioInput.
+                Before that pin the slot stayed and played silence. Either way
+                the run then waited for ever on isArmReady, which asks this same
+                question and never gets a yes - a GO that sounded nothing and
+                said nothing.
+                Refused here, the slot keeps what it held and the run fails
+                while the operator is still reading the next line. */
+            if (! te::AudioFile { *engine, file }.isValid())
+            {
+                error = "\"" + file.getFileName().toStdString()
+                          + "\" is there and is not audio this build can decode";
+                return false;
+            }
 
             clip->getSourceFileReference().setToFile (file, te::SourceFileReference::PathStyle::alwaysAbsolute, false);
 
@@ -934,7 +955,7 @@ namespace wfg::audio
             WHY LOOPING IS THE MECHANISM AND NOT A SETTING. SlotControlNode
             captures a stop duration when the graph is built - the clip's length
             in beats when `isLooping()` is false, nothing at all when it is
-            (tracktion_EditNodeBuilder.cpp:1025-1026) - and every block, before
+            (tracktion_EditNodeBuilder.cpp:1031-1032) - and every block, before
             it advances, it queues a stop for the block containing that duration
             (tracktion_SlotControlNode.cpp:134-153). So a clip armed NOT looping
             can never be made to loop afterwards: LaunchHandle::setLooping is a

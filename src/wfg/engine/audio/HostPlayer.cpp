@@ -94,9 +94,10 @@ namespace wfg::audio
             if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges,
                                             request.startOffset))
             {
-                /*  MEDIA-MISSING COVERS BOTH, for now: a file that is not there
-                    and a range that is not inside it are both "this cue cannot
-                    be made ready", and `lastError` carries which. A `no-slot`
+                /*  MEDIA-MISSING COVERS ALL THREE, for now: a file that is not
+                    there, one that is there and is not audio, and a range that
+                    is not inside it are all "this cue cannot be made ready",
+                    and `lastError` carries which. A `no-slot`
                     of its own arrives with the run-level range reporting in
                     PR 3.9, where there is something to report it against. */
                 engine.submit (origin::engine, "run.failed",

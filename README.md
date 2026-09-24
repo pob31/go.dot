@@ -638,7 +638,7 @@ Build presets append `-debug` / `-release` (`dev-debug`, `ci-linux-release`, …
 | Dependency | Version | Commit |
 |---|---|---|
 | JUCE | 8.0.13+7 (on `develop`) | `37c894f83d379179b2070d437ccd0f1cd9af9576` |
-| Tracktion Engine | develop (3.5.0) | `a806e7262ac299ef7dad51d5186872077cf5e750` |
+| Tracktion Engine | develop (3.5.0) | `13b51326693e3227ddef91b224114d12af6433ce` |
 
 The load-bearing fact: **Tracktion Engine develop (3.5.0)'s own `modules/juce` gitlink is
 byte-for-byte our JUCE pin.** We are not guessing at a compatible JUCE — we are

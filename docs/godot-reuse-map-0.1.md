@@ -35,7 +35,13 @@ nothing here depends on them.
    Tracktion's `develop` (`4536d8a`, 2026-09-07) still pins JUCE 8.0.13 and no Tracktion
    branch tracks JUCE 9, so Go.dot cannot follow — the build failure recorded in
    `docs/spikes/README.md` came from APIs JUCE 9 removed, which a patch release does not
-   restore. The spatcore bump itself changed only `examples/minimal-app/CMakeLists.txt`;
+   restore. *Re-checked 2026-09-24, when Go.dot moved its Tracktion pin to `develop`
+   `13b5132`:* the pin still vendors JUCE 8.0.13 (`37c894f`, unchanged, so the JUCE gitlink
+   did not move), but Tracktion's `juce_compat` CI job now builds the engine against JUCE's
+   `develop` tip nightly and on every push, green on all three platforms. It builds and
+   runs no tests, and the "JUCE 9" strings in Tracktion's tree are compatibility shims, so
+   this is "compiles on JUCE 9", not "tested on it" - the move waits for Tracktion to pin 9.
+   The spatcore bump itself changed only `examples/minimal-app/CMakeLists.txt`;
    neither header Go.dot compiles moved. **Draft 0.1 named one instance and it was wrong** (see the correction under
    *Phase 1* below): `control/osc/OSCParser.h`'s `juce::OSCArgument (true)` compiles on
    both. **No confirmed JUCE-9-only usage in spatcore is known today** — which makes this a

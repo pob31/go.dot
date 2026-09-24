@@ -179,3 +179,7 @@ a bed, and the question is what it does to a transient.
     for a minute. Then the same file with a transient at the loop point.
 12. The same at 128 and 256 frames, which is what a show runs at, and where the measurement says
     there is nothing to hear.
+
+*Re-measured 2026-09-24, at the Tracktion pin `13b5132`:* the wrap is now exact in every cell,
+48 kHz at 512 and 1024 frames included (`docs/spikes/spike03b-loop-joins.md`). Item 11 no
+longer has a measured blemish behind it; it stays as a listen through a real device.

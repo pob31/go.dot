@@ -146,6 +146,37 @@ stop decay, capped at the block length. So a range playlist's boundaries cost 25
 each however the rig is set up, and M13's bound — *damaged span ≤ block + 40 samples* — is met
 with room to spare before PR 3.9 has written a line.
 
+## Re-measured 2026-09-24, at the Tracktion pin `13b5132`
+
+Go.dot moved Tracktion Engine from `a806e72` to `develop` `13b5132`, and one commit in
+between reaches this rig: `150582e` (*Launcher: Fixed a click when retriggering clips*) made
+`LagrangeResamplerReader::setPosition` reset the interpolator, and clear its latency
+compensation, whenever the position jumps by more than a sample. A wrap is such a jump:
+`BeatRangeReader` reads the pass after it as a non-contiguous range, and `TimeRangeReader`
+repositions the reader before resetting it. At the old pin that repositioning still carried
+the 2-sample compensation from before the reset. The old damage is the size that offset would
+cause: 2 samples of the chirp's 200 Hz start is 0.026 of an amplitude of 0.5, against a
+measured worst of 0.027.
+
+Same command, same Debug build type, same box:
+
+| block | 48 kHz wrap | 48 kHz placed | 96 kHz wrap | 96 kHz placed |
+|---|---|---|---|---|
+| 64   | **2.8e-11** | 1.067 | **2.8e-11** | 0.071 |
+| 128  | **2.8e-11** | 1.061 | **2.8e-11** | 0.998 |
+| 256  | **2.8e-11** | 1.088 | **2.8e-11** | 0.950 |
+| 512  | **2.8e-11** | 1.088 | **2.8e-11** | 0.950 |
+| 1024 | **2.8e-11** | 0.795 | **2.8e-11** | 0.950 |
+
+**The wrap is now exact at every block size and both rates.** No damaged sample in any of the
+ten cells, and a worst deviation of 1.2e-7, which is float rounding against the reference. The
+55 samples at 5% of full scale that 48 kHz left at 512 and 1024 frames are gone. The placed
+boundary and `setLooping` measure exactly as they did on 2026-09-07, so the fixed stop decay,
+and the verdict, stand.
+
+The hardware checklist's extra listen at 48 kHz and 512 frames no longer has a measured
+blemish behind it. It stays on the list as a check of the whole path through a real device.
+
 ## Status
 
 Answered. `spikes/spike03b_loop_joins/` stays in the tree until Phase 3 closes, like the other

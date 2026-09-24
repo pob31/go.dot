@@ -4217,6 +4217,61 @@ TEST_CASE ("offset: one past the end of the file is a failed arm, not a silence"
     CHECK (rig.host.setTrackRanges (0, tone.getFullPathName().toStdString(), {}, 2.0));
 }
 
+TEST_CASE ("media: a file that is there and is not audio is a failed arm, and the voice stays whole")
+{
+    /*  THE CASE THE 2026-09-24 TRACKTION PIN CHANGED. Tracktion now builds no
+        node for a clip whose file it cannot read, so a slot pointed at one
+        loses its nodes at the next rebuild and its launch handle answers to
+        nothing (the track stays: CueOutputPlugin holds it in the graph).
+        Before that pin the slot stayed and played silence. Either way the run
+        waited for ever on a readiness that never came.
+
+        So the arm refuses the file before the slot is touched, and the graph
+        it leaves behind is the graph it found: same node count, and the same
+        voice arms a real file straight afterwards. Without the refusal this
+        case reads 16 nodes where it found 18. A `.wav` holding text is
+        the shape that happens - a copy that stopped half way, a file renamed
+        by somebody who thought the extension was the format. */
+    constexpr int rate = 48000;
+
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = rate;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 1;
+    spec.slots = 1;
+    REQUIRE (rig.host.buildEdit (spec));
+
+    const auto before = rig.host.inspectNodeIds();
+    REQUIRE (before.nodes > 0);
+
+    const auto broken = rig.storage.folder.getChildFile ("broken.wav");
+    REQUIRE (broken.replaceWithText ("this is not a sound"));
+
+    CHECK_FALSE (rig.host.setTrackRanges (0, broken.getFullPathName().toStdString(), {}));
+
+    INFO (rig.host.lastError());
+    CHECK (rig.host.lastError().find ("not audio") != std::string::npos);
+
+    /*  The slot still holds what it held, so nothing left the graph. */
+    CHECK (rig.host.inspectNodeIds().nodes == before.nodes);
+
+    /*  And the voice is still a voice. */
+    const auto tone = writeSegmentedTone (rig.storage.folder, rate);
+    REQUIRE (tone.existsAsFile());
+
+    CHECK (rig.host.setTrackRanges (0, tone.getFullPathName().toStdString(), {}));
+    CHECK (rig.host.waitForTrackSourceReady (0, 10000));
+    CHECK (rig.host.inspectNodeIds().nodes == before.nodes);
+}
+
 //==============================================================================
 /*  A file whose sample value IS its position: value at sample n is n / total,
     so a rendered sample says where in the file it came from. The segmented tone
