@@ -444,6 +444,15 @@ namespace wfg::cue
         bool held = false;
         std::string heldBy;
 
+        /*  SOLOED ON ITS STRIP (author, 2026-09-25: "The solo switch could be
+            engaged on a track to prevent other faders in the bank to
+            trigger"): while it holds, a press on any other strip of its bank
+            - a touch, a pad, a fire by name - starts nothing. It lets go by
+            itself when the clip stops (`soloCanHold`), so a solo left on
+            never outlives the clip it protected. Run-local, as `held` is: a
+            performance, never an edit to the show. */
+        bool solo = false;
+
         /*  ON A SAMPLER GROUP'S RUN: taken over by another sampler group
             arming with `takeover=group`. A closing group launches nothing
             new, plays out what is playing and ends each idle member so its
@@ -826,6 +835,14 @@ namespace wfg::cue
         bool isFinished() const noexcept
         {
             return state == runState::done || state == runState::failed;
+        }
+
+        /*  Whether a solo on it holds: until the clip stops - its end, a stop,
+            a kill, a release - and not after. */
+        bool soloCanHold() const noexcept
+        {
+            return ! isFinished() && ! stopIssued && state != runState::stopping
+                     && state != runState::postWait;
         }
 
         /** Whether this run is a group's, and so has children rather than a

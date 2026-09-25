@@ -56,6 +56,8 @@ namespace wfg::surface
             port a message goes to, never the id inside it. */
         constexpr std::uint8_t deviceId = d700DeviceId;
 
+        constexpr int recNote = 0x00;           // + element: REC, where the strip's fader starts, lit a moment when set
+        constexpr int soloNote = 0x08;          // + element: SOLO, the bank locked to the strip
         constexpr int muteNote = 0x10;          // + element: MUTE, the strip's kill, lit a moment when it kills
         constexpr int selectNote = 0x18;        // + element: SELECT, whose LED says the strip sounds
         constexpr int vpotNote = 0x20;          // + element: the V-Pot - its press, and the D700's colour
@@ -393,7 +395,7 @@ namespace wfg::surface
             std::string cueId, cueNameAt, cueShortAt, cueNumberAt, cueColourAt, cuePressureAt,
                         cueFloorAt;
             std::string dcaId, dcaNameAt, dcaShortAt;
-            std::string holderId, timbreAt, envelopeAt, meterAt;
+            std::string holderId, timbreAt, envelopeAt, meterAt, soloAt;
 
             /*  THE PULSE'S OWN MEMORY (2026-09-25): the slow average of the
                 holder's envelope and the brightness being let go, for the run
@@ -426,6 +428,9 @@ namespace wfg::surface
             int led = -1;
             int muteLed = -1;                       // the MUTE light as last sent; -1 for nobody knows
             std::int64_t muteLitUntil = -1;         // the tick the kill's flash goes out
+            int soloLed = -1;                       // the SOLO light as last sent
+            int recLed = -1;                        // the REC light as last sent
+            std::int64_t recLitUntil = -1;          // the tick the starting level's flash goes out
             int ring = -1;
             bool colourKnown = false;
             Rgb colourLevel;
@@ -573,6 +578,8 @@ namespace wfg::surface
             strip.colourKnown = false;
             strip.meterStep = -1;
             strip.meterFor.clear();
+            strip.soloLed = -1;
+            strip.recLed = -1;
         }
 
         //======================================================================
@@ -613,6 +620,7 @@ namespace wfg::surface
                 strip.timbreAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/timbre";
                 strip.envelopeAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/envelope";
                 strip.meterAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/meter";
+                strip.soloAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/solo";
             }
         }
 
@@ -844,6 +852,18 @@ namespace wfg::surface
                             kill (box, *strip, submit, tick);
                     break;
 
+                case Action::solo:
+                    if (event.down)
+                        if (auto* strip = stripAt (box, bank, event.id.index))
+                            solo (box, *strip, submit);
+                    break;
+
+                case Action::startLevel:
+                    if (event.down)
+                        if (auto* strip = stripAt (box, bank, event.id.index))
+                            startLevel (box, *strip, submit, tick);
+                    break;
+
                 case Action::rewind:
                     if (event.down)
                         submit (commandFrom (box.origin, "standby.previous"));
@@ -880,6 +900,45 @@ namespace wfg::surface
 
             //  And the red light says it happened, for `killFlashTicks`.
             strip.muteLitUntil = tick + killFlashTicks;
+        }
+
+        /*  SOLO LOCKS THE BANK TO THE STRIP (author, 2026-09-25): `run.solo`
+            on the run holding it, as a toggle - the engine says what it came
+            to, and lets go of it when the clip stops. A dca strip and a free
+            one have nothing to solo. */
+        void solo (const Surface& box, const Strip& strip, const Submit& submit) const
+        {
+            if (strip.holderId.empty() || textAt (published.get(), strip.roleAt) == "dca")
+                return;
+
+            submit (commandFrom (box.origin, "run.solo", { osc::Value::string (strip.holderId) }));
+        }
+
+        /*  REC SETS WHERE THE FADER STARTS (author, 2026-09-25: "Pressing Rec
+            on a sampler fader sets the starting level. Confirm with a LED
+            pulse."): the level the strip's fader is at, written as its
+            member's `initialLevel`. An edit to the show, so a locked show
+            takes none, and then nothing is confirmed. */
+        void startLevel (const Surface& box, Strip& strip, const Submit& submit, std::int64_t tick) const
+        {
+            const auto* at = published.get();
+
+            if (strip.cueId.empty() || textAt (at, strip.roleAt) == "dca"
+                  || flagAt (at, "/godot/document/locked"))
+                return;
+
+            const auto& target = textAt (at, strip.targetAt);
+            const auto level = target.empty() ? std::optional<double> {} : numberAt (at, target);
+
+            if (! level.has_value())
+                return;
+
+            submit (commandFrom (box.origin, "node.set",
+                                 { osc::Value::string ("/godot/cue/" + strip.cueId + "/initialLevel"),
+                                   osc::Value::float64 (std::clamp (*level, -120.0, 12.0)) }));
+
+            //  And its light says it happened, for `startLevelFlashTicks`.
+            strip.recLitUntil = tick + startLevelFlashTicks;
         }
 
         /*  THE STRIP'S GATE, the V-Pot press: a hand on a sampler strip, or on
@@ -1314,6 +1373,27 @@ namespace wfg::surface
             {
                 send (port, led (muteNote + element, muteLit));
                 strip.muteLed = static_cast<int> (muteLit);
+            }
+
+            /*  SOLO, flashing while a soloed clip waits for its start, lit while
+                it sounds, and dark once the solo has gone with the clip. */
+            const auto soloed = ! isDca && flagAt (at, strip.soloAt);
+            const auto soloLit = ! soloed ? Led::off
+                                          : (word == "playing" || word == "held") ? Led::on : Led::flash;
+
+            if (static_cast<int> (soloLit) != strip.soloLed)
+            {
+                send (port, led (soloNote + element, soloLit));
+                strip.soloLed = static_cast<int> (soloLit);
+            }
+
+            //  REC, lit a moment after it set the starting level.
+            const auto recLit = tick < strip.recLitUntil ? Led::on : Led::off;
+
+            if (static_cast<int> (recLit) != strip.recLed)
+            {
+                send (port, led (recNote + element, recLit));
+                strip.recLed = static_cast<int> (recLit);
             }
 
             if (static_cast<int> (lit) != strip.led)

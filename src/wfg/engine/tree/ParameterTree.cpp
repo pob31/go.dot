@@ -2578,6 +2578,7 @@ namespace wfg::tree
                 else if (name == "asserted")  text = run.asserted ? "true" : "false";
                 else if (name == "strip")     text = run.strip;
                 else if (name == "held")      text = run.held ? "true" : "false";
+                else if (name == "solo")      text = run.solo ? "true" : "false";
                 else if (name == "error")     text = run.error;
                 else if (name == "iteration")  text = std::to_string (run.iteration);
                 else if (name == "iterations") text = std::to_string (run.iterations);

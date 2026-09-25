@@ -3830,6 +3830,15 @@ namespace wfg::cue
         if (run->held && run->heldBy != origin)
             return {};
 
+        /*  A SOLO IN THE BANK HOLDS THE OTHERS (author, 2026-09-25: "The solo
+            switch could be engaged on a track to prevent other faders in the
+            bank to trigger"): while a clip of this bank is soloed, a press on
+            another of its strips is applied and starts nothing - a pad, a fire
+            by name, and the fader's own touch, whose edge is spent by it, so a
+            finger resting there starts nothing when the solo lets go either. */
+        if (! run->solo && bankSoloed (run->parent))
+            return {};
+
         const auto cue = document.findById (run->cue);
 
         if (! cue.isValid())
@@ -3909,6 +3918,29 @@ namespace wfg::cue
         seekMedia (engine, tick, run->id, 0.0);
         step();
         return {};
+    }
+
+    bool Runner::bankSoloed (const std::string& groupRunId) const
+    {
+        if (groupRunId.empty())
+            return false;
+
+        for (const auto& member : runs.all())
+            if (member.parent == groupRunId && member.solo && member.soloCanHold())
+                return true;
+
+        return false;
+    }
+
+    void Runner::releaseSolos()
+    {
+        /*  A SOLO NEVER OUTLIVES ITS CLIP: at its end, a stop, a kill or a
+            release, the flag goes - and with it the lock on the bank and the
+            light on the button. */
+        for (const auto& snapshot : runs.all())
+            if (snapshot.solo && ! snapshot.soloCanHold())
+                if (auto* run = runs.find (snapshot.id))
+                    run->solo = false;
     }
 
     std::string Runner::releaseStrip (Engine&, std::int64_t, const std::string& stripId,
@@ -6060,6 +6092,7 @@ namespace wfg::cue
         advanceWaits (engine, tick);
         advanceGroups (engine);
         samplerEdges (engine);
+        releaseSolos();
         armStandby (engine);
         advanceFades (engine, tick);
         applyLevels();

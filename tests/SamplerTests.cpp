@@ -460,6 +460,58 @@ TEST_CASE ("sampler: a strip's run says how loud it left its track, after the fa
     CHECK (rig.runs.find (runId)->meter == doctest::Approx (cue::Run::silentDb));
 }
 
+TEST_CASE ("sampler: a soloed clip holds its bank - the other strips start nothing until it stops")
+{
+    /*  The author, 2026-09-25: "The solo switch could be engaged on a track
+        to prevent other faders in the bank to trigger ... turned off once the
+        sample has finished playing or is stopped." */
+    Rig rig;
+    const auto& members = rig.membersOf[rig.bankA];
+    rig.arm (rig.bankA);
+
+    const auto* first = rig.liveRunOf (members[0]);
+    REQUIRE (first != nullptr);
+    const auto soloed = first->id;
+
+    //  A TOGGLE, and the value it came to is what is applied: on, off, on again.
+    CHECK (rig.send ("run.solo", { osc::Value::string (soloed) }).applied == 1);
+    CHECK (rig.runs.find (soloed)->solo);
+    CHECK (rig.send ("run.solo", { osc::Value::string (soloed) }).applied == 1);
+    CHECK_FALSE (rig.runs.find (soloed)->solo);
+    rig.send ("run.solo", { osc::Value::string (soloed), osc::Value::boolean (true) });
+    CHECK (rig.runs.find (soloed)->solo);
+    CHECK (rig.published ("/godot/run/" + soloed + "/solo") == "true");
+
+    //  ANOTHER STRIP OF THE BANK starts nothing: the press is applied and launches nothing.
+    CHECK (rig.send ("strip.press", { osc::Value::string (rig.strips[1]), osc::Value::int32 (100) })
+             .applied == 1);
+    CHECK_FALSE (rig.liveRunOf (members[1])->launchRequested);
+
+    //  Nor a member fired by name, which is a press on its strip.
+    rig.send ("cue.fire", { osc::Value::string (members[2]) });
+    CHECK_FALSE (rig.liveRunOf (members[2])->launchRequested);
+
+    //  THE SOLOED STRIP ITSELF starts, and keeps its solo while it sounds.
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]), osc::Value::int32 (100) });
+    rig.sound (members[0]);
+    CHECK (rig.runs.find (soloed)->solo);
+
+    //  IT LETS GO WHEN THE CLIP STOPS, and the bank is free again.
+    rig.silence (members[0]);
+    REQUIRE (rig.tickUntil ([&rig, &soloed] { return ! rig.runs.find (soloed)->solo; }));
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[1]), osc::Value::int32 (100) });
+    CHECK (rig.liveRunOf (members[1])->launchRequested);
+
+    //  A clip that has stopped takes no solo, and a run that is no sampler clip is refused one.
+    CHECK (rig.send ("run.solo", { osc::Value::string (soloed), osc::Value::boolean (true) }).rejected == 0);
+    CHECK_FALSE (rig.runs.find (soloed)->solo);
+
+    const auto* bank = rig.runs.find (rig.liveRunOf (members[1])->parent);
+    REQUIRE (bank != nullptr);
+    CHECK (rig.send ("run.solo", { osc::Value::string (bank->id) }).rejected == 1);
+}
+
 TEST_CASE ("sampler: a second press does what the clip says it does")
 {
     Rig rig;

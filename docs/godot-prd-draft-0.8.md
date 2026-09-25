@@ -2156,6 +2156,25 @@ Mackie's own meter, about sixteen times a second while the strip sounds,
 the loudest since the last message. It goes dark when the strip stops, and the
 peak hold is cleared for each new run. DCA strips have no meter.
 
+*Amended in 0.8, at the author's direction (2026-09-25).* **SOLO on a sampler
+strip locks its bank to it** (*"The solo switch could be engaged on a track to
+prevent other faders in the bank to trigger. The solo switch blink before the
+sample is triggered. Stays on while it plays and is turned off once the sample
+has finished playing or is stopped."*). The button sends `run.solo` for the clip
+on its strip, as a toggle. While that solo holds, a press on any other strip of
+the same bank starts nothing: a fader's touch, a pad, a member fired by name.
+Several strips of one bank may be soloed at once. The solo belongs to the clip
+and lets go by itself when the clip stops - its end, a stop, a kill, a release -
+so a solo left on never outlives what it protected. Its light flashes while the
+soloed clip waits for its start, is lit while it sounds, and goes out with it.
+A performance and not an edit: nothing is written to the show.
+
+**REC on a sampler strip sets where its fader starts** (*"Pressing Rec on a
+sampler fader sets the starting level. Confirm with a LED pulse."*). The level
+the fader is at is written as the member's `initialLevel` - an edit to the show,
+one undo step - and the REC light is lit for half a second to say so. A locked
+show takes no edit, and then nothing is lit.
+
 **Takeover.** Two modes, one attribute on the group that arms — the scene change
 is where the designer is thinking about it, and §4.10 wants the decision in the
 file:

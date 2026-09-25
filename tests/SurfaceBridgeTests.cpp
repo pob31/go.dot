@@ -1745,6 +1745,137 @@ TEST_CASE ("surface bridge: a sampler strip's meter is what left its run after t
     CHECK (stepsSent().empty());
 }
 
+TEST_CASE ("surface bridge: SOLO solos the strip's clip and says where the solo is; REC sets where its fader starts")
+{
+    /*  The author, 2026-09-25: "The solo switch blink before the sample is
+        triggered. Stays on while it plays and is turned off once the sample
+        has finished playing or is stopped." And: "Pressing Rec on a sampler
+        fader sets the starting level. Confirm with a LED pulse." */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", -6.5);
+    fake.put ("/godot/run/RUN00001/solo", osc::Value::boolean (false), 'T');
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    std::vector<Event> submitted;
+    const auto collect = [&submitted] (Event event)
+    {
+        submitted.push_back (std::move (event));
+        return true;
+    };
+
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    //  SOLO on strip one: `run.solo` on the run it holds, as a toggle.
+    bridge.arrived ("PORTBNK1", { 0x90, 0x08, 0x7f });
+    bridge.arrived ("PORTBNK1", { 0x90, 0x08, 0x00 });
+    bridge.beforeTick (collect, ++tick);
+
+    REQUIRE (submitted.size() == 1u);
+    CHECK (submitted[0].command == "run.solo");
+    REQUIRE (submitted[0].args.size() == 1u);
+    CHECK (submitted[0].args[0].getString() == "RUN00001");
+
+    //  ITS LIGHT: flashing while the soloed clip waits for its start ...
+    const auto soloFlash = midi::Bytes { 0x90, 0x08, 0x01 };
+    const auto soloOn = midi::Bytes { 0x90, 0x08, 0x7f };
+    const auto soloOff = midi::Bytes { 0x90, 0x08, 0x00 };
+
+    fake.put ("/godot/run/RUN00001/solo", osc::Value::boolean (true), 'T');
+    sink.sent.clear();
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), soloFlash));
+
+    //  ... lit while it sounds ...
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    sink.sent.clear();
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), soloOn));
+
+    //  ... and dark once the engine has let the solo go with the clip.
+    fake.put ("/godot/run/RUN00001/solo", osc::Value::boolean (false), 'T');
+    fake.text ("/godot/slot/STRIP001/word", "stopping");
+    sink.sent.clear();
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), soloOff));
+
+    /*  REC: the fader's level becomes the member's starting level - one
+        write to the show - and its light is on for a moment. */
+    submitted.clear();
+    bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x7f });
+    bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x00 });
+    bridge.beforeTick (collect, ++tick);
+
+    REQUIRE (submitted.size() == 1u);
+    CHECK (submitted[0].command == "node.set");
+    REQUIRE (submitted[0].args.size() == 2u);
+    CHECK (submitted[0].args[0].getString() == "/godot/cue/CUE00001/initialLevel");
+    CHECK (submitted[0].args[1].asDouble() == doctest::Approx (-6.5));
+
+    const auto recOn = midi::Bytes { 0x90, 0x00, 0x7f };
+    const auto recOff = midi::Bytes { 0x90, 0x00, 0x00 };
+
+    sink.sent.clear();
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), recOn));
+
+    const auto setAt = tick;
+    sink.sent.clear();
+
+    while (tick < setAt + surface::startLevelFlashTicks)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK (contains (sentOn (sink, "PORTBNK1"), recOff));
+
+    //  A LOCKED SHOW takes no edit, so REC writes nothing and lights nothing.
+    fake.put ("/godot/document/locked", osc::Value::boolean (true), 'T');
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    submitted.clear();
+    bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x7f });
+    bridge.beforeTick (collect, ++tick);
+    CHECK (submitted.empty());
+
+    sink.sent.clear();
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK_FALSE (contains (sentOn (sink, "PORTBNK1"), recOn));
+
+    //  And a DCA strip has no clip to solo and no start to set.
+    fake.put ("/godot/document/locked", osc::Value::boolean (false), 'T');
+    fake.text ("/godot/slot/STRIP001/role", "dca");
+    fake.text ("/godot/slot/STRIP001/word", "dca");
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    submitted.clear();
+    bridge.arrived ("PORTBNK1", { 0x90, 0x08, 0x7f });
+    bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x7f });
+    bridge.beforeTick (collect, ++tick);
+    CHECK (submitted.empty());
+}
+
 TEST_CASE ("surface bridge: a hand resting through a handover lets go of the old node, and touches the new one only by landing again")
 {
     RecordingSink sink;

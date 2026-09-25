@@ -113,6 +113,12 @@ namespace wfg::surface
         if (button.button == Button::mute)
             return button.index >= 0 ? Action::kill : Action::none;
 
+        if (button.button == Button::solo)
+            return button.index >= 0 ? Action::solo : Action::none;
+
+        if (button.button == Button::rec)
+            return button.index >= 0 ? Action::startLevel : Action::none;
+
         if (button.button == Button::play)      return Action::go;
         if (button.button == Button::stop)      return Action::stop;
         if (button.button == Button::rewind)    return Action::rewind;

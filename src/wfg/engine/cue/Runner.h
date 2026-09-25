@@ -1092,6 +1092,13 @@ namespace wfg::cue
             the touch table, and submitted as `strip.press` / `strip.release`. */
         void samplerEdges (Engine& engine);
 
+        /*  A SOLO IN A BANK (2026-09-25): whether any clip of the sampler
+            group run `groupRunId` is soloed and still held, and, every tick,
+            the solos let go of whose clips have stopped - above the null
+            player's gate, so a replay lets go the same. */
+        bool bankSoloed (const std::string& groupRunId) const;
+        void releaseSolos();
+
         /*  Takes a strip for a sampler member, or queues for it behind the
             run holding it - which is how a takeover waits for a playing clip
             to finish rather than cutting it off. */

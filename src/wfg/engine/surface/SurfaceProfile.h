@@ -97,21 +97,40 @@ namespace wfg::surface
         again inside `doubleStopTicks` is `run.killAll` - PRD §4.4's first two
         levels under the hand already on the surface; rewind and forward move
         the standby. The bank and channel arrows do nothing, because banking is
-        §3.9d's decision to take with the hardware in hand, and REC does
-        nothing.
+        §3.9d's decision to take with the hardware in hand, and the
+        transport's REC does nothing.
 
         MUTE ON A STRIP KILLS WHAT IT PLAYS (author, 2026-09-25: "Can the mute
         switch of a sampler fader be a kill switch for it? Not temporary
         muting, kill as the X in the active cue list panel."): `run.kill` on
         the run holding the strip, while something sounds on it - the running
-        pane's cross, under the hand already on the surface. */
-    enum class Action { none, gate, go, stop, rewind, forward, kill };
+        pane's cross, under the hand already on the surface.
+
+        SOLO ON A STRIP LOCKS ITS BANK TO IT (author, 2026-09-25: "The solo
+        switch could be engaged on a track to prevent other faders in the bank
+        to trigger. The solo switch blink before the sample is triggered.
+        Stays on while it plays and is turned off once the sample has finished
+        playing or is stopped."): `run.solo` on the run holding the strip, as
+        a toggle. Its light flashes while the soloed clip waits for its start,
+        is lit while it sounds, and goes out with the solo, which the engine
+        lets go of when the clip stops.
+
+        REC ON A STRIP SETS WHERE ITS FADER STARTS (author, 2026-09-25:
+        "Pressing Rec on a sampler fader sets the starting level. Confirm with
+        a LED pulse."): the level the fader is at, written as its member's
+        `initialLevel` - an edit to the show and one undo step. */
+    enum class Action { none, gate, go, stop, rewind, forward, kill, solo, startLevel };
 
     /*  AND IT SAYS SO: the red MUTE light is on for half a second after a
         kill it sent (author, 2026-09-25: "Can you flash for 0.5s the red mute
         switch to have feedback on the killed sample?"). A press with nothing
         to kill lights nothing - which is its own answer. */
     inline constexpr std::int64_t killFlashTicks = TickClock::rateHz / 2;
+
+    /*  AND REC SAYS SO THE SAME WAY: lit for half a second after it wrote the
+        starting level ("Confirm with a LED pulse"). A press that wrote nothing
+        - a free strip, a dca strip, a locked show - lights nothing. */
+    inline constexpr std::int64_t startLevelFlashTicks = TickClock::rateHz / 2;
 
     /** What a button means on a surface of this profile. `none` for every
         button a profile does not use, and for every button of a profile that
