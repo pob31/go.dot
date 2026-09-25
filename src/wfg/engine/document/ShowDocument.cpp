@@ -1834,7 +1834,8 @@ namespace wfg::doc
 
     EditResult ShowDocument::createSend (const std::string& cueId,
                                          const std::string& busId,
-                                         const std::string& id)
+                                         const std::string& id,
+                                         const std::string& level)
     {
         auto cue = findById (cueId);
 
@@ -1858,8 +1859,15 @@ namespace wfg::doc
                  && child.getProperty ("bus").toString().toStdString() == busId)
                 return EditResult::failed (reason::badValue);
 
-        return insertObject (cue, endOfSequence, "Send", id,
-                             { { "bus", busId } });
+        /*  BORN AT ITS LEVEL WHEN ONE IS GIVEN: in the object before it is
+            added, so no tick ever routes it at the default (see the command's
+            own note in DocumentCommands.cpp). */
+        std::vector<std::pair<std::string_view, std::string>> attributes { { "bus", busId } };
+
+        if (! level.empty())
+            attributes.push_back ({ "level", level });
+
+        return insertObject (cue, endOfSequence, "Send", id, attributes);
     }
 
     EditResult ShowDocument::createFx (const std::string& cueId,

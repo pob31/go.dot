@@ -339,8 +339,10 @@ namespace wfg::doc
         EditResult createFx (const std::string& cueId, const std::string& pluginId,
                              const std::string& id);
 
+        /*  `level` empty is the row's default; otherwise the send is born at
+            it, checked like any written value (2026-09-25). */
         EditResult createSend (const std::string& cueId, const std::string& busId,
-                               const std::string& id = {});
+                               const std::string& id = {}, const std::string& level = {});
 
         /*  CUTS A RANGE IN TWO where the playhead is (author, 2026-09-21:
             *"even if the ranges amount to the full file, pressing the [+]

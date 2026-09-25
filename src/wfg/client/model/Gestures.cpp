@@ -16,6 +16,8 @@
 
 #include <wfg/client/model/Gestures.h>
 
+#include <wfg/engine/osc/OscValue.h>
+
 #include <cstddef>
 #include <limits>
 #include <string>
@@ -65,10 +67,17 @@ namespace wfg::client::gesture
                    osc::Value::string (kind), osc::Value::string (name) } };
     }
 
-    Event createSend (const std::string& cueId, const std::string& busId)
+    Event createSend (const std::string& cueId, const std::string& busId,
+                      std::optional<double> level)
     {
+        if (! level.has_value())
+            return { origin::window, "send.create",
+                     { osc::Value::string (cueId), osc::Value::string (busId) } };
+
+        //  The identifier left empty for the engine to draw; the level after it.
         return { origin::window, "send.create",
-                 { osc::Value::string (cueId), osc::Value::string (busId) } };
+                 { osc::Value::string (cueId), osc::Value::string (busId), osc::Value::string ({}),
+                   osc::Value::string (osc::formatDouble (*level)) } };
     }
 
     Event createFx (const std::string& cueId, const std::string& pluginId)

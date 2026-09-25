@@ -202,20 +202,29 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });
 
+        /*  AND THE LEVEL IT IS BORN AT, when one is given (2026-09-25). A
+            hand raising a silent fader makes the send and sets its level in
+            one move, and the send used to be born at the row's default of
+            nought and fixed a round trip later - the voice climbed towards
+            unity for those ticks, which the author heard: "when moving them
+            from -inf play at full level for a brief instant before taking the
+            actual level". AFTER the identifier, so a log written before it
+            replays as it always did. */
         registry.add ({ "send.create",
-                        "Adds a send from a media cue into one mix channel. The level is written"
-                        " afterwards, like any other value. Refuses a second send into a bus this"
-                        " cue already sends to.",
+                        "Adds a send from a media cue into one mix channel, at the level given -"
+                        " the one a hand raising a silent fader asked for - or at the row's default"
+                        " when none is. Refuses a second send into a bus this cue already sends to.",
                         { { "cue", 's', false }, { "bus", 's', false },
-                          { "id", 's', true } },
+                          { "id", 's', true }, { "level", 's', true } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+                            const auto level = args.size() > 3 ? args[3].getString() : std::string {};
 
                             const auto edit = document.createSend (args[0].getString(),
                                                                    args[1].getString(),
-                                                                   id);
+                                                                   id, level);
 
                             return fromEdit (edit, withId (args, 2, edit.id));
                         } });

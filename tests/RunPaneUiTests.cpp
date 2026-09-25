@@ -328,13 +328,17 @@ TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes 
         what makes that sentence true rather than approximately true. */
     std::vector<std::pair<std::string, std::string>> written;
     std::vector<std::pair<std::string, std::string>> made;
+    std::vector<double> madeAt;
 
     ui::SendMixerComponent::Actions actions;
     actions.set = [&] (const std::string& address, const std::string& text)
     { written.emplace_back (address, text); };
 
-    actions.createSend = [&] (const std::string& cueId, const std::string& busId)
-    { made.emplace_back (cueId, busId); };
+    actions.createSend = [&] (const std::string& cueId, const std::string& busId, double level)
+    {
+        made.emplace_back (cueId, busId);
+        madeAt.push_back (level);
+    };
 
     ui::SendMixerComponent mixer (model::Theme {}, actions);
     mixer.setSize (420, 180);
@@ -408,6 +412,12 @@ TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes 
         REQUIRE (made.size() == 1);
         CHECK (made[0].first == "CUE00001");
         CHECK (made[0].second == "BUS00001");
+
+        /*  AND IT IS MADE AT THE LEVEL ASKED FOR (2026-09-25): born at the
+            row's default of nought and set a round trip later, the voice
+            climbed towards unity in between - the author heard it. */
+        REQUIRE (madeAt.size() == 1);
+        CHECK (madeAt[0] == doctest::Approx (0.0));
 
         //  And nothing was written to an address that is not there yet.
         CHECK (written.empty());

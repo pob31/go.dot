@@ -438,8 +438,14 @@ namespace wfg::client::ui
                 awaitingBus = strip.busId;
                 awaitingLevel = level;
 
+                /*  BORN AT THE LEVEL ASKED FOR, rounded as every level
+                    here is, so the voice never passes through the row's
+                    default of nought on its way (2026-09-25). The write
+                    below, once the send exists, carries the hand on from
+                    wherever it has got to since. */
                 if (! asked)
-                    actions.createSend (reading.subject.objectId, strip.busId);
+                    actions.createSend (reading.subject.objectId, strip.busId,
+                                        std::round (level * 10.0) / 10.0);
             }
 
             return;

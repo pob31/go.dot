@@ -61,7 +61,7 @@ namespace wfg::client::ui
             std::function<void (const std::string& cueId, double at)> splitRange;
 
             /** `send.create`, when a silent fader in the mixer is raised. */
-            std::function<void (const std::string& cueId, const std::string& busId)> createSend;
+            std::function<void (const std::string& cueId, const std::string& busId, double level)> createSend;
 
             /** `eq.reset` on a media cue, from the EQ panel's Flat button. */
             std::function<void (const std::string& cueId)> resetEq;

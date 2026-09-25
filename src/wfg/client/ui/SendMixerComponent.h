@@ -62,7 +62,7 @@ namespace wfg::client::ui
             std::function<void (const std::string& address, const std::string& text)> set;
 
             /** `send.create` on this cue into that mix, when a silent strip is raised. */
-            std::function<void (const std::string& cueId, const std::string& busId)> createSend;
+            std::function<void (const std::string& cueId, const std::string& busId, double level)> createSend;
 
             /** `object.delete` on one send, from its cross. */
             std::function<void (const std::string& sendId)> removeSend;

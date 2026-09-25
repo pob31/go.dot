@@ -403,8 +403,9 @@ namespace wfg::client
                 footActions.splitRange = [this] (const std::string& cueId, double at)
                                          { send (gesture::splitRange (cueId, at)); };
 
-                footActions.createSend = [this] (const std::string& cueId, const std::string& busId)
-                                         { send (gesture::createSend (cueId, busId)); };
+                footActions.createSend = [this] (const std::string& cueId, const std::string& busId,
+                                                 double level)
+                                         { send (gesture::createSend (cueId, busId, level)); };
 
                 /*  FLAT IS ONE COMMAND (Phase 9a): nineteen rows back in one
                     transaction, which is one step to undo. */

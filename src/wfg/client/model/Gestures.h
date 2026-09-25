@@ -41,6 +41,7 @@
 
 #include <wfg/engine/command/Event.h>
 
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -125,10 +126,12 @@ namespace wfg::client::gesture
         project - so the panel finds what it made on the next pass. */
     Event createRange (const std::string& cueId, double in, double out);
 
-    /*  Gives a media cue a send into one mix channel. The level follows as an
-        ordinary `node.set` once the object exists, which is why this carries
-        none: there is one way values are written. */
-    Event createSend (const std::string& cueId, const std::string& busId);
+    /*  Gives a media cue a send into one mix channel, born at `level` when one
+        is given - the level a hand raising a silent fader asked for, so the
+        voice never passes through the row's default of nought on its way
+        there (2026-09-25). Later moves are ordinary `node.set`s. */
+    Event createSend (const std::string& cueId, const std::string& busId,
+                      std::optional<double> level = std::nullopt);
 
     /*  PHASE 9a, PR 9a.9: an insert on a media cue - one entry of the show's
         set switched in, made by the first switch on the FX panel; an entry

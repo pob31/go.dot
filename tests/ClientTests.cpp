@@ -588,6 +588,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::fireCue ("B3N8R5TW"),
         gesture::splitRange ("B3N8R5TW", 6.0),
         gesture::createSend ("B3N8R5TW", "J3MT5XYA"),
+        gesture::createSend ("B3N8R5TW", "J3MT5XYA", -18.5),
         gesture::eqReset ("B3N8R5TW"),
         gesture::createFx ("B3N8R5TW", "PG7N0001"),
         gesture::captureFx ("FX7N0001", "state/PG7N0001-0123456789abcdef.state", "0:0.5 1:0"),
@@ -3024,6 +3025,28 @@ TEST_CASE ("client: the mixer draws a strip per mix channel, not per send")
 
         //  And another cue's sends are not this one's.
         CHECK (model::readSends (*after, "F7HR8TVD").front().present() == false);
+    }
+
+    SUBCASE ("and one made at a level is born at it, in the same edit (2026-09-25)")
+    {
+        const auto made = gesture::createSend (cue, rows[1].id, -18.5);
+        rig.apply (4, made.origin, made.command, made.args);
+
+        const auto after = rig.publish (5);
+        auto raised = model::readSends (*after, cue);
+
+        REQUIRE (raised.size() == 1);
+        CHECK (raised[0].present());
+        CHECK (raised[0].levelDb == doctest::Approx (-18.5));
+    }
+
+    SUBCASE ("and a level the row would refuse makes nothing")
+    {
+        rig.apply (4, "window", "send.create",
+                   { osc::Value::string (cue), osc::Value::string (rows[1].id),
+                     osc::Value::string ({}), osc::Value::string ("loud") });
+
+        CHECK (model::readSends (*rig.publish (5), cue).front().present() == false);
     }
 }
 
