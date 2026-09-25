@@ -32,6 +32,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -425,6 +426,8 @@ namespace wfg::surface
 
             //  What the surface was last told, or put there itself.
             int motor = -1;                 // where the fader is, as far as anybody knows; -1 for nobody
+            std::int64_t reassertAt = -1;   // when a let-go fader is next sent its level again
+            int reassertsLeft = 0;
             bool held = false;              // held by this surface at the last afterTick
             std::array<Row, 3> rows;
             int led = -1;
@@ -756,7 +759,18 @@ namespace wfg::surface
                             reckoning stands. A surface with no touch sense has
                             only hands to send positions, so every one counts. */
                         if (box.topology.hasTouch && ! strip->handDown)
+                        {
+                            /*  BUT STILL WHERE THE FADER IS: a report well away
+                                from where it was sent means the surface moved it
+                                on its own - a D700 puts a released fader back
+                                where the host last put it - and believed, the
+                                motor is sent back where the engine says. Close
+                                to it is the motor settling, and left alone. */
+                            if (strip->motor < 0 || std::abs (event.value - strip->motor) > motorSlack)
+                                strip->motor = event.value;
+
                             break;
+                        }
 
                         /*  WHERE THE HAND PUT IT is where the fader is: the
                             motor is not sent there again when the engine
@@ -1324,9 +1338,31 @@ namespace wfg::surface
             const auto letGo = strip.held && ! heldNow;
             strip.held = heldNow;
 
+            /*  AND AGAIN A MOMENT AFTER A LET-GO (`motorReasserts`): the one
+                position sent as the hand lifts can reach a D700 too soon to
+                count, and the fader goes back where the host put it before. */
+            if (letGo)
+            {
+                strip.reassertAt = tick + motorReassertTicks;
+                strip.reassertsLeft = motorReasserts;
+            }
+
+            auto again = false;
+
+            if (! heldNow && strip.reassertsLeft > 0 && tick >= strip.reassertAt)
+            {
+                again = true;
+                --strip.reassertsLeft;
+                strip.reassertAt = tick + motorReassertTicks;
+            }
+
+            if (heldNow)
+                strip.reassertsLeft = 0;
+
             if (! heldNow)
                 moveMotor (port, element, strip,
-                           level.has_value() ? fourteenBitForDb (*level, box.topology.faderLaw) : 0, letGo);
+                           level.has_value() ? fourteenBitForDb (*level, box.topology.faderLaw) : 0,
+                           letGo || again);
 
             //------------------------------------------------------------------
             /*  WHAT THE STRIP IS CALLED: the authored short name, else the name

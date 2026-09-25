@@ -159,6 +159,21 @@ namespace wfg::surface
         interpolate over roughly twenty steps). */
     inline constexpr int motorStepPerTick = 819;
 
+    /*  A FADER LET GO IS SENT ITS LEVEL AGAIN, `motorReasserts` times, this
+        many ticks apart (author, 2026-09-25: "After using the Rec track
+        button, the fader reverts to the old initial level and jumps to the new
+        one when triggered"). A D700 puts a released fader back where the host
+        last put it, and the one position sent the moment the hand lifts can
+        reach it too soon to count: the fader went back to the level of an
+        earlier ride, -0.6 dB where the hand had left it at -10.7. */
+    inline constexpr std::int64_t motorReassertTicks = 10;
+    inline constexpr int motorReasserts = 3;
+
+    /*  WHERE AN UNTOUCHED FADER SAYS IT IS counts once it is further than this
+        from where it was sent: the motor goes back there. Closer is the motor
+        settling, and chasing it would keep it twitching. */
+    inline constexpr int motorSlack = 64;
+
     /*  AT MOST THIS MANY COLOUR WRITES A SECOND TO ONE RGB ELEMENT (PRD §3.30:
         "no faster than about ten times a second"). M27 revises it on the
         unit. */

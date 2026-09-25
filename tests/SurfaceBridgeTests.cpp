@@ -1954,6 +1954,134 @@ TEST_CASE ("surface bridge: a sampler strip's ring is its clip's progress, and e
     CHECK (contains (sentOn (sink, "PORTBNK1"), surface::d700Ring (0, 0, 2)));
 }
 
+TEST_CASE ("surface bridge: a clip re-armed after REC flies its fader to the new start, and stays there")
+{
+    /*  The author, 2026-09-25: "After using the Rec track button, the fader
+        reverts to the old initial level and jumps to the new one when
+        triggered." The session log's sequence: a clip playing at 0 dB, the
+        fader ridden down to -10.7 and let go, REC, MUTE, the member armed
+        again at -10.7. */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    std::vector<Event> submitted;
+    const auto collect = [&submitted] (Event event)
+    {
+        submitted.push_back (std::move (event));
+        return true;
+    };
+
+    std::int64_t tick = 1;
+    const auto settle = [&] (int ticks)
+    {
+        for (int i = 0; i < ticks; ++i)
+        {
+            ++tick;
+            bridge.beforeTick (collect, tick);
+
+            for (const auto& event : submitted)
+                if (event.command == "node.touch")
+                    touches.touch (event.origin, event.args[0].getString());
+                else if (event.command == "node.release")
+                    touches.release (event.origin, event.args[0].getString());
+                else if (event.command == "node.set")
+                    if (event.args[0].getString().find ("/trim") != std::string::npos)
+                        fake.number (event.args[0].getString(), event.args[1].asDouble());
+
+            submitted.clear();
+            bridge.afterTick (fake.publish (tick), touches, tick);
+        }
+    };
+
+    settle (30);                                                //  the fader at 0 dB, armed
+    const auto zeroAt = surface::fourteenBitForDb (0.0, surface::FaderLaw::d700);
+    const auto newAt = surface::fourteenBitForDb (-10.7, surface::FaderLaw::d700);
+
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    settle (2);
+
+    //  THE RIDE: a finger on it, down to -10.7, let go.
+    bridge.arrived ("PORTBNK1", { 0x90, 0x68, 0x7f });
+    bridge.arrived ("PORTBNK1", { 0xe0, static_cast<std::uint8_t> (newAt & 0x7f),
+                                  static_cast<std::uint8_t> (newAt >> 7) });
+    settle (2);
+    bridge.arrived ("PORTBNK1", { 0x90, 0x68, 0x00 });
+    sink.sent.clear();
+    settle (40);
+
+    /*  LET GO, THE LEVEL GOES AT ONCE AND THREE TIMES MORE, a fifth of a
+        second apart: the first can reach a D700 too soon to count. */
+    {
+        const auto sent = motorMoves (sink, "PORTBNK1", 0);
+        CHECK (sent.size() == 1u + static_cast<std::size_t> (surface::motorReasserts));
+
+        for (const auto position : sent)
+            CHECK (std::abs (position - newAt) <= 2);
+    }
+
+    /*  AND THE D700 PUTS THE FADER BACK where the host last put it before -
+        the old start - and says so, untouched. Believed, and the fader is
+        flown back to the level the engine has. */
+    sink.sent.clear();
+    bridge.arrived ("PORTBNK1", { 0xe0, static_cast<std::uint8_t> (zeroAt & 0x7f),
+                                  static_cast<std::uint8_t> (zeroAt >> 7) });
+    settle (10);
+    {
+        const auto back = motorMoves (sink, "PORTBNK1", 0);
+        REQUIRE_FALSE (back.empty());
+        CHECK (std::abs (back.back() - newAt) <= 2);
+    }
+
+    //  A report close to where it was sent is the motor settling: nothing chases it.
+    sink.sent.clear();
+    bridge.arrived ("PORTBNK1", { 0xe0, static_cast<std::uint8_t> ((newAt - 20) & 0x7f),
+                                  static_cast<std::uint8_t> ((newAt - 20) >> 7) });
+    settle (5);
+    CHECK (motorMoves (sink, "PORTBNK1", 0).empty());
+
+    //  REC, then MUTE: the run ends, the strip is free a tick, and the member comes back at -10.7.
+    bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x7f });
+    settle (2);
+    fake.text ("/godot/slot/STRIP001/word", "stopping");
+    settle (2);
+    fake.text ("/godot/slot/STRIP001/word", "free");
+    fake.text ("/godot/slot/STRIP001/target", "");
+    fake.text ("/godot/slot/STRIP001/holder", "");
+    settle (1);
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00002/trim");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00002");
+    fake.number ("/godot/run/RUN00002/trim", surface::dbForFourteenBit (newAt, surface::FaderLaw::d700));
+
+    sink.sent.clear();
+    settle (40);
+
+    const auto moves = motorMoves (sink, "PORTBNK1", 0);
+    MESSAGE ("zero " << zeroAt << " new " << newAt << " moves " << moves.size()
+                     << " last " << (moves.empty() ? -1 : moves.back()));
+
+    //  THE FADER ENDS WHERE THE ENGINE SAYS: the new start, not the old one.
+    REQUIRE_FALSE (moves.empty());
+    CHECK (std::abs (moves.back() - newAt) <= 2);
+}
+
 TEST_CASE ("surface bridge: only a touched fader writes a level - the motor's own report is no hand")
 {
     /*  The author, 2026-09-25: "The rec is using the wrong fader curve. Each
