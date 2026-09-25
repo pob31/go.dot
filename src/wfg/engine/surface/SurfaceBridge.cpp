@@ -63,6 +63,8 @@ namespace wfg::surface
         constexpr int vpotNote = 0x20;          // + element: the V-Pot - its press, and the D700's colour
 
         constexpr int ringFillMode = 2;         // MCU "wrap" and the D700's channel 3: fill from the left
+        constexpr int d700RingSteps = 127;      // a D700 ring's value, 0..127 (control guide §4.3)
+        constexpr int mcuRingSteps = 11;        // MCU's ring positions, 0 lighting none
 
         //  A run's `meter` when nothing has left its track: the tree's word for silence.
         constexpr double meterSilentDb = -120.0;
@@ -393,9 +395,9 @@ namespace wfg::surface
             //  Addresses that follow what is on the strip, made again only when
             //  that changes - at a handover, or when the show edits the strip.
             std::string cueId, cueNameAt, cueShortAt, cueNumberAt, cueColourAt, cuePressureAt,
-                        cueFloorAt;
+                        cueFloorAt, cueDurationAt, cueStartAt;
             std::string dcaId, dcaNameAt, dcaShortAt;
-            std::string holderId, timbreAt, envelopeAt, meterAt, soloAt;
+            std::string holderId, timbreAt, envelopeAt, meterAt, soloAt, positionAt;
 
             /*  THE PULSE'S OWN MEMORY (2026-09-25): the slow average of the
                 holder's envelope and the brightness being let go, for the run
@@ -604,6 +606,8 @@ namespace wfg::surface
                 strip.cueColourAt = under (base, "colour");
                 strip.cuePressureAt = under (base, "pressure");
                 strip.cueFloorAt = under (base, "velocityFloor");
+                strip.cueDurationAt = under (base, "duration");
+                strip.cueStartAt = under (base, "startOffset");
             }
 
             if (const auto& marked = textAt (at, strip.dcaAt); marked != strip.dcaId)
@@ -621,6 +625,7 @@ namespace wfg::surface
                 strip.envelopeAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/envelope";
                 strip.meterAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/meter";
                 strip.soloAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/solo";
+                strip.positionAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/position";
             }
         }
 
@@ -1192,6 +1197,29 @@ namespace wfg::surface
             strip.motor = next;
         }
 
+        /*  HOW FAR THE STRIP'S CLIP HAS GOT, in `steps`: its position through
+            the span it plays - from its start offset to the end of its file,
+            the running pane's bar - while it sounds, and nought otherwise. A
+            dca strip and a free one hold no clip. */
+        int progressOf (const Strip& strip, std::string_view word, int steps) const
+        {
+            const auto sounding = word == "playing" || word == "held" || word == "stopping" || word == "closing";
+
+            if (! sounding || strip.cueId.empty())
+                return 0;
+
+            const auto* at = published.get();
+            const auto position = numberAt (at, strip.positionAt);
+            const auto length = numberAt (at, strip.cueDurationAt);
+            const auto from = numberAt (at, strip.cueStartAt).value_or (0.0);
+
+            if (! position.has_value() || ! length.has_value() || ! (*length > from))
+                return 0;
+
+            const auto through = std::clamp ((*position - from) / (*length - from), 0.0, 1.0);
+            return static_cast<int> (std::lround (through * static_cast<double> (steps)));
+        }
+
         /*  A FLASH AS THE LIGHT IS SENT: blinked here, a quarter of a second
             each way (`blinkHalfTicks`), since the D700 lights a flash
             steadily. Every other state goes as it is. */
@@ -1348,11 +1376,16 @@ namespace wfg::surface
                 if (changed (strip.rows[2], role))
                     send (port, d700DisplayRow3 (element, role));
 
-                /*  THE RING IS DARK: it no longer repeats the fader
-                    (author, 2026-09-25 - "either or"). Sent once, and again
-                    whenever the strip is painted whole, so a ring an earlier
-                    session lit goes out. */
-                constexpr int ring = 0;
+                /*  THE RING IS THE CLIP'S PROGRESS (author, 2026-09-25: "So
+                    use the rotary LED ring then"). Asked for as the thin white
+                    bar at the top of the screen - which is the D700's own mark
+                    of a lit SELECT, on or off and nothing between, so it cannot
+                    be one. Filled from the left as far as the clip has got, in
+                    the D700's 128 steps, and empty when nothing sounds; turning
+                    the knob still does nothing, and the ring no longer repeats
+                    the fader ("either or"). Sent when it moves, and again
+                    whenever the strip is painted whole. */
+                const auto ring = progressOf (strip, word, d700RingSteps);
 
                 if (ring != strip.ring)
                 {
@@ -1377,8 +1410,8 @@ namespace wfg::surface
                 if (changed (strip.rows[1], word))
                     send (port, lcdCell (deviceId, 1, element, word));
 
-                //  Dark, as the D700's: the ring does not repeat the fader.
-                constexpr int ring = 0;
+                //  The clip's progress, as the D700's, in MCU's eleven steps: it does not repeat the fader.
+                const auto ring = progressOf (strip, word, mcuRingSteps);
 
                 if (ring != strip.ring)
                 {

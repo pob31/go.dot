@@ -2175,6 +2175,12 @@ the fader is at is written as the member's `initialLevel` - an edit to the show,
 one undo step - and the REC light is lit for half a second to say so. A locked
 show takes no edit, and then nothing is lit.
 
+**A sampler strip's ring is its clip's progress** (*"So use the rotary LED ring
+then"*): filled from the left as far as the clip has got through the span it
+plays, and empty when nothing sounds. The thin white bar at the top of a D700
+screen, first asked for, is the D700's own mark of a lit SELECT - on while the
+strip sounds - and cannot show a length. Turning the knob still does nothing.
+
 **Takeover.** Two modes, one attribute on the group that arms — the scene change
 is where the designer is thinking about it, and §4.10 wants the decision in the
 file:

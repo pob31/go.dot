@@ -1906,6 +1906,54 @@ TEST_CASE ("surface bridge: SOLO solos the strip's clip and says where the solo 
     CHECK (submitted.empty());
 }
 
+TEST_CASE ("surface bridge: a sampler strip's ring is its clip's progress, and empty when nothing sounds")
+{
+    /*  The author, 2026-09-25, of a progress bar for a playing clip: "So use
+        the rotary LED ring then" - the white bar at the top of the D700's
+        screen being its SELECT mark, which is on or off and nothing between. */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+    fake.number ("/godot/cue/CUE00001/duration", 70.0);
+    fake.number ("/godot/cue/CUE00001/startOffset", 10.0);
+    fake.number ("/godot/run/RUN00001/position", 40.0);
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    //  HALF WAY through what it plays - ten seconds in to seventy - is half the ring.
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), surface::d700Ring (0, 64, 2)));
+
+    //  At its end, the whole ring.
+    sink.sent.clear();
+    fake.number ("/godot/run/RUN00001/position", 70.0);
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), surface::d700Ring (0, 127, 2)));
+
+    //  NOTHING SOUNDING, nothing drawn: armed and waiting for its touch, the ring is empty.
+    sink.sent.clear();
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), surface::d700Ring (0, 0, 2)));
+}
+
 TEST_CASE ("surface bridge: only a touched fader writes a level - the motor's own report is no hand")
 {
     /*  The author, 2026-09-25: "The rec is using the wrong fader curve. Each
