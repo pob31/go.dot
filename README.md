@@ -615,6 +615,7 @@ without telling anyone.
 | `strict` | `WFG_WARNINGS_AS_ERRORS=ON`. Applies to our code only — the vendor sources live in a separate target that never sees the flag. Inherits `dev`, so it runs on all three platforms |
 | `strict-ci` | `strict` plus the two `ccache` launchers; what the Linux CI job runs. Keeping them out of `strict` is what lets a Windows or macOS contributor run `strict` without installing ccache |
 | `spikes` | `WFG_BUILD_SPIKES=ON`, its own build tree and its own CI job |
+| `package` / `package-macos` / `package-windows` | The test build's archive, run by `release.yml` on a tag (or by hand). `WFG_BUILD_TESTS=OFF`; `package-macos` is universal (arm64 + x86_64). See [Test builds](#test-builds) |
 | `rtsan` | Clang's real-time sanitizer, the second net under PRD §4.2. **Clang 20 or newer only** — `-fsanitize=realtime` does not exist before it, so this preset fails to configure on MSVC and on Apple Clang, and that is not a defect. Its own CI job installs the toolchain; the suppression list goes in at run time through `RTSAN_OPTIONS`, never in the preset |
 
 Build presets append `-debug` / `-release` (`dev-debug`, `ci-linux-release`, …).
@@ -630,6 +631,35 @@ Build presets append `-debug` / `-release` (`dev-debug`, `ci-linux-release`, …
 | `wfg` | executable | The product binary (PRD §7's binary name) |
 | `wfg_tests` | executable | doctest runner, registered with CTest under both locales |
 | `spike01…07_*` | executables | PRD §6.1 validation programs, behind `WFG_BUILD_SPIKES` |
+
+### Test builds
+
+`.github/workflows/release.yml` makes one archive per platform for people to try:
+the `wfg` binary, `console/` (the web client), an empty show in `Untitled/`, a
+launcher (`Go.dot.cmd`, `Go.dot.command` or `go.dot.sh`) and a `README.txt` for
+the tester. `cmake/WfgInstall.cmake` is the list; the extra files live in
+`packaging/`. **Nothing is signed or notarized** — the tester's README says how
+to get past SmartScreen and Gatekeeper.
+
+- **To publish one**, bump `project(VERSION)` in the root `CMakeLists.txt` if
+  needed and push a tag whose numbers match it:
+
+  ```bash
+  git tag v0.1.0-alpha.1 && git push origin v0.1.0-alpha.1
+  ```
+
+  The workflow refuses a tag that disagrees with `project(VERSION)`, builds the
+  three archives, smoke-tests each installed binary, and publishes them as a
+  GitHub **pre-release** with checksums and the commits since the previous tag.
+- **To hand a branch to one tester**, run it by hand (*Actions → Release → Run
+  workflow*). The archives are attached to that run for 14 days and published
+  nowhere.
+- **To make the same folder locally**:
+
+  ```bash
+  cmake --preset package && cmake --build --preset package-release
+  cmake --install build/package --config Release --component wfg --prefix stage/go.dot
+  ```
 
 ---
 
@@ -692,6 +722,8 @@ CMakePresets.json    every preset here is run by CI
 cmake/               guards, options, third-party wiring
 docs/                the PRD and the development plan — the spec
 scripts/             bootstrap, the Linux package list, the pin gate
+packaging/           what a test build carries beside the binary: the
+                     launchers, the tester's README.txt, an empty show
 clients/console/     the web client the engine serves at /ui; reads by polling,
                      writes binary OSC, no build step, no dependency
 src/                 wfg_engine (the library) and wfg (the binary)

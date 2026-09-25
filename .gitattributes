@@ -102,3 +102,9 @@ LICENSE        text eol=lf
 # Nothing here reaches ThirdParty/: those are two gitlinks, and Git does not
 # apply a superproject's attributes across a submodule boundary. JUCE and
 # Tracktion Engine carry their own.
+
+# The test build's launchers (packaging/). A .command is a bash script Finder
+# runs and must stay LF; a .cmd is read by cmd.exe, which mis-parses labels and
+# `if` blocks in an LF file, so it is the one file in the repo checked out CRLF.
+*.command text eol=lf
+*.cmd     text eol=crlf

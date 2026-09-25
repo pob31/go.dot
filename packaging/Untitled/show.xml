@@ -1,0 +1,13 @@
+<Show>
+  <Lists>
+    <List id="7K2QM9X4" name="Main"/>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="8">
+    <Bus id="J3MT5XYA" name="Main L/R" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

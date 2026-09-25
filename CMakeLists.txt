@@ -84,8 +84,9 @@ cmake_minimum_required(VERSION 3.22)
 # someone testing an older target needs.
 #
 # CMAKE_OSX_ARCHITECTURES is deliberately left unset: each machine builds for
-# itself, and universal binaries are a packaging decision for a future release
-# workflow, not a Phase-0 build-system default.
+# itself. Universal binaries are a packaging decision, made by the
+# package-macos preset that .github/workflows/release.yml runs, not a
+# build-system default.
 #
 # The condition is doubled on purpose. Measured on this box with CMake 4.3.1:
 # pre-project(), CMAKE_HOST_WIN32 and CMAKE_HOST_SYSTEM_NAME are both already
@@ -273,6 +274,11 @@ if(WFG_BUILD_TESTS)
 endif()
 
 add_subdirectory(src)
+
+# What `cmake --install` lays down: the test build's archive, which
+# .github/workflows/release.yml makes on a tag. After src/, because it names
+# the wfg target.
+include(WfgInstall)
 
 # tests/ owns every add_test() call in the repo, including the two that run the
 # `wfg` binary itself (wfg.version and wfg.selftest). Keeping all test

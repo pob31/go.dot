@@ -1,0 +1,323 @@
+# Go.dot — Copyright (C) 2026 Pierre-Olivier Boulant
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+name: Release
+
+# THE TEST BUILD: three archives anybody can download, unpack and run, so that
+# people other than the author can try Go.dot and say what they found. The
+# `release.yml` ci.yml's header promised, kept apart from CI for the reason it
+# gives: a packaging pipeline must never run on every push.
+#
+# WHAT IT IS NOT. Nothing here signs, notarizes or builds an installer. Those
+# need identities only the author can hold (an Apple Developer ID, a Windows
+# code-signing certificate), and each archive's README.txt tells the tester how
+# to get past Gatekeeper and SmartScreen without them. When signing arrives it
+# is a step added to the macos and windows jobs, between install and archive,
+# and nothing else here changes.
+#
+# TWO WAYS IN:
+#   * push a tag `vX.Y.Z` or `vX.Y.Z-anything` (v0.1.0-alpha.1, say). The three
+#     archives are built and published as a GitHub PRE-release under that tag,
+#     with the commits since the last one listed under it. X.Y.Z must be the
+#     root CMakeLists.txt's project VERSION, which is what `wfg --version`
+#     prints - the job `meta` refuses a tag that disagrees, before any compile
+#     minute is spent.
+#   * run it by hand (Actions > Release > Run workflow) on any branch. The same
+#     three archives, uploaded to the run as artifacts for 14 days and published
+#     nowhere: the way to hand a branch to one tester, or to check this file
+#     still works before tagging.
+#
+# WHAT IT CHECKS. Not the test suite: CI ran that on the commit being tagged,
+# and building it again would put lxml back into a build that does not need it.
+# Instead every job tests what it is about to ship - the INSTALLED binary, run
+# from the staging folder: `--version`, `selftest`, and `validate` on the empty
+# show the launcher opens. Plus one fact per platform that a runner cannot
+# otherwise notice: the macOS binary has both slices, the Windows folder carries
+# the MSVC runtime (the runner has it installed; a tester may not).
+#
+# No compiler cache. Tags are rare, a cold Release build is what a release
+# should be, and ci.yml's cache keys are Debug trees this would only evict.
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+# Two tags pushed together each get their run; a second run of the SAME ref waits
+# rather than cancelling the first half-way through publishing.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # The name every archive carries, and the pin gate - both before anything
+  # compiles, so a mistyped tag or a skewed pin costs fifteen seconds.
+  # ---------------------------------------------------------------------------
+  meta:
+    name: version + pins
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true          # NON-recursive — see ci.yml's job `pins`
+
+      - name: Populate juce_simpleweb's nested asio
+        # The one scoped recursion; ci.yml's job `pins` says why it is scoped.
+        run: git submodule update --init --recursive ThirdParty/juce_simpleweb
+
+      - name: Check submodule pins
+        run: python3 scripts/check-pins.py
+
+      - name: Work out the version
+        id: version
+        shell: bash
+        # The project VERSION is read out of the root CMakeLists.txt with the
+        # same text a human would look for, so a reformatting of project() that
+        # this misses fails here, loudly, rather than naming an archive "".
+        run: |
+          set -euo pipefail
+          project=$(sed -n 's/^[[:space:]]*VERSION[[:space:]]\+\([0-9]\+\.[0-9]\+\.[0-9]\+\)[[:space:]]*$/\1/p' CMakeLists.txt | head -n1)
+          if [ -z "$project" ]; then
+            echo "::error::could not read project(... VERSION x.y.z) from CMakeLists.txt"
+            exit 1
+          fi
+
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            version="${GITHUB_REF_NAME#v}"
+            base="${version%%-*}"
+            if [ "$base" != "$project" ]; then
+              echo "::error::tag ${GITHUB_REF_NAME} says ${base}, but CMakeLists.txt says ${project} - and wfg --version prints the latter. Bump project(VERSION) or retag."
+              exit 1
+            fi
+          else
+            version="${project}-dev.$(git rev-parse --short=8 HEAD)"
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Building go.dot-$version"
+
+  # ---------------------------------------------------------------------------
+  # Linux. ubuntu-24.04 by name rather than -latest: the image IS the glibc
+  # floor a tester's machine must meet, and README.txt names it, so moving it is
+  # a decision and not an image repoint.
+  # ---------------------------------------------------------------------------
+  linux:
+    name: package (Linux x86_64)
+    needs: meta
+    runs-on: ubuntu-24.04
+    env:
+      PKG: go.dot-${{ needs.meta.outputs.version }}-linux-x86_64
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true          # NON-recursive — see ci.yml's job `pins`
+
+      - name: Populate juce_simpleweb's nested asio
+        run: git submodule update --init --recursive ThirdParty/juce_simpleweb
+
+      - name: Install build deps
+        run: bash scripts/install-linux-deps.sh
+
+      - name: Configure
+        run: cmake --preset package
+
+      - name: Build (Release)
+        run: cmake --build --preset package-release
+
+      - name: Install into the staging folder
+        # --component wfg: only what cmake/WfgInstall.cmake names. Without it,
+        # JUCE's own install rules add thirty megabytes of its headers.
+        run: cmake --install build/package --config Release --component wfg --prefix "stage/$PKG"
+
+      - name: Smoke-test what ships
+        shell: bash
+        working-directory: stage/${{ env.PKG }}
+        run: |
+          set -euo pipefail
+          ./wfg --version
+          ./wfg selftest
+          ./wfg validate Untitled
+          test -x go.dot.sh
+          test -f console/index.html
+
+      - name: Archive
+        # tar, not zip: it keeps the executable bits on wfg and go.dot.sh.
+        run: tar -C stage -czf "$PKG.tar.gz" "$PKG"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.PKG }}
+          path: ${{ env.PKG }}.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # macOS, universal. The runner is arm64, so the smoke test exercises that
+  # slice; lipo proves the other one is there.
+  # ---------------------------------------------------------------------------
+  macos:
+    name: package (macOS universal)
+    needs: meta
+    runs-on: macos-latest
+    env:
+      PKG: go.dot-${{ needs.meta.outputs.version }}-macos-universal
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true          # NON-recursive — see ci.yml's job `pins`
+
+      - name: Populate juce_simpleweb's nested asio
+        run: git submodule update --init --recursive ThirdParty/juce_simpleweb
+
+      - name: Install ninja
+        # The package presets inherit dev's Ninja Multi-Config generator.
+        run: brew install ninja
+
+      - name: Configure
+        run: cmake --preset package-macos
+
+      - name: Build (Release)
+        run: cmake --build --preset package-macos-release
+
+      - name: Install into the staging folder
+        run: cmake --install build/package-macos --config Release --component wfg --prefix "stage/$PKG"
+
+      - name: Smoke-test what ships
+        shell: bash
+        working-directory: stage/${{ env.PKG }}
+        run: |
+          set -euo pipefail
+          archs=$(lipo -archs wfg)
+          echo "wfg slices: $archs"
+          case " $archs " in *" arm64 "*) ;; *) echo "::error::no arm64 slice"; exit 1;; esac
+          case " $archs " in *" x86_64 "*) ;; *) echo "::error::no x86_64 slice"; exit 1;; esac
+          ./wfg --version
+          ./wfg selftest
+          ./wfg validate Untitled
+          test -x Go.dot.command
+          test -f console/index.html
+
+      - name: Archive
+        # ditto rather than zip: it is what Finder's own Compress does, and it
+        # keeps the executable bits and the ad-hoc signature the linker put on
+        # the binary.
+        run: ditto -c -k --keepParent "stage/$PKG" "$PKG.zip"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.PKG }}
+          path: ${{ env.PKG }}.zip
+          retention-days: 14
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Windows. windows-2025 for the reason ci.yml's windows job pins it.
+  # ---------------------------------------------------------------------------
+  windows:
+    name: package (Windows x64)
+    needs: meta
+    runs-on: windows-2025
+    env:
+      PKG: go.dot-${{ needs.meta.outputs.version }}-windows-x64
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          submodules: true          # NON-recursive — see ci.yml's job `pins`
+
+      - name: Populate juce_simpleweb's nested asio
+        run: git submodule update --init --recursive ThirdParty/juce_simpleweb
+
+      - name: Configure
+        run: cmake --preset package-windows
+
+      - name: Build (Release)
+        run: cmake --build --preset package-windows-release
+
+      - name: Install into the staging folder
+        run: cmake --install build/package-windows --config Release --component wfg --prefix "stage/$env:PKG"
+
+      - name: Smoke-test what ships
+        shell: pwsh
+        working-directory: stage/${{ env.PKG }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          # The runner has the VC++ redistributable installed, so wfg.exe would
+          # start here without these; a tester's machine may not.
+          foreach ($dll in 'vcruntime140.dll', 'vcruntime140_1.dll', 'msvcp140.dll') {
+            if (-not (Test-Path $dll)) { throw "$dll is missing beside wfg.exe" }
+          }
+          if (-not (Test-Path 'Go.dot.cmd')) { throw 'Go.dot.cmd is missing' }
+          if (-not (Test-Path 'console/index.html')) { throw 'console/ is missing' }
+          foreach ($run in @(@('--version'), @('selftest'), @('validate', 'Untitled'))) {
+            & ./wfg.exe @run
+            if ($LASTEXITCODE -ne 0) { throw "wfg $run exited $LASTEXITCODE" }
+          }
+
+      - name: Archive
+        shell: pwsh
+        run: Compress-Archive -Path "stage/$env:PKG" -DestinationPath "$env:PKG.zip"
+
+      - uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.PKG }}
+          path: ${{ env.PKG }}.zip
+          retention-days: 14
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Publish - tags only. All three or none: a release with the Windows archive
+  # missing is a release somebody downloads the wrong thing from.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: publish the pre-release
+    if: github.ref_type == 'tag'
+    needs: [meta, linux, macos, windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Checksums
+        working-directory: dist
+        run: sha256sum go.dot-* | tee SHA256SUMS.txt
+
+      - name: Create the GitHub pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.meta.outputs.version }}
+        # --prerelease, always, until the author decides otherwise: nothing this
+        # workflow makes is signed, and "Latest release" on the repo page should
+        # not point a stranger at it. --generate-notes lists the commits since
+        # the previous tag under the paragraph written here.
+        run: |
+          set -euo pipefail
+          cat > notes.md <<'EOF'
+          **A test build, not a release.** Unsigned and not notarized; each archive's
+          `README.txt` says how to start it and how to get past the OS's warning.
+          Please report what you find in the issues, with the archive's name, your OS
+          and audio device, and what the terminal printed.
+
+          | Platform | Archive |
+          |---|---|
+          | Windows 10/11 x64 | `*-windows-x64.zip` — run `Go.dot.cmd` |
+          | macOS 13.3+, Apple silicon and Intel | `*-macos-universal.zip` — run `Go.dot.command` |
+          | Linux x86_64 (glibc of Ubuntu 24.04 or newer) | `*-linux-x86_64.tar.gz` — run `./go.dot.sh` |
+          EOF
+          gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --prerelease \
+            --title "Go.dot $VERSION (test build)" \
+            --notes-file notes.md \
+            --generate-notes \
+            dist/go.dot-* dist/SHA256SUMS.txt
