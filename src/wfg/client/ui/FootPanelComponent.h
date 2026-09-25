@@ -30,6 +30,7 @@
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/ui/CurveEditorComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
+#include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/TimelineComponent.h>
 #include <wfg/client/ui/WaveformEditorComponent.h>
@@ -37,6 +38,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -64,8 +66,17 @@ namespace wfg::client::ui
             /** `eq.reset` on a media cue, from the EQ panel's Flat button. */
             std::function<void (const std::string& cueId)> resetEq;
 
+            /** `fx.create`, when an entry of the set is first switched in on a cue. */
+            std::function<void (const std::string& cueId, const std::string& pluginId)> createFx;
+
+            /** Open the plugin's own window for this cue, from the chain's Edit... */
+            std::function<void (const std::string& cueId, const std::string& pluginId)> editPlugin;
+
             /** Point the panel at another group, from the timeline's own gestures. */
             std::function<void (const std::string& groupId)> openTimelineOn;
+
+            /** Show a cue's EQ, from the chain's EQ box. */
+            std::function<void (const std::string& cueId)> openEqOn;
 
             /** The transport of whatever the panel is showing: fire, kill, seek. */
             std::function<void (const std::string& cueId)> play;
@@ -94,6 +105,9 @@ namespace wfg::client::ui
 
         void show (const model::FootReading&, std::shared_ptr<const audio::MediaRecords>);
 
+        /** What the client knows of each plugin's own window, for the chain to say. */
+        void setEditorWords (std::map<std::string, std::string>);
+
         void paint (juce::Graphics&) override;
         void resized() override;
 
@@ -119,6 +133,8 @@ namespace wfg::client::ui
         std::unique_ptr<TimelineComponent> timeline;
         std::unique_ptr<CurveEditorComponent> curve;
         std::unique_ptr<EqPanelComponent> eq;
+        std::unique_ptr<FxPanelComponent> fx;
+        std::map<std::string, std::string> editorWords;
         juce::TextButton shut { "x" };
         int columnWidth = 0, columnGap = 0;
 

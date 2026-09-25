@@ -529,6 +529,7 @@ namespace wfg::client::model
         {
             offer ("Waveform, in and out points", "waveform");
             offer ("EQ, four bands and two filters", "eq");
+            offer ("FX, the signal chain on this cue", "fx");
         }
         else if (kind == "fade")
         {

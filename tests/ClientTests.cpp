@@ -2201,9 +2201,10 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
         nothing would teach somebody the feature is broken rather than absent. */
     const auto onMedia = model::openersFor ("media", "B3N8R5TW");
 
-    /*  TWO SINCE PHASE 9a: the waveform, and the EQ - the second of the four
-        the author named, drawn at the foot as a response a hand can shape. */
-    REQUIRE (onMedia.size() == 2);
+    /*  THREE SINCE PHASE 9a: the waveform, the EQ - the second of the four
+        the author named, drawn at the foot as a response a hand can shape -
+        and the signal chain, whose boxes open each plugin's own window. */
+    REQUIRE (onMedia.size() == 3);
     CHECK (onMedia[0].control == model::Control::opener);
     CHECK (onMedia[0].value == "waveform");
     CHECK (onMedia[0].address == "B3N8R5TW");
@@ -2212,6 +2213,11 @@ TEST_CASE ("client: the inspector offers the panels a kind actually has, and no 
     CHECK (onMedia[1].value == "eq");
     CHECK (onMedia[1].address == "B3N8R5TW");
     CHECK (onMedia[1].label.find ("EQ") != std::string::npos);
+    CHECK (onMedia[2].control == model::Control::opener);
+    CHECK (onMedia[2].value == "fx");
+    CHECK (onMedia[2].address == "B3N8R5TW");
+    CHECK (onMedia[2].label.find ("FX") != std::string::npos);
+    CHECK_FALSE (onMedia[2].writable);
 
     //  An opener is a door and not a decision: it writes nothing.
     CHECK_FALSE (onMedia[0].writable);
@@ -4722,6 +4728,22 @@ TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and
         CHECK (model::readKnownPlugins (*snapshot).empty());
     }
 
+    SUBCASE ("and the foot reads the chain, with the cue's own EQ as its first box")
+    {
+        /*  The author's chain (2026-09-25): file, EQ, the set, out. The FX
+            subject fills the EQ's reading too, because the first box is the
+            EQ's and its switch is `eqOn`; and it follows the pick, as the EQ
+            does. An unloaded entry adds no latency - nothing is known yet. */
+        const auto foot = model::readFoot (*snapshot, { model::Subject::Kind::fx, cue });
+        CHECK (foot.fx.present);
+        CHECK (foot.fx.strips.size() == 2u);
+        CHECK (foot.eq.present);
+        CHECK (foot.eq.settings.on);
+        CHECK (foot.notice.empty());
+        CHECK (foot.fx.strips[0].latencySamples == 0);
+        CHECK (model::followsPick (model::Subject::Kind::fx));
+    }
+
     SUBCASE ("and a cue that is not media has none, and says so")
     {
         Rig memo;
@@ -4740,6 +4762,45 @@ TEST_CASE ("client: a cue's inserts are one strip per entry of the set, read and
         CHECK (none.strips.empty());
         CHECK (none.notice.find ("Plugins") != std::string::npos);
     }
+}
+
+TEST_CASE ("client: a box in the chain says what became of its plugin, and what that does to this cue")
+{
+    /*  §4.8 in words: the state word the engine publishes, its sentence, and
+        "this cue plays it dry" only where this cue has the insert in - a
+        plugin that is not there is not a problem for a cue that does not use
+        it. And a latency is said in samples, or not at all. */
+    model::FxStrip strip;
+    strip.state = "loaded";
+    CHECK (model::stateSentence (strip) == "loaded");
+    CHECK (model::latencyWords (strip).empty());
+
+    strip.state = "loading";
+    CHECK (model::stateSentence (strip) == "loading...");
+
+    strip.state = "unloaded";
+    strip.problem = "added since the show opened; reload to load it";
+    CHECK (model::stateSentence (strip) == "not loaded: added since the show opened; reload to load it");
+
+    strip.state = "missing";
+    strip.problem = "not on this machine";
+    CHECK (model::stateSentence (strip) == "missing: not on this machine");
+
+    strip.fxId = "FX7N0001";
+    strip.enabled = true;
+    CHECK (model::stateSentence (strip) == "missing: not on this machine - this cue plays it dry");
+
+    strip.enabled = false;
+    CHECK (model::stateSentence (strip) == "missing: not on this machine");
+
+    strip.state.clear();
+    strip.problem.clear();
+    CHECK (model::stateSentence (strip) == "-");
+
+    strip.latencySamples = 1;
+    CHECK (model::latencyWords (strip) == "1 sample late while it is in");
+    strip.latencySamples = 64;
+    CHECK (model::latencyWords (strip) == "64 samples late while it is in");
 }
 
 TEST_CASE ("client: a media cue's EQ is read back as the value the voice gets, and drawn from the same maths")

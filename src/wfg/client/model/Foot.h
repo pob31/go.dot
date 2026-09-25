@@ -48,6 +48,7 @@
 
 #include <wfg/client/model/Curve.h>
 #include <wfg/client/model/Eq.h>
+#include <wfg/client/model/Fx.h>
 #include <wfg/client/model/Ranges.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Timeline.h>
@@ -60,7 +61,7 @@ namespace wfg::client::model
     {
         /*  One per editor. `none` is the panel shut; every other value is an
             editor that exists, so a kind is added here when its editor is. */
-        enum class Kind { none, waveform, sends, timeline, curve, eq };
+        enum class Kind { none, waveform, sends, timeline, curve, eq, fx };
 
         Kind kind = Kind::none;
         std::string objectId;
@@ -112,6 +113,13 @@ namespace wfg::client::model
             the nineteen rows as one value, the same value the voice is
             given, with its own notice for a cue that has none. */
         EqReading eq;
+
+        /*  THE CUE'S SIGNAL CHAIN, filled only when the FX panel is what is
+            open (author, 2026-09-25): the show's plugins in the order the
+            sound goes through them, and what this cue does with each. The
+            chain starts with the EQ, so `eq` above is filled with it - the
+            first box is the EQ's, with its own switch. */
+        FxReading fx;
 
         /*  Where the playhead is, when a run of this cue is sounding, and
             whether there is one at all. A cue with no run has no playhead, and

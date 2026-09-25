@@ -393,6 +393,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/SendMixerComponent.cpp
     wfg/client/ui/EqPanelComponent.h
     wfg/client/ui/EqPanelComponent.cpp
+    wfg/client/ui/FxPanelComponent.h
+    wfg/client/ui/FxPanelComponent.cpp
     wfg/client/ui/TimelineComponent.h
     wfg/client/ui/TimelineComponent.cpp
     wfg/client/ui/Shell.h

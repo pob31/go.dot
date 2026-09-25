@@ -95,6 +95,34 @@ namespace wfg::client::model
     }
 
     //==============================================================================
+    std::string stateSentence (const FxStrip& strip)
+    {
+        const auto& word = strip.state;
+
+        std::string out = word.empty()        ? std::string ("-")
+                        : word == "loading"   ? std::string ("loading...")
+                        : word == "unloaded"  ? std::string ("not loaded")
+                        : word;
+
+        if (! strip.problem.empty())
+            out += ": " + strip.problem;
+
+        if (strip.present() && strip.enabled && (word == "failed" || word == "missing"))
+            out += " - this cue plays it dry";
+
+        return out;
+    }
+
+    std::string latencyWords (const FxStrip& strip)
+    {
+        if (strip.latencySamples <= 0)
+            return {};
+
+        return std::to_string (strip.latencySamples)
+               + (strip.latencySamples == 1 ? " sample" : " samples") + " late while it is in";
+    }
+
+    //==============================================================================
     std::string fxAddress (const std::string& fxId, const std::string& leaf)
     {
         return std::string (fxPrefix) + fxId + "/" + leaf;
@@ -143,6 +171,7 @@ namespace wfg::client::model
             strip.name = text (snapshot, base + "name");
             strip.state = text (snapshot, base + "state");
             strip.problem = text (snapshot, base + "problem");
+            strip.latencySamples = integer (snapshot, base + "latencySamples");
 
             if (strip.name.empty())
                 strip.name = pluginId;

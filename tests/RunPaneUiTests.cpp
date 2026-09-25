@@ -4,6 +4,7 @@
 #include <wfg/client/ui/FootPanelComponent.h>
 #include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
+#include <wfg/client/ui/FxPanelComponent.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
@@ -963,6 +964,281 @@ TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
 
     const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
     const juce::File file { juce::File (dir).getChildFile ("eq-panel.png") };
+    file.getParentDirectory().createDirectory();
+    file.deleteFile();
+
+    juce::FileOutputStream out { file };
+    REQUIRE (out.openedOk());
+
+    juce::PNGImageFormat png;
+    CHECK (png.writeImageToStream (picture, out));
+    MESSAGE ("wrote " << file.getFullPathName().toStdString());
+}
+
+namespace
+{
+    /*  A CHAIN AS A SHOW MIGHT HAVE IT: one entry the cue has not switched
+        in, one it has (and which adds latency), one switched out, and one the
+        machine has not got although the cue uses it. */
+    model::FootReading chainReading (const std::string& cueId)
+    {
+        model::FootReading reading;
+        reading.subject = { model::Subject::Kind::fx, cueId };
+        reading.cueName = "The bed";
+        reading.cueKind = "media";
+        reading.eq.present = true;
+        reading.fx.present = true;
+
+        model::FxStrip gain;
+        gain.pluginId = "PG7N0001";
+        gain.name = "Test gain";
+        gain.index = 0;
+        gain.state = "loaded";
+
+        model::FxStrip verb;
+        verb.pluginId = "PG7N0002";
+        verb.name = "Verb";
+        verb.index = 1;
+        verb.state = "loaded";
+        verb.fxId = "FX7N0001";
+        verb.enabled = true;
+        verb.latencySamples = 64;
+
+        model::FxStrip delay;
+        delay.pluginId = "PG7N0003";
+        delay.name = "Delay";
+        delay.index = 2;
+        delay.state = "loaded";
+        delay.fxId = "FX7N0002";
+        delay.enabled = false;
+
+        model::FxStrip shimmer;
+        shimmer.pluginId = "PG7N0004";
+        shimmer.name = "Shimmer";
+        shimmer.index = 3;
+        shimmer.state = "missing";
+        shimmer.problem = "no plugin on this machine answers VST3-0badf00d-shim";
+        shimmer.fxId = "FX7N0003";
+        shimmer.enabled = true;
+
+        reading.fx.strips = { gain, verb, delay, shimmer };
+        return reading;
+    }
+
+    std::vector<juce::Button*> buttonsNamed (juce::Component& from, const juce::String& text)
+    {
+        std::vector<juce::Button*> out;
+
+        for (auto* button : buttonsUnder (from))
+            if (button->getButtonText() == text)
+                out.push_back (button);
+
+        return out;
+    }
+
+    void press (juce::Button& button, bool state)
+    {
+        button.setToggleState (state, juce::dontSendNotification);
+        button.onClick();
+    }
+}
+
+TEST_CASE ("fx panel: the chain runs file, EQ, the set, out, and a first switch-in makes the insert")
+{
+    /*  The author's design, 2026-09-25: "show the chain, bypass switch and
+        open the native plugin UI as a popup". A box per link in the order the
+        sound goes through them, the EQ first; a switch that is fx.create the
+        first time and `enabled` after; a door that opens the EQ or the
+        plugin's own window. */
+    std::vector<std::pair<std::string, std::string>> written, made, edited;
+    std::vector<std::string> eqOpened;
+
+    ui::FxPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.createFx = [&] (const std::string& cue, const std::string& plugin) { made.emplace_back (cue, plugin); };
+    actions.edit = [&] (const std::string& cue, const std::string& plugin) { edited.emplace_back (cue, plugin); };
+    actions.openEq = [&] (const std::string& cue) { eqOpened.push_back (cue); };
+
+    ui::FxPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1400, 230);
+    panel.show (chainReading ("CUE00001"));
+
+    juce::Image canvas (juce::Image::ARGB, 1400, 230, true);
+    {
+        juce::Graphics g (canvas);
+        panel.paintEntireComponent (g, true);
+    }
+
+    //  THE LINKS, in chain order: the EQ's switch first, then one per entry of the set.
+    auto switches = buttonsNamed (panel, "in");
+    REQUIRE (switches.size() == 5);
+    CHECK (buttonsNamed (panel, "Open").size() == 1);
+    REQUIRE (buttonsNamed (panel, "Edit...").size() == 4);
+
+    CHECK (switches[0]->getToggleState());           // the EQ, in by default
+    CHECK_FALSE (switches[1]->getToggleState());     // Test gain: not in this cue
+    CHECK (switches[2]->getToggleState());           // Verb: in
+    CHECK_FALSE (switches[3]->getToggleState());     // Delay: switched out
+    CHECK (switches[4]->getToggleState());           // Shimmer: in, and missing
+
+    //  Nothing takes the keyboard: the space bar is GO's.
+    for (auto* button : buttonsUnder (panel))
+        CHECK_FALSE (button->getWantsKeyboardFocus());
+
+    SUBCASE ("the first switch-in is fx.create and nothing else, and a second press waits for it")
+    {
+        press (*switches[1], true);
+
+        REQUIRE (made.size() == 1);
+        CHECK (made[0] == std::pair<std::string, std::string> ("CUE00001", "PG7N0001"));
+        CHECK (written.empty());
+
+        //  The switch stays in while the tree catches up, and pressing again sends no second create.
+        CHECK (switches[1]->getToggleState());
+        press (*switches[1], true);
+        CHECK (made.size() == 1);
+
+        //  Once the tree has it, the next press is an ordinary write to `enabled`.
+        auto arrived = chainReading ("CUE00001");
+        arrived.fx.strips[0].fxId = "FX7N0009";
+        arrived.fx.strips[0].enabled = true;
+        panel.show (arrived);
+
+        switches = buttonsNamed (panel, "in");
+        press (*switches[1], false);
+        REQUIRE (written.size() == 1);
+        CHECK (written[0] == std::pair<std::string, std::string> ("/godot/fx/FX7N0009/enabled", "false"));
+        CHECK (made.size() == 1);
+    }
+
+    SUBCASE ("a create in flight belongs to the cue it was pressed on")
+    {
+        press (*switches[1], true);
+        REQUIRE (made.size() == 1);
+
+        //  Another cue picked before the tree answered: its switch is out, and pressing it asks again.
+        panel.show (chainReading ("CUE00002"));
+        switches = buttonsNamed (panel, "in");
+        CHECK_FALSE (switches[1]->getToggleState());
+
+        press (*switches[1], true);
+        REQUIRE (made.size() == 2);
+        CHECK (made[1] == std::pair<std::string, std::string> ("CUE00002", "PG7N0001"));
+    }
+
+    SUBCASE ("an insert the cue has is switched with one write, never a second create")
+    {
+        press (*switches[2], false);
+        press (*switches[3], true);
+
+        REQUIRE (written.size() == 2);
+        CHECK (written[0] == std::pair<std::string, std::string> ("/godot/fx/FX7N0001/enabled", "false"));
+        CHECK (written[1] == std::pair<std::string, std::string> ("/godot/fx/FX7N0002/enabled", "true"));
+        CHECK (made.empty());
+    }
+
+    SUBCASE ("the EQ's switch writes eqOn, and its door opens the EQ on the same cue")
+    {
+        press (*switches[0], false);
+        REQUIRE (written.size() == 1);
+        CHECK (written[0] == std::pair<std::string, std::string> ("/godot/cue/CUE00001/eqOn", "false"));
+
+        buttonsNamed (panel, "Open")[0]->onClick();
+        REQUIRE (eqOpened.size() == 1);
+        CHECK (eqOpened[0] == "CUE00001");
+    }
+
+    SUBCASE ("Edit... asks for that plugin's own window on this cue")
+    {
+        buttonsNamed (panel, "Edit...")[1]->onClick();
+
+        REQUIRE (edited.size() == 1);
+        CHECK (edited[0] == std::pair<std::string, std::string> ("CUE00001", "PG7N0002"));
+        CHECK (written.empty());
+        CHECK (made.empty());
+    }
+
+    SUBCASE ("a long set scrolls sideways rather than squeezing its boxes")
+    {
+        auto many = chainReading ("CUE00001");
+
+        for (int n = 4; n < 8; ++n)
+        {
+            auto more = many.fx.strips[0];
+            more.pluginId = "PG7N000" + std::to_string (n + 1);
+            more.index = n;
+            many.fx.strips.push_back (more);
+        }
+
+        panel.setSize (700, 230);
+        panel.show (many);
+
+        juce::Viewport* viewport = nullptr;
+
+        for (auto* child : panel.getChildren())
+            if (auto* found = dynamic_cast<juce::Viewport*> (child))
+                viewport = found;
+
+        REQUIRE (viewport != nullptr);
+        REQUIRE (viewport->getViewedComponent() != nullptr);
+        CHECK (viewport->getViewedComponent()->getWidth() > panel.getWidth());
+        CHECK (buttonsNamed (panel, "in").size() == 9);
+    }
+
+    SUBCASE ("a show with no plugins still has its EQ, and says how to add one")
+    {
+        auto bare = chainReading ("CUE00001");
+        bare.fx.strips.clear();
+        bare.fx.notice = "The show declares no plugins yet: Show settings, Plugins.";
+        panel.show (bare);
+
+        CHECK (buttonsNamed (panel, "in").size() == 1);
+        CHECK (buttonsNamed (panel, "Open").size() == 1);
+        CHECK (buttonsNamed (panel, "Edit...").empty());
+
+        juce::Image blank (juce::Image::ARGB, 1400, 230, true);
+        juce::Graphics g (blank);
+        panel.paintEntireComponent (g, true);
+    }
+
+    SUBCASE ("a cue that is not media has no chain, and the panel says why")
+    {
+        model::FootReading memo;
+        memo.subject = { model::Subject::Kind::fx, "CUE00002" };
+        memo.cueKind = "memo";
+        memo.fx.notice = "Inserts belong to media cues; this cue plays no file.";
+        panel.show (memo);
+
+        CHECK (buttonsNamed (panel, "in").empty());
+        CHECK (buttonsNamed (panel, "Edit...").empty());
+
+        juce::Image blank (juce::Image::ARGB, 1400, 230, true);
+        juce::Graphics g (blank);
+        panel.paintEntireComponent (g, true);
+    }
+}
+
+TEST_CASE ("fx panel: a picture of it, when somebody asks for one")
+{
+    //  The EQ picture case's shape: with WFG_SNAPSHOT_DIR set, fx-panel.png; skipped otherwise.
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isEmpty())
+        return;
+
+    ui::FxPanelComponent::Actions actions;
+    ui::FxPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (1650, 250);
+
+    auto reading = chainReading ("CUE00001");
+    reading.eq.settings.hpf = true;
+    reading.eq.settings.band[1].gain = -4.0f;
+
+    panel.setEditorWords ({ { "PG7N0002", "its window is open" } });
+    panel.show (reading);
+
+    const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+    const juce::File file { juce::File (dir).getChildFile ("fx-panel.png") };
     file.getParentDirectory().createDirectory();
     file.deleteFile();
 

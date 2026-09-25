@@ -60,6 +60,11 @@ namespace wfg::client::model
             /*  AND THE EQ FOLLOWS, for the sends' reason: how this cue is
                 shaped is a question about whichever cue is in hand. */
             case Subject::Kind::eq:        return true;
+
+            /*  AND THE CHAIN, for the same reason, and so does the plugin's
+                own window opened from it (author, 2026-09-25): which inserts
+                this cue has is a question about the cue in hand. */
+            case Subject::Kind::fx:        return true;
             case Subject::Kind::none:      break;
         }
 
@@ -118,6 +123,15 @@ namespace wfg::client::model
 
             if (! out.eq.present)
                 out.notice = out.eq.notice;
+        }
+
+        if (subject.kind == Subject::Kind::fx)
+        {
+            out.fx = readFx (snapshot, subject.objectId);
+            out.eq = readEq (snapshot, subject.objectId);
+
+            if (! out.fx.present)
+                out.notice = out.fx.notice;
         }
 
         if (subject.kind == Subject::Kind::sends)

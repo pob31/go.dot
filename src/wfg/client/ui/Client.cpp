@@ -303,6 +303,8 @@ namespace wfg::client
                         wanted = model::Subject::Kind::curve;
                     else if (subject == "eq")
                         wanted = model::Subject::Kind::eq;
+                    else if (subject == "fx")
+                        wanted = model::Subject::Kind::fx;
 
                     if (wanted == model::Subject::Kind::none)
                         return;
@@ -407,6 +409,18 @@ namespace wfg::client
                     transaction, which is one step to undo. */
                 footActions.resetEq = [this] (const std::string& cueId)
                                       { send (gesture::eqReset (cueId)); };
+
+                /*  THE CHAIN'S TWO DOORS (author, 2026-09-25): switching an
+                    entry of the set in for the first time is `fx.create`, and
+                    the EQ box shows the same cue's EQ in this same foot. */
+                footActions.createFx = [this] (const std::string& cueId, const std::string& pluginId)
+                                       { send (gesture::createFx (cueId, pluginId)); };
+
+                footActions.openEqOn = [this] (const std::string& cueId)
+                {
+                    if (shell != nullptr && ! cueId.empty())
+                        shell->setFoot ({ model::Subject::Kind::eq, cueId });
+                };
 
                 footActions.openTimelineOn = [this] (const std::string& groupId)
                 {

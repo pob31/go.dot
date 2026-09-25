@@ -73,6 +73,11 @@ namespace wfg::client::model
         std::string state;
         std::string problem;
 
+        /*  How late a cue is while this entry is in its signal, in samples:
+            the plugin's own latency, uncompensated (PRD §3.25). Nought for
+            one that adds none, and for one that has not loaded. */
+        int latencySamples = 0;
+
         /** The cue's Fx for it, when there is one; empty until the first switch-in. */
         std::string fxId;
         bool enabled = false;
@@ -93,6 +98,15 @@ namespace wfg::client::model
         for a cue that is not media; strips are empty, with a sentence, for a
         show that declares no set. */
     FxReading readFx (const tree::TreeSnapshot&, const std::string& cueId);
+
+    /*  WHAT BECAME OF AN ENTRY TONIGHT, in words, for its box in the chain:
+        the engine's state word, its sentence, and - only when this cue has
+        the entry in - what that means for the sound. A plugin that is not
+        there is not a problem for a cue that does not use it. */
+    std::string stateSentence (const FxStrip&);
+
+    /** "64 samples late while it is in", or nothing for an entry that adds none. */
+    std::string latencyWords (const FxStrip&);
 
     /** `/godot/fx/<id>/<leaf>`. */
     std::string fxAddress (const std::string& fxId, const std::string& leaf);
