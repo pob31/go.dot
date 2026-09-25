@@ -126,6 +126,9 @@ namespace wfg::client::ui
         /** Which of the foot's labels shows: the notice in front of the error while there is one. */
         void settleFoot();
 
+        /** GO in the audio's colours, and its caption when there is no audio. */
+        void dressGo();
+
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (TransportComponent)
     };
 }

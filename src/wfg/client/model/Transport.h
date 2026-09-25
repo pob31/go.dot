@@ -143,6 +143,20 @@ namespace wfg::client::model
             lock is something that changes what the next press will do. */
         std::string lockLine() const;
 
+        /*  GO WEARS THE AUDIO (author, 2026-09-25: "Can the Go button be grey
+            when the audio interface is not running be bright yellow with black
+            letters when it's running?"). Bright only when a device is open and
+            producing: the one glance before a press is also the one that says
+            whether the sound will leave. GO still fires when grey - a MIDI or
+            a network cue needs no interface, and GO never blocks (§4.1).
+
+            AND IN A WORD UNDER IT (§4.8), since grey alone would be colour
+            carrying the news: "no audio", "no clock", or the dash for an
+            engine that has not said. Empty while running - the yellow is the
+            ordinary state and needs no caption. */
+        bool audioRunning() const noexcept { return status == "running"; }
+        std::string goLine() const;
+
         /** "3 warnings · <the first>", or empty. Bounded, whatever the show says. */
         std::string warningLine() const;
 

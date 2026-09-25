@@ -148,6 +148,17 @@ namespace wfg::client::model
         return locked == Flag::yes ? "locked" : "";
     }
 
+    std::string TransportReading::goLine() const
+    {
+        if (audioRunning())
+            return {};
+
+        if (status == "noClock")
+            return "no clock";
+
+        return status.empty() ? std::string ("audio ") + unsaid : "no audio";
+    }
+
     bool TransportReading::operator== (const TransportReading& other) const noexcept
     {
         const auto tie = [] (const TransportReading& r)

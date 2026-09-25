@@ -335,6 +335,22 @@ TEST_CASE ("client: the strip says in words what it also says in colour")
     // An unpublished lock says nothing here rather than saying "open".
     reading.locked = model::Flag::unsaid;
     CHECK (reading.lockLine().empty());
+
+    /*  GO IS GREY WITHOUT AUDIO AND SAYS SO UNDER ITS WORD (author,
+        2026-09-25; §4.8), and says nothing while the audio runs. */
+    CHECK (reading.audioRunning());
+    CHECK (reading.goLine().empty());
+
+    reading.status = "stopped";
+    CHECK_FALSE (reading.audioRunning());
+    CHECK (reading.goLine() == "no audio");
+
+    reading.status = "noClock";
+    CHECK (reading.goLine() == "no clock");
+
+    reading.status.clear();
+    CHECK_FALSE (reading.audioRunning());
+    CHECK (reading.goLine() == "audio —");
 }
 
 TEST_CASE ("client: a show with everything wrong with it is summarised, never carried whole")

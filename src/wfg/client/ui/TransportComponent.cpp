@@ -128,7 +128,6 @@ namespace wfg::client::ui
         panicButton.setColour (juce::TextButton::buttonColourId, Look::colour (theme, "failed"));
         panicButton.setTooltip ("Esc: every cue stops and the footers run. "
                                 "Esc again within a second: everything is dropped, no footers.");
-        goButton.setTooltip ("Space: fires the standby cue");
 
         statusLabel.setFont (Look::font (theme, 13.0f));
         statusLabel.setColour (juce::Label::textColourId, dim);
@@ -139,6 +138,7 @@ namespace wfg::client::ui
         noticeLabel.setFont (Look::font (theme, 13.0f));
         noticeLabel.setColour (juce::Label::textColourId, Look::colour (theme, "waiting"));
 
+        dressGo();
         resized();
         repaint();
     }
@@ -186,9 +186,14 @@ namespace wfg::client::ui
         if (reading.warningLine() != last.warningLine() || ! shownOnce)
             noticeLabel.setText (text (reading.warningLine()), juce::dontSendNotification);
 
+        const auto audioMoved = ! shownOnce || reading.status != last.status;
+
         last = reading;
         shownOnce = true;
         settleFoot();
+
+        if (audioMoved)
+            dressGo();
 
         if (bannerShowing != wasShowing)
         {
@@ -233,6 +238,24 @@ namespace wfg::client::ui
         noticeLabel.setVisible (noticing);
         errorLabel.setVisible (! noticing);
         resized();
+    }
+
+    void TransportComponent::dressGo()
+    {
+        /*  BRIGHT YELLOW AND BLACK WHILE THE AUDIO RUNS, GREY WHILE IT DOES
+            NOT (author, 2026-09-25), and the grey says why under the word
+            (§4.8). Grey is not disabled: GO still fires. */
+        const auto running = last.audioRunning();
+
+        goButton.setColour (juce::TextButton::buttonColourId,
+                            Look::colour (theme, running ? "go" : "go-idle"));
+        goButton.setColour (juce::TextButton::textColourOffId,
+                            Look::colour (theme, running ? "go-ink" : "ink-dim"));
+        goButton.getProperties().set (Look::caption(), juce::String (last.goLine()));
+        goButton.setTooltip (running ? "Space: fires the standby cue"
+                                     : "Space: fires the standby cue. The audio is not running, "
+                                       "so a media cue will not be heard - Show settings, Audio.");
+        goButton.repaint();
     }
 
     int TransportComponent::preferredHeight() const noexcept

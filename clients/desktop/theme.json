@@ -27,5 +27,9 @@
   "failed": "#e0685d",
   "waiting": "#86a3db",
   "fade": "#5fb8c9",
-  "picked": "#9a95e4"
+  "picked": "#9a95e4",
+
+  "go": "#ffd60a",
+  "go-ink": "#000000",
+  "go-idle": "#4a4a52"
 }

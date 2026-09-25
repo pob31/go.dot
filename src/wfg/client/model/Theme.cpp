@@ -137,6 +137,15 @@ namespace wfg::client::model
                 { "drop-aim",      0xFF86A3DB },   // blue: this fade would point here
                 { "drop-header",   0xFFE0685D },   // red: prepared by this group's header
                 { "drop-footer",   0xFF9A95E4 },   // purple: into this group's footer
+
+                /*  GO SAYS WHETHER THE SOUND WILL LEAVE (author, 2026-09-25):
+                    bright yellow with black letters while the audio runs, grey
+                    while it does not - and a word under it then (§4.8). Their
+                    own tokens and not `standby`'s amber: the author asked for
+                    a brighter yellow than the cue it fires. */
+                { "go",            0xFFFFD60A },
+                { "go-ink",        0xFF000000 },
+                { "go-idle",       0xFF4A4A52 },
             };
 
             return table;
