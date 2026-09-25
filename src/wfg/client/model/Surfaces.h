@@ -150,4 +150,22 @@ namespace wfg::client::model
 
     /** The four profiles, {word, label}: virtual "Virtual panel", mcu "Mackie Control", d700 "Asparion D700", midiPads "Pads". */
     std::vector<std::pair<std::string, std::string>> profileChoices();
+
+    /*  WHAT A SURFACE'S ROTARIES ARE DOING (author, 2026-09-25): the first
+        surface, in the show's order, whose EQ or Send page is up, with the
+        cue every surface is aimed at and the address its page last wrote -
+        empty until a hand has adjusted something. Read by address, a handful
+        of lookups a pass, since the window asks at every refresh. */
+    struct SurfacePage
+    {
+        bool up = false;          ///< an EQ or Send page is up on some surface
+        std::string surface;
+        std::string word;         ///< eq or send
+        int index = 0;
+        int count = 1;
+        std::string edited;       ///< what it last wrote; empty since it came up
+        std::string aim;          ///< /godot/surface/aim, whether or not a page is up
+    };
+
+    SurfacePage readSurfacePage (const tree::TreeSnapshot&);
 }

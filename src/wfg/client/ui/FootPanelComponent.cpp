@@ -213,6 +213,12 @@ namespace wfg::client::ui
         }
     }
 
+    void FootPanelComponent::showEditedEqHandle (int handle)
+    {
+        if (eq != nullptr)
+            eq->setEditedHandle (handle);
+    }
+
     void FootPanelComponent::show (const model::FootReading& reading,
                                    std::shared_ptr<const audio::MediaRecords> media)
     {

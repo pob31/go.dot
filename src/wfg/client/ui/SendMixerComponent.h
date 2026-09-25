@@ -102,6 +102,9 @@ namespace wfg::client::ui
             importer uses when it makes a cue and then fills it in. */
         void levelWanted (std::size_t at, double decibels);
 
+        /** A send's switch, by the mixer's index (2026-09-25). */
+        void switchAt (std::size_t at, bool on);
+
         model::Theme theme;
         Actions actions;
 

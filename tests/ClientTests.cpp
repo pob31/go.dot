@@ -82,6 +82,7 @@
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/cue/Run.h>
@@ -90,6 +91,7 @@
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/FadePoints.h>
 #include <wfg/engine/document/DocumentWriter.h>
+#include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
@@ -561,6 +563,13 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     plugin::PluginTable pluginTable;
     plugin::registerPluginCommands (rig.engine.commands(), pluginTable, {});
 
+    /*  And the surfaces' aim and the live layer's two (2026-09-25): the running
+        pane's name and the bar's buttons. */
+    surface::SurfaceTable surfaces;
+    surface::registerSurfaceCommands (rig.engine.commands(), rig.document, surfaces);
+    cue::LiveEdits live;
+    cue::registerLiveCommands (rig.engine.commands(), rig.document, live);
+
     const std::vector<Event> gestures
     {
         gesture::go(), gesture::standbyNext(), gesture::standbyPrevious(),
@@ -607,6 +616,11 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::releaseStrip ("STRP0001"),
         gesture::touchNode ("/godot/dca/DCA00001/trim"),
         gesture::releaseNode ("/godot/dca/DCA00001/trim"),
+
+        /*  THE ROTARIES' AIM AND THE LIVE BAR (2026-09-25). */
+        gesture::aimSurfaces ("B3N8R5TW"), gesture::aimSurfaces (""),
+        gesture::keepLive(), gesture::dropLive(),
+        gesture::setNode ("/godot/cue/B3N8R5TW/eqB2On", "false"),
     };
 
     for (const auto& event : gestures)
@@ -5246,4 +5260,52 @@ TEST_CASE ("client: closing two fingers narrows a band, on every road a pinch ta
     //  Shift is the fine step - 1.01 a tenth of a unit, not 1.1 - and a long turn stops at the top.
     CHECK (model::turnedQ (1.0, click, false, true) == doctest::Approx (1.025188).epsilon (1e-5));
     CHECK (model::turnedQ (9.9, 10.0, false, false) == doctest::Approx (model::eqQHighest));
+}
+
+TEST_CASE ("client: a surface adjusting a cue holds the foot on it, and the rest of the window reads what rides")
+{
+    /*  The author, 2026-09-25: "When adjusting either EQ or send levels
+        display the footer on screen." */
+    Rig rig ("first-sound");
+    surface::SurfaceTable surfaces;
+    rig.parameters.setSurfaces (&surfaces);
+    surface::registerSurfaceCommands (rig.engine.commands(), rig.document, surfaces);
+
+    REQUIRE (rig.apply (1, "cli", "surface.create", { osc::Value::string ("d700") }).applied == 1);
+    const auto surfaceId = model::text (*rig.publish (2), "/godot/surface/order");
+    REQUIRE_FALSE (surfaceId.empty());
+
+    const std::string cue = "B3N8R5TW";
+    REQUIRE (rig.apply (3, "cli", "surface.aim", { osc::Value::string (cue) }).applied == 1);
+
+    //  Nothing up: no page, and the foot is the window's own.
+    auto page = model::readSurfacePage (*rig.publish (4));
+    CHECK_FALSE (page.up);
+    CHECK (page.aim == cue);
+    CHECK_FALSE (model::footForSurface (page.up, page.word, page.edited, page.aim).isOpen());
+
+    //  An EQ page up, not yet turned: still nothing for the foot.
+    surfaces.setPage (surfaceId, { "eq", 0, 2, "" });
+    page = model::readSurfacePage (*rig.publish (5));
+    CHECK (page.up);
+    CHECK (page.word == "eq");
+    CHECK (page.count == 2);
+    CHECK_FALSE (model::footForSurface (page.up, page.word, page.edited, page.aim).isOpen());
+
+    //  Turned: the aimed cue's EQ panel, and the band the rotary is on.
+    surfaces.setPage (surfaceId, { "eq", 0, 2, "/godot/cue/" + cue + "/eqB3Gain" });
+    page = model::readSurfacePage (*rig.publish (6));
+    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+             == model::Subject { model::Subject::Kind::eq, cue });
+    CHECK (model::eqHandleForAddress (cue, page.edited) == 2);
+    CHECK (model::eqHandleForAddress (cue, "/godot/cue/" + cue + "/eqHpfFreq") == 4);
+    CHECK (model::eqHandleForAddress (cue, "/godot/cue/" + cue + "/eqLpf") == 5);
+    CHECK (model::eqHandleForAddress (cue, "/godot/cue/" + cue + "/eqOn") == -1);
+    CHECK (model::eqHandleForAddress (cue, "/godot/cue/OTHERCUE/eqB1Gain") == -1);
+
+    //  A Send page: the send mixer.
+    surfaces.setPage (surfaceId, { "send", 0, 1, "/godot/send/SND00001/level" });
+    page = model::readSurfacePage (*rig.publish (7));
+    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+             == model::Subject { model::Subject::Kind::sends, cue });
 }

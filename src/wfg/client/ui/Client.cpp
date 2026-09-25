@@ -60,6 +60,7 @@
 #include <wfg/client/model/DirectOuts.h>
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/Selection.h>
+#include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/ShowModel.h>
 #include <wfg/client/model/Theme.h>
 #include <wfg/client/model/Transport.h>
@@ -269,6 +270,11 @@ namespace wfg::client
                 runActions.seek = [this] (const std::string& id, double seconds)
                                   { send (gesture::seek (id, seconds)); };
 
+                /*  A CLICK ON A RUNNING CUE'S NAME AIMS THE SURFACES' ROTARIES
+                    at it (author, 2026-09-25), and on the aimed one lets go. */
+                runActions.aim = [this] (const std::string& cueId)
+                                 { send (gesture::aimSurfaces (cueId)); };
+
                 ui::InspectorComponent::Actions inspectorActions;
 
                 /*  ONE COMMITTED FIELD IS ONE `node.set`, carrying the address
@@ -465,6 +471,11 @@ namespace wfg::client
                                                             std::move (undoActions),
                                                             std::move (footActions));
                 shell = content.get();
+
+                /*  THE BAR'S TWO BUTTONS (2026-09-25): what a locked show rode
+                    live, kept in the show as one undo step, or let go of. */
+                shell->liveBar.setActions ({ [this] { send (gesture::keepLive()); },
+                                             [this] { send (gesture::dropLive()); } });
 
                 /*  THE PLUGINS' OWN WINDOWS: what they move is one node.set a
                     value, with origin window, like a slider; their close
@@ -1185,6 +1196,49 @@ namespace wfg::client
                 if (shutCurveFor != selection.anchor())
                     shutCurveFor.clear();
 
+                /*  A SURFACE ADJUSTING A CUE HOLDS THE FOOT ON IT (author,
+                    2026-09-25: "When adjusting either EQ or send levels
+                    display the footer on screen"): the aimed cue's EQ panel
+                    for an EQ page, its send mixer for a Send page, once the
+                    page has written something - and not the list's pick, which
+                    the rotaries do not follow. When the page comes down the
+                    foot goes back to what it was showing. */
+                const auto page = model::readSurfacePage (*snapshot);
+                const auto held = model::footForSurface (page.up, page.word, page.edited, page.aim);
+
+                if (held.isOpen())
+                {
+                    if (! surfaceHoldsFoot)
+                    {
+                        footBeforeSurface = shell->footSubject();
+                        surfaceHoldsFoot = true;
+                    }
+
+                    if (shell->footSubject() != held)
+                    {
+                        shell->setFoot (held);
+                        menuItemsChanged();
+                    }
+
+                    //  And the band the rotary last turned, ringed on the panel.
+                    if (held.kind == model::Subject::Kind::eq && page.edited != lastSurfaceEdit)
+                        shell->foot.showEditedEqHandle (model::eqHandleForAddress (page.aim, page.edited));
+                }
+                else if (surfaceHoldsFoot && ! page.up)
+                {
+                    surfaceHoldsFoot = false;
+                    shell->setFoot (footBeforeSurface);
+                    menuItemsChanged();
+                }
+
+                lastSurfaceEdit = page.edited;
+
+                /*  AND WHAT A LOCKED SHOW IS RIDING LIVE, in the bar under the
+                    transport: said while locked, Keep or Discard once not. */
+                shell->setLive (static_cast<int> (osc::parseDouble (model::text (*snapshot, "/godot/document/live"))
+                                                     .value_or (0.0)),
+                                model::isYes (reading.locked));
+
                 if (shell->footSubject().isOpen())
                 {
                     auto subject = shell->footSubject();
@@ -1207,7 +1261,7 @@ namespace wfg::client
                         not" - and it is the one a timeline had wrong. */
                     const auto picked = selection.anchor();
 
-                    if (model::followsPick (subject.kind) && ! picked.empty())
+                    if (! surfaceHoldsFoot && model::followsPick (subject.kind) && ! picked.empty())
                     {
                         auto wanted = picked;
 
@@ -1637,6 +1691,13 @@ namespace wfg::client
                 pick moves, so the rule is "not this one, for now" rather than
                 "never again". */
             std::string shutCurveFor;
+
+            /*  A SURFACE HOLDING THE FOOT (2026-09-25): whether one is, what
+                the foot showed before it took it, and the address its page
+                last wrote - so the ringed band moves only when that does. */
+            bool surfaceHoldsFoot = false;
+            model::Subject footBeforeSurface;
+            std::string lastSurfaceEdit;
 
             void rememberOutsOf (const std::string& cueId)
             {

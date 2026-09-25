@@ -138,4 +138,14 @@ namespace wfg::client::model
     };
 
     FootReading readFoot (const tree::TreeSnapshot&, const Subject&);
+
+    /*  WHERE THE FOOT GOES WHILE A SURFACE ADJUSTS A CUE (author, 2026-09-25:
+        "When adjusting either EQ or send levels display the footer on
+        screen"): the aimed cue's EQ panel for an EQ page, its send mixer for
+        a Send page - once the page has written something, since a page that
+        is only up has adjusted nothing. Nothing otherwise, and the foot is the
+        window's own again. `page` is `readSurfacePage`'s answer, passed by its
+        parts so this file needs no surface model. */
+    Subject footForSurface (bool pageUp, const std::string& pageWord, const std::string& edited,
+                            const std::string& aim);
 }

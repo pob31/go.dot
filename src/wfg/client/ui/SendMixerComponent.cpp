@@ -87,6 +87,14 @@ namespace wfg::client::ui
                 drop.setTooltip ("Takes this send away. The mix channel stays; this cue stops "
                                  "arriving at it.");
                 drop.onClick = [this] { owner.removeAt (at); };
+
+                /*  THE SEND'S SWITCH (2026-09-25): off keeps its level and
+                    takes it out of the mix - the press of its rotary on a
+                    surface's Send page. */
+                onSwitch.setButtonText ("on");
+                onSwitch.setWantsKeyboardFocus (false);
+                onSwitch.setTooltip ("Whether this send is in the mix - off keeps its level");
+                onSwitch.onClick = [this] { owner.switchAt (at, onSwitch.getToggleState()); };
             }
         }
 
@@ -105,6 +113,22 @@ namespace wfg::client::ui
                 addAndMakeVisible (drop);
             else
                 removeChildComponent (&drop);
+
+            resized();
+        }
+
+        /*  AND THE SWITCH WHERE THERE IS A SEND TO SWITCH, beside the cross -
+            a send riding live has the switch and no cross, since it is not in
+            the show to be taken away yet. */
+        void showSwitch (bool wanted)
+        {
+            if (wanted == (onSwitch.getParentComponent() != nullptr))
+                return;
+
+            if (wanted)
+                addAndMakeVisible (onSwitch);
+            else
+                removeChildComponent (&onSwitch);
 
             resized();
         }
@@ -217,8 +241,12 @@ namespace wfg::client::ui
 
             g.setColour (Look::colour (look, "ink-faint"));
             g.setFont (Look::font (look, 10.0f));
+
+            /*  "live" beside what the output is, while a locked show rides
+                this send (2026-09-25): heard, and not saved until kept. */
             g.drawFittedText (isMaster ? juce::String ("a DCA over everything below")
-                                       : juce::String (send().widthWord + " " + send().channelWord),
+                                       : juce::String (send().widthWord + " " + send().channelWord
+                                                         + (send().live ? " - live" : "")),
                               head, juce::Justification::centred, 1);
 
             //  The throw: a groove, a mark at unity, and the cap where the level is.
@@ -249,7 +277,9 @@ namespace wfg::client::ui
                 word under it says which it is - a send at silence and no send
                 at all sound the same, and what differs is only whether there
                 is an object to delete. */
-            const auto live = isMaster || send().present();
+            /*  AND A SEND SWITCHED OUT is dimmed the same way - the switch
+                under it says which. */
+            const auto live = isMaster || (send().present() && send().on);
 
             g.setColour (Look::colour (look, live ? "accent" : "ink-off"));
             g.fillRect (juce::Rectangle<int> (track.getX(), cap - 3, track.getWidth(), 6));
@@ -263,8 +293,16 @@ namespace wfg::client::ui
                 a strip with a send to remove has one, and `throwArea` takes
                 the same row back whether it is there or not so the throws all
                 end at the same height. */
-            if (drop.getParentComponent() != nullptr)
-                drop.setBounds (area.removeFromBottom (scaled (18, owner.theme)));
+            if (drop.getParentComponent() != nullptr || onSwitch.getParentComponent() != nullptr)
+            {
+                auto row = area.removeFromBottom (scaled (18, owner.theme));
+
+                if (drop.getParentComponent() != nullptr)
+                    drop.setBounds (row.removeFromRight (scaled (20, owner.theme)));
+
+                if (onSwitch.getParentComponent() != nullptr)
+                    onSwitch.setBounds (row);
+            }
 
             value.setBounds (area.removeFromBottom (scaled (18, owner.theme)));
         }
@@ -275,6 +313,7 @@ namespace wfg::client::ui
 
         juce::Label value;
         juce::TextButton drop;
+        juce::ToggleButton onSwitch;
 
         double held = 0.0;      ///< where the level was when the hand went down
         double shown = 0.0;     ///< where the hand has asked for it to be
@@ -387,7 +426,11 @@ namespace wfg::client::ui
                 here rather than in the constructor because a send arriving is
                 no longer a rebuild: there is something to delete now, so there
                 is a cross, and the strip it belongs to has not moved. */
-            strip->showCross (! strip->isMaster && strip->send().present());
+            strip->showCross (! strip->isMaster && strip->send().present() && ! strip->send().live);
+            strip->showSwitch (! strip->isMaster && strip->send().present());
+
+            if (! strip->isMaster)
+                strip->onSwitch.setToggleState (strip->send().on, juce::dontSendNotification);
 
             if (strip->value.isBeingEdited())
                 continue;
@@ -396,6 +439,14 @@ namespace wfg::client::ui
                                   juce::dontSendNotification);
             strip->repaint();
         }
+    }
+
+    void SendMixerComponent::switchAt (std::size_t at, bool on)
+    {
+        if (at == 0 || at - 1 >= reading.sends.size() || ! reading.sends[at - 1].present() || ! actions.set)
+            return;
+
+        actions.set ("/godot/send/" + reading.sends[at - 1].sendId + "/on", on ? "true" : "false");
     }
 
     void SendMixerComponent::levelWanted (std::size_t at, double decibels)

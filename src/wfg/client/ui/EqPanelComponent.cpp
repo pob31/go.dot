@@ -163,6 +163,18 @@ namespace wfg::client::ui
         for (auto* toggle : { &onToggle, &hpfToggle, &lpfToggle })
             toggle->setWantsKeyboardFocus (false);
 
+        for (int band = 0; band < audio::EqSettings::numBands; ++band)
+        {
+            auto& toggle = bandToggles[static_cast<std::size_t> (band)];
+            toggle.setWantsKeyboardFocus (false);
+            toggle.setTooltip ("Whether band " + juce::String (band + 1) + " is in - off keeps its numbers");
+            toggle.onClick = [this, band]
+            {
+                writeFlag (model::eqBandRow (band, "On"),
+                           bandToggles[static_cast<std::size_t> (band)].getToggleState());
+            };
+        }
+
         flat.setWantsKeyboardFocus (false);
 
         onToggle.onClick = [this] { writeFlag ("eqOn", onToggle.getToggleState()); };
@@ -225,6 +237,15 @@ namespace wfg::client::ui
         repaint();
     }
 
+    void EqPanelComponent::setEditedHandle (int handle)
+    {
+        if (handle == editing)
+            return;
+
+        editing = handle;
+        repaint();
+    }
+
     const audio::EqSettings& EqPanelComponent::shown() const noexcept
     {
         return dragging ? held : reading.eq.settings;
@@ -243,6 +264,10 @@ namespace wfg::client::ui
         addAndMakeVisible (onToggle);
         addAndMakeVisible (hpfToggle);
         addAndMakeVisible (lpfToggle);
+
+        for (auto& toggle : bandToggles)
+            addAndMakeVisible (toggle);
+
         addAndMakeVisible (lowShape);
         addAndMakeVisible (highShape);
         addAndMakeVisible (flat);
@@ -277,6 +302,10 @@ namespace wfg::client::ui
         onToggle.setToggleState (s.on, juce::dontSendNotification);
         hpfToggle.setToggleState (s.hpf, juce::dontSendNotification);
         lpfToggle.setToggleState (s.lpf, juce::dontSendNotification);
+
+        for (int band = 0; band < audio::EqSettings::numBands; ++band)
+            bandToggles[static_cast<std::size_t> (band)].setToggleState (s.band[band].on,
+                                                                          juce::dontSendNotification);
 
         lowShape.setSelectedId (s.band[0].shape == audio::EqSettings::Shape::lowShelf ? 2 : 1,
                                 juce::dontSendNotification);
@@ -745,6 +774,9 @@ namespace wfg::client::ui
             line.removeFromLeft (mark);
             auto head = line.removeFromLeft (line.getWidth() - 3 * numberWidth);
 
+            //  The band's switch first, then its shape or its name.
+            bandToggles[static_cast<std::size_t> (band)].setBounds (head.removeFromLeft (row));
+
             if (band == 0)
                 lowShape.setBounds (head.reduced (gapPx, 1));
             else if (band == audio::EqSettings::numBands - 1)
@@ -786,6 +818,16 @@ namespace wfg::client::ui
         paintCurve (g, field);
         paintHandles (g, field);
 
+        /*  RIDING LIVE ON A LOCKED SHOW (2026-09-25): heard, and not saved
+            until the window's bar keeps it - said in words over the field. */
+        if (! reading.eq.live.empty())
+        {
+            g.setColour (Look::colour (theme, "ink-dim"));
+            g.setFont (Look::font (theme, 12.0f));
+            g.drawText ("live, not saved", field.reduced (scaled (6, theme), scaled (4, theme)),
+                        juce::Justification::topRight, true);
+        }
+
         /*  THE NAMES OF THE BANDS, beside their rows in the column, where the
             shape menu is not: two and three are always peaks and say so. */
         auto column = columnArea();
@@ -801,6 +843,7 @@ namespace wfg::client::ui
             auto line = column.removeFromTop (row);
             line.removeFromLeft (scaled (markWidth, theme));
             auto head = line.removeFromLeft (line.getWidth() - 3 * scaled (62, theme));
+            head.removeFromLeft (row);    // the band's switch
 
             if (band == 1 || band == 2)
                 g.drawFittedText ("Band " + juce::String (band + 1) + ", peak",

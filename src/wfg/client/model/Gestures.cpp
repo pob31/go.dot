@@ -110,6 +110,21 @@ namespace wfg::client::gesture
         return { origin::window, "eq.reset", { osc::Value::string (cueId) } };
     }
 
+    Event aimSurfaces (const std::string& cueId)
+    {
+        return { origin::window, "surface.aim", { osc::Value::string (cueId) } };
+    }
+
+    Event keepLive()
+    {
+        return { origin::window, "live.keep", {} };
+    }
+
+    Event dropLive()
+    {
+        return { origin::window, "live.drop", {} };
+    }
+
     Event splitRange (const std::string& cueId, double at)
     {
         return { origin::window, "range.split",

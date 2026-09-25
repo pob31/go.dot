@@ -71,6 +71,11 @@ namespace wfg::client::model
             every member is at a second of it. A manual sequence has an
             operator between its members and no second to seek to. */
         bool timedGroup = false;
+
+        /*  WHETHER A SURFACE'S ROTARIES ARE AIMED AT THIS RUN'S CUE (author,
+            2026-09-25): a click on a media run's name aims them, and the row
+            says so in a mark and not a colour alone. */
+        bool aimed = false;
         int late = 0;            ///< samples, when the engine had to place a launch in the past
         int depth = 0;
 

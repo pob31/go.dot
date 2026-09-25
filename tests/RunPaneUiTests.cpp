@@ -376,8 +376,17 @@ TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes 
     /*  ONE CROSS PER SEND THAT EXISTS, and none for the mix the cue does not
         feed yet: the asymmetry shows as the cross appearing rather than as a
         fader that will not move. */
-    const auto crosses = buttonsUnder (mixer);
+    std::vector<juce::Button*> crosses, switches;
+
+    for (auto* button : buttonsUnder (mixer))
+        (button->getButtonText() == "x" ? crosses : switches).push_back (button);
+
     CHECK (crosses.size() == 1);
+
+    /*  AND ONE SWITCH PER SEND (2026-09-25), on, beside its cross: off keeps
+        the level and takes the send out of the mix. */
+    REQUIRE (switches.size() == 1);
+    CHECK (switches[0]->getToggleState());
 
     /*  THE VALUE BOXES, which are also how this test moves a fader. Typing a
         number is the same gesture as dragging one - both end in
@@ -804,6 +813,59 @@ TEST_CASE ("run pane: a sampler group counts its members in words")
     pane.paintEntireComponent (g, true);
 }
 
+TEST_CASE ("run pane: a click on a running cue's name aims the rotaries, and on the aimed one lets go")
+{
+    /*  The author, 2026-09-25: "We will also add a way to edit other running
+        media cues like clicking on the label over the waveform in the running
+        cue panel." The cross still kills; a fade's line aims nothing. */
+    std::vector<std::string> aimed, killed;
+
+    ui::RunPaneComponent::Actions actions;
+    actions.aim = [&aimed] (const std::string& cueId) { aimed.push_back (cueId); };
+    actions.kill = [&killed] (const std::string& runId) { killed.push_back (runId); };
+
+    model::RunRow bed;
+    bed.id = "RUN00001";
+    bed.cueId = "CUE00001";
+    bed.cueName = "Bed";
+    bed.kind = "media";
+    bed.state = "playing";
+
+    model::RunRow fade = bed;
+    fade.id = "RUN00002";
+    fade.cueId = "CUE00002";
+    fade.cueName = "Down";
+    fade.kind = "fade";
+
+    ui::RunPaneComponent pane (model::Theme {}, actions);
+    pane.setSize (450, 300);
+    pane.show ({ bed, fade }, {});
+
+    const auto row = juce::roundToInt (model::Theme {}.row * model::Theme {}.type);
+
+    pane.clickAt (60, row / 2);
+    CHECK (aimed == std::vector<std::string> { "CUE00001" });
+
+    pane.clickAt (60, row + row / 2);
+    CHECK (aimed.size() == 1u);
+
+    pane.clickAt (445, row / 2);
+    CHECK (killed == std::vector<std::string> { "RUN00001" });
+
+    //  Aimed, it draws its mark - and a click lets go.
+    bed.aimed = true;
+    pane.show ({ bed, fade }, {});
+
+    juce::Image canvas (juce::Image::ARGB, 450, 300, true);
+    {
+        juce::Graphics g (canvas);
+        pane.paintEntireComponent (g, true);
+    }
+
+    pane.clickAt (60, row / 2);
+    CHECK (aimed == std::vector<std::string> { "CUE00001", "" });
+}
+
 //==============================================================================
 TEST_CASE ("eq panel: the numbers are drawn, a box writes one row, a switch writes a flag, Flat is one command")
 {
@@ -902,6 +964,25 @@ TEST_CASE ("eq panel: the numbers are drawn, a box writes one row, a switch writ
         REQUIRE (written.size() == 1);
         CHECK (written[0].first == "/godot/cue/CUE00001/eqHpf");
         CHECK (written[0].second == "true");
+    }
+
+    SUBCASE ("a band's own switch writes its flag, off keeping its numbers (2026-09-25)")
+    {
+        juce::Button* bandTwo = nullptr;
+
+        for (auto* button : buttonsUnder (panel))
+            if (button->getTooltip().startsWith ("Whether band 2 is in"))
+                bandTwo = button;
+
+        REQUIRE (bandTwo != nullptr);
+        CHECK (bandTwo->getToggleState());
+
+        bandTwo->setToggleState (false, juce::dontSendNotification);
+        bandTwo->onClick();
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0].first == "/godot/cue/CUE00001/eqB2On");
+        CHECK (written[0].second == "false");
     }
 
     SUBCASE ("Flat is one command on the cue, and writes no row itself")

@@ -108,6 +108,10 @@ namespace wfg::client::ui
         /** What the client knows of each plugin's own window, for the chain to say. */
         void setEditorWords (std::map<std::string, std::string>);
 
+        /*  The EQ band a surface's rotary last turned, ringed on the EQ panel
+            while it is the one open (2026-09-25); -1 lets it go. */
+        void showEditedEqHandle (int handle);
+
         void paint (juce::Graphics&) override;
         void resized() override;
 

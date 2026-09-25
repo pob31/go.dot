@@ -313,6 +313,9 @@ namespace wfg::client::model
         for (const auto& id : order)
             parentOf.emplace (id, at (snapshot, id, "parent"));
 
+        //  The cue a surface's rotaries are aimed at, read once for the pass.
+        const auto aim = text (snapshot, "/godot/surface/aim");
+
         for (const auto& id : order)
         {
             RunRow row;
@@ -358,6 +361,8 @@ namespace wfg::client::model
                 operator is looking for in this pane is which cue that is. */
             if (! row.cueId.empty())
                 row.cueName = text (snapshot, "/godot/cue/" + row.cueId + "/name");
+
+            row.aimed = ! row.cueId.empty() && row.cueId == aim;
 
             if (row.launched())
                 row.position = seconds (at (snapshot, id, "position"));

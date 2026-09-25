@@ -49,6 +49,11 @@ namespace wfg::client::model
 
         /** Why there is nothing to draw, when there is nothing to draw. */
         std::string notice;
+
+        /*  THE ROWS A LOCKED SHOW IS RIDING LIVE, space-separated (2026-09-25):
+            heard, and not saved until somebody keeps them. `settings` already
+            reads what is heard. */
+        std::string live;
     };
 
     /** The cue's twenty-three rows, by exact address, as one value. */
@@ -75,6 +80,12 @@ namespace wfg::client::model
 
     /** The shape words the two shelving bands accept, as the row spells them. */
     const char* eqShapeWord (audio::EqSettings::Shape);
+
+    /*  WHICH HANDLE AN EQ ROW'S ADDRESS MOVES, for the panel to ring the band
+        a surface's rotary last turned (2026-09-25): 0..3 the bands, 4 the
+        high-pass, 5 the low-pass - the panel's own numbering - and -1 for an
+        address that is not an EQ row of `cueId`, or `eqOn`. */
+    int eqHandleForAddress (const std::string& cueId, const std::string& address);
     audio::EqSettings::Shape eqShapeFor (const std::string& word);
 
     /*  A BAND'S WIDTH BY HAND (author, 2026-09-25: "EQ peak gesture to narrow

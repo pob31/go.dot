@@ -179,4 +179,19 @@ namespace wfg::client::model
 
         return out;
     }
+
+    Subject footForSurface (bool pageUp, const std::string& pageWord, const std::string& edited,
+                            const std::string& aim)
+    {
+        if (! pageUp || edited.empty() || aim.empty())
+            return {};
+
+        if (pageWord == "eq")
+            return { Subject::Kind::eq, aim };
+
+        if (pageWord == "send")
+            return { Subject::Kind::sends, aim };
+
+        return {};
+    }
 }

@@ -410,6 +410,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/UndoPanelComponent.cpp
     wfg/client/ui/NewCueBarComponent.h
     wfg/client/ui/NewCueBarComponent.cpp
+    wfg/client/ui/LiveBarComponent.h
+    wfg/client/ui/LiveBarComponent.cpp
     wfg/client/ui/RangeTableComponent.h
     wfg/client/ui/RangeTableComponent.cpp
     wfg/client/ui/RunPaneComponent.h

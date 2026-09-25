@@ -150,6 +150,16 @@ namespace wfg::client::gesture
     /** `eq.reset`: a media cue's EQ back to flat, one transaction (Phase 9a). */
     Event eqReset (const std::string& cueId);
 
+    /*  `surface.aim`: the cue a surface's rotaries edit on their EQ and Send
+        pages (author, 2026-09-25) - a click on a running cue's name. Empty
+        lets go. */
+    Event aimSurfaces (const std::string& cueId);
+
+    /*  What a locked show rode live, kept in the show as one undo step, or
+        let go of (2026-09-25): the two buttons of the window's bar. */
+    Event keepLive();
+    Event dropLive();
+
     /*  Cuts one of a media cue's ranges in two where the playhead is. One
         command rather than a create, a shortening and a reorder, so it is one
         undo step and one record - see `ShowDocument::splitRange`. */

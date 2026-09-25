@@ -58,6 +58,7 @@
 
 #include <juce_gui_basics/juce_gui_basics.h>
 
+#include <array>
 #include <functional>
 #include <map>
 #include <memory>
@@ -122,6 +123,11 @@ namespace wfg::client::ui
             it lets go, since the wheel and a pinch act on it. A press on the
             empty field lets it go. -1 is none. */
         int editedHandle() const noexcept { return editing; }
+
+        /*  AND THE ONE A SURFACE'S ROTARY LAST TURNED (2026-09-25), rung the
+            same way, so the band under the hand on the desk is the band ringed
+            on the screen. -1 lets it go. */
+        void setEditedHandle (int handle);
 
         void mouseDoubleClick (const juce::MouseEvent&) override;
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
@@ -226,6 +232,10 @@ namespace wfg::client::ui
         juce::uint32 turnedAt = 0;
 
         juce::ToggleButton onToggle, hpfToggle, lpfToggle;
+
+        /*  EACH BAND'S OWN SWITCH (2026-09-25), eqB<n>On: off keeps the band's
+            numbers and takes it out - the press of its gain rotary. */
+        std::array<juce::ToggleButton, audio::EqSettings::numBands> bandToggles;
         juce::ComboBox lowShape, highShape;
         juce::TextButton flat;
         std::vector<std::unique_ptr<Box>> boxes;

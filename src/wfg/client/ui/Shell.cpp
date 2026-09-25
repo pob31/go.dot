@@ -39,6 +39,7 @@ namespace wfg::client::ui
           newCues (themeToUse, std::move (newCueActions)),
           history (themeToUse, std::move (historyActions)),
           undoPanel (themeToUse, std::move (undoActions)),
+          liveBar (themeToUse, {}),
           theme (themeToUse)
     {
         /*  NEITHER PANE TAKES THE FOCUS: it rests here, and `keyPressed` below
@@ -63,6 +64,8 @@ namespace wfg::client::ui
         addChildComponent (undoPanel);
         foot.setVisible (false);
         addChildComponent (foot);
+        liveBar.setVisible (false);
+        addChildComponent (liveBar);
 
         setWantsKeyboardFocus (true);
     }
@@ -78,6 +81,7 @@ namespace wfg::client::ui
         history.applyTheme (theme);
         undoPanel.applyTheme (theme);
         foot.applyTheme (theme);
+        liveBar.applyTheme (theme);
         resized();
         repaint();
     }
@@ -88,6 +92,10 @@ namespace wfg::client::ui
 
         transport.setBounds (area.removeFromTop (juce::jmin (transport.preferredHeight(),
                                                              area.getHeight())));
+
+        //  What a locked show rode live, under the transport and across the window, while it has anything.
+        if (liveBar.isVisible())
+            liveBar.setBounds (area.removeFromTop (juce::jmin (liveBar.preferredHeight(), area.getHeight())));
 
         /*  THE FOOT SPANS THE WHOLE WIDTH, under all three panes and not under
             the cue list alone (author, 2026-09-21: it is where a timeline, a
@@ -183,6 +191,17 @@ namespace wfg::client::ui
         }
 
         cues.setBounds (area);
+    }
+
+    void Shell::setLive (int count, bool locked)
+    {
+        const auto wanted = liveBar.setLive (count, locked);
+
+        if (wanted != liveBar.isVisible())
+        {
+            liveBar.setVisible (wanted);
+            resized();
+        }
     }
 
     void Shell::setFoot (const model::Subject& wanted)

@@ -39,6 +39,7 @@ namespace wfg::client::model
         constexpr std::string_view dcaPrefix = "/godot/dca/";
 
         constexpr std::string_view surfaceOrderAddress = "/godot/surface/order";
+        constexpr std::string_view surfaceAimAddress = "/godot/surface/aim";
         constexpr std::string_view dcaOrderAddress = "/godot/dca/order";
 
         /*  THE FOUR PROFILES, and the words a person reads for each. One table
@@ -587,5 +588,43 @@ namespace wfg::client::model
     std::vector<std::pair<std::string, std::string>> profileChoices()
     {
         return profiles();
+    }
+
+    //==========================================================================
+    SurfacePage readSurfacePage (const tree::TreeSnapshot& snapshot)
+    {
+        SurfacePage out;
+        out.aim = text (snapshot, std::string (surfaceAimAddress));
+
+        const auto order = text (snapshot, std::string (surfaceOrderAddress));
+        std::size_t at = 0;
+
+        while (at < order.size())
+        {
+            const auto start = order.find_first_not_of (' ', at);
+
+            if (start == std::string::npos)
+                break;
+
+            const auto end = order.find (' ', start);
+            const auto id = order.substr (start, end == std::string::npos ? std::string::npos : end - start);
+            at = end == std::string::npos ? order.size() : end;
+
+            const auto base = std::string (surfacePrefix) + id + "/";
+            const auto word = text (snapshot, base + "page");
+
+            if (word != "eq" && word != "send")
+                continue;
+
+            out.up = true;
+            out.surface = id;
+            out.word = word;
+            out.index = static_cast<int> (osc::parseDouble (text (snapshot, base + "pageIndex")).value_or (0.0));
+            out.count = static_cast<int> (osc::parseDouble (text (snapshot, base + "pageCount")).value_or (1.0));
+            out.edited = text (snapshot, base + "edited");
+            return out;
+        }
+
+        return out;
     }
 }

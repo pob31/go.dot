@@ -113,7 +113,31 @@ namespace wfg::client::model
         s.band[0].shape = eqShapeFor (text (snapshot, eqAddress (cueId, "eqB1Shape")));
         s.band[3].shape = eqShapeFor (text (snapshot, eqAddress (cueId, "eqB4Shape")));
 
+        out.live = text (snapshot, eqAddress (cueId, "live"));
+
         return out;
+    }
+
+    int eqHandleForAddress (const std::string& cueId, const std::string& address)
+    {
+        const auto base = eqAddress (cueId, "eq");
+
+        if (cueId.empty() || address.rfind (base, 0) != 0)
+            return -1;
+
+        const auto row = address.substr (base.size() - 2);
+
+        if (row.rfind ("eqHpf", 0) == 0)
+            return 4;
+
+        if (row.rfind ("eqLpf", 0) == 0)
+            return 5;
+
+        //  eqB<n>...: the band's own number, from one.
+        if (row.size() > 3 && row.rfind ("eqB", 0) == 0 && row[3] >= '1' && row[3] <= '4')
+            return row[3] - '1';
+
+        return -1;
     }
 
     std::vector<EqPoint> eqCurve (const audio::EqSettings& settings, double sampleRate, int points)

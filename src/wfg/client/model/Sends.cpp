@@ -46,7 +46,7 @@ namespace wfg::client::model
         /*  WHAT THIS CUE SENDS, gathered by the same route a range is: sends
             are published flat under their own owner with a derived `cue`, so
             the way back to the cue is that row and not containment. */
-        struct Held { std::string id, bus; double level = 0.0; bool mine = false; };
+        struct Held { std::string id, bus; double level = 0.0; bool mine = false; bool on = true; bool live = false; };
 
         std::map<std::string, Held> held;
 
@@ -71,6 +71,8 @@ namespace wfg::client::model
             if (name == "cue")        one.mine = reading == cueId;
             else if (name == "bus")   one.bus = reading;
             else if (name == "level") one.level = osc::parseDouble (reading).value_or (0.0);
+            else if (name == "on")    one.on = reading != "false";
+            else if (name == "live")  one.live = reading == "true";
         }
 
         std::map<std::string, Held> byBus;
@@ -100,6 +102,8 @@ namespace wfg::client::model
             {
                 strip.sendId = found->second.id;
                 strip.levelDb = found->second.level;
+                strip.on = found->second.on;
+                strip.live = found->second.live;
             }
             else
             {
