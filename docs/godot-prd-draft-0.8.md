@@ -2136,6 +2136,14 @@ origin that started it owns it, a press from elsewhere is a no-op and so is that
 origin's release — origin tagging exists for exactly this. Layering is absent
 (§3.8).
 
+*Amended in 0.8, at the author's direction (2026-09-25).* **MUTE on a sampler
+strip is its kill switch**, not a temporary mute: *"kill as the X in the active
+cue list panel"*. On a Mackie surface or a D700, a strip's MUTE sends `run.kill`
+for the run holding the strip while something sounds there. That is the
+running pane's cross, under the hand already on the surface. The member is
+armed on its fader again for the next touch, as after any end. On a DCA strip,
+and on a member armed and waiting, MUTE does nothing.
+
 **Takeover.** Two modes, one attribute on the group that arms — the scene change
 is where the designer is thinking about it, and §4.10 wants the decision in the
 file:

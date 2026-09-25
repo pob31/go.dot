@@ -96,8 +96,14 @@ namespace wfg::surface
         levels under the hand already on the surface; rewind and forward move
         the standby. The bank and channel arrows do nothing, because banking is
         §3.9d's decision to take with the hardware in hand, and REC does
-        nothing. */
-    enum class Action { none, gate, go, stop, rewind, forward };
+        nothing.
+
+        MUTE ON A STRIP KILLS WHAT IT PLAYS (author, 2026-09-25: "Can the mute
+        switch of a sampler fader be a kill switch for it? Not temporary
+        muting, kill as the X in the active cue list panel."): `run.kill` on
+        the run holding the strip, while something sounds on it - the running
+        pane's cross, under the hand already on the surface. */
+    enum class Action { none, gate, go, stop, rewind, forward, kill };
 
     /** What a button means on a surface of this profile. `none` for every
         button a profile does not use, and for every button of a profile that

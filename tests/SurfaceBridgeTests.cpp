@@ -1528,6 +1528,73 @@ TEST_CASE ("surface bridge: a sounding strip's colour pulses with how its sound 
     CHECK (redNow() == 127);
 }
 
+TEST_CASE ("surface bridge: MUTE on a sampler strip kills what it plays, like the running pane's cross")
+{
+    /*  The author, 2026-09-25: "Can the mute switch of a sampler fader be a
+        kill switch for it? Not temporary muting, kill as the X in the active
+        cue list panel." */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+    fake.text ("/godot/cue/CUE00001/name", "Rain");
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    std::vector<Event> submitted;
+    const auto collect = [&submitted] (Event event)
+    {
+        submitted.push_back (std::move (event));
+        return true;
+    };
+
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    //  MUTE on strip one, pressed and let go: one kill, of the run on it.
+    bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x7f });
+    bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x00 });
+    bridge.beforeTick (collect, ++tick);
+
+    REQUIRE (submitted.size() == 1u);
+    CHECK (submitted[0].command == "run.kill");
+    REQUIRE (submitted[0].args.size() == 1u);
+    CHECK (submitted[0].args[0].getString() == "RUN00001");
+    CHECK (submitted[0].origin == "surface:SURF0001");
+
+    //  A member armed and waiting has nothing to kill: its fader is ready for the next touch.
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    bridge.afterTick (fake.publish (++tick), touches, tick);
+    submitted.clear();
+
+    bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x7f });
+    bridge.beforeTick (collect, ++tick);
+    CHECK (submitted.empty());
+
+    //  Nor has a DCA strip: MUTE there is no temporary mute either, it is nothing.
+    fake.text ("/godot/slot/STRIP001/word", "dca");
+    fake.text ("/godot/slot/STRIP001/role", "dca");
+    bridge.afterTick (fake.publish (++tick), touches, tick);
+    submitted.clear();
+
+    bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x7f });
+    bridge.beforeTick (collect, ++tick);
+    CHECK (submitted.empty());
+}
+
 TEST_CASE ("surface bridge: a hand resting through a handover lets go of the old node, and touches the new one only by landing again")
 {
     RecordingSink sink;

@@ -793,6 +793,12 @@ namespace wfg::surface
                     }
                     break;
 
+                case Action::kill:
+                    if (event.down)
+                        if (const auto* strip = stripAt (box, bank, event.id.index))
+                            kill (box, *strip, submit);
+                    break;
+
                 case Action::rewind:
                     if (event.down)
                         submit (commandFrom (box.origin, "standby.previous"));
@@ -806,6 +812,26 @@ namespace wfg::surface
                 case Action::none:
                     break;
             }
+        }
+
+        /*  MUTE KILLS, and does not mute (author, 2026-09-25): `run.kill` on
+            the run holding the strip - what the cross in the running pane
+            sends - while something sounds there. The member is armed on its
+            fader again for the next touch, as after any end. A dca strip, a
+            free one and a member armed and waiting have nothing to kill. */
+        void kill (const Surface& box, const Strip& strip, const Submit& submit) const
+        {
+            const auto* at = published.get();
+
+            if (strip.holderId.empty() || textAt (at, strip.roleAt) == "dca")
+                return;
+
+            const auto& word = textAt (at, strip.wordAt);
+
+            if (word != "playing" && word != "held" && word != "stopping" && word != "closing")
+                return;
+
+            submit (commandFrom (box.origin, "run.kill", { osc::Value::string (strip.holderId) }));
         }
 
         /*  THE STRIP'S GATE, the V-Pot press: a hand on a sampler strip, or on

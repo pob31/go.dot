@@ -108,6 +108,9 @@ namespace wfg::surface
         if (button.button == Button::vpotPress)
             return button.index >= 0 ? Action::gate : Action::none;
 
+        if (button.button == Button::mute)
+            return button.index >= 0 ? Action::kill : Action::none;
+
         if (button.button == Button::play)      return Action::go;
         if (button.button == Button::stop)      return Action::stop;
         if (button.button == Button::rewind)    return Action::rewind;
