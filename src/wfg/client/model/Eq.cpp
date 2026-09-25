@@ -104,6 +104,10 @@ namespace wfg::client::model
             b.freq = number (eqBandRow (band, "Freq"), b.freq);
             b.gain = number (eqBandRow (band, "Gain"), b.gain);
             b.q = number (eqBandRow (band, "Q"), b.q);
+
+            /*  A BAND'S SWITCH is on unless the tree says off: a switch it
+                has not published is the default, which is in. */
+            b.on = flag (snapshot, eqAddress (cueId, eqBandRow (band, "On"))) != Flag::no;
         }
 
         s.band[0].shape = eqShapeFor (text (snapshot, eqAddress (cueId, "eqB1Shape")));

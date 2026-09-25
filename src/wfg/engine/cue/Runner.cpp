@@ -229,7 +229,7 @@ namespace wfg::cue
         /*  THROUGH THE SCHEMA, for the reason resolveRouting gives: the
             canonical writer omits every attribute at its default, so a cue
             whose EQ nobody touched has no eq* attribute at all, and a raw read
-            would make a flat EQ into nineteen noughts - a high-pass at 0 Hz, a
+            would make a flat EQ into a row of noughts - a high-pass at 0 Hz, a
             width of nought. The defaults are the table's and do not change
             under a running show. */
         static const Reader schema;
@@ -255,10 +255,14 @@ namespace wfg::cue
         out.lpf = flag ("eqLpf");
         out.hpfFreq = number ("eqHpfFreq");
         out.lpfFreq = number ("eqLpfFreq");
-        out.band[0] = { shape ("eqB1Shape"), number ("eqB1Freq"), number ("eqB1Gain"), number ("eqB1Q") };
-        out.band[1] = { audio::EqSettings::Shape::peak, number ("eqB2Freq"), number ("eqB2Gain"), number ("eqB2Q") };
-        out.band[2] = { audio::EqSettings::Shape::peak, number ("eqB3Freq"), number ("eqB3Gain"), number ("eqB3Q") };
-        out.band[3] = { shape ("eqB4Shape"), number ("eqB4Freq"), number ("eqB4Gain"), number ("eqB4Q") };
+        out.band[0] = { shape ("eqB1Shape"), number ("eqB1Freq"), number ("eqB1Gain"), number ("eqB1Q"),
+                        flag ("eqB1On") };
+        out.band[1] = { audio::EqSettings::Shape::peak, number ("eqB2Freq"), number ("eqB2Gain"),
+                        number ("eqB2Q"), flag ("eqB2On") };
+        out.band[2] = { audio::EqSettings::Shape::peak, number ("eqB3Freq"), number ("eqB3Gain"),
+                        number ("eqB3Q"), flag ("eqB3On") };
+        out.band[3] = { shape ("eqB4Shape"), number ("eqB4Freq"), number ("eqB4Gain"), number ("eqB4Q"),
+                        flag ("eqB4On") };
 
         return out;
     }
@@ -2860,6 +2864,11 @@ namespace wfg::cue
                     cost nothing to mix. `emit` drops exact zeroes anyway; this
                     saves building the matrix. */
                 if (level <= -120.0)
+                    continue;
+
+                /*  AND A SEND SWITCHED OFF is out of the mix the same way, its
+                    level kept for when it comes back on (send/on). */
+                if (! schema.flag (destination, "send", "on"))
                     continue;
 
                 std::string why;

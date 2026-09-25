@@ -966,6 +966,21 @@ TEST_CASE ("sends: a mix channel is a destination with a level, and silence cost
         CHECK (problem.empty());
     }
 
+    SUBCASE ("a send switched off contributes nothing, and keeps its level for when it comes back")
+    {
+        /*  send/on (author, 2026-09-25): the press of a rotary on a surface's
+            Send page. */
+        const auto send = rig.addSend (rig.mediaId, rig.foldback, -6.0);
+        REQUIRE (rig.document.setAttribute ("/godot/send/" + send + "/on", "false").ok);
+
+        CHECK (rig.spreadOf (rig.mediaId, problem).empty());
+        CHECK (problem.empty());
+        CHECK (rig.document.getAttribute ("/godot/send/" + send + "/level").value_or ("?") == "-6");
+
+        REQUIRE (rig.document.setAttribute ("/godot/send/" + send + "/on", "true").ok);
+        CHECK (rig.spreadOf (rig.mediaId, problem) == "0>4@0.501 1>5@0.501");
+    }
+
     SUBCASE ("a cue may hold a direct out and several sends at once")
     {
         /*  PRD 3.9b: a cue's destinations are a LIST and not a choice - a
@@ -7307,7 +7322,7 @@ TEST_CASE ("fx: the arm carries the cue's inserts against the set, an edit pushe
 
 TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a quiet tick not at all")
 {
-    /*  PHASE 9a's parameter path, on the tick thread's side: the nineteen rows
+    /*  PHASE 9a's parameter path, on the tick thread's side: the twenty-three rows
         are read through the schema at the arm and ride the request; while the
         cue sounds, a write to one of them - a rotary, a panel, the page - is
         pushed to that voice on the next tick and to no other; nothing is
@@ -7321,6 +7336,8 @@ TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a 
     //  Shaped before it plays, so the arm has something to carry.
     rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/eqB2Gain", "6");
     rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/eqB2Freq", "1000");
+    rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/eqB3Gain", "-4");
+    rig.document.setAttribute ("/godot/cue/" + rig.mediaId + "/eqB3On", "false");
 
     const auto run = rig.play();
     REQUIRE (rig.runs.find (run) != nullptr);
@@ -7334,6 +7351,11 @@ TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a 
     CHECK (armed.band[1].freq == doctest::Approx (1000.0f));
     CHECK (armed.band[0].gain == doctest::Approx (0.0f));
     CHECK_FALSE (armed.hpf);
+
+    //  A band switched off rides the arm off, its gain kept (2026-09-25).
+    CHECK (armed.band[1].on);
+    CHECK_FALSE (armed.band[2].on);
+    CHECK (armed.band[2].gain == doctest::Approx (-4.0f));
 
     /*  THE ARM CARRIED IT, so the first ticks push nothing through the live
         door: what the voice holds and what the cue says are already one. */
@@ -7378,6 +7400,26 @@ TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a 
             the question is what the row reads, not whether it is there. */
         CHECK (rig.document.getAttribute ("/godot/cue/" + rig.mediaId + "/eqB2Gain").value_or ("?") == "0");
         CHECK (rig.document.getAttribute ("/godot/cue/" + rig.mediaId + "/eqHpf").value_or ("?") == "false");
+    }
+
+    SUBCASE ("and a band's switch is pushed with its gain kept, and eq.reset puts it back on")
+    {
+        const auto pushes = rig.audio.eqPushes;
+
+        rig.submitAndTick ("node.set", { osc::Value::string ("/godot/cue/" + rig.mediaId + "/eqB2On"),
+                                         osc::Value::string ("false") });
+        rig.tickOnce();
+
+        CHECK (rig.audio.eqPushes == pushes + 1);
+        CHECK_FALSE (rig.audio.eqs[track].band[1].on);
+        CHECK (rig.audio.eqs[track].band[1].gain == doctest::Approx (6.0f));
+
+        rig.submitAndTick ("eq.reset", { osc::Value::string (rig.mediaId) });
+        rig.tickOnce();
+
+        CHECK (rig.audio.eqs[track].band[1].on);
+        CHECK (rig.audio.eqs[track].band[2].on);
+        CHECK (rig.document.getAttribute ("/godot/cue/" + rig.mediaId + "/eqB3On").value_or ("?") == "true");
     }
 
     SUBCASE ("and eq.reset on a cue that is not media is refused")

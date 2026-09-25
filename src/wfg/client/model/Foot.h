@@ -110,7 +110,7 @@ namespace wfg::client::model
         CurveReading curve;
 
         /*  THE CUE'S EQ, filled only when the EQ is what is open (Phase 9a):
-            the nineteen rows as one value, the same value the voice is
+            the twenty-three rows as one value, the same value the voice is
             given, with its own notice for a cue that has none. */
         EqReading eq;
 

@@ -439,6 +439,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="eqB1On">
+          <a:documentation>Whether band one is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25). A switch rather than the gain parked at nought, for the reason eqHpf gives: a press that moved a number would move it somewhere, and the number is what somebody decided.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="eqB1Q">
           <a:documentation>The width of band one: higher is narrower. 0.7 is a gentle bell, 5 is a notch. On a shelf it sets how steep the corner is.</a:documentation>
           <data type="double">
@@ -475,6 +484,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="eqB2On">
+          <a:documentation>Whether band two is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="eqB2Q">
           <a:documentation>The width of band two.</a:documentation>
           <data type="double">
@@ -502,6 +520,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="eqB3On">
+          <a:documentation>Whether band three is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="eqB3Q">
           <a:documentation>The width of band three.</a:documentation>
           <data type="double">
@@ -526,6 +553,15 @@
             <param name="minInclusive">-24</param>
             <param name="maxInclusive">24</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="eqB4On">
+          <a:documentation>Whether band four is in the signal. Off takes the band out and keeps its shape, frequency, gain and width, so switching it back on brings back the same band - the press of its gain rotary on a surface page (author, 2026-09-25).</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
       <optional>
@@ -1936,6 +1972,15 @@
             <param name="minInclusive">-120</param>
             <param name="maxInclusive">12</param>
           </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="on">
+          <a:documentation>Whether this send is in the mix. Off contributes nothing and keeps its level, so switching it back on brings back the same send - the press of its rotary on a surface page (author, 2026-09-25). Unlike a send at silence, an off send still says what level it would arrive at.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
         </attribute>
       </optional>
     </element>

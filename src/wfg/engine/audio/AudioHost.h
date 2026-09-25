@@ -495,7 +495,7 @@ namespace wfg::audio
         std::string describe (const std::string& identifier) const;
 
         /*  A track's EQ stage, sitting before its output stage: what a media
-            cue's nineteen eq rows write (Phase 9a). Null for an index no
+            cue's twenty-three eq rows write (Phase 9a). Null for an index no
             track answers to. */
         CueEq* trackEq (int trackIndex) noexcept;
 

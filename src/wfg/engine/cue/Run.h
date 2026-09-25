@@ -411,7 +411,7 @@ namespace wfg::cue
         static constexpr double silentDb = -120.0;
         double meter = silentDb;
 
-        /*  THE EQ THE VOICE WAS LAST GIVEN (Phase 9a): the cue's nineteen rows
+        /*  THE EQ THE VOICE WAS LAST GIVEN (Phase 9a): the cue's twenty-three rows
             as they were carried by the arm, and as `Runner::applyEq` last
             pushed them. Kept on the run so a tick after an edit can say
             what changed for THIS run and push only that, and a tick with no

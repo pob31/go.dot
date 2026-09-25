@@ -33,7 +33,7 @@
 
     CueOutputPlugin's shape line for line, and for its reasons. No automatable
     parameters - `isAutomationNeeded()` would make PluginNode chop the block -
-    so the nineteen settings are atomics on CueEq that the tick thread writes
+    so the twenty-three settings are atomics on CueEq that the tick thread writes
     directly, as it writes the level. Zero latency, no sidechain, the width
     carried on the state because PluginCreationInfo carries nothing else, and
     the `getNumOutputChannelsGivenInputs` override that actually sizes the

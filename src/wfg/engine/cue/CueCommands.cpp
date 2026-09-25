@@ -162,10 +162,10 @@ namespace wfg::cue
 
         //----------------------------------------------------------------------
         /*  THE FLAT BUTTON, AND THE DOUBLE-CLICK ON A ROTARY (Phase 9a): every
-            one of a media cue's nineteen EQ rows back to its default, in ONE
+            one of a media cue's twenty-three EQ rows back to its default, in ONE
             command - so it is one transaction on the show's history and Undo
-            takes the whole reset back as one step, where nineteen node.set
-            records from a client would be nineteen. The defaults are the
+            takes the whole reset back as one step, where twenty-three
+            node.set records from a client would be twenty-three. The defaults are the
             table's own, read off the rows, so this can never disagree with
             what a fresh cue is. */
         registry.add ({ "eq.reset",

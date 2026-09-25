@@ -95,6 +95,7 @@ namespace wfg::audio
             c.freq.store (band.freq, std::memory_order_relaxed);
             c.gain.store (band.gain, std::memory_order_relaxed);
             c.q.store (band.q, std::memory_order_relaxed);
+            c.bandOn.store (band.on ? 1 : 0, std::memory_order_relaxed);
             c.revision.fetch_add (1, std::memory_order_release);
         }
 
@@ -118,6 +119,7 @@ namespace wfg::audio
             band.freq = c.freq.load (std::memory_order_relaxed);
             band.gain = c.gain.load (std::memory_order_relaxed);
             band.q = c.q.load (std::memory_order_relaxed);
+            band.on = c.bandOn.load (std::memory_order_relaxed) != 0;
         }
 
         return out;
@@ -168,6 +170,7 @@ namespace wfg::audio
             band.freq = c.freq.load (std::memory_order_relaxed);
             band.gain = c.gain.load (std::memory_order_relaxed);
             band.q = c.q.load (std::memory_order_relaxed);
+            band.on = c.bandOn.load (std::memory_order_relaxed) != 0;
 
             s.active = EqSettings::bandIsActive (band);
             s.coefficients = s.active ? eqmath::forBand (band, rate) : eqmath::identity();

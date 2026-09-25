@@ -1283,6 +1283,7 @@ element, all `rw` and `persist = show` except where said:
 | `/godot/cue/<id>/sharedOut` | `T`, false | this cue is MEANT to share that out with another (§3.9c). Silences that pair's overlap warning and nothing else |
 | `/godot/send/<id>/bus` | `s`, refers `bus` | the mix channel a `Send` child feeds. One per bus per cue; a second naming the same one is refused at `send.create` |
 | `/godot/send/<id>/level` | `d`, 0, `−120..12` dB | how loud this cue arrives there. −120 is silence and contributes no coefficient at all |
+| `/godot/send/<id>/on` | `T`, true | whether the send is in the mix. Off contributes nothing and keeps the level, so on brings back the same send — the press of its rotary on a surface's Send page (author, 2026-09-25) |
 | `/godot/send/<id>/cue` | `s`, `r` | the cue it belongs to, derived from where it sits. As `feed/cue` |
 
 **A DIRECT OUT IS AN ATTRIBUTE AND A SEND IS A CHILD**, and the asymmetry is the shape of the
@@ -9528,6 +9529,7 @@ resting value is its default.
 | `…/eqLpfFreq` | `d`, 12000 Hz (1000..20000) | rw | show | where the low-pass turns over, second-order |
 | `…/eqB1Shape` | `s`, `peak` (`peak\|lowShelf`) | rw | show | what band one is; the low band is the one that wants to be a shelf |
 | `…/eqB4Shape` | `s`, `peak` (`peak\|highShelf`) | rw | show | what band four is |
+| `…/eqB{1..4}On` | `T`, true | rw | show | whether the band is in the signal; off keeps its shape, frequency, gain and width, so on brings back the same band — the press of a gain rotary on a surface's EQ page (author, 2026-09-25) |
 | `…/eqB{1..4}Freq` | `d`, 100 / 500 / 2000 / 8000 Hz (20..20000) | rw | show | the band's centre, or the shelf's corner |
 | `…/eqB{1..4}Gain` | `d`, 0 dB (−24..24) | rw | show | the band's gain; nought is the band out of the signal, what every band starts and rests at |
 | `…/eqB{1..4}Q` | `d`, 0.7 (0.1..10) | rw | show | the band's width, higher narrower; on a shelf, how steep the corner is |
@@ -9642,7 +9644,11 @@ state, float in and out. Every number is one `std::atomic<float>`, every flag an
 `std::atomic<int>`, and each band carries a revision the setter bumps; `process` recomputes only
 the bands whose revision moved, at the block boundary, with no crossfade (plan decision 7): a
 rotary at 50 Hz makes small steps, and a one-block ramp is the fix if a large step ever clicks.
-There is no per-band enable — a peak at 0 dB is out, and `eqOn` is the one bypass (plan decision 5).
+There was no per-band enable in 9a — a peak at 0 dB is out, and `eqOn` is the one bypass (plan
+decision 5). **Amended 2026-09-25:** each band gained its own switch, `eqB<n>On`, because the author
+asked for a rotary's press to switch a band in and out, and a press that parked the gain at nought
+would lose the number somebody decided. A band that is off is out exactly as a band at nought is;
+its control carries an `std::atomic<int>` beside the numbers, bumped with the same revision.
 
 **When every band is identity the block is not touched**, and that is a test rather than an
 optimisation: every render driver in the tree — `first_sound.py`, `phase6_sampler.py`, whose

@@ -407,7 +407,7 @@ namespace wfg::client
                                                  double level)
                                          { send (gesture::createSend (cueId, busId, level)); };
 
-                /*  FLAT IS ONE COMMAND (Phase 9a): nineteen rows back in one
+                /*  FLAT IS ONE COMMAND (Phase 9a): twenty-three rows back in one
                     transaction, which is one step to undo. */
                 footActions.resetEq = [this] (const std::string& cueId)
                                       { send (gesture::eqReset (cueId)); };

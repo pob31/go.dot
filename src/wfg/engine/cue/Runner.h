@@ -781,7 +781,7 @@ namespace wfg::cue
             tree it may edit meanwhile. */
         std::vector<RangeSpec> rangesOf (const juce::ValueTree& cue) const;
 
-        /** The cue's nineteen EQ rows, read through the schema so a saved
+        /** The cue's twenty-three EQ rows, read through the schema so a saved
             flat EQ - which the writer omits - reads as flat. */
         audio::EqSettings eqOf (const juce::ValueTree& cue) const;
 
@@ -829,7 +829,7 @@ namespace wfg::cue
 
         /*  A sounding cue's EQ, kept up with the document (Phase 9a): the
             routing pass's shape, gated on the same revision, pushing only
-            the runs whose nineteen rows differ from what the voice holds. */
+            the runs whose twenty-three rows differ from what the voice holds. */
         void applyEq();
         void applyFx();
 

@@ -19,15 +19,16 @@
 /*
     A media cue's EQ, as a value.
 
-    Nineteen numbers and flags: whether the EQ is in at all, a high-pass and a
-    low-pass each with a flag and a frequency, and four bands each with a
-    shape, a frequency, a gain and a width. The document holds them as nineteen
-    rows on the media cue (namespace draft §17.2); this is the same nineteen
+    Twenty-three numbers and flags: whether the EQ is in at all, a high-pass
+    and a low-pass each with a flag and a frequency, and four bands each with a
+    switch, a shape, a frequency, a gain and a width. The document holds them
+    as twenty-three rows on the media cue (namespace draft §17.2; the band
+    switches since 2026-09-25); this is the same twenty-three
     as one struct, which is what crosses from the tick thread to the audio
     side - in an ArmRequest at arm, and through CueEq::set while a cue sounds.
 
     NAMES NO JUCE OR TRACKTION TYPE, deliberately. The desktop client's EQ
-    panel reads the same nineteen off the tree and draws the response through
+    panel reads the same twenty-three off the tree and draws the response through
     EqMath.h, which takes this struct; the client boundary forbids JUCE in
     model/ and the DSP is happier without it anyway.
 
@@ -64,6 +65,12 @@ namespace wfg::audio
             float freq = 1000.0f;
             float gain = 0.0f;
             float q = 0.7f;
+
+            /** Whether the band is in the signal (media/eqB<n>On). Off keeps
+                every number, so switching it back on brings back the same
+                band - the click of a rotary on a page. Last, so a braced
+                shape-frequency-gain-width reads as a band that is on. */
+            bool on = true;
         };
 
         static constexpr int numBands = 4;
@@ -82,11 +89,13 @@ namespace wfg::audio
         /** The resting state: every gain nought, both filters off, on. */
         static EqSettings flat() noexcept { return {}; }
 
-        /** Whether a band contributes anything: a gain of exactly nought is a
-            band out of the signal, whatever its frequency and width say. */
+        /** Whether a band contributes anything: a band switched off, or with a
+            gain of exactly nought, is out of the signal, whatever its
+            frequency and width say. */
         static bool bandIsActive (const Band& b) noexcept
         {
-            return std::bit_cast<std::uint32_t> (b.gain) != std::bit_cast<std::uint32_t> (0.0f)
+            return b.on
+                && std::bit_cast<std::uint32_t> (b.gain) != std::bit_cast<std::uint32_t> (0.0f)
                 && std::bit_cast<std::uint32_t> (b.gain) != std::bit_cast<std::uint32_t> (-0.0f);
         }
 
@@ -130,6 +139,7 @@ namespace wfg::audio
         static bool sameBand (const Band& a, const Band& b) noexcept
         {
             return a.shape == b.shape
+                && a.on == b.on
                 && sameFloat (a.freq, b.freq)
                 && sameFloat (a.gain, b.gain)
                 && sameFloat (a.q, b.q);

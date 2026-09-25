@@ -51,7 +51,7 @@ namespace wfg::client::model
         std::string notice;
     };
 
-    /** The cue's nineteen rows, by exact address, as one value. */
+    /** The cue's twenty-three rows, by exact address, as one value. */
     EqReading readEq (const tree::TreeSnapshot&, const std::string& cueId);
 
     /** One point of the drawn response. */

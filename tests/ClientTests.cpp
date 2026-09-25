@@ -5182,6 +5182,28 @@ TEST_CASE ("client: a media cue's EQ is read back as the value the voice gets, a
     CHECK (model::eqShapeFor ("highShelf") == audio::EqSettings::Shape::highShelf);
     CHECK (std::string (model::eqShapeWord (audio::EqSettings::Shape::lowShelf)) == "lowShelf");
 
+    SUBCASE ("and a band switched off reads off, its gain kept, and draws flat")
+    {
+        /*  eqB<n>On (author, 2026-09-25): the press of a gain rotary. */
+        CHECK (eq.settings.band[1].on);
+
+        rig.apply (5, "window", "node.set", { osc::Value::string ("/godot/cue/" + cue + "/eqB2On"),
+                                              osc::Value::boolean (false) });
+        const auto off = model::readEq (*rig.publish (6), cue);
+
+        CHECK_FALSE (off.settings.band[1].on);
+        CHECK (off.settings.band[1].gain == doctest::Approx (6.0f));
+        CHECK (off.settings.band[0].on);
+
+        auto middle = model::eqCurve (off.settings, 48000.0, 241).front();
+
+        for (const auto& point : model::eqCurve (off.settings, 48000.0, 241))
+            if (std::abs (point.frequency - 500.0) < std::abs (middle.frequency - 500.0))
+                middle = point;
+
+        CHECK (middle.db == doctest::Approx (0.0).epsilon (0.05));
+    }
+
     SUBCASE ("and a cue that is not media has none, and says so")
     {
         Rig memo;
