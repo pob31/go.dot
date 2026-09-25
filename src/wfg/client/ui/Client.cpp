@@ -67,6 +67,7 @@
 #include <wfg/client/ui/ShowSettingsWindow.h>
 #include <wfg/client/ui/SurfacePanelComponent.h>
 #include <wfg/client/ui/MainWindow.h>
+#include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/Shell.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/audio/MediaInfo.h>
@@ -422,6 +423,18 @@ namespace wfg::client
                         shell->setFoot ({ model::Subject::Kind::eq, cueId });
                 };
 
+                /*  EDIT... OPENS THE PLUGIN'S OWN WINDOW (author, 2026-09-25),
+                    in a helper process the client keeps: a machine-local
+                    thing, like a file chooser, so no command - what the window
+                    then DOES is ordinary writes. Read against the last pass's
+                    snapshot, as every gesture between passes is. */
+                footActions.editPlugin = [this] (const std::string& cueId, const std::string& pluginId)
+                {
+                    if (editors != nullptr && latest != nullptr)
+                        editors->edit (*latest, cueId, pluginId,
+                                       model::isYes (model::flag (*latest, "/godot/document/locked")));
+                };
+
                 footActions.openTimelineOn = [this] (const std::string& groupId)
                 {
                     if (shell != nullptr && ! groupId.empty())
@@ -451,6 +464,30 @@ namespace wfg::client
                                                             std::move (undoActions),
                                                             std::move (footActions));
                 shell = content.get();
+
+                /*  THE PLUGINS' OWN WINDOWS: what they move is one node.set a
+                    value, with origin window, like a slider; their close
+                    buttons end their helpers; the show's keys pressed in them
+                    come back to this window's own key handling. */
+                ui::PluginEditors::Actions editing;
+                editing.set = [this] (const std::string& address, const std::string& text)
+                              { send (gesture::setNode (address, text)); };
+                editing.createFx = [this] (const std::string& cueId, const std::string& pluginId)
+                                   { send (gesture::createFx (cueId, pluginId)); };
+                editing.key = [this] (bool escape)
+                {
+                    if (shell != nullptr)
+                        shell->keyPressed (juce::KeyPress (escape ? juce::KeyPress::escapeKey
+                                                                  : juce::KeyPress::spaceKey));
+                };
+                editing.changed = [this]
+                {
+                    if (shell != nullptr && editors != nullptr)
+                        shell->foot.setEditorWords (editors->words());
+                };
+
+                editors = std::make_unique<ui::PluginEditors> (std::move (editing), host.describePlugin,
+                                                               host.pluginWorkFolder);
 
                 window = std::make_unique<ui::MainWindow> (titleFor (""),
                                                             ui::Look::colour (theme, "ground"),
@@ -1222,6 +1259,11 @@ namespace wfg::client
 
                     shell->foot.show (model::readFoot (*snapshot, subject), mediaTable);
                 }
+
+                /*  AND EVERY OPEN PLUGIN WINDOW FOLLOWS THE PICK, from this
+                    same snapshot; the lock closes them. */
+                if (editors != nullptr)
+                    editors->follow (*snapshot, selection.anchor(), model::isYes (reading.locked));
 
                 //  What a move just did to the moved cue's own output, if anything.
                 sayIfTheMoveClashed (*snapshot, reading.revision);
@@ -2053,6 +2095,11 @@ namespace wfg::client
             std::unique_ptr<ui::ShowSettingsWindow> audioSettings;
             std::unique_ptr<ui::SurfaceWindow> surfaces;    // Show > Surfaces..., made on first open
             ui::Shell* shell = nullptr;                     // owned by the window
+
+            /*  The plugins' own windows, each a helper process. Declared after
+                the window, so it goes first: its helpers are told to leave
+                while everything they report to still stands. */
+            std::unique_ptr<ui::PluginEditors> editors;
 
             /*  The rows, cached against the show's revision. Declared after the
                 window only because nothing in it points back: it is plain data

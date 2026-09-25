@@ -71,54 +71,6 @@ namespace wfg::cue
         return splitFx (address).has_value();
     }
 
-    std::map<int, double> parseFxValues (const std::string& text)
-    {
-        std::map<int, double> out;
-        std::istringstream in (text);
-        std::string pair;
-
-        while (in >> pair)
-        {
-            const auto colon = pair.find (':');
-
-            if (colon == std::string::npos || colon == 0)
-                continue;
-
-            /*  The index is digits and nothing else: atoi reads "x" as nought,
-                which would hand a stray word to parameter nought. */
-            const auto digits = pair.substr (0, colon);
-            const auto numeric = ! digits.empty()
-                                   && std::all_of (digits.begin(), digits.end(),
-                                                   [] (char c) { return c >= '0' && c <= '9'; });
-
-            if (! numeric || digits.size() > 6)
-                continue;
-
-            const auto index = std::atoi (digits.c_str());
-            const auto value = osc::parseDouble (pair.substr (colon + 1));
-
-            if (value.has_value() && std::isfinite (*value))
-                out[index] = std::clamp (*value, 0.0, 1.0);
-        }
-
-        return out;
-    }
-
-    std::string formatFxValues (const std::map<int, double>& values)
-    {
-        std::string out;
-
-        for (const auto& [index, value] : values)
-        {
-            if (! out.empty())
-                out += ' ';
-
-            out += std::to_string (index) + ":" + osc::formatDouble (value);
-        }
-
-        return out;
-    }
-
     //==============================================================================
     doc::LiveWrite fxWriteFor (doc::ShowDocument& document, const plugin::CatalogueStore* catalogues)
     {

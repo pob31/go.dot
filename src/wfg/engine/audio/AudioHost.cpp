@@ -1642,6 +1642,19 @@ namespace wfg::audio
         return impl->matrices[static_cast<std::size_t> (trackIndex)];
     }
 
+    std::string AudioHost::describe (const std::string& identifier) const
+    {
+        if (impl->engine == nullptr)
+            return {};
+
+        if (const auto description = impl->engine->getPluginManager().knownPluginList
+                                           .getTypeForIdentifierString (juce::String (identifier)))
+            if (const auto xml = description->createXml())
+                return xml->toString().toStdString();
+
+        return {};
+    }
+
     std::vector<plugin::KnownPlugin> AudioHost::knownPlugins() const
     {
         std::vector<plugin::KnownPlugin> out;

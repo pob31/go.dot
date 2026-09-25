@@ -16,6 +16,7 @@
 
 #include <wfg/engine/plugin/PluginHostChild.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/plugin/SharedRegion.h>
 
@@ -277,66 +278,15 @@ namespace wfg::plugin
 
                 for (int i = 0; i < instanceCount; ++i)
                 {
-                    juce::String error;
-                    auto instance = manager.createPluginInstance (description, sampleRate, blockSize, error);
+                    /*  THE SAME MAKING AS THE EDITING HELPER'S (PluginLoad.h):
+                        the voice's width, the preparation, the preset - so a
+                        cue edited in the plugin's own window starts where a
+                        voice starts. */
+                    auto instance = makeInsertInstance (manager, description, channels, sampleRate,
+                                                        blockSize, preset, problem);
 
                     if (instance == nullptr)
-                    {
-                        problem = "could not create " + description.name.toStdString() + ": "
-                                    + (error.isEmpty() ? std::string ("no reason given") : error.toStdString());
                         return false;
-                    }
-
-                    /*  THE VOICE'S WIDTH, asked for on the main buses. A plugin
-                        that answers with another width is not argued with: the
-                        scratch buffer is as wide as it wants, and the voice's
-                        channels are the first of them. One that has no main
-                        input at all - an instrument - is refused: an insert on
-                        a voice must take audio. */
-                    const auto wanted = juce::AudioChannelSet::canonicalChannelSet (channels);
-                    auto layout = instance->getBusesLayout();
-
-                    if (! layout.inputBuses.isEmpty())  layout.inputBuses.getReference (0) = wanted;
-                    if (! layout.outputBuses.isEmpty()) layout.outputBuses.getReference (0) = wanted;
-
-                    if (! instance->setBusesLayout (layout))
-                        instance->enableAllBuses();
-
-                    if (instance->getTotalNumInputChannels() <= 0 || instance->getTotalNumOutputChannels() <= 0)
-                    {
-                        problem = description.name.toStdString() + " takes no audio in or gives none out, so it"
-                                  " cannot be an insert on a voice";
-                        return false;
-                    }
-
-                    instance->setNonRealtime (false);
-                    instance->prepareToPlay (sampleRate, blockSize);
-
-                    if (preset.existsAsFile())
-                    {
-                        juce::MemoryBlock bytes;
-
-                        if (! preset.loadFileAsData (bytes))
-                        {
-                            problem = "could not read the preset " + preset.getFullPathName().toStdString();
-                            return false;
-                        }
-
-                        /*  A .vstpreset goes to the VST3 client, whose loader is
-                            the SDK's own; any other state goes the JUCE way. */
-                        auto applied = false;
-
-                        if (auto* vst3 = instance->getVST3Client())
-                            applied = vst3->setPreset (bytes);
-
-                        if (! applied)
-                        {
-                            instance->setStateInformation (bytes.getData(), static_cast<int> (bytes.getSize()));
-                            applied = true;
-                        }
-
-                        juce::ignoreUnused (applied);
-                    }
 
                     width = std::max ({ width, channels, instance->getTotalNumInputChannels(),
                                         instance->getTotalNumOutputChannels() });
@@ -478,20 +428,6 @@ namespace wfg::plugin
             juce::AudioBuffer<float> scratch;
             int width = 0;
         };
-
-        bool readDescription (const std::string& path, juce::PluginDescription& description, std::string& problem)
-        {
-            const juce::File file { juce::String (path) };
-            const auto xml = juce::parseXML (file);
-
-            if (xml == nullptr || ! description.loadFromXml (*xml))
-            {
-                problem = "no plugin description at " + path;
-                return false;
-            }
-
-            return true;
-        }
 
         /*  `wfg plugin-host --catalogue-only --description=<file>`: one
             instance, the catalogue on stdout as JSON, and out. No region, no

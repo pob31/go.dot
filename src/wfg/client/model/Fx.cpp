@@ -95,6 +95,16 @@ namespace wfg::client::model
     }
 
     //==============================================================================
+    std::map<std::string, HeldInsert> insertsOf (const tree::TreeSnapshot& snapshot, const std::string& cueId)
+    {
+        std::map<std::string, HeldInsert> out;
+
+        for (const auto& [plugin, held] : fxOfCue (snapshot, cueId))
+            out[plugin] = { held.id, held.enabled };
+
+        return out;
+    }
+
     std::string stateSentence (const FxStrip& strip)
     {
         const auto& word = strip.state;

@@ -5,6 +5,7 @@
 #include <wfg/client/ui/InspectorComponent.h>
 #include <wfg/client/ui/EqPanelComponent.h>
 #include <wfg/client/ui/FxPanelComponent.h>
+#include <wfg/client/ui/PluginEditors.h>
 #include <wfg/client/ui/SendMixerComponent.h>
 #include <wfg/client/ui/RangeTableComponent.h>
 #include <wfg/client/ui/RunPaneComponent.h>
@@ -18,7 +19,10 @@
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/command/Event.h>
 #include <wfg/engine/osc/OscValue.h>
+#include <wfg/engine/plugin/EditorHost.h>
+#include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <algorithm>
 #include <cmath>
 #include <memory>
 #include <string>
@@ -1248,4 +1252,188 @@ TEST_CASE ("fx panel: a picture of it, when somebody asks for one")
     juce::PNGImageFormat png;
     CHECK (png.writeImageToStream (picture, out));
     MESSAGE ("wrote " << file.getFullPathName().toStdString());
+}
+
+namespace
+{
+    /*  A TREE BY HAND: the few nodes the plugin windows read, sorted as a
+        snapshot must be. Enough for a media cue with the test gain switched
+        in, a memo beside it, and the set's one entry. */
+    std::shared_ptr<const wfg::tree::TreeSnapshot> editorTree (bool withInsert)
+    {
+        std::vector<wfg::tree::Node> nodes;
+
+        const auto add = [&nodes] (const std::string& address, wfg::osc::Value value)
+        {
+            wfg::tree::Node node;
+            node.address = address;
+            node.values.push_back (std::move (value));
+            nodes.push_back (std::move (node));
+        };
+
+        using wfg::osc::Value;
+        add ("/godot/cue/CUE00001/kind", Value::string ("media"));
+        add ("/godot/cue/CUE00001/name", Value::string ("Steady"));
+        add ("/godot/cue/CUE00001/number", Value::string ("1"));
+        add ("/godot/cue/CUE00002/kind", Value::string ("memo"));
+        add ("/godot/cue/CUE00002/name", Value::string ("Memo"));
+        add ("/godot/cue/CUE00002/number", Value::string ("2"));
+
+        if (withInsert)
+        {
+            add ("/godot/fx/FX7N0001/cue", Value::string ("CUE00001"));
+            add ("/godot/fx/FX7N0001/enabled", Value::boolean (true));
+            add ("/godot/fx/FX7N0001/plugin", Value::string ("PG7N0001"));
+            add ("/godot/fx/FX7N0001/values", Value::string ("0:0.25"));
+        }
+
+        add ("/godot/plugin/PG7N0001/identifier", Value::string ("godot:test-gain"));
+        add ("/godot/plugin/PG7N0001/name", Value::string ("Test gain"));
+        add ("/godot/plugin/PG7N0001/paramCount", Value::string ("2"));
+
+        std::sort (nodes.begin(), nodes.end(), [] (const auto& a, const auto& b) { return a.address < b.address; });
+        return std::make_shared<const wfg::tree::TreeSnapshot> (1, nullptr, nullptr, std::move (nodes));
+    }
+
+    wfg::plugin::EditorLaunch launchOfThisBinary()
+    {
+        wfg::plugin::EditorLaunch launch;
+        launch.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile).getFullPathName().toStdString();
+        launch.leadingArgs = { "plugin-editor" };
+        return launch;
+    }
+
+    /** The editors' timer, turned by hand until `done` or a deadline. */
+    template <typename Done>
+    bool serviceUntil (ui::PluginEditors& editors, Done done, int milliseconds = 10000)
+    {
+        const auto until = juce::Time::getMillisecondCounter() + static_cast<juce::uint32> (milliseconds);
+
+        while (juce::Time::getMillisecondCounter() < until)
+        {
+            editors.service();
+
+            if (done())
+                return true;
+
+            juce::Thread::sleep (10);
+        }
+
+        editors.service();
+        return done();
+    }
+}
+
+TEST_CASE ("plugin windows: Edit... opens a helper on the cue, a turn is one write on its insert, the lock closes it")
+{
+    /*  The author's design, 2026-09-25: the plugin's own window, in a helper
+        process, following the pick. Driven here headless - the helper is this
+        test binary - with the tree built by hand, so what is pinned is the
+        client's half: which helper opens, what it is told, where what it
+        reports is written, and when it goes. */
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("wfg-editors-ui-" + juce::Uuid().toDashedString());
+
+    std::vector<std::pair<std::string, std::string>> written, made;
+    auto changes = 0;
+
+    ui::PluginEditors::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text) { written.emplace_back (address, text); };
+    actions.createFx = [&] (const std::string& cue, const std::string& plugin) { made.emplace_back (cue, plugin); };
+    actions.changed = [&] { ++changes; };
+
+    {
+        ui::PluginEditors editors (actions, {}, folder.getFullPathName().toStdString(), launchOfThisBinary(), true);
+        const auto tree = editorTree (true);
+
+        editors.edit (*tree, "CUE00001", "PG7N0001", false);
+        auto* host = editors.hostFor ("PG7N0001");
+        REQUIRE (host != nullptr);
+        CHECK (made.empty());
+
+        //  Up, on the cue, at the cue's value - and saying so in the chain's words.
+        REQUIRE (serviceUntil (editors, [&] { return host->status() == wfg::plugin::EditorHost::Status::open
+                                                     && host->subjectTaken() >= 1u
+                                                     && std::abs (host->currentValue (0) - 0.25f) < 1.0e-4f; }));
+        CHECK (editors.words().at ("PG7N0001") == "its window is open");
+        CHECK (changes > 0);
+        CHECK (written.empty());
+
+        SUBCASE ("a turn in the plugin's window is one node.set on that cue's insert")
+        {
+            host->poke (0, 0.7f);
+            REQUIRE (serviceUntil (editors, [&] { return ! written.empty(); }));
+            REQUIRE (written.size() == 1);
+            CHECK (written[0] == std::pair<std::string, std::string> ("/godot/fx/FX7N0001/p0", "0.7"));
+        }
+
+        SUBCASE ("the window follows the pick, and on a memo a turn goes nowhere")
+        {
+            editors.follow (*tree, "CUE00002", false);
+            REQUIRE (serviceUntil (editors, [&] { return host->subjectTaken() >= 2u; }));
+
+            host->poke (0, 0.1f);
+            juce::Thread::sleep (150);
+            editors.service();
+            CHECK (written.empty());
+        }
+
+        SUBCASE ("the lock closes every window and says why")
+        {
+            editors.follow (*tree, "CUE00001", true);
+            CHECK (editors.hostFor ("PG7N0001") == nullptr);
+            CHECK (editors.words().at ("PG7N0001") == "closed: the show is locked");
+
+            //  And Edit... under the lock says why rather than opening.
+            editors.edit (*tree, "CUE00001", "PG7N0001", true);
+            CHECK (editors.hostFor ("PG7N0001") == nullptr);
+            CHECK (editors.words().at ("PG7N0001").find ("locked") != std::string::npos);
+        }
+
+        SUBCASE ("its close button ends the helper, and the box goes quiet")
+        {
+            host->poke (-2, 0.0f);
+            REQUIRE (serviceUntil (editors, [&] { return editors.hostFor ("PG7N0001") == nullptr; }, 5000));
+            CHECK (editors.words().count ("PG7N0001") == 0);
+        }
+    }
+
+    folder.deleteRecursively();
+}
+
+TEST_CASE ("plugin windows: Edit... on an insert the cue has not got switches it in, then opens")
+{
+    const auto folder = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                            .getChildFile ("wfg-editors-ui-" + juce::Uuid().toDashedString());
+
+    std::vector<std::pair<std::string, std::string>> made;
+
+    ui::PluginEditors::Actions actions;
+    actions.createFx = [&] (const std::string& cue, const std::string& plugin) { made.emplace_back (cue, plugin); };
+
+    {
+        ui::PluginEditors editors (actions, {}, folder.getFullPathName().toStdString(), launchOfThisBinary(), true);
+
+        editors.edit (*editorTree (false), "CUE00001", "PG7N0001", false);
+        REQUIRE (made.size() == 1);
+        CHECK (made[0] == std::pair<std::string, std::string> ("CUE00001", "PG7N0001"));
+        CHECK (editors.hostFor ("PG7N0001") == nullptr);
+        CHECK (editors.words().at ("PG7N0001").find ("switching it in") != std::string::npos);
+
+        SUBCASE ("the tree shows the insert: the window opens")
+        {
+            editors.follow (*editorTree (true), "CUE00001", false);
+            CHECK (editors.hostFor ("PG7N0001") != nullptr);
+        }
+
+        SUBCASE ("the pick moves on first: it is forgotten")
+        {
+            editors.follow (*editorTree (false), "CUE00002", false);
+            editors.follow (*editorTree (true), "CUE00002", false);
+            CHECK (editors.hostFor ("PG7N0001") == nullptr);
+            CHECK (editors.words().count ("PG7N0001") == 0);
+        }
+    }
+
+    folder.deleteRecursively();
 }

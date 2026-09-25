@@ -489,6 +489,11 @@ namespace wfg::audio
             that never had one. */
         std::vector<plugin::KnownPlugin> knownPlugins() const;
 
+        /*  One scanned plugin's description, as the XML a child makes it
+            from - for the editing helper a plugin's own window runs in.
+            Empty when this machine's scan does not know the identifier. */
+        std::string describe (const std::string& identifier) const;
+
         /*  A track's EQ stage, sitting before its output stage: what a media
             cue's nineteen eq rows write (Phase 9a). Null for an index no
             track answers to. */

@@ -96,6 +96,16 @@ namespace wfg
             then be empty or absent. Answers a sentence for the reader when it
             could not, and nothing when the window is on its way. */
         std::function<std::string (const std::string& folder, bool createNew)> openWindow;
+
+        /*  A PLUGIN'S OWN WINDOW (author, 2026-09-25) is opened by the client
+            in a helper process, and the helper makes its plugin from the
+            description this machine's scan wrote - which the engine has and
+            the tree does not carry, being tens of lines of XML a plugin.
+            Empty when the scan does not know the identifier. */
+        std::function<std::string (const std::string& identifier)> describePlugin;
+
+        /** Where the helpers' shared regions go: the engine's cache, under editor/. */
+        std::string pluginWorkFolder;
     };
 
     /** Builds the client, or returns nullptr having said why on stderr. */

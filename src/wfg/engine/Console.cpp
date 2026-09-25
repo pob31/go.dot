@@ -28,6 +28,7 @@
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/plugin/PluginCommands.h>
+#include <wfg/engine/plugin/PluginEditorChild.h>
 #include <wfg/engine/plugin/PluginHostChild.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
@@ -4168,8 +4169,30 @@ namespace
 
             if (wantWindow)
             {
-                client = makeClient ({ engine, parameters, &mediaInfo,
-                                       [] { interrupted = 1; }, themePath, launchAnother });
+                wfg::ClientHost clientHost { engine, parameters, &mediaInfo,
+                                             [] { interrupted = 1; }, themePath, launchAnother };
+
+                /*  A PLUGIN'S DESCRIPTION, for its editing helper: off this
+                    machine's scan, which the audio host has open when there
+                    is one, and read from the shared storage when there is
+                    not - a moment's work, once per plugin, when Edit... is
+                    first pressed. */
+                clientHost.describePlugin = [&driver, &deviceDriver] (const std::string& identifier)
+                {
+                    if (driver != nullptr)
+                        return driver->host().describe (identifier);
+
+                    if (deviceDriver != nullptr)
+                        return deviceDriver->host().describe (identifier);
+
+                    return wfg::plugin::describePlugin (engineCacheFolder().getFullPathName().toStdString(),
+                                                        identifier);
+                };
+
+                clientHost.pluginWorkFolder = engineCacheFolder().getChildFile ("editor")
+                                                                 .getFullPathName().toStdString();
+
+                client = makeClient (clientHost);
 
                 if (client == nullptr)
                     return 2;   // the factory has already said why
@@ -4287,6 +4310,12 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
         one plugin's sandbox and nothing else, dispatched before the locale
         and the verbs for the same reason. */
     if (int childExit = 0; wfg::plugin::runPluginHostIfAsked (argc, argv, childExit))
+        return childExit;
+
+    /*  AND A PLUGIN'S EDITING HELPER (author, 2026-09-25): `wfg plugin-editor
+        …` is one plugin's own window, in a process of its own so a crash in
+        it takes down a window and never a voice. */
+    if (int childExit = 0; wfg::plugin::runPluginEditorIfAsked (argc, argv, childExit))
         return childExit;
 
     if (const auto localeFailure = applyLocaleAndStrip (argc, argv); localeFailure != 0)

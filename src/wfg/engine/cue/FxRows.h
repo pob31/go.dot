@@ -42,6 +42,7 @@
     round-trips under every locale and a diff of two shows reads.
 */
 
+#include <wfg/engine/cue/FxValues.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/plugin/Catalogue.h>
@@ -55,14 +56,6 @@ namespace wfg::cue
 {
     /** `/godot/fx/<id>/p<n>`, and nothing else. */
     bool isFxParameterAddress (const std::string& address);
-
-    /*  The sparse row, parsed: index to normalised value, sorted. Doubles,
-        as the document holds numbers, so what was written is what is spelled
-        back; the audio side takes a float at its own boundary. */
-    std::map<int, double> parseFxValues (const std::string& text);
-
-    /** The row's spelling for a map, canonical. */
-    std::string formatFxValues (const std::map<int, double>& values);
 
     /** The door. `catalogues` may be null: then any index is accepted. */
     doc::LiveWrite fxWriteFor (doc::ShowDocument& document, const plugin::CatalogueStore* catalogues);

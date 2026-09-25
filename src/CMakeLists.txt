@@ -103,6 +103,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/DcaTable.h
     wfg/engine/cue/LiveRows.h
     wfg/engine/cue/LiveRows.cpp
+    wfg/engine/cue/FxValues.h
+    wfg/engine/cue/FxValues.cpp
     wfg/engine/cue/FxRows.h
     wfg/engine/cue/FxRows.cpp
     wfg/engine/midi/MidiInputs.h
@@ -127,13 +129,22 @@ add_library(wfg_engine STATIC
     wfg/engine/plugin/PluginScan.h
     wfg/engine/plugin/PluginScan.cpp
     wfg/engine/plugin/ProcessUtil.h
+    wfg/engine/plugin/ChildLaunch.h
+    wfg/engine/plugin/ChildLaunch.cpp
     wfg/engine/plugin/SharedRegion.h
     wfg/engine/plugin/ProxyLane.h
     wfg/engine/plugin/ProxyLane.cpp
     wfg/engine/plugin/ProxyHost.h
     wfg/engine/plugin/ProxyHost.cpp
+    wfg/engine/plugin/PluginLoad.h
+    wfg/engine/plugin/PluginLoad.cpp
     wfg/engine/plugin/PluginHostChild.h
     wfg/engine/plugin/PluginHostChild.cpp
+    wfg/engine/plugin/EditorRegion.h
+    wfg/engine/plugin/EditorHost.h
+    wfg/engine/plugin/EditorHost.cpp
+    wfg/engine/plugin/PluginEditorChild.h
+    wfg/engine/plugin/PluginEditorChild.cpp
     wfg/engine/plugin/PluginCommands.h
     wfg/engine/plugin/PluginCommands.cpp
     wfg/engine/audio/AudioCommands.h
@@ -324,6 +335,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Eq.cpp
     wfg/client/model/Fx.h
     wfg/client/model/Fx.cpp
+    wfg/client/model/FxEditor.h
+    wfg/client/model/FxEditor.cpp
     wfg/client/model/Timeline.h
     wfg/client/model/Timeline.cpp
     wfg/client/model/View.h
@@ -395,6 +408,8 @@ add_library(wfg_client_ui STATIC
     wfg/client/ui/EqPanelComponent.cpp
     wfg/client/ui/FxPanelComponent.h
     wfg/client/ui/FxPanelComponent.cpp
+    wfg/client/ui/PluginEditors.h
+    wfg/client/ui/PluginEditors.cpp
     wfg/client/ui/TimelineComponent.h
     wfg/client/ui/TimelineComponent.cpp
     wfg/client/ui/Shell.h

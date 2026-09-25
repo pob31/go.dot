@@ -40,6 +40,7 @@
 
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <map>
 #include <string>
 #include <vector>
 
@@ -107,6 +108,16 @@ namespace wfg::client::model
 
     /** "64 samples late while it is in", or nothing for an entry that adds none. */
     std::string latencyWords (const FxStrip&);
+
+    /** One insert the cue holds: its Fx, and whether it is in the signal. */
+    struct HeldInsert
+    {
+        std::string fxId;
+        bool enabled = true;
+    };
+
+    /** The cue's inserts, by the set entry each is for. */
+    std::map<std::string, HeldInsert> insertsOf (const tree::TreeSnapshot&, const std::string& cueId);
 
     /** `/godot/fx/<id>/<leaf>`. */
     std::string fxAddress (const std::string& fxId, const std::string& leaf);

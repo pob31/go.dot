@@ -99,6 +99,7 @@ add_executable(wfg_tests
     PluginSetTests.cpp
     PluginCatalogueTests.cpp
     ProxyTests.cpp
+    EditorHelperTests.cpp
     FxRowsTests.cpp
     McuCodecTests.cpp
     DcaTests.cpp
