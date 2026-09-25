@@ -48,6 +48,14 @@ namespace wfg::tree
         constexpr std::string_view rootAddress = "/";
         constexpr std::string_view godot = "/godot";
 
+        /*  The rows a surface's page publishes (2026-09-25), which the runtime
+            half carries and the document half must therefore skip: two halves
+            publishing one address is a duplicate `find` answers arbitrarily. */
+        bool isPageRow (const std::string& name) noexcept
+        {
+            return name == "page" || name == "pageIndex" || name == "pageCount" || name == "edited";
+        }
+
         Access accessFor (doc::Access access) noexcept
         {
             switch (access)
@@ -1090,6 +1098,9 @@ namespace wfg::tree
         /*  And every strip, for what it is riding and its word. */
         std::vector<DeclaredStrip> stripOrder;
 
+        /*  And every surface, for the page its rotaries show (2026-09-25). */
+        std::vector<std::string> surfaceOrder;
+
         for (const auto& container : showNode)
         {
             const auto containerName = container.getType().toString().toStdString();
@@ -1324,7 +1335,19 @@ namespace wfg::tree
                 for (const auto* row : doc::Schema::rowsForOwner ("surfaces"))
                 {
                     const auto name = std::string (row->name);
-                    const auto text = name == "order" ? orderOf (container, "Surface") : std::string {};
+                    std::string text;
+
+                    if (name == "order")
+                        text = orderOf (container, "Surface");
+
+                    /*  THE AIM, from the table `surface.aim` writes - cached
+                        here safely because every applied command rebuilds
+                        this half, and that includes the aim's own. A cue
+                        deleted since is no aim: empty, and an Undo of the
+                        delete brings it back, since the table still names it. */
+                    if (name == "aim" && surfaces != nullptr && ! surfaces->aim().empty()
+                          && document.findById (surfaces->aim()).isValid())
+                        text = surfaces->aim();
 
                     nodes.push_back (makeLeaf (std::string (godot) + "/surface/" + name,
                                                *row, text));
@@ -1349,10 +1372,17 @@ namespace wfg::tree
                         if (strip.getType().toString() == "Strip")
                             ++stripCount;
 
+                    surfaceOrder.push_back (id);
+
                     for (const auto* row : doc::Schema::rowsForOwner ("surface"))
                     {
                         const doc::Attribute attribute { "Surface", row };
                         const auto name = std::string (row->name);
+
+                        /*  THE PAGE ROWS ARE THE RUNTIME HALF'S: a page moves
+                            with no command, so a cached copy would freeze. */
+                        if (isPageRow (name))
+                            continue;
 
                         std::string text;
 
@@ -1695,6 +1725,7 @@ namespace wfg::tree
         declaredDcas = std::move (dcaOrder);
         declaredPlugins = std::move (pluginOrder);
         declaredStrips = std::move (stripOrder);
+        declaredSurfaces = std::move (surfaceOrder);
 
         //----------------------------------------------------------------------
         /*  Commands, as write-only method nodes. `node.set` is deliberately
@@ -2438,6 +2469,32 @@ namespace wfg::tree
             runtime.push_back (makeLeaf (std::string (godot) + "/run/" + std::string (row->name),
                                          *row, runOrder));
 
+        /*  WHAT EACH SURFACE'S ROTARIES ARE SHOWING (author, 2026-09-25): its
+            page, which of them, how many, and what it last wrote. Every
+            publish, because a page moves with no command - the surface's own
+            buttons - and the cached half would freeze it. */
+        for (const auto& surfaceId : declaredSurfaces)
+        {
+            const auto page = surfaces != nullptr ? surfaces->pageOf (surfaceId)
+                                                  : surface::SurfaceTable::Page {};
+            const auto base = std::string (godot) + "/surface/" + surfaceId + "/";
+
+            for (const auto* row : doc::Schema::rowsForOwner ("surface"))
+            {
+                const auto name = std::string (row->name);
+
+                if (! isPageRow (name))
+                    continue;
+
+                const auto text = name == "page"      ? page.word
+                                : name == "pageIndex" ? std::to_string (page.index)
+                                : name == "pageCount" ? std::to_string (page.count)
+                                                      : page.edited;
+
+                runtime.push_back (makeLeaf (base + name, *row, text));
+            }
+        }
+
         /*  WHAT EACH STRIP IS DOING (PRD §3.16, §3.27), read off the run table
             the way a slot's holder is: the node its fader rides now, the word
             its display shows, and the cue on it. A dca strip rides its DCA's
@@ -2656,6 +2713,15 @@ namespace wfg::tree
 
         for (const auto& id : declaredSlots)
             ownedByTheDocument.push_back (std::string (godot) + "/slot/" + id);
+
+        /*  `/godot/surface` and each surface's container, since 2026-09-25:
+            the show's half publishes what a surface is, this half the page
+            its rotaries show. A show with no surface publishes neither. */
+        if (! declaredSurfaces.empty())
+            ownedByTheDocument.push_back (std::string (godot) + "/surface");
+
+        for (const auto& id : declaredSurfaces)
+            ownedByTheDocument.push_back (std::string (godot) + "/surface/" + id);
 
         addContainers (runtime, ownedByTheDocument, false);
         sortByAddress (runtime);

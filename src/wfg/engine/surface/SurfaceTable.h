@@ -17,8 +17,10 @@
 #pragma once
 
 /*
-    WHAT THE MACHINE FOUND ABOUT EACH SURFACE THE SHOW DECLARES - whether it is
-    being talked to, why not, and the serial it gave when it was asked.
+    THE SURFACES' RUNTIME STATE: what the machine found about each surface the
+    show declares - whether it is being talked to, why not, and the serial it
+    gave when it was asked - and, since 2026-09-25, what the surfaces are doing
+    with their rotaries: the cue they are aimed at, and the page each shows.
 
     The `PortTable` shape exactly, and for its reason: the show says "the D700
     on these two ports" (a decision, PRD §4.10), and whether anything answers
@@ -29,15 +31,33 @@
     NAMES NO JUCE TYPE, so the tree, the bridge and a test with no MIDI in the
     room can all hold one.
 
+    THE AIM IS ONE CUE FOR EVERY SURFACE: the cue whose EQ and sends the
+    rotaries edit when a page is up (author, 2026-09-25). A SELECT on a sample
+    strip sets it, and so does a click on a running cue's name in the window -
+    both through `surface.aim`, so it is a named command, logged, and a replay
+    reproduces it. It is not the client's pick and not the list GO acts on:
+    the cue list's pick moving does not move it. Never stored (PRD §4.10): a
+    surface arrives knowing nothing (§4.9).
+
+    A PAGE IS EACH SURFACE'S OWN, and it is not a command: which page a
+    controller shows is what its hands are looking at, like the client's
+    selection. What a page DOES is ordinary commands - a turn is a node.set -
+    so a replay reproduces every effect of one without knowing it was up.
+    It is here only so a client can see it: the window opens the foot panel
+    on the aimed cue while a surface is adjusting it.
+
     THREADING: none of its own. The tick thread fills it (the bridge, in the
-    after-tick) and the tick thread reads it (the tree, when it rebuilds its
-    document half) - the model's thread, like the port table. A change that
-    should reach a client asks the tree to rebuild, because this is read from
-    the cached half.
+    after-tick; `surface.aim`, applied on the tick) and the tick thread reads
+    it (the tree) - the model's thread, like the port table. The status and
+    the aim are read from the tree's cached document half, which every
+    applied command rebuilds; a status change that should reach a client asks
+    for a rebuild. The pages are read by the runtime half at every publish,
+    because they change with no command at all.
 */
 
 #include <map>
 #include <string>
+#include <utility>
 
 namespace wfg::surface
 {
@@ -70,7 +90,11 @@ namespace wfg::surface
             return changed;
         }
 
-        void forget (const std::string& surfaceId) { table.erase (surfaceId); }
+        void forget (const std::string& surfaceId)
+        {
+            table.erase (surfaceId);
+            pages.erase (surfaceId);
+        }
 
         /** What is known, or a default Status - not connected, no sentence -
             for a surface nobody has looked at. */
@@ -80,7 +104,41 @@ namespace wfg::surface
             return found != table.end() ? found->second : Status {};
         }
 
+        //==============================================================================
+        /** The cue the rotaries edit, or empty. Set by `surface.aim` only. */
+        const std::string& aim() const noexcept          { return aimed; }
+        void setAim (std::string cueId)                   { aimed = std::move (cueId); }
+
+        //==============================================================================
+        /** What one surface's rotaries are showing. */
+        struct Page
+        {
+            /** show, eq or send - the words of surface/page. */
+            std::string word = "show";
+
+            /** Which page of that kind, from nought, and how many it has. */
+            int index = 0;
+            int count = 1;
+
+            /** The address the page last wrote, or empty: what a client reads
+                to know the surface is adjusting, and which control it moved. */
+            std::string edited;
+
+            bool operator== (const Page&) const = default;
+        };
+
+        void setPage (const std::string& surfaceId, const Page& page)  { pages[surfaceId] = page; }
+
+        /** The page a surface shows, or the Show page for one nobody set. */
+        Page pageOf (const std::string& surfaceId) const
+        {
+            const auto found = pages.find (surfaceId);
+            return found != pages.end() ? found->second : Page {};
+        }
+
     private:
         std::map<std::string, Status> table;
+        std::map<std::string, Page> pages;
+        std::string aimed;
     };
 }

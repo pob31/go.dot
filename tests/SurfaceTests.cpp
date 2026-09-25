@@ -37,6 +37,7 @@
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/log/EventLog.h>
+#include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/tree/ParameterTree.h>
@@ -61,6 +62,7 @@ namespace
         {
             engine.log().openInMemory ({});
             doc::registerDocumentCommands (engine.commands(), document);
+            surface::registerSurfaceCommands (engine.commands(), document, surfaces);
 
             /*  The transaction hook serve installs, so an undo case can ask
                 whether one command made one step. */
@@ -220,6 +222,102 @@ TEST_CASE ("surface: a virtual panel is always connected, and a pad controller's
     rig.surfaces.set (mcu, { true, {}, "D700RTB" });
     CHECK (rig.at ("/godot/surface/" + mcu + "/connected") == "true");
     CHECK (rig.at ("/godot/surface/" + mcu + "/serial") == "D700RTB");
+}
+
+TEST_CASE ("surface: the rotaries' aim is one media cue, named by a command and published")
+{
+    /*  surface.aim (author, 2026-09-25): a SELECT on a sample strip, or a click
+        on a running cue's name, says which cue the rotaries edit on the EQ and
+        Send pages. One cue for every surface; not stored; a cue that is gone
+        is no aim. */
+    Rig rig;
+
+    REQUIRE (rig.apply ("surface.create", { osc::Value::string ("d700") }).applied == 1);
+
+    const auto list = rig.document.createList ("Main");
+    REQUIRE (list.ok);
+    const auto media = rig.document.createCue (list.id, 0, "media", "Kick");
+    const auto memo = rig.document.createCue (list.id, 1, "memo", "Note");
+    REQUIRE (media.ok);
+    REQUIRE (memo.ok);
+
+    CHECK (rig.exists ("/godot/surface/aim"));
+    CHECK (rig.at ("/godot/surface/aim").empty());
+
+    CHECK (rig.apply ("surface.aim", { osc::Value::string (media.id) }).applied == 1);
+    CHECK (rig.surfaces.aim() == media.id);
+    CHECK (rig.at ("/godot/surface/aim") == media.id);
+
+    SUBCASE ("a cue that is not media, or no cue at all, is refused and moves nothing")
+    {
+        const auto memoAim = rig.apply ("surface.aim", { osc::Value::string (memo.id) });
+        CHECK (memoAim.rejected == 1);
+
+        const auto nowhere = rig.apply ("surface.aim", { osc::Value::string ("NQSCHQ00") });
+        CHECK (nowhere.rejected == 1);
+
+        CHECK (rig.at ("/godot/surface/aim") == media.id);
+    }
+
+    SUBCASE ("an empty argument lets go of it, and is applied")
+    {
+        CHECK (rig.apply ("surface.aim", { osc::Value::string ("") }).applied == 1);
+        CHECK (rig.at ("/godot/surface/aim").empty());
+    }
+
+    SUBCASE ("a deleted cue is no aim, and an undo of the delete brings it back")
+    {
+        REQUIRE (rig.apply ("object.delete", { osc::Value::string (media.id) }).applied == 1);
+        CHECK (rig.at ("/godot/surface/aim").empty());
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (rig.at ("/godot/surface/aim") == media.id);
+    }
+
+    SUBCASE ("and it is no step of the show's history")
+    {
+        const auto& history = rig.document.history (doc::UndoDomain::document);
+        const auto steps = history.getUndoDescriptions().size();
+
+        REQUIRE (rig.apply ("surface.aim", { osc::Value::string ("") }).applied == 1);
+        REQUIRE (rig.apply ("surface.aim", { osc::Value::string (media.id) }).applied == 1);
+        CHECK (history.getUndoDescriptions().size() == steps);
+    }
+}
+
+TEST_CASE ("surface: each surface's page is published every tick, from the runtime half")
+{
+    /*  The page a surface's rotaries show moves with no command - the
+        surface's own EQ, Send and star buttons - so it is read off the table
+        at every publish; the document half, a cache, must not carry it too. */
+    Rig rig;
+
+    REQUIRE (rig.apply ("surface.create", { osc::Value::string ("d700") }).applied == 1);
+    const auto d700 = rig.madeSurface();
+    const auto base = "/godot/surface/" + d700 + "/";
+
+    CHECK (rig.at (base + "page") == "show");
+    CHECK (rig.at (base + "pageIndex") == "0");
+    CHECK (rig.at (base + "pageCount") == "1");
+    CHECK (rig.at (base + "edited").empty());
+
+    rig.surfaces.setPage (d700, { "eq", 1, 2, "/godot/cue/K1CKK1CK/eqB2Gain" });
+
+    /*  NO REBUILD ASKED FOR: the runtime half reads it at the next publish. */
+    const auto snapshot = rig.parameters.publish (rig.tick, rig.state);
+    CHECK (client::model::text (*snapshot, base + "page") == "eq");
+    CHECK (client::model::text (*snapshot, base + "pageIndex") == "1");
+    CHECK (client::model::text (*snapshot, base + "pageCount") == "2");
+    CHECK (client::model::text (*snapshot, base + "edited") == "/godot/cue/K1CKK1CK/eqB2Gain");
+
+    /*  ONE ADDRESS, ONE HALF: every node the walk finds is found once. */
+    std::vector<std::string> addresses;
+
+    for (const auto* node : snapshot->all())
+        addresses.push_back (node->address);
+
+    std::sort (addresses.begin(), addresses.end());
+    CHECK (std::adjacent_find (addresses.begin(), addresses.end()) == addresses.end());
 }
 
 TEST_CASE ("surface: a profile nobody knows is refused, and makes nothing")

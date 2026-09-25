@@ -127,6 +127,8 @@ add_library(wfg_engine STATIC
     wfg/engine/surface/SurfaceBridge.h
     wfg/engine/surface/SurfaceBridge.cpp
     wfg/engine/surface/SurfaceTable.h
+    wfg/engine/surface/SurfaceCommands.h
+    wfg/engine/surface/SurfaceCommands.cpp
     wfg/engine/plugin/PluginTable.h
     wfg/engine/plugin/Catalogue.h
     wfg/engine/plugin/Catalogue.cpp

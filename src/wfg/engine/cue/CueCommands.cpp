@@ -162,15 +162,17 @@ namespace wfg::cue
 
         //----------------------------------------------------------------------
         /*  THE FLAT BUTTON, AND THE DOUBLE-CLICK ON A ROTARY (Phase 9a): every
-            one of a media cue's twenty-three EQ rows back to its default, in ONE
-            command - so it is one transaction on the show's history and Undo
-            takes the whole reset back as one step, where twenty-three
-            node.set records from a client would be twenty-three. The defaults are the
-            table's own, read off the rows, so this can never disagree with
-            what a fresh cue is. */
+            one of a media cue's twenty-three EQ rows back to its default, in
+            ONE command - so it is one transaction on the show's history and
+            Undo takes the whole reset back as one step, where twenty-three
+            node.set records from a client would be twenty-three. The defaults
+            are the table's own, read off the rows, so this can never disagree
+            with what a fresh cue is - every band's switch back on with the
+            rest (2026-09-25). */
         registry.add ({ "eq.reset",
-                        "Puts a media cue's EQ back to flat: every band at nought, both filters"
-                        " out, on. One transaction, so Undo takes the whole reset back at once.",
+                        "Puts a media cue's EQ back to flat: every band in and at nought, both"
+                        " filters out, on. One transaction, so Undo takes the whole reset back at"
+                        " once.",
                         { { "cue", 's', false } },
                         true,
                         [&document] (CommandContext&, const std::vector<osc::Value>& args)

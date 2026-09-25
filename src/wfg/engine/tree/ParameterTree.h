@@ -460,6 +460,11 @@ namespace wfg::tree
         };
 
         std::vector<DeclaredStrip> declaredStrips;
+
+        /*  Every surface, in document order: the roster its page rows are
+            published against from the runtime half (2026-09-25), because a
+            page moves with no command and the document half is a cache. */
+        std::vector<std::string> declaredSurfaces;
         const cue::RunTable& runs;
 
         /*  Which cues can be holding one slot at once, and every dangling

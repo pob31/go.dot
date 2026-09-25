@@ -26,6 +26,7 @@
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
+#include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/engine/plugin/PluginEditorChild.h>
@@ -258,6 +259,7 @@ namespace
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
         wfg::audio::AudioState audioState;
+        wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
         const auto nowhere = juce::File::getCurrentWorkingDirectory();
 
@@ -275,6 +277,7 @@ namespace
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
@@ -534,6 +537,7 @@ namespace
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
         wfg::audio::AudioState audioState;
+        wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
         /*  REGISTERED WHETHER OR NOT A BUNDLE WAS GIVEN, unlike everything
             below. `audio.editBuilt` needs no document - it is the machine
@@ -672,6 +676,7 @@ namespace
                                     wfg::cue::fxWriteFor (document, nullptr)));
 
             wfg::cue::registerCueCommands (engine.commands(), document, focus);
+            wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
             wfg::tree::registerTreeCommands (engine.commands(), touches);
             wfg::tree::registerMountCommands (engine.commands(), document, mounts, bundle);
 
@@ -1145,9 +1150,11 @@ namespace
         wfg::cue::Runner runner { document, runs, runIds, focus };
         runner.setDcas (&dcas);
         wfg::audio::AudioState audioState;
+        wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
@@ -2483,6 +2490,11 @@ namespace
                 .getFullPathName().toStdString() };
         std::vector<wfg::plugin::KnownPlugin> knownPlugins;
 
+        /*  THE SURFACES' RUNTIME STATE, declared here rather than beside the
+            bridge further down because `surface.aim` writes it and is
+            registered below (2026-09-25). The bridge fills the rest of it. */
+        wfg::surface::SurfaceTable surfaceTable;
+
         wfg::doc::registerDocumentCommands (
             engine.commands(), document,
             [&mounts, &sender] (const std::string& address, const wfg::osc::Value& value)
@@ -2525,6 +2537,7 @@ namespace
                                 wfg::cue::fxWriteFor (document, &catalogues)));
 
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
 
         /*  THE SANDBOX'S TABLE AND ITS TWO COMMANDS (Phase 9a, §17.3). The
@@ -3041,7 +3054,6 @@ namespace
             keeps the bridge alive for as long as it can be called, and
             `arrived` touches nothing but the bridge's own inbox, so nothing it
             refers to has to outlive it. */
-        wfg::surface::SurfaceTable surfaceTable;
         const auto surfaceBridge = std::make_shared<wfg::surface::SurfaceBridge> (midiOut, surfaceTable);
         parameters.setSurfaces (&surfaceTable);
 
