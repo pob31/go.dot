@@ -117,7 +117,7 @@ RATE = 48000
 WINDOW = 2048
 HOP = 1024
 COARSEST = 64
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 
 # (hertz, hue in degrees UNWRAPPED): 360 is red and 480 green, so deep blue to
 # red goes through magenta and not back through cyan.

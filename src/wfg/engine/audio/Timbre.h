@@ -95,7 +95,7 @@ namespace wfg::audio
             only thing that tells a pyramid computed by an older rule from one
             computed by this one. A file carrying another version is refused
             and rebuilt, never read. */
-        constexpr std::uint16_t formatVersion = 1;
+        constexpr std::uint16_t formatVersion = 2;       // 2: saturation from local noisiness (2026-09-25)
 
         /*  The band the centroid and the flatness are taken over. */
         constexpr double lowestHertz = 40.0;
@@ -104,6 +104,26 @@ namespace wfg::audio
         /*  Lightness at the bottom and the top of that band. */
         constexpr double darkest = 0.15;
         constexpr double brightest = 0.85;
+
+        /*  SATURATION IS HOW TONAL THE SOUND IS WHERE IT IS, not how flat the
+            whole band is (author, 2026-09-25: the colours "don't desaturate on
+            a broader, noisier signal which I find quite a telling visual
+            cue"). Flatness over 40 Hz to 16 kHz read only white noise as grey:
+            a hi-hat, breath, rain or rumble is noise in PART of the band, and
+            the near-silent rest pulled the flatness down - vivid. So each
+            bin's power is set against its own neighbourhood, a ninth of an
+            octave either side and three bins at least, and the ratios are
+            averaged where the energy is: noise of any colour or bandwidth
+            scatters around its neighbourhood (a geometric over an arithmetic
+            mean near 0.6), a tone or a harmonic towers over it (near nought).
+            At `noisyAt` and above the frame is grey; at `tonalAt` and below,
+            vivid; straight between. Measured on white, pink, brown, a hi-hat
+            band, a rumble band and a mid band (0.50 to 0.62) against a sine,
+            a sawtooth (0.03) and a sine over noise (0.06). */
+        constexpr double envelopeOctaves = 1.0 / 9.0;
+        constexpr int envelopeMinimumBins = 3;
+        constexpr double noisyAt = 0.5;
+        constexpr double tonalAt = 0.05;
 
         /*  One frame: hue in 256 steps of a full turn, the other three in 255
             steps of the unit range. */

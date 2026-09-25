@@ -361,15 +361,90 @@ TEST_CASE ("timbre: white noise is grey, and still a reading")
 
     REQUIRE (frames > 100);
 
-    /*  Flatness on MAGNITUDE: a Rayleigh-distributed spectrum's geometric mean
-        over its arithmetic is about 0.85, so noise reads about 0.15. On power
-        it would read 0.44 at every level of noise, and could never be grey. */
+    /*  Noise set against its own neighbourhood scatters around it - a
+        geometric mean over an arithmetic near 0.6, past `noisyAt` - so it
+        reads grey, and not only when it is white (the next case). */
     CHECK (saturation / frames < 0.2);
 
     /*  A reading, not the silence a missing pyramid would be - and a bright
         one, since white noise's power is where the bins are, at the top. */
     CHECK (silent == 0);
     CHECK (lightness / frames > 0.6);
+}
+
+TEST_CASE ("timbre: noise is grey wherever it sits in the spectrum, and a harmonic tone is vivid")
+{
+    /*  The author, 2026-09-25: the colours "don't desaturate on a broader,
+        noisier signal". White noise always read grey; noise with a slope or in
+        part of the band - pink, a hi-hat's top octaves - read as vivid as a
+        sine, because the flatness was over the whole band. Now each bin is
+        set against its own neighbourhood, where the energy is. */
+    constexpr double rate = 48000.0;
+
+    const auto meanSaturation = [] (const std::vector<float>& samples)
+    {
+        const auto pyramid = analyseMono (samples, rate);
+        double sum = 0.0;
+        int frames = 0;
+
+        forEachSteadyFrame (pyramid.levels.front(), [&] (std::size_t, const timbre::Frame& frame)
+        {
+            sum += timbre::saturationOf (frame);
+            ++frames;
+        });
+
+        REQUIRE (frames > 50);
+        return sum / frames;
+    };
+
+    //  Pink: white noise through Paul Kellet's filter, a slope of 3 dB an octave.
+    auto pink = whiteNoise (2.0, rate);
+    {
+        double b0 = 0, b1 = 0, b2 = 0, b3 = 0, b4 = 0, b5 = 0, b6 = 0;
+
+        for (auto& sample : pink)
+        {
+            const auto white = static_cast<double> (sample);
+            b0 = 0.99886 * b0 + white * 0.0555179;
+            b1 = 0.99332 * b1 + white * 0.0750759;
+            b2 = 0.96900 * b2 + white * 0.1538520;
+            b3 = 0.86650 * b3 + white * 0.3104856;
+            b4 = 0.55000 * b4 + white * 0.5329522;
+            b5 = -0.7616 * b5 - white * 0.0168980;
+            sample = static_cast<float> ((b0 + b1 + b2 + b3 + b4 + b5 + b6 + white * 0.5362) * 0.11);
+            b6 = white * 0.115926;
+        }
+    }
+
+    //  A hi-hat's band: white noise high-passed at 6 kHz, four poles.
+    auto hat = whiteNoise (2.0, rate);
+    {
+        for (int pass = 0; pass < 2; ++pass)
+        {
+            juce::IIRFilter filter;
+            filter.setCoefficients (juce::IIRCoefficients::makeHighPass (rate, 6000.0));
+            filter.processSamples (hat.data(), static_cast<int> (hat.size()));
+        }
+    }
+
+    //  A sawtooth at 220 Hz: every harmonic, each a peak over its neighbourhood.
+    std::vector<float> saw (static_cast<std::size_t> (2.0 * rate));
+    {
+        for (std::size_t n = 0; n < saw.size(); ++n)
+        {
+            double value = 0.0;
+
+            for (int harmonic = 1; 220.0 * harmonic < 16000.0; ++harmonic)
+                value += std::sin (2.0 * juce::MathConstants<double>::pi * 220.0 * harmonic
+                                   * static_cast<double> (n) / rate) / harmonic;
+
+            saw[n] = static_cast<float> (0.3 * value);
+        }
+    }
+
+    CHECK (meanSaturation (pink) < 0.2);
+    CHECK (meanSaturation (hat) < 0.25);
+    CHECK (meanSaturation (saw) > 0.8);
 }
 
 TEST_CASE ("timbre: a sweep walks the ramp, and its lightness never falls")
