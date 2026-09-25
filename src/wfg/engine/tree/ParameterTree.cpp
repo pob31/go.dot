@@ -19,6 +19,7 @@
 #include <wfg/engine/cue/ShowWalk.h>
 
 #include <wfg/engine/midi/PortTable.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/cue/DcaTable.h>
 
@@ -678,6 +679,33 @@ namespace wfg::tree
             because this walk is already the one place that knows which cue it
             is at, and a second lookup would be a second thing to keep in step
             with the first. */
+        /*  A MEDIA CUE'S SENDS, by identifier: its Send children in document
+            order, then the ones a locked show made live, in identifier order
+            (2026-09-25) - the index a page or a surface walks rather than
+            scanning every send in the tree. */
+        std::string sendsOf (const juce::ValueTree& cue, const std::string& cueId, const cue::LiveEdits* live)
+        {
+            std::string out;
+
+            const auto add = [&out] (const std::string& sendId)
+            {
+                if (! out.empty())
+                    out.push_back (' ');
+
+                out += sendId;
+            };
+
+            for (const auto& child : cue)
+                if (child.hasType ("Send") && child.hasProperty (idProperty))
+                    add (child[idProperty].toString().toStdString());
+
+            if (live != nullptr)
+                for (const auto& sendId : live->createdSendsOf (cueId))
+                    add (sendId);
+
+            return out;
+        }
+
         void collectCue (const juce::ValueTree& node, const std::string& parentId, int index,
                          std::vector<Node>& out,
                          const std::map<std::string, double>* durations,
@@ -685,6 +713,7 @@ namespace wfg::tree
                          std::vector<std::pair<std::string, std::string>>& mediaRoster,
                          const cue::SlotAnalysis& analysis,
                          const cue::SamplerLayout& layout,
+                         const cue::LiveEdits* live,
                          const char* role = "member")
         {
             const auto element = node.getType().toString().toStdString();
@@ -847,6 +876,23 @@ namespace wfg::tree
                 {
                     text = layout.stripsBeforeOf (id);
                 }
+                /*  WHAT A LOCKED SHOW IS RIDING on this cue (2026-09-25): the
+                    rows held live, and the value each is heard at in place of
+                    the saved one - at the same address, so a client reading a
+                    cue's EQ reads what plays. */
+                else if (name == "live" && isMedia)
+                {
+                    text = live != nullptr ? live->rowsOf (id) : std::string {};
+                }
+                else if (name == "sends" && isMedia)
+                {
+                    text = sendsOf (node, id, live);
+                }
+                else if (isMedia && live != nullptr && name.rfind ("eq", 0) == 0
+                           && live->rowOf (id, name) != nullptr)
+                {
+                    text = *live->rowOf (id, name);
+                }
                 else if (name == "headerDerived")
                 {
                     std::vector<std::string> derived;
@@ -955,12 +1001,24 @@ namespace wfg::tree
                         const auto childBase = std::string (godot) + "/"
                                                  + std::string (owner) + "/" + childId;
 
+                        /*  A SEND A LOCKED SHOW IS RIDING (2026-09-25):
+                            its level and its switch as they are heard. */
+                        const auto* riding = childElement == "Send" && live != nullptr
+                                               ? live->sendOf (childId) : nullptr;
+
                         for (const auto* row : doc::Schema::rowsForOwner (owner))
                         {
                             const doc::Attribute attribute { elementName, row };
                             const auto name = std::string (row->name);
-                            const auto text = name == "cue" ? id
-                                                            : storedText (attribute, child);
+                            auto text = name == "cue" ? id
+                                                      : storedText (attribute, child);
+
+                            if (riding != nullptr && name == "level" && riding->level.has_value())
+                                text = *riding->level;
+                            else if (riding != nullptr && name == "on" && riding->on.has_value())
+                                text = *riding->on;
+                            else if (childElement == "Send" && name == "live")
+                                text = riding != nullptr ? "true" : "false";
 
                             out.push_back (makeLeaf (childBase + "/" + name, *row, text));
                         }
@@ -1013,13 +1071,41 @@ namespace wfg::tree
                     for (const auto& roleChild : child)
                         if (roleChild.hasProperty (idProperty))
                             collectCue (roleChild, id, roleIndex++, out, durations, roster,
-                                        mediaRoster, analysis, layout, childRole);
+                                        mediaRoster, analysis, layout, live, childRole);
 
                     continue;
                 }
 
                 collectCue (child, id, childIndex++, out, durations, roster, mediaRoster,
-                            analysis, layout);
+                            analysis, layout, live);
+            }
+
+            /*  AND THE SENDS A LOCKED SHOW MADE LIVE on this cue, published
+                where a real one would be - /godot/send/<id> - so the mixer, the
+                page and a surface ride them with the verbs they already have.
+                `live` says what they are. */
+            if (isMedia && live != nullptr)
+            {
+                for (const auto& sendId : live->createdSendsOf (id))
+                {
+                    const auto* send = live->sendOf (sendId);
+                    const auto sendBase = std::string (godot) + "/send/" + sendId + "/";
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("send"))
+                    {
+                        const auto name = std::string (row->name);
+                        std::string text;
+
+                        if (name == "bus")          text = send->bus;
+                        else if (name == "cue")     text = id;
+                        else if (name == "live")    text = "true";
+                        else if (name == "level")   text = send->level.value_or (std::string (row->defaultText));
+                        else if (name == "on")      text = send->on.value_or (std::string (row->defaultText));
+                        else                        text = std::string (row->defaultText);
+
+                        out.push_back (makeLeaf (sendBase + name, *row, text));
+                    }
+                }
             }
         }
     }
@@ -1047,6 +1133,7 @@ namespace wfg::tree
             read `loading` for the rest of the session. */
         const auto pluginRevisionSeen = pluginTable != nullptr ? pluginTable->revision() : 0;
         const auto catalogueRevisionSeen = catalogues != nullptr ? catalogues->revision() : 0;
+        const auto liveRevisionSeen = liveEdits != nullptr ? liveEdits->revision() : 0;
 
         std::vector<Node> nodes;
 
@@ -1184,7 +1271,7 @@ namespace wfg::tree
 
                         if (cue.hasProperty (idProperty))
                             collectCue (cue, id, index++, nodes, durations, cueOrder, mediaOrder,
-                                        analysis, samplerLayout);
+                                        analysis, samplerLayout, liveEdits);
                     }
 
                     if (const auto section = list.getChildWithName ("Persistent");
@@ -1196,7 +1283,7 @@ namespace wfg::tree
                             if (cue.hasProperty (idProperty))
                                 collectCue (cue, id, persistentIndex++, nodes, durations,
                                             cueOrder, mediaOrder, analysis, samplerLayout,
-                                            "persistent");
+                                            liveEdits, "persistent");
                     }
                 }
             }
@@ -1851,6 +1938,7 @@ namespace wfg::tree
         documentPart = std::make_shared<const std::vector<Node>> (std::move (nodes));
         pluginRevision = pluginRevisionSeen;
         catalogueRevision = catalogueRevisionSeen;
+        liveRevision = liveRevisionSeen;
         stale = false;
     }
 
@@ -2029,7 +2117,8 @@ namespace wfg::tree
             this cached half. */
         if (stale || documentPart == nullptr
              || (pluginTable != nullptr && pluginTable->revision() != pluginRevision)
-             || (catalogues != nullptr && catalogues->revision() != catalogueRevision))
+             || (catalogues != nullptr && catalogues->revision() != catalogueRevision)
+             || (liveEdits != nullptr && liveEdits->revision() != liveRevision))
             rebuildDocumentPart();
 
         /*  ASKED RATHER THAN TOLD. The mount table bumps its own revision on
@@ -2131,6 +2220,11 @@ namespace wfg::tree
                 1 rather than at the 5 its livelier neighbours carry. */
             else if (name == "recovery") text = state.documentRecovery ? "true" : "false";
             else if (name == "recording") text = lists != nullptr && lists->isRecording() ? "true" : "false";
+
+            /*  HOW MANY CHANGES A LOCKED SHOW IS RIDING LIVE (2026-09-25): what
+                the window's Keep / Discard bar counts, and shows while it is
+                more than nought and the show is unlocked. */
+            else if (name == "live") text = std::to_string (liveEdits != nullptr ? liveEdits->size() : 0);
 
             /*  And why the last write handed to the writer thread did not land,
                 beside it: a sentence, because it is the writer's own - which

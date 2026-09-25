@@ -88,6 +88,7 @@ namespace wfg::tree
 namespace wfg::cue
 {
     class DcaTable;
+    class LiveEdits;
 
     /*  HOW FAR AHEAD A LAUNCH MUST BE PLACED, in ticks.
 
@@ -397,6 +398,13 @@ namespace wfg::cue
             which case every DCA trims nothing: the Runner's arithmetic is
             unchanged for a show that declares none. */
         void setDcas (DcaTable* table) noexcept { dcas = table; }
+
+        /*  THE EQ AND SENDS A LOCKED SHOW IS RIDING (LiveEdits.h, 2026-09-25):
+            asked before the show wherever a cue's EQ or routing is read - at
+            the arm, and for a sounding cue whenever the layer moves. Null
+            where nothing was handed in, which is every tool but serve and
+            replay. */
+        void setLiveEdits (const LiveEdits* layer) noexcept { liveLayer = layer; }
 
         /*  WHO IS HOLDING WHICH NODE, for the fader edges (PRD §3.9a): a
             fader-start counts only from a fader released at the bottom, and a
@@ -1220,6 +1228,7 @@ namespace wfg::cue
         tree::MountSender* sender_ = nullptr;
         midi::MidiSink* midiOut = nullptr;
         DcaTable* dcas = nullptr;
+        const LiveEdits* liveLayer = nullptr;
         const tree::TouchTable* touches = nullptr;
 
         /*  THE SAMPLER ROSTER, read once per show revision: every sampler
@@ -1291,6 +1300,11 @@ namespace wfg::cue
 
         /** The show revision `applyEq` last pushed at; `routingRevision`'s twin. */
         std::uint64_t eqRevision = 0;
+
+        /*  And the live layer's, beside each: a turn under the lock moves the
+            layer and not the show. */
+        std::uint64_t routingLiveRevision = 0;
+        std::uint64_t eqLiveRevision = 0;
         std::uint64_t fxRevision = 0;
 
         /*  THE PERSISTENT ASSERTION (§3.29, §13.11): after every applied

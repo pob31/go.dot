@@ -78,7 +78,7 @@ namespace wfg::midi { class PortTable; }
 
 namespace wfg::surface { class SurfaceTable; }
 
-namespace wfg::cue { class DcaTable; }
+namespace wfg::cue { class DcaTable; class LiveEdits; }
 
 namespace wfg::tree
 {
@@ -264,6 +264,15 @@ namespace wfg::tree
         void setSurfaces (const surface::SurfaceTable* surfacesToRead) noexcept
         {
             surfaces = surfacesToRead;
+        }
+
+        /*  THE EQ AND SENDS A LOCKED SHOW IS RIDING (cue/LiveEdits.h,
+            2026-09-25): published at the addresses the saved values are, in
+            their place, with `media/live`, `send/live` and `document/live`
+            saying what rides. Its revision rebuilds the document half. */
+        void setLiveEdits (const cue::LiveEdits* layer) noexcept
+        {
+            liveEdits = layer;
         }
 
         /*  What each DCA is trimming by tonight, for `/godot/dca/<id>/trim`.
@@ -514,6 +523,9 @@ namespace wfg::tree
 
         /** The catalogue store's revision the document half was built from. */
         std::uint64_t catalogueRevision = 0;
+
+        const cue::LiveEdits* liveEdits = nullptr;
+        std::uint64_t liveRevision = 0;
 
         /*  How many times the mounted half has actually been rebuilt.
 

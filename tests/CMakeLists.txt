@@ -458,6 +458,18 @@ add_test(NAME wfg.replay.eq.fr_FR
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/eq.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/eq
                  --wfg-locale=${WFG_LOCALE_FR})
+# A LOCKED SHOW'S EQ AND SENDS RIDDEN LIVE (2026-09-25): rides refused by the
+# document and taken by the live layer in front of it, a send made live with
+# its drawn identifier, then unlocked, kept as one transaction and undone -
+# reproduced through the same doors serve installs, under both locales.
+add_test(NAME wfg.replay.live.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/live.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/live
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.live.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/live.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/live
+                 --wfg-locale=${WFG_LOCALE_FR})
 # PHASE 9a'S PLUGIN SET AS RECORDS: an entry declared with its four words and
 # its drawn identifier, renamed, deleted and the delete undone - the set made
 # on demand under Audio, reproduced exactly under both locales (§17.9).

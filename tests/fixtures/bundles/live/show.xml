@@ -1,0 +1,20 @@
+<Show>
+  <Lists>
+    <List id="RV000001" name="Sound">
+      <Media id="RV000002" channels="2" directOut="RV000004" file="tones.wav" name="Two tones" number="1">
+        <Send id="RV000006" bus="RV000005" level="-6"/>
+      </Media>
+      <Cue id="RV000003" name="Clear" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="1">
+    <Bus id="RV000004" name="Main L/R" width="2"/>
+    <Bus id="RV000005" firstChannel="2" kind="mix" name="Foldback" width="2"/>
+    <Bus id="RV000007" firstChannel="4" kind="mix" name="Reverb" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

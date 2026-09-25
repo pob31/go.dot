@@ -15,6 +15,7 @@
 */
 
 #include <wfg/engine/cue/CueCommands.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/document/Schema.h>
 
 #include <string>
@@ -56,7 +57,7 @@ namespace wfg::cue
 
     //==============================================================================
     void registerCueCommands (CommandRegistry& registry, doc::ShowDocument& document,
-                              Focus& focus)
+                              Focus& focus, LiveEdits* live)
     {
         //----------------------------------------------------------------------
         registry.add ({ "standby.set",
@@ -175,7 +176,7 @@ namespace wfg::cue
                         " once.",
                         { { "cue", 's', false } },
                         true,
-                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&document, live] (CommandContext&, const std::vector<osc::Value>& args)
                         {
                             const auto id = args[0].getString();
                             const auto cue = document.findById (id);
@@ -186,12 +187,41 @@ namespace wfg::cue
                             if (! cue.hasType ("Media"))
                                 return Outcome::rejected (reason::badValue);
 
+                            /*  UNDER THE LOCK, FLAT RIDES LIVE with the rest of
+                                the EQ (2026-09-25): each row the show has
+                                somewhere else is held at its default in the
+                                layer, and each it already has at its default
+                                rides nothing. Unlocked, what rode live on this
+                                cue is let go first, or it would hide the reset. */
+                            if (live != nullptr && document.isLocked())
+                            {
+                                for (const auto* row : doc::Schema::rowsForOwner ("media"))
+                                {
+                                    const std::string name { row->name };
+
+                                    if (name.rfind ("eq", 0) != 0)
+                                        continue;
+
+                                    const auto saved = document.getAttribute ("/godot/cue/" + id + "/" + name);
+
+                                    if (saved.value_or (std::string {}) == row->defaultText)
+                                        live->dropRow (id, name);
+                                    else
+                                        live->setRow (id, name, std::string (row->defaultText));
+                                }
+
+                                return Outcome::ok (args);
+                            }
+
                             for (const auto* row : doc::Schema::rowsForOwner ("media"))
                             {
                                 const std::string name { row->name };
 
                                 if (name.rfind ("eq", 0) != 0)
                                     continue;
+
+                                if (live != nullptr)
+                                    live->dropRow (id, name);
 
                                 const auto edit = document.setAttribute ("/godot/cue/" + id + "/" + name,
                                                                          std::string (row->defaultText));

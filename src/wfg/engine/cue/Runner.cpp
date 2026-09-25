@@ -18,6 +18,7 @@
 #include <wfg/engine/cue/FxRows.h>
 
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/SamplerLayout.h>
 #include <wfg/engine/tree/Touches.h>
 #include <wfg/engine/cue/ShowWalk.h>
@@ -234,14 +235,34 @@ namespace wfg::cue
             under a running show. */
         static const Reader schema;
 
-        const auto flag = [&] (const char* name) { return schema.flag (cue, "media", name); };
+        /*  AND WHAT A LOCKED SHOW IS RIDING, first (2026-09-25): a row held
+            live is the value the voice plays until somebody keeps it or lets
+            it go. */
+        const auto cueId = cue.getProperty ("id").toString().toStdString();
+        const auto riding = [&] (const char* name) -> const std::string*
+        {
+            return liveLayer != nullptr ? liveLayer->rowOf (cueId, name) : nullptr;
+        };
+
+        const auto flag = [&] (const char* name)
+        {
+            if (const auto* held = riding (name))
+                return *held == "true";
+
+            return schema.flag (cue, "media", name);
+        };
         const auto number = [&] (const char* name)
         {
+            if (const auto* held = riding (name))
+                if (const auto value = osc::parseDouble (*held))
+                    return static_cast<float> (*value);
+
             return static_cast<float> (schema.number (cue, "media", name));
         };
         const auto shape = [&] (const char* name)
         {
-            const auto word = schema.text (cue, "media", name);
+            const auto* held = riding (name);
+            const auto word = held != nullptr ? *held : schema.text (cue, "media", name);
 
             if (word == "lowShelf")  return audio::EqSettings::Shape::lowShelf;
             if (word == "highShelf") return audio::EqSettings::Shape::highShelf;
@@ -2779,6 +2800,44 @@ namespace wfg::cue
             return gains;
         };
 
+        /*  A SEND INTO A MIX CHANNEL: the spread a direct out would get,
+            scaled by the send's level - shared by the show's sends and the
+            ones a locked show made live. False when the run cannot be routed,
+            with `problem` saying why. */
+        const auto sendInto = [&] (const juce::ValueTree& bus, double level, bool on) -> bool
+        {
+            /*  SILENCE CONTRIBUTES NOTHING AT ALL rather than a very small
+                number: -120 dB is how this document spells silence
+                everywhere else, and a track with nothing to add should
+                cost nothing to mix. `emit` drops exact zeroes anyway; this
+                saves building the matrix. */
+            if (level <= -120.0)
+                return true;
+
+            /*  AND A SEND SWITCHED OFF is out of the mix the same way, its
+                level kept for when it comes back on (send/on). */
+            if (! on)
+                return true;
+
+            std::string why;
+            const auto width = schema.integer (bus, "bus", "width");
+            const auto gain = juce::Decibels::decibelsToGain (level, -120.0);
+            const auto gains = spreadOf (cue, width, gain, "mix channel", why);
+
+            /*  ASKED HERE rather than left to `emit`, which cannot always
+                tell: a refused spread answers with one zero, and against a
+                mono destination that is a legal matrix of one silent
+                coefficient - so the send would be dropped quietly instead
+                of failing the run with a reason somebody can read. */
+            if (! why.empty())
+            {
+                problem = why;
+                return false;
+            }
+
+            return emit (schema.integer (bus, "bus", "firstChannel"), width, gains);
+        };
+
         /*  THE DIRECT OUT, where this cue's own channels land. Empty is every
             cue until somebody chooses one, and is silent rather than wrong -
             the same reading `emit` gives an empty gains list. */
@@ -2856,38 +2915,21 @@ namespace wfg::cue
                     return {};
                 }
 
-                const auto level = schema.number (destination, "send", "level");
+                /*  A LOCKED SHOW RIDES ITS SENDS LIVE (2026-09-25): a level or
+                    a switch held in the layer is the one heard. */
+                const auto sendId = destination.getProperty ("id").toString().toStdString();
+                const auto* riding = liveLayer != nullptr ? liveLayer->sendOf (sendId) : nullptr;
 
-                /*  SILENCE CONTRIBUTES NOTHING AT ALL rather than a very small
-                    number: -120 dB is how this document spells silence
-                    everywhere else, and a track with nothing to add should
-                    cost nothing to mix. `emit` drops exact zeroes anyway; this
-                    saves building the matrix. */
-                if (level <= -120.0)
-                    continue;
+                auto level = schema.number (destination, "send", "level");
+                auto on = schema.flag (destination, "send", "on");
 
-                /*  AND A SEND SWITCHED OFF is out of the mix the same way, its
-                    level kept for when it comes back on (send/on). */
-                if (! schema.flag (destination, "send", "on"))
-                    continue;
+                if (riding != nullptr && riding->level.has_value())
+                    level = osc::parseDouble (*riding->level).value_or (level);
 
-                std::string why;
-                const auto width = schema.integer (bus, "bus", "width");
-                const auto gain = juce::Decibels::decibelsToGain (level, -120.0);
-                const auto gains = spreadOf (cue, width, gain, "mix channel", why);
+                if (riding != nullptr && riding->on.has_value())
+                    on = *riding->on == "true";
 
-                /*  ASKED HERE rather than left to `emit`, which cannot always
-                    tell: a refused spread answers with one zero, and against a
-                    mono destination that is a legal matrix of one silent
-                    coefficient - so the send would be dropped quietly instead
-                    of failing the run with a reason somebody can read. */
-                if (! why.empty())
-                {
-                    problem = why;
-                    return {};
-                }
-
-                if (! emit (schema.integer (bus, "bus", "firstChannel"), width, gains))
+                if (! sendInto (bus, level, on))
                     return {};
 
                 continue;
@@ -2937,6 +2979,30 @@ namespace wfg::cue
                     return {};
 
                 continue;
+            }
+        }
+
+        /*  AND THE SENDS A LOCKED SHOW MADE LIVE (2026-09-25): mix channels
+            this cue did not send to, turned up under the lock. A bus deleted
+            since is simply not there - a live send is a ride, and a ride on a
+            fader that has gone fails nothing. */
+        if (liveLayer != nullptr)
+        {
+            const auto cueId = cue.getProperty ("id").toString().toStdString();
+
+            for (const auto& sendId : liveLayer->createdSendsOf (cueId))
+            {
+                const auto* send = liveLayer->sendOf (sendId);
+                const auto bus = send != nullptr ? busNamed (send->bus) : juce::ValueTree {};
+
+                if (! bus.isValid())
+                    continue;
+
+                const auto level = osc::parseDouble (send->level.value_or ("0")).value_or (0.0);
+                const auto on = send->on.value_or ("true") == "true";
+
+                if (! sendInto (bus, level, on))
+                    return {};
             }
         }
 
@@ -6738,11 +6804,13 @@ namespace wfg::cue
             return;
 
         const auto revision = document.showRevision();
+        const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
 
-        if (revision == routingRevision)
+        if (revision == routingRevision && layer == routingLiveRevision)
             return;
 
         routingRevision = revision;
+        routingLiveRevision = layer;
 
         for (const auto& snapshot : runs.all())
         {
@@ -6899,11 +6967,13 @@ namespace wfg::cue
             return;
 
         const auto revision = document.showRevision();
+        const auto layer = liveLayer != nullptr ? liveLayer->revision() : 0;
 
-        if (revision == eqRevision)
+        if (revision == eqRevision && layer == eqLiveRevision)
             return;
 
         eqRevision = revision;
+        eqLiveRevision = layer;
 
         for (const auto& snapshot : runs.all())
         {

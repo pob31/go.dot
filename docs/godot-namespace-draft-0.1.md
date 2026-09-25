@@ -10206,3 +10206,79 @@ it again, and it plays at a half.
 **Found on the way, not this section's to fix:** on a one-track show, a cue fired again within
 about 50 ms of `run.killAll` plays silence while its run reports `playing` - found by the fx
 driver with no plugin at all; at 300 ms it plays. The driver waits for the killed run to finish.
+
+### 17.14 The EQ and Send pages, and a locked show ridden live (2026-09-25)
+
+*Written at the author's direction (2026-09-25, evening): "For the rotary dials when pressing on the
+EQ button while a sample is selected (select button) assign rotaries to the EQ ... Same for Send
+levels ... Pressing the Star key exits from the EQ and Send modes ... These edits can happen even if
+the samples are not playing." The page model of `docs/godot-surface-pages-draft-0.1.md` §5, and its
+§9 questions 1, 3 and 5, are answered here.*
+
+**The seven decisions, asked with a recommendation beside each.**
+
+| | the question | the author's answer | recommended? |
+|---|---|---|---|
+| **AJ** | what aims the rotaries | SELECT on a sample strip, or a click on a running cue's name in the window - and not the cue list's pick; while a page is up the foot shows the surface's cue | yes |
+| **AK** | how a press switches a band or a send | a new saved switch each (`eqB<n>On`, `send/on`): off keeps the number | yes |
+| **AL** | what SELECT's light says | the pick - the D700's white bar - and no longer that the strip sounds | yes |
+| **AM** | the pages under the show lock | **EQ and sends ride live, unsaved**, like a fader's trim | no - closing the pages under the lock was recommended |
+| **AN** | how long a live change lasts | until the show is unlocked, and then a bar asks: Keep (one undo step) or Discard | yes |
+| **AO** | whether the window rides live too | yes - the EQ panel and the send mixer, and the page | yes |
+| **AP** | a send the cue did not have, turned up under the lock | **made live too**, and Keep makes it a real Send | no - existing sends only was recommended |
+
+**The rows.**
+
+| Node | Type, default | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/cue/<id>/eqB{1..4}On` | `T`, true | rw | show | a band's switch (AK); §17.2's table carries it |
+| `/godot/send/<id>/on` | `T`, true | rw | show | a send's switch (AK) |
+| `/godot/surface/aim` | `s` | ro | none | the cue every surface's rotaries edit (AJ); §16.2 |
+| `/godot/surface/<id>/page`, `pageIndex`, `pageCount`, `edited` | | ro | none | what a surface's rotaries show; §16.2 |
+| `/godot/cue/<id>/live` | `s` | ro | none | the names of this cue's EQ rows a locked show is riding live |
+| `/godot/cue/<id>/sends` | `s` | ro | none | this cue's sends by identifier: its Send children, then the ones made live |
+| `/godot/send/<id>/live` | `T`, false | ro | none | whether this send rides live - a value held, or the whole send made under the lock |
+| `/godot/document/live` | `i`, 0 | ro | none | how many changes ride live: what the window's bar counts |
+
+**The commands.**
+
+| Command | Arguments | What it does | What it refuses |
+|---|---|---|---|
+| `surface.aim` | `<cue s>` | §16.3 | a cue that is not media, `bad-value`; none, `unknown-id` |
+| `live.keep` | — | writes every live value into the show, one transaction; a send made live becomes a Send with the identifier it rode under, or gives its values to a send the show has since been given into that bus; a cue or bus deleted since is skipped | under the lock, `locked` |
+| `live.drop` | — | lets go of every live value, and gives back the identifiers the live sends had reserved | nothing |
+
+**The doors.** Under the lock, `node.set` on a cue's EQ row or a send's `level` or `on` is answered
+by `cue::liveEditFor`, composed into the `node.set` door in serve and in replay between the trim
+door and the FX door. It resolves and parses exactly as the document's door would, so it refuses
+what the document would refuse, and holds the value in `cue::LiveEdits` instead of refusing it as
+`locked`. A value the show already has is no change: it drops whatever rode there. `send.create`
+asks `cue::liveSendFor` first (a new `LiveCreate` hook on `registerDocumentCommands`): under the
+lock it makes the send live, the cue media and the bus a mix channel, one send per bus across the
+show and the layer, its identifier drawn and reserved and carried on the applied record.
+`eq.reset` under the lock holds flat live, row by row where the show differs from flat. Once the
+show is unlocked, a write to a row that rides live writes the show - an undo step - and drops that
+live value; a send made live keeps riding until Keep or Discard, since a `node.set` cannot make an
+object. The transaction hook asks `cue::isLiveEdit` beside `isLiveWrite`: a ride opens no
+transaction.
+
+**Who reads the layer.** `Runner::eqOf` and `resolveRouting` ask it before the show, so an arm
+carries what is heard and a sounding cue follows on the next tick: `applyEq` and `applyRouting` are
+gated on the layer's revision as well as the show's. The tree publishes the value heard at the
+saved value's address - one address, one value, whoever reads it - and rebuilds its document half
+when the layer's revision moves.
+
+**What it costs, said as it was chosen.** A change made live is heard and not saved: a crash, a
+close, or `--recover` loses it, as it loses a fader's trim. An undo taken after unlocking, with
+live values still riding, can appear to do nothing where the layer covers the row it restored; the
+bar is the answer. A live send's identifier is reserved in the registry, which a rebuild after an
+undo forgets; were another object to draw the same eight characters before Keep, that send would
+be skipped rather than made twice.
+
+**Built so far** (2026-09-25, on `main`): the switches (stage 1); `surface.aim` and the page rows
+(stage 2); SELECT and the EQ page on the bridge, `surface/SurfacePages`, the band colours from one
+header, `audio/EqColours.h` (stage 3); the live layer - `cue/LiveEdits`, the two doors, `live.keep`
+and `live.drop`, the Runner and tree overlays, `tests/fixtures/logs/live.wfglog` replayed in both
+locales (stage 4). **Still to build:** the Send page on the bridge; the window's part - the foot
+following a surface, the running pane's name aiming the rotaries, the switches in the EQ panel and
+the send mixer, the Keep / Discard bar; the page's inspector rows and commands.

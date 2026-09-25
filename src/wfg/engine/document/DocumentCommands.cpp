@@ -131,7 +131,7 @@ namespace wfg::doc
     }
 
     void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document,
-                                   ForeignWrite foreign, LiveWrite live)
+                                   ForeignWrite foreign, LiveWrite live, LiveCreate liveSend)
     {
         registry.add ({ "audio.configure", "Set the show's audio interface and channel patches as one edit.",
                         { { "enabled", 'T', false }, { "deviceType", 's', false },
@@ -217,8 +217,16 @@ namespace wfg::doc
                         { { "cue", 's', false }, { "bus", 's', false },
                           { "id", 's', true }, { "level", 's', true } },
                         true,
-                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        [&document, liveSend = std::move (liveSend)]
+                        (CommandContext&, const std::vector<osc::Value>& args)
                         {
+                            /*  A SEND UNDER THE LOCK rides live (2026-09-25),
+                                answered in front of the document, which would
+                                refuse it. */
+                            if (liveSend)
+                                if (auto outcome = liveSend (args))
+                                    return std::move (*outcome);
+
                             const auto id = args.size() > 2 ? args[2].getString() : std::string {};
                             const auto level = args.size() > 3 ? args[3].getString() : std::string {};
 

@@ -36,6 +36,10 @@
 #include <wfg/engine/tree/Mount.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/FxRows.h>
+#include <wfg/engine/cue/LiveEdits.h>
+#include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/cue/FadeJob.h>
 #include <wfg/engine/cue/Run.h>
@@ -7427,4 +7431,312 @@ TEST_CASE ("eq: the arm carries the cue's EQ, an edit reaches the voice once, a 
         const auto outcome = rig.submitAndTick ("eq.reset", { osc::Value::string (rig.memoId) });
         CHECK (outcome.rejected > 0);
     }
+}
+
+//==============================================================================
+//  A locked show's EQ and sends, ridden live (author, 2026-09-25).
+
+namespace
+{
+    /*  A ROUTED RIG WITH THE DOORS SERVE INSTALLS: `node.set` answered by the
+        live layer in front of the document, `send.create` too, `eq.reset`
+        holding flat live under the lock, Keep and Discard, the transaction
+        hook asking `isLiveEdit` - and a tree to read what a client sees. Two
+        mix channels: the foldback, which the cue sends to, and a reverb it
+        does not. */
+    struct LiveRig : RoutedRig
+    {
+        LiveRig()
+        {
+            doc::registerDocumentCommands (engine.commands(), document, {},
+                                           cue::eitherOf (cue::liveWriteFor (runs, dcas, document),
+                                                          cue::liveEditFor (live, document)),
+                                           cue::liveSendFor (live, document));
+            cue::registerCueCommands (engine.commands(), document, focus, &live);
+            cue::registerLiveCommands (engine.commands(), document, live);
+
+            engine.setBeforeApply ([this] (const Command& appliedCommand, const Event& submitted,
+                                           const std::vector<osc::Value>& coerced, std::int64_t tickIndex)
+                                   {
+                                       if (cue::isLiveWrite (appliedCommand.name, coerced)
+                                             || cue::isLiveEdit (appliedCommand.name, coerced, document, live))
+                                           return;
+
+                                       document.beginTransaction (appliedCommand.name, tickIndex,
+                                                                  submitted.origin, coerced);
+                                   });
+
+            runner.setLiveEdits (&live);
+            parameters.setLiveEdits (&live);
+
+            reverb = addBus ("Reverb", 6, 2);
+            document.findById (foldback).setProperty (juce::Identifier ("kind"), "mix", nullptr);
+            document.findById (reverb).setProperty (juce::Identifier ("kind"), "mix", nullptr);
+
+            setMedia (mediaId, 2);
+            aimAt (mediaId, main);
+        }
+
+        void lock (bool on)
+        {
+            REQUIRE (document.setAttribute ("/godot/document/locked", on ? "true" : "false").ok);
+        }
+
+        Engine::TickResult set (const std::string& address, osc::Value value)
+        {
+            return submitAndTick ("node.set", { osc::Value::string (address), std::move (value) });
+        }
+
+        std::string eq (const std::string& row) const
+        {
+            return "/godot/cue/" + mediaId + "/" + row;
+        }
+
+        std::string saved (const std::string& address) const
+        {
+            return document.getAttribute (address).value_or ("?");
+        }
+
+        /*  What a client reads at an address: the tree published now. */
+        std::string published (const std::string& address)
+        {
+            parameters.markStale();
+            snapshot = parameters.publish (tick, state);
+
+            const auto* node = snapshot->find (address);
+
+            if (node == nullptr || node->values.size() != 1)
+                return "<none>";
+
+            const auto& value = node->values.front();
+
+            if (value.isString())   return value.getString();
+            if (value.isBool())     return value.getBool() ? "true" : "false";
+            if (value.isNumber())   return osc::formatDouble (value.asDouble());
+
+            return "<?>";
+        }
+
+        std::size_t steps() const
+        {
+            return static_cast<std::size_t> (document.history (doc::UndoDomain::document)
+                                                 .getUndoDescriptions().size());
+        }
+
+        cue::LiveEdits live;
+        cue::DcaTable dcas;
+        tree::MountTable mounts;
+        tree::ParameterTree parameters { document, engine.commands(), mounts, runs };
+        tree::EngineState state;
+        std::shared_ptr<const tree::TreeSnapshot> snapshot;
+        std::string reverb;
+    };
+}
+
+TEST_CASE ("live: under the lock an EQ turn is heard, written to nothing, and no step of the history")
+{
+    LiveRig rig;
+    const auto run = rig.play();
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+    const auto pushes = rig.audio.eqPushes;
+
+    //  A turn on a locked show: applied, and heard on the next tick.
+    CHECK (rig.set (rig.eq ("eqB2Gain"), osc::Value::float64 (6.0)).applied == 1);
+    rig.tickOnce();
+
+    CHECK (rig.audio.eqPushes == pushes + 1);
+    CHECK (rig.audio.eqs[track].band[1].gain == doctest::Approx (6.0f));
+
+    //  WRITTEN TO NOTHING: the show still says nought, and nothing is on its history.
+    CHECK (rig.saved (rig.eq ("eqB2Gain")) == "0");
+    CHECK (rig.steps() == steps);
+
+    //  WHAT A CLIENT SEES: the value heard, at the saved value's address, and what rides.
+    CHECK (rig.published (rig.eq ("eqB2Gain")) == "6");
+    CHECK (rig.published (rig.eq ("live")) == "eqB2Gain");
+    CHECK (rig.published ("/godot/document/live") == "1");
+
+    //  A band's switch rides the same way.
+    CHECK (rig.set (rig.eq ("eqB2On"), osc::Value::boolean (false)).applied == 1);
+    rig.tickOnce();
+    CHECK_FALSE (rig.audio.eqs[track].band[1].on);
+    CHECK (rig.published ("/godot/document/live") == "2");
+
+    SUBCASE ("turned back to what the show says, nothing rides")
+    {
+        CHECK (rig.set (rig.eq ("eqB2Gain"), osc::Value::float64 (0.0)).applied == 1);
+        CHECK (rig.live.rowOf (rig.mediaId, "eqB2Gain") == nullptr);
+        CHECK (rig.published ("/godot/document/live") == "1");
+    }
+
+    SUBCASE ("a bad value is refused as the show would refuse it")
+    {
+        CHECK (rig.set (rig.eq ("eqB2Gain"), osc::Value::float64 (99.0)).rejected == 1);
+        CHECK (rig.set (rig.eq ("eqB2Freq"), osc::Value::string ("loud")).rejected == 1);
+    }
+
+    SUBCASE ("Keep is refused under the lock, and once unlocked is one undo step")
+    {
+        CHECK (rig.submitAndTick ("live.keep").rejected == 1);
+
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.keep").applied == 1);
+
+        CHECK (rig.saved (rig.eq ("eqB2Gain")) == "6");
+        CHECK (rig.saved (rig.eq ("eqB2On")) == "false");
+        CHECK (rig.live.empty());
+        CHECK (rig.published ("/godot/document/live") == "0");
+        CHECK (rig.steps() == steps + 1);
+
+        //  And Undo takes the whole of it back.
+        CHECK (rig.submitAndTick ("undo").applied == 1);
+        CHECK (rig.saved (rig.eq ("eqB2Gain")) == "0");
+        CHECK (rig.saved (rig.eq ("eqB2On")) == "true");
+    }
+
+    SUBCASE ("Discard lets the cue go back to its saved sound")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.drop").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.live.empty());
+        CHECK (rig.audio.eqs[track].band[1].gain == doctest::Approx (0.0f));
+        CHECK (rig.audio.eqs[track].band[1].on);
+        CHECK (rig.published (rig.eq ("eqB2Gain")) == "0");
+        CHECK (rig.steps() == steps);
+    }
+
+    SUBCASE ("unlocked, an edit to a row that rides writes the show and the live value is gone")
+    {
+        rig.lock (false);
+        CHECK (rig.set (rig.eq ("eqB2Gain"), osc::Value::float64 (3.0)).applied == 1);
+
+        CHECK (rig.saved (rig.eq ("eqB2Gain")) == "3");
+        CHECK (rig.live.rowOf (rig.mediaId, "eqB2Gain") == nullptr);
+        CHECK (rig.live.rowOf (rig.mediaId, "eqB2On") != nullptr);
+        CHECK (rig.steps() == steps + 1);
+    }
+}
+
+TEST_CASE ("live: under the lock a send rides live, a new one is made live, and Keep makes it real")
+{
+    LiveRig rig;
+    const auto foldback = rig.addSend (rig.mediaId, rig.foldback, -6.0);
+    const auto run = rig.play();
+    const auto track = rig.runs.find (run)->track;
+    REQUIRE (track >= 0);
+
+    rig.lock (true);
+    const auto steps = rig.steps();
+
+    //  The foldback send up to -3: heard, and not written.
+    CHECK (rig.set ("/godot/send/" + foldback + "/level", osc::Value::float64 (-3.0)).applied == 1);
+    rig.tickOnce();
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>4@0.708 1>5@0.708");
+    CHECK (rig.saved ("/godot/send/" + foldback + "/level") == "-6");
+    CHECK (rig.published ("/godot/send/" + foldback + "/level") == "-3");
+    CHECK (rig.published ("/godot/send/" + foldback + "/live") == "true");
+
+    /*  A SEND TO A MIX CHANNEL THE CUE DID NOT SEND TO (author: "new sends
+        ride live too"): made live, its identifier on the applied record. */
+    const auto made = rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                                          osc::Value::string (rig.reverb),
+                                                          osc::Value::string (""),
+                                                          osc::Value::string ("-10") });
+    REQUIRE (made.applied == 1);
+    rig.tickOnce();
+
+    const auto created = rig.live.createdSendsOf (rig.mediaId);
+    REQUIRE (created.size() == 1u);
+    const auto reverb = created.front();
+
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>4@0.708 1>5@0.708 0>6@0.316 1>7@0.316");
+    CHECK (rig.published ("/godot/send/" + reverb + "/bus") == rig.reverb);
+    CHECK (rig.published ("/godot/send/" + reverb + "/live") == "true");
+    CHECK (rig.published ("/godot/cue/" + rig.mediaId + "/sends") == foldback + " " + reverb);
+    CHECK_FALSE (rig.document.findById (reverb).isValid());
+
+    //  Its level and its switch ride through the same door as any send's.
+    CHECK (rig.set ("/godot/send/" + reverb + "/level", osc::Value::float64 (-20.0)).applied == 1);
+    CHECK (rig.published ("/godot/send/" + reverb + "/level") == "-20");
+
+    //  One send per bus per cue, across the show and the layer - and only into a mix channel.
+    CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                               osc::Value::string (rig.reverb) }).rejected == 1);
+    CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                               osc::Value::string (rig.foldback) }).rejected == 1);
+    CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                               osc::Value::string (rig.main) }).rejected == 1);
+
+    //  A send switched off under the lock leaves the mix.
+    CHECK (rig.set ("/godot/send/" + foldback + "/on", osc::Value::boolean (false)).applied == 1);
+    rig.tickOnce();
+    CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>6@0.100 1>7@0.100");
+    CHECK (rig.steps() == steps);
+
+    SUBCASE ("Keep writes the levels, the switch and the new send, with the identifier it rode under")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.keep").applied == 1);
+
+        CHECK (rig.saved ("/godot/send/" + foldback + "/level") == "-3");
+        CHECK (rig.saved ("/godot/send/" + foldback + "/on") == "false");
+        REQUIRE (rig.document.findById (reverb).isValid());
+        CHECK (rig.saved ("/godot/send/" + reverb + "/bus") == rig.reverb);
+        CHECK (rig.saved ("/godot/send/" + reverb + "/level") == "-20");
+        CHECK (rig.live.empty());
+        CHECK (rig.steps() == steps + 1);
+
+        //  And it sounds as it did.
+        rig.tickOnce();
+        CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>6@0.100 1>7@0.100");
+    }
+
+    SUBCASE ("Discard: the saved sends again, and the new one gone")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("live.drop").applied == 1);
+        rig.tickOnce();
+
+        CHECK (rig.pushedOn (track) == "0>0@1.000 1>1@1.000 0>4@0.501 1>5@0.501");
+        CHECK (rig.published ("/godot/send/" + reverb + "/bus") == "<none>");
+        CHECK_FALSE (rig.document.ids().isTaken (reverb));
+    }
+
+    SUBCASE ("unlocked, a send into a bus a live one already goes to is refused")
+    {
+        rig.lock (false);
+        CHECK (rig.submitAndTick ("send.create", { osc::Value::string (rig.mediaId),
+                                                   osc::Value::string (rig.reverb) }).rejected == 1);
+    }
+}
+
+TEST_CASE ("live: eq.reset under the lock holds flat live; unlocked it lets go of what rode first")
+{
+    LiveRig rig;
+    REQUIRE (rig.document.setAttribute (rig.eq ("eqB2Gain"), "6").ok);
+    REQUIRE (rig.document.setAttribute (rig.eq ("eqHpf"), "true").ok);
+
+    rig.lock (true);
+    CHECK (rig.submitAndTick ("eq.reset", { osc::Value::string (rig.mediaId) }).applied == 1);
+
+    //  Only what differs from flat rides: two rows, the show untouched.
+    CHECK (rig.live.rowsOf (rig.mediaId) == "eqB2Gain eqHpf");
+    CHECK (rig.saved (rig.eq ("eqB2Gain")) == "6");
+    CHECK (rig.published (rig.eq ("eqB2Gain")) == "0");
+    CHECK (rig.published (rig.eq ("eqHpf")) == "false");
+
+    //  Unlocked, the reset lets go of what rode and writes the show.
+    CHECK (rig.set (rig.eq ("eqB3Gain"), osc::Value::float64 (-4.0)).applied == 1);
+    rig.lock (false);
+    CHECK (rig.submitAndTick ("eq.reset", { osc::Value::string (rig.mediaId) }).applied == 1);
+
+    CHECK (rig.live.empty());
+    CHECK (rig.saved (rig.eq ("eqB2Gain")) == "0");
+    CHECK (rig.saved (rig.eq ("eqB3Gain")) == "0");
 }

@@ -1,0 +1,37 @@
+# wfg-log 1
+# fixture live - a locked show's EQ and sends ridden live, then kept (2026-09-25).
+#
+# WHAT IT IS FOR: that a session in which the show was locked and a cue's EQ
+# and sends were ridden anyway - the author's decision: heard at once, written
+# to nothing, until somebody keeps or discards them - reproduces exactly,
+# through the same doors in a replay as in serve. Recorded from a real
+# `wfg serve` of tests/fixtures/bundles/live driven over OSC with no audio
+# device; the header lines below are the session's own.
+#
+# bundle live sha256:4b950ee9175a8650534721c3f88ec18009283c42c3709538fd1f0d452a9a1527
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+# media tones.wav 0 0.000
+#
+# THE SHOW LOCKED: the edit lock is a state row, so it goes through.
+A 25 0 udp:127.0.0.1:62423 node.set s:"/godot/document/locked" T
+#
+# THREE RIDES ON A LOCKED SHOW, each applied and none an edit: band two up six
+# decibels and switched out, and the foldback send up from -6 to -3. The
+# document refuses all three; the live layer in front of it takes them.
+A 41 1 udp:127.0.0.1:62424 node.set s:"/godot/cue/RV000002/eqB2Gain" f:6
+A 56 2 udp:127.0.0.1:62425 node.set s:"/godot/cue/RV000002/eqB2On" F
+A 71 3 udp:127.0.0.1:62299 node.set s:"/godot/send/RV000006/level" f:-3
+#
+# A SEND THE CUE DID NOT HAVE, to the reverb, made live - the identifier it
+# drew rides on the applied record, so a replay makes the same one - and its
+# level ridden like any send's.
+A 86 4 udp:127.0.0.1:62300 send.create s:"RV000002" s:"RV000007" s:"WJ0ZYZT7" s:"-10"
+A 101 5 udp:127.0.0.1:62301 node.set s:"/godot/send/WJ0ZYZT7/level" f:-12
+#
+# UNLOCKED, AND KEPT: one command, one transaction - the EQ rows, the
+# foldback level and a real Send with the identifier the live one had.
+A 118 6 udp:127.0.0.1:61639 node.set s:"/godot/document/locked" F
+A 133 7 udp:127.0.0.1:61640 live.keep
+#
+# AND THE KEEP TAKEN BACK WHOLE by its name: the show as it was saved.
+A 150 8 udp:127.0.0.1:61641 undo s:"document" s:"live.keep"

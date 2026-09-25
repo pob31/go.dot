@@ -20,6 +20,7 @@
 #include <wfg/engine/document/Bundle.h>
 #include <wfg/engine/document/CanonicalXml.h>
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/LiveEdits.h>
 #include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/FxRows.h>
@@ -278,6 +279,8 @@ namespace
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
+        wfg::cue::LiveEdits liveEdits;  // what `live.keep` and `live.drop` act on; nothing rides here
+        wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
@@ -539,6 +542,12 @@ namespace
         wfg::audio::AudioState audioState;
         wfg::surface::SurfaceTable surfaceTable;  // what `surface.aim` writes; nothing reads it here
 
+        /*  WHAT A LOCKED SHOW RODE LIVE (2026-09-25), replayed through the same
+            doors the session wrote it through, so the runs arm with what was
+            heard and a `live.keep` keeps what was kept. */
+        wfg::cue::LiveEdits liveEdits;
+        runner.setLiveEdits (&liveEdits);
+
         /*  REGISTERED WHETHER OR NOT A BUNDLE WAS GIVEN, unlike everything
             below. `audio.editBuilt` needs no document - it is the machine
             reporting the shape of a graph - and a log carrying one must replay
@@ -673,10 +682,13 @@ namespace
                     record applies as it did rather than being refused by a
                     document that cannot hold it. */
                 wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document),
-                                    wfg::cue::fxWriteFor (document, nullptr)));
+                                    wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
+                                                        wfg::cue::fxWriteFor (document, nullptr))),
+                wfg::cue::liveSendFor (liveEdits, document));
 
-            wfg::cue::registerCueCommands (engine.commands(), document, focus);
+            wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);
             wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
+            wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
             wfg::tree::registerTreeCommands (engine.commands(), touches);
             wfg::tree::registerMountCommands (engine.commands(), document, mounts, bundle);
 
@@ -690,7 +702,7 @@ namespace
                 week to find, because every existing fixture replays perfectly
                 without it - what a replay compares is records, and coalescing
                 shows up in the records of nothing anybody has recorded yet. */
-            engine.setBeforeApply ([&document] (const wfg::Command& appliedCommand,
+            engine.setBeforeApply ([&document, &liveEdits] (const wfg::Command& appliedCommand,
                                                 const wfg::Event& submitted,
                                                 const std::vector<wfg::osc::Value>& coerced,
                                                 std::int64_t tickIndex)
@@ -698,7 +710,9 @@ namespace
                                        /*  A RIDE IS NOT AN EDIT: hundreds of
                                            writes a second, none of them a
                                            decision (§14.9's reserved domain). */
-                                       if (wfg::cue::isLiveWrite (appliedCommand.name, coerced))
+                                       if (wfg::cue::isLiveWrite (appliedCommand.name, coerced)
+                                             || wfg::cue::isLiveEdit (appliedCommand.name, coerced,
+                                                                      document, liveEdits))
                                            return;
 
                                        document.beginTransaction (appliedCommand.name, tickIndex,
@@ -1155,6 +1169,8 @@ namespace
         wfg::doc::registerDocumentCommands (engine.commands(), document);
         wfg::cue::registerCueCommands (engine.commands(), document, focus);
         wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
+        wfg::cue::LiveEdits liveEdits;  // what `live.keep` and `live.drop` act on; nothing rides here
+        wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
         wfg::cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
@@ -2495,6 +2511,11 @@ namespace
             registered below (2026-09-25). The bridge fills the rest of it. */
         wfg::surface::SurfaceTable surfaceTable;
 
+        /*  WHAT A LOCKED SHOW IS RIDING LIVE - a cue's EQ and sends, the
+            author's decision of 2026-09-25 - declared before the doors that
+            write it and handed to the Runner and the tree below. */
+        wfg::cue::LiveEdits liveEdits;
+
         wfg::doc::registerDocumentCommands (
             engine.commands(), document,
             [&mounts, &sender] (const std::string& address, const wfg::osc::Value& value)
@@ -2533,11 +2554,17 @@ namespace
                 lock, the transaction and the coalescing apply. The two doors
                 as one: a live row is answered first, in front of the
                 document; an FX parameter through it. */
+            /*  AND UNDER THE LOCK, A CUE'S EQ AND SENDS, ridden live in front
+                of the document that would refuse them (2026-09-25). */
             wfg::cue::eitherOf (wfg::cue::liveWriteFor (runs, dcas, document),
-                                wfg::cue::fxWriteFor (document, &catalogues)));
+                                wfg::cue::eitherOf (wfg::cue::liveEditFor (liveEdits, document),
+                                                    wfg::cue::fxWriteFor (document, &catalogues))),
+            wfg::cue::liveSendFor (liveEdits, document));
 
-        wfg::cue::registerCueCommands (engine.commands(), document, focus);
+        wfg::cue::registerCueCommands (engine.commands(), document, focus, &liveEdits);
         wfg::surface::registerSurfaceCommands (engine.commands(), document, surfaceTable);
+        wfg::cue::registerLiveCommands (engine.commands(), document, liveEdits);
+        runner.setLiveEdits (&liveEdits);
         wfg::cue::registerRunCommands (engine.commands(), runs, [&audioState] { wfg::audio::stopOutputTest (audioState); });
 
         /*  THE SANDBOX'S TABLE AND ITS TWO COMMANDS (Phase 9a, §17.3). The
@@ -2587,7 +2614,7 @@ namespace
             fixture there is and diverges only where coalescing mattered: a log
             of thousands of drags, and a failure nobody would think to look for
             here. */
-        engine.setBeforeApply ([&document] (const wfg::Command& appliedCommand,
+        engine.setBeforeApply ([&document, &liveEdits] (const wfg::Command& appliedCommand,
                                             const wfg::Event& submitted,
                                             const std::vector<wfg::osc::Value>& coerced,
                                             std::int64_t tickIndex)
@@ -2597,7 +2624,9 @@ namespace
                                        of it is a decision about the show, so it
                                        opens no transaction and Undo never moves
                                        a fader (§14.9's reserved domain). */
-                                   if (wfg::cue::isLiveWrite (appliedCommand.name, coerced))
+                                   if (wfg::cue::isLiveWrite (appliedCommand.name, coerced)
+                                         || wfg::cue::isLiveEdit (appliedCommand.name, coerced,
+                                                                  document, liveEdits))
                                        return;
 
                                    document.beginTransaction (appliedCommand.name, tickIndex,
@@ -2910,6 +2939,7 @@ namespace
         wfg::midi::PortBinder portBinder { midiIn, midiOut };
         parameters.setDcas (&dcas);
         parameters.setPlugins (&pluginTable);
+        parameters.setLiveEdits (&liveEdits);
 
         /*  WHAT THIS MACHINE KNOWS OF THE PLUGINS THE SHOW DECLARES (Phase 9a,
             §17.7): the catalogue cache, one file per identifier under the

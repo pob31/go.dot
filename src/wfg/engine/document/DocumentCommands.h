@@ -70,6 +70,15 @@ namespace wfg::doc
                                                             const std::string& text,
                                                             const std::vector<osc::Value>& args)>;
 
+    /*  AND WHERE A SEND GOES WHEN THE SHOW IS LOCKED (2026-09-25): a cue's
+        sends ride live under the lock, a new one included, so `send.create`
+        asks this first with its arguments as given. It answers the applied
+        record - the identifier it drew in the third place - or nothing, and
+        then the document makes the send as it always did.
+        `cue::liveSendFor` is the one implementation. */
+    using LiveCreate = std::function<std::optional<Outcome> (const std::vector<osc::Value>& args)>;
+
     void registerDocumentCommands (CommandRegistry& registry, ShowDocument& document,
-                                   ForeignWrite foreign = {}, LiveWrite live = {});
+                                   ForeignWrite foreign = {}, LiveWrite live = {},
+                                   LiveCreate liveSend = {});
 }
