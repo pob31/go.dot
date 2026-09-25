@@ -3220,6 +3220,41 @@ namespace wfg::client::ui
         {
             initial = audio::readAudioSettings ([&] (const std::string& name)
             { return model::text (snapshot, "/godot/audio/" + name); });
+
+            /*  THE DEVICE THAT IS OPEN, WHEN THE SHOW NAMES NONE (author,
+                2026-09-25: "the settings panel show the system default" while
+                the session ran on the MADIface). A device given on the command
+                line (`--device`) is opened without being written into the show,
+                so a show with no settings of its own read back here as the
+                system default with the interface switched off - and Apply, as
+                shown, closed the very device that was playing. The form starts
+                from what is running instead, found by name among the drivers
+                (names only: no second device is opened to look), and the
+                status line says so; Apply and save then keep it with the show. */
+            const auto running = model::text (snapshot, "/godot/audio/device");
+
+            if (! initial.enabled && initial.outputDevice.empty() && ! running.empty()
+                  && model::text (snapshot, "/godot/audio/status") == "running")
+            {
+                for (auto* deviceType : devices.getAvailableDeviceTypes())
+                {
+                    deviceType->scanForDevices();
+
+                    if (deviceType->getDeviceNames (false).contains (juce::String (running)))
+                    {
+                        initial.enabled = true;
+                        initial.deviceType = deviceType->getTypeName().toStdString();
+                        initial.outputDevice = running;
+                        runningNotSaved = true;
+                        break;
+                    }
+                }
+
+                if (const auto granted = juce::String (model::text (snapshot, "/godot/audio/actualBufferSize")).getIntValue();
+                    runningNotSaved && granted > 0)
+                    initial.bufferSize = granted;
+            }
+
             readCapabilities (snapshot);
             std::vector<int> in, out;
             audio::readPatch (initial.inputPatch, in); audio::readPatch (initial.outputPatch, out);
@@ -3309,6 +3344,11 @@ namespace wfg::client::ui
             cancel.onClick = std::move (close);
             setSize (880, 610);
             refresh (snapshot);
+
+            if (runningNotSaved)
+                status.setText ("This session opened " + juce::String (running) + " from the command line; the show's"
+                                " own settings name no interface. Apply and save to keep it with the show.",
+                                juce::dontSendNotification);
         }
 
         void refresh (const tree::TreeSnapshot& snapshot)
@@ -3576,6 +3616,9 @@ namespace wfg::client::ui
         juce::TextButton rescan { "Rescan interfaces" }, apply { "Apply while stopped" }, cancel { "Close" };
         bool waiting = false, sawApplying = false, saveAfterApply = false, defaultsAfterApply = false;
         std::string errorCount, errorCountAtApply, sequence, sequenceAtApply;
+
+        /** The form was filled from the device that is open, not from the show's settings. */
+        bool runningNotSaved = false;
     };
 
     ShowSettingsWindow::ShowSettingsWindow (const model::Theme& theme, const tree::TreeSnapshot& snapshot,
