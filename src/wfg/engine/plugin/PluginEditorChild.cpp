@@ -505,6 +505,19 @@ namespace wfg::plugin
                 const auto leaving = region.shouldExit.load (std::memory_order_acquire);
                 const auto orphaned = parentPid > 0 && ticks % 100 == 0 && ! process::isAlive (parentPid);
 
+                /*  WHAT THE HAND DID LAST IS SEEN BEFORE THE LEAVE IS (found by
+                    CI on a busy macOS runner, 2026-09-25): a change and the
+                    leave can arrive in the same pass, and a leave read first
+                    left without the change it was asked to keep. */
+                if (leaving == 1 && ! orphaned)
+                {
+                    poke();
+                    collect();
+
+                    if (watcher.stateChanged.exchange (false, std::memory_order_acq_rel))
+                        changedByHand();
+                }
+
                 /*  LEAVING KEEPS WHAT THE HAND DID: a state changed since the
                     last capture is captured on the way out - waiting a moment
                     for the mailbox if the parent has not taken the last one. */
