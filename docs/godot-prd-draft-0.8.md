@@ -2387,12 +2387,22 @@ and a dip dims towards a floor, never dark, because dark is silence. A flash is
 held and released over a few hundred milliseconds, so the ten-a-second colour
 limit above cannot skip it. The resting glow, the dB range, the floor, the
 average and the release are the bench's to tune (`SurfaceProfile.h`).
-**How much rise is "full" adapts** to how much the sound has been moving
-lately (*"at louder volume the modulation gets a bit lost when sparse quiet
-parts are really clear … Could the system be a bit more adaptive?"*): full is
-two and a half times the envelope's recent mean distance from its average,
-held between 2 and 12 dB, so a dense loud passage that moves a decibel or two
-flashes as clearly as a sparse one that moves twenty.
+**Half of the light is the level, half the movement** (*"The low level sounds
+with a little variation come out with as much variation in the lights as a
+more dynamic sound. Maybe make part of the LED level match the long term level
+of the music and the other 'half' the shorter term variations"*). The
+envelope is in dB below full scale. Its average over about three seconds,
+squashed between -48 and -6 dBFS, is half of the brightness, so quiet material
+glows low. The other half is the rise above a 0.6 s average, measured against
+how far the sound has strayed lately. That measure adapts, so a dense loud
+passage still shows its movement (*"at louder volume the modulation gets a bit
+lost"*), but it never counts less than 4 dB as a full swing, so a quiet sound
+that barely moves stays nearly still. **What the LEDs are sent is shaped for
+their light** (*"The white 'looks' louder. I think the LED's of the D700 are
+not super linear and not all channels match totally"*): the total light is
+held to one and a half channels' worth, since white lights all three; each
+channel has its trim; and the response is straightened by a gamma of 2. All of
+these are the bench's numbers.
 
 **And noise is grey wherever it sits** (*"the colours … don't desaturate on a
 broader, noisier signal which I find quite a telling visual cue"*). The

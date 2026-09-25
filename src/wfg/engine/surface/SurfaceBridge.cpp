@@ -322,6 +322,32 @@ namespace wfg::surface
         return Rgb { sevenBitsOf (red + lift), sevenBitsOf (green + lift), sevenBitsOf (blue + lift) };
     }
 
+    Rgb forTheLeds (Rgb colour) noexcept
+    {
+        auto red = std::clamp (colour.red, 0, 127) / 127.0;
+        auto green = std::clamp (colour.green, 0, 127) / 127.0;
+        auto blue = std::clamp (colour.blue, 0, 127) / 127.0;
+
+        /*  THE TOTAL LIGHT HELD: white lights all three channels, and at the
+            same brightness gave three times the light of a pure red (author,
+            2026-09-25: "The white 'looks' louder"). */
+        if (const auto total = red + green + blue; total > ledLightBudget)
+        {
+            const auto share = ledLightBudget / total;
+            red *= share;
+            green *= share;
+            blue *= share;
+        }
+
+        //  Each channel trimmed, then the LEDs' response straightened.
+        const auto shaped = [] (double value, double trim)
+        {
+            return static_cast<int> (std::lround (127.0 * std::pow (std::clamp (value * trim, 0.0, 1.0), ledGamma)));
+        };
+
+        return Rgb { shaped (red, ledRedTrim), shaped (green, ledGreenTrim), shaped (blue, ledBlueTrim) };
+    }
+
     Rgb colourLevels (Rgb colour) noexcept
     {
         const auto levelOf = [] (int component) { return std::clamp (component, 0, 127) >> 4; };
@@ -370,6 +396,7 @@ namespace wfg::surface
                 holder's envelope and the brightness being let go, for the run
                 they were measured on - a new holder starts again. */
             std::string pulseFor;
+            double pulseLevel = 0.0;
             double pulseAverage = 0.0;
             double pulseSpread = 0.0;
             double pulseShown = 0.0;
@@ -1321,21 +1348,35 @@ namespace wfg::surface
             if (strip.pulseFor != strip.holderId)
             {
                 strip.pulseFor = strip.holderId;
+                strip.pulseLevel = *envelope;
                 strip.pulseAverage = *envelope;
                 strip.pulseSpread = pulseScaleLeastDb / pulseSpreadsForFull;
-                strip.pulseShown = pulseRest;
+                strip.pulseShown = 0.0;
             }
 
-            //  One-pole means over their seconds of ticks: the level, then how far it strays.
+            //  One-pole means over their seconds of ticks: the level, a faster one, and how far it strays.
             const auto rate = static_cast<double> (TickClock::rateHz);
-            strip.pulseAverage += (*envelope - strip.pulseAverage) / std::max (1.0, pulseAverageSeconds * rate);
+            const auto mean = [rate] (double& into, double value, double seconds)
+            {
+                into += (value - into) / std::max (1.0, seconds * rate);
+            };
+
+            mean (strip.pulseLevel, *envelope, pulseLevelSeconds);
+            mean (strip.pulseAverage, *envelope, pulseAverageSeconds);
 
             const auto height = *envelope - strip.pulseAverage;
-            strip.pulseSpread += (std::abs (height) - strip.pulseSpread) / std::max (1.0, pulseSpreadSeconds * rate);
+            mean (strip.pulseSpread, std::abs (height), pulseSpreadSeconds);
 
+            //  THE LEVEL'S SHARE: where the long average sits between the floor and the ceiling.
+            const auto level = std::clamp ((strip.pulseLevel - pulseLevelFloorDb)
+                                              / (pulseLevelCeilingDb - pulseLevelFloorDb), 0.0, 1.0);
+
+            //  THE MOVEMENT'S: steady in the middle, a hit at the top, a dip at the bottom.
             const auto full = std::clamp (pulseSpreadsForFull * strip.pulseSpread, pulseScaleLeastDb, pulseScaleMostDb);
-            const auto lift = height / full;
-            const auto now = std::clamp (pulseRest + (1.0 - pulseRest) * lift, pulseFloor, 1.0);
+            const auto movement = std::clamp (0.5 + 0.5 * height / full, 0.0, 1.0);
+
+            const auto now = pulseFloor + (1.0 - pulseFloor)
+                                            * (pulseLevelShare * level + (1.0 - pulseLevelShare) * movement);
 
             //  Up at once, down at the release: a flash outlives the rate limit.
             strip.pulseShown = std::max (now, strip.pulseShown - pulseReleasePerTick);
@@ -1355,6 +1396,8 @@ namespace wfg::surface
             takes an undriven LED back. */
         void paintColour (const std::string& port, int note, Strip& strip, Rgb colour, std::int64_t tick)
         {
+            /*  A VISIBLE STEP IS JUDGED ON THE COLOUR AS SEEN, before the
+                LEDs' shaping squeezes the dim end together. */
             const auto levels = colourLevels (colour);
             const auto since = tick - strip.colourTick;
 
@@ -1364,7 +1407,7 @@ namespace wfg::surface
             if (! due || since < colourIntervalTicks)
                 return;
 
-            sendColour (port, note, colour);
+            sendColour (port, note, forTheLeds (colour));
             strip.colourKnown = true;
             strip.colourLevel = levels;
             strip.colourTick = tick;

@@ -1933,14 +1933,14 @@ namespace wfg::tree
         }
 
         /*  `/godot/run/<id>/envelope`: the frame's peak at the run's position,
-            in decibels below the loudest frame of the file, to a tenth - or
-            empty, for every case `timbre` is empty. A silent frame is -120.
+            in decibels below full scale, to a tenth - or empty, for every case
+            `timbre` is empty. A silent frame is -120.
 
-            AGAINST THE FILE'S OWN LOUDEST MOMENT, which the coarsest level of
-            the pyramid holds (a coarser frame's peak is the larger of its
-            two): what a surface pulses with is how the sound moves, and a
-            quiet recording moves as much as a loud one (author, 2026-09-25:
-            "variation/modulation is a better clue"). */
+            BELOW FULL SCALE, NOT BELOW THE FILE'S OWN LOUDEST MOMENT, since
+            the author asked for part of a strip's light to be the music's
+            level (2026-09-25: "make part of the LED level match the long term
+            level of the music"): a quiet recording glows low. How it MOVES is
+            taken from the same numbers by the surface. */
         std::string envelopeText (const cue::Run& run, const audio::MediaRecords* records)
         {
             if (records == nullptr || run.media.empty())
@@ -1951,22 +1951,15 @@ namespace wfg::tree
             if (found == records->end() || found->second.pyramid == nullptr)
                 return {};
 
-            const auto& pyramid = *found->second.pyramid;
-            const auto* frame = audio::timbre::frameAt (pyramid, run.position);
+            const auto* frame = audio::timbre::frameAt (*found->second.pyramid, run.position);
 
-            if (frame == nullptr || pyramid.levels.empty())
+            if (frame == nullptr)
                 return {};
 
-            std::uint8_t loudest = 0;
-
-            for (const auto& coarse : pyramid.levels.back())
-                loudest = std::max (loudest, coarse.peak);
-
-            if (loudest == 0 || frame->peak == 0)
+            if (frame->peak == 0)
                 return osc::formatDouble (-120.0);
 
-            const auto below = 20.0 * std::log10 (static_cast<double> (frame->peak)
-                                                    / static_cast<double> (loudest));
+            const auto below = 20.0 * std::log10 (audio::timbre::peakOf (*frame));
 
             return osc::formatDouble (std::max (-120.0, std::round (below * 10.0) / 10.0));
         }

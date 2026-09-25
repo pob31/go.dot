@@ -1077,12 +1077,12 @@ TEST_CASE ("tree: a run's timbre is the frame at its position, in three numbers 
     CHECK (textAt (*rig.publish (4), address) == expectedTimbre (frames[63]));
 }
 
-TEST_CASE ("tree: a run's envelope is its file's peak where it has got to, below the file's loudest moment")
+TEST_CASE ("tree: a run's envelope is its file's peak where it has got to, below full scale")
 {
-    /*  The bed's peaks are the frame numbers, frame 50 silent: its loudest
-        frame is 63. So frame 4 is 20 log10 (4 / 63) = -23.95 dB, frame 14 is
-        -13.06, frame 30 is -6.44 and frame 63 nought - worked by hand here,
-        a different road from the tree's to the same tenths. */
+    /*  The bed's peaks are the frame numbers, of 255, frame 50 silent. So
+        frame 4 is 20 log10 (4 / 255) = -36.09 dB, frame 14 is -25.21, frame
+        30 is -18.59 and frame 63 -12.14 - worked by hand here, a different
+        road from the tree's to the same tenths. */
     INFO ("locale in effect: " << std::string (wfgtest::appliedLocaleName()));
 
     Rig rig;
@@ -1096,23 +1096,23 @@ TEST_CASE ("tree: a run's envelope is its file's peak where it has got to, below
     addRun (rig, "R1", cueId, bedFile, 0.1);                 // frame 4
 
     const auto first = rig.publish (0);
-    CHECK (textAt (*first, address) == "-23.9");
+    CHECK (textAt (*first, address) == "-36.1");
 
     const auto* node = first->find (address);
     REQUIRE (node != nullptr);
     CHECK (node->access == Access::read);
 
     moveRun (rig, "R1", 0.3);                                // frame 14
-    CHECK (textAt (*rig.publish (1), address) == "-13.1");
+    CHECK (textAt (*rig.publish (1), address) == "-25.2");
 
     moveRun (rig, "R1", 0.65);                               // frame 30
-    CHECK (textAt (*rig.publish (2), address) == "-6.4");
+    CHECK (textAt (*rig.publish (2), address) == "-18.6");
 
     moveRun (rig, "R1", 1.07);                               // frame 50: silence
     CHECK (textAt (*rig.publish (3), address) == "-120");
 
     moveRun (rig, "R1", 30.0);                               // past the end: frame 63
-    CHECK (textAt (*rig.publish (4), address) == "0");
+    CHECK (textAt (*rig.publish (4), address) == "-12.1");
 
     //  And empty, as timbre is, for a run whose file nothing has analysed.
     addRun (rig, "R2", cueId, "elsewhere.wav", 0.1);

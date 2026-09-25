@@ -145,36 +145,61 @@ namespace wfg::surface
                                                    : (whole > 0 ? whole : std::int64_t { 1 });
     }();
 
-    /*  HOW A SOUNDING STRIP'S COLOUR PULSES WITH ITS SOUND (author,
-        2026-09-25: "Can the brightness of the RGB LEDs be modulated by the
-        sound level or variations of it? ... Don't use the full 16 or 24 bit
-        resolution. It can be squashed, but variation/modulation is a better
-        clue"). Not the level: its MOVEMENT. A slow average follows the clip's
-        envelope, and the brightness is `pulseRest` plus the envelope's height
-        above that average - so a steady sound rests at a middle glow whatever
-        its level, a hit flashes and a dip dims, down to `pulseFloor` and never
-        dark (dark is silence). A flash is held and let go by
-        `pulseReleasePerTick`, so the colour's own rate limit, ten writes a
-        second, cannot skip it.
+    /*  HOW BRIGHT A SOUNDING STRIP IS: HALF ITS LEVEL, HALF ITS MOVEMENT
+        (author, 2026-09-25, in three steps: "Can the brightness of the RGB LEDs
+        be modulated by the sound level or variations of it? ... Don't use the
+        full 16 or 24 bit resolution. It can be squashed, but
+        variation/modulation is a better clue"; then "at louder volume the
+        modulation gets a bit lost ... Could the system be a bit more
+        adaptive?"; then "The low level sounds with a little variation come
+        out with as much variation in the lights as a more dynamic sound.
+        Maybe make part of the LED level match the long term level of the
+        music and the other 'half' the shorter term variations").
 
-        AND HOW MUCH HEIGHT IS FULL ADAPTS (author, the same day: "at louder
-        volume the modulation gets a bit lost when sparse quiet parts are
-        really clear in the pulsation. Could the system be a bit more
-        adaptive?"). A dense, loud passage moves a decibel or two about its
-        average and a sparse one twenty, so a fixed scale showed one and
-        drowned the other. The scale is `pulseSpreadsForFull` times how far
-        the envelope has recently strayed from its average - a slower mean of
-        that distance, over `pulseSpreadSeconds` - held between
-        `pulseScaleLeastDb` (a nearly still sound is not blown up into
-        flashing) and `pulseScaleMostDb`. */
-    inline constexpr double pulseRest = 0.45;
-    inline constexpr double pulseFloor = 0.08;
+        THE LEVEL: the clip's envelope (its analysed peak, in dB below full
+        scale) averaged over `pulseLevelSeconds`, squashed between
+        `pulseLevelFloorDb` (nothing) and `pulseLevelCeilingDb` (all of its
+        share) - quiet material glows low, loud material high.
+
+        THE MOVEMENT: the envelope's height above a faster average (over
+        `pulseAverageSeconds`), against how far it has strayed lately (a mean
+        over `pulseSpreadSeconds`) times `pulseSpreadsForFull` - so a dense
+        passage that moves a decibel or two still shows it - but never less
+        than `pulseScaleLeastDb`, so a quiet sound that barely moves stays
+        nearly still. Steady is the middle of its share, a hit the top, a dip
+        the bottom.
+
+        `pulseLevelShare` of the light is the level's and the rest the
+        movement's, above `pulseFloor`, which is a glow and never dark (dark is
+        silence). A flash is held and let go by `pulseReleasePerTick`, so the
+        colour's own rate limit, ten writes a second, cannot skip it. These
+        are the eye's brightness; what the LEDs are sent is shaped after, by
+        the `led` numbers below. */
+    inline constexpr double pulseFloor = 0.2;
+    inline constexpr double pulseLevelShare = 0.5;
+    inline constexpr double pulseLevelSeconds = 3.0;
+    inline constexpr double pulseLevelFloorDb = -48.0;
+    inline constexpr double pulseLevelCeilingDb = -6.0;
     inline constexpr double pulseAverageSeconds = 0.6;
     inline constexpr double pulseReleasePerTick = 0.04;
     inline constexpr double pulseSpreadSeconds = 1.5;
-    inline constexpr double pulseSpreadsForFull = 2.5;
-    inline constexpr double pulseScaleLeastDb = 2.0;
+    inline constexpr double pulseSpreadsForFull = 1.5;
+    inline constexpr double pulseScaleLeastDb = 4.0;
     inline constexpr double pulseScaleMostDb = 12.0;
+
+    /*  WHAT AN RGB SURFACE'S LEDS ARE SENT for a colour the eye should see
+        (author, 2026-09-25: "The white 'looks' louder. I think the LED's of
+        the D700 are not super linear and not all channels match totally").
+        The total light is held to `ledLightBudget` channels' worth - white
+        lights all three and was three times a pure red; each channel has its
+        trim, for LEDs that do not match; and the LEDs' response is
+        straightened by `ledGamma`, since what they are sent is light and what
+        the colour describes is how it looks. */
+    inline constexpr double ledLightBudget = 1.5;
+    inline constexpr double ledGamma = 2.0;
+    inline constexpr double ledRedTrim = 1.0;
+    inline constexpr double ledGreenTrim = 1.0;
+    inline constexpr double ledBlueTrim = 1.0;
 
     /*  AN UNCHANGED COLOUR IS WRITTEN AGAIN THIS OFTEN, because the D700's
         firmware takes its LEDs back with an idle animation when nothing

@@ -1425,7 +1425,7 @@ namespace wfg::doc::generated
           nullptr, 0,
           "", 50.0, false, "park",
           "",
-          "How loud the file is where the run has got to, against its own loudest moment: the analysed peak of the frame at its position, in decibels below the loudest frame of the file - nought at the loudest, -120 for a silent frame - or empty until the file is analysed, as timbre is. Before the fader and the DCA: it is the sound's own shape, which is what a surface pulses its colour with (author, 2026-09-25: 'variation/modulation is a better clue')." },
+          "How loud the file is where the run has got to: the analysed peak of the frame at its position, in decibels below full scale, to a tenth - -120 for a silent frame - or empty until the file is analysed, as timbre is. Before the fader and the DCA: it is the sound's own shape, which a surface pulses its colour with - half its level over a few seconds, half how it moves (author, 2026-09-25: 'make part of the LED level match the long term level of the music and the other half the shorter term variations')." },
         { "run", "level",
           ValueType::number, 'd', false, Access::read, Kind::state, Persist::none,
           true, "0",

@@ -1303,9 +1303,15 @@ TEST_CASE ("surface bridge: a D700 strip wears its cue's colour, blue last, re-a
     stage.bridge.declare ({ spec }, [] (const std::string& port) { return plugged (port); });
     stage.tickOnce();
 
-    //  THREE MESSAGES, red, green, then blue - the one that refreshes the ring.
+    /*  THREE MESSAGES, red, green, then blue - the one that refreshes the
+        ring - carrying #FF8000 as the LEDs are sent it: the 127, 64, 0 it is,
+        shaped for their light (2026-09-25, `forTheLeds`). */
+    const auto orange = surface::forTheLeds (surface::Rgb { 127, 64, 0 });
+    CHECK (orange.green < 64);
     CHECK (colourOf (stage.sink, "PORTBNK1", 0x20)
-             == std::vector<midi::Bytes> { { 0x91, 0x20, 127 }, { 0x92, 0x20, 64 }, { 0x93, 0x20, 0 } });
+             == std::vector<midi::Bytes> { { 0x91, 0x20, static_cast<std::uint8_t> (orange.red) },
+                                           { 0x92, 0x20, static_cast<std::uint8_t> (orange.green) },
+                                           { 0x93, 0x20, static_cast<std::uint8_t> (orange.blue) } });
 
     //  A clip with no colour authored is dark, and so is a free strip.
     CHECK (colourOf (stage.sink, "PORTBNK1", 0x21)
@@ -1399,13 +1405,14 @@ TEST_CASE ("surface bridge: a sounding strip wears what it sounds like, and its 
     CHECK (colourOf (sink, "PORTBNK1", 0x20).empty());
 }
 
-TEST_CASE ("surface bridge: a sounding strip's colour pulses with how its sound moves, not with how loud it is")
+TEST_CASE ("surface bridge: a sounding strip's light is half its level and half how it moves, shaped for the LEDs")
 {
-    /*  The author, 2026-09-25: "Can the brightness of the RGB LEDs be
-        modulated by the sound level or variations of it? ... variation /
-        modulation is a better clue". A steady sound rests at `pulseRest`
-        whatever its level; a rise above its own recent average flashes, and
-        the flash is let go slowly enough to outlive the colour's rate limit. */
+    /*  The author, 2026-09-25, in three steps: the brightness modulated by
+        the sound's variation; then more adaptive; then "The low level sounds
+        with a little variation come out with as much variation in the lights
+        as a more dynamic sound. Maybe make part of the LED level match the
+        long term level of the music and the other 'half' the shorter term
+        variations" - and "The white 'looks' louder". */
     RecordingSink sink;
     surface::SurfaceTable table;
     surface::SurfaceBridge bridge { sink, table };
@@ -1419,7 +1426,6 @@ TEST_CASE ("surface bridge: a sounding strip's colour pulses with how its sound 
     fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
     fake.number ("/godot/run/RUN00001/trim", 0.0);
     fake.text ("/godot/run/RUN00001/timbre", "0 1 0.5");           // pure red
-    fake.text ("/godot/run/RUN00001/envelope", "-18");              // a quiet, steady bed
     fake.text ("/godot/cue/CUE00001/name", "Rain");
 
     surface::SurfaceSpec spec;
@@ -1436,90 +1442,100 @@ TEST_CASE ("surface bridge: a sounding strip's colour pulses with how its sound 
         return colour.size() >= 3u ? static_cast<int> (colour[colour.size() - 3][2]) : -1;
     };
 
-    const auto rest = static_cast<int> (std::lround (127.0 * surface::pulseRest));
+    std::int64_t tick = 0;
+    std::string run = "RUN00001";
 
-    std::int64_t tick = 1;
-    bridge.afterTick (fake.publish (tick), touches, tick);
-
-    //  STEADY IS THE RESTING GLOW, however quiet: -18 dB rests where 0 dB would.
-    CHECK (redNow() == rest);
-
-    for (tick = 2; tick <= 60; ++tick)
-        bridge.afterTick (fake.publish (tick), touches, tick);
-
-    sink.sent.clear();
-
-    //  A HIT: eight decibels above a steady average is full, at the next write the rate allows.
-    fake.text ("/godot/run/RUN00001/envelope", "-10");
-
-    for (tick = 61; tick <= 66; ++tick)
-        bridge.afterTick (fake.publish (tick), touches, tick);
-
-    CHECK (redNow() >= 120);
-
-    //  And let go: back towards the rest once the sound is steady again.
-    fake.text ("/godot/run/RUN00001/envelope", "-18");
-    sink.sent.clear();
-
-    for (tick = 67; tick <= 100; ++tick)
-        bridge.afterTick (fake.publish (tick), touches, tick);
-
-    CHECK (redNow() >= 0);
-    CHECK (redNow() < 100);
-
-    /*  A DIP DIMS, down to the floor and never dark - dark is silence, which
-        the timbre says on its own. */
-    for (tick = 101; tick <= 200; ++tick)
-        bridge.afterTick (fake.publish (tick), touches, tick);
-
-    fake.text ("/godot/run/RUN00001/envelope", "-40");
-    sink.sent.clear();
-
-    for (tick = 201; tick <= 212; ++tick)
-        bridge.afterTick (fake.publish (tick), touches, tick);
-
-    CHECK (redNow() > 0);
-    CHECK (redNow() < rest);
-
-    /*  AND THE SCALE ADAPTS (author, 2026-09-25: "at louder volume the
-        modulation gets a bit lost"): a dense passage that only moves a
-        decibel or two about its average flashes as clearly as a sparse one
-        moving twenty, because full is measured in how far THIS sound has been
-        straying lately. */
-    const auto flashAfter = [&] (double around, double swing, double hit)
+    //  Some seconds of an envelope given tick by tick, to the run on the strip; the reds sent while it ran.
+    const auto play = [&] (int ticks, const std::function<double (int)>& envelopeAt)
     {
-        //  Eight seconds of the envelope swinging `swing` either side of `around` - the scale adapts over a second and a half...
-        for (int n = 0; n < 400; ++n, ++tick)
+        std::vector<int> reds;
+
+        for (int n = 0; n < ticks; ++n)
         {
-            fake.text ("/godot/run/RUN00001/envelope",
-                       osc::formatDouble (around + ((n / 5) % 2 == 0 ? swing : -swing)));
+            ++tick;
+            fake.text ("/godot/run/" + run + "/envelope", osc::formatDouble (envelopeAt (n)));
+            sink.sent.clear();
             bridge.afterTick (fake.publish (tick), touches, tick);
+
+            if (const auto red = redNow(); red >= 0)
+                reds.push_back (red);
         }
 
-        //  ...then a steady moment at the average, and one hit.
-        for (int n = 0; n < 30; ++n, ++tick)
-        {
-            fake.text ("/godot/run/RUN00001/envelope", osc::formatDouble (around));
-            bridge.afterTick (fake.publish (tick), touches, tick);
-        }
-
-        sink.sent.clear();
-        fake.text ("/godot/run/RUN00001/envelope", osc::formatDouble (around + hit));
-
-        for (int n = 0; n < 6; ++n, ++tick)
-            bridge.afterTick (fake.publish (tick), touches, tick);
-
-        return redNow();
+        return reds;
     };
 
-    const auto dense = flashAfter (-2.0, 1.0, 2.5);         // loud and busy: 2.5 dB is a hit
-    const auto sparse = flashAfter (-20.0, 10.0, 2.5);      // quiet and sparse: 2.5 dB is nothing
+    const auto swing = [] (const std::vector<int>& reds)
+    {
+        return reds.empty() ? 0 : *std::max_element (reds.begin(), reds.end())
+                                    - *std::min_element (reds.begin(), reds.end());
+    };
 
-    CHECK (dense >= 100);
-    CHECK (sparse < dense);
+    //  STEADY, THE LEVEL DECIDES: a loud bed glows well above a quiet one.
+    auto loud = play (400, [] (int) { return -8.0; });
+    REQUIRE_FALSE (loud.empty());
+    const auto loudRest = loud.back();
 
-    //  With no envelope yet, the colour is the timbre's, as it always was.
-    fake.text ("/godot/run/RUN00001/envelope", "");
+    const auto onStrip = [&] (const std::string& id, const std::string& timbre)
+    {
+        run = id;
+        fake.text ("/godot/slot/STRIP001/holder", id);                 // a new run starts afresh
+        fake.text ("/godot/run/" + id + "/timbre", timbre);
+    };
+
+    onStrip ("RUN00002", "0 1 0.5");
+    auto quiet = play (400, [] (int) { return -40.0; });
+    onStrip ("RUN00001", "0 1 0.5");
+    REQUIRE_FALSE (quiet.empty());
+    const auto quietRest = quiet.back();
+
+    CHECK (quietRest > 0);                                          // a glow, never dark
+    CHECK (loudRest > quietRest + 30);
+
+    //  A HIT on the loud bed flashes towards full.
+    play (300, [] (int) { return -8.0; });
+    const auto hit = play (6, [] (int) { return -2.0; });
+    REQUIRE_FALSE (hit.empty());
+    CHECK (hit.back() > loudRest + 20);
+
+    /*  A QUIET SOUND THAT BARELY MOVES BARELY CHANGES, and a dynamic one
+        swings: half a decibel of wobble is under the least that counts as a
+        flash, six decibels is well over it. */
+    onStrip ("RUN00003", "0 1 0.5");
+    const auto still = play (600, [] (int n) { return -36.0 + ((n / 5) % 2 == 0 ? 0.5 : -0.5); });
+
+    onStrip ("RUN00004", "0 1 0.5");
+    const auto lively = play (600, [] (int n) { return -12.0 + ((n / 5) % 2 == 0 ? 6.0 : -6.0); });
+
+    const auto late = [] (const std::vector<int>& reds)
+    {
+        return std::vector<int> (reds.begin() + static_cast<std::ptrdiff_t> (reds.size() / 2), reds.end());
+    };
+
+    CHECK (swing (late (still)) <= 8);
+    CHECK (swing (late (lively)) >= 20);
+    CHECK (swing (late (lively)) >= 3 * swing (late (still)));
+
+    /*  WHITE IS HELD TO THE LIGHT BUDGET: a grey timbre lights all three
+        channels, and each is sent far below what a pure colour of the same
+        brightness gets - "the white looks louder". */
+    onStrip ("RUN00005", "0 0 0.5");                                // no saturation: white
+    play (400, [] (int) { return -8.0; });
+    sink.sent.clear();
+    play (6, [] (int) { return -8.0; });
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    const auto white = colourOf (sink, "PORTBNK1", 0x20);
+
+    if (white.size() >= 3u)
+    {
+        const auto whiteRed = static_cast<int> (white[white.size() - 3][2]);
+        CHECK (whiteRed < loudRest);
+    }
+
+    //  With no envelope yet, the colour is the timbre's, at full: a pure red is a full red.
+    onStrip ("RUN00006", "0 1 0.5");
+    fake.text ("/godot/run/RUN00006/envelope", "");
     sink.sent.clear();
 
     for (const auto end = tick + 18; tick <= end; ++tick)

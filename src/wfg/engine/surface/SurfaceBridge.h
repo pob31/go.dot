@@ -125,6 +125,12 @@ namespace wfg::surface
         What is written is the colour itself, not its level. */
     Rgb colourLevels (Rgb colour) noexcept;
 
+    /*  WHAT AN RGB SURFACE'S LEDS ARE SENT for a colour as the eye should see
+        it: the total light held to `ledLightBudget` channels' worth, each
+        channel trimmed, the response straightened by `ledGamma`
+        (SurfaceProfile.h). Every colour a D700 is sent passes through it. */
+    Rgb forTheLeds (Rgb colour) noexcept;
+
     //==========================================================================
     class SurfaceBridge
     {
