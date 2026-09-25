@@ -59,9 +59,7 @@ namespace wfg::surface
         constexpr int selectNote = 0x18;        // + element: SELECT, whose LED says the strip sounds
         constexpr int vpotNote = 0x20;          // + element: the V-Pot - its press, and the D700's colour
 
-        constexpr int mcuRingPositions = 11;    // MCU's ring: 1..11 lit, 0 dark
         constexpr int ringFillMode = 2;         // MCU "wrap" and the D700's channel 3: fill from the left
-        constexpr int d700RingTop = 127;
 
         /*  WHAT THE CALLBACK THREAD MAY QUEUE BEFORE THE TICK THREAD HAS DRAINED
             IT. Hundreds of messages a tick is a busy surface; this many is a
@@ -693,9 +691,14 @@ namespace wfg::surface
                         touch (box, *strip, event.down, submit);
                     break;
 
+                /*  A TURN MOVES NOTHING (author, 2026-09-25: "The rotaries
+                    don't have to move with the faders. It's either or. We'll
+                    find other uses for the rotaries."). A strip's level is
+                    its fader's; the rotaries wait for a use of their own -
+                    the per-cue EQ and plugin pages of the surface-pages
+                    draft. A relative write is still understood below, for
+                    that day. */
                 case McuEvent::Kind::encoder:
-                    if (auto* strip = stripAt (box, bank, event.strip))
-                        turn (*strip, event.value);
                     break;
 
                 case McuEvent::Kind::button:
@@ -748,31 +751,6 @@ namespace wfg::surface
             {
                 submit (commandFrom (box.origin, "node.release", { osc::Value::string (strip.touched) }));
                 strip.touched.clear();
-            }
-        }
-
-        void turn (Strip& strip, int steps) const
-        {
-            if (steps == 0 || targetOf (strip).empty())
-                return;
-
-            auto& pending = strip.pending;
-
-            switch (pending.kind)
-            {
-                case Write::Kind::none:
-                    pending.kind = Write::Kind::relative;
-                    pending.steps = steps;
-                    break;
-
-                case Write::Kind::relative:
-                    pending.steps += steps;
-                    break;
-
-                case Write::Kind::absolute:
-                    pending.db = std::clamp (pending.db + encoderStepDb * static_cast<double> (steps),
-                                             faderSilenceDb, faderLoudestDb);
-                    break;
             }
         }
 
@@ -1175,8 +1153,6 @@ namespace wfg::surface
                     name = longName;
             }
 
-            const auto fraction = level.has_value() ? fractionForDb (*level) : 0.0;
-
             if (box.topology.nativeDisplay)
             {
                 /*  THE D700'S OWN THREE ROWS, never MCU's 0x12 (§16.6): the
@@ -1195,12 +1171,19 @@ namespace wfg::surface
                 if (changed (strip.rows[1], levelScratch))
                     send (port, d700DisplayRow (element, 1, levelScratch));
 
-                const std::string_view role = isDca ? "dca" : (strip.cueId.empty() ? "free" : "pads");
+                /*  "sampler" and not "pads" (2026-09-25): a D700 strip is a
+                    fader, and the author read "pads" on it as something the
+                    fader could not do. */
+                const std::string_view role = isDca ? "dca" : (strip.cueId.empty() ? "free" : "sampler");
 
                 if (changed (strip.rows[2], role))
                     send (port, d700DisplayRow3 (element, role));
 
-                const auto ring = static_cast<int> (std::lround (fraction * static_cast<double> (d700RingTop)));
+                /*  THE RING IS DARK: it no longer repeats the fader
+                    (author, 2026-09-25 - "either or"). Sent once, and again
+                    whenever the strip is painted whole, so a ring an earlier
+                    session lit goes out. */
+                constexpr int ring = 0;
 
                 if (ring != strip.ring)
                 {
@@ -1225,7 +1208,8 @@ namespace wfg::surface
                 if (changed (strip.rows[1], word))
                     send (port, lcdCell (deviceId, 1, element, word));
 
-                const auto ring = static_cast<int> (std::lround (fraction * static_cast<double> (mcuRingPositions)));
+                //  Dark, as the D700's: the ring does not repeat the fader.
+                constexpr int ring = 0;
 
                 if (ring != strip.ring)
                 {

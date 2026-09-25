@@ -873,8 +873,12 @@ TEST_CASE ("surface bridge: STOP is Esc, STOP again inside the window is double 
     CHECK (pressing (0x5f).empty());
 }
 
-TEST_CASE ("surface bridge: an encoder detent is half a decibel on the strip's target, sign and magnitude")
+TEST_CASE ("surface bridge: a turn of a rotary moves nothing - the level is the fader's")
 {
+    /*  The author, 2026-09-25: "The rotaries don't have to move with the
+        faders. It's either or. We'll find other uses for the rotaries." Until
+        this date a detent was half a decibel on the strip's target; now a
+        turn, either way and however many, writes nothing at all. */
     Desk desk;
     const auto mcu = desk.makeSurface ("mcu", "Desk");
     const auto band = desk.makeDca ("Band");
@@ -889,41 +893,9 @@ TEST_CASE ("surface bridge: an encoder detent is half a decibel on the strip's t
     desk.clear();
 
     desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x02 });     // strip two, two detents clockwise
+    desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x41 });     // and one back
     desk.tickOnce();
 
-    REQUIRE (desk.submitted.size() == 1u);
-    CHECK (desk.submitted[0].command == "node.set");
-    CHECK (desk.submitted[0].args[0].getString() == trim);
-    CHECK (near (desk.submitted[0].args[1].getFloat64(), -5.0));
-
-    //  65 IS ONE STEP BACK, not sixty-three (control guide §3.2).
-    desk.clear();
-    desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x41 });
-    desk.tickOnce();
-
-    REQUIRE (desk.submitted.size() == 1u);
-    CHECK (near (desk.submitted[0].args[1].getFloat64(), -6.5));
-
-    //  Two messages in one tick are both counted, in one write.
-    desk.clear();
-    desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x01 });
-    desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x01 });
-    desk.tickOnce();
-
-    REQUIRE (desk.submitted.size() == 1u);
-    CHECK (near (desk.submitted[0].args[1].getFloat64(), -5.0));
-
-    //  Turned against the top, the value stays where it is and nothing is written.
-    desk.write (trim, 12.0, "cli");
-    desk.tickOnce();
-    desk.clear();
-    desk.arrive ("PORTMCU1", { 0xb0, 0x11, 0x03 });
-    desk.tickOnce();
-    CHECK (desk.submitted.empty());
-
-    //  And a strip riding nothing is turned for nothing.
-    desk.arrive ("PORTMCU1", { 0xb0, 0x10, 0x01 });
-    desk.tickOnce();
     CHECK (desk.submitted.empty());
 }
 
@@ -1161,8 +1133,9 @@ TEST_CASE ("surface bridge: an MCU strip shows its name and its word in seven ch
     CHECK (contains (sent, surface::lcdCell (0x14, 0, 1, "free")));
     CHECK (contains (sent, surface::lcdCell (0x14, 1, 1, "free")));
 
-    //  Its ring shows the trim - unity, most of the way round - and SELECT is dark.
-    CHECK (contains (sent, surface::ringMcu (0, 9, 2, false)));
+    /*  Its ring is dark - it does not repeat the fader (author, 2026-09-25) -
+        and SELECT is dark. */
+    CHECK (contains (sent, surface::ringMcu (0, 0, 2, false)));
     CHECK (contains (sent, surface::led (0x18, surface::Led::off)));
 
     //  MCU's display only: no native D700 row reaches a generic surface.
@@ -1228,10 +1201,9 @@ TEST_CASE ("surface bridge: a D700 strip shows three native rows and a number, a
     CHECK (contains (first, surface::d700TrackNumbers ({ 1, 2, 3, 4, 5, 6, 7, 8 })));
     CHECK (contains (second, surface::d700TrackNumbers ({ 9, 10, 11, 12, 13, 14, 15, 16 })));
 
-    //  The fine ring, filled from the left.
-    const auto ring = static_cast<int> (std::lround (127.0 * surface::fractionForDb (-6.2)));
-    CHECK (contains (first, surface::d700Ring (0, ring, 2)));
-    CHECK (contains (second, surface::d700Ring (1, ring, 2)));
+    //  The ring dark: it does not repeat the fader (author, 2026-09-25).
+    CHECK (contains (first, surface::d700Ring (0, 0, 2)));
+    CHECK (contains (second, surface::d700Ring (1, 0, 2)));
 
     //  NEVER 0x12 ON A D700, and every SysEx one it survives.
     for (const auto& message : sysexOf (desk.sink))
@@ -1281,7 +1253,7 @@ TEST_CASE ("surface bridge: a D700 strip wears its cue's colour, blue last, re-a
 
     //  And the display says what is on the strip.
     CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Clip 0")));
-    CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "pads")));
+    CHECK (contains (sentOn (stage.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "sampler")));
 
     /*  RE-ASSERTED EVERY TWO SECONDS, unchanged, because the firmware's idle
         animation takes an undriven LED back. */

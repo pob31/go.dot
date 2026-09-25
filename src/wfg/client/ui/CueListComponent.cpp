@@ -100,14 +100,16 @@ namespace wfg::client::ui
                 marks << (marks.isEmpty() ? "" : "  ")
                       << juce::String (juce::CharPointer_UTF8 ("\xe2\x88\xa5"));
 
-            /*  pads  a SAMPLER group (PRD §3.27): GO arms its members onto
-                strips and a hand plays them, in any order, any number of
+            /*  sampler  a SAMPLER group (PRD §3.27): GO arms its members
+                onto strips and a hand plays them, in any order, any number of
                 times, so the order on screen is not an order at all. A WORD
                 where the timeline has a shape, because there is no shape that
                 already means "played from a surface" - and colour is never the
-                one carrier (§4.8). */
+                one carrier (§4.8). The mode's own word, and no longer "pads"
+                (2026-09-25): the author read that as a setting a fader could
+                not have. */
             if (row.mode == "sampler")
-                marks << (marks.isEmpty() ? "" : "  ") << "pads";
+                marks << (marks.isEmpty() ? "" : "  ") << "sampler";
 
             return marks;
         }

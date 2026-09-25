@@ -1088,6 +1088,15 @@ is the rest of what the struck words were written against, WFS-DIY's MPE-shaped
 Sampler: XY, and per-note pitch. One of that Sampler's mappings, the level one,
 comes in; the instrument does not.
 
+*Amended in 0.8, at the author's direction (2026-09-25).* **A strip's level is
+its fader's, and its rotary does not repeat it.** *"The rotaries don't have to
+move with the faders. It's either or. We'll find other uses for the rotaries."*
+Until this date an encoder detent was half a decibel on the strip's target and
+the LED ring drew the fader's level. Now a turn writes nothing and the ring is
+dark. The encoders (the *relative* class above) wait for a use of their own;
+the per-cue EQ and plugin pages of `docs/godot-surface-pages-draft-0.1.md` are
+the candidate.
+
 A 6DOF controller driving a WFS source position is better than two faders —
 three axes plus orientation is what the parameter actually is.
 
