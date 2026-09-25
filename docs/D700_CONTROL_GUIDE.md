@@ -98,6 +98,28 @@ E<n> <lsb> <msb>          n = 0..7, 14-bit, value = (msb << 7) | lsb
 Range `0`–`16383`. Touch sense arrives separately as note `0x68 + n`,
 velocity `127` on touch and `0` on release.
 
+**The engraved scale** (measured on Go.dot's unit, 2026-09-25: the fader
+stopped on each engraved mark, the position read back). The fader sends
+positions only, in steps of 4, and knows nothing of decibels; the
+engraving was drawn for a volume law, and a host that wants its levels to
+land on the marks has to follow it:
+
+| Engraved | Position | Share of travel |
+|---|---|---|
+| +7 | 16383 | 100 % |
+| 0 | ~13040 | 79.6 % |
+| −24 | ~5600 | 34.2 % |
+| −48 | ~2095 | 12.8 % |
+| −∞ | 0 | 0 % |
+
+Between the marks the level moves by a nearly steady number of decibels
+per decade of travel (70.6, 65.4, 56.2 from the top down): a power law,
+close to Bitwig's cubic volume. Asparion's own Bitwig script hands the
+position to Bitwig's volume unchanged
+(`getVolume().set(value, 16384)`), so under Bitwig the scale is Bitwig's
+law. Go.dot's table is `FaderLaw::d700` in
+`src/wfg/engine/surface/FaderCurve.h`.
+
 **Touch does not mean "being adjusted".** Faders adjacent to buttons register
 genuine touches when the operator reaches past them — 58 of 81 touch events in
 one capture landed within 150 ms of a nearby button press. Gating motor updates

@@ -608,6 +608,67 @@ TEST_CASE ("surface bridge: the engine's fader curve is the client's, point for 
     CHECK (strays == 0);
 }
 
+TEST_CASE ("surface bridge: a D700 fader lands on its engraving - +7 at the top, and 0, -24 and -48 where they are engraved")
+{
+    /*  Measured on the author's unit, 2026-09-25 ("The maximum I see engraved
+        is +7dB. When set at 0dB (engraved) it reads -6dB on the screen"): the
+        positions the fader sent while it was stopped on each engraved mark.
+        Each one reads what is engraved beside it. */
+    const auto law = surface::FaderLaw::d700;
+
+    CHECK (near (surface::dbForFourteenBit (16383, law), 7.0));
+    CHECK (std::abs (surface::dbForFourteenBit (13040, law) - 0.0) < 0.05);
+    CHECK (std::abs (surface::dbForFourteenBit (5600, law) + 24.0) < 0.05);
+    CHECK (std::abs (surface::dbForFourteenBit (2095, law) + 48.0) < 0.05);
+    CHECK (near (surface::dbForFourteenBit (0, law), -120.0));
+
+    //  Above the engraving's top is the top: a trim at +12 puts a D700 fader as high as it goes.
+    CHECK (surface::fourteenBitForDb (12.0, law) == 16383);
+    CHECK (surface::fourteenBitForDb (7.0, law) == 16383);
+    CHECK (surface::fourteenBitForDb (-120.0, law) == 0);
+
+    //  The generic curve is untouched: unity where the virtual panel draws it.
+    CHECK (surface::fourteenBitForDb (0.0) == 13926);
+    CHECK (surface::topologyOf (surface::Profile::d700).faderLaw == law);
+    CHECK (surface::topologyOf (surface::Profile::mcu).faderLaw == surface::FaderLaw::generic);
+
+    //  A position to decibels and back is the same position under this law too: the echo rule.
+    auto strays = 0;
+
+    for (auto position = 0; position <= surface::faderTop; ++position)
+        if (surface::fourteenBitForDb (surface::dbForFourteenBit (position, law), law) != position)
+            ++strays;
+
+    CHECK (strays == 0);
+
+    //  AND THE BRIDGE USES IT: a D700 fader on its engraved 0 writes nought.
+    Desk desk;
+    const auto d700 = desk.makeSurface ("d700", "The D700");
+    const auto band = desk.makeDca ("Band");
+    desk.pin (desk.strips[d700][0], band);
+
+    desk.declare ({ desk.spec (d700, "d700", { "PORTBNK1", "PORTBNK2" }) },
+                  { { "PORTBNK1", plugged ("D700 bank 1") }, { "PORTBNK2", plugged ("D700 bank 2") } });
+    desk.ticks (3);
+    desk.clear();
+
+    desk.arrive ("PORTBNK1", { 0xe0, 0x70, 0x65 });     // 13040: (0x65 << 7) | 0x70
+    desk.tickOnce();
+
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/dca/" + band + "/trim");
+    CHECK (std::abs (desk.submitted[0].args[1].getFloat64()) < 0.05);
+
+    //  And the motor goes where the engraving says: a DCA written to -24 flies to its mark.
+    desk.clear();
+    desk.write ("/godot/dca/" + band + "/trim", -24.0);
+    desk.ticks (30);
+
+    const auto moves = motorMoves (desk.sink, "PORTBNK1", 0);
+    REQUIRE_FALSE (moves.empty());
+    CHECK (std::abs (moves.back() - 5600) <= 4);
+}
+
 TEST_CASE ("surface bridge: the profiles say what each surface has and what its buttons mean")
 {
     CHECK (surface::profileFor ("mcu") == surface::Profile::mcu);

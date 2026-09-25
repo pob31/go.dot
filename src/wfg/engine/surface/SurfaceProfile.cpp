@@ -67,9 +67,11 @@ namespace wfg::surface
 
             case Profile::d700:
                 /*  Mackie, and on top of it the D700's own: an RGB surround on
-                    every encoder, three native rows and a number field. */
+                    every encoder, three native rows and a number field - and
+                    faders that land on their engraving (+7 at the top). */
                 topology.hasRgb = true;
                 topology.nativeDisplay = true;
+                topology.faderLaw = FaderLaw::d700;
                 break;
 
             case Profile::midiPads:

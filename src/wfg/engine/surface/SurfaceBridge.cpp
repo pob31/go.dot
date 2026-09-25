@@ -681,7 +681,7 @@ namespace wfg::surface
                             answers with the same value (the echo, §16.6). */
                         strip->motor = event.value;
                         strip->pending.kind = Write::Kind::absolute;
-                        strip->pending.db = dbForFourteenBit (event.value);
+                        strip->pending.db = dbForFourteenBit (event.value, box.topology.faderLaw);
                         strip->pending.steps = 0;
                     }
                     break;
@@ -1129,7 +1129,8 @@ namespace wfg::surface
             strip.held = heldNow;
 
             if (! heldNow)
-                moveMotor (port, element, strip, level.has_value() ? fourteenBitForDb (*level) : 0, letGo);
+                moveMotor (port, element, strip,
+                           level.has_value() ? fourteenBitForDb (*level, box.topology.faderLaw) : 0, letGo);
 
             //------------------------------------------------------------------
             /*  WHAT THE STRIP IS CALLED: the authored short name, else the name

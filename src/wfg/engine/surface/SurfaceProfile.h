@@ -40,6 +40,7 @@
 */
 
 #include <wfg/engine/clock/TickClock.h>
+#include <wfg/engine/surface/FaderCurve.h>
 #include <wfg/engine/surface/McuCodec.h>
 
 #include <cstdint>
@@ -74,6 +75,10 @@ namespace wfg::surface
         bool nativeDisplay = false;     // d700: 12 + 12 + 8 and track numbers; mcu: two rows of 7 through 0x12
         bool hasPads = false;           // midiPads: notes with velocity and pressure
         bool drivenOverMidi = true;     // false for the virtual panel, which is the client's own
+
+        /*  WHERE A LEVEL SITS ON THE TRAVEL: the law its engraving was drawn
+            for, where somebody has measured it (FaderCurve.h). */
+        FaderLaw faderLaw = FaderLaw::generic;
     };
 
     Topology topologyOf (Profile profile) noexcept;
