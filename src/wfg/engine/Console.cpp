@@ -35,6 +35,7 @@
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/midi/MidiInputs.h>
 #include <wfg/engine/midi/MidiSender.h>
+#include <wfg/engine/midi/PortBinder.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/DocumentSession.h>
 #include <wfg/engine/document/DocumentWriter.h>
@@ -1922,6 +1923,42 @@ namespace
         return widest;
     }
 
+    /*  WHAT THE SHOW SAYS EACH OF ITS MIDI PORTS SHOULD BE PUT ON, read the
+        same way at start and after every show edit. */
+    std::vector<wfg::midi::PortWish> portWishesOf (const wfg::doc::ShowDocument& document)
+    {
+        std::vector<wfg::midi::PortWish> wishes;
+
+        for (const auto& ports : document.root())
+        {
+            if (ports.getType().toString() != "MidiPorts")
+                continue;
+
+            for (const auto& port : ports)
+            {
+                wfg::midi::PortWish wish;
+                wish.id = port[juce::Identifier ("id")].toString().toStdString();
+
+                if (wish.id.empty())
+                    continue;
+
+                const auto base = "/godot/port/" + wish.id + "/";
+
+                const auto reads = [&document, &base] (const char* row)
+                { return document.getAttribute (base + row).value_or (std::string {}); };
+
+                wish.label = document.getAttribute (base + "name").value_or (wish.id);
+                wish.inputDevice = reads ("inputDevice");
+                wish.inputDeviceId = reads ("inputDeviceId");
+                wish.outputDevice = reads ("outputDevice");
+                wish.outputDeviceId = reads ("outputDeviceId");
+                wishes.push_back (std::move (wish));
+            }
+        }
+
+        return wishes;
+    }
+
     AudioShape audioShapeOf (const wfg::doc::ShowDocument& document)
     {
         AudioShape shape;
@@ -2852,6 +2889,12 @@ namespace
         midiPorts.setDevices (wfg::midi::MidiInputs::availableDevices(),
                               wfg::midi::MidiSender::availableDevices());
         parameters.setMidiPorts (&midiPorts);
+
+        /*  AND WHAT PUTS EACH DECLARED PORT ON ITS DEVICES - at start, below,
+            and again whenever the show changes a port while it runs (found by
+            the author on 2026-09-25: ports added in the MIDI tab stayed
+            "unbound" until the next start). */
+        wfg::midi::PortBinder portBinder { midiIn, midiOut };
         parameters.setDcas (&dcas);
         parameters.setPlugins (&pluginTable);
 
@@ -2895,84 +2938,27 @@ namespace
             while the rest of the show runs (§4.10). What it must not do is go
             quiet: the sentence lands on `/godot/port/<id>/problem`, which the
             settings window draws. */
-        for (const auto& ports : document.root())
+        for (const auto& bound : portBinder.bindAll (portWishesOf (document)))
         {
-            if (ports.getType().toString() != "MidiPorts")
-                continue;
+            const auto base = "/godot/port/" + bound.id + "/";
 
-            for (const auto& port : ports)
-            {
-                const auto portId = port[juce::Identifier ("id")].toString().toStdString();
+            const auto reads = [&document, &base] (const char* row)
+            { return document.getAttribute (base + row).value_or (std::string {}); };
 
-                if (portId.empty())
-                    continue;
+            /*  AND THE IDENTIFIER IS WRITTEN DOWN, so the next start is exact
+                rather than by name. A state row: what the machine matched is
+                not what anybody decided, so it does not dirty the show and is
+                writable under the edit lock, which is what lets it happen
+                during a locked session. Here, before the tick thread runs; a
+                port rebound while the show runs waits for the next start
+                (PortBinder.h says why). */
+            if (! bound.inputMatched.empty() && bound.inputMatched != reads ("inputDeviceId"))
+                document.setAttribute (base + "inputDeviceId", bound.inputMatched);
 
-                const auto base = "/godot/port/" + portId + "/";
-                const auto label = document.getAttribute (base + "name").value_or (portId);
+            if (! bound.outputMatched.empty() && bound.outputMatched != reads ("outputDeviceId"))
+                document.setAttribute (base + "outputDeviceId", bound.outputMatched);
 
-                const auto reads = [&document, &base] (const char* row)
-                { return document.getAttribute (base + row).value_or (std::string {}); };
-
-                wfg::midi::PortTable::Binding binding;
-                std::vector<std::string> troubles;
-
-                /*  THE INPUT SIDE, AND IT IS OPENED AS THE PORT: what arrives
-                    is stamped with the show's own word for the cable, so a
-                    trigger names "Lights" and goes on firing when somebody
-                    moves the interface to another socket. */
-                if (const auto listens = reads ("inputDevice"); ! listens.empty())
-                {
-                    std::string matched, why;
-
-                    if (midiIn.openAs (listens, reads ("inputDeviceId"), portId, matched, why))
-                    {
-                        binding.bound = true;
-
-                        if (! matched.empty() && matched != reads ("inputDeviceId"))
-                            document.setAttribute (base + "inputDeviceId", matched);
-                    }
-                    else
-                    {
-                        troubles.push_back (why);
-                    }
-                }
-
-                if (const auto sends = reads ("outputDevice"); ! sends.empty())
-                {
-                    const auto remembered = reads ("outputDeviceId");
-                    std::string matched, why;
-
-                    if (midiOut.bind (portId, label, sends, remembered, matched, why))
-                    {
-                        binding.bound = true;
-                        binding.deviceId = matched;
-
-                        /*  AND THE IDENTIFIER IS WRITTEN DOWN, so the next
-                            start is exact rather than by name. A state row:
-                            what the machine matched is not what anybody
-                            decided, so it does not dirty the show and is
-                            writable under the edit lock, which is what lets it
-                            happen during a locked session. */
-                        if (! matched.empty() && matched != remembered)
-                            document.setAttribute (base + "outputDeviceId", matched);
-                    }
-                    else
-                    {
-                        binding.bound = false;
-                        troubles.push_back (why);
-                    }
-                }
-
-                for (const auto& trouble : troubles)
-                {
-                    if (! binding.problem.empty())
-                        binding.problem += "; ";
-
-                    binding.problem += trouble;
-                }
-
-                midiPorts.setBinding (portId, binding);
-            }
+            midiPorts.setBinding (bound.id, bound.binding);
         }
 
         /*  AND THE TREE IS TOLD TO LOOK AGAIN. `bound` and `problem` are
@@ -3750,6 +3736,26 @@ namespace
                                     where the decision is taken. The two halves
                                     split by what they are: this one observes,
                                     that one decides and submits. */
+                                /*  WHAT THE MESSAGE THREAD FINISHED BINDING,
+                                    into the table the tree and the surfaces
+                                    read - on this thread, their only writer. A
+                                    surface on a port that has just found its
+                                    device connects and is painted whole here.
+                                    One relaxed atomic on every other tick. */
+                                if (auto rebound = portBinder.take(); ! rebound.empty())
+                                {
+                                    for (auto& result : rebound)
+                                    {
+                                        if (result.gone)
+                                            midiPorts.forget (result.id);
+                                        else
+                                            midiPorts.setBinding (result.id, std::move (result.binding));
+                                    }
+
+                                    declareSurfaces();
+                                    parameters.markStale();
+                                }
+
                                 if (showRevisionNow != showRevisionSeen)
                                 {
                                     showRevisionSeen = showRevisionNow;
@@ -3790,6 +3796,19 @@ namespace
                                         reason: a surface added, a port renamed
                                         or a strip made a DCA strip during a tech
                                         rehearsal reaches the bridge here. */
+                                    /*  AND ITS MIDI PORTS (2026-09-25): a port
+                                        added, or put on another device, is put
+                                        on it now. The document is read here, on
+                                        the tick thread; the devices are opened
+                                        on the message thread, which is where
+                                        enumerating them may block. What came of
+                                        it is taken below, on a later tick. */
+                                    if (portBinder.want (portWishesOf (document)))
+                                        juce::MessageManager::callAsync ([&portBinder]
+                                                                         {
+                                                                             portBinder.rebind();
+                                                                         });
+
                                     if (declareSurfaces())
                                         parameters.markStale();
 

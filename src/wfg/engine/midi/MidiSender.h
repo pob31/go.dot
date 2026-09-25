@@ -84,7 +84,7 @@ namespace wfg::midi
                    const std::string& deviceName, const std::string& wantedId,
                    std::string& matchedId, std::string& why);
 
-        /** Closes a port's device and forgets it. */
+        /** Closes a port's device and forgets it. Safe while the sending thread runs. */
         void unbind (const std::string& portId);
 
         /** This machine's outputs, name and identifier, for a menu to offer. */
@@ -111,11 +111,19 @@ namespace wfg::midi
     private:
         void run();
 
+        /*  SHARED, SO A PORT CAN BE REBOUND WHILE THE SHOW RUNS (2026-09-25):
+            the sending thread takes its own reference under `boundMutex` and
+            sends outside it, so a device closed by a rebind in the middle of a
+            thirty-millisecond dump is closed by whichever of the two lets go
+            last - and never while the lock is held, which the tick thread's
+            `isBound` also takes. */
         struct Bound
         {
             std::string port;
-            std::unique_ptr<juce::MidiOutput> device;
+            std::shared_ptr<juce::MidiOutput> device;
         };
+
+        std::shared_ptr<juce::MidiOutput> deviceFor (const std::string& portId) const;
 
         struct Queued
         {
@@ -123,6 +131,7 @@ namespace wfg::midi
             Bytes bytes;
         };
 
+        mutable std::mutex boundMutex;
         std::vector<Bound> bound;
         std::vector<std::string> refusals;
 

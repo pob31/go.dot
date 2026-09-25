@@ -37,14 +37,31 @@ namespace wfg::midi
 
     void MidiSender::unbind (const std::string& portId)
     {
-        const std::lock_guard<std::mutex> lock { queueMutex };
+        //  Closed here, after the lock is let go - or by the sender, if it is mid-send.
+        std::shared_ptr<juce::MidiOutput> closing;
 
-        for (auto at = bound.begin(); at != bound.end(); ++at)
-            if (at->port == portId)
-            {
-                bound.erase (at);
-                return;
-            }
+        {
+            const std::lock_guard<std::mutex> lock { boundMutex };
+
+            for (auto at = bound.begin(); at != bound.end(); ++at)
+                if (at->port == portId)
+                {
+                    closing = std::move (at->device);
+                    bound.erase (at);
+                    break;
+                }
+        }
+    }
+
+    std::shared_ptr<juce::MidiOutput> MidiSender::deviceFor (const std::string& portId) const
+    {
+        const std::lock_guard<std::mutex> lock { boundMutex };
+
+        for (const auto& entry : bound)
+            if (entry.port == portId)
+                return entry.device;
+
+        return {};
     }
 
     bool MidiSender::bind (const std::string& portId, const std::string& label,
@@ -97,20 +114,34 @@ namespace wfg::midi
         /*  A SECOND BINDING REPLACES THE FIRST rather than being refused. Two
             `--midi-out=Lights=...` on one command line is somebody correcting
             themselves, and the last one is what they meant. */
-        const auto existing = std::find_if (bound.begin(), bound.end(),
-                                            [&portId] (const Bound& b)
-                                            { return b.port == portId; });
+        std::shared_ptr<juce::MidiOutput> replaced;
+        std::shared_ptr<juce::MidiOutput> opened { std::move (device) };
 
-        if (existing != bound.end())
-            existing->device = std::move (device);
-        else
-            bound.push_back ({ portId, std::move (device) });
+        {
+            const std::lock_guard<std::mutex> lock { boundMutex };
+
+            const auto existing = std::find_if (bound.begin(), bound.end(),
+                                                [&portId] (const Bound& b)
+                                                { return b.port == portId; });
+
+            if (existing != bound.end())
+            {
+                replaced = std::move (existing->device);
+                existing->device = std::move (opened);
+            }
+            else
+            {
+                bound.push_back ({ portId, std::move (opened) });
+            }
+        }
 
         return true;
     }
 
     bool MidiSender::isBound (const std::string& portId) const
     {
+        const std::lock_guard<std::mutex> lock { boundMutex };
+
         return std::any_of (bound.begin(), bound.end(),
                             [&portId] (const Bound& b)
                             { return b.port == portId && b.device != nullptr; });
@@ -177,20 +208,19 @@ namespace wfg::midi
                 queue.pop_front();
             }
 
-            const auto device = std::find_if (bound.begin(), bound.end(),
-                                              [&next] (const Bound& b)
-                                              { return b.port == next.port; });
+            const auto device = deviceFor (next.port);
 
-            if (device == bound.end() || device->device == nullptr)
+            if (device == nullptr)
                 continue;
 
             /*  THE BLOCKING CALL, on the thread this class exists to give it.
                 A hundred-byte dump holds this for about thirty milliseconds on
-                Windows and nothing above it notices. */
+                Windows and nothing above it notices - outside `boundMutex`,
+                which the tick thread's `isBound` takes. */
             const juce::MidiMessage message { next.bytes.data(),
                                               static_cast<int> (next.bytes.size()) };
 
-            device->device->sendMessageNow (message);
+            device->sendMessageNow (message);
             delivered.fetch_add (1, std::memory_order_relaxed);
         }
 
@@ -207,17 +237,15 @@ namespace wfg::midi
 
         for (const auto& item : remaining)
         {
-            const auto device = std::find_if (bound.begin(), bound.end(),
-                                              [&item] (const Bound& b)
-                                              { return b.port == item.port; });
+            const auto device = deviceFor (item.port);
 
-            if (device == bound.end() || device->device == nullptr)
+            if (device == nullptr)
                 continue;
 
             const juce::MidiMessage message { item.bytes.data(),
                                               static_cast<int> (item.bytes.size()) };
 
-            device->device->sendMessageNow (message);
+            device->sendMessageNow (message);
             delivered.fetch_add (1, std::memory_order_relaxed);
         }
     }
