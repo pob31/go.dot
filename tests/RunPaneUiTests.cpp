@@ -974,7 +974,7 @@ TEST_CASE ("eq panel: a dragged point follows the hand, however often the readin
     {
         for (auto at = written.rbegin(); at != written.rend(); ++at)
             if (at->first == "/godot/cue/CUE00001/" + row)
-                return std::stod (at->second);
+                return wfg::osc::parseDouble (at->second).value_or (std::nan (""));   // never the locale's
 
         return std::nan ("");
     };
@@ -1055,7 +1055,7 @@ TEST_CASE ("eq panel: two fingers pinch a band's width, closing them narrows it,
     {
         for (auto at = written.rbegin(); at != written.rend(); ++at)
             if (at->first == "/godot/cue/CUE00001/eqB2Q")
-                return std::stod (at->second);
+                return wfg::osc::parseDouble (at->second).value_or (std::nan (""));   // never the locale's
 
         return std::nan ("");
     };
