@@ -1350,6 +1350,27 @@ questions are answered, and the answers pull most of Phase 9 forward as Phase
   tick thread → shared memory → child: §3.4's message-thread handover applies
   only to a plugin hosted inline, which Phase 9a does not build.
 
+*Amended in 0.8, at the author's direction (2026-09-25) — decisions AH and AI,
+`docs/godot-namespace-draft-0.1.md` §17.13, overriding this section's earlier
+"no editor":*
+
+- **A plugin's own window, in a process of its own.** The desktop shows a media
+  cue's signal chain at its foot - the EQ, then the set, then out - and *Edit…*
+  on a plugin opens that plugin's native window in an **editing helper**: a
+  separate process with its own copy of the plugin, never in the audio path, so
+  a crash in a plugin's window takes down a window and never a voice. The window
+  **follows the pick**, greys when the picked cue does not have the insert, and
+  what it moves is written to the cue as ordinary `node.set`s - saved, undoable,
+  heard within two ticks. Space and Esc pressed in it come back to Go.dot.
+- **The whole state of a plugin is kept per cue**, not only its parameters: what
+  its window changes that is not a parameter is saved as a content-addressed
+  file under the bundle's `plugins/`, named on the cue's insert by `fx.capture`
+  with every parameter's value, automatically a moment after the hand stops -
+  **the turn and its state one Undo**. It is loaded onto the voice at the arm and
+  the cue does not launch until it is in: a cue in standby is always ready, and a
+  cue fired cold is late by the load rather than wrong. The cost is stated in
+  §17.13 and measured by M35 (§6.11).
+
 ### 3.19 Video
 
 Built in, by decision (§2, no Alt-Tab). Millumin over OSC remains the escape
@@ -2676,6 +2697,18 @@ its own; a preset as a file under the bundle's `plugins/`; the failed-strip
 threshold, the deadline and the automatic relaunch; the child's worker
 spinning hot while a plugin is in use.
 
+*Answered 2026-09-25, at the author's direction* (decisions AH and AI,
+`docs/godot-namespace-draft-0.1.md` §17.13, the PRD overridden where it said no
+editor is ever opened): the FX panel at the foot is the signal chain with a
+switch a plugin and *Edit…*, which opens the plugin's own window in a separate
+editing helper that follows the pick (§3.18); and a plugin's **whole state** is
+kept per cue - chosen against the recommendation of parameters only - saved
+automatically a moment after the hand stops, the turn and its state one Undo,
+and loaded onto the voice before the cue may launch (§3.18). Built as defaults
+and the author's to overturn once seen working: the 1.5 s quiet moment, the
+125-tick join, greying by hiding the editor, the window above Go.dot only while
+Go.dot is in front, and Space and Esc as the only keys handed back.
+
 ### 6.10 Protocol implementation order (§3.16)
 
 Mackie vs HUI first — first week with the D700.
@@ -2702,6 +2735,13 @@ Mackie vs HUI first — first week with the D700.
   three misses of 252 µs each, and costs nothing after; a parameter write
   reaches the sound in two ticks, 41 ms; a real plugin's child is 36 MB plus
   1.2 MB a voice and every entry of the set loads in about a second.
+- **A cue's whole plugin state, loaded onto its voice** (§3.18, decision AI,
+  2026-09-25): how long a load takes - a cue fired cold is late by that much -
+  and whether it makes another voice miss. *Taken 2026-09-25 as **M35**
+  (`docs/godot-namespace-draft-0.1.md` §17.9):* the author's own plugin loads a
+  cue's state in about half a millisecond (0.32-1.16 ms over three runs of
+  twenty), and no other voice missed a block while it loaded. A plugin with a
+  large state (a sampler, a convolution reverb) is still to measure.
 - **Pause and resume at an offset** (§3.29): whether a relaunch at a remembered
   position is clean when the offset is set in prepare, and when a playing clip
   is nudged instead — the same question load-to-time asks. *Half answered*

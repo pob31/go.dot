@@ -1,5 +1,10 @@
 # Handoff — the FX panel at the foot of the desktop window (Phase 9a, the last piece of 9a.9)
 
+> **Superseded 2026-09-25.** The author redesigned this panel before it was built: the foot shows
+> the signal chain with a switch a plugin, *Edit…* opens the plugin's own window in a separate
+> editing helper that follows the pick, and a plugin's whole state is kept per cue. What was built
+> and why is namespace draft §17.13; this note is kept as the record of the first design.
+
 *Written 2026-09-23, late, by the session that built Phase 9a.0–9a.10. For the session that
 builds this component. Everything below is on `main` at 48adf50 or later.*
 

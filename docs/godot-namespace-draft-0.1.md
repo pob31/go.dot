@@ -9700,7 +9700,8 @@ it, applies the preset, reads every parameter back as the **baseline**, reports 
 `paramCount` and — once per identifier — the catalogue; then a worker thread at real-time priority
 (spatcore's `rt/RtThreadPriority.h`, already vendored) polls the lanes: on a request it applies
 the lane's changed values to that instance, resets it if asked, processes the block, and answers.
-No editor is ever opened; `JUCE_MODAL_LOOPS_PERMITTED` is 0 in the child as in the parent; a
+The voice child never opens an editor - a plugin's own window is a separate helper's since the
+author's redesign of 2026-09-25 (§17.13); `JUCE_MODAL_LOOPS_PERMITTED` is 0 in the child as in the parent; a
 plugin that insists on a window at load, or refuses the channel count, is a `failed` with a
 sentence, not a hang — five seconds for `childReady`, and then the host gives up. The child exits
 when the parent sets `childShouldExit`, or when the parent's process disappears, which it checks
@@ -9767,12 +9768,13 @@ a shape menu on bands one and four, the on/off flags, the number always drawn be
 mixer does, and the engine coalesces. The nineteen rows leave the generic inspector's media list by
 prefix, the panel being their editor.
 
-**The FX panel** (`model/Fx`, `ui/FxPanelComponent`) reads as the send mixer does — **a row per
+**The FX panel** (`model/Fx`, `ui/FxPanelComponent`) reads as the send mixer does — **a box per
 plugin of the set**, not per `Fx` the cue happens to hold — each with its name, its state word and
-problem in words, a switch that sends `fx.create` on the first press and `node.set enabled`
-afterwards (the mixer's create-on-first-move), and an expandable list of its parameters: a slider
-per `p<n>`, centred when the catalogue says bipolar, a menu when it says discrete, the plugin's
-text from `t<n>` beside it, every drag a throttled `node.set`.
+problem in words, and a switch that sends `fx.create` on the first press and `node.set enabled`
+afterwards (the mixer's create-on-first-move). *Redesigned by the author on 2026-09-25 (§17.13):*
+the boxes run left to right as the signal does - the EQ first, then the set, then out - and in
+place of the slider-per-parameter list first drawn here, each plugin's box has *Edit…*, which
+opens **the plugin's own window** in a helper process that follows the pick.
 
 **The Plugins tab** joins Audio, Network, MIDI and Surfaces in the show settings: this machine's
 known plugins from `/godot/plugin/known/<n>/…` with *Add to set*, the set with *Remove*, *Restart*
@@ -9813,6 +9815,7 @@ about a hybrid-core laptop repeated.
 | **M32** | a failed strip: misses before the threshold trips, blocks from the kill to `failed`, the block's cost before and after | the eight-miss threshold; whether the automatic restart is welcome |
 | **M33** | a parameter write to its sound — `node.set p0` at a known tick, the step found in the render, M26's idiom | whether a rotary feels live; the tick rate is the lever, parked at 50 Hz on 2026-09-18 |
 | **M34** | the set at load: from `buildEdit` to every child `loaded`, and the working set, for N × P instances of a real plugin | §6.11's *"bypassed stack at load"*, answered; decision AE's cost in numbers |
+| **M35** | a cue's whole state loaded onto a voice (§17.13): the load's time, and whether another voice misses while it loads | decision AI's cost in numbers: how late a cue fired cold is, and whether a load disturbs the show |
 
 **The figures, taken 2026-09-23 on the author's Windows box (Intel Core Ultra 7 255H, 16 cores,
 Debug build, the box otherwise idle), through the instruments named in each row: `M30`, `M31` and
@@ -9874,6 +9877,23 @@ m33_param_latency.py` and `m34_set_load.py`.**
   36 MB plus 1.2 MB a voice for this plugin** — the children come up in parallel, so three
   entries cost a hundred milliseconds more than one, not three times. §6.11's *"bypassed stack
   at load"* is answered for the proxy; the inline figure is Phase 9b's.
+- **M35 — a cue's whole state, loaded onto a voice** (added 2026-09-25 with §17.13). A skipped
+  case in `tests/ProxyTests.cpp` (`WFG_REAL_VST3=<identifier> --no-skip`): two states made by the
+  editing helper as a hand would, then a two-voice child with voice one playing a block every
+  1.333 ms at the default 250 µs deadline and voice two loaded with the two states in turn, twenty
+  times; then the same length with no loads. Three runs, 2026-09-25, same box:
+
+  | plugin | state | load min | median | max | voice-one misses while loading | the same time idle |
+  |---|---|---|---|---|---|---|
+  | test gain | 21 bytes | 0.20–0.24 ms | 0.27–0.31 ms | 0.59–0.86 ms | 0 | 0 |
+  | WFS-DIY Track | 1,012 bytes | 0.32–0.36 ms | 0.38–0.46 ms | 0.64–1.16 ms | 0 | 0 |
+
+  Decision AI's cost in numbers, for this plugin: **a cue fired cold is late by about half a
+  millisecond** - under one block at 64 frames, far under a tick - **and a load disturbs no other
+  voice.** The instrument's first version counted one miss every run: voice one's first block
+  finding the worker asleep (M31's *first after idle*), not the load; it now warms up before
+  counting. A plugin with a large state - a sampler, a convolution reverb with its impulse inside
+  - is the measurement still to take.
 
 ### 17.10 The direction this phase does not build
 
@@ -9891,9 +9911,10 @@ any other parameter is §3.10's binding, Phase 10's and later. `advanceFades` is
 **Inline hosting** — §3.18's opt-in, a `te::ExternalPlugin` in the process with §3.4's
 message-thread handover. Not built and given no row, an option nothing reads being rot.
 
-**LV2**, **AU presets**, **any plugin editor window**, **curated per-plugin parameter maps** (the
+**LV2**, **AU presets**, **curated per-plugin parameter maps** (the
 pages draft's §7.2, a machine-level library), **a page EQ curve**, and **macOS audio workgroups for
-the child** — a Mac child can be scheduled late, and M31 on the Mac mini says by how much.
+the child** — a Mac child can be scheduled late, and M31 on the Mac mini says by how much. (A
+plugin's own window was on this list until the author asked for it on 2026-09-25; it is §17.13.)
 
 **The live-input rack, rack-channel chains and the shared reverb channel** — Phase 9b, with
 `Media/Insert` and `Rack/Channel` waiting for it exactly as Phase 4 left them.
@@ -10012,11 +10033,10 @@ the sandbox, fifteen parameters catalogued, twenty blocks answered without a mis
   try on the Mac mini with M31 in hand.
 - **The child's test mode also writes its catalogue file**, so the parent's pickup runs in CI.
 
-**What is not built, of §17's own list:** the **FX panel at the foot** of the desktop window - the
-strip-per-entry view with a switch and a slider a parameter that `client/model/Fx.h` is written for
-(the model, the addresses, the gestures and the Plugins tab are in; the component is the next
-session's); the surface pages, the virtual panel's rotaries, a system EQ, a fade on a
-parameter, inline hosting and LV2 as §17.10 said.
+**What is not built, of §17's own list:** the surface pages, the virtual panel's rotaries, a system
+EQ, a fade on a parameter, inline hosting and LV2 as §17.10 said. The **FX panel at the foot**,
+unbuilt when this was first written, was built on 2026-09-25 in the author's redesign: the chain,
+the plugin's own window and the whole state per cue (§17.13).
 
 **The figures M30–M34 gave:** in §17.9, taken the same evening once the box was quiet. In one line
 each: the EQ costs 5.3 µs a voice with every section in and nothing flat; a round trip through a
@@ -10027,3 +10047,132 @@ plugin's child is 36 MB plus 1.2 MB a voice and every entry loads in about a sec
 **What only the author can settle:** what he sees on the desktop - the EQ panel's feel (plan
 decisions 1, 5, 7), the deadline and the spin policy once M31 is in (12, 14), and whether the
 automatic restart is welcome (M32).
+
+### 17.13 The chain, the plugin's own window, and the whole state per cue (2026-09-25)
+
+*Written at the author's direction (2026-09-25), who overrode the PRD and this section's earlier
+text to ask for it: "for VST and such could we just show the chain, bypass switch and open the
+native plugin UI as a popup?" - and then "Yes, I'm overriding the PRD and the rest of the
+documentation." What it replaces: §17.6's "no editor is ever opened", §17.8's slider-per-parameter
+FX panel, and §17.10's "any plugin editor window" as a thing not built.*
+
+**The five decisions, asked one at a time with a recommendation beside each.**
+
+| | the question | the author's answer | recommended? |
+|---|---|---|---|
+| **AH** | how the foot shows a cue's inserts | the chain, left to right, the EQ first: `file ▶ [EQ] ▶ [1. plugin] ▶ … ▶ out`; each plugin box a switch, its state in words, and *Edit…* | yes |
+| **AH** | where the plugin's own window runs | a separate **editing helper**, a process of its own, never in the audio path | yes |
+| **AH** | what the window does when the pick moves | it **follows the pick**, and greys when the cue has no such insert | yes |
+| **AI** | what is kept per cue | **the whole state of the plugin**, not only its parameters | no - parameters only was recommended |
+| **AI** | when the state is kept | automatically, a moment after the hand stops, **the turn and its state one Undo** | yes |
+
+**AH - the chain and the window.** The foot's FX panel (`ui/FxPanelComponent`) draws the signal
+path every voice carries, box by box: Go.dot's EQ with its switch (`eqOn`) and *Open*, which shows
+the EQ panel in the same foot; then each entry of the set in `plugins/order` with its switch - the
+first press on an entry the cue has no `Fx` for is `fx.create`, every press after is `enabled` -
+its state word and sentence (`missing: … - this cue plays it dry` only when the cue has it in), its
+latency in words, and *Edit…*. No sliders: the plugin draws its own controls better than a generic
+list could. *Edit…* opens the plugin's **own** window in a helper process, `wfg plugin-editor`,
+which loads its own copy of the plugin through the same making as the voice child (`PluginLoad`),
+never processes a block for a voice, and so can crash without silencing anything. The desktop
+client owns it (`ui/PluginEditors`, `plugin/EditorHost`): opening a window is not a change to the
+show, so it is no command, like a file chooser; what the window *does* is ordinary - each value
+the plugin's window moves becomes one `node.set` on the cue's `p<n>` with origin `window`, the
+write a slider would send, coalesced into one step, followed by a sounding voice within two ticks.
+A value is written to the insert of the cue it was **moved on**: every event carries the sequence
+of the subject it was made under, so a turn made as the pick moves never lands on the next cue.
+
+**The window follows the pick.** Once a pass, from the pass's own snapshot, every open helper is
+handed its subject: the picked cue's title, whether the window is greyed and why (*nothing is
+picked*, *2 Memo plays no file*, *Verb is not on 3 Steady: switch it in from the FX panel*), the
+cue's value for every parameter, and its state file. Greyed, the editor is **hidden** and the
+sentence drawn in its place - a native plugin view covers anything drawn over it - and nothing the
+window does is written. *Edit…* on an insert the cue has not got switches it in first (`fx.create`)
+and opens once the tree shows it, unless the pick moves first. Values moved elsewhere - an undo,
+the page, a surface - come into the plugin, but never over a hand: a parameter in a gesture, or
+one this window moved in the last 300 ms, keeps the hand's value until the tree has agreed.
+
+**The show's keys come back.** The window belongs to another process, so while it is in front the
+keyboard is its: Space and Esc pressed in it and not taken by the plugin are handed back to the
+client's own key handling - GO, and §4.4's two stops. Best effort, and said so: a plugin view that
+takes the keyboard for itself keeps it. The helper's window stays above Go.dot's only while Go.dot
+or the helper is in front, and is **not owned by Go.dot's window across processes**: on Windows
+that joins the two processes' input queues, and a plugin window that hung would freeze the GO
+button - the one thing a separate process exists to prevent. The lock closes every helper and
+*Edit…* says why.
+
+**AI - the whole state per cue.** What a plugin's window changes that is not a parameter - an
+impulse response, a sample, a mode - is kept with the cue as a file:
+
+- **`fx/stateFile`** (new row, `s`, rw, persist show): a name under the bundle's `plugins/` -
+  `state/<entry id>-<first 16 hex of the bytes' SHA-256>.state` - or empty for the entry's preset.
+  Files are **content-addressed and never changed or deleted by Go.dot**: the same state is always
+  the same file, and Undo only points the row back at an older one. Writing the bytes is not a
+  change to the show (a fact about the disk, as a media file copied in is); naming them is.
+- **`fx.capture <fx> <stateFile> <values>`** (new command): the file's name and **every**
+  parameter's value, in one transaction - so a cue with a state carries its whole parameter
+  picture, and "a value the cue does not mention rests at the preset" never fights the state's own
+  values. It never touches the disk (the tick thread; a replay has no files); it refuses a name
+  that is not `state/<name>.state` in letters, digits, hyphens and underscores; the lock refuses it.
+- **When the helper captures:** only when a hand changed something - a parameter, or the plugin
+  saying its state changed - and the bytes' hash differs from what the plugin held when last
+  loaded or kept; then **1.5 s after the last change** with no gesture open, when the window
+  closes, before the window moves to another cue (kept under the OLD insert), and on the way out.
+  One silent block is processed first, because a VST3 learns of its editor's turns in its
+  processor only at the next block. Never while greyed, never for values the cue sent it, never
+  for a show with no folder (the chain says *save the show to keep its whole state*).
+- **The turn and its state are one Undo.** `ShowDocument::beginTransaction` gained one rule: an
+  `fx.capture` on insert F **joins the open transaction** when the last write was to one of F's
+  `p<n>`, from the same origin, within **125 ticks** (2.5 s). A capture after anything else - an
+  impulse response loaded, which moves no parameter - is a step of its own; a second capture never
+  joins; the turn after a capture is a new step. Keyed on logged ticks and origins, so a replay
+  splits exactly as the session did.
+- **Loaded on the voice at the arm, before the cue may launch.** The arm hands the lane its cue's
+  state path (`ProxyLane::wantState`, the shared region's lane at version 2: `stateRequestSeq`,
+  `stateDoneSeq`, `stateFailed`, `stateLoadMicros`, `statePath`, `stateProblem`). The voice child
+  loads it on its message thread - where a VST3 takes its state - with the lane **parked**: its
+  real-time worker lets go of that instance and answers its blocks **dry**, so no block is ever
+  missed, while the other voices play on; then every value is set again on top, and the parent is
+  answered with how long it took and why it could not. **No state is a state:** a cue with none,
+  arming on a voice that last held another cue's, is given the preset's own state back, or that
+  cue would be heard under this one. **The wait is `HostPlayer::isArmReady`**, which now asks
+  whether every switched-in entry of the voice holds its state (two atomics a lane on the tick
+  thread): a cue armed in standby is always ready; a cue fired cold is **late by the load, not
+  wrong**, and `run.late` says by how much. A state changed after the arm and before the launch
+  (an undo in standby) is loaded before the launch; one changed on a cue already sounding is not -
+  the knobs follow live, the rest applies next time the cue plays. A file that is not there is
+  the preset with a sentence (`plugin/stateProblem`), and `wfg validate` names every cue whose
+  state is missing from the bundle, or outside `plugins/`. A child that has been loading one for
+  five seconds is hung and failed like any other; the state that was loading when a child died is
+  not sent again.
+- **What the entry says:** `plugin/stateLoadMs` (how long the last state took) and
+  `plugin/stateProblem` (why the last could not load), machine rows, beside `latencySamples`.
+
+**The honest cost of AI, stated as it was chosen.** M35 (§17.9) puts the load at about half a
+millisecond for the author's own plugin, with no miss on any other voice while it loads. Every
+arm whose voice holds another state is a
+load, including a return to "no state"; a scene of N cues with states loads them one after
+another; a state that embeds a sample's path does not travel between machines; the bundle grows
+by one file a burst of editing, with no tidy command yet; a plugin that keeps window details (a
+tab, a size) in its state captures on window-only actions. And a plugin whose `setState` takes a
+lock its `process()` also takes on other instances would make other voices miss while it loads -
+M35 is the measurement that says whether the author's own plugins do.
+
+**Defaults to overturn once seen working:** the 1.5 s quiet moment; the 125-tick join; the 300 ms a
+hand's value wins; topmost only while Go.dot is in front; greying by hiding the editor; Space and
+Esc as the only keys handed back; five seconds before a loading child is called hung.
+
+**Built** (2026-09-25, four commits on `main`): the chain panel; the editing helper and its region
+(`plugin/EditorRegion.h`, `EditorHost`, `PluginEditorChild`, the test gain as a real processor with
+a Pad switch that is state and not a parameter); `ChildLaunch` and `PluginLoad` factored out of the
+proxy so both children start and make a plugin the same way; `cue/FxValues` moved out of `FxRows`
+for the std-only client model; `fx/stateFile`, `plugin/stateLoadMs`, `plugin/stateProblem`,
+`fx.capture` and the join rule; the voice child's gate, epoch and state loader; the arm's wait;
+`wfg validate`'s two sentences. Tested by `EditorHelperTests`, the proxy's state case, `FxRowsTests`'
+capture case, the UI binary's chain and plugin-window cases, and `blackbox/phase9a_fx.py`'s second
+session, which hears it: Pad in a cue's state and the cue plays at a quarter of a half; Undo, fire
+it again, and it plays at a half.
+
+**Found on the way, not this section's to fix:** on a one-track show, a cue fired again within
+about 50 ms of `run.killAll` plays silence while its run reports `playing` - found by the fx
+driver with no plugin at all; at 300 ms it plays. The driver waits for the killed run to finish.

@@ -507,6 +507,13 @@ model, the Plugins tab and the gestures are in; the component is the next sessio
 on the author's box once it was quiet and written into §17.9 and PRD §6.11; §17.12, the pages
 draft's §8 and the handoff are written.
 
+*Status, 2026-09-25:* the FX panel at the foot is built, **redesigned by the author** (namespace
+draft §17.13, decisions AH and AI, the PRD overridden): the signal chain with a switch a plugin;
+*Edit…* opens the plugin's own window in a separate editing helper that follows the pick; and a
+plugin's whole state is kept per cue, saved as the hand stops and loaded onto the voice before
+the cue launches. Plugin editor windows therefore leave Phase 9b's list. M35 (a state's load
+time on the author's own plugin) is the measurement it owes.
+
 After 9a.0, four streams run on disjoint files — the DSP, the document object,
 the hosting and the transport — and the FX entries land on top of all four.
 
@@ -533,7 +540,7 @@ for the inserts.
   classes mono→mono, mono→stereo, stereo→stereo — the chains behind Phase 4's
   `Media/Insert` and `Rack/Channel`, and the shared reverb channel.
 - **Inline hosting** (PRD §3.18's opt-in) with §3.4's message-thread handover;
-  **LV2**; AU presets; plugin editor windows; curated per-plugin parameter maps
+  **LV2**; AU presets; curated per-plugin parameter maps
   (the pages draft's §7.2); macOS audio workgroups for the child.
 
 **Done when:** live input runs through a sandboxed third-party plugin, the plugin
