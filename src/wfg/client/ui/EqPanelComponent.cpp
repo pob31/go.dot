@@ -408,7 +408,7 @@ namespace wfg::client::ui
         dragging = true;
         dragFrom = at;
         handleFrom = placeOf (dragged, held);
-        dragScale = 1.0f;
+        dragFine = false;
     }
 
     juce::Point<float> EqPanelComponent::handlePosition (int handle) const
@@ -435,11 +435,11 @@ namespace wfg::client::ui
             jump. */
         const auto scale = fine ? 0.1f : 1.0f;
 
-        if (scale != dragScale)
+        if (fine != dragFine)
         {
             handleFrom = placeOf (dragged, held);
             dragFrom = at;
-            dragScale = scale;
+            dragFine = fine;
         }
 
         const auto target = handleFrom + (at - dragFrom) * scale;

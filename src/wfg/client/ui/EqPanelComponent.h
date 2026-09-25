@@ -160,7 +160,7 @@ namespace wfg::client::ui
             pointer was: a drag is the one plus the pointer's movement since
             the other, and never the published value plus it (2026-09-25). */
         juce::Point<float> handleFrom;
-        float dragScale = 1.0f;
+        bool dragFine = false;
 
         juce::ToggleButton onToggle, hpfToggle, lpfToggle;
         juce::ComboBox lowShape, highShape;
