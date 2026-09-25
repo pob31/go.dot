@@ -16,6 +16,7 @@
 
 #include <wfg/client/model/Theme.h>
 
+#include <wfg/engine/audio/EqColours.h>
 #include <wfg/engine/json/JsonValue.h>
 
 #include <cstdint>
@@ -151,13 +152,15 @@ namespace wfg::client::model
                     colours on each handle like on the EQ of the spatcore
                     library really helps"): spatcore's own first six, red to
                     purple along the field as the handles stand by default -
-                    the high-pass, the four bands, the low-pass. */
-                { "eq-hp",         0xFFE74C3C },
-                { "eq-1",          0xFFE67E22 },
-                { "eq-2",          0xFFFFEB3B },
-                { "eq-3",          0xFF2ECC71 },
-                { "eq-4",          0xFF3498DB },
-                { "eq-lp",         0xFF9B59B6 },
+                    the high-pass, the four bands, the low-pass. The numbers
+                    are the engine's (audio/EqColours.h), because a D700's EQ
+                    page lights its rotaries in the same six. */
+                { "eq-hp",         audio::eqHighPassColour },
+                { "eq-1",          audio::eqBand1Colour },
+                { "eq-2",          audio::eqBand2Colour },
+                { "eq-3",          audio::eqBand3Colour },
+                { "eq-4",          audio::eqBand4Colour },
+                { "eq-lp",         audio::eqLowPassColour },
             };
 
             return table;

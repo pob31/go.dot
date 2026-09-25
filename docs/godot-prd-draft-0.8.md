@@ -1097,6 +1097,28 @@ dark. The encoders (the *relative* class above) wait for a use of their own;
 the per-cue EQ and plugin pages of `docs/godot-surface-pages-draft-0.1.md` are
 the candidate.
 
+*Amended in 0.8, at the author's direction (2026-09-25, later the same day).*
+**The rotaries' use is a cue's EQ and its sends.** SELECT on a sample strip
+aims them at its cue; so does a click on a running cue's name in the window,
+and nothing else does - the cue list's pick does not move them. **EQ** puts
+the aimed cue's EQ on the rotaries in the author's order, sixteen controls: the
+high-pass's frequency, band one's shape, frequency, gain and width, band two's
+frequency, gain and width, band three's, band four's shape, frequency, gain and
+width, and the low-pass's frequency. Sixteen rotaries show them at once; eight
+show the first eight, and a second press the rest. **Send** puts its send
+levels on them, one a mix channel, paging the same way. A further press after
+the last page, or `*` at any time, returns the surface to its own page. A turn
+writes the cue's row (one undo step per control per hand); a press switches -
+the filters on their frequency, a band on its gain, a send on its own rotary -
+and a shape's press moves it between its peak and its shelf. Each rotary wears
+its band's colour, dimmed while the band is out, its ring stands at the value,
+and the screen names the control and says its value, with "off" beside a band
+that is out. A page button with more than one page blinks once, twice... every
+second and a half to say which. While a surface adjusts a cue, the window shows
+that cue's EQ panel or send mixer at its foot. Edits reach a sample that is
+not playing. Each EQ band and each send gained its own saved switch for this,
+so off keeps the number. How a locked show takes these edits is §3.27's.
+
 A 6DOF controller driving a WFS source position is better than two faders —
 three axes plus orientation is what the parameter actually is.
 
@@ -2180,6 +2202,24 @@ then"*): filled from the left as far as the clip has got through the span it
 plays, and empty when nothing sounds. The thin white bar at the top of a D700
 screen, first asked for, is the D700's own mark of a lit SELECT - on while the
 strip sounds - and cannot show a length. Turning the knob still does nothing.
+
+*Amended later the same day (2026-09-25).* **SELECT picks the strip's sample
+for the rotaries** (§3.16's EQ and Send pages), and **its light - the thin
+white bar - is the pick**, on the one strip whose cue the rotaries are aimed
+at, and no longer says the strip sounds: the ring's progress and the pulsing
+colour say that. The strip's third row reads "picked". A lit SELECT pressed
+again lets go. On an EQ or Send page the strips' faders, MUTE, SOLO and REC
+keep their meaning; the rotary's press switches the control under it and never
+starts a clip.
+
+**Under the show lock, EQ and sends ride live and unsaved** (the author's
+decision, against a recommendation to close the pages under the lock): a turn
+on a locked show is heard at once and is written to nothing, like a fader's
+trim, and so is a send added to a mix channel the cue did not send to. The live
+values last until the show is unlocked; then the window asks, in one bar,
+whether to keep them in the show - one undo step - or discard them, returning
+the cues to their saved sound. The window's EQ panel and send mixer, and the
+page, ride live under the lock the same way.
 
 **Takeover.** Two modes, one attribute on the group that arms — the scene change
 is where the designer is thinking about it, and §4.10 wants the decision in the

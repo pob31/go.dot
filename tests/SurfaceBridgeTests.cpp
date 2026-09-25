@@ -47,12 +47,15 @@
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/document/DocumentCommands.h>
 #include <wfg/engine/document/Ids.h>
+#include <wfg/engine/document/Schema.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/midi/MidiSink.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/surface/FaderCurve.h>
 #include <wfg/engine/surface/McuCodec.h>
+#include <wfg/engine/audio/EqColours.h>
 #include <wfg/engine/surface/SurfaceBridge.h>
+#include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/tree/Mount.h>
@@ -535,6 +538,33 @@ namespace
             put (address, osc::Value::float64 (value), 'd');
         }
 
+        void flag (const std::string& address, bool value)
+        {
+            put (address, osc::Value::boolean (value), value ? 'T' : 'F');
+        }
+
+        /*  A MEDIA CUE'S EQ as the tree publishes it, every row at the
+            table's default - what a cue nobody has shaped reads. */
+        void eqOf (const std::string& cue)
+        {
+            const auto base = "/godot/cue/" + cue + "/";
+
+            for (const auto* row : doc::Schema::rowsForOwner ("media"))
+            {
+                const std::string name { row->name };
+
+                if (name.rfind ("eq", 0) != 0)
+                    continue;
+
+                if (row->type == doc::ValueType::boolean)
+                    flag (base + name, row->defaultText == "true");
+                else if (row->type == doc::ValueType::string)
+                    text (base + name, std::string (row->defaultText));
+                else
+                    number (base + name, osc::parseDouble (row->defaultText).value_or (0.0));
+            }
+        }
+
         std::shared_ptr<const tree::TreeSnapshot> publish (std::int64_t at) const
         {
             auto nodes = std::make_shared<std::vector<tree::Node>> (leaves);
@@ -694,8 +724,16 @@ TEST_CASE ("surface bridge: the profiles say what each surface has and what its 
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5b)) == surface::Action::rewind);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5c)) == surface::Action::forward);
 
-    //  SELECT is reserved (plan decision 12); banking is decided in hand (§3.9d).
-    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x18)) == surface::Action::none);
+    /*  SELECT aims the rotaries, EQ and Send are pages and `*` leaves them
+        (author, 2026-09-25) - both of `*`'s notes, the second being its double
+        press when the D700's Configurator asks for one. Banking is decided in
+        hand (§3.9d). */
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x18)) == surface::Action::aim);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2c)) == surface::Action::eqPage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x29)) == surface::Action::sendPage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x36)) == surface::Action::leavePage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x37)) == surface::Action::leavePage);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x38)) == surface::Action::none);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2e)) == surface::Action::none);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5f)) == surface::Action::none);
     CHECK (surface::actionFor (surface::Profile::midiPads, surface::buttonForNote (0x5e))
@@ -880,7 +918,7 @@ TEST_CASE ("surface bridge: the V-Pot press is a sampler strip's gate, and puts 
     CHECK (desk.submitted[0].args[0].getString() == "/godot/dca/" + band + "/trim");
     CHECK (near (desk.submitted[0].args[1].getFloat64(), 0.0));
 
-    //  SELECT is left alone (plan decision 12).
+    //  SELECT on a dca strip aims at nothing: there is no cue on it.
     desk.clear();
     desk.arrive ("PORTMCU1", { 0x90, 0x18, 0x7f });
     desk.arrive ("PORTMCU1", { 0x90, 0x18, 0x00 });
@@ -2636,4 +2674,390 @@ TEST_CASE ("m29: what a full refresh of a sixteen-strip D700 costs the tick thre
     });
 
     CHECK (stage.bridge.refusedSysEx() == 0u);
+}
+
+//==============================================================================
+//  The EQ and Send pages (author, 2026-09-25).
+
+namespace
+{
+    /*  A number to a tenth, as a case reads it - digit by digit, so the
+        fr_FR run reads the same. */
+    std::string tenths (double value)
+    {
+        const auto scaled = std::llround (value * 10.0);
+        const auto magnitude = scaled < 0 ? -scaled : scaled;
+        return (scaled < 0 ? "-" : "") + std::to_string (magnitude / 10) + "."
+             + std::to_string (magnitude % 10);
+    }
+
+    /*  A D700 OF SIXTEEN STRIPS ON TWO PORTS, a snapshot written by hand: strip
+        n holds cue CUE0000n, armed, and the tree says which cue the rotaries
+        are aimed at. Presses go in as bytes, and what the bridge asked for
+        comes out in `submitted`. */
+    struct PageDesk
+    {
+        explicit PageDesk (const std::string& profile = "d700", int stripCount = 16)
+        {
+            surface::SurfaceSpec spec;
+            spec.id = "SURF0001";
+            spec.profile = profile;
+            spec.ports = stripCount > 8 ? std::vector<std::string> { "PORTBNK1", "PORTBNK2" }
+                                        : std::vector<std::string> { "PORTBNK1" };
+
+            for (int n = 1; n <= stripCount; ++n)
+            {
+                const auto strip = "STRIP" + std::string (n < 10 ? "00" : "0") + std::to_string (n);
+                const auto cue = "CUE000" + std::string (n < 10 ? "0" : "") + std::to_string (n);
+                spec.strips.push_back (strip);
+
+                fake.text ("/godot/slot/" + strip + "/role", "sampler");
+                fake.text ("/godot/slot/" + strip + "/word", "armed");
+                fake.text ("/godot/slot/" + strip + "/cue", cue);
+                fake.text ("/godot/cue/" + cue + "/name", "Clip " + std::to_string (n));
+                fake.eqOf (cue);
+            }
+
+            fake.text ("/godot/cue/CUE00001/shortName", "Kick");
+            fake.text ("/godot/surface/aim", "");
+
+            specs = { spec };
+            declare();
+            publish();
+        }
+
+        void declare()
+        {
+            bridge.declare (specs, [] (const std::string&) { return plugged ("D700"); });
+        }
+
+        void publish()
+        {
+            bridge.afterTick (fake.publish (tick), touches, tick);
+        }
+
+        /*  Ticks with nothing in the hands: long enough for a colour, which
+            is written at most every `colourIntervalTicks`. */
+        void settle (int count = 6)
+        {
+            for (int n = 0; n < count; ++n)
+            {
+                ++tick;
+                publish();
+            }
+        }
+
+        /*  A tick's worth of hands: the bytes, the bridge's hook, then what the
+            tree says after it - which a case has set on the fake. */
+        void hands (std::vector<std::pair<std::string, midi::Bytes>> bytes)
+        {
+            for (auto& [port, message] : bytes)
+                REQUIRE (bridge.arrived (port, message));
+
+            ++tick;
+            bridge.beforeTick (collect, tick);
+        }
+
+        void press (const std::string& port, int note)
+        {
+            hands ({ { port, { 0x90, static_cast<std::uint8_t> (note), 0x7f } },
+                     { port, { 0x90, static_cast<std::uint8_t> (note), 0x00 } } });
+        }
+
+        void aimAt (const std::string& cue)
+        {
+            fake.text ("/godot/surface/aim", cue);
+            publish();
+        }
+
+        surface::SurfaceTable::Page page() const { return table.pageOf ("SURF0001"); }
+
+        std::vector<std::string> writes() const
+        {
+            std::vector<std::string> out;
+
+            for (const auto& event : submitted)
+            {
+                std::string one = event.command;
+
+                for (const auto& arg : event.args)
+                {
+                    one += " ";
+
+                    if (arg.isString())
+                        one += arg.getString();
+                    else if (arg.isBool())
+                        one += arg.getBool() ? "true" : "false";
+                    else if (arg.isNumber())
+                        one += tenths (arg.asDouble());
+                }
+
+                out.push_back (one);
+            }
+
+            return out;
+        }
+
+        RecordingSink sink;
+        surface::SurfaceTable table;
+        surface::SurfaceBridge bridge { sink, table };
+        tree::TouchTable touches;
+        FakeTree fake;
+        std::vector<surface::SurfaceSpec> specs;
+        std::vector<Event> submitted;
+        std::int64_t tick = 1;
+
+        surface::SurfaceBridge::Submit collect = [this] (Event event)
+        {
+            submitted.push_back (std::move (event));
+            return true;
+        };
+    };
+
+    /*  THE BAND'S COLOUR AS THE LEDS ARE SENT IT, at a share of its light:
+        whether all three of its messages went out. */
+    bool hasBandColour (const std::vector<midi::Bytes>& sent, int note, std::uint32_t argb, double share)
+    {
+        const auto half = [share] (std::uint32_t eight)
+        {
+            return static_cast<int> (std::lround (static_cast<double> (eight >> 1) * share));
+        };
+
+        const auto shaped = surface::forTheLeds ({ half ((argb >> 16) & 0xffu), half ((argb >> 8) & 0xffu),
+                                                   half (argb & 0xffu) });
+        const auto three = surface::d700Colour (note, shaped.red, shaped.green, shaped.blue);
+
+        for (std::size_t start = 0; start + 3 <= three.size(); start += 3)
+            if (! contains (sent, midi::Bytes (three.begin() + static_cast<std::ptrdiff_t> (start),
+                                               three.begin() + static_cast<std::ptrdiff_t> (start + 3))))
+                return false;
+
+        return ! three.empty();
+    }
+}
+
+TEST_CASE ("surface bridge: SELECT aims the rotaries at its strip's cue, lights for it, and lets go again")
+{
+    /*  The author, 2026-09-25: "while a sample is selected (select button)".
+        SELECT's light is the pick now - on a D700 the thin white bar at the
+        top of the screen - and the screen says "picked" too. */
+    PageDesk desk;
+
+    desk.press ("PORTBNK1", 0x18 + 2);
+    REQUIRE (desk.writes() == std::vector<std::string> { "surface.aim CUE00003" });
+    CHECK (desk.submitted[0].origin == "surface:SURF0001");
+
+    desk.sink.sent.clear();
+    desk.aimAt ("CUE00003");
+
+    const auto sent = sentOn (desk.sink, "PORTBNK1");
+    CHECK (contains (sent, surface::led (0x18 + 2, surface::Led::on)));
+    CHECK (contains (sent, surface::d700DisplayRow3 (2, "picked")));
+
+    //  Only the picked strip: the others stay dark and say "sampler".
+    CHECK_FALSE (contains (sent, surface::led (0x18, surface::Led::on)));
+
+    //  A lit SELECT lets go.
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x18 + 2);
+    CHECK (desk.writes() == std::vector<std::string> { "surface.aim " });
+
+    //  Another strip's SELECT aims there instead.
+    desk.submitted.clear();
+    desk.press ("PORTBNK2", 0x18 + 0);
+    CHECK (desk.writes() == std::vector<std::string> { "surface.aim CUE00009" });
+}
+
+TEST_CASE ("surface bridge: EQ puts the aimed cue's EQ on sixteen rotaries at once, and EQ again leaves")
+{
+    PageDesk desk;
+
+    //  Nothing aimed at, nothing to show: EQ does nothing.
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "show");
+
+    desk.aimAt ("CUE00001");
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+
+    CHECK (desk.page().word == "eq");
+    CHECK (desk.page().index == 0);
+    CHECK (desk.page().count == 1);
+
+    desk.settle();
+
+    const auto first = sentOn (desk.sink, "PORTBNK1");
+    const auto second = sentOn (desk.sink, "PORTBNK2");
+
+    /*  THE AUTHOR'S MAP across both banks: the high-pass first - out, as a
+        cue's high-pass rests - and band one's shape, frequency, gain, width;
+        the low-pass last, on the second bank's eighth rotary. */
+    CHECK (contains (first, surface::d700DisplayRow (0, 0, "HP freq off")));
+    CHECK (contains (first, surface::d700DisplayRow (0, 1, "80 Hz")));
+    CHECK (contains (first, surface::d700DisplayRow3 (0, "EQ")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 0, "B1 shape")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 1, "Peak")));
+    CHECK (contains (first, surface::d700DisplayRow (3, 0, "B1 gain")));
+    CHECK (contains (first, surface::d700DisplayRow (3, 1, "0.0 dB")));
+    CHECK (contains (first, surface::d700DisplayRow3 (3, "Kick")));
+    CHECK (contains (second, surface::d700DisplayRow (0, 0, "B3 freq")));
+    CHECK (contains (second, surface::d700DisplayRow (0, 1, "2.00 kHz")));
+    CHECK (contains (second, surface::d700DisplayRow (7, 0, "LP freq off")));
+    CHECK (contains (second, surface::d700DisplayRow (7, 1, "12.0 kHz")));
+
+    //  THE RINGS: a gain from the centre, at nought; a frequency from the left.
+    CHECK (contains (first, surface::d700Ring (3, 64, 1)));
+    CHECK (contains (first, surface::d700Ring (0, surface::d700RingFor (surface::Law::frequency, 80.0, 20.0,
+                                                                         2000.0, surface::FaderLaw::d700).value, 2)));
+
+    /*  THE BANDS' COLOURS on the surrounds: band one's orange at full, the
+        high-pass's red dimmed - it is out - and the low-pass's purple too. */
+    CHECK (hasBandColour (first, 0x23, audio::eqBand1Colour, 1.0));
+    CHECK (hasBandColour (first, 0x20, audio::eqHighPassColour, surface::pageOffLight));
+    CHECK (hasBandColour (second, 0x27, audio::eqLowPassColour, surface::pageOffLight));
+
+    //  EQ SAYS SO: lit steadily, one page of it, on the bank that asked.
+    CHECK (contains (first, surface::led (0x2c, surface::Led::on)));
+    CHECK_FALSE (contains (second, surface::led (0x2c, surface::Led::on)));
+
+    //  EQ AGAIN, and the surface is back on its own page, EQ dark.
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "show");
+    desk.publish();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::led (0x2c, surface::Led::off)));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Kick")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "picked")));
+}
+
+TEST_CASE ("surface bridge: on eight rotaries the EQ is two pages, then the surface's own; * leaves at once")
+{
+    PageDesk desk ("mcu", 8);
+    desk.aimAt ("CUE00001");
+
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "eq");
+    CHECK (desk.page().index == 0);
+    CHECK (desk.page().count == 2);
+
+    //  "the second press open the higher bands": band three's frequency first.
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().index == 1);
+    desk.publish();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::lcdCell (0x14, 0, 0, "B3 Frq")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::lcdCell (0x14, 0, 7, "LP Frq")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::lcdCell (0x14, 1, 7, "off")));
+
+    //  And a third is the surface's own page again.
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "show");
+
+    //  `*` leaves from any page.
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "eq");
+    desk.press ("PORTBNK1", 0x36);
+    CHECK (desk.page().word == "show");
+
+    /*  PAGE TWO OF TWO BLINKS TWICE every second and a half: the EQ light
+        goes on twice in one cycle. */
+    desk.press ("PORTBNK1", 0x2c);
+    desk.press ("PORTBNK1", 0x2c);
+    REQUIRE (desk.page().index == 1);
+
+    //  From a dark moment of the cycle, one whole cycle.
+    const auto start = desk.tick - desk.tick % surface::pageBlinkCycleTicks + surface::pageBlinkCycleTicks;
+    desk.tick = start - 1;
+    desk.publish();
+    desk.sink.sent.clear();
+
+    for (desk.tick = start; desk.tick < start + surface::pageBlinkCycleTicks; ++desk.tick)
+        desk.publish();
+
+    auto lit = 0;
+
+    for (const auto& message : sentOn (desk.sink, "PORTBNK1"))
+        if (message == surface::led (0x2c, surface::Led::on))
+            ++lit;
+
+    CHECK (lit == 2);
+}
+
+TEST_CASE ("surface bridge: a turn on the EQ page writes the aimed cue's row by its law, a tick's detents folded")
+{
+    PageDesk desk;
+    desk.aimAt ("CUE00001");
+    desk.press ("PORTBNK1", 0x2c);
+    desk.submitted.clear();
+
+    /*  TWO DETENTS ON BAND ONE'S FREQUENCY in one tick are one write, two
+        sixteenths of an octave up from 100 Hz; one back on its gain is half a
+        decibel down. */
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } },
+                  { "PORTBNK1", { 0xb0, 0x12, 0x01 } },
+                  { "PORTBNK1", { 0xb0, 0x13, 0x41 } } });
+
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/cue/CUE00001/eqB1Freq 109.1",
+                                                       "node.set /godot/cue/CUE00001/eqB1Gain -0.5" });
+    CHECK (desk.submitted[0].origin == "surface:SURF0001");
+    CHECK (desk.page().edited == "/godot/cue/CUE00001/eqB1Gain");
+
+    /*  A PRESS SWITCHES, and never fires the pad: band one out on its gain's
+        rotary, the high-pass in on its frequency's, band one's shape to its
+        shelf, and a press on a width does nothing. */
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x23);
+    desk.press ("PORTBNK1", 0x20);
+    desk.press ("PORTBNK1", 0x21);
+    desk.press ("PORTBNK1", 0x24);
+
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/cue/CUE00001/eqB1On false",
+                                                       "node.set /godot/cue/CUE00001/eqHpf true",
+                                                       "node.set /godot/cue/CUE00001/eqB1Shape lowShelf" });
+
+    //  Turned against an end, nothing is written.
+    desk.submitted.clear();
+    desk.fake.number ("/godot/cue/CUE00001/eqB2Gain", 24.0);
+    desk.publish();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x16, 0x01 } } });
+    CHECK (desk.submitted.empty());
+
+    //  On the surface's own page, a turn moves nothing and a press is the pad.
+    desk.press ("PORTBNK1", 0x36);
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } } });
+    CHECK (desk.submitted.empty());
+    desk.press ("PORTBNK1", 0x23);
+    CHECK (desk.writes() == std::vector<std::string> { "strip.press STRIP004", "strip.release STRIP004" });
+}
+
+TEST_CASE ("surface bridge: a page moves no fader, outlives a show edit, and closes when its cue is let go")
+{
+    PageDesk desk;
+    desk.aimAt ("CUE00001");
+
+    //  The faders have landed where the tree says.
+    for (int n = 0; n < 30; ++n)
+    {
+        ++desk.tick;
+        desk.publish();
+    }
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2c);
+    desk.publish();
+
+    //  No fader message (0xE0 + strip) on either bank: the faders stay put.
+    for (const auto& message : desk.sink.sent)
+        CHECK ((message.bytes.front() & 0xf0) != 0xe0);
+
+    //  A SHOW EDIT DECLARES AGAIN - every unlocked turn is one - and the page stays.
+    desk.declare();
+    CHECK (desk.page().word == "eq");
+    desk.publish();
+    CHECK (desk.page().word == "eq");
+
+    //  Its cue let go of: the surface's own page again.
+    desk.aimAt ("");
+    CHECK (desk.page().word == "show");
 }

@@ -30,7 +30,9 @@
     `node.touch`/`node.release` on it, a pad is `strip.press`/`strip.release`
     - exactly what the virtual panel and the page send - with the origin
     `surface:<id>`, so the log says which hand did what and the touch table
-    gates this surface as it gates every other client.
+    gates this surface as it gates every other client. A rotary on an EQ page
+    (2026-09-25) is `node.set` on the aimed cue's row, and SELECT is
+    `surface.aim`; which page is up is the surface's own and no command.
 
     THREE THREADS, AND ONE LOCK.
       - `arrived` runs on the MIDI callback thread. It asks whether a declared

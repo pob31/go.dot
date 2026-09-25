@@ -124,6 +124,8 @@ add_library(wfg_engine STATIC
     wfg/engine/surface/FaderCurve.h
     wfg/engine/surface/SurfaceProfile.h
     wfg/engine/surface/SurfaceProfile.cpp
+    wfg/engine/surface/SurfacePages.h
+    wfg/engine/surface/SurfacePages.cpp
     wfg/engine/surface/SurfaceBridge.h
     wfg/engine/surface/SurfaceBridge.cpp
     wfg/engine/surface/SurfaceTable.h
@@ -161,6 +163,7 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/CueMatrix.h
     wfg/engine/audio/CueMatrix.cpp
     wfg/engine/audio/EqSettings.h
+    wfg/engine/audio/EqColours.h
     wfg/engine/audio/EqMath.h
     wfg/engine/audio/CueEq.h
     wfg/engine/audio/CueEq.cpp

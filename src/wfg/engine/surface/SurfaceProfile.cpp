@@ -23,6 +23,8 @@ namespace wfg::surface
 {
     static_assert (colourIntervalTicks >= 1, "a colour write needs at least a tick to itself");
     static_assert (doubleStopTicks >= 1, "a double STOP needs a window");
+    static_assert (7 * (pageBlinkOnTicks + pageBlinkOffTicks) <= pageBlinkCycleTicks,
+                   "seven blinks must fit in a page button's cycle");
 
     std::optional<Profile> profileFor (std::string_view word)
     {
@@ -118,6 +120,17 @@ namespace wfg::surface
 
         if (button.button == Button::rec)
             return button.index >= 0 ? Action::startLevel : Action::none;
+
+        if (button.button == Button::select)
+            return button.index >= 0 ? Action::aim : Action::none;
+
+        if (button.button == Button::assignEq)      return Action::eqPage;
+        if (button.button == Button::assignSend)    return Action::sendPage;
+
+        /*  `*`, under the Mackie preset the D700 is pinned to: F1, and F2 for
+            its double press when the Configurator is asked for one. */
+        if (button.button == Button::function && (button.index == 0 || button.index == 1))
+            return Action::leavePage;
 
         if (button.button == Button::play)      return Action::go;
         if (button.button == Button::stop)      return Action::stop;

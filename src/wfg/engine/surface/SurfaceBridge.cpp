@@ -16,10 +16,12 @@
 
 #include <wfg/engine/surface/SurfaceBridge.h>
 
+#include <wfg/engine/audio/EqColours.h>
 #include <wfg/engine/cue/Runner.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/surface/FaderCurve.h>
 #include <wfg/engine/surface/McuCodec.h>
+#include <wfg/engine/surface/SurfacePages.h>
 #include <wfg/engine/surface/SurfaceProfile.h>
 #include <wfg/engine/tree/Node.h>
 #include <wfg/engine/tree/Touches.h>
@@ -60,8 +62,10 @@ namespace wfg::surface
         constexpr int recNote = 0x00;           // + element: REC, where the strip's fader starts, lit a moment when set
         constexpr int soloNote = 0x08;          // + element: SOLO, the bank locked to the strip
         constexpr int muteNote = 0x10;          // + element: MUTE, the strip's kill, lit a moment when it kills
-        constexpr int selectNote = 0x18;        // + element: SELECT, whose LED says the strip sounds
+        constexpr int selectNote = 0x18;        // + element: SELECT, whose LED says the rotaries are aimed at its cue
         constexpr int vpotNote = 0x20;          // + element: the V-Pot - its press, and the D700's colour
+        constexpr int sendButtonNote = 0x29;    // Send, lit while its page is up
+        constexpr int eqButtonNote = 0x2c;      // EQ, lit while its page is up
 
         constexpr int ringFillMode = 2;         // MCU "wrap" and the D700's channel 3: fill from the left
         constexpr int d700RingSteps = 127;      // a D700 ring's value, 0..127 (control guide §4.3)
@@ -83,6 +87,27 @@ namespace wfg::surface
             own default. Only a media cue has the row, and only a media cue
             has `pressure` either, so this is never what decides a level. */
         constexpr double defaultFloorDb = -40.0;
+
+        /*  Where the tree says which cue the rotaries are aimed at: one for
+            every surface, set by `surface.aim` (2026-09-25). */
+        const std::string& aimAddress()
+        {
+            static const std::string address { "/godot/surface/aim" };
+            return address;
+        }
+
+        /*  A theme's 0xAARRGGBB as the D700 takes a colour, each eight-bit
+            component halved (control guide §4.4) - the EQ's band colours. */
+        Rgb rgbOf (std::uint32_t argb, double share) noexcept
+        {
+            const auto component = [share] (std::uint32_t eight)
+            {
+                return static_cast<int> (std::lround (static_cast<double> (eight >> 1) * share));
+            };
+
+            return Rgb { component ((argb >> 16) & 0xffu), component ((argb >> 8) & 0xffu),
+                         component (argb & 0xffu) };
+        }
 
         //======================================================================
         const std::string& noText()
@@ -437,9 +462,19 @@ namespace wfg::surface
             int recLed = -1;                        // the REC light as last sent
             std::int64_t recLitUntil = -1;          // the tick the starting level's flash goes out
             int ring = -1;
+            int ringMode = -1;                      // the fill the ring was last sent in: a page changes it
             bool colourKnown = false;
             Rgb colourLevel;
             std::int64_t colourTick = std::numeric_limits<std::int64_t>::min() / 2;
+
+            /*  ON AN EQ OR SEND PAGE (2026-09-25): what the hand did this tick,
+                folded - detents add, a press is a press - and the control under
+                this rotary, made when the page, its index or the aim changes. */
+            int pageSteps = 0;
+            bool pagePress = false;
+            int control = -1;                       // which of the page's controls; -1 for none
+            std::string controlAt;                  // its row on the aimed cue
+            std::string switchAt;                   // the switch that takes its band out
         };
 
         /*  One port of a surface: a bank of eight. */
@@ -448,6 +483,30 @@ namespace wfg::surface
             std::string port;
             bool numbersKnown = false;
             std::array<int, stripsPerBank> numbers {};
+
+            //  The page buttons' lights on this port, as last sent; -1 for nobody knows.
+            int eqLed = -1;
+            int sendLed = -1;
+        };
+
+        /*  WHAT A SURFACE'S ROTARIES SHOW (author, 2026-09-25), and where the
+            controls of that page live - carried whole through a show edit, as
+            the strips are, since every unlocked turn is one. */
+        struct Paging
+        {
+            Page page = Page::show;
+            int index = 0;
+            int count = 1;
+            std::size_t bank = 0;               // where its button was pressed, and where its light answers
+            std::string edited;                 // what the page last wrote
+
+            //  What the controls' addresses were made for.
+            std::string madeForAim;
+            Page madeForPage = Page::show;
+            int madeForIndex = -1;
+
+            //  The aimed cue's rows every rotary of the page reads.
+            std::string eqOnAt, aimShortAt, aimNameAt;
         };
 
         struct Surface
@@ -471,9 +530,18 @@ namespace wfg::surface
             std::optional<std::int64_t> lastStop;
             int padCounter = 0;
 
+            Paging paging;
+
             bool isMackie() const noexcept
             {
                 return profile == Profile::mcu || profile == Profile::d700;
+            }
+
+            /*  How many rotaries a page has: every strip a declared port
+                carries - a D700 with one of its two ports named has eight. */
+            int rotaries() const noexcept
+            {
+                return static_cast<int> (std::min (strips.size(), banks.size() * stripsPerBank));
             }
         };
 
@@ -499,6 +567,8 @@ namespace wfg::surface
             : sink (sinkToUse), table (tableToUse)
         {
             levelScratch.reserve (32);
+            labelScratch.reserve (32);
+            pageScratch.reserve (32);
             colourScratch.reserve (3);
         }
 
@@ -580,11 +650,147 @@ namespace wfg::surface
             strip.led = -1;
             strip.muteLed = -1;
             strip.ring = -1;
+            strip.ringMode = -1;
             strip.colourKnown = false;
             strip.meterStep = -1;
             strip.meterFor.clear();
             strip.soloLed = -1;
             strip.recLed = -1;
+        }
+
+        /*  WHAT A PAGE CHANGES, forgotten when the page changes: the screen,
+            the ring and the colour. Never the motor - a page is the rotaries'
+            and the faders stay where they are; forgotten, a fader would be
+            flown again and twitch. */
+        static void forgetPage (Strip& strip)
+        {
+            for (auto& row : strip.rows)
+                row.known = false;
+
+            strip.ring = -1;
+            strip.ringMode = -1;
+            strip.colourKnown = false;
+        }
+
+        //======================================================================
+        //  The EQ and Send pages (author, 2026-09-25).
+
+        /*  The cue the rotaries are aimed at, as the tree last said. */
+        const std::string& aimNow() const
+        {
+            return textAt (published.get(), aimAddress());
+        }
+
+        /*  WHAT A CLIENT SEES OF THE PAGE: its word, which, how many, and what
+            it last wrote - read by the tree's runtime half at every publish. */
+        void publishPage (const Surface& box)
+        {
+            SurfaceTable::Page page;
+            page.word = std::string (pageWord (box.paging.page));
+            page.index = box.paging.index;
+            page.count = box.paging.count;
+            page.edited = box.paging.edited;
+            table.setPage (box.id, page);
+        }
+
+        /*  THE CONTROLS UNDER THE ROTARIES, made again when the page, its
+            index or the aim changes - and every strip's screen, ring and
+            colour forgotten then, so the next paint shows the new ones. */
+        static void composePage (Surface& box, const std::string& aim)
+        {
+            auto& paging = box.paging;
+
+            if (paging.madeForAim == aim && paging.madeForPage == paging.page
+                  && paging.madeForIndex == paging.index)
+                return;
+
+            paging.madeForAim = aim;
+            paging.madeForPage = paging.page;
+            paging.madeForIndex = paging.index;
+
+            const auto base = aim.empty() ? std::string {} : "/godot/cue/" + aim + "/";
+            paging.eqOnAt = base.empty() ? std::string {} : base + "eqOn";
+            paging.aimShortAt = base.empty() ? std::string {} : base + "shortName";
+            paging.aimNameAt = base.empty() ? std::string {} : base + "name";
+
+            for (auto& strip : box.strips)
+            {
+                strip.control = -1;
+                strip.controlAt.clear();
+                strip.switchAt.clear();
+                strip.pageSteps = 0;
+                strip.pagePress = false;
+                forgetPage (strip);
+            }
+
+            if (paging.page != Page::eq || base.empty())
+                return;
+
+            const auto rotaries = box.rotaries();
+
+            for (int position = 0; position < rotaries; ++position)
+            {
+                const auto index = paging.index * rotaries + position;
+
+                if (index >= eqControlCount)
+                    break;
+
+                const auto& control = eqControls[static_cast<std::size_t> (index)];
+                auto& strip = box.strips[static_cast<std::size_t> (position)];
+                strip.control = index;
+                strip.controlAt = base + std::string (control.row);
+                strip.switchAt = base + std::string (control.switchRow);
+            }
+        }
+
+        /*  A PAGE SHOWN: which kind, which of them, and the bank whose button
+            asked. Anything it had written is forgotten, so a client reading
+            `edited` sees only what this page did. */
+        void showPage (Surface& box, Page page, int index, std::size_t bank)
+        {
+            auto& paging = box.paging;
+            paging.page = page;
+            paging.index = page == Page::show ? 0 : index;
+            paging.bank = bank;
+            paging.edited.clear();
+            paging.count = page == Page::eq ? pageCount (eqControlCount, box.rotaries()) : 1;
+
+            composePage (box, page == Page::show ? std::string {} : aimNow());
+            publishPage (box);
+        }
+
+        /*  EQ OR SEND PRESSED: that kind's first page, or its next, or - after
+            its last - the surface's own page again ("revert to normal mode
+            once all sends have been displayed"). With nothing aimed at there
+            is nothing to show, and the press does nothing. */
+        void turnPage (Surface& box, Page kind, std::size_t bank)
+        {
+            if (aimNow().empty())
+                return;
+
+            const auto count = kind == Page::eq ? pageCount (eqControlCount, box.rotaries()) : 1;
+
+            if (box.paging.page != kind)
+                showPage (box, kind, 0, bank);
+            else if (box.paging.index + 1 < count)
+                showPage (box, kind, box.paging.index + 1, bank);
+            else
+                showPage (box, Page::show, 0, bank);
+        }
+
+        /*  SELECT AIMS THE ROTARIES at the cue on the strip, and a lit one
+            lets go (author, 2026-09-25). A strip with no cue - free, or a
+            dca strip - has nothing to aim at. */
+        void aim (const Surface& box, Strip& strip, const Submit& submit)
+        {
+            follow (strip);
+
+            if (strip.cueId.empty())
+                return;
+
+            const auto again = strip.cueId == aimNow();
+            submit (commandFrom (box.origin, "surface.aim",
+                                 { osc::Value::string (again ? std::string {} : strip.cueId) }));
         }
 
         //======================================================================
@@ -787,14 +993,18 @@ namespace wfg::surface
                         touch (box, *strip, event.down, submit);
                     break;
 
-                /*  A TURN MOVES NOTHING (author, 2026-09-25: "The rotaries
-                    don't have to move with the faders. It's either or. We'll
-                    find other uses for the rotaries."). A strip's level is
-                    its fader's; the rotaries wait for a use of their own -
-                    the per-cue EQ and plugin pages of the surface-pages
-                    draft. A relative write is still understood below, for
-                    that day. */
+                /*  ON THE SURFACE'S OWN PAGE A TURN MOVES NOTHING (author,
+                    2026-09-25: "The rotaries don't have to move with the
+                    faders. It's either or. We'll find other uses for the
+                    rotaries."). A strip's level is its fader's.
+
+                    ON AN EQ OR SEND PAGE it turns the control under it - the
+                    use the author found the same day. The detents are folded
+                    and written once a tick (flushPageWrites). */
                 case McuEvent::Kind::encoder:
+                    if (box.paging.page != Page::show)
+                        if (auto* strip = stripAt (box, bank, event.strip))
+                            strip->pageSteps += event.value;
                     break;
 
                 case McuEvent::Kind::button:
@@ -857,7 +1067,39 @@ namespace wfg::surface
             {
                 case Action::gate:
                     if (auto* strip = stripAt (box, bank, event.id.index))
+                    {
+                        /*  ON A PAGE THE PRESS IS THE CONTROL'S - a band in or
+                            out - and never a clip. A gate held down from the
+                            surface's own page is still let go. */
+                        if (box.paging.page != Page::show && (event.down || ! strip->gateDown))
+                        {
+                            strip->pagePress = strip->pagePress || event.down;
+                            break;
+                        }
+
                         gate (box, *strip, event.down, submit);
+                    }
+                    break;
+
+                case Action::aim:
+                    if (event.down)
+                        if (auto* strip = stripAt (box, bank, event.id.index))
+                            aim (box, *strip, submit);
+                    break;
+
+                case Action::eqPage:
+                    if (event.down)
+                        turnPage (box, Page::eq, bank);
+                    break;
+
+                /*  The Send page reads the show's mix channels and the aimed
+                    cue's sends, which the tree does not index yet. */
+                case Action::sendPage:
+                    break;
+
+                case Action::leavePage:
+                    if (event.down && box.paging.page != Page::show)
+                        showPage (box, Page::show, 0, box.paging.bank);
                     break;
 
                 case Action::go:
@@ -1140,6 +1382,99 @@ namespace wfg::surface
                 }
         }
 
+        /*  THE TICK'S PAGE WRITES, one per rotary that moved or was pressed:
+            the control under it turned by its law from what the tree last
+            said, or switched. A turn against an end writes nothing. Every
+            write is a `node.set` on the aimed cue's row - an edit to the show,
+            one undo step per control per hand, which a locked show refuses. */
+        void flushPageWrites (const Submit& submit)
+        {
+            const auto& aimed = aimNow();
+
+            for (auto& box : surfaces)
+            {
+                if (box.paging.page == Page::show || aimed.empty())
+                {
+                    for (auto& strip : box.strips)
+                    {
+                        strip.pageSteps = 0;
+                        strip.pagePress = false;
+                    }
+
+                    continue;
+                }
+
+                composePage (box, aimed);
+                const auto before = box.paging.edited;
+
+                for (auto& strip : box.strips)
+                {
+                    const auto steps = std::exchange (strip.pageSteps, 0);
+                    const auto pressed = std::exchange (strip.pagePress, false);
+
+                    if ((steps == 0 && ! pressed) || strip.control < 0)
+                        continue;
+
+                    if (box.paging.page == Page::eq)
+                        eqWrite (box, strip, steps, pressed, submit);
+                }
+
+                if (box.paging.edited != before)
+                    publishPage (box);
+            }
+        }
+
+        void eqWrite (Surface& box, const Strip& strip, int steps, bool pressed, const Submit& submit) const
+        {
+            const auto* at = published.get();
+            const auto& control = eqControls[static_cast<std::size_t> (strip.control)];
+
+            const auto write = [&] (const std::string& address, osc::Value value)
+            {
+                submit (commandFrom (box.origin, "node.set",
+                                     { osc::Value::string (address), std::move (value) }));
+                box.paging.edited = address;
+            };
+
+            if (pressed)
+            {
+                if (control.press == Press::toggleSwitch && soleAt (at, strip.switchAt) != nullptr)
+                    write (strip.switchAt, osc::Value::boolean (! flagAt (at, strip.switchAt)));
+                else if (control.press == Press::toggleShape && soleAt (at, strip.controlAt) != nullptr)
+                    write (strip.controlAt,
+                           osc::Value::string (std::string (pressedShape (textAt (at, strip.controlAt),
+                                                                          control.shelf))));
+            }
+
+            if (steps == 0)
+                return;
+
+            if (control.law == Law::shape)
+            {
+                const auto& shape = textAt (at, strip.controlAt);
+                const auto next = turnedShape (shape, steps, control.shelf);
+
+                if (soleAt (at, strip.controlAt) != nullptr && next != shape)
+                    write (strip.controlAt, osc::Value::string (std::string (next)));
+
+                return;
+            }
+
+            const auto current = numberAt (at, strip.controlAt);
+
+            if (! current.has_value())
+                return;
+
+            const auto next = turned (control.law, *current, steps, control.minimum, control.maximum,
+                                      box.topology.faderLaw);
+
+            //  Turned against an end, the value is where it was.
+            if (std::abs (next - *current) < 1.0e-9)
+                return;
+
+            write (strip.controlAt, osc::Value::float64 (next));
+        }
+
         //======================================================================
         //  Outbound, on the tick thread.
 
@@ -1255,20 +1590,6 @@ namespace wfg::surface
             return true;
         }
 
-        /*  THE WORD THE LED SAYS: lit while the strip sounds, flashing while it
-            waits, dark otherwise. Colour is never the only carrier (§4.8), and
-            neither is a light - the display says the word too. */
-        static Led ledFor (std::string_view word) noexcept
-        {
-            if (word == "held" || word == "playing")
-                return Led::on;
-
-            if (word == "pending")
-                return Led::flash;
-
-            return Led::off;
-        }
-
         void paint (Surface& box, const tree::TouchTable& touches, std::int64_t tick)
         {
             if (box.repaint)
@@ -1282,11 +1603,22 @@ namespace wfg::surface
                 {
                     send (bank.port, deviceQuery (deviceId));
                     bank.numbersKnown = false;
+                    bank.eqLed = -1;
+                    bank.sendLed = -1;
                 }
 
                 for (auto& strip : box.strips)
                     forgetShown (strip);
             }
+
+            /*  A PAGE WITH NOTHING TO SHOW - its cue let go of, or gone - is
+                the surface's own page again. */
+            const auto& aimed = aimNow();
+
+            if (box.paging.page != Page::show && aimed.empty())
+                showPage (box, Page::show, 0, box.paging.bank);
+
+            composePage (box, box.paging.page == Page::show ? std::string {} : aimed);
 
             for (std::size_t bank = 0; bank < box.banks.size(); ++bank)
             {
@@ -1315,6 +1647,34 @@ namespace wfg::surface
                         shown.numbersKnown = true;
                     }
                 }
+
+                paintPageButtons (box, bank, tick);
+            }
+        }
+
+        /*  EQ AND SEND SAY WHICH PAGE IS UP, on the bank whose button asked:
+            lit steadily with one page of the kind, and with more, blinked
+            once, twice... every second and a half (`pageButtonLit`). Dark on
+            the surface's own page. */
+        void paintPageButtons (Surface& box, std::size_t bank, std::int64_t tick)
+        {
+            auto& shown = box.banks[bank];
+            const auto here = bank == box.paging.bank;
+            const auto lit = pageButtonLit (box.paging.index, box.paging.count, tick);
+
+            const auto eq = here && box.paging.page == Page::eq && lit ? Led::on : Led::off;
+            const auto sends = here && box.paging.page == Page::send && lit ? Led::on : Led::off;
+
+            if (static_cast<int> (eq) != shown.eqLed)
+            {
+                send (shown.port, led (eqButtonNote, eq));
+                shown.eqLed = static_cast<int> (eq);
+            }
+
+            if (static_cast<int> (sends) != shown.sendLed)
+            {
+                send (shown.port, led (sendButtonNote, sends));
+                shown.sendLed = static_cast<int> (sends);
             }
         }
 
@@ -1364,7 +1724,74 @@ namespace wfg::surface
                            level.has_value() ? fourteenBitForDb (*level, box.topology.faderLaw) : 0,
                            letGo || again);
 
+            /*  PICKED: the rotaries are aimed at this strip's cue (author,
+                2026-09-25: "while a sample is selected (select button)"). */
+            const auto& aimed = aimNow();
+            const auto picked = ! strip.cueId.empty() && strip.cueId == aimed;
+
+            if (box.paging.page != Page::show)
+                paintControl (box, strip, port, element, tick);
+            else
+                paintOwn (box, strip, port, element, tick, number, word, isDca, level, picked);
+
             //------------------------------------------------------------------
+            /*  MUTE, LIT FOR HALF A SECOND after a kill it sent - the only
+                thing its light says (SurfaceProfile.h, `killFlashTicks`). */
+            const auto muteLit = tick < strip.muteLitUntil ? Led::on : Led::off;
+
+            if (static_cast<int> (muteLit) != strip.muteLed)
+            {
+                send (port, led (muteNote + element, muteLit));
+                strip.muteLed = static_cast<int> (muteLit);
+            }
+
+            /*  SOLO, flashing while a soloed clip waits for its start, lit while
+                it sounds, and dark once the solo has gone with the clip. */
+            const auto soloed = ! isDca && flagAt (at, strip.soloAt);
+            const auto soloLit = blinked (! soloed ? Led::off
+                                                   : (word == "playing" || word == "held") ? Led::on : Led::flash,
+                                          tick);
+
+            if (static_cast<int> (soloLit) != strip.soloLed)
+            {
+                send (port, led (soloNote + element, soloLit));
+                strip.soloLed = static_cast<int> (soloLit);
+            }
+
+            //  REC, lit a moment after it set the starting level.
+            const auto recLit = tick < strip.recLitUntil ? Led::on : Led::off;
+
+            if (static_cast<int> (recLit) != strip.recLed)
+            {
+                send (port, led (recNote + element, recLit));
+                strip.recLed = static_cast<int> (recLit);
+            }
+
+            /*  SELECT IS THE PICK (author, 2026-09-25) - on a D700 the thin
+                white bar at the top of the screen - and no longer says the
+                strip sounds: the ring's progress and the pulsing colour say
+                that, and the screen says the word. */
+            const auto lit = picked ? Led::on : Led::off;
+
+            if (static_cast<int> (lit) != strip.led)
+            {
+                send (port, led (selectNote + element, lit));
+                strip.led = static_cast<int> (lit);
+            }
+
+            //------------------------------------------------------------------
+            if (box.topology.hasMeters && ! isDca)
+                paintMeter (port, element, strip, word, tick);
+        }
+
+        /*  THE SURFACE'S OWN PAGE: the strip's name, level and role on its
+            screen, its clip's progress on its ring, and its sound's colour. */
+        void paintOwn (const Surface& box, Strip& strip, const std::string& port, int element,
+                       std::int64_t tick, int& number, std::string_view word, bool isDca,
+                       std::optional<double> level, bool picked)
+        {
+            const auto* at = published.get();
+
             /*  WHAT THE STRIP IS CALLED: the authored short name, else the name
                 - cut to the field, the truncation §3.16 says a display should
                 not have to rely on, and the reason `shortName` exists - else
@@ -1406,8 +1833,13 @@ namespace wfg::surface
 
                 /*  "sampler" and not "pads" (2026-09-25): a D700 strip is a
                     fader, and the author read "pads" on it as something the
-                    fader could not do. */
-                const std::string_view role = isDca ? "dca" : (strip.cueId.empty() ? "free" : "sampler");
+                    fader could not do. And "picked" on the strip the rotaries
+                    are aimed at - the SELECT light says so too, and a light is
+                    never the only carrier (§4.8). */
+                const std::string_view role = isDca                ? "dca"
+                                            : strip.cueId.empty() ? "free"
+                                            : picked               ? "picked"
+                                                                   : "sampler";
 
                 if (changed (strip.rows[2], role))
                     send (port, d700DisplayRow3 (element, role));
@@ -1423,10 +1855,11 @@ namespace wfg::surface
                     whenever the strip is painted whole. */
                 const auto ring = progressOf (strip, word, d700RingSteps);
 
-                if (ring != strip.ring)
+                if (ring != strip.ring || strip.ringMode != ringFillMode)
                 {
                     send (port, d700Ring (element, ring, ringFillMode));
                     strip.ring = ring;
+                    strip.ringMode = ringFillMode;
                 }
 
                 /*  THE CUE'S NUMBER in the strip's number field when it is one
@@ -1449,52 +1882,12 @@ namespace wfg::surface
                 //  The clip's progress, as the D700's, in MCU's eleven steps: it does not repeat the fader.
                 const auto ring = progressOf (strip, word, mcuRingSteps);
 
-                if (ring != strip.ring)
+                if (ring != strip.ring || strip.ringMode != ringFillMode)
                 {
                     send (port, ringMcu (element, ring, ringFillMode, false));
                     strip.ring = ring;
+                    strip.ringMode = ringFillMode;
                 }
-            }
-
-            //------------------------------------------------------------------
-            const auto lit = blinked (ledFor (word), tick);
-
-            /*  MUTE, LIT FOR HALF A SECOND after a kill it sent - the only
-                thing its light says (SurfaceProfile.h, `killFlashTicks`). */
-            const auto muteLit = tick < strip.muteLitUntil ? Led::on : Led::off;
-
-            if (static_cast<int> (muteLit) != strip.muteLed)
-            {
-                send (port, led (muteNote + element, muteLit));
-                strip.muteLed = static_cast<int> (muteLit);
-            }
-
-            /*  SOLO, flashing while a soloed clip waits for its start, lit while
-                it sounds, and dark once the solo has gone with the clip. */
-            const auto soloed = ! isDca && flagAt (at, strip.soloAt);
-            const auto soloLit = blinked (! soloed ? Led::off
-                                                   : (word == "playing" || word == "held") ? Led::on : Led::flash,
-                                          tick);
-
-            if (static_cast<int> (soloLit) != strip.soloLed)
-            {
-                send (port, led (soloNote + element, soloLit));
-                strip.soloLed = static_cast<int> (soloLit);
-            }
-
-            //  REC, lit a moment after it set the starting level.
-            const auto recLit = tick < strip.recLitUntil ? Led::on : Led::off;
-
-            if (static_cast<int> (recLit) != strip.recLed)
-            {
-                send (port, led (recNote + element, recLit));
-                strip.recLed = static_cast<int> (recLit);
-            }
-
-            if (static_cast<int> (lit) != strip.led)
-            {
-                send (port, led (selectNote + element, lit));
-                strip.led = static_cast<int> (lit);
             }
 
             //------------------------------------------------------------------
@@ -1522,10 +1915,128 @@ namespace wfg::surface
 
                 paintColour (port, vpotNote + element, strip, wanted.value_or (Rgb {}), tick);
             }
+        }
 
-            //------------------------------------------------------------------
-            if (box.topology.hasMeters && ! isDca)
-                paintMeter (port, element, strip, word, tick);
+        /*  AN EQ OR SEND PAGE: the control under the rotary - what it is on the
+            screen's first row, "off" beside it when its band is out; its value
+            on the second; the page on the first rotary's third row and the
+            aimed cue's name on the others'. Its ring stands at its value, and
+            its surround wears its band's colour, dimmed while the band is out
+            (author, 2026-09-25: "Put the colours of the parameters (EQ band)
+            on the rotaries. Use the LEDs around the rotaries to show the
+            value"). A rotary past the page's last control is dark and blank. */
+        void paintControl (const Surface& box, Strip& strip, const std::string& port, int element,
+                           std::int64_t tick)
+        {
+            const auto* at = published.get();
+            const auto native = box.topology.nativeDisplay;
+            const auto& paging = box.paging;
+
+            labelScratch.clear();
+            levelScratch.clear();
+            Ring ring { 0, ringFillMode };
+            Rgb colour {};
+
+            if (strip.control >= 0 && paging.page == Page::eq)
+            {
+                const auto& control = eqControls[static_cast<std::size_t> (strip.control)];
+                const auto eqIn = soleAt (at, paging.eqOnAt) == nullptr || flagAt (at, paging.eqOnAt);
+                const auto out = ! eqIn || ! flagAt (at, strip.switchAt);
+
+                labelScratch.assign (native ? control.label : control.shortLabel);
+
+                if (native && out)
+                    labelScratch.append (" off");
+
+                if (control.law == Law::shape)
+                {
+                    const auto& shape = textAt (at, strip.controlAt);
+                    levelScratch.assign (shapeText (shape, ! native));
+                    ring = native ? d700ShapeRing (shape) : mcuShapeRing (shape);
+                }
+                else if (const auto value = numberAt (at, strip.controlAt))
+                {
+                    valueText (control.law, *value, ! native, levelScratch);
+                    ring = native ? d700RingFor (control.law, *value, control.minimum, control.maximum,
+                                                 box.topology.faderLaw)
+                                  : mcuRingFor (control.law, *value, control.minimum, control.maximum,
+                                                box.topology.faderLaw);
+                }
+
+                //  Seven characters have no room for both: an MCU says "off" instead of the value.
+                if (! native && out)
+                    levelScratch.assign ("off");
+
+                colour = rgbOf (audio::eqColours[static_cast<std::size_t> (control.colour)],
+                                out ? pageOffLight : 1.0);
+            }
+
+            if (native)
+            {
+                if (changed (strip.rows[0], labelScratch))
+                    send (port, d700DisplayRow (element, 0, labelScratch));
+
+                if (changed (strip.rows[1], levelScratch))
+                    send (port, d700DisplayRow (element, 1, levelScratch));
+
+                /*  THE THIRD ROW NAMES THE PAGE on the first rotary - "EQ",
+                    "EQ 1/2", "EQ out" while the cue's whole EQ is out - and the
+                    cue on the others, so a glance says whose EQ this is. */
+                pageScratch.clear();
+
+                if (strip.control >= 0)
+                {
+                    if (&strip == &box.strips.front())
+                    {
+                        const auto eqOut = soleAt (at, paging.eqOnAt) != nullptr && ! flagAt (at, paging.eqOnAt);
+                        pageScratch.assign (eqOut ? "EQ out" : "EQ");
+
+                        if (! eqOut && paging.count > 1)
+                        {
+                            pageScratch.push_back (' ');
+                            pageScratch.append (std::to_string (paging.index + 1));
+                            pageScratch.push_back ('/');
+                            pageScratch.append (std::to_string (paging.count));
+                        }
+                    }
+                    else if (const auto& shortName = textAt (at, paging.aimShortAt); ! shortName.empty())
+                    {
+                        pageScratch.assign (shortName);
+                    }
+                    else
+                    {
+                        pageScratch.assign (textAt (at, paging.aimNameAt));
+                    }
+                }
+
+                if (changed (strip.rows[2], pageScratch))
+                    send (port, d700DisplayRow3 (element, pageScratch));
+
+                if (ring.value != strip.ring || ring.mode != strip.ringMode)
+                {
+                    send (port, d700Ring (element, ring.value, ring.mode));
+                    strip.ring = ring.value;
+                    strip.ringMode = ring.mode;
+                }
+            }
+            else
+            {
+                if (changed (strip.rows[0], labelScratch))
+                    send (port, lcdCell (deviceId, 0, element, labelScratch));
+
+                if (changed (strip.rows[1], levelScratch))
+                    send (port, lcdCell (deviceId, 1, element, levelScratch));
+
+                if (ring.value != strip.ring || ring.mode != strip.ringMode)
+                {
+                    send (port, ringMcu (element, ring.value, ring.mode, false));
+                    strip.ring = ring.value;
+                    strip.ringMode = ring.mode;
+                }
+            }
+
+            if (box.topology.hasRgb)
+                paintColour (port, vpotNote + element, strip, colour, tick);
         }
 
         /*  THE METER, AFTER THE FADER (SurfaceProfile.h, `meterStepsDb`): the
@@ -1669,6 +2180,8 @@ namespace wfg::surface
         bool tableMoved = false;
 
         std::string levelScratch;
+        std::string labelScratch;
+        std::string pageScratch;
         midi::Bytes colourScratch;
 
         std::mutex inboxLock;
@@ -1800,6 +2313,11 @@ namespace wfg::surface
                     box.serial = previous->serial;
                     box.lastStop = previous->lastStop;
                     box.padCounter = previous->padCounter;
+
+                    /*  AND ITS PAGE: every unlocked turn of a rotary is an
+                        edit to the show, which declares again - a page that
+                        did not carry over would close at the first detent. */
+                    box.paging = std::move (previous->paging);
                 }
                 else
                 {
@@ -1825,6 +2343,7 @@ namespace wfg::surface
             status.problem = box.problem;
             status.serial = box.serial;
             moved = s.table.set (box.id, status) || moved;
+            s.publishPage (box);
 
             next.push_back (std::move (box));
         }
@@ -1900,6 +2419,7 @@ namespace wfg::surface
         s.draining.clear();
 
         s.flushWrites (to);
+        s.flushPageWrites (to);
         return s.tableMoved;
     }
 

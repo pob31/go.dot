@@ -87,11 +87,25 @@ namespace wfg::surface
 
     /*  What a hardware button on a Mackie surface does in Go.dot.
 
-        THE STRIP'S GATE IS THE V-POT PRESS (plan decision 12), and SELECT is
-        left alone: on the D700 an element's identity is its button note, so
-        encoder three's press, ring and colour all key off one number, and the
-        button that presses a strip is the one wearing its colour. On a dca
-        strip the gate resets the DCA's trim to nought.
+        THE STRIP'S GATE IS THE V-POT PRESS (plan decision 12): on the D700 an
+        element's identity is its button note, so encoder three's press, ring
+        and colour all key off one number, and the button that presses a strip
+        is the one wearing its colour. On a dca strip the gate resets the DCA's
+        trim to nought. On an EQ or Send page the same press switches the
+        control under it instead, and never starts a clip.
+
+        SELECT AIMS THE ROTARIES (author, 2026-09-25: "pressing on the EQ
+        button while a sample is selected (select button) assign rotaries to
+        the EQ"): `surface.aim` at the cue on the strip, and again on a lit
+        SELECT lets go. Its light is the pick - the D700 draws it as the thin
+        white bar at the top of the screen - and no longer says the strip
+        sounds; the ring and the colour do.
+
+        EQ AND SEND ARE PAGES (the same day): the aimed cue's EQ, or its send
+        levels, on the rotaries; each press shows the next page, and after the
+        last the surface is back on its normal one. `*` leaves at once - both
+        its notes, since the D700 sends another for a double press when its
+        Configurator asks it to.
 
         THE TRANSPORT (§16.6): PLAY is `go`; STOP is `run.stopAll` and STOP
         again inside `doubleStopTicks` is `run.killAll` - PRD §4.4's first two
@@ -119,7 +133,8 @@ namespace wfg::surface
         "Pressing Rec on a sampler fader sets the starting level. Confirm with
         a LED pulse."): the level the fader is at, written as its member's
         `initialLevel` - an edit to the show and one undo step. */
-    enum class Action { none, gate, go, stop, rewind, forward, kill, solo, startLevel };
+    enum class Action { none, gate, go, stop, rewind, forward, kill, solo, startLevel,
+                        aim, eqPage, sendPage, leavePage };
 
     /*  AND IT SAYS SO: the red MUTE light is on for half a second after a
         kill it sent (author, 2026-09-25: "Can you flash for 0.5s the red mute
@@ -150,6 +165,36 @@ namespace wfg::surface
 
     /** An encoder detent moves the strip's target this far. */
     inline constexpr double encoderStepDb = 0.5;
+
+    /*  WHAT ONE DETENT OF A ROTARY MOVES ON AN EQ OR SEND PAGE (2026-09-25),
+        bench guesses to revise with the D700 in hand. A fast turn arrives as
+        several detents at once, so the knob accelerates by itself.
+          - a frequency, a sixteenth of an octave: the ten octaves of a band
+            in 160 detents, a semitone in less than two;
+          - a gain, half a decibel;
+          - a width, an eighth of a doubling: 0.7 to 1.4 in eight detents;
+          - a send, a 127th of the fader's travel, so its ring moves one step
+            a detent and the finer steps are where a fader's are, near nought. */
+    inline constexpr double pageOctavesPerDetent = 1.0 / 16.0;
+    inline constexpr double pageGainStepDb = 0.5;
+    inline constexpr double pageWidthDoublingsPerDetent = 1.0 / 8.0;
+    inline constexpr double pageLevelTravelPerDetent = 1.0 / 127.0;
+
+    /*  A CONTROL WHOSE BAND IS OUT is lit at this share of its colour - still
+        its band's colour, so the eye finds it, and plainly dimmer. The text
+        says "off" too (§4.8). */
+    inline constexpr double pageOffLight = 0.3;
+
+    /*  WHICH PAGE, BLINKED ON ITS BUTTON (author, 2026-09-25: "If there are
+        more than one page blink the D700 button once, twice or more every
+        second and a half to show which page we're on"): page n blinks n
+        times, `pageBlinkOnTicks` lit and `pageBlinkOffTicks` dark each, at
+        the start of every `pageBlinkCycleTicks`. A kind with one page is lit
+        steadily. Seven blinks fill the cycle; a page past the seventh blinks
+        seven times. */
+    inline constexpr std::int64_t pageBlinkCycleTicks = 3 * TickClock::rateHz / 2;
+    inline constexpr std::int64_t pageBlinkOnTicks = 5;
+    inline constexpr std::int64_t pageBlinkOffTicks = 5;
 
     /*  A MOTOR MOVES AT MOST THIS FAR IN ONE TICK: a twentieth of its travel,
         so a flight from end to end takes twenty ticks, four tenths of a

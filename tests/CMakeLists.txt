@@ -105,6 +105,7 @@ add_executable(wfg_tests
     DcaTests.cpp
     SamplerTests.cpp
     SurfaceBridgeTests.cpp
+    SurfacePagesTests.cpp
     OscCodecTests.cpp
     SimpleWebToolchainTests.cpp
     SpatcoreToolchainTests.cpp

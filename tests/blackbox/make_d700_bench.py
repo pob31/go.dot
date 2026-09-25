@@ -32,6 +32,8 @@ different places when it is armed; three are tones at different pitches, and
 one is noise, so a ring shows what the saturation carries (a tone vivid, noise
 pale). Bank B is two more, armed over A with a group takeover. "Bed" plays on
 the Band DCA, and two fades move the DCA, which the first fader follows.
+"Low" and "High" carry an EQ already, so the EQ page has something to show:
+"Low" a low shelf lifted and its high-pass in, "High" a cut in band three.
 
 AUDIBLE, UNLIKE THE FIXTURES' MEDIA, which are constants made for arithmetic:
 these are sine tones, a noise burst and a slow sweep, each with a short fade in
@@ -136,9 +138,11 @@ SHOW = f"""<Show>
   <Lists>
     <List id="DBN00001" name="D700 bench">
       <Group id="DBN00002" mode="sampler" name="Bank A" number="1" takeover="group">
-{media("DBN00003", "1.1", "Low", "low.wav", "#C04040", "DBNR0003")}
+{media("DBN00003", "1.1", "Low", "low.wav", "#C04040", "DBNR0003",
+        ' eqB1Gain="4" eqB1Shape="lowShelf" eqHpf="true" eqHpfFreq="60"')}
 {media("DBN00004", "1.2", "Mid", "mid.wav", "#D0A030", "DBNR0004", ' initialLevel="-6" release="hold"')}
-{media("DBN00005", "1.3", "High", "high.wav", "#40A0E0", "DBNR0005", ' initialLevel="-12"')}
+{media("DBN00005", "1.3", "High", "high.wav", "#40A0E0", "DBNR0005",
+        ' eqB3Freq="1500" eqB3Gain="-9" eqB3Q="2" initialLevel="-12"')}
 {media("DBN00006", "1.4", "Noise", "noise.wav", "#909090", "DBNR0006", ' initialLevel="-18"')}
       </Group>
       <Media id="DBN00007" colour="#50C080" dca="DBND0001" file="bed.wav" name="Bed" number="2">
@@ -197,8 +201,8 @@ START
   which mirrors all sixteen strips.
 
 THE WALK (GO on the desk is PLAY; STOP is Esc, STOP twice is double Esc)
-  GO   Bank A arms: faders 2-5 fly to 0, -6, -12 and -18 dB; the rings show the cues' colours;
-       the displays show the names and levels.
+  GO   Bank A arms: faders 2-5 fly to 0, -6, -12 and -18 dB; the rotaries' surrounds show the
+       cues' colours; the displays show the names and levels.
        Touch a fader: that sample starts at the fader's level. Ride it.
        "Mid" is a hold clip: pull it to the bottom and let go, and it stops.
        "Noise" should light a pale ring while it sounds, the tones vivid ones.
@@ -208,6 +212,22 @@ THE WALK (GO on the desk is PLAY; STOP is Esc, STOP twice is double Esc)
   GO   Bank B takes over the desk: a clip of Bank A still sounding finishes before its strip
        changes hands; idle strips change at once.
   GO   Disarm B.
+
+THE EQ PAGE (2026-09-25; unlocked - a locked show refuses the edits until the live layer lands)
+  With Bank A armed:
+  SELECT on fader 2 ("Low"): its white bar lights and its third row reads "picked".
+  EQ   the sixteen rotaries are Low's EQ, in the author's order: HP freq, B1 shape, B1 freq,
+       B1 gain, B1 Q, B2 freq/gain/Q | B3 freq/gain/Q, B4 shape/freq/gain/Q, LP freq.
+       Each surround wears its band's colour (the EQ panel's), dimmed while the band is out;
+       the ring is the value; the screens say the control and the value, "off" beside a band
+       that is out. EQ is lit.
+       Turn B1 gain: Low's shelf moves (listen while it plays). Press it: band one out, "off".
+       Press HP freq: the high-pass out; again, in. Press B1 shape: shelf to peak and back.
+  EQ   again: the surface's own page. `*` also leaves at once.
+  SELECT on fader 4 ("High"), EQ: High's EQ, band three cut at 1.5 kHz.
+  SELECT on the lit strip again: nothing picked, and an EQ page closes.
+  Worth watching for: which port the EQ button's light answers on (it is sent to the port the
+  press came from); whether the colours read at a glance; how fast a detent should be.
 
   Worth watching for: a fader brushed while reaching for the master section - does it fire a
   sample? (FaderEdge::touchDwellTicks in src/wfg/engine/cue/Runner.h is the lever.)
