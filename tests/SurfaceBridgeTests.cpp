@@ -1602,7 +1602,8 @@ TEST_CASE ("surface bridge: MUTE on a sampler strip kills what it plays, like th
 
     //  A member armed and waiting has nothing to kill: its fader is ready for the next touch.
     fake.text ("/godot/slot/STRIP001/word", "armed");
-    bridge.afterTick (fake.publish (++tick), touches, tick);
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
     submitted.clear();
 
     bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x7f });
@@ -1617,7 +1618,8 @@ TEST_CASE ("surface bridge: MUTE on a sampler strip kills what it plays, like th
     //  Nor has a DCA strip: MUTE there is no temporary mute either, it is nothing.
     fake.text ("/godot/slot/STRIP001/word", "dca");
     fake.text ("/godot/slot/STRIP001/role", "dca");
-    bridge.afterTick (fake.publish (++tick), touches, tick);
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
     submitted.clear();
 
     bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x7f });
