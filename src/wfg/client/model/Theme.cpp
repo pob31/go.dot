@@ -146,6 +146,18 @@ namespace wfg::client::model
                 { "go",            0xFFFFD60A },
                 { "go-ink",        0xFF000000 },
                 { "go-idle",       0xFF4A4A52 },
+
+                /*  AN EQ HANDLE EACH (author, 2026-09-25: "Having different
+                    colours on each handle like on the EQ of the spatcore
+                    library really helps"): spatcore's own first six, red to
+                    purple along the field as the handles stand by default -
+                    the high-pass, the four bands, the low-pass. */
+                { "eq-hp",         0xFFE74C3C },
+                { "eq-1",          0xFFE67E22 },
+                { "eq-2",          0xFFFFEB3B },
+                { "eq-3",          0xFF2ECC71 },
+                { "eq-4",          0xFF3498DB },
+                { "eq-lp",         0xFF9B59B6 },
             };
 
             return table;

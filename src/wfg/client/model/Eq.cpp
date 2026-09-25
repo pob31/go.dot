@@ -21,6 +21,7 @@
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
 
+#include <algorithm>
 #include <cmath>
 #include <string>
 
@@ -136,5 +137,29 @@ namespace wfg::client::model
         }
 
         return out;
+    }
+
+    double pinchedQ (double fromQ, double fromDistance, double distance)
+    {
+        if (! (fromDistance > 0.0) || ! (distance > 0.0))
+            return std::clamp (fromQ, eqQLowest, eqQHighest);
+
+        return std::clamp (fromQ * fromDistance / distance, eqQLowest, eqQHighest);
+    }
+
+    double turnedQ (double q, double wheel, bool pinch, bool fine)
+    {
+        const auto step = fine ? 1.01 : 1.1;
+        const auto tenths = (pinch ? -wheel : wheel) * 10.0;
+
+        return std::clamp (q * std::pow (step, tenths), eqQLowest, eqQHighest);
+    }
+
+    double magnifiedQ (double q, double scale)
+    {
+        if (! (scale > 0.0))
+            return std::clamp (q, eqQLowest, eqQHighest);
+
+        return std::clamp (q / scale, eqQLowest, eqQHighest);
     }
 }

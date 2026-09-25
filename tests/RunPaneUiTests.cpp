@@ -1027,6 +1027,80 @@ TEST_CASE ("eq panel: a dragged point follows the hand, however often the readin
     panel.endDrag();
 }
 
+TEST_CASE ("eq panel: two fingers pinch a band's width, closing them narrows it, and the band taken is ringed")
+{
+    /*  The author, 2026-09-25: "Touch gestures on the EQ are not working",
+        "Pinch widens and this feels reversed", and "having a circle around
+        the one being edited". Fingers are driven as the mouse handlers drive
+        them, by their index. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::EqPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text)
+    { written.emplace_back (address, text); };
+
+    ui::EqPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (720, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::eq, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.eq.present = true;
+    reading.eq.settings.band[1] = { wfg::audio::EqSettings::Shape::peak, 1000.0f, 6.0f, 1.0f };
+
+    panel.show (reading);
+
+    const auto lastQ = [&written]
+    {
+        for (auto at = written.rbegin(); at != written.rend(); ++at)
+            if (at->first == "/godot/cue/CUE00001/eqB2Q")
+                return std::stod (at->second);
+
+        return std::nan ("");
+    };
+
+    //  Nothing is ringed until a hand takes something, and a press on a handle rings it.
+    CHECK (panel.editedHandle() == -1);
+
+    const auto centre = panel.handlePosition (1);
+    panel.fingerDown (0, centre);
+    CHECK (panel.editedHandle() == 1);
+    panel.fingerUp (0);
+
+    //  Still ringed once the hand is gone - the wheel acts on it - and a press on nothing lets it go.
+    CHECK (panel.editedHandle() == 1);
+    panel.fingerDown (0, { 2.0f, 2.0f });
+    panel.fingerUp (0);
+    CHECK (panel.editedHandle() == -1);
+
+    /*  TWO FINGERS either side of the band, sixty pixels apart, on no handle:
+        the pinch takes the band nearest their middle, and rings it. */
+    const juce::Point<float> half { 30.0f, 0.0f };
+    panel.fingerDown (0, centre - half);
+    panel.fingerDown (1, centre + half);
+    CHECK (panel.editedHandle() == 1);
+
+    //  CLOSED TO HALF THE DISTANCE: twice the Q, a narrower band.
+    panel.fingerMoved (0, centre - half * 0.5f, false);
+    panel.fingerMoved (1, centre + half * 0.5f, false);
+    CHECK (lastQ() == doctest::Approx (2.0));
+
+    //  SPREAD TO TWICE IT: half the Q, a wider band - measured from where the pinch began.
+    panel.fingerMoved (0, centre - half * 2.0f, false);
+    panel.fingerMoved (1, centre + half * 2.0f, false);
+    CHECK (lastQ() == doctest::Approx (0.5));
+
+    //  LIFTING ONE ENDS THE PINCH, and the finger left drags nothing.
+    const auto writes = written.size();
+    panel.fingerUp (1);
+    panel.fingerMoved (0, centre + juce::Point<float> (-100.0f, 40.0f), false);
+    CHECK (written.size() == writes);
+    panel.fingerUp (0);
+
+    CHECK (panel.editedHandle() == 1);
+}
+
 TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
 {
     /*  NOT AN ASSERTION BUT AN EYE. With WFG_SNAPSHOT_DIR set, the panel is
@@ -1057,6 +1131,10 @@ TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
     s.band[3] = { wfg::audio::EqSettings::Shape::highShelf, 9000.0f, -2.0f, 0.7f };
 
     panel.show (reading);
+
+    //  The third band taken by a hand and let go: drawn ringed, the one being edited.
+    panel.fingerDown (0, panel.handlePosition (2));
+    panel.fingerUp (0);
 
     const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
     const juce::File file { juce::File (dir).getChildFile ("eq-panel.png") };

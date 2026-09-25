@@ -5192,3 +5192,36 @@ TEST_CASE ("client: a media cue's EQ is read back as the value the voice gets, a
         CHECK (none.notice.find ("media") != std::string::npos);
     }
 }
+
+//==============================================================================
+TEST_CASE ("client: closing two fingers narrows a band, on every road a pinch takes")
+{
+    /*  The author, 2026-09-25: "EQ peak gesture to narrow the band (higher
+        Q) is inverted. Pinch widens and this feels reversed." A higher Q is
+        a narrower band, as the row itself says. */
+
+    //  Two fingers: half the distance, twice the Q; twice the distance, half.
+    CHECK (model::pinchedQ (1.0, 60.0, 30.0) == doctest::Approx (2.0));
+    CHECK (model::pinchedQ (1.0, 60.0, 120.0) == doctest::Approx (0.5));
+
+    //  Within the rows' range, and a distance of nothing changes nothing.
+    CHECK (model::pinchedQ (4.0, 100.0, 1.0) == doctest::Approx (model::eqQHighest));
+    CHECK (model::pinchedQ (0.2, 1.0, 100.0) == doctest::Approx (model::eqQLowest));
+    CHECK (model::pinchedQ (0.7, 0.0, 30.0) == doctest::Approx (0.7));
+
+    //  A trackpad's magnify: fingers closing are a scale under one, and narrow it.
+    CHECK (model::magnifiedQ (1.0, 0.5) == doctest::Approx (2.0));
+    CHECK (model::magnifiedQ (1.0, 2.0) == doctest::Approx (0.5));
+
+    /*  THE WHEEL: up narrows, as a knob turned up. A Windows touchpad's pinch
+        comes as the wheel with ctrl, spreading as up - and so widens. */
+    const auto click = 0.25;
+    CHECK (model::turnedQ (1.0, click, false, false) > 1.2);
+    CHECK (model::turnedQ (1.0, -click, false, false) < 1.0 / 1.2);
+    CHECK (model::turnedQ (1.0, click, true, false) < 1.0);
+    CHECK (model::turnedQ (1.0, -click, true, false) > 1.0);
+
+    //  Shift is the fine step - 1.01 a tenth of a unit, not 1.1 - and a long turn stops at the top.
+    CHECK (model::turnedQ (1.0, click, false, true) == doctest::Approx (1.025188).epsilon (1e-5));
+    CHECK (model::turnedQ (9.9, 10.0, false, false) == doctest::Approx (model::eqQHighest));
+}

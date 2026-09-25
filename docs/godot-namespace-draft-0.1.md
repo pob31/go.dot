@@ -9775,9 +9775,14 @@ pinned against the real registry (§14.16).
 **The EQ panel** (`model/Eq`, `ui/EqPanelComponent`) is a subject of the foot beside the curve
 editor: the response drawn on a logarithmic axis from 20 Hz to 20 kHz over ±24 dB through
 `audio/EqMath.h` — the DSP's own function, so what is drawn is what is heard — with a handle per
-band the mouse drags (frequency across, gain up, width on the wheel), two handles for the filters,
-a shape menu on bands one and four, the on/off flags, the number always drawn beside every handle
-(§4.8), and a *Flat* button that sends `eq.reset`. A drag sends `node.set` throttled as the send
+band the mouse or a finger drags (frequency across, gain up, width on the wheel), two handles for
+the filters, a shape menu on bands one and four, the on/off flags, the number always drawn beside
+every handle (§4.8), and a *Flat* button that sends `eq.reset`. *Since 2026-09-25, at the
+author's direction:* each handle has a colour of its own - spatcore's, red at the high-pass to
+purple at the low-pass - and the one being edited is ringed and keeps the wheel and the pinch
+after the hand lets go; a **pinch** sets the width, and closing the fingers narrows the band on
+every road a pinch takes (two fingers on a touch screen, a trackpad's magnify, a Windows
+touchpad's pinch, which arrives as the wheel with ctrl). A drag sends `node.set` throttled as the send
 mixer does, and the engine coalesces. The nineteen rows leave the generic inspector's media list by
 prefix, the panel being their editor.
 

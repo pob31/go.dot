@@ -39,6 +39,13 @@
     shape menu on the two bands that may be shelves; a box for every number;
     and Flat, which is one command and one undo step.
 
+    AND THE WIDTH BY PINCHING (author, 2026-09-25: "Touch gestures on the EQ
+    are not working"): two fingers on a touch screen, a trackpad's magnify, or
+    a Windows touchpad's pinch, on the band being edited - the one the last
+    hand took, drawn ringed, in its own colour as every handle is (spatcore's
+    EQ, which the author works with). Closing the fingers narrows the band
+    (`model::pinchedQ` and its neighbours say how).
+
     WHILE A HAND IS DOWN THE HAND IS DRAWN, and the document catches up
     underneath it - the send mixer's rule, for its reason: the round trip
     through the tick thread is a pass long, and a handle that waited for it
@@ -52,6 +59,7 @@
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <functional>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -98,8 +106,26 @@ namespace wfg::client::ui
 
         /** Where a handle is drawn now: bands 0 to 3, the high-pass 4, the low-pass 5. */
         juce::Point<float> handlePosition (int handle) const;
+
+        /*  THE FINGERS, by the pointer's own index: what the three mouse
+            handlers forward to, and what a test drives. One finger drags as
+            above; a SECOND one down makes the two a pinch on the band nearest
+            their middle, or on the one being edited, and ends the drag where
+            it stands. Lifting either ends the pinch, and the finger left
+            drags nothing. */
+        void fingerDown (int finger, juce::Point<float> at);
+        void fingerMoved (int finger, juce::Point<float> at, bool fine);
+        void fingerUp (int finger);
+
+        /*  THE HANDLE BEING EDITED, drawn ringed (author: "having a circle
+            around the one being edited"): the last one a hand took, kept once
+            it lets go, since the wheel and a pinch act on it. A press on the
+            empty field lets it go. -1 is none. */
+        int editedHandle() const noexcept { return editing; }
+
         void mouseDoubleClick (const juce::MouseEvent&) override;
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
+        void mouseMagnify (const juce::MouseEvent&, float scale) override;
         void mouseMove (const juce::MouseEvent&) override;
 
         /** The sample rate the picture is drawn for. */
@@ -127,6 +153,23 @@ namespace wfg::client::ui
 
         juce::Point<float> placeOf (int handle, const audio::EqSettings&) const;
         int handleAt (juce::Point<float>) const;
+
+        /*  The band a width gesture acts on: the one under the pointer, else
+            the one being edited; none over a filter, which has no width. */
+        int bandFor (juce::Point<float>) const;
+
+        /*  The band two fingers act on: the nearest to their middle within
+            reach - spatcore's rule - else the one being edited. */
+        int bandForPinch (juce::Point<float> middle) const;
+
+        void beginPinch();
+
+        /*  A TURN OF A BAND'S WIDTH, from the hand's own last Q while the
+            turns keep coming: a wheel, a touchpad's pinch and a magnify all
+            send faster than a tick publishes, and a turn taken from the
+            published Q would be taken from the same one twice and lost. */
+        double qToTurn (int band) const;
+        void turnTo (int band, double q);
 
         /** What is drawn: the hand's copy while one is down, else the reading. */
         const audio::EqSettings& shown() const noexcept;
@@ -161,6 +204,17 @@ namespace wfg::client::ui
             the other, and never the published value plus it (2026-09-25). */
         juce::Point<float> handleFrom;
         bool dragFine = false;
+
+        int editing = noHandle;
+
+        std::map<int, juce::Point<float>> fingers;
+        bool pinching = false;
+        double pinchFrom = 0.0;     // the distance between the two when the second landed
+        double pinchQ = 0.0;        // and the band's Q then
+
+        int turning = noHandle;
+        double turningQ = 0.0;
+        juce::uint32 turnedAt = 0;
 
         juce::ToggleButton onToggle, hpfToggle, lpfToggle;
         juce::ComboBox lowShape, highShape;

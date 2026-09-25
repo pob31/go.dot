@@ -76,4 +76,28 @@ namespace wfg::client::model
     /** The shape words the two shelving bands accept, as the row spells them. */
     const char* eqShapeWord (audio::EqSettings::Shape);
     audio::EqSettings::Shape eqShapeFor (const std::string& word);
+
+    /*  A BAND'S WIDTH BY HAND (author, 2026-09-25: "EQ peak gesture to narrow
+        the band (higher Q) is inverted. Pinch widens and this feels
+        reversed."). Two fingers are the band's edges, so closing them NARROWS
+        the band - a higher Q - on every road a pinch takes into the window:
+        two fingers on a touch screen, a trackpad's magnify, and a Windows
+        touchpad, which sends its pinch as the wheel with ctrl held, spreading
+        as the wheel going up.
+
+        `pinchedQ` is the Q two fingers have come to, from the Q and the
+        distance between them when the second one landed: half the distance,
+        twice the Q. `turnedQ` is one turn of the wheel, `wheel` in JUCE's
+        units (a mouse wheel's click is about a quarter, and narrows the band
+        by about a quarter): up is narrower, as a knob turned up, unless
+        `pinch` says the turn is a touchpad's pinch, whose sense is turned
+        round. `fine` is shift's tenth of the step. `magnifiedQ` is a
+        trackpad's magnify, `scale` above one for fingers spreading. All three
+        stay within the rows' range. */
+    constexpr double eqQLowest = 0.1;
+    constexpr double eqQHighest = 10.0;
+
+    double pinchedQ (double fromQ, double fromDistance, double distance);
+    double turnedQ (double q, double wheel, bool pinch, bool fine);
+    double magnifiedQ (double q, double scale);
 }

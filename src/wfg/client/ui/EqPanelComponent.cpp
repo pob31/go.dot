@@ -22,7 +22,9 @@
 #include <spatcore/ui/TypedValue.h>
 
 #include <algorithm>
+#include <array>
 #include <cmath>
+#include <iterator>
 #include <string>
 
 namespace wfg::client::ui
@@ -33,6 +35,22 @@ namespace wfg::client::ui
         {
             return juce::roundToInt (static_cast<float> (base) * theme.type);
         }
+
+        /*  A COLOUR EACH (author, 2026-09-25: "Having different colours on
+            each handle like on the EQ of the spatcore library really helps"):
+            spatcore's first six, in the order the handles stand along the
+            field by default - the high-pass red, the four bands orange to
+            blue, the low-pass purple - as the author's six-band EQs there run
+            from a low cut in red to a high cut in purple. Tokens, by handle
+            index. The colour is the fast half: the shape (a band round, a
+            filter square), the fill (in or out) and the name beside each
+            still say it all (§4.8). */
+        constexpr std::array<const char*, 6> handleTokens { { "eq-1", "eq-2", "eq-3", "eq-4",
+                                                              "eq-hp", "eq-lp" } };
+
+        /*  How long a turn of the wheel waits for the next before the
+            published Q is believed again. */
+        constexpr juce::uint32 turnPatienceMs = 400;
 
         constexpr double lowestHz = 20.0;
         constexpr double highestHz = 20000.0;
@@ -277,7 +295,7 @@ namespace wfg::client::ui
         else if (row.find ("Freq") != std::string::npos)
             bounded = std::clamp (value, lowestHz, highestHz);
         else if (row.find ('Q') != std::string::npos)
-            bounded = std::clamp (value, 0.1, 10.0);
+            bounded = std::clamp (value, model::eqQLowest, model::eqQHighest);
 
         if (row == "eqHpfFreq")
             bounded = std::clamp (bounded, 20.0, 2000.0);
@@ -389,17 +407,150 @@ namespace wfg::client::ui
     //==============================================================================
     void EqPanelComponent::mouseDown (const juce::MouseEvent& event)
     {
-        beginDrag (event.position);
+        /*  A FINGER THAT NEVER SAID IT LIFTED - the panel hidden under it - is
+            forgotten when this is the only one down, or the next single press
+            would be read as the second finger of a pinch. */
+        if (juce::Desktop::getInstance().getNumDraggingMouseSources() <= 1)
+        {
+            fingers.clear();
+            pinching = false;
+        }
+
+        fingerDown (event.source.getIndex(), event.position);
     }
 
     void EqPanelComponent::mouseDrag (const juce::MouseEvent& event)
     {
-        dragTo (event.position, event.mods.isShiftDown());
+        fingerMoved (event.source.getIndex(), event.position, event.mods.isShiftDown());
+    }
+
+    void EqPanelComponent::fingerDown (int finger, juce::Point<float> at)
+    {
+        fingers[finger] = at;
+
+        if (fingers.size() == 2)
+            beginPinch();
+        else if (fingers.size() == 1)
+            beginDrag (at);
+
+        //  A third finger changes nothing.
+    }
+
+    void EqPanelComponent::fingerMoved (int finger, juce::Point<float> at, bool fine)
+    {
+        if (const auto found = fingers.find (finger); found != fingers.end())
+            found->second = at;
+
+        if (! pinching)
+        {
+            dragTo (at, fine);
+            return;
+        }
+
+        if (fingers.size() < 2 || editing == noHandle)
+            return;
+
+        const auto first = fingers.begin()->second;
+        const auto second = std::next (fingers.begin())->second;
+
+        turnTo (editing, model::pinchedQ (pinchQ, pinchFrom,
+                                          static_cast<double> (first.getDistanceFrom (second))));
+    }
+
+    void EqPanelComponent::fingerUp (int finger)
+    {
+        fingers.erase (finger);
+
+        if (fingers.size() < 2)
+            pinching = false;
+
+        if (fingers.empty())
+            endDrag();
+    }
+
+    void EqPanelComponent::beginPinch()
+    {
+        const auto first = fingers.begin()->second;
+        const auto second = std::next (fingers.begin())->second;
+        const auto band = bandForPinch ((first + second) * 0.5f);
+
+        //  The drag the first finger began ends where it stands: its writes stay.
+        dragging = false;
+        dragged = noHandle;
+        pinching = band != noHandle;
+
+        if (pinching)
+        {
+            editing = band;
+            pinchFrom = static_cast<double> (first.getDistanceFrom (second));
+            pinchQ = qToTurn (band);
+        }
+
+        refreshControls();
+        repaint();
+    }
+
+    int EqPanelComponent::bandFor (juce::Point<float> at) const
+    {
+        const auto under = handleAt (at);
+
+        if (under != noHandle)
+            return under < audio::EqSettings::numBands ? under : noHandle;
+
+        return editing >= 0 && editing < audio::EqSettings::numBands ? editing : noHandle;
+    }
+
+    int EqPanelComponent::bandForPinch (juce::Point<float> middle) const
+    {
+        const auto reach = static_cast<float> (scaled (150, theme));
+        const auto& s = shown();
+        auto best = noHandle;
+        auto nearest = reach * reach;
+
+        for (int band = 0; band < audio::EqSettings::numBands; ++band)
+        {
+            const auto distance = placeOf (band, s).getDistanceSquaredFrom (middle);
+
+            if (distance <= nearest)
+            {
+                nearest = distance;
+                best = band;
+            }
+        }
+
+        if (best != noHandle)
+            return best;
+
+        return editing >= 0 && editing < audio::EqSettings::numBands ? editing : noHandle;
+    }
+
+    double EqPanelComponent::qToTurn (int band) const
+    {
+        const auto continuing = band == turning
+                             && juce::Time::getMillisecondCounter() - turnedAt < turnPatienceMs;
+
+        return continuing ? turningQ : static_cast<double> (shown().band[band].q);
+    }
+
+    void EqPanelComponent::turnTo (int band, double q)
+    {
+        turning = band;
+        turningQ = q;
+        turnedAt = juce::Time::getMillisecondCounter();
+        editing = band;
+
+        writeNumber (model::eqBandRow (band, "Q"), q, 2);
+        refreshControls();
+        repaint();
     }
 
     void EqPanelComponent::beginDrag (juce::Point<float> at)
     {
         dragged = handleAt (at);
+
+        //  The ring goes to the handle taken, and from the field when the press found none.
+        editing = dragged;
+        repaint();
 
         if (dragged == noHandle)
             return;
@@ -469,9 +620,9 @@ namespace wfg::client::ui
         repaint();
     }
 
-    void EqPanelComponent::mouseUp (const juce::MouseEvent&)
+    void EqPanelComponent::mouseUp (const juce::MouseEvent& event)
     {
-        endDrag();
+        fingerUp (event.source.getIndex());
     }
 
     void EqPanelComponent::endDrag()
@@ -499,20 +650,28 @@ namespace wfg::client::ui
     void EqPanelComponent::mouseWheelMove (const juce::MouseEvent& event,
                                           const juce::MouseWheelDetails& wheel)
     {
-        const auto handle = handleAt (event.position);
+        /*  THE WIDTH, on the wheel over a band or with one being edited, on a
+            log scale, because Q is read that way. CTRL HELD IS A PINCH: a
+            Windows touchpad sends its pinch as the wheel with ctrl, and the
+            fingers closing must narrow the band (author, 2026-09-25: "Pinch
+            widens and this feels reversed") - `model::turnedQ` turns the
+            sense round for it. */
+        const auto band = bandFor (event.position);
 
-        if (handle < 0 || handle >= audio::EqSettings::numBands)
+        if (band == noHandle || juce::exactlyEqual (wheel.deltaY, 0.0f))
             return;
 
-        const auto clicks = juce::roundToInt (wheel.deltaY * 10.0f);
+        turnTo (band, model::turnedQ (qToTurn (band), static_cast<double> (wheel.deltaY),
+                                      event.mods.isCtrlDown(), event.mods.isShiftDown()));
+    }
 
-        if (clicks == 0)
-            return;
+    void EqPanelComponent::mouseMagnify (const juce::MouseEvent& event, float scale)
+    {
+        //  A trackpad's own pinch: fingers spreading are a scale above one, and widen the band.
+        const auto band = bandFor (event.position);
 
-        /*  THE WIDTH, on the wheel over a band: a tenth narrower or wider a
-            click, on a log scale, because Q is read that way. */
-        const auto q = shown().band[handle].q * std::pow (event.mods.isShiftDown() ? 1.01 : 1.1, clicks);
-        writeNumber (model::eqBandRow (handle, "Q"), q, 2);
+        if (band != noHandle)
+            turnTo (band, model::magnifiedQ (qToTurn (band), static_cast<double> (scale)));
     }
 
     void EqPanelComponent::mouseMove (const juce::MouseEvent& event)
@@ -704,8 +863,14 @@ namespace wfg::client::ui
             const auto box = juce::Rectangle<float> (place.x - radius, place.y - radius,
                                                      2.0f * radius, 2.0f * radius);
 
-            g.setColour (Look::colour (theme, handle == hovered || handle == dragged ? "picked"
-                                              : in ? "accent" : "ink-off"));
+            /*  ITS OWN COLOUR, in or out, brighter under the pointer or the
+                hand (`handleTokens`). */
+            auto colour = Look::colour (theme, handleTokens[static_cast<std::size_t> (handle)]);
+
+            if (handle == hovered || handle == dragged)
+                colour = colour.brighter (0.4f);
+
+            g.setColour (colour);
 
             /*  A BAND IS ROUND AND A FILTER IS SQUARE - two shapes, §4.8 -
                 and one that is out is hollow rather than a different colour. */
@@ -718,12 +883,25 @@ namespace wfg::client::ui
                 if (in) g.fillEllipse (box); else g.drawEllipse (box, 1.5f);
             }
 
-            //  The band's number beside it, so a handle is never only a dot.
+            /*  THE ONE BEING EDITED, RINGED in the ink (author, 2026-09-25:
+                "And having a circle around the one being edited too"): what
+                the wheel and a pinch will narrow or widen. */
+            const auto ring = radius + static_cast<float> (scaled (4, theme));
+            const auto ringed = handle == editing;
+
+            if (ringed)
+            {
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawEllipse (place.x - ring, place.y - ring, 2.0f * ring, 2.0f * ring,
+                               static_cast<float> (scaled (2, theme)));
+            }
+
+            //  The band's number beside it - outside the ring - so a handle is never only a dot.
             g.setColour (Look::colour (theme, "ink"));
             g.setFont (Look::font (theme, 10.0f));
             g.drawFittedText (isFilter ? juce::String (handle == hpfHandle ? "HP" : "LP")
                                        : juce::String (handle + 1),
-                              juce::roundToInt (place.x) + juce::roundToInt (radius) + 2,
+                              juce::roundToInt (place.x + (ringed ? ring + 1.0f : radius)) + 2,
                               juce::roundToInt (place.y) - 7, 20, 14,
                               juce::Justification::centredLeft, 1);
         }
