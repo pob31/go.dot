@@ -87,6 +87,17 @@ namespace wfg::client::ui
         void mouseDown (const juce::MouseEvent&) override;
         void mouseDrag (const juce::MouseEvent&) override;
         void mouseUp (const juce::MouseEvent&) override;
+
+        /*  THE DRAG, as positions in this component: what the three mouse
+            handlers above forward to, and what a test drives without
+            inventing a mouse event (the rule tests/RunPaneUiTests.cpp keeps).
+            `fine` is shift's tenth of the movement. */
+        void beginDrag (juce::Point<float> at);
+        void dragTo (juce::Point<float> at, bool fine);
+        void endDrag();
+
+        /** Where a handle is drawn now: bands 0 to 3, the high-pass 4, the low-pass 5. */
+        juce::Point<float> handlePosition (int handle) const;
         void mouseDoubleClick (const juce::MouseEvent&) override;
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
         void mouseMove (const juce::MouseEvent&) override;
@@ -144,6 +155,12 @@ namespace wfg::client::ui
         int dragged = noHandle;
         int hovered = noHandle;
         juce::Point<float> dragFrom;
+
+        /*  WHERE THE HANDLE WAS WHEN THE HAND WENT DOWN, kept beside where the
+            pointer was: a drag is the one plus the pointer's movement since
+            the other, and never the published value plus it (2026-09-25). */
+        juce::Point<float> handleFrom;
+        float dragScale = 1.0f;
 
         juce::ToggleButton onToggle, hpfToggle, lpfToggle;
         juce::ComboBox lowShape, highShape;

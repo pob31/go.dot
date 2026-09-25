@@ -945,6 +945,88 @@ TEST_CASE ("eq panel: the numbers are drawn, a box writes one row, a switch writ
     }
 }
 
+TEST_CASE ("eq panel: a dragged point follows the hand, however often the reading comes back")
+{
+    /*  The author, 2026-09-25: "The Eq points move in very large increments
+        when using the mouse on the graph. Same with touch." The drag took the
+        handle from the reading, which the drag's own writes move - so each
+        pass added the whole movement again and the point ran away from the
+        hand. Here the reading comes back with every write, as it does live. */
+    std::vector<std::pair<std::string, std::string>> written;
+
+    ui::EqPanelComponent::Actions actions;
+    actions.set = [&] (const std::string& address, const std::string& text)
+    { written.emplace_back (address, text); };
+
+    ui::EqPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (720, 220);
+
+    model::FootReading reading;
+    reading.subject = { model::Subject::Kind::eq, "CUE00001" };
+    reading.cueName = "The bed";
+    reading.cueKind = "media";
+    reading.eq.present = true;
+    reading.eq.settings.band[1] = { wfg::audio::EqSettings::Shape::peak, 1000.0f, 0.0f, 1.0f };
+
+    panel.show (reading);
+
+    const auto lastOf = [&written] (const std::string& row)
+    {
+        for (auto at = written.rbegin(); at != written.rend(); ++at)
+            if (at->first == "/godot/cue/CUE00001/" + row)
+                return std::stod (at->second);
+
+        return std::nan ("");
+    };
+
+    //  What the engine publishes after each write: the band where it was put.
+    const auto publish = [&]
+    {
+        reading.eq.settings.band[1].freq = static_cast<float> (lastOf ("eqB2Freq"));
+        reading.eq.settings.band[1].gain = static_cast<float> (lastOf ("eqB2Gain"));
+        panel.show (reading);
+    };
+
+    const auto from = panel.handlePosition (1);
+    panel.beginDrag (from);
+
+    panel.dragTo (from + juce::Point<float> (20.0f, 0.0f), false);
+    const auto first = std::log2 (lastOf ("eqB2Freq") / 1000.0);
+    publish();
+
+    panel.dragTo (from + juce::Point<float> (40.0f, 0.0f), false);
+    const auto second = std::log2 (lastOf ("eqB2Freq") / 1000.0);
+    publish();
+
+    panel.dragTo (from + juce::Point<float> (60.0f, 0.0f), false);
+    const auto third = std::log2 (lastOf ("eqB2Freq") / 1000.0);
+
+    /*  FREQUENCY IS LOGARITHMIC ACROSS THE FIELD, so twice the pointer's
+        travel is twice the octaves - and not three times, then six, which is
+        what adding the movement to a published value that already held it
+        came to. Whole hertz rounding is the tolerance. */
+    REQUIRE (first > 0.0);
+    CHECK (second == doctest::Approx (2.0 * first).epsilon (0.02));
+    CHECK (third == doctest::Approx (3.0 * first).epsilon (0.02));
+
+    //  And the handle is drawn where the hand is, not ahead of it.
+    CHECK (std::abs (panel.handlePosition (1).x - (from.x + 60.0f)) <= 1.0f);
+
+    /*  SHIFT MID-DRAG IS A CHANGE OF SPEED, NOT A JUMP: the fine drag starts
+        from where the handle is, a tenth of the movement from there on. */
+    publish();
+    panel.dragTo (from + juce::Point<float> (60.0f, 0.0f), true);
+    const auto still = std::log2 (lastOf ("eqB2Freq") / 1000.0);
+    CHECK (still == doctest::Approx (third).epsilon (0.02));
+
+    //  A hundred pixels at a tenth is ten: half of one of the twenty-pixel steps above.
+    panel.dragTo (from + juce::Point<float> (160.0f, 0.0f), true);
+    const auto fine = std::log2 (lastOf ("eqB2Freq") / 1000.0);
+    CHECK (fine - third == doctest::Approx (0.5 * (third - second)).epsilon (0.1));
+
+    panel.endDrag();
+}
+
 TEST_CASE ("eq panel: a picture of it, when somebody asks for one")
 {
     /*  NOT AN ASSERTION BUT AN EYE. With WFG_SNAPSHOT_DIR set, the panel is

@@ -389,29 +389,60 @@ namespace wfg::client::ui
     //==============================================================================
     void EqPanelComponent::mouseDown (const juce::MouseEvent& event)
     {
-        dragged = handleAt (event.position);
+        beginDrag (event.position);
+    }
+
+    void EqPanelComponent::mouseDrag (const juce::MouseEvent& event)
+    {
+        dragTo (event.position, event.mods.isShiftDown());
+    }
+
+    void EqPanelComponent::beginDrag (juce::Point<float> at)
+    {
+        dragged = handleAt (at);
 
         if (dragged == noHandle)
             return;
 
         held = reading.eq.settings;
         dragging = true;
-        dragFrom = event.position;
+        dragFrom = at;
+        handleFrom = placeOf (dragged, held);
+        dragScale = 1.0f;
     }
 
-    void EqPanelComponent::mouseDrag (const juce::MouseEvent& event)
+    juce::Point<float> EqPanelComponent::handlePosition (int handle) const
+    {
+        return placeOf (handle, shown());
+    }
+
+    void EqPanelComponent::dragTo (juce::Point<float> at, bool fine)
     {
         if (! dragging || dragged == noHandle)
             return;
 
-        /*  MEASURED FROM WHERE THE HAND WENT DOWN rather than from where the
-            pointer is, so a press does not jump the handle to the pointer;
-            shift divides the movement by ten, the fine drag every other drag
-            in this window has. */
-        const auto scale = event.mods.isShiftDown() ? 0.1f : 1.0f;
-        const auto origin = placeOf (dragged, reading.eq.settings);
-        const auto moved = (event.position - dragFrom) * scale;
-        const auto target = origin + moved;
+        /*  MEASURED FROM WHERE THE HAND WENT DOWN - the pointer AND the handle,
+            both kept from the press. It used to take the handle from the
+            reading, which this drag's own writes move on every pass: the whole
+            movement so far was added again twenty-five times a second and the
+            point ran away from the hand (author, 2026-09-25: "The Eq points
+            move in very large increments when using the mouse on the graph.
+            Same with touch."). The send mixer's faders always did it this way.
+
+            Shift divides the movement by ten, the fine drag every other drag
+            in this window has; pressing or letting go of it mid-drag starts
+            again from where the handle is, so the change of speed is not a
+            jump. */
+        const auto scale = fine ? 0.1f : 1.0f;
+
+        if (scale != dragScale)
+        {
+            handleFrom = placeOf (dragged, held);
+            dragFrom = at;
+            dragScale = scale;
+        }
+
+        const auto target = handleFrom + (at - dragFrom) * scale;
 
         const auto frequency = frequencyForX (target.x);
 
@@ -439,6 +470,11 @@ namespace wfg::client::ui
     }
 
     void EqPanelComponent::mouseUp (const juce::MouseEvent&)
+    {
+        endDrag();
+    }
+
+    void EqPanelComponent::endDrag()
     {
         /*  AND THE READING TAKES OVER AGAIN: by now what was asked for has
             been applied and published, and if it has not, the next pass
