@@ -6336,6 +6336,16 @@ namespace wfg::cue
             if (run->rangesFinished)
                 continue;
 
+            /*  A RUN THE AUDIO WAS TOLD TO STOP PLACES NOTHING MORE (found by
+                the author on 2026-09-25: Esc, panic and the run's cross did
+                not stop a looping cue). A boundary placed after the stop
+                would launch the next range into a voice that was just
+                silenced - the sound coming back after Esc, which §4.4 does
+                not allow. A fade-and-stop still advances while it fades: its
+                stop is not issued until the fade is done. */
+            if (run->stopIssued)
+                continue;
+
             /*  RE-READ AT EVERY BOUNDARY, which is decision L: a `loops` an
                 operator changed while the range played is honoured from here,
                 and a range deleted while it played is not entered again. What
@@ -6984,8 +6994,16 @@ namespace wfg::cue
                     without it.
 
                     `rangesFinished` is set when the LAST range's end has been
-                    placed, so the silence after that one is the cue finishing. */
-                if (run->range >= 0 && ! run->rangesFinished)
+                    placed, so the silence after that one is the cue finishing.
+
+                    AND A STOPPED RUN'S SILENCE IS ITS END, boundary or not
+                    (found by the author on 2026-09-25): a range that loops for
+                    ever never finishes, so a killed run on one stayed
+                    `stopping` - holding its voice, and still on the running
+                    pane after Esc, panic and its own cross - until somebody
+                    gave the range a loop count. Once the audio has been told to
+                    stop, there is no boundary left to wait for. */
+                if (run->range >= 0 && ! run->rangesFinished && ! run->stopIssued)
                     continue;
 
                 engine.submit (origin::engine, "run.ended", one (run->id));
