@@ -2377,6 +2377,22 @@ and a dip dims towards a floor, never dark, because dark is silence. A flash is
 held and released over a few hundred milliseconds, so the ten-a-second colour
 limit above cannot skip it. The resting glow, the dB range, the floor, the
 average and the release are the bench's to tune (`SurfaceProfile.h`).
+**How much rise is "full" adapts** to how much the sound has been moving
+lately (*"at louder volume the modulation gets a bit lost when sparse quiet
+parts are really clear … Could the system be a bit more adaptive?"*): full is
+two and a half times the envelope's recent mean distance from its average,
+held between 2 and 12 dB, so a dense loud passage that moves a decibel or two
+flashes as clearly as a sparse one that moves twenty.
+
+**And noise is grey wherever it sits** (*"the colours … don't desaturate on a
+broader, noisier signal which I find quite a telling visual cue"*). The
+saturation was one minus the spectral flatness of the whole band, which reads
+only white noise as grey: a hi-hat, breath, rain or rumble is noise in part of
+the band, and the near-silent rest made it vivid. It is now how tonal the
+sound is where its energy is: each bin against its own neighbourhood, a ninth
+of an octave either side, weighted by that neighbourhood's power. Noise of any
+colour or bandwidth reads grey, a tone or a harmonic sound vivid (the
+analysis's format version 2; every file is analysed again once).
 
 **A test exists before the UI does.** A 1 kHz sine must come out saturated at
 1 kHz's hue, white noise grey, and a sweep must walk the ramp — a black-box

@@ -139,17 +139,30 @@ namespace wfg::surface
         resolution. It can be squashed, but variation/modulation is a better
         clue"). Not the level: its MOVEMENT. A slow average follows the clip's
         envelope, and the brightness is `pulseRest` plus the envelope's height
-        above that average, `pulseDbForFull` decibels of it being the rest of
-        the way to full - so a steady sound rests at a middle glow whatever its
-        level, a hit flashes and a dip dims, down to `pulseFloor` and never
+        above that average - so a steady sound rests at a middle glow whatever
+        its level, a hit flashes and a dip dims, down to `pulseFloor` and never
         dark (dark is silence). A flash is held and let go by
         `pulseReleasePerTick`, so the colour's own rate limit, ten writes a
-        second, cannot skip it. */
+        second, cannot skip it.
+
+        AND HOW MUCH HEIGHT IS FULL ADAPTS (author, the same day: "at louder
+        volume the modulation gets a bit lost when sparse quiet parts are
+        really clear in the pulsation. Could the system be a bit more
+        adaptive?"). A dense, loud passage moves a decibel or two about its
+        average and a sparse one twenty, so a fixed scale showed one and
+        drowned the other. The scale is `pulseSpreadsForFull` times how far
+        the envelope has recently strayed from its average - a slower mean of
+        that distance, over `pulseSpreadSeconds` - held between
+        `pulseScaleLeastDb` (a nearly still sound is not blown up into
+        flashing) and `pulseScaleMostDb`. */
     inline constexpr double pulseRest = 0.45;
-    inline constexpr double pulseDbForFull = 8.0;
     inline constexpr double pulseFloor = 0.08;
     inline constexpr double pulseAverageSeconds = 0.6;
     inline constexpr double pulseReleasePerTick = 0.04;
+    inline constexpr double pulseSpreadSeconds = 1.5;
+    inline constexpr double pulseSpreadsForFull = 2.5;
+    inline constexpr double pulseScaleLeastDb = 2.0;
+    inline constexpr double pulseScaleMostDb = 12.0;
 
     /*  AN UNCHANGED COLOUR IS WRITTEN AGAIN THIS OFTEN, because the D700's
         firmware takes its LEDs back with an idle animation when nothing

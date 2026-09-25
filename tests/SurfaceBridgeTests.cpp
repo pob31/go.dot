@@ -1449,7 +1449,7 @@ TEST_CASE ("surface bridge: a sounding strip's colour pulses with how its sound 
 
     sink.sent.clear();
 
-    //  A HIT: eight decibels above the average is full, at the next write the rate allows.
+    //  A HIT: eight decibels above a steady average is full, at the next write the rate allows.
     fake.text ("/godot/run/RUN00001/envelope", "-10");
 
     for (tick = 61; tick <= 66; ++tick)
@@ -1481,11 +1481,48 @@ TEST_CASE ("surface bridge: a sounding strip's colour pulses with how its sound 
     CHECK (redNow() > 0);
     CHECK (redNow() < rest);
 
+    /*  AND THE SCALE ADAPTS (author, 2026-09-25: "at louder volume the
+        modulation gets a bit lost"): a dense passage that only moves a
+        decibel or two about its average flashes as clearly as a sparse one
+        moving twenty, because full is measured in how far THIS sound has been
+        straying lately. */
+    const auto flashAfter = [&] (double around, double swing, double hit)
+    {
+        //  Eight seconds of the envelope swinging `swing` either side of `around` - the scale adapts over a second and a half...
+        for (int n = 0; n < 400; ++n, ++tick)
+        {
+            fake.text ("/godot/run/RUN00001/envelope",
+                       osc::formatDouble (around + ((n / 5) % 2 == 0 ? swing : -swing)));
+            bridge.afterTick (fake.publish (tick), touches, tick);
+        }
+
+        //  ...then a steady moment at the average, and one hit.
+        for (int n = 0; n < 30; ++n, ++tick)
+        {
+            fake.text ("/godot/run/RUN00001/envelope", osc::formatDouble (around));
+            bridge.afterTick (fake.publish (tick), touches, tick);
+        }
+
+        sink.sent.clear();
+        fake.text ("/godot/run/RUN00001/envelope", osc::formatDouble (around + hit));
+
+        for (int n = 0; n < 6; ++n, ++tick)
+            bridge.afterTick (fake.publish (tick), touches, tick);
+
+        return redNow();
+    };
+
+    const auto dense = flashAfter (-2.0, 1.0, 2.5);         // loud and busy: 2.5 dB is a hit
+    const auto sparse = flashAfter (-20.0, 10.0, 2.5);      // quiet and sparse: 2.5 dB is nothing
+
+    CHECK (dense >= 100);
+    CHECK (sparse < dense);
+
     //  With no envelope yet, the colour is the timbre's, as it always was.
     fake.text ("/godot/run/RUN00001/envelope", "");
     sink.sent.clear();
 
-    for (tick = 213; tick <= 230; ++tick)
+    for (const auto end = tick + 18; tick <= end; ++tick)
         bridge.afterTick (fake.publish (tick), touches, tick);
 
     CHECK (redNow() == 127);

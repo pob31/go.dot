@@ -370,6 +370,7 @@ namespace wfg::surface
                 they were measured on - a new holder starts again. */
             std::string pulseFor;
             double pulseAverage = 0.0;
+            double pulseSpread = 0.0;
             double pulseShown = 0.0;
 
             //  The hand.
@@ -1278,14 +1279,19 @@ namespace wfg::surface
             {
                 strip.pulseFor = strip.holderId;
                 strip.pulseAverage = *envelope;
+                strip.pulseSpread = pulseScaleLeastDb / pulseSpreadsForFull;
                 strip.pulseShown = pulseRest;
             }
 
-            //  A one-pole average over `pulseAverageSeconds` of ticks.
-            const auto ticks = pulseAverageSeconds * static_cast<double> (TickClock::rateHz);
-            strip.pulseAverage += (*envelope - strip.pulseAverage) / std::max (1.0, ticks);
+            //  One-pole means over their seconds of ticks: the level, then how far it strays.
+            const auto rate = static_cast<double> (TickClock::rateHz);
+            strip.pulseAverage += (*envelope - strip.pulseAverage) / std::max (1.0, pulseAverageSeconds * rate);
 
-            const auto lift = (*envelope - strip.pulseAverage) / pulseDbForFull;
+            const auto height = *envelope - strip.pulseAverage;
+            strip.pulseSpread += (std::abs (height) - strip.pulseSpread) / std::max (1.0, pulseSpreadSeconds * rate);
+
+            const auto full = std::clamp (pulseSpreadsForFull * strip.pulseSpread, pulseScaleLeastDb, pulseScaleMostDb);
+            const auto lift = height / full;
             const auto now = std::clamp (pulseRest + (1.0 - pulseRest) * lift, pulseFloor, 1.0);
 
             //  Up at once, down at the release: a flash outlives the rate limit.
