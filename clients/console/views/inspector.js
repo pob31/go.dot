@@ -132,6 +132,8 @@ const KIND_ORDER = {
   fx:      ["plugin", "enabled", "values", "stateFile", "name", "index"],
   plugin:  ["name", "identifier", "format", "path", "preset", "state", "problem",
             "latencySamples", "paramCount", "stateLoadMs", "stateProblem"],
+  // A media cue's send into one mix channel: which, how loud, whether it is in (2026-09-25).
+  send:    ["bus", "level", "on", "live", "cue"],
 };
 
 /*  THE NAMES A KIND CLAIMS - or, when several cues are chosen at once, the
@@ -780,6 +782,36 @@ function renderInspector() {
       anything else: the fields come from `/godot/trigger/<id>/*` through the
       same lookup that reads a cue's. What it needs of its own is a way back to
       the cue it belongs to. */
+  /*  A SEND IS INSPECTED THE SAME WAY (2026-09-25): its fields from
+      `/godot/send/<id>/*` - level and switch - and a way back to its cue. Under
+      the show lock a write to either rides live, as the desk's does. */
+  if (selection.picked && tree.node("/godot/send/" + selection.picked + "/bus")) {
+    const owner = String(tree.get("/godot/send/" + selection.picked + "/cue", ""));
+    const kind = "send";
+    const fields = fieldsFor(selection.picked, kind);
+    const signature = "send|" + selection.picked + "|" + (panel.details ? "open" : "shut")
+                        + "|" + fields.map((f) => f.address).join(",");
+
+    if (pane.dataset.showing !== signature) {
+      pane.dataset.showing = signature;
+
+      const bus = String(tree.get("/godot/send/" + selection.picked + "/bus", ""));
+
+      pane.innerHTML =
+        '<div class="who"><span class="text">' +
+        esc(String(tree.get("/godot/bus/" + bus + "/name", "") || bus)) +
+        '</span><span class="kind">send</span></div>' +
+        '<div class="back" data-pick="' + esc(owner) + '">\u2190 ' +
+        esc(tree.cue(owner, "name", "") || owner) + "</div>" +
+        fieldsMarkup (fields.filter(decided), kind, true) +
+        detailsMarkup ([selection.picked], fields.filter((f) => !decided(f)), kind);
+      return;
+    }
+
+    refreshFields(pane);
+    return;
+  }
+
   if (selection.picked && tree.node("/godot/trigger/" + selection.picked + "/kind")) {
     const owner = tree.trigger(selection.picked, "cue", "");
     const kind = "trigger";
@@ -878,6 +910,43 @@ function renderInspector() {
     }
 
     out += "</div>";
+
+    /*  A MEDIA CUE'S SENDS (2026-09-25), listed as its triggers are: each an
+        object of its own, picked to be edited, and a `+` for every mix
+        channel the cue does not reach yet. What rides live under the lock
+        says so. */
+    if (kind === "media") {
+      out += '<div class="group-head">sends</div>';
+
+      const reached = new Set();
+
+      for (const send of tree.ids("/godot/cue/" + selection.picked + "/sends")) {
+        const bus = String(tree.get("/godot/send/" + send + "/bus", ""));
+        const on = tree.get("/godot/send/" + send + "/on", true);
+        const off = on === false || on === "false";
+        const riding = tree.get("/godot/send/" + send + "/live", false);
+        const level = Number(tree.get("/godot/send/" + send + "/level", 0));
+
+        reached.add(bus);
+
+        out += '<div class="trigger-row" data-pick="' + esc(send) + '">' +
+               '<span class="kind">' + esc(String(tree.get("/godot/bus/" + bus + "/name", "") || bus)) + "</span>" +
+               '<span class="what' + (off ? " off" : "") + '">' +
+               esc((level <= -120 ? "-inf" : level.toFixed(1)) + " dB" + (off ? " · off" : "") +
+                   (riding === true || riding === "true" ? " · live" : "")) + "</span></div>";
+      }
+
+      out += '<div class="actions">';
+
+      for (const bus of tree.ids("/godot/audio/mixes")) {
+        if (!reached.has(bus)) {
+          out += '<button data-send="' + esc(bus) + '">+ ' +
+                 esc(String(tree.get("/godot/bus/" + bus + "/name", "") || bus)) + "</button>";
+        }
+      }
+
+      out += "</div>";
+    }
 
     /*  UP AND DOWN, which is `object.move` at one index either way. Dragging
         is what a desktop UI will do and is not what a first pass should try

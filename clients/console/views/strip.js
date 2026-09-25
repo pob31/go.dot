@@ -192,6 +192,19 @@ function renderStrip() {
 
   el("undo-note").textContent = stack.join(" · ");
 
+  /*  WHAT A LOCKED SHOW IS RIDING LIVE (2026-09-25): said while locked, and
+      offered to keep or discard once it is not - nothing can be kept while
+      the show refuses edits. */
+  const live = Number(tree.get("/godot/document/live", 0)) || 0;
+  const lockedNow = tree.get("/godot/document/locked", null);
+  const isLocked = lockedNow === true || lockedNow === "true";
+
+  el("live-note").hidden = live === 0;
+  el("live-note").textContent = live === 0 ? ""
+    : live + (live === 1 ? " change" : " changes") + " riding live, not saved";
+  el("live-keep").hidden = live === 0 || isLocked;
+  el("live-drop").hidden = live === 0 || isLocked;
+
   el("s-tick").textContent = tree.get("/godot/engine/tick", "—");
   el("s-revision").textContent = tree.get("/godot/document/revision", "—");
   el("s-audio").textContent = tree.get("/godot/audio/status", "—");

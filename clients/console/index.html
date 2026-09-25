@@ -62,6 +62,15 @@
          written into a take - a timeline group of start cues - on stop. -->
     <button data-cmd="record.start" title="keep every cue start from now">record</button>
     <button data-cmd="record.stop" title="write what was kept into a take">stop recording</button>
+    <!-- What a locked show rode live (2026-09-25): a cue's EQ and sends ridden
+         under the lock, heard and not saved. Once unlocked these keep them in
+         the show - one undo step - or let them go. Shown only while something
+         rides; the note says how many. -->
+    <span class="live-note" id="live-note" hidden></span>
+    <button data-cmd="live.keep" id="live-keep" hidden
+            title="write what was ridden live into the show - one step to undo">keep live changes</button>
+    <button data-cmd="live.drop" id="live-drop" hidden
+            title="let the live changes go: every cue sounds as it is saved">discard</button>
     <span class="undo-note" id="undo-note"></span>
 
     <!--  SAVE, AS A BUTTON AND AS CTRL/⌘-S, for the reason undo is both: the

@@ -220,6 +220,13 @@ document.addEventListener("click", (event) => {
     return;
   }
 
+  /*  A SEND INTO A MIX CHANNEL THE CUE DOES NOT REACH YET (2026-09-25), at the
+      row's own level; under the show lock it rides live. */
+  if (data && data.send && selection.picked) {
+    gesture("add-send", [str(selection.picked), str(data.send)]);
+    return;
+  }
+
   if (data && data.role && selection.picked) {
     gesture("add-role", [str(selection.picked), str(data.role)]);
     return;
