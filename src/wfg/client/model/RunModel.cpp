@@ -91,7 +91,23 @@ namespace wfg::client::model
                 const auto waits = words (pending);
                 const auto forVoice = std::find (waits.begin(), waits.end(), "voice") != waits.end();
 
-                return line + separator + (forVoice ? "pending voice" : "pending");
+                /*  SAID AS WHAT IS WRONG, NOT AS A STATE (author, 2026-09-25:
+                    "Sampler show 'on 2 - pending voice' No sound"). A member
+                    waiting for a voice is waiting for a TRACK, and every one
+                    the show has is sounding or held ready for GO - so the
+                    words give the show's count, the number to raise (Show
+                    settings, Outputs, how many cues can sound at once). A
+                    member waiting for its strip is waiting for another
+                    group's clip on it to end. */
+                if (forVoice)
+                {
+                    const auto tracks = text (snapshot, "/godot/audio/tracks");
+
+                    return line + separator + "no free track"
+                           + (tracks.empty() ? std::string {} : std::string (separator) + "the show has " + tracks);
+                }
+
+                return line + separator + "waiting for the strip";
             }
 
             if (text (snapshot, slot + "holder") == runId)

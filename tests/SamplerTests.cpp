@@ -34,6 +34,7 @@
 #include "TestSupport.h"
 
 #include <wfg/client/model/Text.h>
+#include <wfg/client/model/RunModel.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
@@ -350,6 +351,20 @@ TEST_CASE ("sampler: a member that finds no voice waits for one, and takes the n
     CHECK (third->state == cue::runState::armed);
     CHECK (std::find (third->pending.begin(), third->pending.end(), "voice") != third->pending.end());
     CHECK (rig.published ("/godot/slot/" + rig.strips[2] + "/word") == "pending");
+
+    /*  AND THE RUNNING PANE SAYS WHY NOTHING WILL SOUND, and what number to
+        raise (author, 2026-09-25: "Sampler show 'on 2 - pending voice' No
+        sound" - on a show of one track). */
+    rig.set ("/godot/audio/tracks", "2");
+    rig.published ("/godot/audio/tracks");
+
+    std::string said;
+
+    for (const auto& row : client::model::readRuns (*rig.snapshot))
+        if (row.id == third->id)
+            said = row.samplerWords;
+
+    CHECK (said == "on 3 \xc2\xb7 no free track \xc2\xb7 the show has 2");
 
     /*  A clip plays and ends; its track frees, and the member that was waiting
         takes it before the finished member is armed again. */
