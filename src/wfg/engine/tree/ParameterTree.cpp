@@ -679,6 +679,42 @@ namespace wfg::tree
             because this walk is already the one place that knows which cue it
             is at, and a second lookup would be a second thing to keep in step
             with the first. */
+        /*  THE SHOW'S MIX CHANNELS, by identifier, in the order the outputs
+            list them - by first channel, then identifier, as the window's
+            send mixer draws its strips - so the rotaries of a Send page and
+            the faders on the screen stand in the same order. */
+        std::string mixesOf (const juce::ValueTree& audio)
+        {
+            std::vector<std::pair<int, std::string>> mixes;
+
+            for (const auto& bus : audio)
+            {
+                if (! bus.hasType ("Bus") || ! bus.hasProperty (idProperty))
+                    continue;
+
+                //  An absent kind is the row's default, a direct out.
+                if (bus.getProperty ("kind").toString() != "mix")
+                    continue;
+
+                mixes.emplace_back (static_cast<int> (bus.getProperty ("firstChannel", 0)),
+                                    bus[idProperty].toString().toStdString());
+            }
+
+            std::sort (mixes.begin(), mixes.end());
+
+            std::string out;
+
+            for (const auto& [first, id] : mixes)
+            {
+                if (! out.empty())
+                    out.push_back (' ');
+
+                out += id;
+            }
+
+            return out;
+        }
+
         /*  A MEDIA CUE'S SENDS, by identifier: its Send children in document
             order, then the ones a locked show made live, in identifier order
             (2026-09-25) - the index a page or a surface walks rather than
@@ -1575,13 +1611,25 @@ namespace wfg::tree
                     the lateness, exactly like /godot/document's runtime half. */
                 for (const auto* row : doc::Schema::rowsForOwner ("audio"))
                 {
+                    const auto name = std::string (row->name);
+
+                    /*  THE MIX CHANNELS, IN OUTPUT ORDER (2026-09-25): a
+                        reading of the show and nothing the machine is doing,
+                        so from this half although nothing stores it - what a
+                        surface's Send page walks, one rotary a channel. */
+                    if (name == "mixes")
+                    {
+                        nodes.push_back (makeLeaf (std::string (godot) + "/audio/mixes", *row,
+                                                   mixesOf (container)));
+                        continue;
+                    }
+
                     if (row->persist == doc::Persist::none)
                         continue;
 
                     const doc::Attribute attribute { "Audio", row };
 
-                    nodes.push_back (makeLeaf (std::string (godot) + "/audio/"
-                                                 + std::string (row->name),
+                    nodes.push_back (makeLeaf (std::string (godot) + "/audio/" + name,
                                                *row, storedText (attribute, container)));
                 }
 
@@ -2255,6 +2303,11 @@ namespace wfg::tree
                 continue;
 
             const auto name = std::string (row->name);
+
+            //  The show's own, and so the document half's (2026-09-25).
+            if (name == "mixes")
+                continue;
+
             std::string text;
 
             if (name == "device")        text = state.audioDevice;

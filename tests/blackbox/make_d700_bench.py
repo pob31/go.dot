@@ -34,6 +34,9 @@ pale). Bank B is two more, armed over A with a group takeover. "Bed" plays on
 the Band DCA, and two fades move the DCA, which the first fader follows.
 "Low" and "High" carry an EQ already, so the EQ page has something to show:
 "Low" a low shelf lifted and its high-pass in, "High" a cut in band three.
+Three mix channels - Foldback, Wedges, Reverb - on outputs 3-8, and "Low"
+sends to Foldback at -6 and Reverb at -12, so the Send page has two sends and
+one channel it does not reach yet.
 
 AUDIBLE, UNLIKE THE FIXTURES' MEDIA, which are constants made for arithmetic:
 these are sine tones, a noise burst and a slow sweep, each with a short fade in
@@ -127,10 +130,11 @@ def strips() -> str:
 
 
 def media(cue_id: str, number: str, name: str, file: str, colour: str, route: str,
-          extra: str = "") -> str:
+          extra: str = "", sends: str = "") -> str:
     return (f'        <Media id="{cue_id}" colour="{colour}" file="{file}"{extra} name="{name}" '
             f'number="{number}">\n'
             f'          <Route id="{route}" bus="DBNB0001" gains="1 1"/>\n'
+            f'{sends}'
             f'        </Media>')
 
 
@@ -139,7 +143,9 @@ SHOW = f"""<Show>
     <List id="DBN00001" name="D700 bench">
       <Group id="DBN00002" mode="sampler" name="Bank A" number="1" takeover="group">
 {media("DBN00003", "1.1", "Low", "low.wav", "#C04040", "DBNR0003",
-        ' eqB1Gain="4" eqB1Shape="lowShelf" eqHpf="true" eqHpfFreq="60"')}
+        ' eqB1Gain="4" eqB1Shape="lowShelf" eqHpf="true" eqHpfFreq="60"',
+        '          <Send id="DBNX0001" bus="DBNB0002" level="-6"/>\n'
+        '          <Send id="DBNX0002" bus="DBNB0004" level="-12"/>\n')}
 {media("DBN00004", "1.2", "Mid", "mid.wav", "#D0A030", "DBNR0004", ' initialLevel="-6" release="hold"')}
 {media("DBN00005", "1.3", "High", "high.wav", "#40A0E0", "DBNR0005",
         ' eqB3Freq="1500" eqB3Gain="-9" eqB3Q="2" initialLevel="-12"')}
@@ -161,6 +167,9 @@ SHOW = f"""<Show>
   <Mounts/>
   <Audio tracks="8">
     <Bus id="DBNB0001" name="Main L/R" width="2"/>
+    <Bus id="DBNB0002" firstChannel="2" kind="mix" name="Foldback" width="2"/>
+    <Bus id="DBNB0003" firstChannel="4" kind="mix" name="Wedges" width="2"/>
+    <Bus id="DBNB0004" firstChannel="6" kind="mix" name="Reverb" width="2"/>
   </Audio>
   <MidiPorts>
     <Port id="DBNP0001" inputDevice="D 700" name="D700 bank 1" outputDevice="D 700"/>
@@ -213,7 +222,7 @@ THE WALK (GO on the desk is PLAY; STOP is Esc, STOP twice is double Esc)
        changes hands; idle strips change at once.
   GO   Disarm B.
 
-THE EQ PAGE (2026-09-25; unlocked - a locked show refuses the edits until the live layer lands)
+THE EQ AND SEND PAGES (2026-09-25)
   With Bank A armed:
   SELECT on fader 2 ("Low"): its white bar lights and its third row reads "picked".
   EQ   the sixteen rotaries are Low's EQ, in the author's order: HP freq, B1 shape, B1 freq,
@@ -226,6 +235,12 @@ THE EQ PAGE (2026-09-25; unlocked - a locked show refuses the edits until the li
   EQ   again: the surface's own page. `*` also leaves at once.
   SELECT on fader 4 ("High"), EQ: High's EQ, band three cut at 1.5 kHz.
   SELECT on the lit strip again: nothing picked, and an EQ page closes.
+  SELECT on fader 2 again ("Low"), then Send: three rotaries - Foldback -6, Wedges "no send",
+       Reverb -12 - in Low's colour, dimmed where out. Turn Foldback; press it: off. Turn
+       Wedges up: the send is made. Send again: the surface's own page.
+  LOCK the show (the padlock), SELECT Low, EQ and turn: heard, not saved (/godot/document/live
+       counts it). Unlock: keep it with `live.keep` or let it go with `live.drop` - the window's
+       Keep / Discard bar is its next stage.
   Worth watching for: which port the EQ button's light answers on (it is sent to the port the
   press came from); whether the colours read at a glance; how fast a detent should be.
 

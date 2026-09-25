@@ -37,6 +37,7 @@
 #include <cstdlib>
 #include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -94,6 +95,49 @@ namespace wfg::surface
         {
             static const std::string address { "/godot/surface/aim" };
             return address;
+        }
+
+        /*  And the show's mix channels in output order: a Send page's rotaries. */
+        const std::string& mixesAddress()
+        {
+            static const std::string address { "/godot/audio/mixes" };
+            return address;
+        }
+
+        /*  A space-separated list of identifiers, as the tree publishes one. */
+        std::vector<std::string> wordsOf (std::string_view text)
+        {
+            std::vector<std::string> out;
+            std::size_t at = 0;
+
+            while (at < text.size())
+            {
+                const auto start = text.find_first_not_of (' ', at);
+
+                if (start == std::string_view::npos)
+                    break;
+
+                const auto end = text.find (' ', start);
+                out.emplace_back (text.substr (start, end == std::string_view::npos ? std::string_view::npos
+                                                                                     : end - start));
+                at = end == std::string_view::npos ? text.size() : end;
+            }
+
+            return out;
+        }
+
+        /*  A send's rotary wears its cue's colour; one with none, a plain light. */
+        constexpr Rgb neutralLight { 80, 80, 80 };
+
+        /*  A level to a tenth of a decibel as text, digit by digit - what
+            `send.create` is handed, so the log reads "-12.5" and not the last
+            bit of a double. */
+        std::string tenthsText (double decibels)
+        {
+            const auto tenths = std::llround (decibels * 10.0);
+            const auto magnitude = tenths < 0 ? -tenths : tenths;
+            return (tenths < 0 ? "-" : "") + std::to_string (magnitude / 10) + "."
+                 + std::to_string (magnitude % 10);
         }
 
         /*  A theme's 0xAARRGGBB as the D700 takes a colour, each eight-bit
@@ -473,8 +517,10 @@ namespace wfg::surface
             int pageSteps = 0;
             bool pagePress = false;
             int control = -1;                       // which of the page's controls; -1 for none
-            std::string controlAt;                  // its row on the aimed cue
-            std::string switchAt;                   // the switch that takes its band out
+            std::string controlAt;                  // its row on the aimed cue; on a Send page, empty for no send yet
+            std::string switchAt;                   // the switch that takes its band, or its send, out
+            std::string busId;                      // a Send page: the mix channel under the rotary
+            std::string busNameAt;
         };
 
         /*  One port of a surface: a bank of eight. */
@@ -504,9 +550,10 @@ namespace wfg::surface
             std::string madeForAim;
             Page madeForPage = Page::show;
             int madeForIndex = -1;
+            std::string madeForSends, madeForMixes;
 
             //  The aimed cue's rows every rotary of the page reads.
-            std::string eqOnAt, aimShortAt, aimNameAt;
+            std::string eqOnAt, aimShortAt, aimNameAt, aimColourAt, aimSendsAt;
         };
 
         struct Surface
@@ -696,37 +743,101 @@ namespace wfg::surface
         /*  THE CONTROLS UNDER THE ROTARIES, made again when the page, its
             index or the aim changes - and every strip's screen, ring and
             colour forgotten then, so the next paint shows the new ones. */
-        static void composePage (Surface& box, const std::string& aim)
+        void composePage (Surface& box, const std::string& aim) const
         {
             auto& paging = box.paging;
+            const auto* at = published.get();
+            const auto base = aim.empty() ? std::string {} : "/godot/cue/" + aim + "/";
+
+            /*  A SEND PAGE IS ALSO MADE AGAIN when the show's mix channels or
+                the cue's sends change - a send made by the page's own turn, a
+                bus added - since which send is under which rotary moved. */
+            const auto& mixes = paging.page == Page::send ? textAt (at, mixesAddress()) : noText();
+            const auto sends = paging.page == Page::send && ! base.empty()
+                                 ? textAt (at, base + "sends") : std::string {};
 
             if (paging.madeForAim == aim && paging.madeForPage == paging.page
-                  && paging.madeForIndex == paging.index)
+                  && paging.madeForIndex == paging.index
+                  && paging.madeForMixes == mixes && paging.madeForSends == sends)
                 return;
+
+            const auto sameControls = paging.madeForAim == aim && paging.madeForPage == paging.page
+                                        && paging.madeForIndex == paging.index;
 
             paging.madeForAim = aim;
             paging.madeForPage = paging.page;
             paging.madeForIndex = paging.index;
+            paging.madeForMixes = mixes;
+            paging.madeForSends = sends;
 
-            const auto base = aim.empty() ? std::string {} : "/godot/cue/" + aim + "/";
             paging.eqOnAt = base.empty() ? std::string {} : base + "eqOn";
             paging.aimShortAt = base.empty() ? std::string {} : base + "shortName";
             paging.aimNameAt = base.empty() ? std::string {} : base + "name";
+            paging.aimColourAt = base.empty() ? std::string {} : base + "colour";
+            paging.aimSendsAt = base.empty() ? std::string {} : base + "sends";
 
             for (auto& strip : box.strips)
             {
                 strip.control = -1;
                 strip.controlAt.clear();
                 strip.switchAt.clear();
-                strip.pageSteps = 0;
-                strip.pagePress = false;
+                strip.busId.clear();
+                strip.busNameAt.clear();
+
+                /*  A hand's detents stay when only the sends moved under it -
+                    the send its own turn made - and the screens are drawn
+                    again from what changed. */
+                if (! sameControls)
+                {
+                    strip.pageSteps = 0;
+                    strip.pagePress = false;
+                }
+
                 forgetPage (strip);
             }
 
-            if (paging.page != Page::eq || base.empty())
+            if (base.empty())
                 return;
 
             const auto rotaries = box.rotaries();
+
+            if (paging.page == Page::send)
+            {
+                //  Which of the cue's sends goes into which mix channel.
+                std::map<std::string, std::string> sendInto;
+
+                for (const auto& sendId : wordsOf (sends))
+                {
+                    const auto busAt = "/godot/send/" + sendId + "/bus";
+                    sendInto[textAt (at, busAt)] = sendId;
+                }
+
+                const auto channels = wordsOf (mixes);
+
+                for (int position = 0; position < rotaries; ++position)
+                {
+                    const auto index = paging.index * rotaries + position;
+
+                    if (index >= static_cast<int> (channels.size()))
+                        break;
+
+                    auto& strip = box.strips[static_cast<std::size_t> (position)];
+                    strip.control = index;
+                    strip.busId = channels[static_cast<std::size_t> (index)];
+                    strip.busNameAt = "/godot/bus/" + strip.busId + "/name";
+
+                    if (const auto found = sendInto.find (strip.busId); found != sendInto.end())
+                    {
+                        strip.controlAt = "/godot/send/" + found->second + "/level";
+                        strip.switchAt = "/godot/send/" + found->second + "/on";
+                    }
+                }
+
+                return;
+            }
+
+            if (paging.page != Page::eq)
+                return;
 
             for (int position = 0; position < rotaries; ++position)
             {
@@ -743,6 +854,19 @@ namespace wfg::surface
             }
         }
 
+        /*  How many controls a kind of page has: the EQ's sixteen, or one a
+            mix channel of the show. */
+        int controlsOf (Page page) const
+        {
+            if (page == Page::eq)
+                return eqControlCount;
+
+            if (page == Page::send)
+                return static_cast<int> (wordsOf (textAt (published.get(), mixesAddress())).size());
+
+            return 0;
+        }
+
         /*  A PAGE SHOWN: which kind, which of them, and the bank whose button
             asked. Anything it had written is forgotten, so a client reading
             `edited` sees only what this page did. */
@@ -753,7 +877,7 @@ namespace wfg::surface
             paging.index = page == Page::show ? 0 : index;
             paging.bank = bank;
             paging.edited.clear();
-            paging.count = page == Page::eq ? pageCount (eqControlCount, box.rotaries()) : 1;
+            paging.count = page == Page::show ? 1 : pageCount (controlsOf (page), box.rotaries());
 
             composePage (box, page == Page::show ? std::string {} : aimNow());
             publishPage (box);
@@ -765,10 +889,11 @@ namespace wfg::surface
             is nothing to show, and the press does nothing. */
         void turnPage (Surface& box, Page kind, std::size_t bank)
         {
-            if (aimNow().empty())
+            //  A show with no mix channel has no Send page to show.
+            if (aimNow().empty() || controlsOf (kind) == 0)
                 return;
 
-            const auto count = kind == Page::eq ? pageCount (eqControlCount, box.rotaries()) : 1;
+            const auto count = pageCount (controlsOf (kind), box.rotaries());
 
             if (box.paging.page != kind)
                 showPage (box, kind, 0, bank);
@@ -1092,9 +1217,9 @@ namespace wfg::surface
                         turnPage (box, Page::eq, bank);
                     break;
 
-                /*  The Send page reads the show's mix channels and the aimed
-                    cue's sends, which the tree does not index yet. */
                 case Action::sendPage:
+                    if (event.down)
+                        turnPage (box, Page::send, bank);
                     break;
 
                 case Action::leavePage:
@@ -1417,6 +1542,8 @@ namespace wfg::surface
 
                     if (box.paging.page == Page::eq)
                         eqWrite (box, strip, steps, pressed, submit);
+                    else if (box.paging.page == Page::send)
+                        sendWrite (box, strip, steps, pressed, submit);
                 }
 
                 if (box.paging.edited != before)
@@ -1469,6 +1596,61 @@ namespace wfg::surface
                                       box.topology.faderLaw);
 
             //  Turned against an end, the value is where it was.
+            if (std::abs (next - *current) < 1.0e-9)
+                return;
+
+            write (strip.controlAt, osc::Value::float64 (next));
+        }
+
+        /*  A SEND'S ROTARY: a turn is its level along the fader's law, a press
+            its switch. A mix channel the cue does not send to yet is made one
+            by the hand - `send.create` at the level a turn up from silence
+            reaches, or at nought for a press, the row's default - and under
+            the lock that send rides live (the author, 2026-09-25). A turn
+            down from nothing makes nothing. */
+        void sendWrite (Surface& box, const Strip& strip, int steps, bool pressed, const Submit& submit) const
+        {
+            const auto* at = published.get();
+
+            if (strip.controlAt.empty())
+            {
+                if (! pressed && steps <= 0)
+                    return;
+
+                const auto level = pressed ? 0.0
+                                           : turned (Law::level, faderSilenceDb, steps, faderSilenceDb,
+                                                     faderLoudestDb, box.topology.faderLaw);
+
+                submit (commandFrom (box.origin, "send.create",
+                                     { osc::Value::string (box.paging.madeForAim),
+                                       osc::Value::string (strip.busId),
+                                       osc::Value::string (std::string {}),
+                                       osc::Value::string (tenthsText (level)) }));
+                box.paging.edited = box.paging.aimSendsAt;
+                return;
+            }
+
+            const auto write = [&] (const std::string& address, osc::Value value)
+            {
+                submit (commandFrom (box.origin, "node.set",
+                                     { osc::Value::string (address), std::move (value) }));
+                box.paging.edited = address;
+            };
+
+            if (pressed && soleAt (at, strip.switchAt) != nullptr)
+                write (strip.switchAt, osc::Value::boolean (! flagAt (at, strip.switchAt)));
+
+            if (steps == 0)
+                return;
+
+            const auto current = numberAt (at, strip.controlAt);
+
+            if (! current.has_value())
+                return;
+
+            const auto next = turned (Law::level, *current, steps, faderSilenceDb, faderLoudestDb,
+                                      box.topology.faderLaw);
+
             if (std::abs (next - *current) < 1.0e-9)
                 return;
 
@@ -1970,6 +2152,44 @@ namespace wfg::surface
                 colour = rgbOf (audio::eqColours[static_cast<std::size_t> (control.colour)],
                                 out ? pageOffLight : 1.0);
             }
+            else if (strip.control >= 0 && paging.page == Page::send)
+            {
+                /*  A SEND: the mix channel's name, "off" beside it when the
+                    send is switched out; its level, or "no send" into a
+                    channel the cue does not reach yet; its ring where a fader
+                    would stand; the cue's own colour, dimmed while out. */
+                const auto present = ! strip.controlAt.empty();
+                const auto level = present ? numberAt (at, strip.controlAt) : std::optional<double> {};
+                const auto out = ! present || ! flagAt (at, strip.switchAt);
+                const auto& busName = textAt (at, strip.busNameAt);
+
+                labelScratch.assign (busName.empty() ? std::string_view (strip.busId) : std::string_view (busName));
+
+                if (native && present && out)
+                    labelScratch.append (" off");
+
+                if (level.has_value())
+                {
+                    valueText (Law::level, *level, ! native, levelScratch);
+                    ring = native ? d700RingFor (Law::level, *level, faderSilenceDb, faderLoudestDb,
+                                                 box.topology.faderLaw)
+                                  : mcuRingFor (Law::level, *level, faderSilenceDb, faderLoudestDb,
+                                                box.topology.faderLaw);
+                }
+                else
+                {
+                    levelScratch.assign (native ? "no send" : "none");
+                }
+
+                if (! native && present && out)
+                    levelScratch.assign ("off");
+
+                const auto own = colourFromHex (textAt (at, paging.aimColourAt)).value_or (neutralLight);
+                const auto share = out ? pageOffLight : 1.0;
+                colour = Rgb { static_cast<int> (std::lround (own.red * share)),
+                               static_cast<int> (std::lround (own.green * share)),
+                               static_cast<int> (std::lround (own.blue * share)) };
+            }
 
             if (native)
             {
@@ -1988,8 +2208,9 @@ namespace wfg::surface
                 {
                     if (&strip == &box.strips.front())
                     {
-                        const auto eqOut = soleAt (at, paging.eqOnAt) != nullptr && ! flagAt (at, paging.eqOnAt);
-                        pageScratch.assign (eqOut ? "EQ out" : "EQ");
+                        const auto eqOut = paging.page == Page::eq
+                                             && soleAt (at, paging.eqOnAt) != nullptr && ! flagAt (at, paging.eqOnAt);
+                        pageScratch.assign (paging.page == Page::send ? "Send" : eqOut ? "EQ out" : "EQ");
 
                         if (! eqOut && paging.count > 1)
                         {

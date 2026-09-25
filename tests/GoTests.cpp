@@ -7659,6 +7659,9 @@ TEST_CASE ("live: under the lock a send rides live, a new one is made live, and 
     CHECK (rig.published ("/godot/send/" + reverb + "/bus") == rig.reverb);
     CHECK (rig.published ("/godot/send/" + reverb + "/live") == "true");
     CHECK (rig.published ("/godot/cue/" + rig.mediaId + "/sends") == foldback + " " + reverb);
+
+    //  The show's mix channels in output order - a Send page's rotaries.
+    CHECK (rig.published ("/godot/audio/mixes") == rig.foldback + " " + rig.reverb);
     CHECK_FALSE (rig.document.findById (reverb).isValid());
 
     //  Its level and its switch ride through the same door as any send's.

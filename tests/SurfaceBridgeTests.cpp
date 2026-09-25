@@ -3061,3 +3061,120 @@ TEST_CASE ("surface bridge: a page moves no fader, outlives a show edit, and clo
     desk.aimAt ("");
     CHECK (desk.page().word == "show");
 }
+
+namespace
+{
+    /*  THE SHOW'S MIX CHANNELS AND THE AIMED CUE'S SENDS, as the tree
+        publishes them: channels in output order, each named, and the cue
+        sending to the first only, at -6 dB. */
+    void fakeSends (FakeTree& fake, int channels)
+    {
+        std::string mixes;
+
+        for (int n = 1; n <= channels; ++n)
+        {
+            const auto bus = "BUS000" + std::string (n < 10 ? "0" : "") + std::to_string (n);
+            mixes += (mixes.empty() ? "" : " ") + bus;
+            fake.text ("/godot/bus/" + bus + "/name", n == 1 ? "Foldback" : "Mix " + std::to_string (n));
+        }
+
+        fake.text ("/godot/audio/mixes", mixes);
+        fake.text ("/godot/cue/CUE00001/sends", "SND00001");
+        fake.text ("/godot/send/SND00001/bus", "BUS00001");
+        fake.number ("/godot/send/SND00001/level", -6.0);
+        fake.flag ("/godot/send/SND00001/on", true);
+        fake.text ("/godot/cue/CUE00001/colour", "#C04040");
+    }
+}
+
+TEST_CASE ("surface bridge: Send puts the aimed cue's sends on the rotaries, one a mix channel, and makes a missing one")
+{
+    /*  The author, 2026-09-25: "Can the selected sample or media cue have its
+        send levels displayed on the rotaries? ... Click the rotaries to toggle
+        on and off." */
+    PageDesk desk;
+    fakeSends (desk.fake, 3);
+    desk.aimAt ("CUE00001");
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().word == "send");
+    CHECK (desk.page().count == 1);
+    desk.settle();
+
+    const auto first = sentOn (desk.sink, "PORTBNK1");
+
+    //  ONE ROTARY A MIX CHANNEL, in output order: the send's level, or "no send".
+    CHECK (contains (first, surface::d700DisplayRow (0, 0, "Foldback")));
+    CHECK (contains (first, surface::d700DisplayRow (0, 1, "-6.0 dB")));
+    CHECK (contains (first, surface::d700DisplayRow3 (0, "Send")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 0, "Mix 2")));
+    CHECK (contains (first, surface::d700DisplayRow (1, 1, "no send")));
+
+    //  Past the last channel, dark and blank.
+    CHECK (contains (first, surface::d700DisplayRow (3, 0, "")));
+
+    //  The ring where a fader would stand; Send lit.
+    CHECK (contains (first, surface::d700Ring (0, surface::d700RingFor (surface::Law::level, -6.0, -120.0, 12.0,
+                                                                         surface::FaderLaw::d700).value, 2)));
+    CHECK (contains (first, surface::led (0x29, surface::Led::on)));
+
+    //  A TURN rides the level along the fader's law; a PRESS switches the send.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x01 } } });
+    desk.press ("PORTBNK1", 0x20);
+
+    const auto up = surface::turned (surface::Law::level, -6.0, 1, -120.0, 12.0, surface::FaderLaw::d700);
+    CHECK (desk.writes() == std::vector<std::string> { "node.set /godot/send/SND00001/level " + tenths (up),
+                                                       "node.set /godot/send/SND00001/on false" });
+
+    /*  A CHANNEL THE CUE DOES NOT REACH is made one by the hand: turned up
+        from silence, or pressed - at nought. Turned down, nothing. */
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x11, 0x02 } } });
+    desk.press ("PORTBNK1", 0x22);
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x41 } } });
+
+    const auto fromSilence = surface::turned (surface::Law::level, -120.0, 2, -120.0, 12.0, surface::FaderLaw::d700);
+    CHECK (desk.writes() == std::vector<std::string> {
+                                "send.create CUE00001 BUS00002  " + tenths (fromSilence),
+                                "send.create CUE00001 BUS00003  0.0" });
+
+    //  Send again: one page, so the surface's own page.
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().word == "show");
+}
+
+TEST_CASE ("surface bridge: seventeen mix channels on sixteen rotaries are two Send pages; none is no page")
+{
+    PageDesk desk;
+    fakeSends (desk.fake, 17);
+    desk.aimAt ("CUE00001");
+
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().count == 2);
+    CHECK (desk.page().index == 0);
+
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().index == 1);
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Mix 17")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "Send 2/2")));
+
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().word == "show");
+
+    //  A show with no mix channel has no Send page.
+    desk.fake.text ("/godot/audio/mixes", "");
+    desk.publish();
+    desk.press ("PORTBNK1", 0x29);
+    CHECK (desk.page().word == "show");
+
+    //  And EQ goes straight from a Send page to its own.
+    desk.fake.text ("/godot/audio/mixes", "BUS00001");
+    desk.publish();
+    desk.press ("PORTBNK1", 0x29);
+    desk.press ("PORTBNK1", 0x2c);
+    CHECK (desk.page().word == "eq");
+}
