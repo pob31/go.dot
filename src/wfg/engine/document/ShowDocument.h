@@ -295,15 +295,21 @@ namespace wfg::doc
 
             So a new show starts with a list, somewhere for sound to go, and
             room for some of it: one stereo direct out on the first two
-            interface channels, and eight cues able to sound at once. Eight is
-            a judgement and not a law - it is more than most shows need at any
-            one instant and cheap to carry - and it is one number in a box on
-            the Outputs tab the moment anybody disagrees.
+            interface channels, and THIRTY-TWO cues able to sound at once
+            (author, 2026-09-25: "Can we default to 32 voices when starting a
+            new project so people don't have a broken app until they figure
+            out the polyphony?"). It was eight, and eight runs out sooner than
+            it looks: a sampler bank holds a track for every member it arms,
+            and the next standby cue holds one ready for GO, so one bank and a
+            scene already crowd it - and a member with no track plays nothing.
+            Thirty-two is what M11 measured affordable (a third of a 96 kHz,
+            64-frame block), and it is still one number in a box on the
+            Outputs tab the moment anybody disagrees.
 
             Both halves or neither: tracks with no output is worse than no
             tracks at all, because the engine refuses to start a show that has
             somewhere to play from and nowhere to play to. */
-        EditResult startNewShow (int tracks = 8);
+        EditResult startNewShow (int tracks = 32);
 
         EditResult removeBus (const std::string& id);
 

@@ -377,8 +377,8 @@ TEST_CASE ("a new show arrives able to play something")
     const auto lists = fresh.root().getChildWithName ("Lists");
     REQUIRE (lists.getNumChildren() == 1);
 
-    //  Room for some of them to sound at once.
-    CHECK (fresh.getAttribute ("/godot/audio/tracks") == "8");
+    //  Room for some of them to sound at once: thirty-two (author, 2026-09-25).
+    CHECK (fresh.getAttribute ("/godot/audio/tracks") == "32");
 
     /*  AND SOMEWHERE FOR THE SOUND TO GO. Both halves or neither: the engine
         refuses to start a show that has tracks and no bus ("there is nowhere
