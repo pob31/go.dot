@@ -2363,6 +2363,21 @@ profile says so rather than approximating
 sounding**, with timbre a layout option that can be off, so a desk that uses
 colour for provenance keeps it.
 
+*Amended in 0.8, at the author's direction (2026-09-25).* **While it sounds,
+the strip's colour pulses with how the sound moves, not with how loud it is.**
+*"Can the brightness of the RGB LEDs be modulated by the sound level or
+variations of it? … Don't use the full 16 or 24 bit resolution. It can be
+squashed, but variation/modulation is a better clue."* The hue and saturation
+stay the timbre's. The brightness follows the clip's own envelope: the engine
+publishes, for each run, the analysed peak where it has got to, in dB below the
+file's loudest moment (`run/envelope`, before the fader and any DCA). The
+profile keeps a slow average of it over about 0.6 s: a steady sound rests at a
+middle glow whatever its level, a rise above the average flashes towards full,
+and a dip dims towards a floor, never dark, because dark is silence. A flash is
+held and released over a few hundred milliseconds, so the ten-a-second colour
+limit above cannot skip it. The resting glow, the dB range, the floor, the
+average and the release are the bench's to tune (`SurfaceProfile.h`).
+
 **A test exists before the UI does.** A 1 kHz sine must come out saturated at
 1 kHz's hue, white noise grey, and a sweep must walk the ramp — a black-box
 check on the cache alone, in the style of the routing spike, and where the work

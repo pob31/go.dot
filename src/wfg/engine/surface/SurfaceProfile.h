@@ -133,6 +133,24 @@ namespace wfg::surface
                                                    : (whole > 0 ? whole : std::int64_t { 1 });
     }();
 
+    /*  HOW A SOUNDING STRIP'S COLOUR PULSES WITH ITS SOUND (author,
+        2026-09-25: "Can the brightness of the RGB LEDs be modulated by the
+        sound level or variations of it? ... Don't use the full 16 or 24 bit
+        resolution. It can be squashed, but variation/modulation is a better
+        clue"). Not the level: its MOVEMENT. A slow average follows the clip's
+        envelope, and the brightness is `pulseRest` plus the envelope's height
+        above that average, `pulseDbForFull` decibels of it being the rest of
+        the way to full - so a steady sound rests at a middle glow whatever its
+        level, a hit flashes and a dip dims, down to `pulseFloor` and never
+        dark (dark is silence). A flash is held and let go by
+        `pulseReleasePerTick`, so the colour's own rate limit, ten writes a
+        second, cannot skip it. */
+    inline constexpr double pulseRest = 0.45;
+    inline constexpr double pulseDbForFull = 8.0;
+    inline constexpr double pulseFloor = 0.08;
+    inline constexpr double pulseAverageSeconds = 0.6;
+    inline constexpr double pulseReleasePerTick = 0.04;
+
     /*  AN UNCHANGED COLOUR IS WRITTEN AGAIN THIS OFTEN, because the D700's
         firmware takes its LEDs back with an idle animation when nothing
         drives them (control guide §4.4). Two seconds; M28 measures how soon

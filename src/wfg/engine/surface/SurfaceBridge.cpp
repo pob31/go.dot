@@ -287,8 +287,9 @@ namespace wfg::surface
             bass bed a dark LED and a high effect a white one, washing the
             saturation out at both ends, so it is not read - except that
             nought is silence, and silence is dark. Brightness is left free for
-            what the bench decides to put on it: the amplitude, or at least its
-            variation, and a ceiling for a house that needs a dark booth.
+            what the bench decides to put on it - and since 2026-09-25 that is
+            the sound's variation, applied after this by `pulsed` - and a
+            ceiling for a house that needs a dark booth.
 
             So HSV at full value: the chroma is the saturation, the hue's sector
             chooses which component carries it, and the rest is white. */
@@ -362,7 +363,14 @@ namespace wfg::surface
             std::string cueId, cueNameAt, cueShortAt, cueNumberAt, cueColourAt, cuePressureAt,
                         cueFloorAt;
             std::string dcaId, dcaNameAt, dcaShortAt;
-            std::string holderId, timbreAt;
+            std::string holderId, timbreAt, envelopeAt;
+
+            /*  THE PULSE'S OWN MEMORY (2026-09-25): the slow average of the
+                holder's envelope and the brightness being let go, for the run
+                they were measured on - a new holder starts again. */
+            std::string pulseFor;
+            double pulseAverage = 0.0;
+            double pulseShown = 0.0;
 
             //  The hand.
             bool handDown = false;          // the fader's touch sense
@@ -558,6 +566,7 @@ namespace wfg::surface
             {
                 strip.holderId = holder;
                 strip.timbreAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/timbre";
+                strip.envelopeAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/envelope";
             }
         }
 
@@ -1237,13 +1246,57 @@ namespace wfg::surface
                 std::optional<Rgb> wanted;
 
                 if (word == "playing" || word == "held")
+                {
                     wanted = colourFromTimbre (textAt (at, strip.timbreAt));
+
+                    if (wanted.has_value())
+                        wanted = pulsed (*wanted, strip, textAt (at, strip.envelopeAt));
+                }
+                else
+                {
+                    strip.pulseFor.clear();
+                }
 
                 if (! wanted.has_value() && ! strip.cueId.empty())
                     wanted = colourFromHex (textAt (at, strip.cueColourAt));
 
                 paintColour (port, vpotNote + element, strip, wanted.value_or (Rgb {}), tick);
             }
+        }
+
+        /*  THE COLOUR AT THE BRIGHTNESS ITS SOUND'S MOVEMENT GIVES IT - see
+            the `pulse` numbers in SurfaceProfile.h. An envelope the tree does
+            not have yet leaves the colour as it is. */
+        static Rgb pulsed (Rgb colour, Strip& strip, const std::string& envelopeText)
+        {
+            const auto envelope = osc::parseDouble (envelopeText);
+
+            if (! envelope.has_value())
+                return colour;
+
+            if (strip.pulseFor != strip.holderId)
+            {
+                strip.pulseFor = strip.holderId;
+                strip.pulseAverage = *envelope;
+                strip.pulseShown = pulseRest;
+            }
+
+            //  A one-pole average over `pulseAverageSeconds` of ticks.
+            const auto ticks = pulseAverageSeconds * static_cast<double> (TickClock::rateHz);
+            strip.pulseAverage += (*envelope - strip.pulseAverage) / std::max (1.0, ticks);
+
+            const auto lift = (*envelope - strip.pulseAverage) / pulseDbForFull;
+            const auto now = std::clamp (pulseRest + (1.0 - pulseRest) * lift, pulseFloor, 1.0);
+
+            //  Up at once, down at the release: a flash outlives the rate limit.
+            strip.pulseShown = std::max (now, strip.pulseShown - pulseReleasePerTick);
+
+            const auto scale = [&strip] (int component)
+            {
+                return static_cast<int> (std::lround (static_cast<double> (component) * strip.pulseShown));
+            };
+
+            return Rgb { scale (colour.red), scale (colour.green), scale (colour.blue) };
         }
 
         /*  COLOUR, QUANTISED, RATE-LIMITED AND RE-ASSERTED (§16.6): written

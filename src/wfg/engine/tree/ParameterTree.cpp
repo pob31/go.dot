@@ -1931,6 +1931,45 @@ namespace wfg::tree
                  + rounded (audio::timbre::saturationOf (*frame), 1000.0) + " "
                  + rounded (audio::timbre::lightnessOf (*frame), 1000.0);
         }
+
+        /*  `/godot/run/<id>/envelope`: the frame's peak at the run's position,
+            in decibels below the loudest frame of the file, to a tenth - or
+            empty, for every case `timbre` is empty. A silent frame is -120.
+
+            AGAINST THE FILE'S OWN LOUDEST MOMENT, which the coarsest level of
+            the pyramid holds (a coarser frame's peak is the larger of its
+            two): what a surface pulses with is how the sound moves, and a
+            quiet recording moves as much as a loud one (author, 2026-09-25:
+            "variation/modulation is a better clue"). */
+        std::string envelopeText (const cue::Run& run, const audio::MediaRecords* records)
+        {
+            if (records == nullptr || run.media.empty())
+                return {};
+
+            const auto found = records->find (run.media);
+
+            if (found == records->end() || found->second.pyramid == nullptr)
+                return {};
+
+            const auto& pyramid = *found->second.pyramid;
+            const auto* frame = audio::timbre::frameAt (pyramid, run.position);
+
+            if (frame == nullptr || pyramid.levels.empty())
+                return {};
+
+            std::uint8_t loudest = 0;
+
+            for (const auto& coarse : pyramid.levels.back())
+                loudest = std::max (loudest, coarse.peak);
+
+            if (loudest == 0 || frame->peak == 0)
+                return osc::formatDouble (-120.0);
+
+            const auto below = 20.0 * std::log10 (static_cast<double> (frame->peak)
+                                                    / static_cast<double> (loudest));
+
+            return osc::formatDouble (std::max (-120.0, std::round (below * 10.0) / 10.0));
+        }
     }
 
     //==============================================================================
@@ -2530,6 +2569,7 @@ namespace wfg::tree
                     the row is what a surface is told to draw it at, and nothing
                     here throttles it (§14.5). */
                 else if (name == "timbre")    text = timbreText (run, mediaRecords.get());
+                else if (name == "envelope")  text = envelopeText (run, mediaRecords.get());
                 else if (name == "level")     text = osc::formatDouble (run.level);
                 else if (name == "trim")      text = osc::formatDouble (run.trim);
                 else if (name == "late")      text = std::to_string (run.late);

@@ -1399,6 +1399,98 @@ TEST_CASE ("surface bridge: a sounding strip wears what it sounds like, and its 
     CHECK (colourOf (sink, "PORTBNK1", 0x20).empty());
 }
 
+TEST_CASE ("surface bridge: a sounding strip's colour pulses with how its sound moves, not with how loud it is")
+{
+    /*  The author, 2026-09-25: "Can the brightness of the RGB LEDs be
+        modulated by the sound level or variations of it? ... variation /
+        modulation is a better clue". A steady sound rests at `pulseRest`
+        whatever its level; a rise above its own recent average flashes, and
+        the flash is let go slowly enough to outlive the colour's rate limit. */
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+    fake.text ("/godot/run/RUN00001/timbre", "0 1 0.5");           // pure red
+    fake.text ("/godot/run/RUN00001/envelope", "-18");              // a quiet, steady bed
+    fake.text ("/godot/cue/CUE00001/name", "Rain");
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    //  The red of the LAST colour written since the sink was cleared: three notes a write.
+    const auto redNow = [&sink]
+    {
+        const auto colour = colourOf (sink, "PORTBNK1", 0x20);
+        return colour.size() >= 3u ? static_cast<int> (colour[colour.size() - 3][2]) : -1;
+    };
+
+    const auto rest = static_cast<int> (std::lround (127.0 * surface::pulseRest));
+
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+
+    //  STEADY IS THE RESTING GLOW, however quiet: -18 dB rests where 0 dB would.
+    CHECK (redNow() == rest);
+
+    for (tick = 2; tick <= 60; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    sink.sent.clear();
+
+    //  A HIT: eight decibels above the average is full, at the next write the rate allows.
+    fake.text ("/godot/run/RUN00001/envelope", "-10");
+
+    for (tick = 61; tick <= 66; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    CHECK (redNow() >= 120);
+
+    //  And let go: back towards the rest once the sound is steady again.
+    fake.text ("/godot/run/RUN00001/envelope", "-18");
+    sink.sent.clear();
+
+    for (tick = 67; tick <= 100; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    CHECK (redNow() >= 0);
+    CHECK (redNow() < 100);
+
+    /*  A DIP DIMS, down to the floor and never dark - dark is silence, which
+        the timbre says on its own. */
+    for (tick = 101; tick <= 200; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    fake.text ("/godot/run/RUN00001/envelope", "-40");
+    sink.sent.clear();
+
+    for (tick = 201; tick <= 212; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    CHECK (redNow() > 0);
+    CHECK (redNow() < rest);
+
+    //  With no envelope yet, the colour is the timbre's, as it always was.
+    fake.text ("/godot/run/RUN00001/envelope", "");
+    sink.sent.clear();
+
+    for (tick = 213; tick <= 230; ++tick)
+        bridge.afterTick (fake.publish (tick), touches, tick);
+
+    CHECK (redNow() == 127);
+}
+
 TEST_CASE ("surface bridge: a hand resting through a handover lets go of the old node, and touches the new one only by landing again")
 {
     RecordingSink sink;
