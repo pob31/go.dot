@@ -2142,7 +2142,9 @@ cue list panel"*. On a Mackie surface or a D700, a strip's MUTE sends `run.kill`
 for the run holding the strip while something sounds there. That is the
 running pane's cross, under the hand already on the surface. The member is
 armed on its fader again for the next touch, as after any end. On a DCA strip,
-and on a member armed and waiting, MUTE does nothing.
+and on a member armed and waiting, MUTE does nothing. **Its red light flashes
+for half a second when it kills** (*"to have feedback on the killed sample"*).
+A press with nothing to kill lights nothing, which is its own answer.
 
 **Takeover.** Two modes, one attribute on the group that arms — the scene change
 is where the designer is thinking about it, and §4.10 wants the decision in the

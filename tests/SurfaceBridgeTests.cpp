@@ -1575,6 +1575,31 @@ TEST_CASE ("surface bridge: MUTE on a sampler strip kills what it plays, like th
     CHECK (submitted[0].args[0].getString() == "RUN00001");
     CHECK (submitted[0].origin == "surface:SURF0001");
 
+    /*  AND THE RED LIGHT SAYS SO for half a second (author, 2026-09-25:
+        "Can you flash for 0.5s the red mute switch to have feedback on the
+        killed sample?"), then goes out. */
+    const auto muteOn = midi::Bytes { 0x90, 0x10, 0x7f };
+    const auto muteOff = midi::Bytes { 0x90, 0x10, 0x00 };
+
+    sink.sent.clear();
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), muteOn));
+
+    const auto killedAt = tick;
+    sink.sent.clear();
+
+    while (tick < killedAt + surface::killFlashTicks - 1)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK_FALSE (contains (sentOn (sink, "PORTBNK1"), muteOff));
+
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (contains (sentOn (sink, "PORTBNK1"), muteOff));
+
     //  A member armed and waiting has nothing to kill: its fader is ready for the next touch.
     fake.text ("/godot/slot/STRIP001/word", "armed");
     bridge.afterTick (fake.publish (++tick), touches, tick);
@@ -1583,6 +1608,11 @@ TEST_CASE ("surface bridge: MUTE on a sampler strip kills what it plays, like th
     bridge.arrived ("PORTBNK1", { 0x90, 0x10, 0x7f });
     bridge.beforeTick (collect, ++tick);
     CHECK (submitted.empty());
+
+    //  And nothing killed lights nothing.
+    sink.sent.clear();
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK_FALSE (contains (sentOn (sink, "PORTBNK1"), muteOn));
 
     //  Nor has a DCA strip: MUTE there is no temporary mute either, it is nothing.
     fake.text ("/godot/slot/STRIP001/word", "dca");

@@ -105,6 +105,12 @@ namespace wfg::surface
         pane's cross, under the hand already on the surface. */
     enum class Action { none, gate, go, stop, rewind, forward, kill };
 
+    /*  AND IT SAYS SO: the red MUTE light is on for half a second after a
+        kill it sent (author, 2026-09-25: "Can you flash for 0.5s the red mute
+        switch to have feedback on the killed sample?"). A press with nothing
+        to kill lights nothing - which is its own answer. */
+    inline constexpr std::int64_t killFlashTicks = TickClock::rateHz / 2;
+
     /** What a button means on a surface of this profile. `none` for every
         button a profile does not use, and for every button of a profile that
         has none (the virtual panel, a pad controller). */

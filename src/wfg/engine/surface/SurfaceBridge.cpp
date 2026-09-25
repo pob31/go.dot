@@ -56,6 +56,7 @@ namespace wfg::surface
             port a message goes to, never the id inside it. */
         constexpr std::uint8_t deviceId = d700DeviceId;
 
+        constexpr int muteNote = 0x10;          // + element: MUTE, the strip's kill, lit a moment when it kills
         constexpr int selectNote = 0x18;        // + element: SELECT, whose LED says the strip sounds
         constexpr int vpotNote = 0x20;          // + element: the V-Pot - its press, and the D700's colour
 
@@ -385,6 +386,8 @@ namespace wfg::surface
             bool held = false;              // held by this surface at the last afterTick
             std::array<Row, 3> rows;
             int led = -1;
+            int muteLed = -1;                       // the MUTE light as last sent; -1 for nobody knows
+            std::int64_t muteLitUntil = -1;         // the tick the kill's flash goes out
             int ring = -1;
             bool colourKnown = false;
             Rgb colourLevel;
@@ -527,6 +530,7 @@ namespace wfg::surface
                 row.known = false;
 
             strip.led = -1;
+            strip.muteLed = -1;
             strip.ring = -1;
             strip.colourKnown = false;
         }
@@ -795,8 +799,8 @@ namespace wfg::surface
 
                 case Action::kill:
                     if (event.down)
-                        if (const auto* strip = stripAt (box, bank, event.id.index))
-                            kill (box, *strip, submit);
+                        if (auto* strip = stripAt (box, bank, event.id.index))
+                            kill (box, *strip, submit, tick);
                     break;
 
                 case Action::rewind:
@@ -819,7 +823,7 @@ namespace wfg::surface
             sends - while something sounds there. The member is armed on its
             fader again for the next touch, as after any end. A dca strip, a
             free one and a member armed and waiting have nothing to kill. */
-        void kill (const Surface& box, const Strip& strip, const Submit& submit) const
+        void kill (const Surface& box, Strip& strip, const Submit& submit, std::int64_t tick) const
         {
             const auto* at = published.get();
 
@@ -832,6 +836,9 @@ namespace wfg::surface
                 return;
 
             submit (commandFrom (box.origin, "run.kill", { osc::Value::string (strip.holderId) }));
+
+            //  And the red light says it happened, for `killFlashTicks`.
+            strip.muteLitUntil = tick + killFlashTicks;
         }
 
         /*  THE STRIP'S GATE, the V-Pot press: a hand on a sampler strip, or on
@@ -1257,6 +1264,16 @@ namespace wfg::surface
 
             //------------------------------------------------------------------
             const auto lit = ledFor (word);
+
+            /*  MUTE, LIT FOR HALF A SECOND after a kill it sent - the only
+                thing its light says (SurfaceProfile.h, `killFlashTicks`). */
+            const auto muteLit = tick < strip.muteLitUntil ? Led::on : Led::off;
+
+            if (static_cast<int> (muteLit) != strip.muteLed)
+            {
+                send (port, led (muteNote + element, muteLit));
+                strip.muteLed = static_cast<int> (muteLit);
+            }
 
             if (static_cast<int> (lit) != strip.led)
             {
