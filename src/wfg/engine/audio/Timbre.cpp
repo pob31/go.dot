@@ -345,6 +345,10 @@ namespace wfg::audio::timbre
 
                 binPower.resize (logHertz.size());
                 runningPower.resize (logHertz.size() + 1);
+
+                //  The first bin judged for noise: every one under it is pitched (Timbre.h).
+                judgedFrom = std::max (0, static_cast<int> (std::ceil (pitchedBelowHertz * windowSize / sampleRate))
+                                            - firstBin);
             }
         }
 
@@ -400,8 +404,9 @@ namespace wfg::audio::timbre
             one (noise): each bin's power over its neighbourhood's mean, the
             ratios' geometric mean over their arithmetic, both weighted by the
             neighbourhood's power - so a band nothing sounds in weighs nothing
-            (Timbre.h, `noisyAt`). Reads `binPower` and `runningPower` as the
-            frame above left them. */
+            (Timbre.h, `noisyAt`) - over the bins from `pitchedBelowHertz` up;
+            the power under it counts as tonal, and the two are mixed by power.
+            Reads `binPower` and `runningPower` as the frame above left them. */
         double greyness() const noexcept
         {
             const auto count = static_cast<int> (binPower.size());
@@ -409,8 +414,12 @@ namespace wfg::audio::timbre
             double weight = 0.0;
             double logRatio = 0.0;
             double ratio = 0.0;
+            double pitched = 0.0;
 
-            for (auto at = 0; at < count; ++at)
+            for (auto at = 0; at < std::min (judgedFrom, count); ++at)
+                pitched += binPower[static_cast<std::size_t> (at)];
+
+            for (auto at = std::min (judgedFrom, count); at < count; ++at)
             {
                 const auto reach = halfWidth[static_cast<std::size_t> (at)];
                 const auto low = std::max (0, at - reach);
@@ -430,10 +439,15 @@ namespace wfg::audio::timbre
                 ratio += around * share;
             }
 
-            if (! (weight > 0.0) || ! (ratio > 0.0))
+            /*  `ratio` is the judged bins' power: a neighbourhood times its
+                share is the bin's own. */
+            const auto judged = weight > 0.0 && ratio > 0.0 ? std::exp (logRatio / weight) / (ratio / weight)
+                                                            : 0.0;
+
+            if (! (ratio + pitched > 0.0))
                 return 0.0;
 
-            const auto noisiness = std::exp (logRatio / weight) / (ratio / weight);
+            const auto noisiness = (ratio * judged + pitched * tonalAt) / (ratio + pitched);
 
             return std::clamp ((noisiness - tonalAt) / (noisyAt - tonalAt), 0.0, 1.0);
         }
@@ -471,6 +485,7 @@ namespace wfg::audio::timbre
         std::vector<int> halfWidth;
         std::vector<double> binPower;
         std::vector<double> runningPower;
+        int judgedFrom = 0;
 
         /*  The in-band power a -100 dBFS sine puts in the spectrum. A
             bin-centred sine of amplitude A through a periodic Hann window of N

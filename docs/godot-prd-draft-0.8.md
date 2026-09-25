@@ -2391,8 +2391,14 @@ only white noise as grey: a hi-hat, breath, rain or rumble is noise in part of
 the band, and the near-silent rest made it vivid. It is now how tonal the
 sound is where its energy is: each bin against its own neighbourhood, a ninth
 of an octave either side, weighted by that neighbourhood's power. Noise of any
-colour or bandwidth reads grey, a tone or a harmonic sound vivid (the
-analysis's format version 2; every file is analysed again once).
+colour or bandwidth reads grey, a tone or a harmonic sound vivid. **Below 200
+Hz sound reads by its pitch**, never as noise: the analysis window cannot tell a
+tone from noise there, and the ear hears a thump or a note rather than hiss.
+A sub-bass pulse had come out grey beside Samplitude's dark blue (*"It's like
+pulsating bass drum"*). A rumble reads coloured too; that is the price. The
+stops lean blue as well (*"I would bias a bit towards the blues"*): deep blue
+to 250 Hz, red not before 800 (the analysis's format version 4; every file is
+analysed again once).
 
 **A test exists before the UI does.** A 1 kHz sine must come out saturated at
 1 kHz's hue, white noise grey, and a sweep must walk the ramp — a black-box

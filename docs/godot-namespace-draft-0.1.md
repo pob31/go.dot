@@ -6070,7 +6070,10 @@ saturation is noisiness where the energy is**, no longer `1 − flatness` over t
 which read only white noise as grey: each bin against its own neighbourhood, a ninth of an
 octave either side, weighted by the neighbourhood's power - grey for noise of any colour or
 bandwidth, vivid for a tone (*"don't desaturate on a broader, noisier signal which I find
-quite a telling visual cue"*). The analysis's format version is 3.
+quite a telling visual cue"*) - **and below 200 Hz sound reads by its pitch**, never as noise:
+a 2048-sample window cannot tell a tone from noise there, and a sub-bass pulse the author
+compared with Samplitude's dark blue had come out grey (*"It's like pulsating bass drum"*). A
+rumble reads coloured too; that is the price. The analysis's format version is 4.
 
 **An analysis is regenerable from the file, so it is not something anybody decided.** §4.10 says
 the document holds what someone decided and never what the machine happened to be doing, and

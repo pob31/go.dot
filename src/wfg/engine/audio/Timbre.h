@@ -95,7 +95,7 @@ namespace wfg::audio
             only thing that tells a pyramid computed by an older rule from one
             computed by this one. A file carrying another version is refused
             and rebuilt, never read. */
-        constexpr std::uint16_t formatVersion = 3;       // 2: saturation from local noisiness; 3: the author's blues (2026-09-25)
+        constexpr std::uint16_t formatVersion = 4;       // 2: local noisiness; 3: the author's blues; 4: the lows read by pitch (2026-09-25)
 
         /*  The band the centroid and the flatness are taken over. */
         constexpr double lowestHertz = 40.0;
@@ -124,6 +124,17 @@ namespace wfg::audio
         constexpr int envelopeMinimumBins = 3;
         constexpr double noisyAt = 0.5;
         constexpr double tonalAt = 0.05;
+
+        /*  AND BELOW THIS, SOUND READS BY ITS PITCH, never as noise (author,
+            2026-09-25, of a sub-bass pulse that came out grey: "It's like
+            pulsating bass drum", with Samplitude's dark blue beside it). A
+            2048-sample window cannot tell a tone from noise down there - a
+            bin is 23 Hz wide, and a bass drum is three or four of them, all
+            of its own neighbourhood - and the ear does not hear hiss there
+            either: it hears a thump or a note. So the power under this
+            frequency counts as tonal, and the rest is judged as above, the two
+            mixed by power. A rumble reads coloured too, which is the price. */
+        constexpr double pitchedBelowHertz = 200.0;
 
         /*  One frame: hue in 256 steps of a full turn, the other three in 255
             steps of the unit range. */

@@ -452,6 +452,27 @@ TEST_CASE ("timbre: noise is grey wherever it sits in the spectrum, and a harmon
     CHECK (meanSaturation (pink) < 0.2);
     CHECK (meanSaturation (hat) < 0.25);
     CHECK (meanSaturation (saw) > 0.8);
+
+    /*  AND A BASS DRUM IS COLOURED (author, 2026-09-25, of a sub-bass pulse
+        that came out grey: "It's like pulsating bass drum"): a pitch falling
+        from 85 to 45 Hz twice a second, each hit decaying. Under
+        `pitchedBelowHertz` sound reads by its pitch - the window cannot tell
+        a tone from noise there, and the ear hears a thump. */
+    std::vector<float> kick (static_cast<std::size_t> (2.0 * rate));
+    {
+        double phase = 0.0;
+
+        for (std::size_t n = 0; n < kick.size(); ++n)
+        {
+            const auto since = std::fmod (static_cast<double> (n) / rate, 0.5);
+            const auto hertz = 45.0 + 40.0 * std::exp (-since * 30.0);
+
+            phase += 2.0 * juce::MathConstants<double>::pi * hertz / rate;
+            kick[n] = static_cast<float> (0.8 * std::sin (phase) * std::exp (-since * 6.0));
+        }
+    }
+
+    CHECK (meanSaturation (kick) > 0.8);
 }
 
 TEST_CASE ("timbre: a sweep walks the ramp, and its lightness never falls")
