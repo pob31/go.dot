@@ -296,6 +296,107 @@ TEST_CASE ("fx door: a turn on one parameter is one undo step; two parameters ar
     }
 }
 
+TEST_CASE ("fx door: a captured state is one step, and it joins the turn of the same insert that left it")
+{
+    /*  The author's decision of 2026-09-25: the whole state of a plugin kept
+        per cue, saved a moment after the hand stops, and the turn and its
+        state ONE Undo. `fx.capture` writes the file's name and every value
+        in one transaction; after a turn of that insert's parameters, from the
+        same origin, within the window, it joins the turn's step. */
+    Rig rig;
+    const auto file = "state/" + rig.pluginId + "-0123456789abcdef.state";
+    const auto other = "state/" + rig.pluginId + "-fedcba9876543210.state";
+
+    const auto capture = [&rig] (const std::string& name, const std::string& values, const char* origin = "cli")
+    {
+        return rig.apply ("fx.capture", { osc::Value::string (rig.fxId), osc::Value::string (name),
+                                          osc::Value::string (values) }, origin);
+    };
+
+    const auto stateFile = [&rig]
+    {
+        return rig.document.findById (rig.fxId).getProperty ("stateFile").toString().toStdString();
+    };
+
+    SUBCASE ("alone, it writes the file and every value, canonically, as one step")
+    {
+        REQUIRE (capture (file, "1:0 0:0.25").applied == 1);
+        CHECK (stateFile() == file);
+        CHECK (rig.values() == "0:0.25 1:0");
+        CHECK (rig.at (rig.fxAddress ("stateFile")) == file);
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (stateFile().empty());
+        CHECK (rig.values().empty());
+    }
+
+    SUBCASE ("after a turn of the same insert from the same hand, the turn and its state are one step")
+    {
+        REQUIRE (rig.set (rig.fxAddress ("p0"), "0.3").applied == 1);
+        REQUIRE (rig.set (rig.fxAddress ("p0"), "0.4").applied == 1);
+        rig.tick += 75;     // the helper's quiet moment, and the round trip
+
+        REQUIRE (capture (file, "0:0.4 1:0").applied == 1);
+        CHECK (stateFile() == file);
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (stateFile().empty());
+        CHECK (rig.values().empty());
+    }
+
+    SUBCASE ("from another hand it is a step of its own")
+    {
+        REQUIRE (rig.set (rig.fxAddress ("p0"), "0.3").applied == 1);
+        REQUIRE (capture (file, "0:0.3 1:0", "udp:1").applied == 1);
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (stateFile().empty());
+        CHECK (rig.values() == "0:0.3");
+    }
+
+    SUBCASE ("too long after the turn it is a step of its own")
+    {
+        REQUIRE (rig.set (rig.fxAddress ("p0"), "0.3").applied == 1);
+        rig.tick += doc::ShowDocument::captureJoinWindowTicks + 10;
+        REQUIRE (capture (file, "0:0.3 1:0").applied == 1);
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (stateFile().empty());
+        CHECK (rig.values() == "0:0.3");
+    }
+
+    SUBCASE ("a second capture never joins, and the turn after one is a new step")
+    {
+        REQUIRE (rig.set (rig.fxAddress ("p0"), "0.3").applied == 1);
+        REQUIRE (capture (file, "0:0.3 1:0").applied == 1);
+        REQUIRE (capture (other, "0:0.3 1:1").applied == 1);
+        REQUIRE (rig.set (rig.fxAddress ("p0"), "0.9").applied == 1);
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (rig.values() == "0:0.3 1:1");
+        CHECK (stateFile() == other);
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (stateFile() == file);
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (stateFile().empty());
+        CHECK (rig.values().empty());
+    }
+
+    SUBCASE ("what it refuses: a name that is not plugins/state's, and an Fx nobody made")
+    {
+        CHECK (capture ("plugin.state", "0:0.5").applied == 0);
+        CHECK (capture ("state/../show.state", "0:0.5").applied == 0);
+        CHECK (capture ("state/a b.state", "0:0.5").applied == 0);
+        CHECK (capture ("state/.state", "0:0.5").applied == 0);
+        CHECK (capture ("/tmp/x.state", "0:0.5").applied == 0);
+        CHECK (rig.apply ("fx.capture", { osc::Value::string ("FX0NOPE0"), osc::Value::string (file),
+                                          osc::Value::string ("0:0.5") }).applied == 0);
+        CHECK (stateFile().empty());
+    }
+}
+
 TEST_CASE ("fx door: the cue lists its enabled inserts in chain order, and a switched-off one drops out")
 {
     Rig rig;

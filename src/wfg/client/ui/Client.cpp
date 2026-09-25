@@ -474,6 +474,9 @@ namespace wfg::client
                               { send (gesture::setNode (address, text)); };
                 editing.createFx = [this] (const std::string& cueId, const std::string& pluginId)
                                    { send (gesture::createFx (cueId, pluginId)); };
+                editing.capture = [this] (const std::string& fxId, const std::string& stateFile,
+                                          const std::string& values)
+                                  { send (gesture::captureFx (fxId, stateFile, values)); };
                 editing.key = [this] (bool escape)
                 {
                     if (shell != nullptr)

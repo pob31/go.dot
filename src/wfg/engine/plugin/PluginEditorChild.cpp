@@ -19,8 +19,10 @@
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/plugin/EditorRegion.h>
 #include <wfg/engine/plugin/PluginLoad.h>
+#include <wfg/engine/plugin/TestGainState.h>
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_cryptography/juce_cryptography.h>
 #include <juce_gui_basics/juce_gui_basics.h>
 
 #include <algorithm>
@@ -121,43 +123,101 @@ namespace wfg::plugin
 
             void processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer&) override
             {
-                buffer.applyGain (gain->get());
+                buffer.applyGain (gain->get() * (padded.load() ? 0.25f : 1.0f));
             }
 
             double getTailLengthSeconds() const override { return 0.0; }
             bool acceptsMidi() const override { return false; }
             bool producesMidi() const override { return false; }
-            juce::AudioProcessorEditor* createEditor() override { return nullptr; }
-            bool hasEditor() const override { return false; }
+            juce::AudioProcessorEditor* createEditor() override;
+            bool hasEditor() const override { return true; }
             int getNumPrograms() override { return 1; }
             int getCurrentProgram() override { return 0; }
             void setCurrentProgram (int) override {}
             const juce::String getProgramName (int) override { return {}; }
             void changeProgramName (int, const juce::String&) override {}
 
+            /*  THE WHOLE STATE, in TestGainState's words - the voice child
+                reads the same bytes when it loads a cue's state. */
             void getStateInformation (juce::MemoryBlock& into) override
             {
-                const auto text = "gain=" + juce::String (gain->get()) + "\ndie=" + juce::String (die->get() ? 1 : 0) + "\n";
-                into.replaceAll (text.toRawUTF8(), text.getNumBytesAsUTF8());
+                TestGainState state;
+                state.gain = gain->get();
+                state.die = die->get();
+                state.pad = padded.load();
+
+                const auto text = state.toText();
+                into.replaceAll (text.data(), text.size());
             }
 
             void setStateInformation (const void* data, int size) override
             {
-                const auto text = juce::String::fromUTF8 (static_cast<const char*> (data), size);
+                const auto state = TestGainState::fromText (std::string (static_cast<const char*> (data),
+                                                                         static_cast<std::size_t> (std::max (0, size))));
+                gain->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, state.gain));
+                die->setValueNotifyingHost (state.die ? 1.0f : 0.0f);
+                padded.store (state.pad);
+            }
 
-                for (const auto& line : juce::StringArray::fromLines (text))
-                {
-                    if (line.startsWith ("gain="))
-                        gain->setValueNotifyingHost (juce::jlimit (0.0f, 1.0f, line.fromFirstOccurrenceOf ("=", false, false).getFloatValue()));
-                    else if (line.startsWith ("die="))
-                        die->setValueNotifyingHost (line.fromFirstOccurrenceOf ("=", false, false).getIntValue() != 0 ? 1.0f : 0.0f);
-                }
+            bool isPadded() const noexcept { return padded.load(); }
+
+            /*  PAD, WHICH IS NOT A PARAMETER: what a plugin does when its
+                window changes something a host cannot see - it says only
+                that its state changed. */
+            void setPadded (bool shouldPad)
+            {
+                if (padded.exchange (shouldPad) != shouldPad)
+                    updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
             }
 
         private:
             juce::AudioParameterFloat* gain = nullptr;
             juce::AudioParameterBool* die = nullptr;
+            std::atomic<bool> padded { false };
         };
+
+        /*  ITS WINDOW: JUCE's generic editor for the two parameters, and a
+            switch for the one thing that is not a parameter. */
+        class TestGainEditor final : public juce::AudioProcessorEditor, private juce::Timer
+        {
+        public:
+            explicit TestGainEditor (TestGainProcessor& processorToEdit)
+                : AudioProcessorEditor (processorToEdit), owner (processorToEdit), generic (processorToEdit)
+            {
+                addAndMakeVisible (generic);
+
+                pad.setButtonText ("Pad -12 dB (kept in the state, not a parameter)");
+                pad.setToggleState (owner.isPadded(), juce::dontSendNotification);
+                pad.onClick = [this] { owner.setPadded (pad.getToggleState()); };
+                addAndMakeVisible (pad);
+
+                setSize (std::max (generic.getWidth(), 420), generic.getHeight() + 40);
+                startTimer (100);
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds();
+                pad.setBounds (area.removeFromBottom (40).reduced (12, 6));
+                generic.setBounds (area);
+            }
+
+        private:
+            //  A state loaded under it moves Pad; the switch follows.
+            void timerCallback() override
+            {
+                pad.setToggleState (owner.isPadded(), juce::dontSendNotification);
+            }
+
+            TestGainProcessor& owner;
+            juce::GenericAudioProcessorEditor generic;
+            juce::ToggleButton pad;
+        };
+
+        juce::AudioProcessorEditor* TestGainProcessor::createEditor()
+        {
+            return new TestGainEditor (*this);
+        }
 
         //======================================================================
         /*  WHAT THE PLUGIN'S WINDOW DID, caught as it happens. A plugin may
@@ -167,8 +227,24 @@ namespace wfg::plugin
             pass, however many the plugin sent. `muted` is up while this
             process applies values itself, so what the cue says is never
             mistaken for what a hand did. */
-        struct Watcher final : juce::AudioProcessorParameter::Listener
+        struct Watcher final : juce::AudioProcessorParameter::Listener,
+                               juce::AudioProcessorListener
         {
+            /*  WHAT A PLUGIN SAYS WHEN ITS WINDOW CHANGED SOMETHING THAT IS
+                NOT A PARAMETER - an impulse response, a sample, a mode - is
+                only that its state changed; the capture then compares the
+                bytes, so a plugin that says it too often costs a hash and
+                never a file. */
+            void audioProcessorParameterChanged (juce::AudioProcessor*, int, float) override {}
+
+            void audioProcessorChanged (juce::AudioProcessor*, const ChangeDetails& details) override
+            {
+                if (details.nonParameterStateChanged && ! muted.load (std::memory_order_acquire))
+                    stateChanged.store (true, std::memory_order_release);
+            }
+
+            std::atomic<bool> stateChanged { false };
+
             explicit Watcher (int countToUse)
                 : count (countToUse),
                   latest (std::make_unique<std::atomic<float>[]> (static_cast<std::size_t> (std::max (1, countToUse)))),
@@ -354,11 +430,13 @@ namespace wfg::plugin
         struct Session final : juce::Timer
         {
             Session (editor::Region& regionToUse, juce::AudioProcessor& processorToUse,
-                     std::int64_t parentPidToUse, bool windowed, const juce::String& name)
+                     std::int64_t parentPidToUse, bool windowed, const juce::String& name,
+                     std::string pluginIdToUse, std::string stateFolderToUse, int channels, int blockSize)
                 : region (regionToUse), processor (processorToUse), parentPid (parentPidToUse),
                   params (processorToUse.getParameters()),
                   count (std::min (params.size(), editor::maxParams)),
-                  watcher (count)
+                  watcher (count),
+                  pluginId (std::move (pluginIdToUse)), stateFolder (std::move (stateFolderToUse))
             {
                 baseline.assign (static_cast<std::size_t> (count), 0.0f);
                 sentAt.assign (static_cast<std::size_t> (count), 0u);
@@ -371,6 +449,17 @@ namespace wfg::plugin
                         p->addListener (&watcher);
                     }
                 }
+
+                processor.addListener (&watcher);
+
+                /*  THE PRESET'S STATE, kept: what a cue with no state of its
+                    own is put back to, as a voice is. And the silent block the
+                    capture plays to flush the plugin, sized once. */
+                silence.setSize (std::max ({ channels, processor.getTotalNumInputChannels(),
+                                             processor.getTotalNumOutputChannels(), 1 }),
+                                 std::max (1, blockSize));
+                processor.getStateInformation (initialState);
+                cleanHash = hashOfState();
 
                 region.paramCount.store (static_cast<std::uint32_t> (count), std::memory_order_relaxed);
                 mirror();
@@ -401,6 +490,8 @@ namespace wfg::plugin
                     if (auto* p = params[i])
                         p->removeListener (&watcher);
 
+                processor.removeListener (&watcher);
+
                 /*  THE WINDOW BEFORE THE PROCESSOR: an editor outliving its
                     processor is the one ordering JUCE asserts on. */
                 holder = nullptr;
@@ -411,8 +502,16 @@ namespace wfg::plugin
             {
                 ++ticks;
 
-                if (region.shouldExit.load (std::memory_order_acquire) != 0
-                      || (parentPid > 0 && ticks % 100 == 0 && ! process::isAlive (parentPid)))
+                const auto leaving = region.shouldExit.load (std::memory_order_acquire);
+                const auto orphaned = parentPid > 0 && ticks % 100 == 0 && ! process::isAlive (parentPid);
+
+                /*  LEAVING KEEPS WHAT THE HAND DID: a state changed since the
+                    last capture is captured on the way out - waiting a moment
+                    for the mailbox if the parent has not taken the last one. */
+                if (leaving == 1 && ! orphaned && dirty && canCapture() && ! captureNow() && ++exitWaits < 50)
+                    return;
+
+                if (leaving != 0 || orphaned)
                 {
                     stopTimer();
                     juce::MessageManager::getInstance()->stopDispatchLoop();
@@ -420,10 +519,22 @@ namespace wfg::plugin
                 }
 
                 collect();
+
+                if (watcher.stateChanged.exchange (false, std::memory_order_acq_rel))
+                    changedByHand();
+
                 takeSubject();
                 poke();
                 reconcile();
                 place();
+
+                /*  THE QUIET MOMENT: a second and a half after the hand last
+                    moved and with no gesture open, the plugin's whole state
+                    is kept with the cue. The engine joins it to the turn that
+                    left it, so the turn and its state are one Undo. */
+                if (dirty && canCapture() && ! anyGesture()
+                      && juce::Time::getMillisecondCounter() - lastChangeAt >= quietMs)
+                    captureNow();
 
                 if (ticks % 5 == 0)
                     mirror();
@@ -454,7 +565,133 @@ namespace wfg::plugin
 
                     if (editor::push (region, editor::EventKind::value, static_cast<std::uint32_t> (i), value, taken))
                         sentAt[at] = now | 1u;
+
+                    changedByHand();
                 }
+            }
+
+            //==================================================================
+            /*  THE WHOLE STATE (the author's decision of 2026-09-25): kept
+                with the cue a moment after a hand changed it - a parameter,
+                or something the plugin only says is its state - when the cue
+                has the insert and the show has a folder to keep it in. */
+            void changedByHand()
+            {
+                if (greyed)
+                    return;
+
+                dirty = true;
+                lastChangeAt = juce::Time::getMillisecondCounter();
+            }
+
+            bool canCapture() const
+            {
+                return ! greyed && ! fxId.empty() && ! stateFolder.empty();
+            }
+
+            bool anyGesture() const
+            {
+                for (int i = 0; i < count; ++i)
+                    if (watcher.inGesture (i))
+                        return true;
+
+                return false;
+            }
+
+            /*  THE BYTES AND THEIR NAME. One silent block first, because a
+                VST3 hears a turn of its window's knobs in its controller and
+                only learns it in its processor at the next block - a capture
+                without one would keep the processor's older values. Then the
+                state, and the first sixteen hex digits of its SHA-256, which is
+                the file's name: the same state is always the same file. */
+            std::string stateOf (juce::MemoryBlock& state)
+            {
+                silence.clear();
+                juce::MidiBuffer midi;
+                processor.processBlock (silence, midi);
+
+                state.reset();
+                processor.getStateInformation (state);
+                return juce::SHA256 (state.getData(), state.getSize()).toHexString().substring (0, 16).toStdString();
+            }
+
+            std::string hashOfState()
+            {
+                juce::MemoryBlock state;
+                return stateOf (state);
+            }
+
+            /*  KEEP IT: the file under plugins/state/, written once and never
+                changed - a name that exists is the same bytes - and the mailbox
+                filled for the parent. False only when the parent has not taken
+                the last capture yet; the caller tries again. */
+            bool captureNow()
+            {
+                if (region.captureAck.load (std::memory_order_acquire) != region.captureSeq.load (std::memory_order_relaxed))
+                    return false;
+
+                juce::MemoryBlock state;
+                const auto hash = stateOf (state);
+
+                if (hash == cleanHash)
+                {
+                    dirty = false;
+                    return true;
+                }
+
+                const juce::File folder { juce::String::fromUTF8 (stateFolder.c_str()) };
+                folder.createDirectory();
+
+                const auto name = juce::String (pluginId) + "-" + juce::String (hash) + ".state";
+                const auto file = folder.getChildFile (name);
+
+                if (! file.existsAsFile())
+                {
+                    const auto temp = folder.getChildFile (name + ".tmp-" + juce::String (process::currentId()));
+
+                    if (! temp.replaceWithData (state.getData(), state.getSize()) || ! temp.moveFileTo (file))
+                    {
+                        temp.deleteFile();
+                        dirty = false;          // not tried again until the hand moves again
+                        return true;
+                    }
+                }
+
+                std::memset (region.captureFxId, 0, sizeof (region.captureFxId));
+                std::snprintf (region.captureFxId, sizeof (region.captureFxId), "%s", fxId.c_str());
+                std::memset (region.captureFile, 0, sizeof (region.captureFile));
+                std::snprintf (region.captureFile, sizeof (region.captureFile), "state/%s", name.toRawUTF8());
+
+                for (int i = 0; i < count; ++i)
+                    region.captureValues[i].store (params[i] != nullptr ? params[i]->getValue() : 0.0f,
+                                                   std::memory_order_relaxed);
+
+                region.captureCount.store (static_cast<std::uint32_t> (count), std::memory_order_relaxed);
+                region.captureSeq.fetch_add (1, std::memory_order_release);
+
+                cleanHash = hash;
+                lastCapturedPath = file.getFullPathName().toStdString();
+                dirty = false;
+                return true;
+            }
+
+            /*  A CUE'S STATE PUT ON THE PLUGIN, or the preset's for a cue that
+                has none - muted, since this is the cue speaking and not a
+                hand. A file that is not there is the preset, and says so. */
+            void loadState (const std::string& path)
+            {
+                watcher.muted.store (true, std::memory_order_release);
+
+                juce::MemoryBlock bytes;
+                const juce::File file { juce::String::fromUTF8 (path.c_str()) };
+
+                if (path.empty() || ! file.loadFileAsData (bytes))
+                    processor.setStateInformation (initialState.getData(), static_cast<int> (initialState.getSize()));
+                else
+                    processor.setStateInformation (bytes.getData(), static_cast<int> (bytes.getSize()));
+
+                watcher.muted.store (false, std::memory_order_release);
+                loadedStatePath = path;
             }
 
             void takeSubject()
@@ -464,13 +701,32 @@ namespace wfg::plugin
                 if (seq == taken)
                     return;
 
+                /*  THE LAST CUE'S STATE BEFORE THE NEXT ONE: what the hand did
+                    to it is kept with IT, under its insert, before this
+                    plugin is put where the next cue says. Tried again next
+                    pass if the parent has not taken the last capture. */
+                if (dirty && canCapture() && ! captureNow())
+                    return;
+
                 const auto& s = region.subject;
                 const auto title = juce::String::fromUTF8 (textOf (s.title).c_str());
                 const auto reason = juce::String::fromUTF8 (textOf (s.reason).c_str());
+                const auto nextFx = textOf (s.fxId);
+                const auto nextState = textOf (s.statePath);
                 greyed = s.greyed.load (std::memory_order_relaxed) != 0;
 
                 if (! greyed)
                 {
+                    /*  ITS WHOLE STATE FIRST, then its values over it - a voice
+                        does the same. Loaded when the insert is another one, or
+                        when the cue now names a file this helper did not just
+                        write itself (an undo): the file it just kept is what
+                        the plugin already has. */
+                    if (nextFx != fxId || (nextState != loadedStatePath && nextState != lastCapturedPath))
+                        loadState (nextState);
+                    else
+                        loadedStatePath = nextState;
+
                     const auto given = static_cast<int> (std::min<std::uint32_t> (s.valueCount.load (std::memory_order_relaxed),
                                                                                    static_cast<std::uint32_t> (count)));
 
@@ -478,7 +734,12 @@ namespace wfg::plugin
                     {
                         return i < given ? s.values[i].load (std::memory_order_relaxed) : editor::restsAtPreset;
                     });
+
+                    cleanHash = hashOfState();
                 }
+
+                fxId = greyed ? std::string() : nextFx;
+                dirty = false;
 
                 /*  A NEW CUE STARTS WITH NOTHING OF ITS OWN IN FLIGHT: the
                     last cue's protection is the last cue's. */
@@ -511,6 +772,17 @@ namespace wfg::plugin
                 if (index == -2)
                 {
                     closePressed();
+                    return;
+                }
+
+                /*  -1 IS THE TEST GAIN'S PAD, the one thing it keeps that is
+                    not a parameter: what a real plugin's window does when an
+                    impulse response is loaded into it. */
+                if (index == -1)
+                {
+                    if (auto* test = dynamic_cast<TestGainProcessor*> (&processor))
+                        test->setPadded (! test->isPadded());
+
                     return;
                 }
 
@@ -576,6 +848,11 @@ namespace wfg::plugin
 
             void closePressed()
             {
+                /*  WHAT THE HAND DID IS KEPT BEFORE THE WINDOW GOES, where it
+                    can be; leaving tries again if the mailbox was busy. */
+                if (dirty && canCapture())
+                    captureNow();
+
                 closedByHand = true;
 
                 if (window != nullptr)
@@ -653,8 +930,24 @@ namespace wfg::plugin
             const int count;
 
             Watcher watcher;
+            const std::string pluginId;
+            const std::string stateFolder;
+
             std::vector<float> baseline;
             std::vector<std::uint32_t> sentAt;
+
+            /*  THE WHOLE STATE: the preset's bytes, the silent block that
+                flushes a capture, the hash of what the plugin held when it
+                was last loaded or kept, and which file that was. */
+            juce::AudioBuffer<float> silence;
+            juce::MemoryBlock initialState;
+            std::string cleanHash, loadedStatePath, lastCapturedPath, fxId;
+            bool dirty = false;
+            std::uint32_t lastChangeAt = 0;
+            int exitWaits = 0;
+
+            /** The quiet moment after the last change before a state is kept. */
+            static constexpr std::uint32_t quietMs = 1500;
 
             std::unique_ptr<EditorWindow> window;
             Holder* holder = nullptr;
@@ -764,7 +1057,9 @@ namespace wfg::plugin
                                  std::memory_order_relaxed);
 
         {
-            Session session (region, *processor, parentPid, windowed, name);
+            Session session (region, *processor, parentPid, windowed, name,
+                             optionFrom (args, "--plugin-id"), optionFrom (args, "--state-folder"),
+                             channels, blockSize);
             region.ready.store (1, std::memory_order_release);
 
             session.startTimer (10);

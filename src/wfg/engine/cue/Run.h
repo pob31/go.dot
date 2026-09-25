@@ -273,11 +273,18 @@ namespace wfg::cue
         bool enabled = false;
         std::vector<std::pair<int, float>> values;
 
+        /*  THE CUE'S WHOLE STATE for this entry (the author's decision of
+            2026-09-25): the row's name under the bundle's plugins/, and the
+            same resolved to a path on disk for the voice. Empty for the
+            preset's own state. */
+        std::string stateFile;
+        std::string statePath;
+
         /** Field-wise, the floats by bit pattern (-Wfloat-equal). */
         bool sameAs (const FxSetting& other) const noexcept
         {
             if (slot != other.slot || enabled != other.enabled || fxId != other.fxId
-                 || values.size() != other.values.size())
+                 || stateFile != other.stateFile || values.size() != other.values.size())
                 return false;
 
             for (std::size_t i = 0; i < values.size(); ++i)

@@ -554,6 +554,12 @@ namespace wfg::doc
         /** Half a second at 50 Hz. See `beginTransaction`. */
         static constexpr std::int64_t coalescingWindowTicks = 25;
 
+        /*  Two and a half seconds at 50 Hz: how long after a turn of an
+            insert's parameters its captured state still joins the turn's
+            step - the helper's quiet moment (a second and a half) and the
+            round trip, with room. A default the author may overturn. */
+        static constexpr std::int64_t captureJoinWindowTicks = 125;
+
         /*  Takes back, or puts back, one transaction - and answers with its
             NAME, which the command logs as an applied argument so that a replay
             popping a differently named transaction fails on that record with

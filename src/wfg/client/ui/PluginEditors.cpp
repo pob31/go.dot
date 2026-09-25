@@ -19,6 +19,7 @@
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/FxEditor.h>
 #include <wfg/client/model/Text.h>
+#include <wfg/engine/cue/FxValues.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/plugin/Catalogue.h>
 
@@ -142,6 +143,7 @@ namespace wfg::client::ui
         spec.sampleRate = begin.sampleRate;
         spec.blockSize = begin.blockSize;
         spec.channels = begin.channels;
+        spec.stateFolder = begin.stateFolder;
         spec.headless = headless;
         spec.launch = launch;
 
@@ -169,18 +171,10 @@ namespace wfg::client::ui
         auto& entry = open[pluginId];
         entry = Open {};
         entry.host = std::move (host);
+        entry.canKeepState = ! begin.stateFolder.empty();
 
         //  The first subject at once, so the window opens on the cue it was asked for.
-        const auto subject = model::readEditorSubject (snapshot, cueId, pluginId);
-        entry.host->setSubject ({ subject.cueId, subject.fxId, subject.title, subject.reason,
-                                  subject.greyed, subject.values });
-        entry.subjectSent = true;
-        entry.cueSent = subject.cueId;
-        entry.fxSent = subject.fxId;
-        entry.titleSent = subject.title;
-        entry.reasonSent = subject.reason;
-        entry.greyedSent = subject.greyed;
-        entry.valuesSent = subject.values;
+        hand (entry, model::readEditorSubject (snapshot, cueId, pluginId));
 
         say (pluginId, "opening its window...");
         startTimer (20);
@@ -230,37 +224,42 @@ namespace wfg::client::ui
 
             const auto subject = model::readEditorSubject (snapshot, pickedCueId, pluginId);
 
-            const auto sameSubject = entry.subjectSent && subject.cueId == entry.cueSent && subject.fxId == entry.fxSent
-                                       && subject.title == entry.titleSent && subject.reason == entry.reasonSent
-                                       && subject.greyed == entry.greyedSent;
-
-            if (! sameSubject)
+            if (! subject.sameSubjectAs (entry.sent))
             {
-                entry.host->setSubject ({ subject.cueId, subject.fxId, subject.title, subject.reason,
-                                          subject.greyed, subject.values });
-                entry.subjectSent = true;
-                entry.cueSent = subject.cueId;
-                entry.fxSent = subject.fxId;
-                entry.titleSent = subject.title;
-                entry.reasonSent = subject.reason;
-                entry.greyedSent = subject.greyed;
-                entry.valuesSent = subject.values;
+                hand (entry, subject);
             }
-            else if (subject.values != entry.valuesSent)
+            else if (subject.values != entry.sent.values)
             {
                 entry.host->setLive (subject.values);
-                entry.valuesSent = subject.values;
+                entry.sent.values = subject.values;
             }
         }
+    }
+
+    void PluginEditors::hand (Open& entry, const model::EditorSubject& subject)
+    {
+        plugin::EditorHost::Subject handed;
+        handed.cueId = subject.cueId;
+        handed.fxId = subject.fxId;
+        handed.title = subject.title;
+        handed.reason = subject.reason;
+        handed.greyed = subject.greyed;
+        handed.values = subject.values;
+        handed.statePath = subject.statePath;
+
+        entry.host->setSubject (handed);
+        entry.sent = subject;
     }
 
     void PluginEditors::closeAll()
     {
         waiting.reset();
 
+        /*  NOTHING KEPT ON THE WAY OUT: this is the lock, and a write under
+            the lock would be refused anyway. */
         for (auto& [pluginId, entry] : open)
             if (entry.host != nullptr)
-                entry.host->leave();
+                entry.host->leave (false);
 
         open.clear();
         stopTimer();
@@ -309,6 +308,20 @@ namespace wfg::client::ui
                 if (actions.set)
                     actions.set (model::fxParameterAddress (where.first, where.second), valueText (value));
 
+            /*  THE WHOLE STATE, KEPT: after the values, so the turn goes out
+                first and the capture joins it. Taken whether or not the helper
+                is still there - one is made on the way out. */
+            while (const auto kept = host.takeCapture())
+            {
+                std::map<int, double> values;
+
+                for (std::size_t i = 0; i < kept->values.size(); ++i)
+                    values[static_cast<int> (i)] = std::round (static_cast<double> (kept->values[i]) * 1.0e6) / 1.0e6;
+
+                if (actions.capture)
+                    actions.capture (kept->fxId, kept->stateFile, cue::formatFxValues (values));
+            }
+
             switch (host.status())
             {
                 case plugin::EditorHost::Status::starting:
@@ -316,7 +329,9 @@ namespace wfg::client::ui
                     break;
 
                 case plugin::EditorHost::Status::open:
-                    say (pluginId, entry.leaving ? "closing its window..." : "its window is open");
+                    say (pluginId, entry.leaving ? "closing its window..."
+                                 : entry.canKeepState ? "its window is open"
+                                 : "its window is open - save the show to keep its whole state");
                     break;
 
                 case plugin::EditorHost::Status::failed:

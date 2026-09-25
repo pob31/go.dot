@@ -109,6 +109,14 @@ namespace wfg::client::model
             if (index >= 0 && index < count)
                 out.values[static_cast<std::size_t> (index)] = static_cast<float> (value);
 
+        /*  AND ITS WHOLE STATE, a name under the bundle's plugins/ as the
+            row holds it, joined to the open bundle's folder. */
+        const auto stateFile = text (snapshot, "/godot/fx/" + out.fxId + "/stateFile");
+        const auto bundle = text (snapshot, "/godot/document/path");
+
+        if (! stateFile.empty() && ! bundle.empty())
+            out.statePath = bundle + "/plugins/" + stateFile;
+
         return out;
     }
 
@@ -131,6 +139,9 @@ namespace wfg::client::model
 
         if (! preset.empty() && ! bundle.empty())
             out.presetPath = bundle + "/plugins/" + preset;
+
+        if (! bundle.empty())
+            out.stateFolder = bundle + "/plugins/state";
 
         if (const auto rate = integer (snapshot, "/godot/audio/actualSampleRate"); rate > 0)
             out.sampleRate = rate;

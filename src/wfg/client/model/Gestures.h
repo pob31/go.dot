@@ -135,6 +135,11 @@ namespace wfg::client::gesture
         declared in the set from the machine's known list, with the four words
         a replay needs; and a fresh child for an entry that failed. */
     Event createFx (const std::string& cueId, const std::string& pluginId);
+
+    /*  A plugin's whole state kept with a cue (author, 2026-09-25): the file
+        its editing helper wrote under the bundle's plugins/, and every
+        parameter's value, in one step. */
+    Event captureFx (const std::string& fxId, const std::string& stateFile, const std::string& values);
     Event createPlugin (const std::string& name, const std::string& identifier,
                         const std::string& format, const std::string& path);
     Event restartPlugin (const std::string& pluginId);

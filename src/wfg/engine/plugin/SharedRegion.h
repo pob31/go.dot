@@ -57,7 +57,7 @@ namespace wfg::plugin::region
     constexpr std::uint32_t magic = 0x746f6447u;
 
     /** Bumped whenever a structure below changes shape. */
-    constexpr std::uint32_t version = 1;
+    constexpr std::uint32_t version = 2;
 
     /** The most parameters a plugin may expose through the proxy; a plugin
         with more has the rest neither published nor written. */
@@ -65,6 +65,9 @@ namespace wfg::plugin::region
 
     /** Room for the child's one sentence about why it is not up. */
     constexpr int problemChars = 256;
+
+    /** Room for the path of a cue's state file. */
+    constexpr int pathChars = 1024;
 
     /** A parameter value the child reads as "use the baseline" (§17.4). */
     constexpr float useBaseline = -1.0f;
@@ -135,6 +138,22 @@ namespace wfg::plugin::region
         /** Bumped by the parent at an arm; the child resets the instance
             before the next block so the previous cue's tail is not in it. */
         std::atomic<std::uint32_t> resetSeq;
+
+        /*  A CUE'S WHOLE STATE, loaded onto this lane's instance before the cue
+            may launch (the author's decision of 2026-09-25). One in flight:
+            the parent writes `statePath` - absolute, empty for the preset's
+            own state - only while `stateDoneSeq` has caught up, then stores
+            `stateRequestSeq` with release. The child loads it on its message
+            thread with the lane parked (answered dry, never missed), puts the
+            lane's values back on top, and answers with the sequence in
+            `stateDoneSeq`, having written first whether it failed, why, and
+            how long it took. */
+        std::atomic<std::uint64_t> stateRequestSeq;
+        std::atomic<std::uint64_t> stateDoneSeq;
+        std::atomic<std::uint32_t> stateFailed;
+        std::atomic<std::uint32_t> stateLoadMicros;
+        char statePath[pathChars];
+        char stateProblem[problemChars];
 
         /** Normalised 0..1, or `useBaseline`. */
         std::atomic<float> params[maxParams];

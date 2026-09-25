@@ -57,11 +57,16 @@ namespace wfg::client::model
         /** One per parameter: 0..1, or -1 where the cue does not say. */
         std::vector<float> values;
 
-        /** The same cue and the same words: only the values may differ. */
+        /*  The cue's whole state for the plugin, as a file in the open
+            bundle, absolute; empty for the preset (the author's decision of
+            2026-09-25). */
+        std::string statePath;
+
+        /** The same cue, the same words, the same state: only the values may differ. */
         bool sameSubjectAs (const EditorSubject& other) const
         {
             return cueId == other.cueId && fxId == other.fxId && title == other.title
-                && reason == other.reason && greyed == other.greyed;
+                && reason == other.reason && greyed == other.greyed && statePath == other.statePath;
         }
     };
 
@@ -74,6 +79,10 @@ namespace wfg::client::model
         std::string identifier;         ///< empty when the set has no such entry
         std::string name;
         std::string presetPath;         ///< absolute, in the open bundle; empty for none
+
+        /*  Where a cue's whole state is kept: the open bundle's plugins/state/.
+            Empty for a show that has no folder yet - nothing can be kept. */
+        std::string stateFolder;
 
         int sampleRate = 48000;
         int blockSize = 512;

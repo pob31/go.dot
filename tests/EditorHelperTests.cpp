@@ -40,6 +40,7 @@
 #include <chrono>
 #include <cmath>
 #include <memory>
+#include <optional>
 #include <thread>
 #include <vector>
 
@@ -271,6 +272,183 @@ TEST_CASE ("editor helper: the test gain comes up with no window, takes a subjec
         host.kill();
         REQUIRE (waitFor (host, [&] { return host.status() == Status::ended; }, 3000));
     }
+}
+
+TEST_CASE ("editor helper: the whole state is kept a moment after the hand stops, and only when the hand changed it")
+{
+    /*  The author's decision of 2026-09-25: a plugin's whole state kept per
+        cue. The test gain's Pad is the thing that is not a parameter; the
+        helper captures after its quiet moment, names the file by its bytes,
+        and says which insert it was for. What it must never do: capture a
+        state nobody changed, capture for a greyed window, or take a value the
+        cue sent it for a hand. */
+    Folder folder;
+    auto spec = testGainEditor (folder);
+    spec.stateFolder = folder.path.getChildFile ("plugins").getChildFile ("state").getFullPathName().toStdString();
+
+    plugin::EditorHost host (std::move (spec));
+
+    std::string why;
+    REQUIRE_MESSAGE (host.start (why), why);
+    REQUIRE (waitFor (host, [&] { return host.status() == Status::open; }));
+
+    host.setSubject (subjectOf ("CUE00001", "FX000001", { 0.5f, 0.0f }));
+    REQUIRE (waitFor (host, [&] { return host.subjectTaken() == 1u; }));
+
+    const auto quietly = [&host] (int milliseconds)
+    {
+        waitFor (host, [] { return false; }, milliseconds);
+    };
+
+    const auto capture = [&host] (int milliseconds)
+    {
+        std::optional<plugin::EditorHost::Capture> taken;
+        waitFor (host, [&] { taken = host.takeCapture(); return taken.has_value(); }, milliseconds);
+        return taken;
+    };
+
+    const auto stateFile = [&folder] (const std::string& name)
+    {
+        return folder.path.getChildFile ("plugins").getChildFile (juce::String (name));
+    };
+
+    SUBCASE ("Pad, which is no parameter, is kept: one file, named by its bytes, and every value")
+    {
+        host.poke (-1, 0.0f);
+
+        //  Not before the quiet moment...
+        quietly (600);
+        CHECK_FALSE (host.takeCapture().has_value());
+
+        //  ...but after it.
+        const auto kept = capture (4000);
+        REQUIRE (kept.has_value());
+        CHECK (kept->fxId == "FX000001");
+        CHECK (kept->stateFile.rfind ("state/PG7N0001-", 0) == 0);
+        CHECK (kept->stateFile.size() == std::string ("state/PG7N0001-0123456789abcdef.state").size());
+        REQUIRE (kept->values.size() == 2);
+        CHECK (near (kept->values[0], 0.5f));
+
+        const auto file = stateFile (kept->stateFile);
+        REQUIRE (file.existsAsFile());
+        CHECK (file.loadFileAsString().contains ("pad=1"));
+
+        //  And nothing more while nothing more happens.
+        quietly (2000);
+        CHECK_FALSE (host.takeCapture().has_value());
+
+        SUBCASE ("the same state again is no new capture")
+        {
+            host.poke (-1, 0.0f);
+            quietly (100);
+            host.poke (-1, 0.0f);
+            quietly (2500);
+            CHECK_FALSE (host.takeCapture().has_value());
+        }
+    }
+
+    SUBCASE ("a turn of a knob is kept too, as the turn's own state")
+    {
+        /*  The tree's echo of the turn, as the client hands it over - without
+            it the helper would, rightly, put Gain back where the cue says. */
+        host.poke (0, 0.8f);
+        host.setLive ({ 0.8f, 0.0f });
+        const auto kept = capture (4000);
+        REQUIRE (kept.has_value());
+        CHECK (near (kept->values[0], 0.8f));
+        CHECK (stateFile (kept->stateFile).loadFileAsString().contains ("gain=0.8"));
+    }
+
+    SUBCASE ("moving to another cue keeps the last one's under ITS insert, at once")
+    {
+        host.poke (-1, 0.0f);
+        quietly (100);
+        host.setSubject (subjectOf ("CUE00003", "FX000003", { 0.5f, 0.0f }));
+
+        const auto kept = capture (1000);
+        REQUIRE (kept.has_value());
+        CHECK (kept->fxId == "FX000001");
+    }
+
+    SUBCASE ("values the cue sends are not a hand, and are never kept")
+    {
+        host.setLive ({ 0.9f, 0.0f });
+        REQUIRE (waitFor (host, [&] { return near (host.currentValue (0), 0.9f); }));
+        quietly (2500);
+        CHECK_FALSE (host.takeCapture().has_value());
+    }
+
+    SUBCASE ("a greyed window keeps nothing")
+    {
+        auto greyed = subjectOf ("CUE00002", "", {});
+        greyed.greyed = true;
+        host.setSubject (greyed);
+        REQUIRE (waitFor (host, [&] { return host.subjectTaken() == 2u; }));
+
+        host.poke (-1, 0.0f);
+        quietly (2500);
+        CHECK_FALSE (host.takeCapture().has_value());
+    }
+
+    SUBCASE ("leaving keeps what the hand did, read after the helper has gone; leaving at once does not")
+    {
+        host.poke (-1, 0.0f);
+        quietly (100);
+        host.leave (true);
+        REQUIRE (waitFor (host, [&] { return host.status() == Status::ended; }, 3000));
+
+        const auto kept = host.takeCapture();
+        REQUIRE (kept.has_value());
+        CHECK (kept->fxId == "FX000001");
+    }
+
+    SUBCASE ("the lock's leave keeps nothing")
+    {
+        host.poke (-1, 0.0f);
+        quietly (100);
+        host.leave (false);
+        REQUIRE (waitFor (host, [&] { return host.status() == Status::ended; }, 3000));
+        CHECK_FALSE (host.takeCapture().has_value());
+    }
+
+    SUBCASE ("a cue's state is put on the plugin, and what the hand does next keeps it")
+    {
+        const auto padded = stateFile ("state/PG7N0001-feedfacefeedface.state");
+        padded.getParentDirectory().createDirectory();
+        REQUIRE (padded.replaceWithText ("gain=0.5\ndie=0\npad=1\n"));
+
+        auto withState = subjectOf ("CUE00004", "FX000004", { 0.5f, 0.0f });
+        withState.statePath = padded.getFullPathName().toStdString();
+        host.setSubject (withState);
+        REQUIRE (waitFor (host, [&] { return host.subjectTaken() == 2u; }));
+
+        host.poke (0, 0.3f);
+        host.setLive ({ 0.3f, 0.0f });
+        const auto kept = capture (4000);
+        REQUIRE (kept.has_value());
+        CHECK (kept->fxId == "FX000004");
+
+        const auto text = stateFile (kept->stateFile).loadFileAsString();
+        CHECK (text.contains ("pad=1"));
+        CHECK (text.contains ("gain=0.3"));
+    }
+}
+
+TEST_CASE ("editor helper: a show with no folder keeps no state")
+{
+    Folder folder;
+    plugin::EditorHost host (testGainEditor (folder));    // no state folder
+
+    std::string why;
+    REQUIRE_MESSAGE (host.start (why), why);
+    REQUIRE (waitFor (host, [&] { return host.status() == Status::open; }));
+
+    host.setSubject (subjectOf ("CUE00001", "FX000001", { 0.5f, 0.0f }));
+    REQUIRE (waitFor (host, [&] { return host.subjectTaken() == 1u; }));
+
+    host.poke (-1, 0.0f);
+    waitFor (host, [] { return false; }, 2500);
+    CHECK_FALSE (host.takeCapture().has_value());
 }
 
 TEST_CASE ("editor helper: a real window, when somebody asks for one")

@@ -574,6 +574,7 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::createSend ("B3N8R5TW", "J3MT5XYA"),
         gesture::eqReset ("B3N8R5TW"),
         gesture::createFx ("B3N8R5TW", "PG7N0001"),
+        gesture::captureFx ("FX7N0001", "state/PG7N0001-0123456789abcdef.state", "0:0.5 1:0"),
         gesture::createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "C:/plugins/verb.vst3"),
         gesture::restartPlugin ("PG7N0001"),
         gesture::createPort ("Lights"),

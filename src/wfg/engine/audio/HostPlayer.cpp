@@ -68,11 +68,17 @@ namespace wfg::audio
     void HostPlayer::serviceArms()
     {
         std::vector<cue::ArmRequest> work;
+        std::vector<StateWanted> states;
 
         {
             const std::lock_guard<std::mutex> lock { queueMutex };
             work.swap (queued);
+            states.swap (statesQueued);
         }
+
+        for (const auto& wanted : states)
+            if (auto* lane = audioHost.proxyLane (wanted.track, wanted.slot))
+                lane->wantState (wanted.path);
 
         for (const auto& request : work)
         {
@@ -125,7 +131,7 @@ namespace wfg::audio
                 the cue sets, the instance reset before its next block (Phase
                 9a, PR 9a.8). */
             for (const auto& fx : request.fx)
-                audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values);
+                audioHost.snapTrackFx (request.track, fx.slot, fx.enabled, fx.values, fx.statePath);
 
             /*  The voice is yours. Whether the sound would come out YET is a
                 different question, asked separately through isArmReady - the
@@ -231,6 +237,22 @@ namespace wfg::audio
 
     bool HostPlayer::isArmReady (int track) const
     {
-        return audioHost.isTrackSourceReady (track);
+        /*  READY IS THE DISK AND THE STATES: a cue whose plugin is still
+            taking its whole state would sound through the last cue's
+            (the author's decision of 2026-09-25) - so it waits, and is late
+            by the load rather than wrong, and `run.late` says by how much. */
+        return audioHost.isTrackSourceReady (track) && audioHost.isTrackFxSettled (track);
+    }
+
+    void HostPlayer::requestFxState (int track, int slot, const std::string& path)
+    {
+        /*  The tick thread: the lane counts it NOW, so a launch due this tick
+            waits; the path goes to the message thread, under the same short
+            lock an arm takes. */
+        if (auto* lane = audioHost.proxyLane (track, slot))
+            lane->expectState();
+
+        const std::lock_guard<std::mutex> lock { queueMutex };
+        statesQueued.push_back ({ track, slot, path });
     }
 }

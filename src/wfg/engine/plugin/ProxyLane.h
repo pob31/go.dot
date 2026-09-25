@@ -21,6 +21,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -110,6 +111,50 @@ namespace wfg::plugin
         void requestReset() noexcept;
 
         //======================================================================
+        /*  A CUE'S WHOLE STATE (the author's decision of 2026-09-25): what the
+            plugin's own window changed that is not a parameter, kept per cue
+            as a file, loaded onto this voice's instance before the cue may
+            launch. The lane keeps which state it was asked for, which it
+            holds, and the one in flight; the arm waits on `stateSettled`.
+
+            Message thread, at an arm: this lane should hold that state - a
+            file, absolute, or empty for the preset's own. */
+        void wantState (const std::string& path);
+
+        /*  The tick thread, when a cue's state changes after its arm and
+            before its launch: the path follows from the message thread, but
+            the launch must wait from NOW, so the count moves here. */
+        void expectState() noexcept;
+
+        /*  Any thread, the tick thread's question at every launch: nothing
+            this lane was asked to load is still loading. A lane that is not
+            switched in, not called or not bound has nothing to wait for. */
+        bool stateSettled() const noexcept;
+
+        /** What one pass of the host's poll found. */
+        struct StateNews
+        {
+            bool arrived = false;       ///< a load finished - `failed` and `problem` say how
+            bool failed = false;
+            bool late = false;          ///< one has been loading for longer than it may
+            double loadMs = 0.0;
+            std::string problem;
+        };
+
+        /*  The host's poll, message thread: sends the wanted state when none
+            is in flight (settling at once when the lane holds it already),
+            and reads the child's answer when it comes. */
+        StateNews serviceState (std::uint32_t nowMs);
+
+        /*  A new child holds the preset's own state and nothing in flight:
+            the one that was loading when the last child died is not sent
+            again - it may be what killed it. */
+        void forgetState();
+
+        /** How long a state may load before the host calls the child hung. */
+        static constexpr std::uint32_t stateLoadLimitMs = 5000;
+
+        //======================================================================
         /*  The audio thread. Sends `numChannels` channels of `numSamples`
             frames, up to the region's shape, and takes the answer in place;
             leaves the block untouched when the lane is off, unbound, not to
@@ -144,6 +189,14 @@ namespace wfg::plugin
         std::atomic<std::int64_t> deadlineUs { defaultDeadlineMicroseconds };
 
         std::atomic<float> shadow[region::maxParams];
+
+        std::atomic<std::uint64_t> wantedStateSeq { 0 };
+        std::atomic<std::uint64_t> settledStateSeq { 0 };
+        std::string wantedStatePath, heldStatePath, flightStatePath;
+        std::uint64_t flightStateSeq = 0;
+        std::uint64_t pathStateSeq = 0;     ///< the count `wantedStatePath` belongs to
+        std::uint32_t flightSentAt = 0;
+        bool stateInFlight = false;
 
         std::atomic<std::uint64_t> blockCount { 0 };
         std::atomic<std::uint64_t> answeredCount { 0 };

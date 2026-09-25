@@ -48,6 +48,7 @@
     the tree; the one snapshot read stays in the client's pass.
 */
 
+#include <wfg/client/model/FxEditor.h>
 #include <wfg/engine/plugin/EditorHost.h>
 
 #include <juce_events/juce_events.h>
@@ -73,6 +74,11 @@ namespace wfg::client::ui
 
             /** `fx.create`, when Edit... is pressed on an insert the cue has not got. */
             std::function<void (const std::string& cueId, const std::string& pluginId)> createFx;
+
+            /*  `fx.capture`: a plugin's whole state kept with a cue - the file
+                the helper wrote, and every value, in the row's spelling. */
+            std::function<void (const std::string& fxId, const std::string& stateFile,
+                                const std::string& values)> capture;
 
             /** The show's key, pressed in a plugin's window: true for Esc, false for Space. */
             std::function<void (bool escape)> key;
@@ -119,16 +125,18 @@ namespace wfg::client::ui
         struct Open
         {
             std::unique_ptr<plugin::EditorHost> host;
-            std::string cueSent;
-            bool subjectSent = false;
             bool leaving = false;
 
-            /*  The last subject handed over, for telling a new cue from new
-                values on the same one. */
-            std::string fxSent, titleSent, reasonSent;
-            bool greyedSent = true;
-            std::vector<float> valuesSent;
+            /*  Whether the show has a folder to keep a whole state in; a
+                window on one that has not says to save it first. */
+            bool canKeepState = false;
+
+            /*  The last subject handed over, for telling a new cue (or a new
+                state, after an undo) from new values on the same one. */
+            model::EditorSubject sent;
         };
+
+        void hand (Open&, const model::EditorSubject&);
 
         struct Waiting
         {

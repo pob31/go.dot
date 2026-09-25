@@ -38,6 +38,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -64,6 +65,11 @@ namespace wfg::plugin
 
         /** Where the region and the description go. */
         std::string workFolder;
+
+        /*  Where the plugin's whole state is kept: the open bundle's
+            plugins/state/. Empty when the show has no folder yet - then
+            nothing is captured, and the chain says to save the show first. */
+        std::string stateFolder;
 
         int sampleRate = 48000;
         int blockSize = 512;
@@ -109,6 +115,9 @@ namespace wfg::plugin
             std::string reason;
             bool greyed = true;
             std::vector<float> values;      ///< 0..1, or editor::restsAtPreset
+
+            /** The cue's whole state for the plugin, absolute; empty for the preset. */
+            std::string statePath;
         };
 
         /*  Hands the helper a subject. If it has not taken the last one yet,
@@ -139,8 +148,23 @@ namespace wfg::plugin
             empty when the subject was greyed or is too old to remember. */
         std::string fxIdFor (std::uint32_t subjectSeq) const;
 
-        /** Asks the helper to leave; `poll()` sees it go. */
-        void leave();
+        /*  Asks the helper to leave; `poll()` sees it go. Keeping the
+            plugin's state first, if a hand changed it, unless told not to -
+            the lock, where the write would be refused anyway. */
+        void leave (bool keepState = true);
+
+        /** A plugin's whole state the helper kept: which insert, the row's file name, every value. */
+        struct Capture
+        {
+            std::string fxId;
+            std::string stateFile;
+            std::vector<float> values;
+        };
+
+        /*  The capture the helper has made and nobody has taken, if any -
+            read even after the helper has gone, since one is made on the way
+            out. Taking it frees the mailbox for the next. */
+        std::optional<Capture> takeCapture();
 
         std::int64_t pid() const noexcept;
 

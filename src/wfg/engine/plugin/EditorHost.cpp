@@ -147,6 +147,11 @@ namespace wfg::plugin
             if (! spec.presetPath.empty())
                 command.push_back ("--preset=" + spec.presetPath);
 
+            if (! spec.stateFolder.empty())
+                command.push_back ("--state-folder=" + spec.stateFolder);
+
+            command.push_back ("--plugin-id=" + spec.pluginId);
+
             if (! spec.descriptionXml.empty())
             {
                 descriptionFile = regionFile.withFileExtension ("plugin.xml");
@@ -226,9 +231,9 @@ namespace wfg::plugin
                 child->kill();
         }
 
-        static std::size_t strnlenOf (const char* text)
+        static std::size_t strnlenOf (const char* text, std::size_t size = editor::textChars)
         {
-            return static_cast<std::size_t> (std::find (text, text + editor::textChars, '\0') - text);
+            return static_cast<std::size_t> (std::find (text, text + size, '\0') - text);
         }
 
         /*  THE WAITING SUBJECT, handed over once the helper has taken the
@@ -262,6 +267,7 @@ namespace wfg::plugin
             writeText (region->subject.fxId, sizeof (region->subject.fxId), s.fxId);
             writeText (region->subject.title, sizeof (region->subject.title), s.title);
             writeText (region->subject.reason, sizeof (region->subject.reason), s.reason);
+            writeText (region->subject.statePath, sizeof (region->subject.statePath), s.statePath);
             region->subject.greyed.store (s.greyed ? 1u : 0u, std::memory_order_relaxed);
             region->subject.valueCount.store (static_cast<std::uint32_t> (count), std::memory_order_relaxed);
             region->subjectSeq.store (seq, std::memory_order_release);
@@ -370,10 +376,36 @@ namespace wfg::plugin
         return {};
     }
 
-    void EditorHost::leave()
+    void EditorHost::leave (bool keepState)
     {
         if (impl->region != nullptr)
-            impl->region->shouldExit.store (1, std::memory_order_release);
+            impl->region->shouldExit.store (keepState ? 1u : 2u, std::memory_order_release);
+    }
+
+    std::optional<EditorHost::Capture> EditorHost::takeCapture()
+    {
+        auto* region = impl->region;
+
+        if (region == nullptr)
+            return std::nullopt;
+
+        const auto seq = region->captureSeq.load (std::memory_order_acquire);
+
+        if (seq == region->captureAck.load (std::memory_order_relaxed))
+            return std::nullopt;
+
+        Capture capture;
+        capture.fxId.assign (region->captureFxId, Impl::strnlenOf (region->captureFxId, sizeof (region->captureFxId)));
+        capture.stateFile.assign (region->captureFile, Impl::strnlenOf (region->captureFile, sizeof (region->captureFile)));
+
+        const auto count = std::min<std::uint32_t> (region->captureCount.load (std::memory_order_relaxed),
+                                                    static_cast<std::uint32_t> (editor::maxParams));
+
+        for (std::uint32_t i = 0; i < count; ++i)
+            capture.values.push_back (region->captureValues[i].load (std::memory_order_relaxed));
+
+        region->captureAck.store (seq, std::memory_order_release);
+        return capture;
     }
 
     std::int64_t EditorHost::pid() const noexcept

@@ -77,6 +77,12 @@ namespace wfg::client::gesture
                  { osc::Value::string (cueId), osc::Value::string (pluginId) } };
     }
 
+    Event captureFx (const std::string& fxId, const std::string& stateFile, const std::string& values)
+    {
+        return { origin::window, "fx.capture",
+                 { osc::Value::string (fxId), osc::Value::string (stateFile), osc::Value::string (values) } };
+    }
+
     Event createPlugin (const std::string& name, const std::string& identifier,
                         const std::string& format, const std::string& path)
     {

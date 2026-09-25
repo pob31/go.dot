@@ -136,6 +136,7 @@ add_library(wfg_engine STATIC
     wfg/engine/plugin/ProxyLane.cpp
     wfg/engine/plugin/ProxyHost.h
     wfg/engine/plugin/ProxyHost.cpp
+    wfg/engine/plugin/TestGainState.h
     wfg/engine/plugin/PluginLoad.h
     wfg/engine/plugin/PluginLoad.cpp
     wfg/engine/plugin/PluginHostChild.h

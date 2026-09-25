@@ -1956,6 +1956,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="stateFile">
+          <a:documentation>The whole state of the plugin for this cue, as a file under the plugins/ folder of the bundle, by name - state/ then the entry-s id and the start of a hash of the bytes - or empty for the preset of the entry. What the own window of the plugin changes that is not a parameter (an impulse response, a sample, a mode) is kept here, captured by the editing helper a moment after the hand stops (author, 2026-09-25); it is loaded onto the voice when the cue is armed, before it may launch, and values sit on top of it. Files are never changed once written, so undo points the row back at an older one. A file and not the bytes, for the reason media/file is.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="values">
           <a:documentation>The parameter values this cue sets, as index:value pairs space-separated, each value normalised 0..1 as the plugin takes it, and only the parameters somebody changed: one absent rests at the set entry-s preset. Writable whole for a script; a hand writes ONE parameter through the p&lt;n&gt; nodes beneath, one node a parameter, so a rotary-s turn is one address and one undo step (PRD 4.10).</a:documentation>
           <data type="string"/>

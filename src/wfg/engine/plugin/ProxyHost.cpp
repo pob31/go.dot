@@ -72,6 +72,8 @@ namespace wfg::plugin
             status.problem = problem;
             status.latencySamples = latencySamples;
             status.paramCount = paramCount;
+            status.stateLoadMs = stateLoadMs;
+            status.stateProblem = stateProblem;
             return status;
         }
 
@@ -185,6 +187,7 @@ namespace wfg::plugin
                 {
                     lane->setCallEnabled (false);
                     lane->clearMisses();
+                    lane->forgetState();
                 }
 
             juce::StringArray command;
@@ -398,7 +401,36 @@ namespace wfg::plugin
                 header->wantSpin.store (anyEnabled ? 1u : 0u, std::memory_order_relaxed);
 
                 if (child == nullptr || ! child->isRunning())
+                {
                     fail ("the plugin host process died");
+                    return;
+                }
+
+                /*  A CUE'S WHOLE STATE onto each voice that is asked for one
+                    (the author's decision of 2026-09-25), one in flight a
+                    lane, the child's answer read back: how long it took, and
+                    why it could not. A child that has been loading one for
+                    five seconds is hung, and failed like any other. */
+                for (auto* lane : lanes)
+                {
+                    if (lane == nullptr)
+                        continue;
+
+                    const auto news = lane->serviceState (now);
+
+                    if (news.late)
+                    {
+                        fail ("a cue's state has been loading for more than five seconds: the plugin host is stuck");
+                        return;
+                    }
+
+                    if (news.arrived)
+                    {
+                        stateLoadMs = news.loadMs;
+                        stateProblem = news.failed ? news.problem : std::string();
+                        publish();
+                    }
+                }
 
                 return;
             }
@@ -462,6 +494,8 @@ namespace wfg::plugin
         std::string problem;
         int latencySamples = 0;
         int paramCount = 0;
+        double stateLoadMs = 0.0;
+        std::string stateProblem;
         std::int64_t deadlineUs = ProxyLane::defaultDeadlineMicroseconds;
 
         std::uint32_t launchedAt = 0;

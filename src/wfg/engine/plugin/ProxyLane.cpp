@@ -18,6 +18,8 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdio>
+#include <cstring>
 
 namespace wfg::plugin
 {
@@ -146,6 +148,108 @@ namespace wfg::plugin
     {
         if (auto* bound = lane.load (std::memory_order_acquire))
             bound->resetSeq.fetch_add (1, std::memory_order_release);
+    }
+
+    //==============================================================================
+    void ProxyLane::wantState (const std::string& path)
+    {
+        wantedStatePath = path;
+        pathStateSeq = wantedStateSeq.fetch_add (1, std::memory_order_acq_rel) + 1;
+    }
+
+    void ProxyLane::expectState() noexcept
+    {
+        wantedStateSeq.fetch_add (1, std::memory_order_acq_rel);
+    }
+
+    bool ProxyLane::stateSettled() const noexcept
+    {
+        if (enabled.load (std::memory_order_relaxed) == 0
+             || callEnabled.load (std::memory_order_relaxed) == 0
+             || lane.load (std::memory_order_acquire) == nullptr)
+            return true;
+
+        return settledStateSeq.load (std::memory_order_acquire) >= wantedStateSeq.load (std::memory_order_acquire);
+    }
+
+    ProxyLane::StateNews ProxyLane::serviceState (std::uint32_t nowMs)
+    {
+        StateNews news;
+        auto* bound = lane.load (std::memory_order_acquire);
+
+        if (bound == nullptr)
+            return news;
+
+        if (stateInFlight)
+        {
+            if (bound->stateDoneSeq.load (std::memory_order_acquire) < flightStateSeq)
+            {
+                news.late = nowMs - flightSentAt > stateLoadLimitMs;
+                return news;
+            }
+
+            /*  ANSWERED. A load that failed left the instance on the preset's
+                own state, so that is what the lane holds - and it is not
+                tried again until the next arm asks. */
+            news.arrived = true;
+            news.failed = bound->stateFailed.load (std::memory_order_relaxed) != 0;
+            news.loadMs = static_cast<double> (bound->stateLoadMicros.load (std::memory_order_relaxed)) / 1000.0;
+
+            if (news.failed)
+            {
+                bound->stateProblem[region::problemChars - 1] = 0;
+                news.problem = bound->stateProblem;
+            }
+
+            heldStatePath = news.failed ? std::string() : flightStatePath;
+            stateInFlight = false;
+            settledStateSeq.store (flightStateSeq, std::memory_order_release);
+            return news;
+        }
+
+        const auto wanted = wantedStateSeq.load (std::memory_order_acquire);
+
+        if (wanted <= settledStateSeq.load (std::memory_order_relaxed))
+            return news;
+
+        /*  A STATE ANNOUNCED AND NOT YET NAMED: the tick thread counted it,
+            and its path is still on the way from the message thread's queue.
+            Neither settled nor sent until it arrives, so no launch slips
+            through on the path before it. */
+        if (wanted != pathStateSeq)
+            return news;
+
+        //  HELD ALREADY: nothing to load, and the arm need not wait.
+        if (wantedStatePath == heldStatePath)
+        {
+            settledStateSeq.store (wanted, std::memory_order_release);
+            return news;
+        }
+
+        std::memset (bound->statePath, 0, sizeof (bound->statePath));
+        std::snprintf (bound->statePath, sizeof (bound->statePath), "%s", wantedStatePath.c_str());
+
+        flightStatePath = wantedStatePath;
+        flightStateSeq = wanted;
+        flightSentAt = nowMs;
+        stateInFlight = true;
+        bound->stateRequestSeq.store (wanted, std::memory_order_release);
+        return news;
+    }
+
+    void ProxyLane::forgetState()
+    {
+        if (stateInFlight)
+        {
+            stateInFlight = false;
+            settledStateSeq.store (flightStateSeq, std::memory_order_release);
+        }
+
+        heldStatePath.clear();
+
+        if (auto* bound = lane.load (std::memory_order_acquire))
+            bound->stateDoneSeq.store (bound->stateRequestSeq.load (std::memory_order_acquire),
+                                       std::memory_order_release);
     }
 
     //==============================================================================

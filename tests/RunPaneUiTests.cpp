@@ -1259,7 +1259,7 @@ namespace
     /*  A TREE BY HAND: the few nodes the plugin windows read, sorted as a
         snapshot must be. Enough for a media cue with the test gain switched
         in, a memo beside it, and the set's one entry. */
-    std::shared_ptr<const wfg::tree::TreeSnapshot> editorTree (bool withInsert)
+    std::shared_ptr<const wfg::tree::TreeSnapshot> editorTree (bool withInsert, const std::string& bundle = {})
     {
         std::vector<wfg::tree::Node> nodes;
 
@@ -1286,6 +1286,9 @@ namespace
             add ("/godot/fx/FX7N0001/plugin", Value::string ("PG7N0001"));
             add ("/godot/fx/FX7N0001/values", Value::string ("0:0.25"));
         }
+
+        if (! bundle.empty())
+            add ("/godot/document/path", Value::string (bundle));
 
         add ("/godot/plugin/PG7N0001/identifier", Value::string ("godot:test-gain"));
         add ("/godot/plugin/PG7N0001/name", Value::string ("Test gain"));
@@ -1342,9 +1345,14 @@ TEST_CASE ("plugin windows: Edit... opens a helper on the cue, a turn is one wri
     actions.createFx = [&] (const std::string& cue, const std::string& plugin) { made.emplace_back (cue, plugin); };
     actions.changed = [&] { ++changes; };
 
+    std::vector<std::vector<std::string>> kept;
+    actions.capture = [&] (const std::string& fxId, const std::string& file, const std::string& values)
+    { kept.push_back ({ fxId, file, values }); };
+
     {
         ui::PluginEditors editors (actions, {}, folder.getFullPathName().toStdString(), launchOfThisBinary(), true);
-        const auto tree = editorTree (true);
+        const auto bundle = folder.getChildFile ("show");
+        const auto tree = editorTree (true, bundle.getFullPathName().toStdString());
 
         editors.edit (*tree, "CUE00001", "PG7N0001", false);
         auto* host = editors.hostFor ("PG7N0001");
@@ -1376,6 +1384,17 @@ TEST_CASE ("plugin windows: Edit... opens a helper on the cue, a turn is one wri
             juce::Thread::sleep (150);
             editors.service();
             CHECK (written.empty());
+        }
+
+        SUBCASE ("the plugin's whole state is kept with the cue: one fx.capture, the file in the bundle")
+        {
+            host->poke (-1, 0.0f);      // Pad: no parameter, only state
+            REQUIRE (serviceUntil (editors, [&] { return ! kept.empty(); }, 6000));
+            REQUIRE (kept.size() == 1);
+            CHECK (kept[0][0] == "FX7N0001");
+            CHECK (kept[0][1].rfind ("state/PG7N0001-", 0) == 0);
+            CHECK (kept[0][2] == "0:0.25 1:0");
+            CHECK (bundle.getChildFile ("plugins").getChildFile (juce::String (kept[0][1])).existsAsFile());
         }
 
         SUBCASE ("the lock closes every window and says why")

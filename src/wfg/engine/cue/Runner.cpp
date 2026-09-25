@@ -2569,6 +2569,22 @@ namespace wfg::cue
         requestArmOn (engine, cue, *run, numberOf (cue, "level"));
     }
 
+    std::string Runner::statePathOf (const std::string& named) const
+    {
+        if (named.empty() || pluginsFolder.empty())
+            return {};
+
+        /*  NOTHING OUTSIDE plugins/: `fx.capture` refuses such a name, but a
+            script may write the row whole, and a state is bytes a plugin is
+            made to believe. */
+        const auto climbs = named.find ("..") != std::string::npos || named.find (':') != std::string::npos
+                              || named.front() == '/' || named.front() == '\\';
+
+        return juce::File (juce::String (pluginsFolder))
+                   .getChildFile (climbs ? juce::String ("not-a-state-in-this-bundle") : juce::String (named))
+                   .getFullPathName().toStdString();
+    }
+
     std::string Runner::mediaPathOf (const std::string& named) const
     {
         /*  RESOLVED AGAINST THE BUNDLE. A run's copy of the file name is
@@ -6715,6 +6731,8 @@ namespace wfg::cue
 
                 setting.fxId = child.getProperty ("id").toString().toStdString();
                 setting.enabled = schema.flag (child, "fx", "enabled");
+                setting.stateFile = schema.text (child, "fx", "stateFile");
+                setting.statePath = statePathOf (setting.stateFile);
 
                 for (const auto& [index, value] : parseFxValues (schema.text (child, "fx", "values")))
                     setting.values.emplace_back (index, static_cast<float> (value));
@@ -6770,6 +6788,13 @@ namespace wfg::cue
 
                 if (next.enabled != last.enabled)
                     audio->setFxEnabled (run->track, next.slot, next.enabled);
+
+                /*  A NEW STATE ON A CUE THAT HAS NOT LAUNCHED is loaded before
+                    it may (an undo in standby, a capture while it waits); on
+                    one already sounding it is not - the knobs follow live, and
+                    the rest applies the next time the cue plays. */
+                if (next.stateFile != last.stateFile && run->launchedAtSample == 0 && next.enabled)
+                    audio->requestFxState (run->track, next.slot, next.statePath);
 
                 /*  Both sorted by index: one walk finds what moved, what
                     appeared and what went. */

@@ -806,7 +806,30 @@ namespace wfg::doc
                                             && tick >= lastWriteTick
                                             && tick - lastWriteTick <= coalescingWindowTicks;
 
-        if (! joinsOpenTransaction)
+        /*  A PLUGIN'S STATE JOINS THE TURN THAT LEFT IT (the author's decision
+            of 2026-09-25: "one Undo"). The editing helper keeps a plugin's
+            whole state with the cue a moment after the hand stops, as
+            `fx.capture` - and when the last write was a turn of THAT insert's
+            parameters, from the same origin, within the window, the capture
+            is part of the same thing somebody did and joins its step. Keyed on
+            logged ticks and origins, so a replay splits exactly as the session
+            did. A capture after anything else - an impulse response loaded,
+            which moves no parameter - is a step of its own. */
+        const auto captured = (commandName == "fx.capture" && ! args.empty() && args[0].isString())
+                                ? args[0].getString()
+                                : std::string {};
+        const auto turnPrefix = "/godot/fx/" + captured + "/p";
+
+        const auto joinsTurn = ! captured.empty()
+                                 && lastWriteAddress.size() > turnPrefix.size()
+                                 && lastWriteAddress.compare (0, turnPrefix.size(), turnPrefix) == 0
+                                 && lastWriteAddress[turnPrefix.size()] >= '0'
+                                 && lastWriteAddress[turnPrefix.size()] <= '9'
+                                 && writeOrigin == lastWriteOrigin
+                                 && tick >= lastWriteTick
+                                 && tick - lastWriteTick <= captureJoinWindowTicks;
+
+        if (! joinsOpenTransaction && ! joinsTurn)
         {
             /*  EVERY DOMAIN, because which one a command writes to is the
                 command's business and not this hook's, and naming a transaction

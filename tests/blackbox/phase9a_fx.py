@@ -244,13 +244,167 @@ def run(locale: "str | None") -> int:
     return report.finish()
 
 
+STATE_NAME = f"state/{PLUGIN}-0000000000000001.state"
+PADDED = SOURCE * 0.5 * 0.25
+PAD_TOLERANCE = 0.008
+
+
+def run_state(locale: "str | None") -> int:
+    """THE WHOLE STATE PER CUE (the author's decision of 2026-09-25), heard.
+
+    The test gain's Pad is no parameter - only state - and a quarter of the
+    gain. A state file with Pad on is put in the bundle, as the editing helper
+    would write it; `fx.capture` names it on the cue; GO, and the cue is heard
+    at a quarter of a half. Then Undo takes the capture back, the cue is fired
+    again, and it is heard at a half: the voice went back to the preset's own
+    state, because no state is a state. `wfg replay` reproduces the session,
+    with no child and no files read."""
+    report = Report(f"phase 9a: a cue's whole plugin state, heard ({locale or 'C'})")
+    with tempfile.TemporaryDirectory(prefix="wfg-phase9a-state-") as scratch:
+        room = Path(scratch)
+        bundle = common.copy_bundle(FIXTURE, room / "fx")
+        render = room / "out.wav"
+        log = room / "session.wfglog"
+        replayed = room / "replayed"
+        (bundle / "media").mkdir(exist_ok=True)
+        write_constant(bundle / "media" / "tone.wav", seconds=30.0)
+        (bundle / "plugins" / "state").mkdir(parents=True, exist_ok=True)
+        (bundle / "plugins" / STATE_NAME).write_text("gain=0.5\ndie=0\npad=1\n")
+
+        padded_at = 0
+        plain_at = 0
+
+        with Server(bundle, log=log, locale=locale, sample_rate=RATE,
+                    buffer_size=BLOCK, hosted=True, render=render,
+                    proxy_deadline_us=20000) as server:
+            hand = Hand(server)
+            try:
+                report.equal(wait_for(server, f"/godot/plugin/{PLUGIN}/state", "loaded"), "loaded",
+                             "the test-gain child comes up")
+
+                hand.send("/godot/cmd/fx/create", [MEDIA, PLUGIN])
+                fx_id = None
+
+                def made():
+                    nonlocal fx_id
+                    listed = value_of(server, f"/godot/cue/{MEDIA}/fx")
+                    if listed:
+                        fx_id = str(listed).split()[0]
+                    return bool(fx_id)
+
+                report.check(common.wait_until(made, timeout=10.0), "fx.create switches the entry in", str(fx_id))
+                if fx_id is None:
+                    raise HarnessError("no Fx was made")
+
+                hand.send("/godot/cmd/fx/capture", [fx_id, STATE_NAME, "0:0.5 1:0"])
+                report.equal(wait_for(server, f"/godot/fx/{fx_id}/stateFile", STATE_NAME), STATE_NAME,
+                             "fx.capture names the state file on the cue")
+                report.equal(value_of(server, f"/godot/fx/{fx_id}/values"), "0:0.5 1:0",
+                             "and every value beside it")
+
+                hand.send("/godot/cmd/go")
+                report.check(wait_for_frames(render, int(RATE * 3.0)), "the render runs three seconds past GO")
+                padded_at = first_sound.frames_on_disk(render)
+
+                load_ms = value_of(server, f"/godot/plugin/{PLUGIN}/stateLoadMs")
+                report.check(isinstance(load_ms, (int, float)) and load_ms >= 0,
+                             "the entry says how long the state took to load", str(load_ms))
+                report.equal(value_of(server, f"/godot/plugin/{PLUGIN}/stateProblem") or "", "",
+                             "and that it loaded")
+
+                hand.send("/godot/cmd/run/killAll")
+
+                # THE KILLED RUN FINISHED BEFORE THE CUE IS FIRED AGAIN. On a
+                # one-track show a firing inside ~50 ms of a kill plays silence
+                # while reporting `playing` - found by this driver, with no
+                # plugin at all, and not this driver's to prove.
+                def quiet():
+                    status, body = common.http_get(server.http_port, "/godot/run")
+                    if status != 200:
+                        return False
+                    contents = common.json.loads(body).get("CONTENTS") or {}
+                    for node in contents.values():
+                        leaves = node.get("CONTENTS") or {}
+                        state = ((leaves.get("state") or {}).get("VALUE") or [None])[0]
+                        if state in ("armed", "playing", "stopping"):
+                            return False
+                    return True
+
+                report.check(common.wait_until(quiet, timeout=10.0), "the kill finishes the run")
+                hand.send("/godot/cmd/undo")
+                report.equal(wait_for(server, f"/godot/fx/{fx_id}/stateFile", ""), "",
+                             "Undo takes the capture back")
+                hand.send("/godot/cmd/cue/fire", [MEDIA])
+                fired_at = first_sound.frames_on_disk(render)
+                report.check(wait_for_frames(render, fired_at + int(RATE * 3.0)),
+                             "the render runs three seconds past the second firing")
+                plain_at = fired_at
+
+                report.equal(value_of(server, "/godot/engine/rtViolations"), 0,
+                             "Go.dot's own code allocated nothing on the audio thread")
+                first_sound.wait_for_render_tail(render)
+            finally:
+                hand.close()
+
+        channels, data = first_sound.read_render(render)
+        left = data[0] if data else []
+        start = first_sound.first_above(left, 0.005)
+        report.check(start >= 0, "the cue was heard at all")
+
+        # THE SECOND WINDOW IS THE RENDER'S LAST SECOND, not one measured from
+        # the frames on disk when the cue was fired: the writer flushes in its
+        # own time, so that count lags the sound and a window placed by it can
+        # land in the gap between the kill and the second firing. The second
+        # run plays a thirty-second file past the end of the session.
+        if start >= 0 and len(left) > plain_at + int(RATE * 2.5):
+            padded = level(left, start + int(RATE * 1.0))
+            plain = level(left, len(left) - int(RATE * 1.5))
+            report.check(abs(padded - PADDED) <= PAD_TOLERANCE,
+                         "with the state's Pad on, the cue is heard at a quarter of a half",
+                         f"{padded:.4f} against {PADDED:.4f}")
+            report.check(abs(plain - SOURCE * 0.5) <= TOLERANCE,
+                         "and after Undo, fired again, at a half - the preset's own state, back",
+                         f"{plain:.4f} against {SOURCE * 0.5:.4f}")
+        else:
+            report.check(False, "the render is long enough to read both windows",
+                         f"{len(left)} frames, padded at {padded_at}, plain at {plain_at}")
+
+        code, out, err = common.run_wfg("replay", str(log), f"--bundle={bundle}", f"--out={replayed}")
+        report.equal(code, 0, "and `wfg replay` reproduces the session, reading no state file",
+                     (out + err).strip()[-400:])
+        report.check("reproduced exactly" in out, "saying so in as many words")
+
+        # AND `wfg validate` SAYS WHEN THE FILE IS GONE: a copy of the fixture
+        # with a cue naming a state, first with the file and then without it.
+        checked = common.copy_bundle(FIXTURE, room / "checked" / "fx")
+        (checked / "media").mkdir(exist_ok=True)
+        write_constant(checked / "media" / "tone.wav", seconds=1.0)
+        show = checked / "show.xml"
+        route = '<Route id="FX000003" bus="FX000004" gains="1 0 0 1"/>'
+        show.write_text(show.read_text().replace(
+            route, route + f'\n        <Fx id="FX000007" plugin="{PLUGIN}" stateFile="{STATE_NAME}"/>', 1))
+        (checked / "plugins" / "state").mkdir(parents=True, exist_ok=True)
+        (checked / "plugins" / STATE_NAME).write_text("gain=0.5\ndie=0\npad=1\n")
+
+        code, out, err = common.run_wfg("validate", str(checked))
+        report.equal(code, 0, "wfg validate finds the state a cue names in the bundle", (out + err).strip()[-400:])
+
+        (checked / "plugins" / STATE_NAME).unlink()
+        code, out, err = common.run_wfg("validate", str(checked))
+        report.check(code != 0 and "which this bundle does not have" in err,
+                     "and says, in words, when it is not there", (out + err).strip()[-400:])
+    return report.finish()
+
+
 def main(argv: "list[str]") -> int:
     locale = None
     for argument in argv[1:]:
         if argument.startswith("--wfg-locale="):
             locale = argument.split("=", 1)[1]
     try:
-        return run(locale)
+        first = run(locale)
+        second = run_state(locale)
+        return first or second
     except HarnessError as error:
         print(f"harness: {error}", file=sys.stderr)
         return 2

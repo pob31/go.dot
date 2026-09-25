@@ -60,7 +60,7 @@ namespace wfg::plugin::editor
     constexpr std::uint32_t magic = 0x45746f47u;
 
     /** Bumped whenever the structure below changes shape. */
-    constexpr std::uint32_t version = 1;
+    constexpr std::uint32_t version = 2;
 
     constexpr int maxParams = region::maxParams;
     constexpr int idChars = 64;
@@ -102,6 +102,10 @@ namespace wfg::plugin::editor
         char title[textChars];
         char reason[textChars];
 
+        /*  The cue's whole state for this plugin, as a file - absolute - or
+            empty for the preset (the author's decision of 2026-09-25). */
+        char statePath[pathChars];
+
         /** Nought: the window is the cue's. One: it is greyed, and `reason` says why. */
         std::atomic<std::uint32_t> greyed;
 
@@ -119,7 +123,7 @@ namespace wfg::plugin::editor
         std::atomic<std::uint32_t> layoutHash;
 
         //==============================================================================
-        /** Parent to helper: 1 leave. */
+        /** Parent to helper: 1 leave, keeping the plugin's state first if a hand changed it; 2 leave now. */
         std::atomic<std::uint32_t> shouldExit;
 
         /** Parent to helper: whether the window is on screen. */
@@ -165,6 +169,21 @@ namespace wfg::plugin::editor
 
         /** Helper to parent: every parameter's value as the helper's plugin has it. */
         std::atomic<float> current[maxParams];
+
+        /*  A PLUGIN'S WHOLE STATE, KEPT (the author's decision of 2026-09-25).
+            The helper has written the bytes into the bundle, content-addressed,
+            and says so here: which insert it was, the file's name as the cue's
+            row will hold it, and every parameter's value. One in flight: the
+            helper writes only while `captureAck == captureSeq`, then bumps
+            `captureSeq`; the parent reads and answers with `captureAck`. It
+            outlives the helper - a capture made on the way out is read after
+            the process has gone. */
+        std::atomic<std::uint32_t> captureSeq;
+        std::atomic<std::uint32_t> captureAck;
+        char captureFxId[idChars];
+        char captureFile[textChars];
+        std::atomic<std::uint32_t> captureCount;
+        std::atomic<float> captureValues[maxParams];
 
         /*  THE EVENTS, one producer (the helper's message thread) and one
             consumer (the parent's timer). `ringWrite` is stored with release

@@ -41,6 +41,7 @@
     having to remember to mark the tree stale from a thread that must not.
 */
 
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <mutex>
@@ -64,6 +65,12 @@ namespace wfg::plugin
 
             /** How many parameters the catalogue knows for it. */
             int paramCount = 0;
+
+            /*  How long the last cue's whole state took to load onto a voice,
+                in milliseconds, and why the last one could not (author's
+                decision of 2026-09-25: the whole state per cue). */
+            double stateLoadMs = 0.0;
+            std::string stateProblem;
         };
 
         /** Replaces what is known about one entry. Answers whether anything a
@@ -77,7 +84,9 @@ namespace wfg::plugin
             const auto changed = held.state != status.state
                                    || held.problem != status.problem
                                    || held.latencySamples != status.latencySamples
-                                   || held.paramCount != status.paramCount;
+                                   || held.paramCount != status.paramCount
+                                   || held.stateProblem != status.stateProblem
+                                   || std::abs (held.stateLoadMs - status.stateLoadMs) > 1.0e-9;
             held = status;
 
             if (changed)

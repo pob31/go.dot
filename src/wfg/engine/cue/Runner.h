@@ -296,6 +296,12 @@ namespace wfg::cue
         virtual void setFxEnabled (int, int, bool) {}
         virtual void setFxParameter (int, int, int, float) {}
 
+        /*  A cue's whole state for one entry changed after its arm and before
+            its launch (the author's decision of 2026-09-25): load that one
+            instead, and hold the launch until it is in. The tick thread; a
+            player that hosts no plugin has nothing to do. */
+        virtual void requestFxState (int, int, const std::string&) {}
+
         /*  Whether that track's cue is sounding, out of any of its slots.
             Tick thread. Track-wide for the reason `stop` is: the question is
             about the cue. */
@@ -366,6 +372,11 @@ namespace wfg::cue
             the Player free of any idea what a bundle is - it is handed a path
             that exists, or the run fails before it gets there. */
         void setMediaFolder (std::string folder) { mediaFolder = std::move (folder); }
+
+        /*  Where a cue's plugin states live: the bundle's `plugins/` folder,
+            which a cue's `fx/stateFile` names a file under - as `media/` is to
+            `media/file`, and for the same reason. */
+        void setPluginsFolder (std::string folder) { pluginsFolder = std::move (folder); }
 
         /*  Where a MIDI cue's bytes go. Null is legal and is what a replay has:
             the run is created and finishes on the ticks the log says, and
@@ -970,6 +981,11 @@ namespace wfg::cue
         /** A bundle-relative file name as the path the audio side opens. */
         std::string mediaPathOf (const std::string& named) const;
 
+        /*  A state file's name resolved under the plugins folder - string
+            work, no disk. One that would climb out of it resolves to a file
+            that is not there, so the load fails in words. */
+        std::string statePathOf (const std::string& named) const;
+
         /*  Builds the runs a plan names, outermost first, under the groups
             `runFor` already holds, and the jobs that carry them on. A jump
             hands in an empty map; a group seek hands in the scene's own run
@@ -1140,6 +1156,7 @@ namespace wfg::cue
         Player* audio = nullptr;
         int samplesPerTick = 0;
         std::string mediaFolder;
+        std::string pluginsFolder;
 
         std::vector<FadeJob> running;
 

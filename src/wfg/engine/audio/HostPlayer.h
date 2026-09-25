@@ -86,6 +86,7 @@ namespace wfg::audio
         void setEq (int track, const EqSettings&) override;
         void setFxEnabled (int track, int slot, bool enabled) override;
         void setFxParameter (int track, int slot, int parameter, float normalised) override;
+        void requestFxState (int track, int slot, const std::string& path) override;
         bool isPlaying (int track) const override;
         bool isArmReady (int track) const override;
 
@@ -113,5 +114,10 @@ namespace wfg::audio
 
         std::mutex queueMutex;
         std::vector<cue::ArmRequest> queued;
+
+        /*  States asked for between an arm and its launch, for the message
+            thread: the lane was already told one is coming. */
+        struct StateWanted { int track = 0, slot = 0; std::string path; };
+        std::vector<StateWanted> statesQueued;
     };
 }

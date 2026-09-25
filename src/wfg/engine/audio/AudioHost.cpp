@@ -1747,14 +1747,31 @@ namespace wfg::audio
     }
 
     void AudioHost::snapTrackFx (int trackIndex, int slot, bool enabled,
-                                 const std::vector<std::pair<int, float>>& values) noexcept
+                                 const std::vector<std::pair<int, float>>& values,
+                                 const std::string& statePath)
     {
         if (auto* lane = proxyLane (trackIndex, slot))
         {
             lane->setValues (values);
             lane->setEnabled (enabled);
             lane->requestReset();
+
+            /*  AND ITS WHOLE STATE, when the cue switches it in: loaded before
+                the launch, the values above set again on top of it. A cue
+                with none asks for the preset's own - no state is a state, or
+                the last cue's would be heard under this one. */
+            if (enabled)
+                lane->wantState (statePath);
         }
+    }
+
+    bool AudioHost::isTrackFxSettled (int trackIndex) noexcept
+    {
+        for (int slot = 0; slot < impl->proxySlots; ++slot)
+            if (auto* lane = proxyLane (trackIndex, slot); lane != nullptr && ! lane->stateSettled())
+                return false;
+
+        return true;
     }
 
     void AudioHost::pollProxies()

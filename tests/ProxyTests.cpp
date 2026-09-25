@@ -35,6 +35,7 @@
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/PluginScan.h>
+#include <wfg/engine/plugin/EditorHost.h>
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/plugin/SharedRegion.h>
@@ -44,10 +45,12 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <new>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -390,6 +393,152 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
     CHECK_FALSE (juce::File (host.regionPath()).existsAsFile());
     CHECK_FALSE (lanes[0].isBound());
     CHECK (table.statusOf ("PG7N0001").state == "unloaded");
+}
+
+TEST_CASE ("proxy: a cue's whole state is loaded onto its voice before it may launch, the lane answering dry meanwhile")
+{
+    /*  The author's decision of 2026-09-25: a plugin's whole state kept per
+        cue and loaded onto the voice at the arm. The test gain's Pad - no
+        parameter, only state - is what makes it audible: a quarter of the
+        gain. What is pinned: the arm waits (`stateSettled`) until the child
+        has loaded it; the lane answers DRY while it loads and misses nothing;
+        the other voice plays on; the cue's values sit on top; the same state
+        twice loads nothing; no state after one is the preset's again; a file
+        that is not there is the preset with a sentence. */
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lanes[2];
+    plugin::ProxyHost host (testGainSpec (folder, 2), { &lanes[0], &lanes[1] }, &table);
+
+    std::string problem;
+    INFO ("start: " << problem);
+    REQUIRE (host.start (problem));
+    REQUIRE (waitForState (host, "loaded", 5000));
+
+    for (auto& lane : lanes)
+    {
+        lane.setDeadlineMicroseconds (200000);
+        lane.setEnabled (true);
+    }
+
+    host.poll();
+
+    const auto stateFile = [&folder] (const char* name, const char* text)
+    {
+        const auto file = folder.path.getChildFile (name);
+        REQUIRE (file.replaceWithText (text));
+        return file.getFullPathName().toStdString();
+    };
+
+    const auto settled = [&host] (plugin::ProxyLane& lane, int milliseconds)
+    {
+        const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+        while (std::chrono::steady_clock::now() < until)
+        {
+            host.poll();
+
+            if (lane.stateSettled())
+                return true;
+
+            std::this_thread::sleep_for (std::chrono::milliseconds (5));
+        }
+
+        return lane.stateSettled();
+    };
+
+    //  What a block of 0.8 comes back as, a few blocks in so any warm-up is past.
+    const auto play = [] (plugin::ProxyLane& lane)
+    {
+        Block block (2, 64, 0.8f);
+
+        for (int i = 0; i < 3; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), 0.8f);
+            lane.process (block.data(), 2, 64);
+        }
+
+        return block.storage.front();
+    };
+
+    const auto padded = stateFile ("padded.state", "gain=0.5\ndie=0\npad=1\n");
+
+    SUBCASE ("Pad in the state: the voice is a quarter as loud, the other voice is not, and the table says so")
+    {
+        lanes[0].wantState (padded);
+        CHECK_FALSE (lanes[0].stateSettled());
+        REQUIRE (settled (lanes[0], 3000));
+
+        CHECK (play (lanes[0]) == doctest::Approx (0.1f));      // 0.8 x 0.5 x 0.25
+        CHECK (play (lanes[1]) == doctest::Approx (0.4f));
+        CHECK (table.statusOf ("PG7N0001").stateProblem.empty());
+
+        SUBCASE ("the same state again loads nothing, and waits for nothing")
+        {
+            lanes[0].wantState (padded);
+            host.poll();
+            CHECK (lanes[0].stateSettled());
+        }
+
+        SUBCASE ("no state after one is the preset's again - or the last cue's would be heard")
+        {
+            lanes[0].wantState ({});
+            REQUIRE (settled (lanes[0], 3000));
+            CHECK (play (lanes[0]) == doctest::Approx (0.4f));
+        }
+
+        SUBCASE ("the cue's own values sit on top of its state")
+        {
+            lanes[0].setParameter (0, 1.0f);
+            CHECK (play (lanes[0]) == doctest::Approx (0.2f));  // 0.8 x 1 x 0.25
+        }
+    }
+
+    SUBCASE ("a slow state: the voice waits, answers dry and misses nothing, and the other voice plays on")
+    {
+        const auto slow = stateFile ("slow.state", "gain=0.5\ndie=0\npad=1\nloadDelayMs=300\n");
+        lanes[0].wantState (slow);
+        host.poll();
+
+        std::this_thread::sleep_for (std::chrono::milliseconds (80));
+        CHECK_FALSE (lanes[0].stateSettled());
+        CHECK (play (lanes[0]) == doctest::Approx (0.8f));      // parked: dry
+        CHECK (play (lanes[1]) == doctest::Approx (0.4f));
+
+        REQUIRE (settled (lanes[0], 3000));
+        CHECK (lanes[0].misses() == 0);
+        CHECK (play (lanes[0]) == doctest::Approx (0.1f));
+        CHECK (table.statusOf ("PG7N0001").stateLoadMs >= 250.0);
+    }
+
+    SUBCASE ("a file that is not there: the preset, and a sentence that says so")
+    {
+        lanes[0].wantState (folder.path.getChildFile ("nowhere.state").getFullPathName().toStdString());
+        REQUIRE (settled (lanes[0], 3000));
+        CHECK (table.statusOf ("PG7N0001").stateProblem.find ("not in the bundle") != std::string::npos);
+        CHECK (play (lanes[0]) == doctest::Approx (0.4f));
+    }
+
+    SUBCASE ("a lane the cue does not switch in has nothing to wait for")
+    {
+        lanes[1].setEnabled (false);
+        lanes[1].wantState (padded);
+        CHECK (lanes[1].stateSettled());
+    }
+
+    SUBCASE ("a state announced before its path settles nothing until the path arrives")
+    {
+        lanes[0].expectState();
+        host.poll();
+        host.poll();
+        CHECK_FALSE (lanes[0].stateSettled());
+
+        lanes[0].wantState (padded);
+        REQUIRE (settled (lanes[0], 3000));
+        CHECK (play (lanes[0]) == doctest::Approx (0.1f));
+    }
+
+    host.stop();
 }
 
 TEST_CASE ("proxy: a child killed mid-flight leaves the block dry, is marked failed with a sentence, stops being called, and comes back")
@@ -1006,6 +1155,188 @@ namespace
         }
 
         return spec;
+    }
+}
+
+TEST_CASE ("M35: a cue's whole state loaded onto a voice - how long it takes, and whether the other voices miss while it loads"
+           * doctest::skip())
+{
+    /*  THE COST OF THE AUTHOR'S CHOICE (decision AI, 2026-09-25, §17.13): a
+        plugin's whole state kept per cue and loaded onto the voice before the
+        cue launches. Two questions. How long a load takes - a cue fired cold
+        is late by that much, and `run.late` says so. And whether a load makes
+        the OTHER voices miss: the loading lane is parked and answers dry, but
+        a plugin whose setState takes a lock its process() also takes on other
+        instances would stall them - which only a real plugin can answer.
+
+        The states are made the way the product makes them: the editing
+        helper, headless, a parameter moved as a hand would and the state
+        captured. Then a two-voice child: voice one plays a block every block
+        period at the default deadline, voice two is loaded with the two states
+        in turn, twenty times; and the same length again with no loads, for
+        the misses a busy box has anyway. Run with
+        `WFG_REAL_VST3=<identifier> wfg_tests --test-case="M35*" --no-skip`. */
+    const auto realIdentifier = juce::SystemStats::getEnvironmentVariable ("WFG_REAL_VST3", {}).toStdString();
+    const auto storage = juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
+                            .getChildFile ("Go.dot").getChildFile ("engine").getFullPathName().toStdString();
+
+    MESSAGE ("M35 on " << juce::SystemStats::getOperatingSystemName() << ", "
+             << juce::SystemStats::getCpuModel() << ", " << juce::SystemStats::getNumCpus() << " cores");
+    MESSAGE ("plugin | state bytes | load min ms | median ms | max ms | voice-one misses while loading | the same time idle");
+
+    for (const auto& identifier : std::vector<std::string> { plugin::Catalogue::testGainIdentifier(), realIdentifier })
+    {
+        if (identifier.empty())
+            continue;
+
+        std::string xml;
+
+        if (identifier != plugin::Catalogue::testGainIdentifier())
+        {
+            xml = plugin::describePlugin (storage, identifier);
+
+            if (xml.empty())
+            {
+                MESSAGE ("the scan does not know " << identifier << "; skipped");
+                continue;
+            }
+        }
+
+        Folder folder;
+        const auto stateFolder = folder.path.getChildFile ("state");
+
+        //  TWO STATES, as a hand makes them in the plugin's own window.
+        std::vector<std::string> states;
+        {
+            plugin::EditorSpec edit;
+            edit.pluginId = "PG7N0001";
+            edit.identifier = identifier;
+            edit.descriptionXml = xml;
+            edit.workFolder = folder.string();
+            edit.stateFolder = stateFolder.getFullPathName().toStdString();
+            edit.headless = true;
+            edit.launch.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                         .getFullPathName().toStdString();
+
+            plugin::EditorHost helper (std::move (edit));
+            std::string why;
+            REQUIRE_MESSAGE (helper.start (why), why);
+
+            const auto until = [&helper] (auto done, int milliseconds)
+            {
+                const auto end = std::chrono::steady_clock::now() + std::chrono::milliseconds (milliseconds);
+
+                while (std::chrono::steady_clock::now() < end)
+                {
+                    helper.poll();
+
+                    if (done())
+                        return true;
+
+                    std::this_thread::sleep_for (std::chrono::milliseconds (10));
+                }
+
+                return done();
+            };
+
+            REQUIRE (until ([&] { return helper.status() == plugin::EditorHost::Status::open; }, 30000));
+            const auto count = std::max (1, helper.paramCount());
+            std::uint32_t seq = 0;
+
+            for (const auto value : { 0.2f, 0.8f })
+            {
+                std::vector<float> values (static_cast<std::size_t> (count), plugin::editor::restsAtPreset);
+                helper.setSubject ({ "CUE00001", "FX000001", "M35", {}, false, values, {} });
+                ++seq;
+                REQUIRE (until ([&] { return helper.subjectTaken() == seq; }, 5000));
+
+                helper.poke (0, value);
+                values[0] = value;
+                helper.setLive (values);
+
+                std::optional<plugin::EditorHost::Capture> kept;
+                REQUIRE (until ([&] { kept = helper.takeCapture(); return kept.has_value(); }, 8000));
+                states.push_back (folder.path.getChildFile (juce::String (kept->stateFile)).getFullPathName().toStdString());
+            }
+
+            helper.leave (false);
+        }
+
+        REQUIRE (states.size() == 2);
+        const auto bytes = juce::File (juce::String (states.front())).getSize();
+
+        //  A TWO-VOICE CHILD: voice one plays, voice two is loaded.
+        plugin::PluginTable table;
+        plugin::ProxyLane lanes[2];
+        auto spec = testGainSpec (folder, 2, 2, 64);
+        spec.identifier = identifier;
+        spec.descriptionXml = xml;
+        plugin::ProxyHost host (spec, { &lanes[0], &lanes[1] }, &table);
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        const auto up = waitForState (host, "loaded", 20000);
+        INFO (host.status().state << ": " << host.status().problem);
+        REQUIRE (up);
+
+        lanes[0].setEnabled (true);
+        lanes[1].setEnabled (true);
+        host.poll();
+
+        std::atomic<bool> playing { true };
+        std::thread voiceOne ([&lanes, &playing]
+        {
+            Block block (2, 64, 0.5f);
+            auto next = std::chrono::steady_clock::now();
+
+            while (playing.load())
+            {
+                lanes[0].process (block.data(), 2, 64);
+                next += std::chrono::microseconds (1333);
+                std::this_thread::sleep_until (next);
+            }
+        });
+
+        /*  WARMED UP FIRST: voice one's first block may find the worker in
+            its idle sleep, which is M31's "first after idle" and not a load's
+            doing - so the count starts once voice one has been playing. */
+        std::this_thread::sleep_for (std::chrono::milliseconds (200));
+
+        std::vector<double> loads;
+        const auto missesBefore = lanes[0].misses();
+        const auto loadingBegan = std::chrono::steady_clock::now();
+
+        for (int i = 0; i < 20; ++i)
+        {
+            lanes[1].wantState (states[static_cast<std::size_t> (i % 2)]);
+            const auto end = std::chrono::steady_clock::now() + std::chrono::seconds (10);
+
+            while (! lanes[1].stateSettled() && std::chrono::steady_clock::now() < end)
+            {
+                host.poll();
+                std::this_thread::sleep_for (std::chrono::milliseconds (1));
+            }
+
+            REQUIRE (lanes[1].stateSettled());
+            loads.push_back (table.statusOf ("PG7N0001").stateLoadMs);
+        }
+
+        const auto loadingTook = std::chrono::steady_clock::now() - loadingBegan;
+        const auto missesLoading = lanes[0].misses() - missesBefore;
+
+        //  The same length again with no loads: what this box misses anyway.
+        const auto idleBefore = lanes[0].misses();
+        std::this_thread::sleep_for (loadingTook);
+        const auto missesIdle = lanes[0].misses() - idleBefore;
+
+        playing.store (false);
+        voiceOne.join();
+        host.stop();
+
+        std::sort (loads.begin(), loads.end());
+        MESSAGE ((identifier == plugin::Catalogue::testGainIdentifier() ? std::string ("test-gain") : identifier) << " | "
+                 << bytes << " | " << loads.front() << " | " << loads[loads.size() / 2] << " | " << loads.back()
+                 << " | " << missesLoading << " | " << missesIdle);
     }
 }
 

@@ -535,7 +535,13 @@ namespace wfg::audio
             instance reset before its next block. Message thread, beside
             snapTrackEq. */
         void snapTrackFx (int trackIndex, int slot, bool enabled,
-                          const std::vector<std::pair<int, float>>& values) noexcept;
+                          const std::vector<std::pair<int, float>>& values,
+                          const std::string& statePath = {});
+
+        /*  The tick thread, at every launch: every entry this voice has
+            switched in holds the state its cue asked for - two atomics a
+            lane, nothing else. */
+        bool isTrackFxSettled (int trackIndex) noexcept;
 
         /** Message thread, every ten milliseconds: HostPlayer's timer. */
         void pollProxies();

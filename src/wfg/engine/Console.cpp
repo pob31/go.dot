@@ -1355,6 +1355,53 @@ namespace
         for (const auto& problem : analysis.referenceWarnings())
             result.problems.push_back (problem);
 
+        /*  AND A CUE'S WHOLE PLUGIN STATE THAT IS NOT THERE (the author's
+            decision of 2026-09-25: a plugin's whole state kept per cue, as a
+            file under the bundle's plugins/). The engine never reads the disk
+            for it - `fx.capture` runs on the tick thread, and a replay has no
+            files - so a state that went missing, a folder copied without its
+            plugins/, is found here or on the night. The show still runs: that
+            voice plays the preset with the cue's own values, which is what
+            each line says. */
+        if (target.isDirectory())
+        {
+            std::function<void (const juce::ValueTree&)> walk = [&] (const juce::ValueTree& node)
+            {
+                if (! node.hasType ("Fx"))
+                {
+                    for (const auto& child : node)
+                        walk (child);
+
+                    return;
+                }
+
+                const auto file = node.getProperty ("stateFile").toString();
+
+                if (file.isEmpty())
+                    return;
+
+                const auto cue = node.getParent();
+                const auto entry = document.findById (node.getProperty ("plugin").toString().toStdString());
+                const auto label = "cue " + cue.getProperty ("number").toString() + " \""
+                                     + cue.getProperty ("name").toString() + "\": its "
+                                     + (entry.isValid() ? entry.getProperty ("name").toString()
+                                                        : node.getProperty ("plugin").toString())
+                                     + " insert names ";
+                const auto climbs = file.contains ("..") || file.containsChar (':')
+                                      || file.startsWithChar ('/') || file.startsWithChar ('\\');
+
+                if (climbs)
+                    result.problems.push_back ((label + "a state outside the bundle's plugins/ folder - that voice"
+                                                        " will play the preset with the cue's own values").toStdString());
+                else if (! target.getChildFile ("plugins").getChildFile (file).existsAsFile())
+                    result.problems.push_back ((label + "plugins/" + file + ", which this bundle does not have -"
+                                                        " that voice will play the preset with the cue's own values")
+                                                   .toStdString());
+            };
+
+            walk (document.root());
+        }
+
         for (const auto& problem : result.problems)
             std::cerr << "    " << problem << std::endl;
 
@@ -3314,6 +3361,7 @@ namespace
             runner.setPlayer (player.get());
             runner.setMediaFolder (target.getChildFile ("media")
                                      .getFullPathName().toStdString());
+            runner.setPluginsFolder (target.getChildFile ("plugins").getFullPathName().toStdString());
 
             blockSource = &deviceDriver->host().clock();
         }
@@ -3422,6 +3470,7 @@ namespace
             player = std::make_unique<wfg::audio::HostPlayer> (driver->host(), engine);
             runner.setPlayer (player.get());
             runner.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
+            runner.setPluginsFolder (target.getChildFile ("plugins").getFullPathName().toStdString());
 
             /*  And the restart, now there is a graph to restart in. */
             restartPlugin = [&driver] (const std::string& id, std::string& problem)
@@ -3965,6 +4014,7 @@ namespace
             }
             runner.setPlayer (player.get());
             runner.setMediaFolder (target.getChildFile ("media").getFullPathName().toStdString());
+            runner.setPluginsFolder (target.getChildFile ("plugins").getFullPathName().toStdString());
             sessionClock.use (*blockSource, ticks.rebaseAudio (rate));
             engine.submit ("engine", "audio.settingsReady",
                 { wfg::osc::Value::string (error), wfg::osc::Value::int32 (rate),

@@ -17,15 +17,40 @@
 #include <wfg/engine/document/DocumentCommands.h>
 
 #include <wfg/engine/document/CanonicalXml.h>
+#include <wfg/engine/cue/FxValues.h>
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace wfg::doc
 {
     namespace
     {
+        /*  A STATE FILE'S NAME, as the editing helper writes one: `state/`,
+            then letters, digits, hyphens and underscores, then `.state`.
+            Nothing that could climb out of plugins/ or name a file elsewhere. */
+        bool isStateFileName (const std::string& name)
+        {
+            constexpr std::string_view folder = "state/";
+            constexpr std::string_view extension = ".state";
+
+            if (name.size() <= folder.size() + extension.size()
+                  || name.compare (0, folder.size(), folder) != 0
+                  || name.compare (name.size() - extension.size(), extension.size(), extension) != 0)
+                return false;
+
+            const auto stem = std::string_view (name).substr (folder.size(),
+                                                              name.size() - folder.size() - extension.size());
+
+            for (const auto c : stem)
+                if (! ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_'))
+                    return false;
+
+            return true;
+        }
+
         /*  Every create command takes its identifier as an OPTIONAL last
             argument, and returns the one it used. That single convention is
             what makes replay work without randomness: the engine draws an
@@ -211,6 +236,50 @@ namespace wfg::doc
                                                                  id);
 
                             return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        /*  A PLUGIN'S WHOLE STATE, KEPT WITH A CUE (the author's decision of
+            2026-09-25). The editing helper has written the bytes into the
+            bundle - a fact about the disk, like a media file copied in - and
+            this is the decision: the Fx names that file and holds every
+            parameter's value beside it, in ONE transaction, so Undo takes both
+            back together. And when it follows a turn of the same insert's knobs
+            from the same hand, it joins that turn's step (ShowDocument's
+            beginTransaction): a turn and its state are one thing somebody did.
+
+            It never reads the disk - it runs on the tick thread, and a replay
+            has no files - so a name that is not in the bundle is `wfg
+            validate`'s to say. It refuses a name that could point anywhere but
+            plugins/state/. */
+        registry.add ({ "fx.capture",
+                        "Keeps a plugin's whole state with a cue: the file under the bundle's"
+                        " plugins/ folder its editing helper wrote, and every parameter's value"
+                        " beside it, in one step.",
+                        { { "fx", 's', false }, { "stateFile", 's', false }, { "values", 's', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto fxId = args[0].getString();
+                            const auto file = args[1].getString();
+
+                            if (! document.findById (fxId).hasType ("Fx"))
+                                return Outcome::rejected (reason::unknownId);
+
+                            if (! isStateFileName (file))
+                                return Outcome::rejected (reason::badValue);
+
+                            const auto values = cue::formatFxValues (cue::parseFxValues (args[2].getString()));
+
+                            for (const auto& [row, text] : { std::pair<const char*, std::string> { "stateFile", file },
+                                                             std::pair<const char*, std::string> { "values", values } })
+                            {
+                                const auto edit = document.setAttribute ("/godot/fx/" + fxId + "/" + row, text);
+
+                                if (! edit.ok)
+                                    return Outcome::rejected (edit.reason);
+                            }
+
+                            return Outcome::ok (args);
                         } });
 
         registry.add ({ "group.wrap", "Create a group containing the selected cues in show order.",
