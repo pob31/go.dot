@@ -4220,7 +4220,7 @@ namespace
             if (wantWindow)
             {
                 wfg::ClientHost clientHost { engine, parameters, &mediaInfo,
-                                             [] { interrupted = 1; }, themePath, launchAnother };
+                                             [] { interrupted = 1; }, themePath, launchAnother, {}, {} };
 
                 /*  A PLUGIN'S DESCRIPTION, for its editing helper: off this
                     machine's scan, which the audio host has open when there
