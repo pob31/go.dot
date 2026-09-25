@@ -19,6 +19,8 @@
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <spatcore/ui/TypedValue.h>
+
 #include <algorithm>
 #include <cmath>
 #include <string>
@@ -71,10 +73,15 @@ namespace wfg::client::ui
 
             value.onTextChange = [this]
             {
-                const auto typed = osc::parseDouble (value.getText().trim().toStdString());
+                /*  READ THE WAY A PERSON TYPES IT, which is spatcore's typed
+                    reader and the one WFS-DIY's fields use: "2.5 kHz" in a
+                    frequency box is 2500, "-3 dB" is -3, a comma is a decimal
+                    point. A text with no number in it puts the box back
+                    rather than writing nought - nought is a real gain. */
+                const auto typed = spatcore::ui::typed::number (value.getText());
 
                 if (typed.has_value())
-                    owner.writeNumber (row, *typed, decimals);
+                    owner.writeNumber (row, static_cast<double> (*typed), decimals);
                 else
                     owner.refreshControls();
             };

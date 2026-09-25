@@ -20,6 +20,8 @@
 #include <wfg/client/ui/Look.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <spatcore/ui/TypedValue.h>
+
 #include <algorithm>
 #include <cmath>
 #include <utility>
@@ -58,11 +60,12 @@ namespace wfg::client::ui
 
             value.onTextChange = [this]
             {
-                /*  TYPED IS AS GOOD AS DRAGGED, and it goes through the same
-                    parse the rest of this client uses so that a French locale
-                    reads a comma. A refusal leaves the number where it was
-                    rather than writing nought, which is what `value_or` would
-                    have done to a mistyped level. */
+                /*  TYPED IS AS GOOD AS DRAGGED, and it is read the way a
+                    person types it (spatcore's typed reader, WFS-DIY's): a
+                    comma is a decimal point, "-6 dB" is -6 and the unit is not
+                    a mistake. A refusal leaves the number where it was rather
+                    than writing nought, which is what `value_or` would have
+                    done to a mistyped level - nought is full level. */
                 const auto typed = value.getText().trim();
 
                 if (typed.equalsIgnoreCase ("-inf") || typed.equalsIgnoreCase ("inf"))
@@ -71,8 +74,8 @@ namespace wfg::client::ui
                     return;
                 }
 
-                if (const auto parsed = osc::parseDouble (typed.toStdString()))
-                    owner.levelWanted (at, *parsed);
+                if (const auto parsed = spatcore::ui::typed::number (typed))
+                    owner.levelWanted (at, static_cast<double> (*parsed));
                 else
                     owner.refresh();
             };

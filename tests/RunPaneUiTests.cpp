@@ -428,6 +428,19 @@ TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes 
         CHECK (made.empty());
     }
 
+    SUBCASE ("a level is read the way it is typed, and a word writes nothing")
+    {
+        /*  "-6,5 dB" is what a French hand types into a box that showed -6;
+            "full" has no number in it, and writing nought for it would be
+            full level. */
+        boxes[2]->setText ("-6,5 dB", juce::sendNotificationSync);
+        boxes[2]->setText ("full", juce::sendNotificationSync);
+
+        REQUIRE (written.size() == 1);
+        CHECK (written[0].first == "/godot/send/SND00001/level");
+        CHECK (written[0].second == "-6.5");
+    }
+
     SUBCASE ("and the master writes the cue's own level, which is the DCA")
     {
         boxes[0]->setText ("0", juce::sendNotificationSync);
@@ -841,6 +854,22 @@ TEST_CASE ("eq panel: the numbers are drawn, a box writes one row, a switch writ
         REQUIRE (written.size() == 1);
         CHECK (written[0].first == "/godot/cue/CUE00001/eqB2Gain");
         CHECK (written[0].second == "24");
+    }
+
+    SUBCASE ("a box reads what a person types, unit and all")
+    {
+        /*  spatcore's typed reader: the unit is not a mistake, "k" is
+            thousands, a comma is a decimal point - and a text with no
+            number in it writes nothing, because nought is a real gain. */
+        boxes[5]->setText ("2.5 kHz", juce::sendNotificationSync);
+        boxes[6]->setText ("-3 dB", juce::sendNotificationSync);
+        boxes[7]->setText ("1,5", juce::sendNotificationSync);
+        boxes[6]->setText ("loud", juce::sendNotificationSync);
+
+        REQUIRE (written.size() == 3);
+        CHECK (written[0] == std::pair<std::string, std::string> ("/godot/cue/CUE00001/eqB2Freq", "2500"));
+        CHECK (written[1] == std::pair<std::string, std::string> ("/godot/cue/CUE00001/eqB2Gain", "-3"));
+        CHECK (written[2] == std::pair<std::string, std::string> ("/godot/cue/CUE00001/eqB2Q", "1.5"));
     }
 
     SUBCASE ("a switch writes a flag")

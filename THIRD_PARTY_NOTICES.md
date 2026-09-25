@@ -255,7 +255,7 @@ to need no OpenSSL.
 ## spatcore
 
 - **Website**: https://github.com/pob31/spatcore
-- **Version**: commit `cf7ba9faff12f455d2e3bc945f515e7536977005`
+- **Version**: commit `5803830150e408ad76c296cd9edbd5d9eba35dc3` (main, after PR #18)
 - **Licence**: GPLv3
 - **Copyright**: Pierre-Olivier Boulant
 
@@ -264,8 +264,10 @@ WFS-DIY, XOA and Tight-WFS. Consumed at **source level** — there is no
 `add_subdirectory`, because spatcore's own CMake targets call
 `juce_add_modules()` and would compile JUCE a second time in this build tree.
 
-Two headers from it are compiled here: `io/DeviceHost.h` and
-`rt/RtThreadPriority.h`. spatcore itself builds against JUCE 9.0.2 and Go.dot
+What is compiled here: `io/DeviceHost.h`, `io/TestSignalGenerator.h`,
+`rt/RtThreadPriority.h`, `ui/patch/PatchMatrixComponent.{h,cpp}` with
+`PatchMatrixConfig.h`, and `ui/TypedValue.h` (how a typed value is read, in the
+foot's number boxes). spatcore itself builds against JUCE 9.0.2 and Go.dot
 against JUCE 8.0.13, so a header is compiled here before anything depends on
 it. Go.dot's OSC codec is its own because spatcore's drops bundle time tags and
 cannot write `T`/`F` — not because of the JUCE version. Full text:
