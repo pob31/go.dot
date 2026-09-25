@@ -10239,6 +10239,7 @@ the samples are not playing." The page model of `docs/godot-surface-pages-draft-
 | `/godot/cue/<id>/sends` | `s` | ro | none | this cue's sends by identifier: its Send children, then the ones made live |
 | `/godot/send/<id>/live` | `T`, false | ro | none | whether this send rides live - a value held, or the whole send made under the lock |
 | `/godot/document/live` | `i`, 0 | ro | none | how many changes ride live: what the window's bar counts |
+| `/godot/audio/mixes` | `s` | ro | none | the show's mix channels in output order - first channel, then identifier, the send mixer's own order - one a Send page's rotary |
 
 **The commands.**
 
@@ -10275,10 +10276,15 @@ bar is the answer. A live send's identifier is reserved in the registry, which a
 undo forgets; were another object to draw the same eight characters before Keep, that send would
 be skipped rather than made twice.
 
-**Built so far** (2026-09-25, on `main`): the switches (stage 1); `surface.aim` and the page rows
-(stage 2); SELECT and the EQ page on the bridge, `surface/SurfacePages`, the band colours from one
-header, `audio/EqColours.h` (stage 3); the live layer - `cue/LiveEdits`, the two doors, `live.keep`
-and `live.drop`, the Runner and tree overlays, `tests/fixtures/logs/live.wfglog` replayed in both
-locales (stage 4). **Still to build:** the Send page on the bridge; the window's part - the foot
-following a surface, the running pane's name aiming the rotaries, the switches in the EQ panel and
-the send mixer, the Keep / Discard bar; the page's inspector rows and commands.
+**Built** (2026-09-25, on `main`, in the plan's stages): the switches; `surface.aim` and the page
+rows; SELECT and the EQ page on the bridge (`surface/SurfacePages`, the band colours from one header,
+`audio/EqColours.h`); the live layer (`cue/LiveEdits`, the two doors, `live.keep` and `live.drop`,
+the Runner and tree overlays, `tests/fixtures/logs/live.wfglog` replayed in both locales); the Send
+page (`/godot/audio/mixes`, a send created by a turn up from silence or a press, at nought); the
+window - the foot held on the surface's cue while its page adjusts it and handed back when the page
+closes, the band last turned ringed, the running pane's name aiming the rotaries with a mark,
+the band switches in the EQ panel and the send switches in the mixer, "live" said on both, and
+the Keep / Discard bar under the transport (`ui/LiveBarComponent`); and the page - the same bar's
+two buttons, a media cue's sends listed and inspected like its triggers, and `+` for a mix channel
+it does not reach. **Owed to the bench:** the port the master section's lights answer on, the
+detent laws, the colours at a glance - `tests/blackbox/make_d700_bench.py` walks them.

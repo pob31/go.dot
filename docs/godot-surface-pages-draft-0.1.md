@@ -10,6 +10,17 @@ section yet: what the author said is recorded as said, what is only proposed is 
 in another session**; the surface pages come after, on top of them. §8 is what the pages will need
 from that work, written so that session can provide it without having to guess.
 
+**Built, 2026-09-25: the EQ and Send pages on the D700** (and on a generic Mackie surface),
+specified by the author that evening and recorded as decisions AJ-AP in the namespace draft
+§17.14. What changed from what this draft proposed: the rotaries edit **the cue SELECT picked on a
+sample strip, or a running cue whose name was clicked in the window** - not the window's pick
+(§9 question 1); **under the edit lock the EQ and Send pages ride live and unsaved** until the show
+is unlocked, where a bar offers Keep or Discard - the opposite of §5.5's proposal (§9 question 3);
+each surface keeps its own page, and `*` leaves it (§9 question 5). The EQ map is the author's own
+sixteen controls, not §7.1's three a band; a press switches a band, a filter or a send in and out
+(new saved switches `eqB<n>On` and `send/on`), and SELECT's light is the pick. Pan, FX, the
+shortcuts, the Stream Deck and the Icon are not built.
+
 This document serves PRD §3.16 (control surfaces) and §3.18 (plugin hosting), and builds on the
 measured protocol (`docs/godot-asparion-d700-protocol-0.1.md`), the byte-level recipe book
 (`docs/D700_CONTROL_GUIDE.md`) and what Phase 6 built (`docs/godot-namespace-draft-0.1.md` §16).
@@ -170,6 +181,10 @@ The two halves of a show's life map onto the **edit lock** Phase 5 built:
 - **Locked is the show**: the Show page only — pads, DCAs, GO and stop, running items — and
   nothing that edits the show. The editing page buttons go dark under the lock.
 
+*Superseded for EQ and Send by the author's decision of 2026-09-25 (namespace draft §17.14, AM):*
+under the lock those two pages stay, and what they turn rides live - heard, not saved - until the
+show is unlocked and somebody keeps or discards it.
+
 Touch-start (namespace draft §16.5) stays a **Show-page rule**: on an editing page a touch is only
 a ride, because the fader is not over a sample.
 
@@ -313,14 +328,18 @@ flat four-part addresses - the document resolves nothing deeper:*
 Each with the recommendation made in the conversation.
 
 1. **Which cue a page edits** — the client's pick, shared as a live value (*recommended*); the
-   standby cue; or only a pick made on the surface.
+   standby cue; or only a pick made on the surface. **Answered 2026-09-25:** SELECT on a sample
+   strip, or a click on a running cue's name in the window (`surface.aim`); not the window's pick.
 2. **What Pan moves** — the route gains now; a WFS source position later; something else.
 3. **Under the edit lock** — the editing pages unavailable (*recommended*), or allowed.
+   **Answered 2026-09-25, against the recommendation:** EQ and Send ride live and unsaved; Keep or
+   Discard once unlocked.
 4. **Shortcuts** — fixed defaults in the D700 profile first and editable in the Surfaces tab later
    (*recommended*), or editable from the start; and **which commands** deserve a button (new cue,
    record, save, undo, lock).
 5. **Page switching** — each surface keeps its own page and the lock switches all together
-   (*recommended*), or one page for the whole room.
+   (*recommended*), or one page for the whole room. **Answered 2026-09-25:** each surface its own
+   page, left with `*`; the lock switches nothing, since the pages ride live under it.
 6. **Scope** — build the page model and add devices one at a time, the D700 first and the Stream
    Deck next (*recommended*), or draw every device first.
 7. **The EQ** — Go.dot's own built-in (*recommended*: known parameters, in-process, a page designed

@@ -414,6 +414,19 @@ per-cue **EQ and VST inserts are built first, in another session**
 sandbox and the inserts, decisions AD–AG — and two of the draft's eleven
 questions (7, the EQ; 8, where the inserts live) are answered by it.
 
+**Built 2026-09-25: the EQ and Send pages.** SELECT picks a sample strip's cue
+(`surface.aim`, also a click on a running cue's name in the window); EQ puts
+its EQ on the rotaries in the author's order, Send its send levels, paging and
+blinking the page, `*` leaving; band colours on the surrounds, the value on
+the ring, names and values on the screens. Each EQ band and send gained a
+saved switch. Under the edit lock EQ and sends ride live and unsaved
+(`cue/LiveEdits`), kept or discarded from a bar once the show is unlocked; the
+window's EQ panel and send mixer, and the page, ride live too. Decisions AJ-AP,
+namespace draft §17.14; the pages draft's §9 questions 1, 3 and 5 answered.
+**Owed to the bench:** which port the master section's lights answer on, how
+fast a detent should be, whether the colours read at a glance, and the author's
+walk of `make_d700_bench.py`.
+
 ---
 
 ## Phase 7 — Tablet client · M
