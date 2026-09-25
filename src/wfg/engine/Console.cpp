@@ -3744,12 +3744,12 @@ namespace
                                     One relaxed atomic on every other tick. */
                                 if (auto rebound = portBinder.take(); ! rebound.empty())
                                 {
-                                    for (auto& result : rebound)
+                                    for (auto& port : rebound)
                                     {
-                                        if (result.gone)
-                                            midiPorts.forget (result.id);
+                                        if (port.gone)
+                                            midiPorts.forget (port.id);
                                         else
-                                            midiPorts.setBinding (result.id, std::move (result.binding));
+                                            midiPorts.setBinding (port.id, std::move (port.binding));
                                     }
 
                                     declareSurfaces();
