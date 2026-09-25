@@ -496,19 +496,28 @@ TEST_CASE ("proxy: a cue's whole state is loaded onto its voice before it may la
 
     SUBCASE ("a slow state: the voice waits, answers dry and misses nothing, and the other voice plays on")
     {
-        const auto slow = stateFile ("slow.state", "gain=0.5\ndie=0\npad=1\nloadDelayMs=300\n");
+        /*  A LOAD LONG ENOUGH TO CATCH IN THE ACT on a loaded runner: the
+            child's loader picks the request up on its own timer, so the lane
+            is waited for until it is parked rather than assumed parked after
+            a fixed pause (macOS CI took longer than 80 ms to get there). */
+        const auto slow = stateFile ("slow.state", "gain=0.5\ndie=0\npad=1\nloadDelayMs=1500\n");
         lanes[0].wantState (slow);
         host.poll();
 
-        std::this_thread::sleep_for (std::chrono::milliseconds (80));
+        const auto parkedBy = std::chrono::steady_clock::now() + std::chrono::milliseconds (1200);
+        auto parked = false;
+
+        while (! parked && std::chrono::steady_clock::now() < parkedBy)
+            parked = std::abs (play (lanes[0]) - 0.8f) < 1.0e-4f;       // parked: dry
+
+        REQUIRE (parked);
         CHECK_FALSE (lanes[0].stateSettled());
-        CHECK (play (lanes[0]) == doctest::Approx (0.8f));      // parked: dry
         CHECK (play (lanes[1]) == doctest::Approx (0.4f));
 
-        REQUIRE (settled (lanes[0], 3000));
+        REQUIRE (settled (lanes[0], 5000));
         CHECK (lanes[0].misses() == 0);
         CHECK (play (lanes[0]) == doctest::Approx (0.1f));
-        CHECK (table.statusOf ("PG7N0001").stateLoadMs >= 250.0);
+        CHECK (table.statusOf ("PG7N0001").stateLoadMs >= 1400.0);
     }
 
     SUBCASE ("a file that is not there: the preset, and a sentence that says so")
@@ -679,7 +688,7 @@ TEST_CASE ("proxy: plugin.failed writes the table and plugin.restart reaches the
 {
     CommandRegistry registry;
     plugin::PluginTable table;
-    table.set ("PG7N0001", { "loaded", "", 12, 3 });
+    table.set ("PG7N0001", { "loaded", "", 12, 3, 0.0, {} });
 
     std::vector<std::string> restarted;
     plugin::PluginCommandHooks hooks;
