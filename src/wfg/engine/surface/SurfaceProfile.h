@@ -132,6 +132,14 @@ namespace wfg::surface
         - a free strip, a dca strip, a locked show - lights nothing. */
     inline constexpr std::int64_t startLevelFlashTicks = TickClock::rateHz / 2;
 
+    /*  A FLASHING LIGHT IS BLINKED BY THE BRIDGE, a quarter of a second on and
+        a quarter off: the D700 takes a light as on or off and nothing else
+        (control guide §4.2), so MCU's own flash - a velocity of one - lit it
+        steadily, and a solo waiting for its clip looked like one already
+        sounding (author, 2026-09-25: "Solo could be blinking before the
+        sample is started to show which one should be triggered"). */
+    inline constexpr std::int64_t blinkHalfTicks = TickClock::rateHz / 4;
+
     /** What a button means on a surface of this profile. `none` for every
         button a profile does not use, and for every button of a profile that
         has none (the virtual panel, a pad controller). */

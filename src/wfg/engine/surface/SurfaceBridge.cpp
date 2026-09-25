@@ -739,6 +739,20 @@ namespace wfg::surface
                 case McuEvent::Kind::fader:
                     if (auto* strip = stripAt (box, bank, event.strip))
                     {
+                        /*  ONLY A HAND WRITES A LEVEL (author, 2026-09-25: "The
+                            rec is using the wrong fader curve. Each press
+                            lowers the level from where it was recorded"). A
+                            position sent while nobody touches the fader is the
+                            motor saying where it has got to - the D700 says so
+                            on its way up to a start level - and taken as a
+                            level it pulled each recalled start down to wherever
+                            the motor was: a clip armed at -8.75 dB was written
+                            -11.08, and REC kept that. The bridge's own motor
+                            reckoning stands. A surface with no touch sense has
+                            only hands to send positions, so every one counts. */
+                        if (box.topology.hasTouch && ! strip->handDown)
+                            break;
+
                         /*  WHERE THE HAND PUT IT is where the fader is: the
                             motor is not sent there again when the engine
                             answers with the same value (the echo, §16.6). */
@@ -1178,6 +1192,17 @@ namespace wfg::surface
             strip.motor = next;
         }
 
+        /*  A FLASH AS THE LIGHT IS SENT: blinked here, a quarter of a second
+            each way (`blinkHalfTicks`), since the D700 lights a flash
+            steadily. Every other state goes as it is. */
+        static Led blinked (Led wanted, std::int64_t tick) noexcept
+        {
+            if (wanted != Led::flash)
+                return wanted;
+
+            return (tick / blinkHalfTicks) % 2 == 0 ? Led::on : Led::off;
+        }
+
         static bool changed (Row& row, std::string_view source)
         {
             if (row.known && row.source == source)
@@ -1363,7 +1388,7 @@ namespace wfg::surface
             }
 
             //------------------------------------------------------------------
-            const auto lit = ledFor (word);
+            const auto lit = blinked (ledFor (word), tick);
 
             /*  MUTE, LIT FOR HALF A SECOND after a kill it sent - the only
                 thing its light says (SurfaceProfile.h, `killFlashTicks`). */
@@ -1378,8 +1403,9 @@ namespace wfg::surface
             /*  SOLO, flashing while a soloed clip waits for its start, lit while
                 it sounds, and dark once the solo has gone with the clip. */
             const auto soloed = ! isDca && flagAt (at, strip.soloAt);
-            const auto soloLit = ! soloed ? Led::off
-                                          : (word == "playing" || word == "held") ? Led::on : Led::flash;
+            const auto soloLit = blinked (! soloed ? Led::off
+                                                   : (word == "playing" || word == "held") ? Led::on : Led::flash,
+                                          tick);
 
             if (static_cast<int> (soloLit) != strip.soloLed)
             {

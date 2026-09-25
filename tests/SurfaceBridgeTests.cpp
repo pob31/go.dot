@@ -652,14 +652,17 @@ TEST_CASE ("surface bridge: a D700 fader lands on its engraving - +7 at the top,
     desk.ticks (3);
     desk.clear();
 
+    desk.arrive ("PORTBNK1", { 0x90, 0x68, 0x7f });     // a finger on fader one
     desk.arrive ("PORTBNK1", { 0xe0, 0x70, 0x65 });     // 13040: (0x65 << 7) | 0x70
     desk.tickOnce();
 
-    REQUIRE (desk.submitted.size() == 1u);
-    CHECK (desk.submitted[0].args[0].getString() == "/godot/dca/" + band + "/trim");
-    CHECK (std::abs (desk.submitted[0].args[1].getFloat64()) < 0.05);
+    REQUIRE (desk.submitted.size() == 2u);              // the touch, then the write
+    CHECK (desk.submitted[1].args[0].getString() == "/godot/dca/" + band + "/trim");
+    CHECK (std::abs (desk.submitted[1].args[1].getFloat64()) < 0.05);
 
     //  And the motor goes where the engraving says: a DCA written to -24 flies to its mark.
+    desk.arrive ("PORTBNK1", { 0x90, 0x68, 0x00 });     // the finger lifted
+    desk.tickOnce();
     desk.clear();
     desk.write ("/godot/dca/" + band + "/trim", -24.0);
     desk.ticks (30);
@@ -756,6 +759,7 @@ TEST_CASE ("surface bridge: a fader's positions in one tick are one write, the l
     /*  THREE POSITIONS IN ONE TICK - a hand moving - and one write: the tree
         shows one value a tick, and the log would otherwise fill with positions
         nobody could have seen. */
+    desk.arrive ("PORTMCU1", { 0x90, 0x68, 0x7f });     // a finger on fader one
     desk.arrive ("PORTMCU1", { 0xe0, 0x00, 0x20 });
     desk.arrive ("PORTMCU1", { 0xe0, 0x00, 0x40 });
     desk.arrive ("PORTMCU1", { 0xe0, 0x7f, 0x5f });
@@ -763,8 +767,8 @@ TEST_CASE ("surface bridge: a fader's positions in one tick are one write, the l
 
     const auto last = surface::dbForFourteenBit ((0x5f << 7) | 0x7f);
 
-    REQUIRE (desk.submitted.size() == 1u);
-    const auto& write = desk.submitted.front();
+    REQUIRE (desk.submitted.size() == 2u);              // the touch, and one write
+    const auto& write = desk.submitted.back();
     CHECK (write.origin == "surface:" + mcu);
     CHECK (write.command == "node.set");
     REQUIRE (write.args.size() == 2u);
@@ -1792,22 +1796,48 @@ TEST_CASE ("surface bridge: SOLO solos the strip's clip and says where the solo 
     REQUIRE (submitted[0].args.size() == 1u);
     CHECK (submitted[0].args[0].getString() == "RUN00001");
 
-    //  ITS LIGHT: flashing while the soloed clip waits for its start ...
-    const auto soloFlash = midi::Bytes { 0x90, 0x08, 0x01 };
+    /*  ITS LIGHT: blinking while the soloed clip waits for its start - on
+        and off by the bridge, never MCU's own flash, which a D700 shows lit
+        ("Solo could be blinking before the sample is started") ... */
     const auto soloOn = midi::Bytes { 0x90, 0x08, 0x7f };
     const auto soloOff = midi::Bytes { 0x90, 0x08, 0x00 };
 
+    const auto soloSent = [&sink]
+    {
+        std::vector<midi::Bytes> messages;
+
+        for (const auto& message : sentOn (sink, "PORTBNK1"))
+            if (message.size() == 3u && message[0] == 0x90 && message[1] == 0x08)
+                messages.push_back (message);
+
+        return messages;
+    };
+
     fake.put ("/godot/run/RUN00001/solo", osc::Value::boolean (true), 'T');
     sink.sent.clear();
-    bridge.afterTick (fake.publish (tick), touches, tick);
-    CHECK (contains (sentOn (sink, "PORTBNK1"), soloFlash));
 
-    //  ... lit while it sounds ...
+    for (std::int64_t i = 0; i < 2 * surface::blinkHalfTicks; ++i)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK (contains (soloSent(), soloOn));
+    CHECK (contains (soloSent(), soloOff));
+    CHECK_FALSE (contains (soloSent(), midi::Bytes { 0x90, 0x08, 0x01 }));
+
+    //  ... lit, steadily, while it sounds ...
     fake.text ("/godot/slot/STRIP001/word", "playing");
     sink.sent.clear();
-    ++tick;
-    bridge.afterTick (fake.publish (tick), touches, tick);
-    CHECK (contains (sentOn (sink, "PORTBNK1"), soloOn));
+
+    for (std::int64_t i = 0; i < 2 * surface::blinkHalfTicks; ++i)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK_FALSE (contains (soloSent(), soloOff));
+    CHECK ((soloSent().empty() || soloSent().back() == soloOn));
 
     //  ... and dark once the engine has let the solo go with the clip.
     fake.put ("/godot/run/RUN00001/solo", osc::Value::boolean (false), 'T');
@@ -1874,6 +1904,46 @@ TEST_CASE ("surface bridge: SOLO solos the strip's clip and says where the solo 
     bridge.arrived ("PORTBNK1", { 0x90, 0x00, 0x7f });
     bridge.beforeTick (collect, ++tick);
     CHECK (submitted.empty());
+}
+
+TEST_CASE ("surface bridge: only a touched fader writes a level - the motor's own report is no hand")
+{
+    /*  The author, 2026-09-25: "The rec is using the wrong fader curve. Each
+        press lowers the level from where it was recorded." The session log
+        said why: a clip re-armed at -8.75 dB was written -11.08 by the D700
+        reporting its motor on the way up, with no touch, and REC kept that. */
+    Desk desk;
+    const auto d700 = desk.makeSurface ("d700", "The D700");
+    const auto band = desk.makeDca ("Band");
+    desk.pin (desk.strips[d700][0], band);
+
+    desk.declare ({ desk.spec (d700, "d700", { "PORTBNK1", "PORTBNK2" }) },
+                  { { "PORTBNK1", plugged ("D700 bank 1") }, { "PORTBNK2", plugged ("D700 bank 2") } });
+    desk.ticks (3);
+    desk.clear();
+
+    //  THE MOTOR'S REPORT: a position and no touch - nothing written.
+    desk.arrive ("PORTBNK1", { 0xe0, 0x70, 0x45 });
+    desk.tickOnce();
+    CHECK (desk.submitted.empty());
+
+    //  THE HAND'S: touched, then moved - written.
+    desk.arrive ("PORTBNK1", { 0x90, 0x68, 0x7f });
+    desk.arrive ("PORTBNK1", { 0xe0, 0x70, 0x45 });
+    desk.tickOnce();
+
+    REQUIRE (desk.submitted.size() == 2u);
+    CHECK (desk.submitted[0].command == "node.touch");
+    CHECK (desk.submitted[1].command == "node.set");
+
+    //  Lifted, the fader's reports are the motor's again.
+    desk.arrive ("PORTBNK1", { 0x90, 0x68, 0x00 });
+    desk.tickOnce();
+    desk.clear();
+
+    desk.arrive ("PORTBNK1", { 0xe0, 0x00, 0x30 });
+    desk.tickOnce();
+    CHECK (desk.submitted.empty());
 }
 
 TEST_CASE ("surface bridge: a hand resting through a handover lets go of the old node, and touches the new one only by landing again")
