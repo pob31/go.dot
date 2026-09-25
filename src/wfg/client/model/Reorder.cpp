@@ -271,6 +271,68 @@ namespace wfg::client::model
         return dropFor (over, dragged, fraction);
     }
 
+    FileDrop fileDropAt (const std::vector<Row>& rows, std::size_t at, double fraction, int depth)
+    {
+        FileDrop drop;
+
+        if (at >= rows.size())
+            return drop;
+
+        const auto& over = rows[at];
+
+        //  A container said by its name: a group's own, or the list's.
+        const auto nameOf = [&rows] (const std::string& id)
+        {
+            for (const auto& row : rows)
+                if (row.rowKind == RowKind::cue && row.id == id && ! row.derived)
+                    return row.name.empty() ? row.id : row.name;
+
+            return std::string ("the list");
+        };
+
+        const auto ownCue = over.rowKind == RowKind::cue && ! over.derived;
+
+        if (ownCue && over.isGroup)
+        {
+            if (inOnBand (fraction))
+            {
+                drop.parent = over.id;
+                drop.lit = true;
+                drop.words = "into " + nameOf (over.id) + ", at the end";
+                return drop;
+            }
+
+            if (! over.shut)
+            {
+                drop.parent = over.id;
+                drop.index = 0;
+                drop.depth = over.depth + 1;
+                drop.words = "first in " + nameOf (over.id);
+                return drop;
+            }
+        }
+
+        /*  AFTER A MEMBER, or after the group it ends when the hand is left of
+            it. A section row, or a group in a section, has no member position
+            to be after, and falls through to the end. */
+        const auto* after = ownCue && over.section == Section::member ? endingAt (rows, at, depth) : nullptr;
+
+        if (after != nullptr && after->section == Section::member)
+        {
+            drop.parent = after->parent;
+            drop.index = after->indexInParent + 1;
+            drop.depth = after->depth;
+            drop.words = "after " + (after->name.empty() ? after->id : after->name);
+            return drop;
+        }
+
+        const auto& container = after != nullptr ? after->parent : over.parent;
+
+        drop.parent = container;
+        drop.words = "at the end of " + nameOf (container);
+        return drop;
+    }
+
     std::string resolveCueRef (const std::string& text, const std::vector<Row>& rows)
     {
         if (text.empty())

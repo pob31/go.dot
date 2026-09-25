@@ -1170,6 +1170,119 @@ TEST_CASE ("client: an import names its cue after the file, and finds what the c
 }
 
 //==============================================================================
+TEST_CASE ("client: a file dropped on a group's row goes into the group")
+{
+    /*  The author, 2026-09-25: "Drag and dropping a media file on a group
+        places the new media cue after the group and requires moving it into
+        the group afterwards." Rows built by hand, as the row drag's are. */
+    const auto cue = [] (const char* id, const char* kind, const char* parent, int index, int depth)
+    {
+        model::Row row;
+        row.rowKind = model::RowKind::cue;
+        row.id = id;
+        row.name = id;
+        row.kind = kind;
+        row.parent = parent;
+        row.indexInParent = index;
+        row.depth = depth;
+        row.isGroup = std::string (kind) == "group";
+        return row;
+    };
+
+    //  A, then G open holding M1 and M2, then S, then F folded - all in the list L.
+    auto folded = cue ("F", "group", "L", 3, 0);
+    folded.shut = true;
+
+    const std::vector<model::Row> rows {
+        cue ("A", "memo", "L", 0, 0),
+        cue ("G", "group", "L", 1, 0),
+        cue ("M1", "media", "G", 0, 1),
+        cue ("M2", "memo", "G", 1, 1),
+        cue ("S", "memo", "L", 2, 0),
+        folded,
+    };
+
+    //  The middle of a group's row: into it, at the end, the row lit - open or folded.
+    for (const std::size_t group : { std::size_t { 1 }, std::size_t { 5 } })
+    {
+        const auto into = model::fileDropAt (rows, group, 0.5, 0);
+        CHECK (into.parent == rows[group].id);
+        CHECK (into.index == -1);
+        CHECK (into.lit);
+        CHECK (into.words == "into " + rows[group].id + ", at the end");
+    }
+
+    /*  THE REST OF AN OPEN GROUP'S ROW IS ITS FIRST PLACE, where the line
+        under its name is drawn - the author's case: it was after the group. */
+    for (const auto fraction : { 0.1, 0.9 })
+    {
+        const auto first = model::fileDropAt (rows, 1, fraction, 0);
+        CHECK (first.parent == "G");
+        CHECK (first.index == 0);
+        CHECK_FALSE (first.lit);
+        CHECK (first.depth == 1);
+        CHECK (first.words == "first in G");
+    }
+
+    //  A folded group's row is still after it: its members are not on screen to go among.
+    {
+        const auto after = model::fileDropAt (rows, 5, 0.9, 0);
+        CHECK (after.parent == "L");
+        CHECK (after.index == 4);
+        CHECK (after.depth == 0);
+        CHECK (after.words == "after F");
+    }
+
+    //  After a member, in its group; and, with the hand left of it, after the group it ends.
+    {
+        const auto inG = model::fileDropAt (rows, 3, 0.9, 1);
+        CHECK (inG.parent == "G");
+        CHECK (inG.index == 2);
+        CHECK (inG.depth == 1);
+
+        const auto outOfG = model::fileDropAt (rows, 3, 0.9, 0);
+        CHECK (outOfG.parent == "L");
+        CHECK (outOfG.index == 2);
+        CHECK (outOfG.depth == 0);
+        CHECK (outOfG.words == "after G");
+
+        //  A plain cue at the top of the list: after it.
+        CHECK (model::fileDropAt (rows, 0, 0.5, 0).index == 1);
+    }
+
+    /*  A HEADER ROW AND A BAND: the end of their group's members, with no
+        line, since a create cannot reach the section the line would be in. */
+    {
+        auto inHeader = cue ("H1", "memo", "G", 0, 1);
+        inHeader.section = model::Section::header;
+        inHeader.sectionId = "G/header";
+
+        model::Row band;
+        band.rowKind = model::RowKind::band;
+        band.section = model::Section::header;
+        band.parent = "G";
+        band.sectionId = "G/header";
+        band.depth = 1;
+
+        const std::vector<model::Row> headed { cue ("G", "group", "L", 0, 0), band, inHeader,
+                                               cue ("M1", "memo", "G", 0, 1) };
+
+        for (const std::size_t at : { std::size_t { 1 }, std::size_t { 2 } })
+        {
+            const auto end = model::fileDropAt (headed, at, 0.9, 1);
+            CHECK (end.parent == "G");
+            CHECK (end.index == -1);
+            CHECK_FALSE (end.lit);
+            CHECK (end.depth == -1);
+            CHECK (end.words == "at the end of G");
+        }
+    }
+
+    //  Past the rows there is nothing to read.
+    CHECK (model::fileDropAt (rows, rows.size(), 0.5, 0).parent.empty());
+}
+
+//==============================================================================
 TEST_CASE ("client: a cue dragged to the end of a group leaves it when the hand moves left")
 {
     /*  The author, 2026-09-25: "It's hard to move a cue out of group to place

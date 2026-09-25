@@ -240,6 +240,10 @@ namespace wfg::client::ui
 
         int rowUnder (int y) const;
 
+        /*  How far down the row under `y` the pointer is, 0 at its top and 1
+            at its bottom: what tells "on" from "after", for a row and a file. */
+        double fractionDown (int y) const;
+
         /*  WHERE THE RAILS STAND, asked in one place because four kinds of row
             draw the same shape and the shape only holds if they agree: a
             contained row draws the rule down its left, a container starts that

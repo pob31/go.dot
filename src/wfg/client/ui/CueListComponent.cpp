@@ -52,20 +52,12 @@ namespace wfg::client::ui
         constexpr int timeChars = 6;
         constexpr int kindChars = 8;
 
-        /*  WHETHER LETTING GO ON THIS ROW REALLY DOES INSERT AFTER IT. Only a
-            member can be pointed at: `cue.create` speaks in member positions,
-            and a group's header and footer are separate orders that a role
-            decides rather than places an index can reach. Asked in one spot
-            because the answer has to be the same in the drawing and in the
-            dropping, and drawing a promise the drop then breaks is the exact
-            failure the feedback exists to prevent. */
-        bool insertAfter (const model::Row& row)
+        /*  ONE FILE ONTO ONE MEDIA CUE NAMES ITS FILE, which is asked before
+            anything else a dropped file could mean. More than one file could
+            not, and a cue of another kind has no file to name. */
+        bool namesItsFile (const juce::StringArray& files, const model::Row& entry)
         {
-            /*  ANY CUE ROW THAT IS ITS OWN, since 2026-09-18: a header, footer
-                or persistent row is in a section the tree now names, so a
-                drop after it has a container to go into. A derived header
-                line is a reading of a cue elsewhere and is not a place. */
-            return row.rowKind == model::RowKind::cue && ! row.derived;
+            return files.size() == 1 && entry.rowKind == model::RowKind::cue && entry.kind == "media";
         }
 
         /*  HOW A GROUP BEHAVES, AS SHAPES. Two questions and two marks,
@@ -1152,15 +1144,23 @@ namespace wfg::client::ui
         TWO GESTURES, TOLD APART BY WHAT IS UNDER THE POINTER. On a media cue,
         letting go NAMES that cue's file - which is what somebody means when
         they drag a replacement onto a cue that already has one. Anywhere else,
-        it MAKES cues, one per file, after whatever row the hand was over. The
-        difference is drawn while the drag is in the air rather than explained
-        afterwards. */
+        it MAKES cues, one per file, where `model::fileDropAt` says: into a
+        group, first in an open one, or after a row. The difference is drawn
+        while the drag is in the air rather than explained afterwards. */
     int CueListComponent::rowUnder (int y) const
     {
         const auto inList = y - list.getY() + list.getViewport()->getViewPositionY();
         const auto at = inList / juce::jmax (1, rowHeight());
 
         return at >= 0 && at < static_cast<int> (rows.size()) ? at : -1;
+    }
+
+    double CueListComponent::fractionDown (int y) const
+    {
+        const auto inList = y - list.getY() + list.getViewport()->getViewPositionY();
+        const auto height = juce::jmax (1, rowHeight());
+
+        return static_cast<double> (((inList % height) + height) % height) / static_cast<double> (height);
     }
 
     bool CueListComponent::isInterestedInFileDrag (const juce::StringArray& files)
@@ -1184,10 +1184,12 @@ namespace wfg::client::ui
         fileDragMove (files, x, y);
     }
 
-    void CueListComponent::fileDragMove (const juce::StringArray& files, int, int y)
+    void CueListComponent::fileDragMove (const juce::StringArray& files, int x, int y)
     {
         const auto was = dropRow;
         const auto wasLink = dropWouldLink;
+        const auto wasInsert = dropWouldInsert;
+        const auto wasDepth = dropDepth;
 
         dropRow = rowUnder (y);
         dropWouldLink = false;
@@ -1195,24 +1197,38 @@ namespace wfg::client::ui
         dropDepth = -1;
         dropTone = "drop-into";
 
+        std::string words;
+
         if (dropRow >= 0)
         {
             const auto& entry = rows[static_cast<std::size_t> (dropRow)];
 
-            /*  ONE FILE ONTO ONE MEDIA CUE NAMES IT. More than one could not,
-                and a cue of another kind has no file to name. */
-            dropWouldLink = files.size() == 1
-                         && entry.rowKind == model::RowKind::cue
-                         && entry.kind == "media";
-
-            //  Drawn only where letting go really does insert there.
-            dropWouldInsert = ! dropWouldLink && insertAfter (entry);
+            if (namesItsFile (files, entry))
+            {
+                dropWouldLink = true;
+                words = "becomes the file of " + (entry.name.empty() ? entry.id : entry.name);
+            }
+            else
+            {
+                /*  Drawn as it will land: the row lit for into a group, a line
+                    from the depth the cues land at, and nothing where the
+                    line would promise a place a create cannot reach. */
+                const auto drop = model::fileDropAt (rows, static_cast<std::size_t> (dropRow),
+                                                     fractionDown (y), depthUnder (x));
+                dropWouldLink = drop.lit;
+                dropWouldInsert = ! drop.lit && drop.depth >= 0;
+                dropDepth = drop.depth;
+                words = drop.words;
+            }
         }
 
-        if (dropRow != was || dropWouldLink != wasLink)
+        if (dropRow != was || dropWouldLink != wasLink || dropWouldInsert != wasInsert || dropDepth != wasDepth)
         {
             if (was >= 0)      list.repaintRow (was);
             if (dropRow >= 0)  list.repaintRow (dropRow);
+
+            if (actions.say && ! words.empty())
+                actions.say (juce::String (words));
         }
     }
 
@@ -1230,7 +1246,7 @@ namespace wfg::client::ui
             list.repaintRow (was);
     }
 
-    void CueListComponent::filesDropped (const juce::StringArray& files, int, int y)
+    void CueListComponent::filesDropped (const juce::StringArray& files, int x, int y)
     {
         const auto at = rowUnder (y);
 
@@ -1248,8 +1264,7 @@ namespace wfg::client::ui
         {
             const auto& entry = rows[static_cast<std::size_t> (at)];
 
-            if (files.size() == 1 && entry.rowKind == model::RowKind::cue
-                  && entry.kind == "media")
+            if (namesItsFile (files, entry))
             {
                 if (actions.linkMedia)
                     actions.linkMedia (entry.id, files[0]);
@@ -1257,21 +1272,15 @@ namespace wfg::client::ui
                 return;
             }
 
-            /*  AFTER THE ROW THE HAND WAS OVER, in that row's own container,
-                by its MEMBER index - which is the only index a create speaks
-                in, and the reason the other rows cannot be pointed at.
+            /*  WHERE THE DRAWING SAID (model::fileDropAt): into a group, first
+                in an open one, after a row - by MEMBER position, the only one
+                a create speaks in. A row with no container to name falls to
+                the end of the list, as a drop on nothing does. */
+            const auto drop = model::fileDropAt (rows, static_cast<std::size_t> (at),
+                                                 fractionDown (y), depthUnder (x));
 
-                A HEADER, A FOOTER, A PERSISTENT CUE AND A BAND ALL ANSWER THE
-                END INSTEAD. `cue.create` puts a cue among its parent's
-                MEMBERS; the header and footer of a group are separate orders
-                that a role decides, not positions an index can reach. So a
-                drop on one of those rows says which container was meant and
-                nothing about where, and the end of its members is the honest
-                reading of that. The line under the row is not drawn for them,
-                so nothing is promised that will not happen. */
             if (actions.importMedia)
-                actions.importMedia (entry.parent, insertAfter (entry) ? entry.indexInParent + 1 : -1,
-                                     files);
+                actions.importMedia (drop.parent.empty() ? drawnList : drop.parent, drop.index, files);
 
             return;
         }
@@ -1404,12 +1413,8 @@ namespace wfg::client::ui
             return {};
 
         /*  How far down the row the pointer is, which is what tells "on"
-            from "after": the same arithmetic `rowUnder` uses, kept beside it. */
-        const auto inList = details.localPosition.y - list.getY()
-                              + list.getViewport()->getViewPositionY();
-        const auto height = juce::jmax (1, rowHeight());
-        const auto fraction = pastTheEnd ? 1.0
-                                         : static_cast<double> (inList % height) / static_cast<double> (height);
+            from "after" - asked as a dropped file asks it. */
+        const auto fraction = pastTheEnd ? 1.0 : fractionDown (details.localPosition.y);
 
         /*  ALT HELD MEANS THE PRESET, not a move (author, 2026-09-18: "drag
             and drop with alt onto a group label adds this cue to the header").
