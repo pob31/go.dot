@@ -753,7 +753,15 @@ namespace wfg::client::ui
             }
             else if (dropWouldInsert)
             {
-                g.fillRect (0, height - 2, width, 2);
+                /*  STARTING WHERE THE CUE WOULD LAND: at the indent of its
+                    depth, so a line reaching further left than the row is a
+                    cue leaving the groups that row ends (2026-09-25). */
+                const auto from = dropDepth < 0
+                                    ? 0
+                                    : juce::jlimit (0, width - 2,
+                                                    railsOrigin() + dropDepth * juce::roundToInt (theme.type * 7.0) * 2);
+
+                g.fillRect (from, height - 2, width - from, 2);
             }
         }
 
@@ -1184,6 +1192,7 @@ namespace wfg::client::ui
         dropRow = rowUnder (y);
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropDepth = -1;
         dropTone = "drop-into";
 
         if (dropRow >= 0)
@@ -1214,6 +1223,7 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropDepth = -1;
         dropTone = "drop-into";
 
         if (was >= 0)
@@ -1227,6 +1237,7 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropDepth = -1;
         dropTone = "drop-into";
         repaint();
 
@@ -1342,9 +1353,39 @@ namespace wfg::client::ui
             && rowById (draggedIdOf (details)) != nullptr;
     }
 
-    model::Drop CueListComponent::dropAt (const SourceDetails& details, int& rowOut) const
+    int CueListComponent::depthUnder (int x) const noexcept
+    {
+        const auto indent = juce::jmax (1, juce::roundToInt (theme.type * 7.0) * 2);
+        const auto inRow = x - list.getX() - railsOrigin();
+
+        return inRow < 0 ? 0 : inRow / indent;
+    }
+
+    model::Drop CueListComponent::dropAt (const SourceDetails& details, int& rowOut, int* depthOut) const
     {
         rowOut = rowUnder (details.localPosition.y);
+
+        if (depthOut != nullptr)
+            *depthOut = -1;
+
+        /*  BELOW THE LAST ROW IS THE BOTTOM OF THE LAST ROW (2026-09-25), so a
+            group at the end of the list can be left too: dropped there, the
+            hand's x says how far out - into the last group, or after it at the
+            end of the list. Before, nothing was under the hand and nothing
+            happened. */
+        auto pastTheEnd = false;
+
+        if (rowOut < 0 && ! rows.empty())
+        {
+            const auto inList = details.localPosition.y - list.getY()
+                                  + list.getViewport()->getViewPositionY();
+
+            if (inList >= static_cast<int> (rows.size()) * juce::jmax (1, rowHeight()))
+            {
+                rowOut = static_cast<int> (rows.size()) - 1;
+                pastTheEnd = true;
+            }
+        }
 
         const auto draggedId = draggedIdOf (details);
 
@@ -1367,7 +1408,8 @@ namespace wfg::client::ui
         const auto inList = details.localPosition.y - list.getY()
                               + list.getViewport()->getViewPositionY();
         const auto height = juce::jmax (1, rowHeight());
-        const auto fraction = static_cast<double> (inList % height) / static_cast<double> (height);
+        const auto fraction = pastTheEnd ? 1.0
+                                         : static_cast<double> (inList % height) / static_cast<double> (height);
 
         /*  ALT HELD MEANS THE PRESET, not a move (author, 2026-09-18: "drag
             and drop with alt onto a group label adds this cue to the header").
@@ -1385,7 +1427,17 @@ namespace wfg::client::ui
         if (rows[static_cast<std::size_t> (rowOut)].rowKind == model::RowKind::step)
             return {};
 
-        return model::dropFor (rows[static_cast<std::size_t> (rowOut)], *dragged, fraction);
+        /*  AND HOW FAR LEFT THE HAND IS says how far out of the groups this
+            row ends the cue lands (author, 2026-09-25: "It's hard to move a
+            cue out of group to place it right below it"). */
+        int landed = -1;
+        const auto drop = model::dropAtDepth (rows, static_cast<std::size_t> (rowOut), *dragged, fraction,
+                                              depthUnder (details.localPosition.x), &landed);
+
+        if (depthOut != nullptr)
+            *depthOut = landed;
+
+        return drop;
     }
 
     void CueListComponent::itemDragEnter (const SourceDetails& details)
@@ -1417,6 +1469,7 @@ namespace wfg::client::ui
         const auto wasLink = dropWouldLink;
         const auto wasInsert = dropWouldInsert;
         const auto wasTone = dropTone;
+        const auto wasDepth = dropDepth;
 
         //  Kept so the timer can ask the same question again without the hand moving.
         lastDrag = details;
@@ -1439,7 +1492,9 @@ namespace wfg::client::ui
         }
 
         auto at = -1;
-        const auto drop = dropAt (details, at);
+        auto depth = -1;
+        const auto drop = dropAt (details, at, &depth);
+        dropDepth = drop.kind == model::DropKind::after ? depth : -1;
 
         /*  THE SAME TWO SHAPES A FILE GETS: a line under the row for "after",
             the whole row lit for "on" - into a group, or aimed at a fade. */
@@ -1455,7 +1510,7 @@ namespace wfg::client::ui
             actions.say (juce::String (model::describe (drop, model::Row {}, false)));
 
         if (dropRow != was || dropWouldLink != wasLink || dropWouldInsert != wasInsert
-              || dropTone != wasTone)
+              || dropTone != wasTone || dropDepth != wasDepth)
         {
             if (was >= 0)      list.repaintRow (was);
             if (dropRow >= 0)  list.repaintRow (dropRow);
@@ -1580,6 +1635,7 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropDepth = -1;
         dropTone = "drop-into";
 
         if (was >= 0)
@@ -1601,6 +1657,7 @@ namespace wfg::client::ui
         dropRow = -1;
         dropWouldLink = false;
         dropWouldInsert = false;
+        dropDepth = -1;
         dropTone = "drop-into";
 
         //  The bands were the hand's, and the hand has gone.

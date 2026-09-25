@@ -1168,6 +1168,118 @@ TEST_CASE ("client: an import names its cue after the file, and finds what the c
 }
 
 //==============================================================================
+TEST_CASE ("client: a cue dragged to the end of a group leaves it when the hand moves left")
+{
+    /*  The author, 2026-09-25: "It's hard to move a cue out of group to place
+        it right below it. It always gets moved back into the group at the last
+        position." Under the last row of a group the pointer's height cannot
+        tell "after this row" from "after the group"; its x can - `depth` is
+        the level the hand is over. Rows built by hand, with their depths. */
+    const auto cue = [] (const char* id, const char* kind, const char* parent, int index, int depth)
+    {
+        model::Row row;
+        row.rowKind = model::RowKind::cue;
+        row.id = id;
+        row.name = id;
+        row.kind = kind;
+        row.parent = parent;
+        row.indexInParent = index;
+        row.depth = depth;
+        row.isGroup = std::string (kind) == "group";
+        return row;
+    };
+
+    //  A, then G holding M1 and M2, then S - all in the list L.
+    const std::vector<model::Row> rows {
+        cue ("A", "memo", "L", 0, 0),
+        cue ("G", "group", "L", 1, 0),
+        cue ("M1", "memo", "G", 0, 1),
+        cue ("M2", "memo", "G", 1, 1),
+        cue ("S", "memo", "L", 2, 0),
+    };
+
+    //  The last member ends the group; the first does not.
+    CHECK (model::endingAt (rows, 3, 1)->id == "M2");
+    CHECK (model::endingAt (rows, 3, 0)->id == "G");
+    CHECK (model::endingAt (rows, 2, 0)->id == "M1");
+
+    //  M1 dropped under M2 with the hand over the group's rail: after G, in the list.
+    {
+        int landed = -1;
+        const auto out = model::dropAtDepth (rows, 3, rows[2], 0.9, 0, &landed);
+        CHECK (out.kind == model::DropKind::after);
+        CHECK (out.container == "L");
+        CHECK (out.index == 2);
+        CHECK (landed == 0);
+
+        //  And over the row's own text: after M2, in the group, as before.
+        const auto in = model::dropAtDepth (rows, 3, rows[2], 0.9, 1, &landed);
+        CHECK (in.kind == model::DropKind::after);
+        CHECK (in.container == "G");
+        CHECK (landed == 1);
+    }
+
+    /*  THE LAST MEMBER TAKES ITSELF OUT: dragged over its own row, left, it
+        lands directly below the group - the author's case exactly. Over its
+        own text it is still nothing, as a row onto itself always was. */
+    {
+        const auto out = model::dropAtDepth (rows, 3, rows[3], 0.9, 0);
+        CHECK (out.kind == model::DropKind::after);
+        CHECK (out.container == "L");
+        CHECK (out.index == 2);
+
+        CHECK (model::dropAtDepth (rows, 3, rows[3], 0.9, 1).kind == model::DropKind::none);
+    }
+
+    //  The middle of a group's own row still means into it, wherever the hand is.
+    CHECK (model::dropAtDepth (rows, 1, rows[0], 0.5, 0).kind == model::DropKind::into);
+
+    //  Nested: G holding H holding N, then S. Each level left is one group further out.
+    {
+        const std::vector<model::Row> nested {
+            cue ("G", "group", "L", 0, 0),
+            cue ("H", "group", "G", 0, 1),
+            cue ("N", "memo", "H", 0, 2),
+            cue ("S", "memo", "L", 1, 0),
+        };
+
+        CHECK (model::endingAt (nested, 2, 2)->id == "N");
+        CHECK (model::endingAt (nested, 2, 1)->id == "H");
+        CHECK (model::endingAt (nested, 2, 0)->id == "G");
+
+        const auto outOfH = model::dropAtDepth (nested, 2, nested[3], 0.9, 1);
+        CHECK (outOfH.kind == model::DropKind::after);
+        CHECK (outOfH.container == "G");
+        CHECK (outOfH.index == 1);
+    }
+
+    //  A group at the very end of the list: the next row is nothing, so both levels are open.
+    {
+        const std::vector<model::Row> last {
+            cue ("A", "memo", "L", 0, 0),
+            cue ("G", "group", "L", 1, 0),
+            cue ("M1", "memo", "G", 0, 1),
+        };
+
+        CHECK (model::endingAt (last, 2, 0)->id == "G");
+
+        const auto out = model::dropAtDepth (last, 2, last[0], 0.9, 0);
+        CHECK (out.kind == model::DropKind::after);
+        CHECK (out.container == "L");
+    }
+
+    //  A group the next row is still inside is not left: the line is only as far out as it is.
+    {
+        const std::vector<model::Row> inside {
+            cue ("G", "group", "L", 0, 0),
+            cue ("M1", "memo", "G", 0, 1),
+            cue ("M2", "memo", "G", 1, 1),
+        };
+
+        CHECK (model::endingAt (inside, 1, 0)->id == "M1");
+    }
+}
+
 TEST_CASE ("client: a dragged row lands after, into or on, and a cue can be named by number or name")
 {
     /*  model/Reorder.h: the one rule the drawing and the dropping share.

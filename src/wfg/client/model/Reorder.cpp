@@ -204,6 +204,73 @@ namespace wfg::client::model
         return drop;
     }
 
+    const Row* endingAt (const std::vector<Row>& rows, std::size_t at, int depth)
+    {
+        if (at >= rows.size())
+            return nullptr;
+
+        const auto& row = rows[at];
+
+        if (depth >= row.depth)
+            return &row;
+
+        //  The shallowest the line can reach: the next row's depth, the list's past the end.
+        const auto next = at + 1 < rows.size() ? rows[at + 1].depth : 0;
+
+        const Row* chosen = &row;
+
+        for (const auto& id : ancestorsOf (row.id, rows))       // innermost first
+        {
+            const Row* group = nullptr;
+
+            for (const auto& candidate : rows)
+                if (candidate.rowKind == RowKind::cue && candidate.id == id && ! candidate.derived)
+                {
+                    group = &candidate;
+                    break;
+                }
+
+            //  A group the next row is still inside does not end here, and nor does any outside it.
+            if (group == nullptr || next > group->depth)
+                break;
+
+            chosen = group;
+
+            if (group->depth <= depth)
+                break;
+        }
+
+        return chosen;
+    }
+
+    Drop dropAtDepth (const std::vector<Row>& rows, std::size_t at, const Row& dragged,
+                      double fraction, int depth, int* landed)
+    {
+        if (at >= rows.size())
+            return {};
+
+        const auto& over = rows[at];
+        const auto onIt = inOnBand (fraction) && (aimable (over) || over.isGroup);
+
+        /*  OUT OF THE GROUP WHEN THE HAND IS LEFT OF IT: after the group the
+            row ends, in the group's own container - and so also when the row
+            is the dragged cue itself, which is how the last member of a group
+            is taken out to sit directly below it. */
+        if (over.rowKind == RowKind::cue && ! over.derived && ! onIt)
+            if (const auto* ending = endingAt (rows, at, depth); ending != nullptr && ending != &over)
+            {
+                if (landed != nullptr)
+                    *landed = ending->depth;
+
+                return dropFor (*ending, dragged, 1.0);
+            }
+
+        if (landed != nullptr)
+            *landed = over.depth;
+
+        return dropFor (over, dragged, fraction);
+    }
+
     std::string resolveCueRef (const std::string& text, const std::vector<Row>& rows)
     {
         if (text.empty())

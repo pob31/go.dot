@@ -224,7 +224,12 @@ namespace wfg::client::ui
         void itemDropped (const SourceDetails& details) override;
 
         /** What letting go of the dragged row at this point would do. */
-        model::Drop dropAt (const SourceDetails& details, int& rowOut) const;
+        model::Drop dropAt (const SourceDetails& details, int& rowOut, int* depthOut = nullptr) const;
+
+        /*  The level the pointer's x is over, counted as the rails are: nought
+            left of the first rail's column, one over it, and so on - what
+            chooses how far out a drop at the end of a group lands. */
+        int depthUnder (int x) const noexcept;
         const model::Row* rowById (const std::string& id) const;
 
         /*  A dragged DERIVED header line carries the cue's id behind this
@@ -321,6 +326,12 @@ namespace wfg::client::ui
         juce::ModifierKeys lastMods;
 
         int dropRow = -1;            ///< the row a file drag is over, or -1
+
+        /*  THE DEPTH THE DRAGGED CUE WOULD LAND AT, where the line under
+            `dropRow` starts (2026-09-25): the row's own, or further out when
+            the hand has moved left to take the cue out of the groups that row
+            ends. -1 draws the line the whole width, as a dropped file's is. */
+        int dropDepth = -1;
         bool dropWouldInsert = false;   ///< whether letting go really inserts after that row
         bool dropWouldLink = false;  ///< whether letting go there names a cue's file, or lands ON the row
 
