@@ -16,9 +16,11 @@
 
 #include <wfg/client/model/Waveform.h>
 
+#include <wfg/engine/audio/Peaks.h>
 #include <wfg/engine/audio/Timbre.h>
 
 #include <algorithm>
+#include <cmath>
 
 namespace wfg::client::model
 {
@@ -75,6 +77,8 @@ namespace wfg::client::model
             column.saturation = audio::timbre::saturationOf (*loudest);
             column.lightness = audio::timbre::lightnessOf (*loudest);
             column.peak = audio::timbre::peakOf (*loudest);
+            column.low = -column.peak;
+            column.high = column.peak;
 
             columns.push_back (column);
         }
@@ -151,11 +155,82 @@ namespace wfg::client::model
             column.saturation = audio::timbre::saturationOf (*loudest);
             column.lightness = audio::timbre::lightnessOf (*loudest);
             column.peak = audio::timbre::peakOf (*loudest);
+            column.low = -column.peak;
+            column.high = column.peak;
 
             columns.push_back (column);
         }
 
         return columns;
+    }
+
+    std::vector<Column> waveform (const audio::TimbrePyramid& pyramid, const audio::PeakTrack* peaks,
+                                  int width, double fromSeconds, double toSeconds)
+    {
+        auto columns = waveform (pyramid, width, fromSeconds, toSeconds);
+
+        if (columns.empty() || peaks == nullptr || peaks->levels.empty() || peaks->sampleRate == 0
+             || peaks->samples == 0)
+            return columns;
+
+        const auto length = static_cast<double> (peaks->samples) / static_cast<double> (peaks->sampleRate);
+        const auto from = std::max (0.0, fromSeconds);
+        const auto to = std::min (length, toSeconds);
+
+        if (! (to > from))
+            return columns;
+
+        /*  THE LEVEL WITH A PAIR PER COLUMN, from the coarsest down, as
+            `levelFor` picks the pyramid's: the same cost at every zoom. */
+        const auto share = (to - from) / length;
+        auto level = std::size_t { 0 };
+
+        for (auto candidate = peaks->levels.size(); candidate-- > 0;)
+            if (static_cast<double> (peaks->levels[candidate].size()) * share >= static_cast<double> (columns.size()))
+            {
+                level = candidate;
+                break;
+            }
+
+        const auto& pairs = peaks->levels[level];
+
+        if (pairs.empty())
+            return columns;
+
+        const auto count = pairs.size();
+        const auto firstPair = static_cast<double> (count) * from / length;
+        const auto lastPair = static_cast<double> (count) * to / length;
+        const auto columnsWide = static_cast<double> (columns.size());
+
+        for (std::size_t at = 0; at < columns.size(); ++at)
+        {
+            const auto a = firstPair + (lastPair - firstPair) * static_cast<double> (at) / columnsWide;
+            const auto b = firstPair + (lastPair - firstPair) * static_cast<double> (at + 1) / columnsWide;
+
+            auto fromIndex = std::min (static_cast<std::size_t> (std::max (0.0, a)), count - 1);
+            auto toIndex = std::max (fromIndex + 1, std::min (static_cast<std::size_t> (std::max (0.0, std::ceil (b))), count));
+
+            auto low = pairs[fromIndex].low;
+            auto high = pairs[fromIndex].high;
+
+            for (auto i = fromIndex; i < toIndex; ++i)
+            {
+                low = std::min (low, pairs[i].low);
+                high = std::max (high, pairs[i].high);
+            }
+
+            auto& column = columns[at];
+            column.low = audio::peaks::toUnit (low);
+            column.high = audio::peaks::toUnit (high);
+            column.peak = std::max (std::abs (column.low), std::abs (column.high));
+        }
+
+        return columns;
+    }
+
+    std::vector<Column> waveform (const audio::TimbrePyramid& pyramid, const audio::PeakTrack* peaks, int width)
+    {
+        return waveform (pyramid, peaks, width, 0.0, lengthOf (pyramid));
     }
 
     double playhead (double position, double from, double to)

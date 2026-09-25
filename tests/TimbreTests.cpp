@@ -40,6 +40,7 @@
 
 #include <wfg/engine/audio/MediaAnalyser.h>
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/audio/Peaks.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/document/ShowDocument.h>
 
@@ -251,6 +252,11 @@ namespace
     juce::File cacheFileFor (const juce::File& media, const std::string& hash)
     {
         return media.getChildFile (".timbre").getChildFile (juce::String (hash) + ".tpy");
+    }
+
+    juce::File peaksFileFor (const juce::File& media, const std::string& hash)
+    {
+        return media.getChildFile (".timbre").getChildFile (juce::String (hash) + ".tpk");
     }
 
     bool isHexDigest (const std::string& text)
@@ -816,7 +822,14 @@ TEST_CASE ("timbre cache: a file is analysed once, keyed by its bytes, and a sec
 
     const auto cache = cacheFileFor (media, built.contentHash);
     REQUIRE (cache.existsAsFile());
-    CHECK (built.bytesOnDisk == cache.getSize());
+
+    /*  AND THE FINER LEVEL BESIDE IT (2026-09-25), from the same pass: a pair
+        per 64 samples of the two seconds. */
+    const auto level = peaksFileFor (media, built.contentHash);
+    REQUIRE (level.existsAsFile());
+    REQUIRE (built.peaks != nullptr);
+    CHECK (built.peaks->pairs() == (96000u + 63u) / 64u);
+    CHECK (built.bytesOnDisk == cache.getSize() + level.getSize());
     CHECK (juce::String (audio::describe (built.outcome)) == "built");
 
     /*  THE FILE'S ANALYSIS IS THE SAMPLES' ANALYSIS: the reader hands the
@@ -835,6 +848,15 @@ TEST_CASE ("timbre cache: a file is analysed once, keyed by its bytes, and a sec
     CHECK (second.contentHash == built.contentHash);
     REQUIRE (second.pyramid != nullptr);
     CHECK (samePyramid (*second.pyramid, *built.pyramid));
+    REQUIRE (second.peaks != nullptr);
+    CHECK (second.peaks->levels == built.peaks->levels);
+
+    /*  A CACHE WITH THE COLOURS AND NOT THE LEVEL is built again - one pass
+        makes both - and then has both. */
+    REQUIRE (level.deleteFile());
+    const auto partial = audio::analyseMediaFile (mediaFolder, "tone.wav", false);
+    CHECK (partial.outcome == audio::MediaAnalysis::Outcome::built);
+    CHECK (level.existsAsFile());
 
     /*  The same bytes under another name: the same key, and no work. */
     REQUIRE (media.getChildFile ("elsewhere").createDirectory().wasOk());
@@ -862,8 +884,71 @@ TEST_CASE ("timbre cache: a file is analysed once, keyed by its bytes, and a sec
     REQUIRE (cache.loadFileAsData (mendedBytes));
     CHECK (mendedBytes == firstBytes);
 
-    /*  And no temp is left beside it. */
-    CHECK (media.getChildFile (".timbre").getNumberOfChildFiles (juce::File::findFiles) == 1);
+    /*  And no temp is left beside them: the colours and the level, two files. */
+    CHECK (media.getChildFile (".timbre").getNumberOfChildFiles (juce::File::findFiles) == 2);
+}
+
+TEST_CASE ("peaks: every 64 samples' lowest and highest, in sixteen bits, halved, written and read back")
+{
+    /*  The author, 2026-09-25: "Can the waveform be more precise in level,
+        not colour when zooming in." A frame's peak was a byte a thousand
+        samples; this is the plain answer beside it. */
+    constexpr int length = 1000;
+
+    std::vector<float> left (static_cast<std::size_t> (length));
+    std::vector<float> right (static_cast<std::size_t> (length));
+
+    for (int n = 0; n < length; ++n)
+    {
+        left[static_cast<std::size_t> (n)] = 0.5f * std::sin (2.0f * juce::MathConstants<float>::pi
+                                                              * static_cast<float> (n) / 100.0f);
+        right[static_cast<std::size_t> (n)] = 0.0f;
+    }
+
+    //  A spike on the second channel in the second stretch: the pair holds every channel.
+    right[70] = 0.9f;
+
+    const float* channels[] { left.data(), right.data() };
+
+    audio::peaks::Collector collector;
+    collector.add (channels, 2, 600);
+    const float* rest[] { left.data() + 600, right.data() + 600 };
+    collector.add (rest, 2, length - 600);
+
+    const auto track = collector.finish (48000u);
+
+    REQUIRE (track.levels.size() == 1u);                        // sixteen pairs: already a Gogo bar
+    CHECK (track.pairs() == 16u);                               // the last one short
+    CHECK (track.samples == static_cast<std::uint64_t> (length));
+    CHECK (track.levels.front()[1].high == audio::peaks::toShort (0.9f));
+    CHECK (audio::peaks::toUnit (track.levels.front()[0].high) > 0.45);      // the crest, at sample 25
+    CHECK (audio::peaks::toUnit (track.levels.front()[1].low) < -0.45);      // the trough, at sample 75
+
+    //  Sixteen bits: a level a byte could not tell from its neighbour.
+    CHECK (audio::peaks::toShort (0.0021f) != audio::peaks::toShort (0.0025f));
+
+    //  Halved as the pyramid is, the lower low and the higher high, down to 64.
+    std::vector<audio::PeakPair> many (200);
+    many[150] = { -1000, 2000 };
+    const auto halved = audio::peaks::trackOf (many, 48000u, 200u * 64u);
+    REQUIRE (halved.levels.size() == 3u);                       // 200, 100, 50
+    CHECK (halved.levels[2].size() == 50u);
+    CHECK (halved.levels[2][37] == audio::PeakPair { -1000, 2000 });
+
+    //  Written and read back, whole; anything else refused.
+    const auto bytes = audio::peaks::write (track);
+    audio::PeakTrack back;
+    REQUIRE (audio::peaks::read (bytes.data(), bytes.size(), back));
+    CHECK (back.levels == track.levels);
+    CHECK (back.sampleRate == 48000u);
+
+    audio::PeakTrack untouched;
+    CHECK_FALSE (audio::peaks::read (bytes.data(), bytes.size() - 1, untouched));
+
+    auto wrong = bytes;
+    wrong[0] = 'X';
+    CHECK_FALSE (audio::peaks::read (wrong.data(), wrong.size(), untouched));
+    CHECK (untouched.levels.empty());
 }
 
 TEST_CASE ("timbre cache: a folder that cannot be written costs the cache and not the colours")

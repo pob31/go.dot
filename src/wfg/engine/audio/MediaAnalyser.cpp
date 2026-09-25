@@ -17,6 +17,7 @@
 #include <wfg/engine/audio/MediaAnalyser.h>
 
 #include <wfg/engine/audio/MediaInfo.h>
+#include <wfg/engine/audio/Peaks.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/document/Bundle.h>
 
@@ -122,6 +123,26 @@ namespace wfg::audio
                 return nullptr;
 
             return std::make_shared<const TimbrePyramid> (std::move (pyramid));
+        }
+
+        /*  The finer level's file beside the pyramid's (Peaks.h): read the
+            same way, and a miss the same way - nothing, and built again. */
+        std::shared_ptr<const PeakTrack> readPeaks (const juce::File& peaksFile)
+        {
+            if (! peaksFile.existsAsFile())
+                return nullptr;
+
+            juce::MemoryBlock bytes;
+
+            if (! peaksFile.loadFileAsData (bytes))
+                return nullptr;
+
+            PeakTrack track;
+
+            if (! peaks::read (static_cast<const std::uint8_t*> (bytes.getData()), bytes.getSize(), track))
+                return nullptr;
+
+            return std::make_shared<const PeakTrack> (std::move (track));
         }
 
         /*  REPLACED WHOLE, BUT NOT MADE DURABLE - which is the one way this
@@ -254,18 +275,27 @@ namespace wfg::audio
                                  : juce::File (juce::String (cacheFolder))
                                        .getChildFile (juce::String (analysis.contentHash) + ".tpy");
 
+        const auto peaksFile = cacheFile == juce::File()
+                                 ? juce::File()
+                                 : cacheFile.withFileExtension ("tpk");
+
         /*  A CACHE THAT DOES NOT READ IS A CACHE MISS, not an error: a torn
             file, one written by another version of the analysis, one somebody
-            edited - each is built again and replaced. */
+            edited - each is built again and replaced. BOTH FILES, or neither:
+            one pass makes the colours and the finer level together. */
         if (! force && cacheFile != juce::File())
         {
             if (const auto cached = readCache (cacheFile))
             {
-                describeInto (analysis, cached);
-                analysis.outcome = MediaAnalysis::Outcome::cached;
-                analysis.bytesOnDisk = cacheFile.getSize();
-                analysis.analysisMilliseconds = millisecondsSince (working);
-                return analysis;
+                if (const auto level = readPeaks (peaksFile))
+                {
+                    describeInto (analysis, cached);
+                    analysis.peaks = level;
+                    analysis.outcome = MediaAnalysis::Outcome::cached;
+                    analysis.bytesOnDisk = cacheFile.getSize() + peaksFile.getSize();
+                    analysis.analysisMilliseconds = millisecondsSince (working);
+                    return analysis;
+                }
             }
         }
 
@@ -288,6 +318,7 @@ namespace wfg::audio
         const auto channels = static_cast<int> (reader->numChannels);
         juce::AudioBuffer<float> stretch { channels, timbre::hopSize };
         timbre::Analyser analyser { reader->sampleRate };
+        peaks::Collector level;
 
         /*  A HOP AT A TIME, so an hour of audio is never in memory - the
             finest level of its pyramid is, at four bytes a frame. */
@@ -312,20 +343,23 @@ namespace wfg::audio
             }
 
             analyser.add (stretch.getArrayOfReadPointers(), channels, count);
+            level.add (stretch.getArrayOfReadPointers(), channels, count);
         }
 
         const auto pyramid = std::make_shared<const TimbrePyramid> (analyser.finish());
         describeInto (analysis, pyramid);
+        analysis.peaks = std::make_shared<const PeakTrack> (level.finish (pyramid->sampleRate));
         analysis.framesAnalysed = pyramid->frames();
 
         /*  The seconds the READER says, not the ones the pyramid's rounded
             rate would give back: an odd rate is not rounded into a length. */
         analysis.seconds = static_cast<double> (reader->lengthInSamples) / reader->sampleRate;
 
-        if (cacheFile != juce::File() && writeCache (cacheFile, timbre::write (*pyramid)))
+        if (cacheFile != juce::File() && writeCache (cacheFile, timbre::write (*pyramid))
+             && writeCache (peaksFile, peaks::write (*analysis.peaks)))
         {
             analysis.outcome = MediaAnalysis::Outcome::built;
-            analysis.bytesOnDisk = cacheFile.getSize();
+            analysis.bytesOnDisk = cacheFile.getSize() + peaksFile.getSize();
         }
         else
         {
@@ -470,6 +504,7 @@ namespace wfg::audio
                 record.seconds = analysis.seconds;
                 record.contentHash = analysis.contentHash;
                 record.pyramid = analysis.pyramid;
+                record.peaks = analysis.peaks;
 
                 media->publish (named, std::move (record));
             }

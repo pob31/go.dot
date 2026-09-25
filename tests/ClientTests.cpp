@@ -74,6 +74,7 @@
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Waveform.h>
+#include <wfg/engine/audio/Peaks.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/command/CommandRegistry.h>
@@ -3707,6 +3708,67 @@ TEST_CASE ("client: a patch that is written, or a layout with a hole, has alread
         their edits would be a promise the engine does not keep. */
     Rig unpacked ("slots");
     CHECK (model::patchHasSettled (*unpacked.publish (0)));
+}
+
+TEST_CASE ("client: a waveform's height is the finer level's, where the analysis has one")
+{
+    /*  The author, 2026-09-25: "Can the waveform be more precise in level,
+        not colour when zooming in." The colour stays the frame's; the height
+        is the peak track's - 64 samples a pair and sixteen bits. */
+    audio::TimbrePyramid pyramid;
+    pyramid.sampleRate = 48000;
+    pyramid.samples = 1024 * 4;
+
+    //  Four frames, each loud by its byte: 0.5 all the way.
+    std::vector<audio::timbre::Frame> frames (4);
+
+    for (auto& frame : frames)
+    {
+        frame.peak = 128;
+        frame.hue = 40;
+        frame.saturation = 200;
+        frame.lightness = 128;
+    }
+
+    pyramid.levels.push_back (frames);
+
+    //  And the level under them: sixty-four pairs, each its own height, never 0.5.
+    std::vector<audio::PeakPair> pairs (64);
+
+    for (std::size_t at = 0; at < pairs.size(); ++at)
+    {
+        const auto height = static_cast<std::int16_t> (1000 + 100 * static_cast<int> (at));
+        pairs[at] = { static_cast<std::int16_t> (-height / 2), height };
+    }
+
+    const auto track = audio::peaks::trackOf (pairs, 48000u, 1024u * 4u);
+
+    //  ZOOMED INTO ONE FRAME: sixteen columns over its sixteen pairs, sixteen heights.
+    const auto seconds = 1024.0 / 48000.0;
+    const auto close = model::waveform (pyramid, &track, 16, seconds, 2.0 * seconds);
+    REQUIRE (close.size() == 16u);
+
+    for (std::size_t at = 0; at < close.size(); ++at)
+    {
+        const auto& pair = pairs[16 + at];
+        CHECK (close[at].high == doctest::Approx (audio::peaks::toUnit (pair.high)));
+        CHECK (close[at].low == doctest::Approx (audio::peaks::toUnit (pair.low)));
+        CHECK (close[at].peak == doctest::Approx (audio::peaks::toUnit (pair.high)));
+        CHECK (close[at].hue == doctest::Approx (audio::timbre::hueOf (frames[1])));   // the frame's colour
+    }
+
+    CHECK (close[0].high < close[15].high);
+
+    //  Without the level, the frame's byte, mirrored: the old picture, unchanged.
+    const auto coarse = model::waveform (pyramid, nullptr, 16, seconds, 2.0 * seconds);
+    REQUIRE (coarse.size() == 16u);
+    CHECK (coarse[0].peak == doctest::Approx (audio::timbre::peakOf (frames[1])));
+    CHECK (coarse[0].low == doctest::Approx (-coarse[0].peak));
+
+    //  The whole file with its level: one column per pixel, each the loudest pair of its span.
+    const auto whole = model::waveform (pyramid, &track, 4);
+    REQUIRE (whole.size() == 4u);
+    CHECK (whole[3].high == doctest::Approx (audio::peaks::toUnit (pairs[63].high)));
 }
 
 TEST_CASE ("client: a waveform is the engine's analysis bucketed, and never a second analysis")

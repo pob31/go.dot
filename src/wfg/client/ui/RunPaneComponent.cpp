@@ -410,10 +410,11 @@ namespace wfg::client::ui
             which is what every strip was before ranges were drawn and is still
             the right answer for a cue that plays straight through. */
         if (! (to > from))
-            return bars.emplace (key, model::waveform (*found->second.pyramid, width))
+            return bars.emplace (key, model::waveform (*found->second.pyramid, found->second.peaks.get(), width))
                        .first->second;
 
-        return bars.emplace (key, model::waveform (*found->second.pyramid, width, from, to))
+        return bars.emplace (key, model::waveform (*found->second.pyramid, found->second.peaks.get(),
+                                                   width, from, to))
                    .first->second;
     }
 

@@ -172,6 +172,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/MediaInfo.cpp
     wfg/engine/audio/Timbre.h
     wfg/engine/audio/Timbre.cpp
+    wfg/engine/audio/Peaks.h
+    wfg/engine/audio/Peaks.cpp
     wfg/engine/audio/MediaAnalyser.h
     wfg/engine/audio/MediaAnalyser.cpp
     wfg/engine/audio/CueOutputPlugin.h

@@ -2420,6 +2420,15 @@ stops lean blue as well (*"I would bias a bit towards the blues"*): deep blue
 to 250 Hz, red not before 800 (the analysis's format version 4; every file is
 analysed again once).
 
+**The waveform's height is finer than its colour** (*"Can the waveform be more
+precise in level, not colour when zooming in"*). The same pass keeps, for every
+64 samples, the lowest and the highest sample, in sixteen bits. It is halved
+into coarser levels as the colour frames are, and cached beside them
+(`<hash>.tpk`, beside the `.tpy`, which the page reads unchanged). A zoomed-in
+waveform takes its shape from that trace, lowest to highest rather than
+mirrored, and its colour from the colour frames. Before, the height was a frame
+of 1024 samples and eight bits: a staircase when zoomed.
+
 **A test exists before the UI does.** A 1 kHz sine must come out saturated at
 1 kHz's hue, white noise grey, and a sweep must walk the ramp — a black-box
 check on the cache alone, in the style of the routing spike, and where the work

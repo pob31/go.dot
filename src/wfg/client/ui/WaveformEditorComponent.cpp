@@ -316,7 +316,8 @@ namespace wfg::client::ui
         if (found == analysed.end() || found->second.pyramid == nullptr)
             return bars;
 
-        bars = model::waveform (*found->second.pyramid, bar.getWidth(), view.from, view.to);
+        bars = model::waveform (*found->second.pyramid, found->second.peaks.get(), bar.getWidth(),
+                                view.from, view.to);
         return bars;
     }
 
@@ -360,13 +361,12 @@ namespace wfg::client::ui
         const auto half = bar.getHeight() / 2.0;
         const auto count = static_cast<int> (drawn.size());
 
-        const auto reach = [&drawn, half] (int at)
-        {
-            return juce::jmax (1, juce::roundToInt (drawn[static_cast<std::size_t> (at)].peak * half));
-        };
-
-        /*  The running pane's picture, given room: one line per column,
-            mirrored about the middle, coloured by what that slice sounds like. */
+        /*  The running pane's picture, given room: one line per column from
+            its lowest sample to its highest - the wave's own shape where the
+            finer level is there (2026-09-25: "more precise in level, not
+            colour, when zooming in"), the peak mirrored about the middle where
+            it is not - coloured by what that slice sounds like. A pixel at
+            least, so silence is a line and not a gap. */
         for (auto at = 0; at < count; ++at)
         {
             const auto& column = drawn[static_cast<std::size_t> (at)];
@@ -376,8 +376,10 @@ namespace wfg::client::ui
                                                 static_cast<float> (0.25 + column.lightness * 0.6),
                                                 1.0f));
 
-            const auto far = reach (at);
-            g.fillRect (bar.getX() + at, middle - far, 1, far * 2);
+            const auto top = middle - juce::roundToInt (column.high * half);
+            const auto bottom = middle - juce::roundToInt (column.low * half);
+
+            g.fillRect (bar.getX() + at, juce::jmin (top, bottom), 1, juce::jmax (1, std::abs (bottom - top)));
         }
     }
 
