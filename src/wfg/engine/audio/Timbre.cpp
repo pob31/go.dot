@@ -37,8 +37,16 @@ namespace wfg::audio::timbre
         static_assert (windowSize == 2 * hopSize && hopSize % 2 == 0,
                        "a frame's window is its own stretch and half of each neighbour's");
 
-        /*  PLAN DECISION 8'S SIX STOPS, a starting point and not a palette
-            (§14.12). The hue is UNWRAPPED - 360 is red, 480 is green - so the
+        /*  SIX STOPS, THE AUTHOR'S SINCE 2026-09-25 ("I would bias a bit
+            towards the blues"): plan decision 8 put deep blue at 150 Hz, red
+            at 500, orange at 1.5 kHz and yellow at 4 kHz, so the body of most
+            material - two hundred hertz to a few thousand - came out red,
+            orange and yellow, and blue was a narrow band under 250 Hz. Blue
+            now holds to 250 Hz and turns through violet to red at 800,
+            orange at 2.5 kHz, yellow at 6 kHz; purple at the bottom and green
+            at the top as they were.
+
+            The hue is UNWRAPPED - 360 is red, 480 is green - so the
             interpolation from deep blue to red goes through magenta and not
             back through cyan; it is wrapped into [0, 360) only at the end.
 
@@ -53,10 +61,10 @@ namespace wfg::audio::timbre
 
         constexpr std::array<RampStop, 6> ramp { {
             {    40.0, 280.0 },     // near-black purple
-            {   150.0, 240.0 },     // deep blue
-            {   500.0, 360.0 },     // red
-            {  1500.0, 390.0 },     // orange
-            {  4000.0, 420.0 },     // yellow
+            {   250.0, 240.0 },     // deep blue
+            {   800.0, 360.0 },     // red, through violet
+            {  2500.0, 390.0 },     // orange
+            {  6000.0, 420.0 },     // yellow
             { 12000.0, 480.0 },     // green
         } };
 

@@ -268,14 +268,21 @@ namespace
 }
 
 //==============================================================================
-TEST_CASE ("timbre: the ramp's stops are plan decision 8's, and its lightness climbs the whole band")
+TEST_CASE ("timbre: the ramp's stops are the author's, and its lightness climbs the whole band")
 {
+    /*  Blue held to 250 Hz and red not before 800 (author, 2026-09-25: "I
+        would bias a bit towards the blues"); plan decision 8 had them at 150
+        and 500. */
     CHECK (timbre::rampHue (40.0) == doctest::Approx (280.0));
-    CHECK (timbre::rampHue (150.0) == doctest::Approx (240.0));
-    CHECK (timbre::rampHue (500.0) == doctest::Approx (0.0));
-    CHECK (timbre::rampHue (1500.0) == doctest::Approx (30.0));
-    CHECK (timbre::rampHue (4000.0) == doctest::Approx (60.0));
+    CHECK (timbre::rampHue (250.0) == doctest::Approx (240.0));
+    CHECK (timbre::rampHue (800.0) == doctest::Approx (0.0));
+    CHECK (timbre::rampHue (2500.0) == doctest::Approx (30.0));
+    CHECK (timbre::rampHue (6000.0) == doctest::Approx (60.0));
     CHECK (timbre::rampHue (12000.0) == doctest::Approx (120.0));
+
+    //  And the body of most material is violet and blue now, not red: 500 Hz is past magenta's 300.
+    CHECK (timbre::rampHue (500.0) > 300.0);
+    CHECK (timbre::rampHue (500.0) < 330.0);
 
     /*  Held at the ends, including a centroid nobody could have. */
     CHECK (timbre::rampHue (20.0) == doctest::Approx (280.0));
@@ -283,15 +290,15 @@ TEST_CASE ("timbre: the ramp's stops are plan decision 8's, and its lightness cl
     CHECK (timbre::rampHue (std::nan ("")) == doctest::Approx (280.0));
 
     /*  Between red and orange, the log of the frequency and not the frequency:
-        1 kHz is 63 % of the way from 500 Hz to 1.5 kHz in octaves. */
-    CHECK (timbre::rampHue (1000.0) == doctest::Approx (30.0 * std::log (2.0) / std::log (3.0)));
+        1 kHz is a fifth of the way from 800 Hz to 2.5 kHz in octaves. */
+    CHECK (timbre::rampHue (1000.0) == doctest::Approx (30.0 * std::log (1.25) / std::log (3.125)));
 
     /*  THE HUE TURNS BACK, and this pins it so a palette change is seen: from
-        purple at 40 Hz it falls to deep blue at 150 Hz, then climbs the other
+        purple at 40 Hz it falls to deep blue at 250 Hz, then climbs the other
         way round the wheel. What the sweep check below asserts is therefore
         the lightness, which never turns back. */
-    CHECK (timbre::rampHue (100.0) > timbre::rampHue (150.0));
-    CHECK (timbre::rampHue (300.0) > timbre::rampHue (150.0));
+    CHECK (timbre::rampHue (100.0) > timbre::rampHue (250.0));
+    CHECK (timbre::rampHue (300.0) > timbre::rampHue (250.0));
 
     CHECK (timbre::rampLightness (40.0) == doctest::Approx (0.15));
     CHECK (timbre::rampLightness (16000.0) == doctest::Approx (0.85));

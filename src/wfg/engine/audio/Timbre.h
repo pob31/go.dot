@@ -95,7 +95,7 @@ namespace wfg::audio
             only thing that tells a pyramid computed by an older rule from one
             computed by this one. A file carrying another version is refused
             and rebuilt, never read. */
-        constexpr std::uint16_t formatVersion = 2;       // 2: saturation from local noisiness (2026-09-25)
+        constexpr std::uint16_t formatVersion = 3;       // 2: saturation from local noisiness; 3: the author's blues (2026-09-25)
 
         /*  The band the centroid and the flatness are taken over. */
         constexpr double lowestHertz = 40.0;

@@ -35,9 +35,10 @@ rule, a separate codec so a driver cannot share a mistake with the code under
 test. If the author moves a stop, this file moves with it, on purpose.
 
 WHAT THE RAMP DOES NOT PROMISE, and so what this does not assert: that a sweep's
-hue climbs. Plan decision 8's stops run purple (280 degrees) to deep blue (240)
-and then the other way round the wheel through red, orange, yellow and green,
-so from 40 Hz to 150 Hz the hue turns back. What is monotonic is the lightness,
+hue climbs. The stops (the author's since 2026-09-25, from plan decision 8's)
+run purple (280 degrees) to deep blue (240) and then the other way round the
+wheel through violet, red, orange, yellow and green, so from 40 Hz to 250 Hz
+the hue turns back. What is monotonic is the lightness,
 by construction. So the sweep is asserted twice: its lightness never falls, and
 every frame's hue is the ramp's hue AT THE SWEEP'S FREQUENCY THEN - which is a
 stronger check than monotonic would have been, and one a machine can make.
@@ -117,12 +118,12 @@ RATE = 48000
 WINDOW = 2048
 HOP = 1024
 COARSEST = 64
-FORMAT_VERSION = 2
+FORMAT_VERSION = 3
 
 # (hertz, hue in degrees UNWRAPPED): 360 is red and 480 green, so deep blue to
 # red goes through magenta and not back through cyan.
-RAMP = [(40.0, 280.0), (150.0, 240.0), (500.0, 360.0),
-        (1500.0, 390.0), (4000.0, 420.0), (12000.0, 480.0)]
+RAMP = [(40.0, 280.0), (250.0, 240.0), (800.0, 360.0),
+        (2500.0, 390.0), (6000.0, 420.0), (12000.0, 480.0)]
 
 LOWEST, HIGHEST = 40.0, 16000.0
 DARKEST, BRIGHTEST = 0.15, 0.85

@@ -6062,6 +6062,16 @@ are plan decision 8 and are here to be overruled early rather than late; the exa
 the author's once the sine/noise/sweep bundle is on screen, which is the whole reason that
 bundle exists before anything is drawn.
 
+*Overruled by the author, 2026-09-25, with the D700's LEDs and the waveforms in front of
+him.* **The stops lean blue**: *"I would bias a bit towards the blues"* - deep blue at 250 Hz,
+red (through violet) at 800 Hz, orange at 2.5 kHz, yellow at 6 kHz; purple at 40 Hz and green
+at 12 kHz as they were. The body of most material had come out red, orange and yellow. **And
+saturation is noisiness where the energy is**, no longer `1 − flatness` over the whole band,
+which read only white noise as grey: each bin against its own neighbourhood, a ninth of an
+octave either side, weighted by the neighbourhood's power - grey for noise of any colour or
+bandwidth, vivid for a tone (*"don't desaturate on a broader, noisier signal which I find
+quite a telling visual cue"*). The analysis's format version is 3.
+
 **An analysis is regenerable from the file, so it is not something anybody decided.** §4.10 says
 the document holds what someone decided and never what the machine happened to be doing, and
 §3.20 puts derived state in a separate file or outside the authored half entirely. A spectrum is
