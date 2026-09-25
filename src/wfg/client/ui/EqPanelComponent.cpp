@@ -52,6 +52,23 @@ namespace wfg::client::ui
             published Q is believed again. */
         constexpr juce::uint32 turnPatienceMs = 400;
 
+        //  The width a handle's mark takes at the left of its row in the column.
+        constexpr int markWidth = 16;
+
+        /*  A HANDLE'S SHAPE, on the field and in the column alike: a band
+            round and a filter square, hollow when it is out (§4.8). */
+        void drawHandleShape (juce::Graphics& g, juce::Rectangle<float> box, bool filter, bool in)
+        {
+            if (filter)
+            {
+                if (in) g.fillRect (box); else g.drawRect (box, 1.5f);
+            }
+            else
+            {
+                if (in) g.fillEllipse (box); else g.drawEllipse (box, 1.5f);
+            }
+        }
+
         constexpr double lowestHz = 20.0;
         constexpr double highestHz = 20000.0;
 
@@ -707,12 +724,17 @@ namespace wfg::client::ui
 
         const auto numberWidth = scaled (62, theme);
 
+        //  Each handle's row gives its mark the left of it (`markArea`).
+        const auto mark = scaled (markWidth, theme);
+
         line = column.removeFromTop (row);
+        line.removeFromLeft (mark);
         hpfToggle.setBounds (line.removeFromLeft (line.getWidth() - numberWidth));
         if (boxes.size() > 0) boxes[0]->value.setBounds (line.reduced (gapPx, 1));
         column.removeFromTop (gapPx);
 
         line = column.removeFromTop (row);
+        line.removeFromLeft (mark);
         lpfToggle.setBounds (line.removeFromLeft (line.getWidth() - numberWidth));
         if (boxes.size() > 1) boxes[1]->value.setBounds (line.reduced (gapPx, 1));
         column.removeFromTop (gapPx);
@@ -720,6 +742,7 @@ namespace wfg::client::ui
         for (int band = 0; band < audio::EqSettings::numBands; ++band)
         {
             line = column.removeFromTop (row);
+            line.removeFromLeft (mark);
             auto head = line.removeFromLeft (line.getWidth() - 3 * numberWidth);
 
             if (band == 0)
@@ -776,6 +799,7 @@ namespace wfg::client::ui
         for (int band = 0; band < audio::EqSettings::numBands; ++band)
         {
             auto line = column.removeFromTop (row);
+            line.removeFromLeft (scaled (markWidth, theme));
             auto head = line.removeFromLeft (line.getWidth() - 3 * scaled (62, theme));
 
             if (band == 1 || band == 2)
@@ -784,6 +808,52 @@ namespace wfg::client::ui
 
             column.removeFromTop (gapPx);
         }
+
+        /*  AND EACH HANDLE'S MARK BESIDE ITS ROW, as it is drawn on the field
+            - its colour, its shape, filled or hollow, and ringed while it is
+            the one being edited - so the row and the handle find each other. */
+        const auto& s = shown();
+        const auto radius = static_cast<float> (scaled (5, theme));
+
+        for (int handle = 0; handle < 6; ++handle)
+        {
+            const auto centre = markArea (handle).toFloat().getCentre();
+            const auto box = juce::Rectangle<float> (2.0f * radius, 2.0f * radius).withCentre (centre);
+
+            g.setColour (Look::colour (theme, handleTokens[static_cast<std::size_t> (handle)]));
+            drawHandleShape (g, box, handle >= hpfHandle, handleIsIn (handle, s));
+
+            if (handle == editing)
+            {
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawEllipse (box.expanded (static_cast<float> (scaled (3, theme))),
+                               static_cast<float> (scaled (1, theme)));
+            }
+        }
+    }
+
+    juce::Rectangle<int> EqPanelComponent::markArea (int handle) const
+    {
+        auto column = columnArea();
+        const auto row = scaled (22, theme);
+        const auto gapPx = scaled (3, theme);
+
+        //  The EQ's own row first, then the high-pass, the low-pass and the four bands.
+        const auto index = handle == hpfHandle ? 1 : handle == lpfHandle ? 2 : 3 + handle;
+        column.removeFromTop (index * (row + gapPx));
+
+        return column.removeFromTop (row).removeFromLeft (scaled (markWidth, theme));
+    }
+
+    bool EqPanelComponent::handleIsIn (int handle, const audio::EqSettings& s) noexcept
+    {
+        if (handle == hpfHandle)
+            return s.hpf;
+
+        if (handle == lpfHandle)
+            return s.lpf;
+
+        return audio::EqSettings::bandIsActive (s.band[std::clamp (handle, 0, audio::EqSettings::numBands - 1)]);
     }
 
     void EqPanelComponent::paintGrid (juce::Graphics& g, juce::Rectangle<int> field)
@@ -856,8 +926,7 @@ namespace wfg::client::ui
         for (int handle = 0; handle < 6; ++handle)
         {
             const auto isFilter = handle >= hpfHandle;
-            const auto in = isFilter ? (handle == hpfHandle ? s.hpf : s.lpf)
-                                     : audio::EqSettings::bandIsActive (s.band[handle]);
+            const auto in = handleIsIn (handle, s);
 
             const auto place = placeOf (handle, s);
             const auto box = juce::Rectangle<float> (place.x - radius, place.y - radius,
@@ -874,14 +943,7 @@ namespace wfg::client::ui
 
             /*  A BAND IS ROUND AND A FILTER IS SQUARE - two shapes, §4.8 -
                 and one that is out is hollow rather than a different colour. */
-            if (isFilter)
-            {
-                if (in) g.fillRect (box); else g.drawRect (box, 1.5f);
-            }
-            else
-            {
-                if (in) g.fillEllipse (box); else g.drawEllipse (box, 1.5f);
-            }
+            drawHandleShape (g, box, isFilter, in);
 
             /*  THE ONE BEING EDITED, RINGED in the ink (author, 2026-09-25:
                 "And having a circle around the one being edited too"): what

@@ -154,6 +154,15 @@ namespace wfg::client::ui
         juce::Point<float> placeOf (int handle, const audio::EqSettings&) const;
         int handleAt (juce::Point<float>) const;
 
+        /*  WHERE A HANDLE'S MARK STANDS IN THE COLUMN, at the left of its row
+            (author, 2026-09-25: "Show colours in the side panel with the
+            parameters"): the high-pass's and the low-pass's rows, then the
+            bands'. The layout and the painting both take it from here. */
+        juce::Rectangle<int> markArea (int handle) const;
+
+        /** Whether a handle's band or filter is in: a mark is filled when it is, hollow when not. */
+        static bool handleIsIn (int handle, const audio::EqSettings&) noexcept;
+
         /*  The band a width gesture acts on: the one under the pointer, else
             the one being edited; none over a filter, which has no width. */
         int bandFor (juce::Point<float>) const;
