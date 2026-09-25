@@ -18,6 +18,7 @@
 #include <wfg/engine/cue/FxRows.h>
 
 #include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/SamplerLayout.h>
 #include <wfg/engine/tree/Touches.h>
 #include <wfg/engine/cue/ShowWalk.h>
 #include <wfg/engine/cue/Solver.h>
@@ -3495,23 +3496,16 @@ namespace wfg::cue
 
     std::string Runner::stripForMember (const juce::ValueTree& group, const std::string& cueId)
     {
-        /*  POSITIONAL (plan decision 3): the Nth media member of the group is
-            on the Nth sampler strip. Counted over media members only, because
-            a sampler's members are clips (§3.27) and a memo among them would
-            otherwise take a strip nothing could be played from. */
-        const auto& strips = samplerStrips();
-        std::size_t position = 0;
-
-        for (const auto& memberId : membersOf (group))
-        {
-            if (kindOfCue (document.findById (memberId)) != "media")
-                continue;
-
-            if (memberId == cueId)
-                return position < strips.size() ? strips[position] : std::string {};
-
-            ++position;
-        }
+        /*  A MEMBER'S OWN STRIP FIRST, THEN POSITIONAL (plan decision 3, and
+            the pin the author asked for on 2026-09-25): `placeMembers` is the
+            one rule, shared with the re-arm below and with the tree's
+            `stripNow`, so the strip a menu says is the strip that is armed.
+            Counted over media members only, because a sampler's members are
+            clips (§3.27) and a memo among them would otherwise take a strip
+            nothing could be played from. */
+        for (const auto& member : placeMembers (document, group, samplerStrips()))
+            if (member.cue == cueId)
+                return member.strip;
 
         return {};
     }
@@ -3658,29 +3652,20 @@ namespace wfg::cue
             is what makes a clip playable any number of times: the strip frees
             when the run ends, and the member takes it back armed and ready.
             A member past the last strip is left unarmed; the group is then
-            partially armed, and the row says so. */
-        const auto& strips = samplerStrips();
-        std::size_t position = 0;
+            partially armed, and the row says so. The strip each member is on
+            is `placeMembers`' answer - its own pin, or the next one free. */
         bool anyStrip = false;
 
-        for (const auto& memberId : membersOf (group))
+        for (const auto& member : placeMembers (document, group, samplerStrips()))
         {
-            if (kindOfCue (document.findById (memberId)) != "media")
-                continue;
-
-            if (position >= strips.size())
-                break;
-
-            const auto& stripId = strips[position++];
-
-            if (lost (stripId))
+            if (member.strip.empty() || lost (member.strip))
                 continue;
 
             anyStrip = true;
 
-            if (live.count (memberId) == 0)
+            if (live.count (member.cue) == 0)
                 engine.submit (origin::engine, "run.spawn",
-                               { osc::Value::string (job.run), osc::Value::string (memberId) });
+                               { osc::Value::string (job.run), osc::Value::string (member.cue) });
         }
 
         /*  A GROUP WITH NO STRIP LEFT AND NOTHING SOUNDING COMPLETES (PRD

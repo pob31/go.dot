@@ -129,6 +129,25 @@ namespace wfg::client::model
         `DcaRow::label()` only when it has none. */
     std::vector<std::pair<std::string, std::string>> dcaChoices (const std::vector<DcaRow>&);
 
+    /*  THE STRIP MENU OF ONE SAMPLER MEMBER, {id, label} (author, 2026-09-25:
+        "There should be a drop down menu to assign the strip. Like for the
+        direct outs, it should state what is the previous assignment in
+        chronological order of the cuelist unless it's free" - "Same for
+        pads").
+
+        "automatic" first, with an empty id, saying where automatic placement
+        puts this member now. Then every sampler strip - faders and pads - in
+        the order automatic placement fills them, each saying in words what is
+        on it: another member of this group, what the nearest earlier sampler
+        group in the list put there, or free. Never a refusal, as the
+        direct-out menu never refuses: the mark informs the choice.
+
+        What a strip carries is the engine's answer (`stripNow`,
+        `stripsBefore`), never worked out here: the rule that places members
+        lives where they are armed. */
+    std::vector<std::pair<std::string, std::string>> stripChoices (const tree::TreeSnapshot&,
+                                                                   const std::string& cueId);
+
     /** The four profiles, {word, label}: virtual "Virtual panel", mcu "Mackie Control", d700 "Asparion D700", midiPads "Pads". */
     std::vector<std::pair<std::string, std::string>> profileChoices();
 }

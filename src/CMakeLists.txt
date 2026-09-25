@@ -93,6 +93,8 @@ add_library(wfg_engine STATIC
     wfg/engine/cue/Solver.cpp
     wfg/engine/cue/SlotAnalysis.h
     wfg/engine/cue/SlotAnalysis.cpp
+    wfg/engine/cue/SamplerLayout.h
+    wfg/engine/cue/SamplerLayout.cpp
     wfg/engine/cue/RunCommands.h
     wfg/engine/cue/RunCommands.cpp
     wfg/engine/cue/Runner.h

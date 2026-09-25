@@ -904,3 +904,113 @@ TEST_CASE ("sampler: each strip says what it rides, what it is doing and whose i
     CHECK (rig.published ("/godot/slot/" + rig.strips[7] + "/word") == "dca");
     CHECK (rig.published ("/godot/slot/" + rig.strips[7] + "/target") == "/godot/dca/" + band + "/trim");
 }
+
+//==============================================================================
+/*  A MEMBER NAMES ITS STRIP (author, 2026-09-25: "I need to specify which
+    track goes where"). The pin first; everybody else on what is left, in
+    member order - the placement that was the whole rule until today. */
+#include <wfg/client/model/Surfaces.h>
+
+TEST_CASE ("sampler: a member names its strip, and the others fill what is left in order")
+{
+    Rig rig;
+    const auto& a = rig.membersOf[rig.bankA];
+
+    rig.set ("/godot/cue/" + a[2] + "/strip", rig.strips[0]);
+    rig.arm (rig.bankA);
+
+    CHECK (rig.holds (rig.liveRunOf (a[2]), rig.strips[0]));
+    CHECK (rig.holds (rig.liveRunOf (a[0]), rig.strips[1]));
+    CHECK (rig.holds (rig.liveRunOf (a[1]), rig.strips[2]));
+    CHECK (rig.holds (rig.liveRunOf (a[3]), rig.strips[3]));
+
+    //  And the tree says the same strips, so the menu cannot disagree with the arm.
+    CHECK (rig.published ("/godot/cue/" + a[2] + "/stripNow") == rig.strips[0]);
+    CHECK (rig.published ("/godot/cue/" + a[0] + "/stripNow") == rig.strips[1]);
+    CHECK (rig.published ("/godot/slot/" + rig.strips[0] + "/cue") == a[2]);
+
+    /*  A PRESS ON THE PINNED STRIP PLAYS THE PINNED CLIP, which is the point
+        of the pin: the hand goes to the fader somebody wrote down. */
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]) });
+    CHECK (rig.liveRunOf (a[2])->launchRequested);
+    CHECK_FALSE (rig.liveRunOf (a[0])->launchRequested);
+}
+
+TEST_CASE ("sampler: two members naming one strip - the first has it, the other is placed as if it named none")
+{
+    Rig rig;
+    const auto& a = rig.membersOf[rig.bankA];
+
+    rig.set ("/godot/cue/" + a[1] + "/strip", rig.strips[5]);
+    rig.set ("/godot/cue/" + a[3] + "/strip", rig.strips[5]);
+    rig.arm (rig.bankA);
+
+    CHECK (rig.holds (rig.liveRunOf (a[1]), rig.strips[5]));
+    CHECK (rig.holds (rig.liveRunOf (a[0]), rig.strips[0]));
+    CHECK (rig.holds (rig.liveRunOf (a[2]), rig.strips[1]));
+    CHECK (rig.holds (rig.liveRunOf (a[3]), rig.strips[2]));
+}
+
+TEST_CASE ("sampler: a strip that is not a sampler strip is no pin, and the member still plays")
+{
+    Rig rig;
+    const auto& a = rig.membersOf[rig.bankA];
+
+    /*  A DCA STRIP rides its DCA and never a clip: a member naming one is
+        placed automatically rather than left silent, and the strip goes on
+        riding the DCA. */
+    rig.set ("/godot/slot/" + rig.strips[6] + "/role", "dca");
+    rig.set ("/godot/cue/" + a[0] + "/strip", rig.strips[6]);
+    rig.arm (rig.bankA);
+
+    CHECK (rig.holds (rig.liveRunOf (a[0]), rig.strips[0]));
+    CHECK (rig.published ("/godot/cue/" + a[0] + "/stripNow") == rig.strips[0]);
+    CHECK (rig.published ("/godot/slot/" + rig.strips[6] + "/cue").empty());
+}
+
+TEST_CASE ("sampler: the strip menu says what each strip carries - this group, the list before it, or free")
+{
+    /*  Bank A, first in the list, takes strips one to four in order. Bank B
+        pins its first member to strip three and lets the second fall where
+        automatic puts it - strip one. The menu of Bank B's second member must
+        say so strip by strip, in words (author, 2026-09-25: "it should state
+        what is the previous assignment in chronological order of the cuelist
+        unless it's free"). */
+    Rig rig;
+    const auto& a = rig.membersOf[rig.bankA];
+    const auto& b = rig.membersOf[rig.bankB];
+
+    rig.set ("/godot/cue/" + b[0] + "/strip", rig.strips[2]);
+
+    const auto before = rig.published ("/godot/cue/" + b[1] + "/stripsBefore");
+    CHECK (before == rig.strips[0] + " " + a[0] + " " + rig.strips[1] + " " + a[1] + " "
+                       + rig.strips[2] + " " + a[2] + " " + rig.strips[3] + " " + a[3]);
+    CHECK (rig.published ("/godot/cue/" + a[0] + "/stripsBefore").empty());
+    CHECK (rig.published ("/godot/cue/" + b[0] + "/stripNow") == rig.strips[2]);
+    CHECK (rig.published ("/godot/cue/" + b[1] + "/stripNow") == rig.strips[0]);
+
+    const auto choices = client::model::stripChoices (*rig.snapshot, b[1]);
+    REQUIRE (choices.size() == 9u);             // automatic, and the eight faders
+
+    const std::string dash = "\xe2\x80\x94";
+
+    CHECK (choices[0].first.empty());
+    CHECK (choices[0].second == "automatic " + dash + " Panel · fader 1");
+
+    CHECK (choices[1].first == rig.strips[0]);
+    CHECK (choices[1].second == "Panel · fader 1 " + dash + " previously \"Bank A 0\"");
+    CHECK (choices[3].first == rig.strips[2]);
+    CHECK (choices[3].second == "Panel · fader 3 " + dash + " \"Bank B 0\" in this group");
+    CHECK (choices[5].second == "Panel · fader 5 " + dash + " free");
+
+    /*  PINNED, "automatic" says what choosing it would do rather than where it
+        would land: that depends on the other members, and the menu does not
+        guess. */
+    const auto pinned = client::model::stripChoices (*rig.snapshot, b[0]);
+    CHECK (pinned[0].second == "automatic, on the next strip free");
+
+    /*  A DCA STRIP IS NOT OFFERED: it rides its DCA. */
+    rig.set ("/godot/slot/" + rig.strips[7] + "/role", "dca");
+    rig.published ("/godot/cue/" + b[1] + "/stripNow");
+    CHECK (client::model::stripChoices (*rig.snapshot, b[1]).size() == 8u);
+}

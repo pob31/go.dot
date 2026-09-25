@@ -2081,10 +2081,27 @@ bulk-edit view over its members, never a property of the group.
 **Strips.** §3.16's word for a fader or a pad. Each strip's role is the
 layout's (§3.9a): a **DCA strip** is pinned; a **sampler strip** is filled by
 whichever sampler group is armed, in member order, left to right. A member may
-pin its strip *(proposed)* — "the gunshot is always the rightmost fader" is a
+pin its strip ~~*(proposed)*~~ — "the gunshot is always the rightmost fader" is a
 decision somebody may want to write down; derived from order is the half that
 exists first. **A pad is a fader-start fader without a motor**: the same
 binding at one bit, a *gate* endpoint (§3.16). ~~No pressure,~~ no XY.
+
+*Amended in 0.8, at the author's direction (2026-09-25).* **A member names its
+strip.** The author, with the D700 on the desk: *"I need to specify which track
+goes where."* The member carries a `strip` row naming a fader or a pad; empty is
+automatic. Placement is one rule, used by the arm, the re-arm and the menu
+alike: members that name a sampler strip have it, the first in member order
+when two name the same one; every other member takes the next sampler strip
+nobody in its group has named, in member order. A name that is no sampler strip
+of this layout — deleted since, or made a DCA strip — is no pin, and the member
+is placed automatically rather than left silent. It is chosen from a menu on
+the member that, like the direct-out menu (§3.9b), says what each strip carries,
+*"what is the previous assignment in chronological order of the cuelist unless
+it's free"*: another member of the same group, the member the nearest earlier
+sampler group in the list put there, or free. Faders and pads are one menu. The
+engine publishes both halves — `stripNow`, where the member is played from, and
+`stripsBefore`, what the list put on each strip before its group — so the words
+are computed where the rule lives.
 
 *Amended in 0.8, at the author's direction (2026-09-23) — decision AA,
 `docs/godot-namespace-draft-0.1.md` §9.* **Pressure yes, XY no.** Per clip and

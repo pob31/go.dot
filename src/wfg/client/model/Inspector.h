@@ -132,6 +132,13 @@ namespace wfg::client::model
             a selection already sends, and nothing new. */
         dcaRef,
 
+        /*  A MENU OF THE SHOW'S SAMPLER STRIPS, faders and pads (author,
+            2026-09-25), the DCA menu's twin: it writes a strip's IDENTIFIER
+            to a sampler member's `strip` row, and each item says what is on
+            that strip - another member of the group, what an earlier group in
+            the list put there, or free. "automatic" is the empty id. */
+        stripRef,
+
         /*  A BUTTON THAT OPENS THE PANEL AT THE FOOT on this cue (author,
             2026-09-21: "it would be great if the controls to show the
             waveform, the send levels, the EQ, the group timeline were in the

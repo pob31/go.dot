@@ -724,6 +724,12 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="strip">
+          <a:documentation>sampler member: the strip this clip is played from, by identifier - a fader or a pad (author, 2026-09-25: &apos;I need to specify which track goes where&apos;). Empty is automatic: the next sampler strip nobody in the group has named, in member order, which is how every member was placed before. Two members naming one strip: the first in member order has it and the other is placed automatically. A strip that is not a sampler strip of this layout - deleted, or made a DCA strip - is no pin at all, and the member is placed automatically rather than left silent.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="velocity">
           <a:documentation>sampler member: whether the velocity of a press sets the level the clip starts at (author, 2026-09-23). Off, a press starts at the member&apos;s initialLevel, which is where its fader already is. On, a press at 127 starts at 0 dB and a press at one at velocityFloor, in a straight line between them in dB.</a:documentation>
           <choice>
@@ -2064,7 +2070,7 @@
       </optional>
       <optional>
         <attribute name="role">
-          <a:documentation>What this strip is for (PRD 3.9a, 3.27): a sampler strip is unpinned and filled by whichever sampler group is armed, in member order across the sampler strips of every surface; a dca strip is pinned to one DCA and never reassigned. The two may be mixed on one surface.</a:documentation>
+          <a:documentation>What this strip is for (PRD 3.9a, 3.27): a sampler strip is filled by whichever sampler group is armed - by the member whose strip row names it, or else automatically in member order across the sampler strips of every surface; a dca strip is pinned to one DCA and never reassigned. The two may be mixed on one surface.</a:documentation>
           <choice>
             <value>sampler</value>
             <value>dca</value>

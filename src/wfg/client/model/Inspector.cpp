@@ -47,8 +47,9 @@ namespace wfg::client::model
             how hard it was struck and pressed, and the fade a release ends in.
             `dca` arrived with them and is not one of them - a DCA trims any
             cue, fired or pressed. */
-        const std::vector<std::string> samplerRows { "initialLevel", "release", "secondPress", "velocity",
-                                                     "velocityFloor", "pressure", "releaseFade" };
+        const std::vector<std::string> samplerRows { "strip", "initialLevel", "release", "secondPress",
+                                                     "velocity", "velocityFloor", "pressure",
+                                                     "releaseFade" };
 
         /*  WHAT A SAMPLER GROUP IS NEVER ASKED: how it advances, how a round is
             drawn and how many rounds it plays. The hand launches its members,
@@ -61,12 +62,13 @@ namespace wfg::client::model
             static const std::map<std::string, std::vector<std::string>> table
             {
                 /*  A SAMPLER MEMBER'S ROWS AFTER EVERYTHING A MEDIA CUE HAS
-                    (Phase 6): the DCA it answers to, where its fader waits,
-                    then what a hand on its strip does, in the order a press
-                    happens - it is let go, it is pressed again, it was struck,
-                    it is leant on, it fades. */
+                    (Phase 6): the DCA it answers to, the strip it is played
+                    from (2026-09-25), where its fader waits, then what a hand
+                    on its strip does, in the order a press happens - it is let
+                    go, it is pressed again, it was struck, it is leant on, it
+                    fades. */
                 { "media",   { "file", "channels", "stereoToMono", "directOut",
-                               "level", "startOffset", "dca", "initialLevel", "release",
+                               "level", "startOffset", "dca", "strip", "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
                                "releaseFade" } },
 
@@ -374,6 +376,25 @@ namespace wfg::client::model
             }
         }
 
+        /*  WHICH STRIP A SAMPLER MEMBER IS PLAYED FROM, as a menu of the
+            show's faders and pads that says what each one carries - another
+            member of this group, what the list put there before, or free
+            (author, 2026-09-25). The words are `stripChoices`'; the rows they
+            come from are the engine's. */
+        void offerTheStrips (const tree::TreeSnapshot& snapshot, const std::string& cueId,
+                             std::vector<Field>& decided)
+        {
+            for (auto& field : decided)
+            {
+                if (field.name != "strip" || ! field.writable)
+                    continue;
+
+                field.control = Control::stripRef;
+                field.choices = stripChoices (snapshot, cueId);
+                return;
+            }
+        }
+
         /*  WHAT ONLY A HAND ON A STRIP ASKS, greyed where no hand can reach it
             (PRD §3.27). A media cue carries the sampler rows whatever group it
             is in, and they mean something only on a MEMBER of a SAMPLER group:
@@ -602,7 +623,10 @@ namespace wfg::client::model
             more linear pass when somebody clicks a media cue, against the same
             human reaction time the comment above weighs. */
         if (out.kind == "media")
+        {
             fitToTheRig (snapshot, cueId, decided);
+            offerTheStrips (snapshot, cueId, decided);
+        }
 
         /*  And the same kind of second pass for a network cue, for the same
             reason: which devices exist is a fact about THIS show and cannot

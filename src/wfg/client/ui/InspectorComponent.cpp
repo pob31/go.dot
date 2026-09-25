@@ -243,6 +243,7 @@ namespace wfg::client::ui
                 case model::Control::deviceRef:
                 case model::Control::portRef:
                 case model::Control::dcaRef:
+                case model::Control::stripRef:
                     /*  THE ITEMS THEMSELVES CAN HAVE MOVED, which no other
                         control here has to think about: a `choice`'s options
                         come from the parameter table and are fixed for the
@@ -555,7 +556,8 @@ namespace wfg::client::ui
             else if ((field.control == model::Control::busRef
                         || field.control == model::Control::deviceRef
                         || field.control == model::Control::portRef
-                        || field.control == model::Control::dcaRef)
+                        || field.control == model::Control::dcaRef
+                        || field.control == model::Control::stripRef)
                        && field.writable)
             {
                 /*  A MENU THE SHOW WROTE, not one the parameter table
@@ -823,7 +825,8 @@ namespace wfg::client::ui
                                   || line->field.control == model::Control::busRef
                                   || line->field.control == model::Control::deviceRef
                                   || line->field.control == model::Control::portRef
-                                  || line->field.control == model::Control::dcaRef;
+                                  || line->field.control == model::Control::dcaRef
+                                  || line->field.control == model::Control::stripRef;
 
             line->box.setVisible (! hidden && ! line->isHeading
                                     && line->field.control != model::Control::toggle

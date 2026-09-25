@@ -53,6 +53,7 @@
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/ListState.h>
+#include <wfg/engine/cue/SamplerLayout.h>
 #include <wfg/engine/cue/SlotAnalysis.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/plugin/PluginScan.h>
@@ -465,6 +466,11 @@ namespace wfg::tree
             reference the show has - both functions of the document at one
             revision, so both out of one cache asked by that revision. */
         cue::SlotAnalysis analysis;
+
+        /*  Which strip each sampler member is played from, and what the list
+            put on each strip before it - a function of the document at one
+            revision too, cached the same way. */
+        cue::SamplerLayout samplerLayout;
 
         const cue::ListState* lists = nullptr;
 

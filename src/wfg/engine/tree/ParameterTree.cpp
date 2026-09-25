@@ -676,6 +676,7 @@ namespace wfg::tree
                          std::vector<std::string>& roster,
                          std::vector<std::pair<std::string, std::string>>& mediaRoster,
                          const cue::SlotAnalysis& analysis,
+                         const cue::SamplerLayout& layout,
                          const char* role = "member")
         {
             const auto element = node.getType().toString().toStdString();
@@ -825,6 +826,18 @@ namespace wfg::tree
                 else if (name == "outsMaybe" && isMedia)
                 {
                     text = analysis.maybeOutsOf (id);
+                }
+                /*  AND WHICH STRIP A SAMPLER MEMBER IS PLAYED FROM, with what
+                    the list put on each strip before it (author, 2026-09-25),
+                    from a cache keyed like the analysis above - the menu's
+                    words, computed where the placement rule lives. */
+                else if (name == "stripNow" && isMedia)
+                {
+                    text = layout.stripOf (id);
+                }
+                else if (name == "stripsBefore" && isMedia)
+                {
+                    text = layout.stripsBeforeOf (id);
                 }
                 else if (name == "headerDerived")
                 {
@@ -992,13 +1005,13 @@ namespace wfg::tree
                     for (const auto& roleChild : child)
                         if (roleChild.hasProperty (idProperty))
                             collectCue (roleChild, id, roleIndex++, out, durations, roster,
-                                        mediaRoster, analysis, childRole);
+                                        mediaRoster, analysis, layout, childRole);
 
                     continue;
                 }
 
                 collectCue (child, id, childIndex++, out, durations, roster, mediaRoster,
-                            analysis);
+                            analysis, layout);
             }
         }
     }
@@ -1160,7 +1173,7 @@ namespace wfg::tree
 
                         if (cue.hasProperty (idProperty))
                             collectCue (cue, id, index++, nodes, durations, cueOrder, mediaOrder,
-                                        analysis);
+                                        analysis, samplerLayout);
                     }
 
                     if (const auto section = list.getChildWithName ("Persistent");
@@ -1171,7 +1184,8 @@ namespace wfg::tree
                         for (const auto& cue : section)
                             if (cue.hasProperty (idProperty))
                                 collectCue (cue, id, persistentIndex++, nodes, durations,
-                                            cueOrder, mediaOrder, analysis, "persistent");
+                                            cueOrder, mediaOrder, analysis, samplerLayout,
+                                            "persistent");
                     }
                 }
             }
@@ -1945,6 +1959,7 @@ namespace wfg::tree
         }
 
         analysis.ensureBuilt (document, durations);
+        samplerLayout.ensureBuilt (document);
 
         /*  AND THE PLUGIN TABLE ASKED THE SAME WAY (Phase 9a): the sandbox
             writes it from the message thread, and its `state` rows are on
