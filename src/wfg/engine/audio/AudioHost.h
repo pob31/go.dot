@@ -562,6 +562,11 @@ namespace wfg::audio
         float trackOutputPeak (int trackIndex) const;
         void resetTrackPeaks (int trackIndex);
 
+        /*  The output peak TAKEN - read and set back to nought in one
+            exchange - which is what a strip's post-fader meter asks for once a
+            tick (2026-09-25). The input peak is left to the diagnostics. */
+        float takeTrackOutputPeak (int trackIndex);
+
     private:
         struct Impl;
         std::unique_ptr<Impl> impl;

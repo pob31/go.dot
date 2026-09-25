@@ -307,6 +307,13 @@ namespace wfg::cue
             about the cue. */
         virtual bool isPlaying (int track) const = 0;
 
+        /*  The loudest sample the track's output stage has sent since the
+            last take, linear, and counting starts again (2026-09-25, a strip's
+            post-fader meter). Tick thread, once a tick for each sounding
+            track; one atomic exchange on the audio side. Silence by default,
+            so a replay's player and a test's are still complete. */
+        virtual float takeOutputPeak (int) { return 0.0f; }
+
         /*  Whether the media for that track is actually ready to sound.
 
             SEPARATE FROM THE ARM BEING ACCEPTED, and the separation is the

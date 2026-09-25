@@ -1894,6 +1894,14 @@ namespace wfg::audio
             impl->plugins[static_cast<std::size_t> (trackIndex)]->resetPeaks();
     }
 
+    float AudioHost::takeTrackOutputPeak (int trackIndex)
+    {
+        if (trackIndex < 0 || trackIndex >= static_cast<int> (impl->plugins.size()))
+            return 0.0f;
+
+        return impl->plugins[static_cast<std::size_t> (trackIndex)]->takeOutputPeak();
+    }
+
     int AudioHost::editChannelsPerTrack() const noexcept  { return impl->editChannels; }
 
     int AudioHost::waveOutputDeviceCount() const noexcept

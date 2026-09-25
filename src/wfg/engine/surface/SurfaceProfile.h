@@ -43,6 +43,7 @@
 #include <wfg/engine/surface/FaderCurve.h>
 #include <wfg/engine/surface/McuCodec.h>
 
+#include <array>
 #include <cstdint>
 #include <optional>
 #include <string_view>
@@ -74,6 +75,7 @@ namespace wfg::surface
         bool hasRgb = false;            // d700: an RGB surround on each encoder
         bool nativeDisplay = false;     // d700: 12 + 12 + 8 and track numbers; mcu: two rows of 7 through 0x12
         bool hasPads = false;           // midiPads: notes with velocity and pressure
+        bool hasMeters = false;         // mcu, d700: a meter per strip, as channel pressure
         bool drivenOverMidi = true;     // false for the virtual panel, which is the client's own
 
         /*  WHERE A LEVEL SITS ON THE TRAVEL: the law its engraving was drawn
@@ -200,6 +202,28 @@ namespace wfg::surface
     inline constexpr double ledRedTrim = 1.0;
     inline constexpr double ledGreenTrim = 1.0;
     inline constexpr double ledBlueTrim = 1.0;
+
+    /*  A SAMPLER STRIP'S METER, AFTER THE FADER (author, 2026-09-25: "On the
+        sampler fader displays of the D700 can we have a post fader level
+        meter too?"): the held run's `meter` - what left its track after the
+        EQ, the inserts and the fader - the loudest of the ticks since the
+        last message, as MCU's channel pressure (control guide §4.7).
+
+        Sent every `meterEveryTicks` while the strip sounds, even unchanged,
+        since a Mackie meter falls by itself between messages: every third
+        tick is 16.7 a second, where the guide found 18 smooth and Asparion's
+        own default is 5. Dark once, when it stops.
+
+        `meterStepsDb` is where each of the D700's eleven lit steps begins,
+        bottom to top: the n-th reached lights step n, and nothing below the
+        first. A bench guess on the pattern desks use, closer together near
+        the top, where headroom is read. */
+    inline constexpr int meterEveryTicks = 3;
+    inline constexpr std::array<double, 11> meterStepsDb { { -60.0, -50.0, -40.0, -30.0, -24.0, -18.0,
+                                                             -12.0, -9.0, -6.0, -3.0, -1.0 } };
+
+    /** The step a peak in dB lights, 0 to 11. */
+    int meterStepFor (double db) noexcept;
 
     /*  AN UNCHANGED COLOUR IS WRITTEN AGAIN THIS OFTEN, because the D700's
         firmware takes its LEDs back with an idle animation when nothing

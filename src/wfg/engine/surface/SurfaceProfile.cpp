@@ -63,6 +63,7 @@ namespace wfg::surface
                 break;
 
             case Profile::mcu:
+                topology.hasMeters = true;
                 break;
 
             case Profile::d700:
@@ -71,6 +72,7 @@ namespace wfg::surface
                     faders that land on their engraving (+7 at the top). */
                 topology.hasRgb = true;
                 topology.nativeDisplay = true;
+                topology.hasMeters = true;
                 topology.faderLaw = FaderLaw::d700;
                 break;
 
@@ -117,5 +119,16 @@ namespace wfg::surface
         if (button.button == Button::forward)   return Action::forward;
 
         return Action::none;
+    }
+
+    int meterStepFor (double db) noexcept
+    {
+        int step = 0;
+
+        for (const auto from : meterStepsDb)
+            if (db >= from)
+                ++step;
+
+        return step;
     }
 }

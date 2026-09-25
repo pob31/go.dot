@@ -96,6 +96,13 @@ namespace
         bool isPlaying (int track) const override               { return playing.count (track) > 0; }
         bool isArmReady (int track) const override              { return ready.count (track) > 0; }
 
+        //  What left each track since the last take, as the output stage's peak: taken, so nought after.
+        float takeOutputPeak (int track) override
+        {
+            const auto found = peaks.find (track);
+            return found != peaks.end() ? std::exchange (found->second, 0.0f) : 0.0f;
+        }
+
         void completeArms (Engine& engine)
         {
             for (const auto& arm : arms)
@@ -114,6 +121,7 @@ namespace
         std::vector<int> stopped;
         std::set<int> playing;
         std::set<int> ready;
+        std::map<int, float> peaks;
     };
 
     struct Rig
@@ -409,6 +417,47 @@ TEST_CASE ("sampler: a press launches the clip on its strip, at the level its ve
 
     /*  And the press is a step, letter p, which the live recorder keeps. */
     CHECK (rig.published ("/godot/list/" + rig.listId + "/history").find (":p") != std::string::npos);
+}
+
+TEST_CASE ("sampler: a strip's run says how loud it left its track, after the fader, and nothing once it ends")
+{
+    /*  The author, 2026-09-25: "On the sampler fader displays of the D700 can
+        we have a post fader level meter too?" The output stage's peak is
+        taken once a tick, so each tick reads its own. */
+    Rig rig;
+    const auto& members = rig.membersOf[rig.bankA];
+    rig.arm (rig.bankA);
+
+    rig.send ("strip.press", { osc::Value::string (rig.strips[0]), osc::Value::int32 (100) });
+    rig.sound (members[0]);
+
+    const auto* run = rig.liveRunOf (members[0]);
+    REQUIRE (run != nullptr);
+    const auto runId = run->id;
+    const auto track = run->track;
+
+    //  Half of full scale left the track in a tick: -6 dB, published to a tenth.
+    rig.audio.peaks[track] = 0.5f;
+    rig.tickOnce();
+    CHECK (rig.runs.find (runId)->meter == doctest::Approx (-6.0206).epsilon (1e-3));
+    CHECK (std::stod (rig.published ("/godot/run/" + runId + "/meter")) == doctest::Approx (-6.0));
+
+    //  Taken and not kept: a tick with nothing out of it is silence again.
+    rig.tickOnce();
+    CHECK (rig.runs.find (runId)->meter == doctest::Approx (cue::Run::silentDb));
+
+    //  And a run that has ended is silent, whatever was taken last.
+    rig.audio.peaks[track] = 0.9f;
+    rig.silence (members[0]);
+
+    REQUIRE (rig.tickUntil ([&rig, &runId]
+                            {
+                                const auto* ended = rig.runs.find (runId);
+                                return ended != nullptr && ended->isFinished();
+                            }));
+
+    rig.tickOnce();
+    CHECK (rig.runs.find (runId)->meter == doctest::Approx (cue::Run::silentDb));
 }
 
 TEST_CASE ("sampler: a second press does what the clip says it does")

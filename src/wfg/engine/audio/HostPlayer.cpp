@@ -235,6 +235,11 @@ namespace wfg::audio
         return audioHost.trackPlayState (track).playing;
     }
 
+    float HostPlayer::takeOutputPeak (int track)
+    {
+        return audioHost.takeTrackOutputPeak (track);
+    }
+
     bool HostPlayer::isArmReady (int track) const
     {
         /*  READY IS THE DISK AND THE STATES: a cue whose plugin is still

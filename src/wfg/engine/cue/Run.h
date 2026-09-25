@@ -400,6 +400,17 @@ namespace wfg::cue
             set it are logged, which is what a replay needs. */
         double trim = 0.0;
 
+        /*  HOW LOUD IT LEFT ITS TRACK over the last tick, in dB below full
+            scale (author, 2026-09-25: "On the sampler fader displays of the
+            D700 can we have a post fader level meter too?"): the loudest
+            sample the track's output stage sent, after its EQ, its inserts,
+            the level and the hand's trim - so after the fader. `silentDb`
+            while it has no voice sounding. A READOUT like `position`: taken
+            on the tick thread from the player, never logged, and nought a
+            replay could reproduce. */
+        static constexpr double silentDb = -120.0;
+        double meter = silentDb;
+
         /*  THE EQ THE VOICE WAS LAST GIVEN (Phase 9a): the cue's nineteen rows
             as they were carried by the arm, and as `Runner::applyEq` last
             pushed them. Kept on the run so a tick after an edit can say

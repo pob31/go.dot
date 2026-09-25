@@ -86,6 +86,13 @@ namespace wfg::audio
         float outputPeak() const noexcept  { return lastOutputPeak.load (std::memory_order_relaxed); }
         void resetPeaks() noexcept;
 
+        /*  THE OUTPUT PEAK TAKEN, and nought left in its place: what a strip's
+            post-fader meter reads once a tick (2026-09-25). One exchange. A
+            block whose maximum lands between its own load and store keeps an
+            older peak for one more take - a meter holding a value twenty
+            milliseconds longer, and nothing on the audio thread waits. */
+        float takeOutputPeak() noexcept    { return lastOutputPeak.exchange (0.0f, std::memory_order_relaxed); }
+
         int numOutputChannels() const noexcept    { return outputs; }
         int numInputChannels() const noexcept     { return inputs; }
 

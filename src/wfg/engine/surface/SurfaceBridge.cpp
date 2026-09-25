@@ -62,6 +62,9 @@ namespace wfg::surface
 
         constexpr int ringFillMode = 2;         // MCU "wrap" and the D700's channel 3: fill from the left
 
+        //  A run's `meter` when nothing has left its track: the tree's word for silence.
+        constexpr double meterSilentDb = -120.0;
+
         /*  WHAT THE CALLBACK THREAD MAY QUEUE BEFORE THE TICK THREAD HAS DRAINED
             IT. Hundreds of messages a tick is a busy surface; this many is a
             tick thread that has stopped, and a callback that went on
@@ -390,7 +393,7 @@ namespace wfg::surface
             std::string cueId, cueNameAt, cueShortAt, cueNumberAt, cueColourAt, cuePressureAt,
                         cueFloorAt;
             std::string dcaId, dcaNameAt, dcaShortAt;
-            std::string holderId, timbreAt, envelopeAt;
+            std::string holderId, timbreAt, envelopeAt, meterAt;
 
             /*  THE PULSE'S OWN MEMORY (2026-09-25): the slow average of the
                 holder's envelope and the brightness being let go, for the run
@@ -400,6 +403,14 @@ namespace wfg::surface
             double pulseAverage = 0.0;
             double pulseSpread = 0.0;
             double pulseShown = 0.0;
+
+            /*  THE METER'S (2026-09-25): the loudest the holder sent since the
+                last message, the step last sent (-1 for nobody knows), when,
+                and the run its peak hold was last cleared for. */
+            double meterPeak = meterSilentDb;
+            int meterStep = -1;
+            std::int64_t meterSentAt = std::numeric_limits<std::int64_t>::min() / 2;
+            std::string meterFor;
 
             //  The hand.
             bool handDown = false;          // the fader's touch sense
@@ -560,6 +571,8 @@ namespace wfg::surface
             strip.muteLed = -1;
             strip.ring = -1;
             strip.colourKnown = false;
+            strip.meterStep = -1;
+            strip.meterFor.clear();
         }
 
         //======================================================================
@@ -599,6 +612,7 @@ namespace wfg::surface
                 strip.holderId = holder;
                 strip.timbreAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/timbre";
                 strip.envelopeAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/envelope";
+                strip.meterAt = holder.empty() ? std::string {} : "/godot/run/" + holder + "/meter";
             }
         }
 
@@ -1333,6 +1347,56 @@ namespace wfg::surface
 
                 paintColour (port, vpotNote + element, strip, wanted.value_or (Rgb {}), tick);
             }
+
+            //------------------------------------------------------------------
+            if (box.topology.hasMeters && ! isDca)
+                paintMeter (port, element, strip, word, tick);
+        }
+
+        /*  THE METER, AFTER THE FADER (SurfaceProfile.h, `meterStepsDb`): the
+            loudest the strip's run sent since the last message, every
+            `meterEveryTicks` while the strip sounds, and dark once when it
+            stops. A run starts with the peak hold cleared, so a clip does not
+            wear the loudest moment of the one before it. */
+        void paintMeter (const std::string& port, int element, Strip& strip, std::string_view word,
+                         std::int64_t tick)
+        {
+            const auto sounding = ! strip.holderId.empty()
+                               && (word == "playing" || word == "held" || word == "stopping" || word == "closing");
+
+            if (! sounding)
+            {
+                strip.meterPeak = meterSilentDb;
+                strip.meterFor.clear();
+
+                if (strip.meterStep != 0)
+                {
+                    send (port, meter (element, 0));
+                    send (port, meterClearPeak (element));
+                    strip.meterStep = 0;
+                }
+
+                return;
+            }
+
+            if (strip.meterFor != strip.holderId)
+            {
+                strip.meterFor = strip.holderId;
+                send (port, meterClearPeak (element));
+            }
+
+            if (const auto db = numberAt (published.get(), strip.meterAt); db.has_value())
+                strip.meterPeak = std::max (strip.meterPeak, *db);
+
+            if (tick - strip.meterSentAt < meterEveryTicks)
+                return;
+
+            const auto step = meterStepFor (strip.meterPeak);
+            send (port, meter (element, step));
+
+            strip.meterStep = step;
+            strip.meterSentAt = tick;
+            strip.meterPeak = meterSilentDb;
         }
 
         /*  THE COLOUR AT THE BRIGHTNESS ITS SOUND'S MOVEMENT GIVES IT - see

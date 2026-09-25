@@ -6517,9 +6517,16 @@ namespace wfg::cue
                 the more useful of the two honest answers: a finished run stays
                 on the tree for its retention (`retentionTicks`) so that what
                 happened can still be read, and where it got to is part of what
-                happened. */
-            if (run == nullptr || run->isFinished())
+                happened. Its meter is silence: nothing leaves a voice it no
+                longer has. */
+            if (run == nullptr)
                 continue;
+
+            if (run->isFinished())
+            {
+                run->meter = Run::silentDb;
+                continue;
+            }
 
             /*  THE GUARD THAT MAKES THIS A READOUT RATHER THAN A LIE.
                 `launchedAtSample` is nought until the launch has been PLACED,
@@ -6550,6 +6557,19 @@ namespace wfg::cue
                                       / static_cast<double> (TickClock::rateHz);
 
                 continue;
+            }
+
+            /*  HOW LOUD IT LEFT ITS TRACK since the last tick, after the
+                fader (author, 2026-09-25: "On the sampler fader displays of the
+                D700 can we have a post fader level meter too?"). TAKEN, so each
+                tick reads its own twenty milliseconds and a surface can keep
+                the loudest of those it has not drawn yet. */
+            if (run->track >= 0)
+            {
+                const auto peak = static_cast<double> (audio->takeOutputPeak (run->track));
+
+                run->meter = peak > 0.0 ? std::max (Run::silentDb, 20.0 * std::log10 (peak))
+                                        : Run::silentDb;
             }
 
             /*  MEASURED FROM THE LAUNCH, and clamped at nought because the

@@ -1643,6 +1643,108 @@ TEST_CASE ("surface bridge: MUTE on a sampler strip kills what it plays, like th
     CHECK (submitted.empty());
 }
 
+TEST_CASE ("surface bridge: a sampler strip's meter is what left its run after the fader, the loudest since the last message")
+{
+    /*  The author, 2026-09-25: "On the sampler fader displays of the D700 can
+        we have a post fader level meter too?" MCU's channel pressure, D0 and
+        (strip << 4) | step, the step from `meterStepsDb`. */
+    CHECK (surface::meterStepFor (-65.0) == 0);
+    CHECK (surface::meterStepFor (-60.0) == 1);
+    CHECK (surface::meterStepFor (-8.0) == 8);
+    CHECK (surface::meterStepFor (-2.5) == 10);
+    CHECK (surface::meterStepFor (0.0) == 11);
+    CHECK (surface::meterStepFor (6.0) == 11);
+
+    RecordingSink sink;
+    surface::SurfaceTable table;
+    surface::SurfaceBridge bridge { sink, table };
+    tree::TouchTable touches;
+
+    FakeTree fake;
+    fake.text ("/godot/slot/STRIP001/role", "sampler");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    fake.text ("/godot/slot/STRIP001/target", "/godot/run/RUN00001/trim");
+    fake.text ("/godot/slot/STRIP001/cue", "CUE00001");
+    fake.text ("/godot/slot/STRIP001/holder", "RUN00001");
+    fake.number ("/godot/run/RUN00001/trim", 0.0);
+    fake.number ("/godot/run/RUN00001/meter", -8.0);
+
+    surface::SurfaceSpec spec;
+    spec.id = "SURF0001";
+    spec.profile = "d700";
+    spec.ports = { "PORTBNK1" };
+    spec.strips = { "STRIP001" };
+    bridge.declare ({ spec }, [] (const std::string&) { return plugged ("D700"); });
+
+    //  The steps strip one was sent, in order; 15 is the peak hold cleared.
+    const auto stepsSent = [&sink]
+    {
+        std::vector<int> steps;
+
+        for (const auto& message : sentOn (sink, "PORTBNK1"))
+            if (message.size() == 2u && message[0] == 0xd0 && (message[1] >> 4) == 0)
+                steps.push_back (message[1] & 0x0f);
+
+        return steps;
+    };
+
+    //  A NEW RUN: its peak hold cleared, then its level - -8 dB lights eight steps of eleven.
+    std::int64_t tick = 1;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (stepsSent() == std::vector<int> { 15, 8 });
+
+    /*  THE LOUDEST OF THE TICKS BETWEEN TWO MESSAGES, not the last: a
+        transient between two sends still reaches the display. */
+    sink.sent.clear();
+    fake.number ("/godot/run/RUN00001/meter", -2.5);
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    fake.number ("/godot/run/RUN00001/meter", -20.0);
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (stepsSent().empty());
+
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (stepsSent() == std::vector<int> { 10 });
+
+    //  Sent again at the rate while it sounds, even unchanged: a Mackie meter falls by itself.
+    sink.sent.clear();
+
+    for (int i = 0; i < surface::meterEveryTicks; ++i)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK (stepsSent() == std::vector<int> { 5 });     // -20 dB: past -24, short of -18
+
+    //  STOPPED: dark once, the hold cleared, and then nothing more.
+    sink.sent.clear();
+    fake.text ("/godot/slot/STRIP001/word", "armed");
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (stepsSent() == std::vector<int> { 0, 15 });
+
+    sink.sent.clear();
+
+    for (int i = 0; i < 2 * surface::meterEveryTicks; ++i)
+    {
+        ++tick;
+        bridge.afterTick (fake.publish (tick), touches, tick);
+    }
+
+    CHECK (stepsSent().empty());
+
+    //  A DCA strip has no meter: it holds no run.
+    fake.text ("/godot/slot/STRIP001/role", "dca");
+    fake.text ("/godot/slot/STRIP001/word", "playing");
+    sink.sent.clear();
+    ++tick;
+    bridge.afterTick (fake.publish (tick), touches, tick);
+    CHECK (stepsSent().empty());
+}
+
 TEST_CASE ("surface bridge: a hand resting through a handover lets go of the old node, and touches the new one only by landing again")
 {
     RecordingSink sink;

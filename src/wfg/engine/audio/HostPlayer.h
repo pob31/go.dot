@@ -89,6 +89,7 @@ namespace wfg::audio
         void requestFxState (int track, int slot, const std::string& path) override;
         bool isPlaying (int track) const override;
         bool isArmReady (int track) const override;
+        float takeOutputPeak (int track) override;
 
         /*  Performs every queued arm. MESSAGE THREAD - it writes a Tracktion
             ValueTree, which every one of those writes asserts.

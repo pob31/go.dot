@@ -2563,6 +2563,9 @@ namespace wfg::tree
                     here throttles it (§14.5). */
                 else if (name == "timbre")    text = timbreText (run, mediaRecords.get());
                 else if (name == "envelope")  text = envelopeText (run, mediaRecords.get());
+
+                //  What left the track after the fader, to a tenth, as the envelope is.
+                else if (name == "meter")     text = osc::formatDouble (std::round (run.meter * 10.0) / 10.0);
                 else if (name == "level")     text = osc::formatDouble (run.level);
                 else if (name == "trim")      text = osc::formatDouble (run.trim);
                 else if (name == "late")      text = std::to_string (run.late);

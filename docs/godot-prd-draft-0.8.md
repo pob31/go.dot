@@ -2146,6 +2146,16 @@ and on a member armed and waiting, MUTE does nothing. **Its red light flashes
 for half a second when it kills** (*"to have feedback on the killed sample"*).
 A press with nothing to kill lights nothing, which is its own answer.
 
+*Amended in 0.8, at the author's direction (2026-09-25).* **A sampler strip
+meters what it plays, after the fader** (*"On the sampler fader displays of the
+D700 can we have a post fader level meter too?"*). The level is measured, not
+estimated: the loudest sample the voice's output stage sent, after its EQ, its
+inserts, the level and the fader, taken once a tick and published as the run's
+`meter`. A Mackie surface or a D700 draws it on the strip that holds the run, as
+Mackie's own meter, about sixteen times a second while the strip sounds,
+the loudest since the last message. It goes dark when the strip stops, and the
+peak hold is cleared for each new run. DCA strips have no meter.
+
 **Takeover.** Two modes, one attribute on the group that arms — the scene change
 is where the designer is thinking about it, and §4.10 wants the decision in the
 file:
