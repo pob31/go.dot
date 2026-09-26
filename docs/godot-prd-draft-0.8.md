@@ -632,7 +632,11 @@ Rules:
 - A stereo cue may occupy one stereo slot
   *or* two mono slots *(proposed)* — two independently positionable objects is a
   legitimate and often better choice in WFS. Offer both; refuse silent downmix or
-  upmix.
+  upmix. *(Amended 2026-09-26, at the author's direction:* an insert may make a
+  mono cue stereo - a widening somebody switched in, and said on screen, not a
+  silent one. The routing reads the cue's width after its inserts; where a
+  destination has room for fewer sides than the cue now has, they are summed
+  into it, which returns the cue to its file's width and never below it. §3.18.)
 - **The show declares the processor's inputs as slots** — a name, an address
   prefix, a width and the bus that feeds each *(amended in 0.8, at the author's
   direction, 2026-09-10 — decision P of 2026-09-07,
@@ -1342,7 +1346,9 @@ process per third-party plugin under the out-of-process default; and, because
 the bypassed delay line keeps timing constant, **a channel's latency is the sum
 of every plugin in its stack whether on or off**. For playback effects that is a
 number Go.dot reads and compensates in prepare; for the live rack it is the
-budget itself. The summed latency is shown at the moment somebody adds a plugin
+budget itself. *(Corrected 2026-09-26 for the voice inserts as built: the number
+is read and shown - "sounds 21 ms late through its inserts" - and never
+compensated; PDC is off and a cue is not started early for it. See below.)* The summed latency is shown at the moment somebody adds a plugin
 to a channel, never discovered on the night.
 
 Choosing the deadline follows from the same table — the smallest value that
@@ -1401,6 +1407,32 @@ questions are answered, and the answers pull most of Phase 9 forward as Phase
   the cue does not launch until it is in: a cue in standby is always ready, and a
   cue fired cold is late by the load rather than wrong. The cost is stated in
   §17.13 and measured by M35 (§6.11).
+
+*Amended in 0.8, at the author's direction (2026-09-26) — decisions AQ-AY,
+`docs/godot-namespace-draft-0.1.md` §17.15.* Plugin hosting finished for the
+voice inserts, in three decisions and what they pulled after them:
+
+- **All three formats are built.** VST3 and LV2 on every platform, AU on macOS
+  (AUv2; AUv3 is refused, with a sentence, and `.aupreset` files are not read -
+  a cue's whole saved state does their work). Each plugin's child registers only
+  its own format.
+- **The app scans.** Show settings, Plugins, has a Scan button - every format or
+  one, and a folder of one's own - running the same out-of-process scan as the
+  command line: a plugin that does not answer in thirty seconds is skipped and
+  listed, each with Retry; the progress is said in words; nothing scans by
+  itself, and a locked show refuses. The machine's list lives in a file of
+  Go.dot's own that only the scan writes, and every session reads it, whatever
+  its audio. A plugin added to the set mid-session says so, and **Load now**
+  rebuilds the graph with the set as it stands (§3.25).
+- **A plugin can make a mono cue stereo.** A mono cue through a stereo reverb is
+  fed into both of its inputs and comes out with both of its sides; where it is
+  sent somewhere with room for two sides it plays them apart, where there is
+  room for one they are summed at a half each; a cue is never made narrower than
+  its file, and with the insert switched out it sounds exactly as before.
+- **A plugin's buses are asked, not assumed.** The voice's width, then stereo,
+  then mono in and stereo out, then mono - never every bus switched on without a
+  word; a sidechain is fed silence. A cue wider than a plugin takes passes it
+  dry, whole, and the insert says why - never half wet.
 
 ### 3.19 Video
 
@@ -1875,6 +1907,12 @@ Both halves are now measured rather than assumed.
 - **The fixed-track-set discipline extends to routing.** Changing a track's
   output device is a structural edit and does rebuild the graph, so destinations
   are assigned at show load along with the track set, not per cue.
+- **And to the plugin set** *(amended 2026-09-26)*. A plugin added to the set,
+  taken out or moved after the graph was built changes nothing until **Load
+  now** (`plugin.load`) rebuilds it - on the same interface, rate and block, only
+  while nothing plays, the clock gapped for the moment it takes as for an audio
+  settings change. Until then the entry says so, and a cue's inserts go by the
+  slots the graph was built with.
 
 #### Ranges are looping clips, and Go.dot places the boundaries
 
@@ -2798,6 +2836,12 @@ persistent media (§3.29).
 Added 2026-09-09: authored colour at idle and timbre while sounding, as a
 layout option (§3.30).
 
+*Answered 2026-09-26* (the author's decisions, `docs/godot-namespace-draft-0.1.md`
+§17.15): scanning from the app, yes (decision AQ); AU and LV2, yes (AS); a plugin
+making a mono cue stereo, yes, with the routing reading the width after the
+inserts (AT). The width class mono→stereo that §3.18 drew for rack channels is
+built on the voice inserts; the rack channels themselves stay Phase 9b's.
+
 Added 2026-09-22, with the network devices (§3.3, §3.11, §3.22):
 
 - **Two of the same desk in one rig.** A cue is aimed by the root its address
@@ -2909,6 +2953,14 @@ Mackie vs HUI first — first week with the D700.
   cue's state in about half a millisecond (0.32-1.16 ms over three runs of
   twenty), and no other voice missed a block while it loaded. A plugin with a
   large state (a sampler, a convolution reverb) is still to measure.
+- **What LV2 costs a session's start** (§3.18, 2026-09-26, **M36**): JUCE's LV2
+  format reads every bundle on the default folders the moment it is made, and
+  Tracktion makes one when the engine starts. The engine's start, before and
+  after, on the author's machine and on one with many LV2 bundles.
+- **A scan during a rehearsal** (§3.18, 2026-09-26, **M37**): the tick's lateness
+  (p95) and the proxies' misses while the app scans a full plugin folder with a
+  show open and playing - whether "never while locked" is enough or a scan should
+  also wait for nothing to be playing.
 - **Pause and resume at an offset** (§3.29): whether a relaunch at a remembered
   position is clean when the offset is set in prepare, and when a playing clip
   is nudged instead — the same question load-to-time asks. *Half answered*

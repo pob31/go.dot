@@ -553,8 +553,11 @@ for the inserts.
   classes mono→mono, mono→stereo, stereo→stereo — the chains behind Phase 4's
   `Media/Insert` and `Rack/Channel`, and the shared reverb channel.
 - **Inline hosting** (PRD §3.18's opt-in) with §3.4's message-thread handover;
-  **LV2**; AU presets; curated per-plugin parameter maps
-  (the pages draft's §7.2); macOS audio workgroups for the child.
+  AU presets; AUv3; curated per-plugin parameter maps
+  (the pages draft's §7.2); macOS audio workgroups for the child. *(LV2 left
+  this list on 2026-09-26: built on every platform, with AU on macOS, the scan
+  in the app and the mono→stereo widening on the voice inserts - namespace
+  §17.15. The width classes above remain the rack channels' own.)*
 
 **Done when:** live input runs through a sandboxed third-party plugin, the plugin
 is killed mid-show, and the show continues with the strip marked failed; a cue

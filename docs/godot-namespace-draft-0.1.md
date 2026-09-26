@@ -10430,3 +10430,46 @@ two buttons, a media cue's sends listed and inspected like its triggers, and `+`
 it does not reach. **Owed to the bench:** the port the master section's lights answer on, the
 detent laws, the colours at a glance - `tests/blackbox/make_d700_bench.py` walks them.
 
+### 17.15 Plugin hosting finished: the scan in the app, AU and LV2, and how an insert's channels flow (2026-09-26)
+
+Asked by the author on 2026-09-26 — *"Should we add or finalise plugins VST/AU/LV2 integration?
+Scanning and audio patch for the media cue inserts"* — and answered with three decisions, each the
+recommendation offered (AskUserQuestion). The letters go on from §17.14's AP, and skip **AU** so a
+decision letter never reads as the plugin format.
+
+| | Decision | Recommended? |
+|---|---|---|
+| **AQ** | **A Scan button in the app**, Show settings → Plugins: the command line's out-of-process scan, launched as a child; progress in words; skipped files listed with Retry; never automatic; refused while locked | yes — the author's |
+| **AR** | The machine's list is `<engine>/plugins/known.xml`, written only by the scan, read in every mode (§17.7) | implementer's call, from the code |
+| **AS** | **AU on macOS and LV2 everywhere**; AUv3 and `.aupreset` out | yes — the author's |
+| **AT** | **A plugin can make a mono cue stereo**: mono fed into every input, both sides kept; the routing reads the width after the inserts; summed where there is room for one | yes — the author's |
+| **AV** | The layout ladder: the voice's width, 2-2, 1-2, 1-1, each standard and numbered; never every bus on; a sidechain fed silence | implementer's call |
+| **AW** | A cue wider than an insert takes, or one it would make narrower, passes it dry, whole, with a sentence — never half wet | implementer's call |
+| **AX** | **Load now** (`plugin.load`): the graph rebuilt with the set as it stands, on what plays now, only while nothing plays | implementer's call |
+| **AY** | Latency shown — per entry, per cue through its inserts, re-read after each state — and still never compensated | implementer's call |
+
+**Built** (on `main`, one commit a stage): the known list in every mode and `--engine-folder` (stage 1);
+LV2, the in-tree test bundle, a child registering its plugin's format alone, the bundle recorded
+beside each LV2 (2); the scan from serve — `plugin.scan [format] [folder]`, `plugin.scanRetry`,
+`plugin.scanned`, `/godot/plugin/scan/…`, `/godot/plugin/skipped/<n>` — and LV2_PATH set aside on
+Windows (3); Load now, `/godot/plugin/changed`, and a cue's inserts sent by the graph's slots (4); the
+Plugins tab's Scan, folder, Retry and Load now (5); AU on macOS (6); the layout ladder, the lane's rules,
+region version 3, `plugin,inputs|outputs|layout`, and the test children `godot:test-mono` and
+`godot:test-widen` (7); the chain's width (`cue/InsertChain`), the routing reading it,
+`media,chainChannels|insertLatency`, `fx,problem`, the FX panel's words, a widening insert's dry block
+widened, blocks sent in pieces (8).
+
+**What the code turned up on the way**, each put right where it was found and said in its stage's
+amendment above: a device session handed the proxies before the catalogue store was set, so children on
+a real interface reported their catalogues into nothing; a set edited mid-session sent a cue's
+settings to the wrong plugin; on a real interface a preset reached the child as a bare name (so no
+preset loaded) and `--proxy-deadline-us` was dropped; hosted voices ignored the show's channels per
+track; a mono bus last in a saved show was built no output; JUCE's LV2 search answered nothing on
+macOS for a folder it was given; and a set `LV2_PATH` crashed JUCE's LV2 host on Windows.
+
+**Owed to the bench and the Mac mini:** a real scan of the author's plugin folder from the app, and
+M37 (a scan during a rehearsal); a mono cue through a real stereo reverb on the MADIface, stereo on a
+stereo out and summed on a mono one, and whether switching it in mid-cue bumps; a mono-only plugin
+saying "plays dry"; the latency words against a look-ahead plugin; how long Load now's gap is; M36
+(LV2 at a session's start); and on the Mac mini a third-party AUv2 from scan to sound, its window and
+a state round trip, M31 there, and the AUv3 sentence read by a person.
