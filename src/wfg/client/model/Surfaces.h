@@ -160,7 +160,7 @@ namespace wfg::client::model
     {
         bool up = false;          ///< an EQ or Send page is up on some surface
         std::string surface;
-        std::string word;         ///< eq or send
+        std::string word;         ///< eq, send or fx
         int index = 0;
         int count = 1;
         std::string edited;       ///< what it last wrote; empty since it came up

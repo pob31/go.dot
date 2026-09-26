@@ -103,6 +103,7 @@ namespace wfg::surface
             case Page::show: return "show";
             case Page::eq:   return "eq";
             case Page::send: return "send";
+            case Page::fx:   return "fx";
         }
 
         return "show";
@@ -209,6 +210,41 @@ namespace wfg::surface
             return { static_cast<int> (std::lround (fraction * 11.0)), 2 };
 
         return { 1 + static_cast<int> (std::lround (fraction * 10.0)), 2 };
+    }
+
+    double turnedParameter (double value, int steps, int parameterSteps) noexcept
+    {
+        const auto at = std::clamp (value, 0.0, 1.0);
+
+        if (parameterSteps >= 2)
+        {
+            const auto last = static_cast<double> (parameterSteps - 1);
+            const auto step = std::clamp (std::lround (at * last) + static_cast<long> (steps), 0L,
+                                          static_cast<long> (parameterSteps - 1));
+            return static_cast<double> (step) / last;
+        }
+
+        return std::clamp (at + static_cast<double> (steps) * pageParameterTravelPerDetent, 0.0, 1.0);
+    }
+
+    Ring d700ParameterRing (double value, bool bipolar) noexcept
+    {
+        const auto fraction = std::clamp (value, 0.0, 1.0);
+
+        if (bipolar)
+            return { static_cast<int> (std::lround (fraction * 127.0)), 1 };
+
+        return { static_cast<int> (std::lround (fraction * 127.0)), 2 };
+    }
+
+    Ring mcuParameterRing (double value, bool bipolar) noexcept
+    {
+        const auto fraction = std::clamp (value, 0.0, 1.0);
+
+        if (bipolar)
+            return { 1 + static_cast<int> (std::lround (fraction * 10.0)), 1 };
+
+        return { static_cast<int> (std::lround (fraction * 11.0)), 2 };
     }
 
     Ring d700ShapeRing (std::string_view shape) noexcept

@@ -66,7 +66,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_rackChannel_class[] = { "mono", "monoToStereo", "stereo" };
     inline constexpr std::string_view enum_rackChannel_access[] = { "exclusive", "shared" };
     inline constexpr std::string_view enum_surface_profile[] = { "virtual", "mcu", "d700", "midiPads" };
-    inline constexpr std::string_view enum_surface_page[] = { "show", "eq", "send" };
+    inline constexpr std::string_view enum_surface_page[] = { "show", "eq", "send", "fx" };
     inline constexpr std::string_view enum_strip_role[] = { "sampler", "dca" };
     inline constexpr std::string_view enum_strip_endpoint[] = { "absolute", "gate" };
     inline constexpr std::string_view enum_strip_word[] = { "free", "dca", "unassigned", "armed", "pending", "playing", "held", "stopping", "closing" };
@@ -2575,10 +2575,10 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           true, "show",
           false, 0.0, false, 0.0,
-          enum_surface_page, 3,
+          enum_surface_page, 4,
           "", 50.0, false, "park",
           "",
-          "What this surface-s rotaries are showing: show is its normal page, eq the aimed cue-s EQ, send its send levels (author, 2026-09-25). The surface-s own, changed by its EQ, Send and star buttons and by no command - which page a controller shows is where its hands are looking, like the window-s selection. Published so the window can open the foot panel on the aimed cue while a surface adjusts it." },
+          "What this surface-s rotaries are showing: show is its normal page, eq the aimed cue-s EQ, send its send levels (author, 2026-09-25), fx the parameters of its inserts, walked in chain order (2026-09-26). The surface-s own, changed by its EQ, Send and star buttons and by no command - which page a controller shows is where its hands are looking, like the window-s selection. Published so the window can open the foot panel on the aimed cue while a surface adjusts it." },
         { "surface", "pageIndex",
           ValueType::integer, 'i', false, Access::read, Kind::state, Persist::none,
           true, "0",

@@ -192,6 +192,10 @@ namespace wfg::client::model
         if (pageWord == "send")
             return { Subject::Kind::sends, aim };
 
+        //  The FX page (2026-09-26): the cue's chain at the foot.
+        if (pageWord == "fx")
+            return { Subject::Kind::fx, aim };
+
         return {};
     }
 }

@@ -134,7 +134,7 @@ namespace wfg::surface
         a LED pulse."): the level the fader is at, written as its member's
         `initialLevel` - an edit to the show and one undo step. */
     enum class Action { none, gate, go, stop, rewind, forward, kill, solo, startLevel,
-                        aim, eqPage, sendPage, leavePage };
+                        aim, eqPage, sendPage, fxPage, leavePage };
 
     /*  AND IT SAYS SO: the red MUTE light is on for half a second after a
         kill it sent (author, 2026-09-25: "Can you flash for 0.5s the red mute
@@ -179,6 +179,12 @@ namespace wfg::surface
     inline constexpr double pageGainStepDb = 0.5;
     inline constexpr double pageWidthDoublingsPerDetent = 1.0 / 8.0;
     inline constexpr double pageLevelTravelPerDetent = 1.0 / 127.0;
+
+    /*  A PLUGIN PARAMETER'S DETENT on the FX page (2026-09-26): a hundred and
+        twenty-eighth of its travel, a ring's resolution - a fast turn arrives
+        as several detents at once, so the whole travel is a spin or two. A
+        stepped parameter moves one step a detent whatever this is. */
+    inline constexpr double pageParameterTravelPerDetent = 1.0 / 128.0;
 
     /*  A CONTROL WHOSE BAND IS OUT is lit at this share of its colour - still
         its band's colour, so the eye finds it, and plainly dimmer. The text

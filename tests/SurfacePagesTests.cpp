@@ -296,3 +296,28 @@ TEST_CASE ("surface pages: a page button blinks its page's number every second a
     CHECK (surface::pageButtonLit (1, 2, 0) == surface::pageButtonLit (1, 2, 75));
     CHECK_FALSE (surface::pageButtonLit (1, 2, 60));
 }
+
+TEST_CASE ("pages: a plugin parameter turns along its travel, a step at a time when it has steps, its ring from the centre when bipolar")
+{
+    //  Continuous: a hundred-and-twenty-eighth a detent, kept within 0..1.
+    CHECK (surface::turnedParameter (0.5, 1, 0) == doctest::Approx (0.5 + 1.0 / 128.0));
+    CHECK (surface::turnedParameter (0.5, -4, 0) == doctest::Approx (0.5 - 4.0 / 128.0));
+    CHECK (surface::turnedParameter (0.999, 5, 0) == doctest::Approx (1.0));
+    CHECK (surface::turnedParameter (0.001, -5, 0) == doctest::Approx (0.0));
+
+    //  Stepped: one step a detent, landing on the steps.
+    CHECK (surface::turnedParameter (0.5, 1, 3) == doctest::Approx (1.0));
+    CHECK (surface::turnedParameter (0.0, 1, 5) == doctest::Approx (0.25));
+    CHECK (surface::turnedParameter (0.26, -1, 5) == doctest::Approx (0.0));
+    CHECK (surface::turnedParameter (1.0, 3, 2) == doctest::Approx (1.0));
+
+    //  Rings: bipolar from the centre (fill 1), the rest from the left (fill 2).
+    CHECK (surface::d700ParameterRing (0.5, true) == surface::Ring { 64, 1 });
+    CHECK (surface::d700ParameterRing (0.0, false) == surface::Ring { 0, 2 });
+    CHECK (surface::d700ParameterRing (1.0, false) == surface::Ring { 127, 2 });
+    CHECK (surface::mcuParameterRing (0.5, true) == surface::Ring { 6, 1 });
+    CHECK (surface::mcuParameterRing (1.0, false) == surface::Ring { 11, 2 });
+
+    CHECK (surface::pageWord (surface::Page::fx) == "fx");
+}
+

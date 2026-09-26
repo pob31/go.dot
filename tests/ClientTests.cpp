@@ -5344,4 +5344,11 @@ TEST_CASE ("client: a surface adjusting a cue holds the foot on it, and the rest
     page = model::readSurfacePage (*rig.publish (7));
     CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
              == model::Subject { model::Subject::Kind::sends, cue });
+
+    //  An FX page, turned (2026-09-26): the cue's chain.
+    surfaces.setPage (surfaceId, { "fx", 1, 3, "/godot/fx/FXAA0001/p4" });
+    page = model::readSurfacePage (*rig.publish (8));
+    CHECK (page.word == "fx");
+    CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
+             == model::Subject { model::Subject::Kind::fx, cue });
 }

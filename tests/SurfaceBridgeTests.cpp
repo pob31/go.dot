@@ -3031,6 +3031,164 @@ TEST_CASE ("surface bridge: a turn on the EQ page writes the aimed cue's row by 
     CHECK (desk.writes() == std::vector<std::string> { "strip.press STRIP004", "strip.release STRIP004" });
 }
 
+namespace
+{
+    /*  TWO INSERTS ON CUE00001, as the tree publishes them (2026-09-26): a
+        reverb of twenty parameters - the second a bipolar one - and a delay
+        of two, the first stepped in three. */
+    void insertsOn (PageDesk& desk)
+    {
+        auto& fake = desk.fake;
+        fake.text ("/godot/cue/CUE00001/fx", "FXAA0001 FXAA0002");
+
+        const auto plugin = [&fake] (const std::string& fx, const std::string& id, const std::string& name, int params)
+        {
+            fake.text ("/godot/fx/" + fx + "/plugin", id);
+            fake.text ("/godot/fx/" + fx + "/name", name);
+            fake.number ("/godot/plugin/" + id + "/paramCount", params);
+
+            for (int n = 0; n < params; ++n)
+            {
+                const auto param = "/godot/plugin/" + id + "/param/" + std::to_string (n) + "/";
+                fake.text (param + "name", name + " knob " + std::to_string (n));
+                fake.text (param + "shortName", "K" + std::to_string (n));
+                fake.number (param + "default", 0.5);
+                fake.number (param + "steps", 0.0);
+                fake.flag (param + "bipolar", n == 1);
+                fake.number ("/godot/fx/" + fx + "/p" + std::to_string (n), 0.5);
+                fake.text ("/godot/fx/" + fx + "/t" + std::to_string (n), std::to_string (n) + " units");
+            }
+        };
+
+        plugin ("FXAA0001", "PG7N0001", "Verb", 20);
+        plugin ("FXAA0002", "PG7N0002", "Delay", 2);
+        fake.number ("/godot/plugin/PG7N0002/param/0/steps", 3.0);
+        desk.publish();
+    }
+
+    double lastValue (const PageDesk& desk)
+    {
+        REQUIRE_FALSE (desk.submitted.empty());
+        return desk.submitted.back().args.at (1).asDouble();
+    }
+}
+
+TEST_CASE ("surface bridge: FX puts the aimed cue's inserts on the rotaries, a plugin's own order, walked in chain order")
+{
+    /*  The author's decisions of 2026-09-26: the first sixteen parameters of
+        the first insert in the plugin's own order; further presses page
+        through the rest, then the next insert's; after the last, the
+        surface's own page. The first rotary's third row says which. */
+    PageDesk desk;
+    insertsOn (desk);
+    desk.aimAt ("CUE00001");
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2b);
+
+    CHECK (desk.page().word == "fx");
+    CHECK (desk.page().index == 0);
+    CHECK (desk.page().count == 3);     // Verb 1/2, Verb 2/2, Delay
+
+    desk.settle();
+    const auto first = sentOn (desk.sink, "PORTBNK1");
+    const auto second = sentOn (desk.sink, "PORTBNK2");
+
+    CHECK (contains (first, surface::d700DisplayRow (0, 0, "Verb knob 0")));
+    CHECK (contains (first, surface::d700DisplayRow (0, 1, "0 units")));
+    CHECK (contains (first, surface::d700DisplayRow3 (0, "Verb 1/2")));
+    CHECK (contains (first, surface::d700DisplayRow3 (1, "Kick")));
+    CHECK (contains (second, surface::d700DisplayRow (7, 0, "Verb knob 15")));
+
+    //  A bipolar parameter's ring fills from the centre, the others from the left.
+    CHECK (contains (first, surface::d700Ring (1, 64, 1)));
+    CHECK (contains (first, surface::d700Ring (0, 64, 2)));
+
+    //  THE SECOND PAGE: the reverb's last four, the other rotaries dark.
+    desk.press ("PORTBNK1", 0x2b);
+    CHECK (desk.page().index == 1);
+    desk.sink.sent.clear();
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Verb knob 16")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "Verb 2/2")));
+
+    //  THE NEXT INSERT, and then the surface's own page.
+    desk.press ("PORTBNK1", 0x2b);
+    CHECK (desk.page().index == 2);
+    desk.sink.sent.clear();
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "Delay knob 0")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "Delay")));
+
+    desk.press ("PORTBNK1", 0x2b);
+    CHECK (desk.page().word == "show");
+}
+
+TEST_CASE ("surface bridge: on the FX page a turn moves a parameter along its travel, a step at a time when it has steps, and a press puts it back")
+{
+    PageDesk desk;
+    insertsOn (desk);
+    desk.aimAt ("CUE00001");
+    desk.press ("PORTBNK1", 0x2b);
+    desk.submitted.clear();
+
+    //  Two detents up on the reverb's first parameter: two hundred-and-twenty-eighths.
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x02 } } });
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].command == "node.set");
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/fx/FXAA0001/p0");
+    CHECK (lastValue (desk) == doctest::Approx (0.5 + 2.0 / 128.0));
+    CHECK (desk.page().edited == "/godot/fx/FXAA0001/p0");
+
+    //  A press puts it back where the preset leaves it.
+    desk.fake.number ("/godot/fx/FXAA0001/p0", 0.8);
+    desk.publish();
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x20);
+    CHECK (lastValue (desk) == doctest::Approx (0.5));
+
+    //  At its rest, a press writes nothing; against an end, a turn neither.
+    desk.fake.number ("/godot/fx/FXAA0001/p0", 0.5);
+    desk.fake.number ("/godot/fx/FXAA0001/p2", 1.0);
+    desk.publish();
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x20);
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x12, 0x01 } } });
+    CHECK (desk.submitted.empty());
+
+    //  THE DELAY'S STEPPED PARAMETER: one step a detent, of three - from the middle to the top.
+    desk.press ("PORTBNK1", 0x2b);
+    desk.press ("PORTBNK1", 0x2b);
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x01 } } });
+    CHECK (desk.submitted[0].args[0].getString() == "/godot/fx/FXAA0002/p0");
+    CHECK (lastValue (desk) == doctest::Approx (1.0));
+}
+
+TEST_CASE ("surface bridge: a cue with no insert in shows the FX page saying so, and an MCU names its knobs in seven")
+{
+    PageDesk desk;
+    desk.aimAt ("CUE00002");
+    desk.sink.sent.clear();
+    desk.press ("PORTBNK1", 0x2b);
+    CHECK (desk.page().word == "fx");
+    desk.settle();
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow (0, 0, "no FX in")));
+    CHECK (contains (sentOn (desk.sink, "PORTBNK1"), surface::d700DisplayRow3 (0, "FX")));
+
+    //  A turn on nothing writes nothing; FX again leaves.
+    desk.submitted.clear();
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x10, 0x01 } } });
+    CHECK (desk.submitted.empty());
+    desk.press ("PORTBNK1", 0x2b);
+    CHECK (desk.page().word == "show");
+
+    PageDesk mcu ("mcu", 8);
+    insertsOn (mcu);
+    mcu.aimAt ("CUE00001");
+    mcu.press ("PORTBNK1", 0x2b);
+    CHECK (mcu.page().count == 4);      // Verb in three pages of eight, and the delay
+}
+
 TEST_CASE ("surface bridge: a page moves no fader, outlives a show edit, and closes when its cue is let go")
 {
     PageDesk desk;

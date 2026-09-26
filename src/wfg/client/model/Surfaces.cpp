@@ -613,7 +613,7 @@ namespace wfg::client::model
             const auto base = std::string (surfacePrefix) + id + "/";
             const auto word = text (snapshot, base + "page");
 
-            if (word != "eq" && word != "send")
+            if (word != "eq" && word != "send" && word != "fx")
                 continue;
 
             out.up = true;

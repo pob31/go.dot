@@ -127,6 +127,9 @@ namespace wfg::surface
         if (button.button == Button::assignEq)      return Action::eqPage;
         if (button.button == Button::assignSend)    return Action::sendPage;
 
+        /*  FX, the Mackie "Plug-In" (2026-09-26): the aimed cue's inserts. */
+        if (button.button == Button::assignPlugin)  return Action::fxPage;
+
         /*  `*`, under the Mackie preset the D700 is pinned to: F1, and F2 for
             its double press when the Configurator is asked for one. */
         if (button.button == Button::function && (button.index == 0 || button.index == 1))

@@ -66,6 +66,7 @@ namespace wfg::surface
         constexpr int selectNote = 0x18;        // + element: SELECT, whose LED says the rotaries are aimed at its cue
         constexpr int vpotNote = 0x20;          // + element: the V-Pot - its press, and the D700's colour
         constexpr int sendButtonNote = 0x29;    // Send, lit while its page is up
+        constexpr int fxButtonNote = 0x2b;      // FX (Mackie's Plug-In), lit while its page is up
         constexpr int eqButtonNote = 0x2c;      // EQ, lit while its page is up
 
         constexpr int ringFillMode = 2;         // MCU "wrap" and the D700's channel 3: fill from the left
@@ -521,6 +522,8 @@ namespace wfg::surface
             std::string switchAt;                   // the switch that takes its band, or its send, out
             std::string busId;                      // a Send page: the mix channel under the rotary
             std::string busNameAt;
+            std::string paramAt;                    // an FX page: /godot/plugin/<id>/param/<n>/, its name, steps, default
+            std::string fxTextAt;                   // an FX page: /godot/fx/<id>/t<n>, the plugin's own words for it
         };
 
         /*  One port of a surface: a bank of eight. */
@@ -533,6 +536,7 @@ namespace wfg::surface
             //  The page buttons' lights on this port, as last sent; -1 for nobody knows.
             int eqLed = -1;
             int sendLed = -1;
+            int fxLed = -1;
         };
 
         /*  WHAT A SURFACE'S ROTARIES SHOW (author, 2026-09-25), and where the
@@ -550,7 +554,14 @@ namespace wfg::surface
             std::string madeForAim;
             Page madeForPage = Page::show;
             int madeForIndex = -1;
-            std::string madeForSends, madeForMixes;
+            std::string madeForSends, madeForMixes, madeForFx;
+
+            /*  AN FX PAGE (2026-09-26): which insert is up, as the first
+                rotary's third row says it - "Verb 1/3" - its place in the
+                chain for its colour, and whether the cue has none in at all. */
+            std::string fxTitle;
+            int fxInsert = 0;
+            bool fxNone = false;
 
             //  The aimed cue's rows every rotary of the page reads.
             std::string eqOnAt, aimShortAt, aimNameAt, aimColourAt, aimSendsAt;
@@ -740,6 +751,62 @@ namespace wfg::surface
             table.setPage (box.id, page);
         }
 
+        /*  THE FX PAGES (2026-09-26, the author's decisions): the aimed cue's
+            switched-in inserts in chain order - its `fx` row - each as many
+            pages of its parameters, in the plugin's own order, as the rotaries
+            need; one at least, so an insert whose plugin nobody has catalogued
+            still says its name. An insert switched out is not walked: a turn
+            must never switch a plugin in. */
+        struct FxPage
+        {
+            std::string fxId, pluginId, name;
+            int first = 0;          // the first parameter under the first rotary
+            int count = 0;          // how many of the rotaries carry one
+            int page = 0;           // which of this insert's pages
+            int pages = 1;
+            int insert = 0;         // its place among the cue's inserts
+        };
+
+        std::vector<FxPage> fxPagesOf (const std::string& aim, int rotaries) const
+        {
+            std::vector<FxPage> out;
+
+            if (aim.empty() || rotaries <= 0)
+                return out;
+
+            const auto* at = published.get();
+            auto insert = 0;
+
+            for (const auto& fxId : wordsOf (textAt (at, "/godot/cue/" + aim + "/fx")))
+            {
+                const auto pluginId = textAt (at, "/godot/fx/" + fxId + "/plugin");
+                const auto params = static_cast<int> (numberAt (at, "/godot/plugin/" + pluginId + "/paramCount").value_or (0.0));
+                const auto pages = pageCount (params, rotaries);
+
+                for (int page = 0; page < pages; ++page)
+                    out.push_back ({ fxId, pluginId, textAt (at, "/godot/fx/" + fxId + "/name"),
+                                     page * rotaries, std::clamp (params - page * rotaries, 0, rotaries),
+                                     page, pages, insert });
+
+                ++insert;
+            }
+
+            return out;
+        }
+
+        /*  What an FX page was made from: which inserts, and how many
+            parameters each - an insert switched in or out, or a catalogue
+            arriving, makes it again. */
+        std::string fxKeyOf (const std::vector<FxPage>& pages) const
+        {
+            std::string key;
+
+            for (const auto& page : pages)
+                key += page.fxId + ':' + std::to_string (page.first + page.count) + ' ';
+
+            return key;
+        }
+
         /*  THE CONTROLS UNDER THE ROTARIES, made again when the page, its
             index or the aim changes - and every strip's screen, ring and
             colour forgotten then, so the next paint shows the new ones. */
@@ -756,19 +823,28 @@ namespace wfg::surface
             const auto sends = paging.page == Page::send && ! base.empty()
                                  ? textAt (at, base + "sends") : std::string {};
 
+            /*  AND AN FX PAGE when the cue's inserts or their catalogues move. */
+            const auto fxPages = paging.page == Page::fx ? fxPagesOf (aim, box.rotaries()) : std::vector<FxPage> {};
+            const auto fxKey = fxKeyOf (fxPages);
+
             if (paging.madeForAim == aim && paging.madeForPage == paging.page
                   && paging.madeForIndex == paging.index
-                  && paging.madeForMixes == mixes && paging.madeForSends == sends)
+                  && paging.madeForMixes == mixes && paging.madeForSends == sends
+                  && paging.madeForFx == fxKey)
                 return;
 
             const auto sameControls = paging.madeForAim == aim && paging.madeForPage == paging.page
-                                        && paging.madeForIndex == paging.index;
+                                        && paging.madeForIndex == paging.index && paging.madeForFx == fxKey;
 
             paging.madeForAim = aim;
             paging.madeForPage = paging.page;
             paging.madeForIndex = paging.index;
             paging.madeForMixes = mixes;
             paging.madeForSends = sends;
+            paging.madeForFx = fxKey;
+            paging.fxTitle.clear();
+            paging.fxInsert = 0;
+            paging.fxNone = false;
 
             paging.eqOnAt = base.empty() ? std::string {} : base + "eqOn";
             paging.aimShortAt = base.empty() ? std::string {} : base + "shortName";
@@ -783,6 +859,8 @@ namespace wfg::surface
                 strip.switchAt.clear();
                 strip.busId.clear();
                 strip.busNameAt.clear();
+                strip.paramAt.clear();
+                strip.fxTextAt.clear();
 
                 /*  A hand's detents stay when only the sends moved under it -
                     the send its own turn made - and the screens are drawn
@@ -836,6 +914,38 @@ namespace wfg::surface
                 return;
             }
 
+            if (paging.page == Page::fx)
+            {
+                /*  THE INSERT AND THE PARAMETERS UNDER THIS PAGE: the rotaries
+                    left to right are the plugin's parameters in its own order,
+                    from where this page of it starts. */
+                if (fxPages.empty())
+                {
+                    paging.fxNone = true;
+                    return;
+                }
+
+                const auto& page = fxPages[static_cast<std::size_t> (std::clamp (paging.index, 0,
+                                                                              static_cast<int> (fxPages.size()) - 1))];
+                paging.fxInsert = page.insert;
+                paging.fxTitle = page.name.empty() ? page.pluginId : page.name;
+
+                if (page.pages > 1)
+                    paging.fxTitle += " " + std::to_string (page.page + 1) + "/" + std::to_string (page.pages);
+
+                for (int position = 0; position < page.count && position < rotaries; ++position)
+                {
+                    const auto parameter = page.first + position;
+                    auto& strip = box.strips[static_cast<std::size_t> (position)];
+                    strip.control = parameter;
+                    strip.controlAt = "/godot/fx/" + page.fxId + "/p" + std::to_string (parameter);
+                    strip.fxTextAt = "/godot/fx/" + page.fxId + "/t" + std::to_string (parameter);
+                    strip.paramAt = "/godot/plugin/" + page.pluginId + "/param/" + std::to_string (parameter) + "/";
+                }
+
+                return;
+            }
+
             if (paging.page != Page::eq)
                 return;
 
@@ -877,7 +987,9 @@ namespace wfg::surface
             paging.index = page == Page::show ? 0 : index;
             paging.bank = bank;
             paging.edited.clear();
-            paging.count = page == Page::show ? 1 : pageCount (controlsOf (page), box.rotaries());
+            paging.count = page == Page::show ? 1
+                         : page == Page::fx ? std::max (1, static_cast<int> (fxPagesOf (aimNow(), box.rotaries()).size()))
+                                            : pageCount (controlsOf (page), box.rotaries());
 
             composePage (box, page == Page::show ? std::string {} : aimNow());
             publishPage (box);
@@ -889,8 +1001,28 @@ namespace wfg::surface
             is nothing to show, and the press does nothing. */
         void turnPage (Surface& box, Page kind, std::size_t bank)
         {
+            if (aimNow().empty())
+                return;
+
+            /*  AN FX PAGE IS SHOWN EVEN FOR A CUE WITH NO INSERT IN (2026-09-26)
+                - "no FX" on its first rotary is an answer, where a press that
+                did nothing would be a question. */
+            if (kind == Page::fx)
+            {
+                const auto count = std::max (1, static_cast<int> (fxPagesOf (aimNow(), box.rotaries()).size()));
+
+                if (box.paging.page != kind)
+                    showPage (box, kind, 0, bank);
+                else if (box.paging.index + 1 < count)
+                    showPage (box, kind, box.paging.index + 1, bank);
+                else
+                    showPage (box, Page::show, 0, bank);
+
+                return;
+            }
+
             //  A show with no mix channel has no Send page to show.
-            if (aimNow().empty() || controlsOf (kind) == 0)
+            if (controlsOf (kind) == 0)
                 return;
 
             const auto count = pageCount (controlsOf (kind), box.rotaries());
@@ -1222,6 +1354,11 @@ namespace wfg::surface
                         turnPage (box, Page::send, bank);
                     break;
 
+                case Action::fxPage:
+                    if (event.down)
+                        turnPage (box, Page::fx, bank);
+                    break;
+
                 case Action::leavePage:
                     if (event.down && box.paging.page != Page::show)
                         showPage (box, Page::show, 0, box.paging.bank);
@@ -1544,6 +1681,8 @@ namespace wfg::surface
                         eqWrite (box, strip, steps, pressed, submit);
                     else if (box.paging.page == Page::send)
                         sendWrite (box, strip, steps, pressed, submit);
+                    else if (box.paging.page == Page::fx)
+                        fxWrite (box, strip, steps, pressed, submit);
                 }
 
                 if (box.paging.edited != before)
@@ -1655,6 +1794,37 @@ namespace wfg::surface
                 return;
 
             write (strip.controlAt, osc::Value::float64 (next));
+        }
+
+        /*  A PLUGIN PARAMETER'S ROTARY (2026-09-26, the author's decisions): a
+            turn moves it along its travel - a step a detent for a stepped one -
+            and a press puts it back where the set entry's preset leaves it,
+            the catalogue's `default`. Normalised 0..1, as the insert's p<n>
+            takes it, and one write a rotary a tick. */
+        void fxWrite (Surface& box, const Strip& strip, int steps, bool pressed, const Submit& submit) const
+        {
+            const auto* at = published.get();
+            const auto current = numberAt (at, strip.controlAt);
+
+            if (! current.has_value())
+                return;
+
+            auto next = *current;
+
+            if (pressed)
+                next = std::clamp (numberAt (at, strip.paramAt + "default").value_or (next), 0.0, 1.0);
+
+            if (steps != 0)
+                next = turnedParameter (next, steps,
+                                        static_cast<int> (numberAt (at, strip.paramAt + "steps").value_or (0.0)));
+
+            //  Turned against an end, or pressed at its rest, it is where it was.
+            if (std::abs (next - *current) < 1.0e-9)
+                return;
+
+            submit (commandFrom (box.origin, "node.set",
+                                 { osc::Value::string (strip.controlAt), osc::Value::float64 (next) }));
+            box.paging.edited = strip.controlAt;
         }
 
         //======================================================================
@@ -1787,6 +1957,7 @@ namespace wfg::surface
                     bank.numbersKnown = false;
                     bank.eqLed = -1;
                     bank.sendLed = -1;
+                    bank.fxLed = -1;
                 }
 
                 for (auto& strip : box.strips)
@@ -1846,6 +2017,13 @@ namespace wfg::surface
 
             const auto eq = here && box.paging.page == Page::eq && lit ? Led::on : Led::off;
             const auto sends = here && box.paging.page == Page::send && lit ? Led::on : Led::off;
+            const auto fx = here && box.paging.page == Page::fx && lit ? Led::on : Led::off;
+
+            if (static_cast<int> (fx) != shown.fxLed)
+            {
+                send (shown.port, led (fxButtonNote, fx));
+                shown.fxLed = static_cast<int> (fx);
+            }
 
             if (static_cast<int> (eq) != shown.eqLed)
             {
@@ -2190,6 +2368,33 @@ namespace wfg::surface
                                static_cast<int> (std::lround (own.green * share)),
                                static_cast<int> (std::lround (own.blue * share)) };
             }
+            else if (strip.control >= 0 && paging.page == Page::fx)
+            {
+                /*  A PLUGIN PARAMETER (2026-09-26): its name as the plugin
+                    gives it - the seven-character one on an MCU - and its
+                    value in the plugin's own words; its ring from the centre
+                    when its middle is its rest; the surround in the insert's
+                    colour, so two inserts a page apart are told apart. */
+                const auto name = textAt (at, strip.paramAt + (native ? "name" : "shortName"));
+                const auto fallback = textAt (at, strip.paramAt + "name");
+                labelScratch.assign (! name.empty() ? name
+                                     : ! fallback.empty() ? fallback
+                                                          : "p" + std::to_string (strip.control + 1));
+                levelScratch.assign (textAt (at, strip.fxTextAt));
+
+                if (const auto value = numberAt (at, strip.controlAt))
+                {
+                    const auto bipolar = flagAt (at, strip.paramAt + "bipolar");
+                    ring = native ? d700ParameterRing (*value, bipolar) : mcuParameterRing (*value, bipolar);
+                }
+
+                colour = rgbOf (audio::eqColours[static_cast<std::size_t> (paging.fxInsert % 6)], 1.0);
+            }
+            else if (paging.page == Page::fx && paging.fxNone && &strip == &box.strips.front())
+            {
+                //  A cue with no insert in says so, on the first rotary.
+                labelScratch.assign (native ? "no FX in" : "no FX");
+            }
 
             if (native)
             {
@@ -2204,9 +2409,14 @@ namespace wfg::surface
                     cue on the others, so a glance says whose EQ this is. */
                 pageScratch.clear();
 
-                if (strip.control >= 0)
+                if (strip.control >= 0 || (paging.page == Page::fx && paging.fxNone && &strip == &box.strips.front()))
                 {
-                    if (&strip == &box.strips.front())
+                    if (paging.page == Page::fx && &strip == &box.strips.front())
+                    {
+                        //  Which insert, and which of its pages: "Verb 1/3"; "FX" with none.
+                        pageScratch.assign (paging.fxNone ? std::string ("FX") : paging.fxTitle);
+                    }
+                    else if (&strip == &box.strips.front())
                     {
                         const auto eqOut = paging.page == Page::eq
                                              && soleAt (at, paging.eqOnAt) != nullptr && ! flagAt (at, paging.eqOnAt);

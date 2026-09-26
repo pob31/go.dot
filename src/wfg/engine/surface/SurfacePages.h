@@ -51,10 +51,12 @@
 
 namespace wfg::surface
 {
-    /** What a surface's rotaries show. */
-    enum class Page { show, eq, send };
+    /*  What a surface's rotaries show. `fx` since 2026-09-26: the aimed cue's
+        inserts, their parameters in each plugin's own order (the author's
+        decision), the inserts walked in chain order. */
+    enum class Page { show, eq, send, fx };
 
-    /** The word `surface/page` publishes: show, eq or send. */
+    /** The word `surface/page` publishes: show, eq, send or fx. */
     std::string_view pageWord (Page page) noexcept;
 
     /*  HOW A CONTROL MOVES AND READS. A frequency and a width are turned in
@@ -137,6 +139,17 @@ namespace wfg::surface
 
     Ring d700RingFor (Law law, double value, double minimum, double maximum, FaderLaw fader) noexcept;
     Ring mcuRingFor (Law law, double value, double minimum, double maximum, FaderLaw fader) noexcept;
+
+    /*  A PLUGIN'S PARAMETER ON THE FX PAGE (2026-09-26), normalised 0..1 as
+        the plugin takes it. A stepped one (`parameterSteps` two or more) moves
+        one step a detent, a continuous one `pageParameterTravelPerDetent` of
+        its travel; within 0..1, unrounded - the plugin's own text says what
+        it is, and a 128th is exact in binary. Its ring fills
+        from the centre when its middle is its rest (`bipolar`, the catalogue's
+        guess) and from the left otherwise. */
+    double turnedParameter (double value, int steps, int parameterSteps) noexcept;
+    Ring d700ParameterRing (double value, bool bipolar) noexcept;
+    Ring mcuParameterRing (double value, bool bipolar) noexcept;
 
     /** A shape's ring, which reads a word rather than a number. */
     Ring d700ShapeRing (std::string_view shape) noexcept;
