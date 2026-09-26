@@ -45,9 +45,9 @@ namespace
         return out;
     }
 
-    const doc::AttributeRow* mediaRow (std::string_view name)
+    const doc::AttributeRow* soundRow (std::string_view name)
     {
-        for (const auto* row : doc::Schema::rowsForOwner ("media"))
+        for (const auto* row : doc::Schema::rowsForOwner ("sound"))
             if (row->name == name)
                 return row;
 
@@ -81,7 +81,7 @@ TEST_CASE ("surface pages: the EQ map is the author's, and every row in it is th
         CHECK (control.shortLabel.size() <= 7u);
 
         //  THE TABLE'S RANGES, so a page never writes what the document refuses.
-        const auto* row = mediaRow (control.row);
+        const auto* row = soundRow (control.row);
         REQUIRE (row != nullptr);
 
         if (control.law != surface::Law::shape)
@@ -93,7 +93,7 @@ TEST_CASE ("surface pages: the EQ map is the author's, and every row in it is th
         }
 
         //  And the switch it answers to is a flag of the table.
-        const auto* switchRow = mediaRow (control.switchRow);
+        const auto* switchRow = soundRow (control.switchRow);
         REQUIRE (switchRow != nullptr);
         CHECK (switchRow->type == doc::ValueType::boolean);
     }
@@ -356,26 +356,26 @@ TEST_CASE ("surface pages: the master dial turns a number by what its own row sa
 
     SUBCASE ("a frequency, as a band's rotary turns it")
     {
-        CHECK (near (turned ("media", "eqB1Freq", 100.0, 16), 200.0));
-        CHECK (near (turned ("media", "eqHpfFreq", 1900.0, 40), 2000.0));
+        CHECK (near (turned ("sound", "eqB1Freq", 100.0, 16), 200.0));
+        CHECK (near (turned ("sound", "eqHpfFreq", 1900.0, 40), 2000.0));
     }
 
     SUBCASE ("a decibel that reaches silence is a level, along the fader")
     {
-        CHECK (near (turned ("media", "level", -6.0, 1),
+        CHECK (near (turned ("sound", "level", -6.0, 1),
                      surface::turned (surface::Law::level, -6.0, 1, -120.0, 12.0, law)));
         CHECK (near (turned ("send", "level", -120.0, -1), -120.0));
     }
 
     SUBCASE ("a narrower decibel is a gain, half a decibel a detent")
     {
-        CHECK (near (turned ("media", "eqB2Gain", 0.0, 3), 1.5));
-        CHECK (near (turned ("media", "eqB2Gain", 23.5, 4), 24.0));
+        CHECK (near (turned ("sound", "eqB2Gain", 0.0, 3), 1.5));
+        CHECK (near (turned ("sound", "eqB2Gain", 23.5, 4), 24.0));
     }
 
     SUBCASE ("a width spans a hundredfold with no unit, and turns in ratios")
     {
-        CHECK (near (turned ("media", "eqB1Q", 0.7, 8), 1.4));
+        CHECK (near (turned ("sound", "eqB1Q", 0.7, 8), 1.4));
     }
 
     SUBCASE ("a time, a tenth of a second, and a whole one past ten")
@@ -396,6 +396,6 @@ TEST_CASE ("surface pages: the master dial turns a number by what its own row sa
 
     SUBCASE ("no detent, no move")
     {
-        CHECK (near (turned ("media", "level", -6.0, 0), -6.0));
+        CHECK (near (turned ("sound", "level", -6.0, 0), -6.0));
     }
 }

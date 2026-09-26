@@ -251,7 +251,7 @@ namespace wfg::cue
             if (const auto* held = riding (name))
                 return *held == "true";
 
-            return schema.flag (cue, "media", name);
+            return schema.flag (cue, "sound", name);
         };
         const auto number = [&] (const char* name)
         {
@@ -259,12 +259,12 @@ namespace wfg::cue
                 if (const auto value = osc::parseDouble (*held))
                     return static_cast<float> (*value);
 
-            return static_cast<float> (schema.number (cue, "media", name));
+            return static_cast<float> (schema.number (cue, "sound", name));
         };
         const auto shape = [&] (const char* name)
         {
             const auto* held = riding (name);
-            const auto word = held != nullptr ? *held : schema.text (cue, "media", name);
+            const auto word = held != nullptr ? *held : schema.text (cue, "sound", name);
 
             if (word == "lowShelf")  return audio::EqSettings::Shape::lowShelf;
             if (word == "highShelf") return audio::EqSettings::Shape::highShelf;
@@ -2827,7 +2827,7 @@ namespace wfg::cue
             /*  `flag` and not `text(...) == "true"`: a stored `T` reads back
                 as "1" through `var::toString`, so the text comparison is
                 silently always false. The Reader knows both spellings. */
-            const auto fold = channels == 2 && schema.flag (mediaCue, "media", "stereoToMono");
+            const auto fold = channels == 2 && schema.flag (mediaCue, "sound", "stereoToMono");
 
             if (! fold && channels > width)
             {
@@ -2898,7 +2898,7 @@ namespace wfg::cue
         /*  THE DIRECT OUT, where this cue's own channels land. Empty is every
             cue until somebody chooses one, and is silent rather than wrong -
             the same reading `emit` gives an empty gains list. */
-        if (const auto directOut = schema.text (cue, "media", "directOut"); ! directOut.empty())
+        if (const auto directOut = schema.text (cue, "sound", "directOut"); ! directOut.empty())
         {
             const auto bus = busNamed (directOut);
 

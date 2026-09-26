@@ -549,7 +549,7 @@ namespace
         {
             const auto base = "/godot/cue/" + cue + "/";
 
-            for (const auto* row : doc::Schema::rowsForOwner ("media"))
+            for (const auto* row : doc::Schema::rowsForOwner ("sound"))
             {
                 const std::string name { row->name };
 

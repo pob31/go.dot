@@ -490,7 +490,7 @@ namespace wfg::cue
             if (! cue.isValid())
                 continue;
 
-            const auto trim = level - read.number (cue, "media", "level");
+            const auto trim = level - read.number (cue, "sound", "level");
 
             const auto seen = trimmedAt.find (targetCue);
 
@@ -727,7 +727,7 @@ namespace wfg::cue
                     continue;
 
                 const auto whole = read.number (entry->node, "fade", "level")
-                                     - read.number (cue, "media", "level");
+                                     - read.number (cue, "sound", "level");
                 const auto duration = read.number (entry->node, "fade", "duration");
                 const auto part = duration > 0.0 && seconds < duration ? seconds / duration : 1.0;
                 const auto trim = whole * part;

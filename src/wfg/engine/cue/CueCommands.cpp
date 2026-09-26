@@ -208,7 +208,7 @@ namespace wfg::cue
                                 cue is let go first, or it would hide the reset. */
                             if (live != nullptr && document.isLocked())
                             {
-                                for (const auto* row : doc::Schema::rowsForOwner ("media"))
+                                for (const auto* row : doc::Schema::rowsForOwner ("sound"))
                                 {
                                     const std::string name { row->name };
 
@@ -226,7 +226,7 @@ namespace wfg::cue
                                 return Outcome::ok (args);
                             }
 
-                            for (const auto* row : doc::Schema::rowsForOwner ("media"))
+                            for (const auto* row : doc::Schema::rowsForOwner ("sound"))
                             {
                                 const std::string name { row->name };
 

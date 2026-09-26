@@ -176,9 +176,16 @@ namespace wfg::doc
                     Group does: a media cue has a number, a name and a pre-wait
                     like any other, and it is addressed at /godot/cue/<id> so a
                     client holding an identifier never has to know which kind it
-                    got. */
+                    got.
+
+                    AND THE `sound` ROWS BETWEEN THE TWO (Phase 9b, namespace
+                    draft 18.2): what a cue that sounds carries whatever its
+                    source - level, routing, the DCA, the EQ, the inserts, the
+                    sends - which a mic cue carries too. `media` keeps what is
+                    about a file. The addresses do not move: every row is still
+                    /godot/cue/<id>/<row>. */
                 { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger", "Fx" },
-                                                          { "cue", "media" } },
+                                                          { "cue", "sound", "media" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,

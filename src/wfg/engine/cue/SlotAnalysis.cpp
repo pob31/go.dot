@@ -299,7 +299,7 @@ namespace wfg::cue
                 a cue lands on one output or none. Only a direct out is a
                 claim; a cue aimed at a mix channel is a document somebody
                 should look at (`warnings()` says so) and not a contention. */
-            const auto out = read.text (cue.node, "media", "directOut");
+            const auto out = read.text (cue.node, "sound", "directOut");
 
             if (! out.empty())
                 if (const auto found = isDirectOut.find (out);
@@ -308,7 +308,7 @@ namespace wfg::cue
                     auto use = span;
                     use.kind = ResourceKind::directOut;
                     use.slot = out;
-                    use.shared = read.flag (cue.node, "media", "sharedOut");
+                    use.shared = read.flag (cue.node, "sound", "sharedOut");
 
                     liveRanges.push_back (use);
                 }

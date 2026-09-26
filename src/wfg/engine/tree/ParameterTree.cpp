@@ -841,9 +841,17 @@ namespace wfg::tree
                 for (auto* row : doc::Schema::rowsForOwner ("group"))
                     rows.push_back (row);
 
+            /*  A MEDIA CUE IS A CUE, THEN A SOUND, THEN A FILE (Phase 9b):
+                what a cue that sounds carries whatever its source is the
+                `sound` owner's, and what is about its file is `media`'s. */
             if (isMedia)
+            {
+                for (auto* row : doc::Schema::rowsForOwner ("sound"))
+                    rows.push_back (row);
+
                 for (auto* row : doc::Schema::rowsForOwner ("media"))
                     rows.push_back (row);
+            }
 
             if (isFade)
                 for (auto* row : doc::Schema::rowsForOwner ("fade"))
