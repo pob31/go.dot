@@ -152,6 +152,31 @@ def wait_for_frames(render: Path, frames: int, timeout: float = 30.0) -> bool:
     return common.wait_until(lambda: first_sound.frames_on_disk(render) >= frames, timeout=timeout)
 
 
+def plugin_said(server: Server) -> str:
+    """WHAT THE ENTRY SAID AT A MOMENT, for a failure's detail line only.
+
+    A window at the source level is either dry or processed at gain 1.0, and
+    the render cannot tell which (handoff 2026-09-26, finding 1). A child
+    that falls eight blocks behind in a row is marked failed at once, with a
+    sentence - so reading the entry when each window was being played says
+    whether the blocks were late, and a window read at the wrong value with
+    the entry `loaded` is something else.
+    """
+    state = value_of(server, f"/godot/plugin/{PLUGIN}/state")
+    problem = value_of(server, f"/godot/plugin/{PLUGIN}/problem") or ""
+    return f"the entry {state}" + (f" ({problem})" if problem else "")
+
+
+def stopped_answering(log: Path) -> str:
+    """How many times the session logged a child that stopped answering -
+    `plugin.failed` carries the sentence, and a miss is never logged alone."""
+    try:
+        text = log.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return "no session log to read"
+    return f"{text.count('stopped answering')} 'stopped answering' in the session log"
+
+
 def run(locale: "str | None") -> int:
     report = Report(f"phase 9a: a cue's insert, heard ({locale or 'C'})")
     with tempfile.TemporaryDirectory(prefix="wfg-phase9a-fx-") as scratch:
@@ -166,6 +191,7 @@ def run(locale: "str | None") -> int:
         moved_at = 0
         killed_at = 0
         fx_id = None
+        at_go = before_kill = "not read"
 
         # A DEADLINE A CI RUNNER CAN MEET. This driver proves the path, not the
         # round trip: at the 250 us default a slow shared box misses on and off,
@@ -206,6 +232,7 @@ def run(locale: "str | None") -> int:
                 hand.send("/godot/cmd/go")
                 report.check(wait_for_frames(render, int(RATE * 3.0)),
                              "the render runs three seconds past GO")
+                at_go = plugin_said(server)
 
                 moved_at = first_sound.frames_on_disk(render)
                 hand.send("/godot/cmd/node/set", [f"/godot/fx/{fx_id}/p0", 0.75])
@@ -215,6 +242,7 @@ def run(locale: "str | None") -> int:
                              "and the cue's row says so")
                 report.check(wait_for_frames(render, moved_at + int(RATE * 3.0)),
                              "and the render runs three seconds past it")
+                before_kill = plugin_said(server)
 
                 killed_at = first_sound.frames_on_disk(render)
                 hand.send("/godot/cmd/node/set", [f"/godot/fx/{fx_id}/p1", 1.0])
@@ -246,11 +274,13 @@ def run(locale: "str | None") -> int:
             report.check(abs(halved - SOURCE * 0.5) <= TOLERANCE,
                          "while the insert is in at its baseline, the source plays at a half",
                          f"{halved:.4f} against {SOURCE * 0.5:.4f}; {late_half:.0%} of the blocks late (dry);"
-                         f" {shares(left, start + int(RATE * 1.0))}; moved at frame {moved_at}, sound from {start}")
+                         f" {shares(left, start + int(RATE * 1.0))}; moved at frame {moved_at}, sound from {start};"
+                         f" {at_go} after it; {stopped_answering(log)}")
             report.check(abs(moved - SOURCE * 0.75) <= TOLERANCE,
                          "p0 at three quarters moves the render to three quarters",
                          f"{moved:.4f} against {SOURCE * 0.75:.4f}; {late_moved:.0%} of the blocks late (dry);"
-                         f" {shares(left, moved_at + int(RATE * 1.5))}")
+                         f" {shares(left, moved_at + int(RATE * 1.5))}; {before_kill} before the kill;"
+                         f" {stopped_answering(log)}")
             report.check(abs(dry - SOURCE) <= TOLERANCE,
                          "and with the child dead the voice plays dry, the source as it was",
                          f"{dry:.4f} against {SOURCE:.4f}")
@@ -296,6 +326,7 @@ def run_state(locale: "str | None") -> int:
         padded_at = 0
         plain_at = 0
         load_ms = None
+        at_padded = at_plain = "not read"
 
         with Server(bundle, log=log, locale=locale, sample_rate=RATE,
                     buffer_size=BLOCK, hosted=True, render=render,
@@ -328,6 +359,7 @@ def run_state(locale: "str | None") -> int:
                 hand.send("/godot/cmd/go")
                 report.check(wait_for_frames(render, int(RATE * 3.0)), "the render runs three seconds past GO")
                 padded_at = first_sound.frames_on_disk(render)
+                at_padded = plugin_said(server)
 
                 load_ms = value_of(server, f"/godot/plugin/{PLUGIN}/stateLoadMs")
                 report.check(isinstance(load_ms, (int, float)) and load_ms >= 0,
@@ -362,6 +394,7 @@ def run_state(locale: "str | None") -> int:
                 report.check(wait_for_frames(render, fired_at + int(RATE * 3.0)),
                              "the render runs three seconds past the second firing")
                 plain_at = fired_at
+                at_plain = plugin_said(server)
 
                 report.equal(value_of(server, "/godot/engine/rtViolations"), 0,
                              "Go.dot's own code allocated nothing on the audio thread")
@@ -385,10 +418,12 @@ def run_state(locale: "str | None") -> int:
             report.check(abs(padded - PADDED) <= PAD_TOLERANCE,
                          "with the state's Pad on, the cue is heard at a quarter of a half",
                          f"{padded:.4f} against {PADDED:.4f}; {shares(left, start + int(RATE * 1.0))};"
-                         f" the whole first run: {shares(left, start, 2.5)}; the state took {load_ms} ms")
+                         f" the whole first run: {shares(left, start, 2.5)}; the state took {load_ms} ms;"
+                         f" {at_padded} three seconds in; {stopped_answering(log)}")
             report.check(abs(plain - SOURCE * 0.5) <= TOLERANCE,
                          "and after Undo, fired again, at a half - the preset's own state, back",
-                         f"{plain:.4f} against {SOURCE * 0.5:.4f}; {shares(left, len(left) - int(RATE * 1.5))}")
+                         f"{plain:.4f} against {SOURCE * 0.5:.4f}; {shares(left, len(left) - int(RATE * 1.5))};"
+                         f" {at_plain} three seconds in; {stopped_answering(log)}")
         else:
             report.check(False, "the render is long enough to read both windows",
                          f"{len(left)} frames, padded at {padded_at}, plain at {plain_at}")
