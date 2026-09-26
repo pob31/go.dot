@@ -83,6 +83,26 @@ def level(samples: "list[float]", start_frame: int, seconds: float = 1.0) -> flo
     return blocks[len(blocks) // 2]
 
 
+def shares(samples: "list[float]", start_frame: int, seconds: float = 1.0) -> str:
+    """WHAT THE WINDOW'S BLOCKS WERE AT, each put with the level it is nearest.
+
+    For a failure's detail line, never for the verdict. This driver has failed
+    on CI three different ways at one of its windows - the source dry, the gain
+    without the state's Pad, a parameter's next value arriving early - and a
+    median alone cannot say which: the share of each, and when the window's
+    first and last blocks sit at which level, can.
+    """
+    part = samples[start_frame:start_frame + int(RATE * seconds)]
+    if len(part) < BLOCK:
+        return "no blocks in the window"
+    levels = {"dry": SOURCE, "three quarters": SOURCE * 0.75, "half": SOURCE * 0.5,
+              "padded": SOURCE * 0.5 * 0.25, "silent": 0.0}
+    blocks = [sum(abs(s) for s in part[i:i + BLOCK]) / BLOCK for i in range(0, len(part) - BLOCK + 1, BLOCK)]
+    named = [min(levels, key=lambda word: abs(levels[word] - b)) for b in blocks]
+    counted = ", ".join(f"{named.count(word) / len(named):.0%} {word}" for word in levels if named.count(word))
+    return f"{counted}; first block {named[0]}, last block {named[-1]}"
+
+
 def dry_fraction(samples: "list[float]", start_frame: int, expected: float, seconds: float = 1.0) -> float:
     """How many of the window's blocks sit at the source rather than at `expected`."""
     part = samples[start_frame:start_frame + int(RATE * seconds)]
@@ -225,10 +245,12 @@ def run(locale: "str | None") -> int:
             late_moved = dry_fraction(left, moved_at + int(RATE * 1.5), SOURCE * 0.75)
             report.check(abs(halved - SOURCE * 0.5) <= TOLERANCE,
                          "while the insert is in at its baseline, the source plays at a half",
-                         f"{halved:.4f} against {SOURCE * 0.5:.4f}; {late_half:.0%} of the blocks late (dry)")
+                         f"{halved:.4f} against {SOURCE * 0.5:.4f}; {late_half:.0%} of the blocks late (dry);"
+                         f" {shares(left, start + int(RATE * 1.0))}; moved at frame {moved_at}, sound from {start}")
             report.check(abs(moved - SOURCE * 0.75) <= TOLERANCE,
                          "p0 at three quarters moves the render to three quarters",
-                         f"{moved:.4f} against {SOURCE * 0.75:.4f}; {late_moved:.0%} of the blocks late (dry)")
+                         f"{moved:.4f} against {SOURCE * 0.75:.4f}; {late_moved:.0%} of the blocks late (dry);"
+                         f" {shares(left, moved_at + int(RATE * 1.5))}")
             report.check(abs(dry - SOURCE) <= TOLERANCE,
                          "and with the child dead the voice plays dry, the source as it was",
                          f"{dry:.4f} against {SOURCE:.4f}")
@@ -273,6 +295,7 @@ def run_state(locale: "str | None") -> int:
 
         padded_at = 0
         plain_at = 0
+        load_ms = None
 
         with Server(bundle, log=log, locale=locale, sample_rate=RATE,
                     buffer_size=BLOCK, hosted=True, render=render,
@@ -361,10 +384,11 @@ def run_state(locale: "str | None") -> int:
             plain = level(left, len(left) - int(RATE * 1.5))
             report.check(abs(padded - PADDED) <= PAD_TOLERANCE,
                          "with the state's Pad on, the cue is heard at a quarter of a half",
-                         f"{padded:.4f} against {PADDED:.4f}")
+                         f"{padded:.4f} against {PADDED:.4f}; {shares(left, start + int(RATE * 1.0))};"
+                         f" the whole first run: {shares(left, start, 2.5)}; the state took {load_ms} ms")
             report.check(abs(plain - SOURCE * 0.5) <= TOLERANCE,
                          "and after Undo, fired again, at a half - the preset's own state, back",
-                         f"{plain:.4f} against {SOURCE * 0.5:.4f}")
+                         f"{plain:.4f} against {SOURCE * 0.5:.4f}; {shares(left, len(left) - int(RATE * 1.5))}")
         else:
             report.check(False, "the render is long enough to read both windows",
                          f"{len(left)} frames, padded at {padded_at}, plain at {plain_at}")
