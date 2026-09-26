@@ -9860,6 +9860,27 @@ sentence, since the children make their plugins synchronously; AU preset files (
 read - a cue's whole saved state does their work. On the macOS CI runner Apple's AUBandpass is scanned
 by its identifier and hosted in the child, where it takes a constant away.
 
+**Amended 2026-09-26 — a plugin's buses, honestly; region version 3.** §17.6 said a plugin that refuses
+the voice's channel count is `failed` with a sentence; the code asked once for the voice's width and,
+refused, switched every bus on without a word, then poured the voice's channels into the first
+channels of a buffer as wide as the plugin wanted — a stereo voice on a mono-only plugin put its right
+channel into the sidechain, and only as many channels came back as went in. Now **a ladder**
+(`PluginLoad::chooseLayout`): the voice's width in and out, two in two out, one in two out, one in one
+out (a mono voice asks one-one, one-two, two-two); each asked in the standard layout for its count and
+then as plain numbered channels (an LV2 whose ports name no speaker matches nothing else), first with
+every bus but the main ones off and then with the others left as they are; none taken is `failed`,
+*"it takes neither the voice's N channels, stereo nor mono on its main buses"*. **The rules of the
+lane** (`plugin/LaneMapping.h`): the cue's channels into the main inputs one to one, a mono cue into
+every one of them; every other input fed silence; the main outputs back, as many as the lane carries,
+beyond that folded (output `i` onto `i mod lane` at lane/outputs); and a cue wider than the inputs, or
+one the plugin would make narrower, **passes it dry, whole** — never half wet. The shared region is
+**version 3**: the header carries the main widths and the layout in words, and each lane the latency
+the plugin declares after that lane's state (a state can move a look-ahead; the entry's latency is the
+largest a voice reports). New rows `plugin,inputs`, `plugin,outputs`, `plugin,layout`. Two more test
+children beside the gain, `godot:test-mono` and `godot:test-widen` (one in, two out: left the input
+times the gain, right that at a half). Until the cue's own width reaches the lane (the next
+amendment), every cue is sent at the voice's width, so a mono-only plugin on stereo voices plays dry.
+
 ### 17.8 The client
 
 The desktop client keeps its rules: one snapshot a pass, `model/` std-only, one call site per

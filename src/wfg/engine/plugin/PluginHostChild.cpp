@@ -16,6 +16,7 @@
 
 #include <wfg/engine/plugin/PluginHostChild.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/LaneMapping.h>
 #include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/ProcessUtil.h>
 #include <wfg/engine/plugin/SharedRegion.h>
@@ -28,6 +29,7 @@
 #include <juce_events/juce_events.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdio>
@@ -185,6 +187,28 @@ namespace wfg::plugin
             std::unique_ptr<LaneControl[]> control;
         };
 
+        /*  THE LAYOUT, for the header: the widths, and the words the entry
+            says them in, written before ready. */
+        void reportLayout (region::Header& header, int inputs, int outputs, const std::string& words)
+        {
+            header.inputs.store (static_cast<std::uint32_t> (std::max (0, inputs)), std::memory_order_relaxed);
+            header.outputs.store (static_cast<std::uint32_t> (std::max (0, outputs)), std::memory_order_relaxed);
+            std::memset (header.layout, 0, sizeof (header.layout));
+            std::snprintf (header.layout, sizeof (header.layout), "%s", words.c_str());
+        }
+
+        /** The lane's channels as pointers: the region is channel-major. */
+        constexpr int maxLaneChannels = 64;
+
+        void pointersOf (region::Lane* lane, int channels, int maxSamples,
+                         std::array<float*, maxLaneChannels>& into) noexcept
+        {
+            auto* audio = region::audioOf (lane);
+
+            for (int channel = 0; channel < std::min (channels, maxLaneChannels); ++channel)
+                into[static_cast<std::size_t> (channel)] = audio + channel * maxSamples;
+        }
+
         //======================================================================
         /*  THE TEST GAIN, spike 07's child grown up: one instance per lane,
             each a gain that rests at the baseline, with the kill switch on p1.
@@ -206,7 +230,17 @@ namespace wfg::plugin
 
         struct TestGainWorker
         {
-            explicit TestGainWorker (Lanes& lanesToUse) : lanes (lanesToUse)
+            /*  THE THREE TEST PLUGINS (2026-09-26): the gain as wide as the
+                voice; the mono, one in and one out; the widener, one in and
+                two out - left the input times the gain, right that at a
+                half. The last two take a block only when the cue is mono
+                (LaneMapping.h), and pass it dry otherwise. */
+            TestGainWorker (Lanes& lanesToUse, const std::string& identifier)
+                : lanes (lanesToUse),
+                  inputs (identifier == Catalogue::testGainIdentifier() ? lanesToUse.channels : 1),
+                  outputs (identifier == Catalogue::testWidenIdentifier() ? 2
+                             : identifier == Catalogue::testMonoIdentifier() ? 1 : lanesToUse.channels),
+                  work (static_cast<std::size_t> (2 * std::max (1, lanesToUse.maxSamples)), 0.0f)
             {
                 instances.resize (static_cast<std::size_t> (lanes.count));
 
@@ -294,13 +328,34 @@ namespace wfg::plugin
                         auto* audio = region::audioOf (lane);
 
                         const auto factor = instance.gain * instance.padFactor;
+                        const lanemap::Shape shape { numChannels, inputs, outputs, lanes.channels };
 
-                        for (int channel = 0; channel < numChannels; ++channel)
+                        if (inputs == lanes.channels && outputs == lanes.channels)
                         {
-                            auto* samples = audio + channel * lanes.maxSamples;
+                            for (int channel = 0; channel < numChannels; ++channel)
+                            {
+                                auto* samples = audio + channel * lanes.maxSamples;
+
+                                for (int n = 0; n < numSamples; ++n)
+                                    samples[n] *= factor;
+                            }
+                        }
+                        else if (lanemap::takes (shape))
+                        {
+                            /*  One in: the mono side of the cue. Out: itself
+                                times the gain, and for the widener a second side
+                                at a half - back into the lane by the rules. */
+                            float* sides[2] = { work.data(), work.data() + lanes.maxSamples };
 
                             for (int n = 0; n < numSamples; ++n)
-                                samples[n] *= factor;
+                            {
+                                const auto x = audio[n];
+                                sides[0][n] = x * factor;
+                                sides[1][n] = x * factor * 0.5f;
+                            }
+
+                            pointersOf (lane, lanes.channels, lanes.maxSamples, lanePointers);
+                            lanemap::backInto (sides, shape, lanePointers.data(), numSamples);
                         }
 
                         instance.answered = request;
@@ -312,6 +367,9 @@ namespace wfg::plugin
             }
 
             Lanes& lanes;
+            int inputs, outputs;
+            std::vector<float> work;
+            std::array<float*, maxLaneChannels> lanePointers {};
             std::vector<TestGainInstance> instances;
         };
 
@@ -379,11 +437,11 @@ namespace wfg::plugin
                 for (int i = 0; i < instanceCount; ++i)
                 {
                     /*  THE SAME MAKING AS THE EDITING HELPER'S (PluginLoad.h):
-                        the voice's width, the preparation, the preset - so a
+                        the layout ladder, the preparation, the preset - so a
                         cue edited in the plugin's own window starts where a
                         voice starts. */
                     auto instance = makeInsertInstance (manager, description, channels, sampleRate,
-                                                        blockSize, preset, problem);
+                                                        blockSize, preset, layout, problem);
 
                     if (instance == nullptr)
                         return false;
@@ -402,6 +460,7 @@ namespace wfg::plugin
             {
                 juce::ignoreUnused (channels);
                 auto& first = *instances.front();
+                reportLayout (header, layout.inputs, layout.outputs, layout.words);
                 const auto& parameters = first.getParameters();
                 const auto count = std::min (parameters.size(), region::maxParams);
 
@@ -550,22 +609,29 @@ namespace wfg::plugin
                         const auto numChannels = std::min<int> (lanes.channels, static_cast<int> (lane->numChannels.load (std::memory_order_relaxed)));
                         const auto numSamples = std::min<int> ({ lanes.maxSamples, scratch.getNumSamples(),
                                                                  static_cast<int> (lane->numSamples.load (std::memory_order_relaxed)) });
-                        auto* audio = region::audioOf (lane);
 
-                        scratch.clear();
+                        /*  BY THE RULES OF LaneMapping.h (2026-09-26): the cue's
+                            channels into the main inputs - a mono cue into all
+                            of them - every other input fed silence, the main
+                            outputs back; a cue wider than the plugin takes, or
+                            one it would make narrower, passes dry and whole. */
+                        const lanemap::Shape shape { numChannels, layout.inputs, layout.outputs, lanes.channels };
 
-                        for (int channel = 0; channel < numChannels; ++channel)
-                            scratch.copyFrom (channel, 0, audio + channel * lanes.maxSamples, numSamples);
+                        if (lanemap::takes (shape))
+                        {
+                            pointersOf (lane, lanes.channels, lanes.maxSamples, lanePointers);
+                            scratch.clear();
+                            lanemap::feedInto (lanePointers.data(), shape, scratch.getArrayOfWritePointers(), numSamples);
 
-                        /*  A view of the scratch at the block's length: the
-                            plugin sees the width it asked for and the length
-                            the parent sent. */
-                        juce::AudioBuffer<float> block (scratch.getArrayOfWritePointers(), scratch.getNumChannels(), numSamples);
-                        midi.clear();
-                        instance.processBlock (block, midi);
+                            /*  A view of the scratch at the block's length: the
+                                plugin sees the width it asked for and the length
+                                the parent sent. */
+                            juce::AudioBuffer<float> block (scratch.getArrayOfWritePointers(), scratch.getNumChannels(), numSamples);
+                            midi.clear();
+                            instance.processBlock (block, midi);
 
-                        for (int channel = 0; channel < numChannels; ++channel)
-                            std::copy_n (scratch.getReadPointer (channel), numSamples, audio + channel * lanes.maxSamples);
+                            lanemap::backInto (scratch.getArrayOfReadPointers(), shape, lanePointers.data(), numSamples);
+                        }
 
                         s.answered = request;
                         lane->responseSeq.store (request, std::memory_order_release);
@@ -577,6 +643,8 @@ namespace wfg::plugin
 
             juce::AudioPluginFormatManager manager;
             std::vector<std::unique_ptr<juce::AudioPluginInstance>> instances;
+            InsertLayout layout;
+            std::array<float*, maxLaneChannels> lanePointers {};
             std::vector<float> baseline;
             std::vector<std::vector<float>> laneBaseline;
             juce::MemoryBlock initialState;
@@ -666,9 +734,9 @@ namespace wfg::plugin
         {
             /*  The test child's is built in, and answers with no JUCE at all -
                 which is what lets a test drive this verb on a CI runner. */
-            if (optionFrom (args, "--plugin") == Catalogue::testGainIdentifier())
+            if (Catalogue::isTestIdentifier (optionFrom (args, "--plugin")))
             {
-                std::printf ("%s\n", Catalogue::testGain().toJson().c_str());
+                std::printf ("%s\n", Catalogue::testFor (optionFrom (args, "--plugin")).toJson().c_str());
                 std::fflush (stdout);
                 return 0;
             }
@@ -760,11 +828,11 @@ namespace wfg::plugin
         std::unique_ptr<TestGainWorker> testGain;
         std::unique_ptr<RealHost> real;
 
-        if (identifier == Catalogue::testGainIdentifier())
+        if (Catalogue::isTestIdentifier (identifier))
         {
             /*  THE REPORT, before ready: what the parent reads into the table
                 and what a value nobody set rests at. */
-            const auto catalogue = Catalogue::testGain();
+            const auto catalogue = Catalogue::testFor (identifier);
             header.latencySamples.store (static_cast<std::uint32_t> (catalogue.latencySamples), std::memory_order_relaxed);
             header.paramCount.store (static_cast<std::uint32_t> (catalogue.params.size()), std::memory_order_relaxed);
 
@@ -778,7 +846,13 @@ namespace wfg::plugin
                 header.catalogueReady.store (1, std::memory_order_release);
             }
 
-            testGain = std::make_unique<TestGainWorker> (lanes);
+            testGain = std::make_unique<TestGainWorker> (lanes, identifier);
+
+            const auto width = [] (int n) { return n == 1 ? std::string ("mono") : n == 2 ? std::string ("stereo")
+                                                                              : std::to_string (n) + " channels"; };
+            reportLayout (header, testGain->inputs, testGain->outputs,
+                          width (testGain->inputs) + " in, " + width (testGain->outputs) + " out");
+
             answering = std::thread ([&testGain, &stop] { testGain->run (stop); });
         }
         else
@@ -827,9 +901,19 @@ namespace wfg::plugin
         /*  THE CUES' WHOLE STATES, loaded on this thread for whichever kind
             of child this is - made before ready, so a request can never
             arrive with nobody to take it. */
-        StateLoader loader (lanes, [&testGain, &real] (int lane, const std::string& path)
+        StateLoader loader (lanes, [&testGain, &real, &lanes] (int lane, const std::string& path)
         {
-            return testGain != nullptr ? testGain->loadState (lane, path) : real->loadState (lane, path);
+            auto problem = testGain != nullptr ? testGain->loadState (lane, path) : real->loadState (lane, path);
+
+            /*  AND WHAT THE PLUGIN DECLARES NOW (2026-09-26): a state can move
+                a look-ahead, and the entry's latency is the largest a voice
+                reports. Stored before the loader answers. */
+            if (real != nullptr)
+                lanes.laneOf[static_cast<std::size_t> (lane)]->latencySamples.store (
+                    static_cast<std::uint32_t> (std::max (0, real->instances[static_cast<std::size_t> (lane)]->getLatencySamples())),
+                    std::memory_order_relaxed);
+
+            return problem;
         });
 
         header.childReady.store (1, std::memory_order_release);

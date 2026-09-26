@@ -87,6 +87,20 @@ namespace wfg::plugin
         static const char* testGainIdentifier() noexcept { return "godot:test-gain"; }
         static Catalogue testGain();
 
+        /*  TWO MORE TEST PLUGINS, child modes like the gain (2026-09-26), so
+            CI covers a plugin whose buses are not the voice's: a mono one
+            (one in, one out) and a widener (one in, two out: left is the
+            input times the gain, right is that at a half). Same parameters
+            as the gain - p0 the gain, p1 the kill switch. */
+        static const char* testMonoIdentifier() noexcept { return "godot:test-mono"; }
+        static const char* testWidenIdentifier() noexcept { return "godot:test-widen"; }
+
+        /** Any of the three: built in, needing no scan and no description. */
+        static bool isTestIdentifier (const std::string& identifier) noexcept;
+
+        /** The catalogue of whichever test plugin `identifier` names. */
+        static Catalogue testFor (const std::string& identifier);
+
         /** A bipolar guess from what the texts at the ends say. */
         static bool guessBipolar (float defaultValue, const std::string& atZero,
                                   const std::string& atOne);

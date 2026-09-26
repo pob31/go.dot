@@ -613,7 +613,7 @@ namespace wfg::audio
                     asks again at its next start, since a scan may find it. */
                 proxySpec.describe = services.describe;
 
-                if (entry.identifier != plugin::Catalogue::testGainIdentifier())
+                if (! plugin::Catalogue::isTestIdentifier (entry.identifier))
                 {
                     if (services.describe)
                         proxySpec.descriptionXml = services.describe (entry.identifier);

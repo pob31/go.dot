@@ -72,6 +72,14 @@ namespace wfg::plugin
                 decision of 2026-09-25: the whole state per cue). */
             double stateLoadMs = 0.0;
             std::string stateProblem;
+
+            /*  THE BUSES IT TOOK (2026-09-26): its main input and output
+                widths, and the two in words - "stereo in, stereo out". A cue
+                wider than `inputs`, or one it would make narrower, passes it
+                dry. Nought before the child has said. */
+            int inputs = 0;
+            int outputs = 0;
+            std::string layout;
         };
 
         /** Replaces what is known about one entry. Answers whether anything a
@@ -87,6 +95,8 @@ namespace wfg::plugin
                                    || held.latencySamples != status.latencySamples
                                    || held.paramCount != status.paramCount
                                    || held.stateProblem != status.stateProblem
+                                   || held.inputs != status.inputs || held.outputs != status.outputs
+                                   || held.layout != status.layout
                                    || std::abs (held.stateLoadMs - status.stateLoadMs) > 1.0e-9;
             held = status;
 

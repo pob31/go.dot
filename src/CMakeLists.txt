@@ -146,6 +146,7 @@ add_library(wfg_engine STATIC
     wfg/engine/plugin/ChildLaunch.h
     wfg/engine/plugin/ChildLaunch.cpp
     wfg/engine/plugin/SharedRegion.h
+    wfg/engine/plugin/LaneMapping.h
     wfg/engine/plugin/ProxyLane.h
     wfg/engine/plugin/ProxyLane.cpp
     wfg/engine/plugin/ProxyHost.h

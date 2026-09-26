@@ -74,6 +74,9 @@ namespace wfg::plugin
             status.paramCount = paramCount;
             status.stateLoadMs = stateLoadMs;
             status.stateProblem = stateProblem;
+            status.inputs = inputs;
+            status.outputs = outputs;
+            status.layout = layout;
             return status;
         }
 
@@ -310,6 +313,12 @@ namespace wfg::plugin
         void becomeLoaded()
         {
             latencySamples = static_cast<int> (header->latencySamples.load (std::memory_order_relaxed));
+            reportedLatency = latencySamples;
+            inputs = static_cast<int> (header->inputs.load (std::memory_order_relaxed));
+            outputs = static_cast<int> (header->outputs.load (std::memory_order_relaxed));
+            header->layout[region::problemChars - 1] = 0;
+            layout = header->layout;
+            laneLatency.assign (lanes.size(), 0);
             paramCount = static_cast<int> (std::min<std::uint32_t> (header->paramCount.load (std::memory_order_relaxed),
                                                                     static_cast<std::uint32_t> (region::maxParams)));
 
@@ -411,8 +420,10 @@ namespace wfg::plugin
                     lane, the child's answer read back: how long it took, and
                     why it could not. A child that has been loading one for
                     five seconds is hung, and failed like any other. */
-                for (auto* lane : lanes)
+                for (std::size_t index = 0; index < lanes.size(); ++index)
                 {
+                    auto* lane = lanes[index];
+
                     if (lane == nullptr)
                         continue;
 
@@ -428,6 +439,18 @@ namespace wfg::plugin
                     {
                         stateLoadMs = news.loadMs;
                         stateProblem = news.failed ? news.problem : std::string();
+
+                        /*  THE LATENCY, the largest any voice's instance
+                            declares since its state (2026-09-26): a state can
+                            move a look-ahead. */
+                        if (index < laneLatency.size())
+                            laneLatency[index] = news.latencySamples;
+
+                        latencySamples = reportedLatency;
+
+                        for (const auto each : laneLatency)
+                            latencySamples = std::max (latencySamples, each);
+
                         publish();
                     }
                 }
@@ -493,7 +516,12 @@ namespace wfg::plugin
         State state = State::unloaded;
         std::string problem;
         int latencySamples = 0;
+        int reportedLatency = 0;
+        std::vector<int> laneLatency;
         int paramCount = 0;
+        int inputs = 0;
+        int outputs = 0;
+        std::string layout;
         double stateLoadMs = 0.0;
         std::string stateProblem;
         std::int64_t deadlineUs = ProxyLane::defaultDeadlineMicroseconds;
@@ -535,10 +563,10 @@ namespace wfg::plugin
             entry says so, and every voice plays dry through the slot. Asked
             once more first, since a scan may have found it since. */
         if (impl->spec.descriptionXml.empty() && impl->spec.describe
-              && impl->spec.identifier != Catalogue::testGainIdentifier())
+              && ! Catalogue::isTestIdentifier (impl->spec.identifier))
             impl->spec.descriptionXml = impl->spec.describe (impl->spec.identifier);
 
-        if (impl->spec.descriptionXml.empty() && impl->spec.identifier != Catalogue::testGainIdentifier())
+        if (impl->spec.descriptionXml.empty() && ! Catalogue::isTestIdentifier (impl->spec.identifier))
         {
             problem = "this machine's scan does not know " + impl->spec.identifier
                         + "; scan for it in Show settings, Plugins, or install it";

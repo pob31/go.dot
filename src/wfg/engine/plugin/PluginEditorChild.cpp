@@ -1027,7 +1027,7 @@ namespace wfg::plugin
         std::unique_ptr<juce::AudioProcessor> processor;
         std::string problem;
 
-        if (identifier == Catalogue::testGainIdentifier())
+        if (Catalogue::isTestIdentifier (identifier))
         {
             processor = std::make_unique<TestGainProcessor>();
         }
@@ -1051,9 +1051,10 @@ namespace wfg::plugin
             }
 
             const auto preset = optionFrom (args, "--preset");
+            InsertLayout layout;
             auto instance = makeInsertInstance (manager, description, channels, sampleRate, blockSize,
                                                 preset.empty() ? juce::File() : juce::File (juce::String (preset)),
-                                                problem);
+                                                layout, problem);
 
             if (instance == nullptr)
             {

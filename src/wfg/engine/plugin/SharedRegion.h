@@ -57,7 +57,9 @@ namespace wfg::plugin::region
     constexpr std::uint32_t magic = 0x746f6447u;
 
     /** Bumped whenever a structure below changes shape. */
-    constexpr std::uint32_t version = 2;
+    /*  3 since 2026-09-26: the plugin's main widths and the layout in words in
+        the header, the latency after a cue's state on each lane. */
+    constexpr std::uint32_t version = 3;
 
     /** The most parameters a plugin may expose through the proxy; a plugin
         with more has the rest neither published nor written. */
@@ -112,8 +114,17 @@ namespace wfg::plugin::region
         /** How many parameters the instances have, at most `maxParams`. */
         std::atomic<std::uint32_t> paramCount;
 
+        /*  The plugin's main input and output widths as it took them
+            (2026-09-26), written before `childReady`: what decides whether a
+            cue of a given width goes through it (LaneMapping.h). */
+        std::atomic<std::uint32_t> inputs;
+        std::atomic<std::uint32_t> outputs;
+
         /** The child's sentence, NUL-terminated, written before `childFailed`. */
         char problem[problemChars];
+
+        /** The layout in words - "stereo in, stereo out" - written before `childReady`. */
+        char layout[problemChars];
 
         /** Every parameter's value after the preset was applied: what a value
             a cue does not set rests at (§17.4). Written before `childReady`. */
@@ -152,6 +163,10 @@ namespace wfg::plugin::region
         std::atomic<std::uint64_t> stateDoneSeq;
         std::atomic<std::uint32_t> stateFailed;
         std::atomic<std::uint32_t> stateLoadMicros;
+
+        /** What the plugin declares after this lane's last state, uncompensated:
+            a state can change a look-ahead (2026-09-26). Written before `stateDoneSeq`. */
+        std::atomic<std::uint32_t> latencySamples;
         char statePath[pathChars];
         char stateProblem[problemChars];
 

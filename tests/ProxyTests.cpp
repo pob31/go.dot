@@ -36,6 +36,8 @@
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/EditorHost.h>
+#include <wfg/engine/plugin/LaneMapping.h>
+#include <wfg/engine/plugin/PluginLoad.h>
 #include <wfg/engine/plugin/ProxyHost.h>
 #include <wfg/engine/plugin/ProxyLane.h>
 #include <wfg/engine/plugin/SharedRegion.h>
@@ -393,6 +395,252 @@ TEST_CASE ("proxy: the test child comes up, halves an enabled lane's block, leav
     CHECK_FALSE (juce::File (host.regionPath()).existsAsFile());
     CHECK_FALSE (lanes[0].isBound());
     CHECK (table.statusOf ("PG7N0001").state == "unloaded");
+}
+
+//==============================================================================
+TEST_CASE ("lanes: a voice's channels meet a plugin's by the rules - mono into every input, dry when it will not fit, folded when it gives more")
+{
+    using plugin::lanemap::Shape;
+
+    //  Who takes what.
+    CHECK (plugin::lanemap::takes (Shape { 2, 2, 2, 2 }));
+    CHECK (plugin::lanemap::takes (Shape { 1, 2, 2, 2 }));     // a mono cue into a stereo plugin
+    CHECK (plugin::lanemap::takes (Shape { 1, 1, 2, 2 }));     // into a widener
+    CHECK_FALSE (plugin::lanemap::takes (Shape { 2, 1, 1, 2 }));   // a stereo cue, a mono plugin: dry
+    CHECK_FALSE (plugin::lanemap::takes (Shape { 6, 2, 2, 8 }));   // wider than the plugin's inputs
+    CHECK_FALSE (plugin::lanemap::takes (Shape { 2, 2, 1, 2 }));   // it would come out narrower
+    CHECK_FALSE (plugin::lanemap::takes (Shape { 0, 2, 2, 2 }));
+
+    constexpr int n = 4;
+    float laneL[n] = { 1, 2, 3, 4 }, laneR[n] = { 10, 20, 30, 40 };
+    float* lane[2] = { laneL, laneR };
+    float bufA[n] = {}, bufB[n] = {};
+    float* buffer[2] = { bufA, bufB };
+
+    SUBCASE ("a mono feed goes into both inputs of a stereo plugin")
+    {
+        const Shape shape { 1, 2, 2, 2 };
+        plugin::lanemap::feedInto (lane, shape, buffer, n);
+        CHECK (bufA[2] == doctest::Approx (3.0f));
+        CHECK (bufB[2] == doctest::Approx (3.0f));   // the left, not the lane's right
+    }
+
+    SUBCASE ("a stereo feed goes one to one")
+    {
+        const Shape shape { 2, 2, 2, 2 };
+        plugin::lanemap::feedInto (lane, shape, buffer, n);
+        CHECK (bufA[1] == doctest::Approx (2.0f));
+        CHECK (bufB[1] == doctest::Approx (20.0f));
+    }
+
+    SUBCASE ("outputs as wide as the lane come back channel to channel")
+    {
+        bufA[0] = 0.5f;
+        bufB[0] = 0.25f;
+        plugin::lanemap::backInto (buffer, Shape { 1, 1, 2, 2 }, lane, n);
+        CHECK (laneL[0] == doctest::Approx (0.5f));
+        CHECK (laneR[0] == doctest::Approx (0.25f));
+    }
+
+    SUBCASE ("two outputs onto a one-channel lane are summed at a half each")
+    {
+        bufA[0] = 0.5f;
+        bufB[0] = 0.25f;
+        float* mono[1] = { laneL };
+        plugin::lanemap::backInto (buffer, Shape { 1, 1, 2, 1 }, mono, n);
+        CHECK (laneL[0] == doctest::Approx (0.375f));
+    }
+}
+
+namespace
+{
+    /*  A PLUGIN THAT TAKES WHAT IT IS TOLD TO: its buses, and which layouts
+        it agrees to, are the test's. What the ladder is asked against. It
+        starts in a layout it accepts, as every real plugin does - JUCE takes
+        a layout equal to the one a plugin has without asking it. */
+    struct PickyProcessor final : juce::AudioProcessor
+    {
+        PickyProcessor (bool sidechain, std::function<bool (const BusesLayout&)> acceptsToUse,
+                        juce::AudioChannelSet in = juce::AudioChannelSet::stereo(),
+                        juce::AudioChannelSet out = juce::AudioChannelSet::stereo())
+            : juce::AudioProcessor (sidechain
+                                      ? BusesProperties().withInput ("In", in)
+                                                         .withInput ("Sidechain", juce::AudioChannelSet::stereo())
+                                                         .withOutput ("Out", out)
+                                      : BusesProperties().withInput ("In", in).withOutput ("Out", out)),
+              accepts (std::move (acceptsToUse))
+        {
+        }
+
+        bool isBusesLayoutSupported (const BusesLayout& layout) const override { return accepts (layout); }
+
+        const juce::String getName() const override { return "picky"; }
+        void prepareToPlay (double, int) override {}
+        void releaseResources() override {}
+        void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override {}
+        double getTailLengthSeconds() const override { return 0.0; }
+        bool acceptsMidi() const override { return false; }
+        bool producesMidi() const override { return false; }
+        juce::AudioProcessorEditor* createEditor() override { return nullptr; }
+        bool hasEditor() const override { return false; }
+        int getNumPrograms() override { return 1; }
+        int getCurrentProgram() override { return 0; }
+        void setCurrentProgram (int) override {}
+        const juce::String getProgramName (int) override { return {}; }
+        void changeProgramName (int, const juce::String&) override {}
+        void getStateInformation (juce::MemoryBlock&) override {}
+        void setStateInformation (const void*, int) override {}
+
+        std::function<bool (const BusesLayout&)> accepts;
+    };
+}
+
+TEST_CASE ("layout: the ladder asks the voice's width, then stereo, then mono in and stereo out, then mono - never every bus on")
+{
+    using Set = juce::AudioChannelSet;
+    plugin::InsertLayout layout;
+    std::string problem;
+
+    SUBCASE ("a plugin that takes anything takes the voice's width")
+    {
+        PickyProcessor any (false, [] (const auto& l) { return l.getMainInputChannels() == l.getMainOutputChannels(); });
+        REQUIRE (plugin::chooseLayout (any, 2, layout, problem));
+        CHECK (layout.inputs == 2);
+        CHECK (layout.outputs == 2);
+        CHECK (layout.words == "stereo in, stereo out");
+    }
+
+    SUBCASE ("a mono-only plugin on a stereo voice is taken mono, and says so")
+    {
+        PickyProcessor mono (false, [] (const auto& l) { return l.getMainInputChannelSet() == Set::mono()
+                                                                && l.getMainOutputChannelSet() == Set::mono(); },
+                             Set::mono(), Set::mono());
+        REQUIRE (plugin::chooseLayout (mono, 2, layout, problem));
+        CHECK (layout.inputs == 1);
+        CHECK (layout.outputs == 1);
+        CHECK (layout.words == "mono in, mono out");
+    }
+
+    SUBCASE ("a widener is taken one in, two out")
+    {
+        PickyProcessor widen (false, [] (const auto& l) { return l.getMainInputChannelSet() == Set::mono()
+                                                                 && l.getMainOutputChannelSet() == Set::stereo(); },
+                              Set::mono(), Set::stereo());
+        REQUIRE (plugin::chooseLayout (widen, 2, layout, problem));
+        CHECK (layout.inputs == 1);
+        CHECK (layout.outputs == 2);
+    }
+
+    SUBCASE ("a sidechain it will not give up is left on, and the main buses are still the voice's")
+    {
+        PickyProcessor keyed (true, [] (const auto& l) { return l.inputBuses.size() == 2 && ! l.inputBuses[1].isDisabled()
+                                                                && l.getMainInputChannelSet() == Set::stereo()
+                                                                && l.getMainOutputChannelSet() == Set::stereo(); });
+        REQUIRE (plugin::chooseLayout (keyed, 2, layout, problem));
+        CHECK (layout.inputs == 2);
+        CHECK (keyed.getBus (true, 1)->isEnabled());
+    }
+
+    SUBCASE ("a sidechain it lets go of is switched off")
+    {
+        PickyProcessor keyed (true, [] (const auto& l) { return l.getMainInputChannelSet() == Set::stereo()
+                                                                && l.getMainOutputChannelSet() == Set::stereo(); });
+        REQUIRE (plugin::chooseLayout (keyed, 2, layout, problem));
+        CHECK_FALSE (keyed.getBus (true, 1)->isEnabled());
+    }
+
+    SUBCASE ("one that takes nothing it is offered is refused, with the sentence the entry reads")
+    {
+        PickyProcessor none (false, [] (const auto& l) { return l.getMainInputChannels() == 6; },
+                             Set::create5point1(), Set::create5point1());
+        CHECK_FALSE (plugin::chooseLayout (none, 2, layout, problem));
+        CHECK (problem.find ("stereo nor mono") != std::string::npos);
+    }
+}
+
+TEST_CASE ("proxy: the mono and widening test children say their buses, take a mono cue, and pass a stereo one dry")
+{
+    SUBCASE ("the widener on a mono voice: its two sides folded back into the one")
+    {
+        Folder folder;
+        plugin::PluginTable table;
+        plugin::ProxyLane lanes[1];
+
+        auto spec = testGainSpec (folder, 1, 1, 64);
+        spec.identifier = plugin::Catalogue::testWidenIdentifier();
+        plugin::ProxyHost host (spec, { &lanes[0] }, &table);
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+        CHECK (host.status().inputs == 1);
+        CHECK (host.status().outputs == 2);
+        CHECK (host.status().layout == "mono in, stereo out");
+
+        lanes[0].setDeadlineMicroseconds (200000);
+        lanes[0].setEnabled (true);
+        host.poll();
+
+        Block block (1, 64, 0.25f);
+
+        for (int i = 0; i < 4; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), 0.25f);
+            lanes[0].process (block.data(), 1, 64);
+        }
+
+        //  Left x.g, right x.g/2, summed at a half each: 0.25 x 0.5 x 0.75.
+        CHECK (block.allEqual (0.09375f));
+        host.stop();
+    }
+
+    SUBCASE ("the mono plugin on a stereo voice passes a stereo cue dry, whole")
+    {
+        Folder folder;
+        plugin::PluginTable table;
+        plugin::ProxyLane lanes[1];
+
+        auto spec = testGainSpec (folder, 1, 2, 64);
+        spec.identifier = plugin::Catalogue::testMonoIdentifier();
+        plugin::ProxyHost host (spec, { &lanes[0] }, &table);
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+        CHECK (host.status().layout == "mono in, mono out");
+
+        lanes[0].setDeadlineMicroseconds (200000);
+        lanes[0].setEnabled (true);
+        host.poll();
+
+        Block block (2, 64, 0.25f);
+
+        for (int i = 0; i < 4; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), 0.25f);
+            lanes[0].process (block.data(), 2, 64);
+        }
+
+        CHECK (block.allEqual (0.25f));
+        CHECK (lanes[0].answered() >= 1);
+        host.stop();
+    }
+
+    SUBCASE ("the gain as wide as the voice, as ever")
+    {
+        Folder folder;
+        plugin::PluginTable table;
+        plugin::ProxyLane lanes[1];
+        plugin::ProxyHost host (testGainSpec (folder, 1), { &lanes[0] }, &table);
+
+        std::string problem;
+        REQUIRE (host.start (problem));
+        REQUIRE (waitForState (host, "loaded", 5000));
+        CHECK (host.status().inputs == 2);
+        CHECK (host.status().outputs == 2);
+        CHECK (host.status().layout == "stereo in, stereo out");
+        host.stop();
+    }
 }
 
 TEST_CASE ("proxy: a cue's whole state is loaded onto its voice before it may launch, the lane answering dry meanwhile")
@@ -947,6 +1195,10 @@ TEST_CASE ("proxy: the in-tree LV2 comes up in the child through JUCE's real LV2
     INFO ("state " << host.status().state << ": " << host.status().problem);
     REQUIRE (up);
     CHECK (host.status().paramCount >= 1);
+
+    //  Its two ports name no speaker: taken as two numbered channels, in and out.
+    CHECK (host.status().inputs == 2);
+    CHECK (host.status().outputs == 2);
 
     lanes[0].setDeadlineMicroseconds (200000);
     lanes[0].setEnabled (true);

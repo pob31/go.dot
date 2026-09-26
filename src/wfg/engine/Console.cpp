@@ -1767,7 +1767,7 @@ namespace
 
         juce::File descriptionFile;
 
-        if (identifier != wfg::plugin::Catalogue::testGainIdentifier())
+        if (! wfg::plugin::Catalogue::isTestIdentifier (identifier))
         {
             const auto xml = wfg::plugin::describePlugin (storage, identifier);
 

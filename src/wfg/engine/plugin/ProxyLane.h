@@ -139,6 +139,9 @@ namespace wfg::plugin
             bool late = false;          ///< one has been loading for longer than it may
             double loadMs = 0.0;
             std::string problem;
+
+            /** What the plugin declares after the state, uncompensated (2026-09-26). */
+            int latencySamples = 0;
         };
 
         /*  The host's poll, message thread: sends the wanted state when none

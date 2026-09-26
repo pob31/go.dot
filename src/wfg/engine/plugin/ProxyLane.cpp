@@ -194,6 +194,7 @@ namespace wfg::plugin
             news.arrived = true;
             news.failed = bound->stateFailed.load (std::memory_order_relaxed) != 0;
             news.loadMs = static_cast<double> (bound->stateLoadMicros.load (std::memory_order_relaxed)) / 1000.0;
+            news.latencySamples = static_cast<int> (bound->latencySamples.load (std::memory_order_relaxed));
 
             if (news.failed)
             {

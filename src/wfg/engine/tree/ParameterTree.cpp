@@ -1775,6 +1775,9 @@ namespace wfg::tree
                                 else if (name == "latencySamples") text = std::to_string (status.latencySamples);
                                 else if (name == "stateLoadMs")    text = osc::formatDouble (status.stateLoadMs);
                                 else if (name == "stateProblem")   text = status.stateProblem;
+                                else if (name == "inputs")         text = std::to_string (status.inputs);
+                                else if (name == "outputs")        text = std::to_string (status.outputs);
+                                else if (name == "layout")         text = status.layout;
                                 else if (name == "paramCount")     text = std::to_string (status.paramCount > 0 ? status.paramCount : knownCount);
                                 else                               text = storedText (attribute, entry);
 

@@ -208,6 +208,30 @@ namespace wfg::plugin
         return true;
     }
 
+    bool Catalogue::isTestIdentifier (const std::string& identifier) noexcept
+    {
+        return identifier == testGainIdentifier() || identifier == testMonoIdentifier()
+                 || identifier == testWidenIdentifier();
+    }
+
+    Catalogue Catalogue::testFor (const std::string& identifier)
+    {
+        auto out = testGain();
+
+        if (identifier == testMonoIdentifier())
+        {
+            out.identifier = testMonoIdentifier();
+            out.name = "Test mono";
+        }
+        else if (identifier == testWidenIdentifier())
+        {
+            out.identifier = testWidenIdentifier();
+            out.name = "Test widen";
+        }
+
+        return out;
+    }
+
     //==============================================================================
     CatalogueStore::CatalogueStore (std::string folderToUse)
         : root (std::move (folderToUse))
@@ -215,7 +239,9 @@ namespace wfg::plugin
         /*  THE TEST CATALOGUE IS ALWAYS KNOWN, on every machine, so the whole
             surface a real plugin presents - the param nodes, the text nodes,
             the count - is exercised in CI with no plugin installed. */
-        held[Catalogue::testGainIdentifier()] = std::make_shared<const Catalogue> (Catalogue::testGain());
+        for (const auto* identifier : { Catalogue::testGainIdentifier(), Catalogue::testMonoIdentifier(),
+                                        Catalogue::testWidenIdentifier() })
+            held[identifier] = std::make_shared<const Catalogue> (Catalogue::testFor (identifier));
     }
 
     std::string CatalogueStore::fileFor (const std::string& identifier) const

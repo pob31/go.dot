@@ -149,7 +149,7 @@ namespace wfg::client::ui
 
         /*  THE PLUGIN IS MADE FROM THIS MACHINE'S SCAN, which the engine has;
             the built-in test gain needs none. */
-        if (begin.identifier != plugin::Catalogue::testGainIdentifier())
+        if (! plugin::Catalogue::isTestIdentifier (begin.identifier))
         {
             spec.descriptionXml = describe ? describe (begin.identifier) : std::string();
 

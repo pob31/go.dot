@@ -37,15 +37,43 @@
 
 namespace wfg::plugin
 {
-    /*  One instance, laid out to `channels` on its main buses, prepared, and
-        the preset applied (a .vstpreset to the VST3 client, whose loader is
-        the SDK's own; any other file the JUCE way). Null with a sentence when
-        it will not come up - including one that takes no audio in or gives
-        none out, which cannot be an insert on a voice. */
+    /*  THE BUSES A PLUGIN TOOK, as an insert on a voice `channels` wide
+        (2026-09-26). The main input and output widths are what LaneMapping.h
+        decides by; the words are what the entry says on screen. */
+    struct InsertLayout
+    {
+        int inputs = 0;
+        int outputs = 0;
+        std::string words;
+    };
+
+    /*  THE LADDER, asked of the plugin in order until it agrees - never the
+        old answer, every bus switched on without a word:
+
+          the voice's own width, in and out
+          two in, two out
+          one in, two out
+          one in, one out
+
+        (a mono voice asks one in one out first, then one in two out, then
+        two in two out). Each width is asked in the standard layout for its
+        count and then as plain numbered channels - an LV2 whose ports name
+        no speaker describes itself so. Each rung is tried with every bus but the main ones
+        switched off, and then with the others left as the plugin has them -
+        fed silence, since only the main inputs are ever written. False with
+        the sentence the entry reads when no rung is taken. */
+    bool chooseLayout (juce::AudioProcessor&, int voiceChannels, InsertLayout&, std::string& problem);
+
+    /*  One instance, laid out by the ladder above, prepared, and the preset
+        applied (a .vstpreset to the VST3 client, whose loader is the SDK's
+        own; any other file the JUCE way). Null with a sentence when it will
+        not come up - including one that takes no audio in or gives none out,
+        which cannot be an insert on a voice. */
     std::unique_ptr<juce::AudioPluginInstance> makeInsertInstance (juce::AudioPluginFormatManager&,
                                                                    const juce::PluginDescription&,
                                                                    int channels, double sampleRate, int blockSize,
-                                                                   const juce::File& preset, std::string& problem);
+                                                                   const juce::File& preset, InsertLayout& layout,
+                                                                   std::string& problem);
 
     /*  THE ONE FORMAT THE PLUGIN IS, registered alone (2026-09-26): a child
         hosting a VST3 has no business standing up an LV2 world, which JUCE
