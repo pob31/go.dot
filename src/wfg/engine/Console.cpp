@@ -2234,6 +2234,15 @@ namespace
                             ? args.getValueForOption ("--buffer").getIntValue() : 256;
         const auto hosted = args.containsOption ("--hosted");
 
+        /*  `--input-wav=<file>`: a WAV fed into the hosted interface's logical
+            inputs, looped, one channel an input (Phase 9b, namespace draft
+            §18.10). How a machine with no interface - CI, a driver, a replay
+            fixture being recorded - hears a live input. The hosted interface's
+            alone: a device has inputs of its own. */
+        const auto inputWav = args.containsOption ("--input-wav")
+                                ? args.getValueForOption ("--input-wav").toStdString()
+                                : std::string();
+
         /*  The proxies' spin limit, for a measurement (M31); nought is the
             rule - the smaller of 250 µs and a quarter of the block. */
         const auto proxyDeadlineUs = args.containsOption ("--proxy-deadline-us")
@@ -3568,6 +3577,7 @@ namespace
             hostSettings.renderFile = args.containsOption ("--render")
                                         ? args.getValueForOption ("--render").toStdString()
                                         : std::string();
+            hostSettings.inputFile = inputWav;
 
             if (! driver->open (hostSettings))
             {
@@ -3820,6 +3830,16 @@ namespace
                                 state.audioBufferSize = audioState.bufferSize;
                                 state.hardwareInputs = audioState.inputs;
                                 state.hardwareOutputs = audioState.hardwareOutputs;
+
+                                /*  THE INPUTS' SIDE (Phase 9b): the interface's
+                                    delays as the logged record carried them,
+                                    and each logical input's meter as the runner
+                                    took it this tick - which also says how many
+                                    logical inputs there are. */
+                                state.inputLatency = audioState.inputLatency;
+                                state.outputLatency = audioState.outputLatency;
+                                state.inputMetersDb = runner.inputMetersDb();
+                                state.logicalInputs = static_cast<int> (state.inputMetersDb.size());
                                 state.sampleRate = ticks.sampleRate();
                                 state.samplesPerTick = ticks.samplesPerTick();
                                 if (audioState.bufferSize > 0) state.blockSize = audioState.bufferSize;
@@ -4210,7 +4230,9 @@ namespace
                 { wfg::osc::Value::string (error), wfg::osc::Value::int32 (rate),
                   wfg::osc::Value::int32 (buffer), wfg::osc::Value::int32 (inputs),
                   wfg::osc::Value::int32 (outputs), wfg::osc::Value::string (
-                      deviceDriver ? deviceDriver->availableBufferSizes() : std::string {}) });
+                      deviceDriver ? deviceDriver->availableBufferSizes() : std::string {}),
+                  wfg::osc::Value::int32 (deviceDriver ? deviceDriver->inputLatency() : 0),
+                  wfg::osc::Value::int32 (deviceDriver ? deviceDriver->outputLatency() : 0) });
             if (deviceDriver)
                 engine.submit ("engine", "audio.editBuilt",
                     { wfg::osc::Value::string (deviceDriver->deviceName()),
@@ -4315,7 +4337,9 @@ namespace
                 { wfg::osc::Value::string (error), wfg::osc::Value::int32 (rate),
                   wfg::osc::Value::int32 (buffer), wfg::osc::Value::int32 (inputs),
                   wfg::osc::Value::int32 (outputs), wfg::osc::Value::string (
-                      deviceDriver ? deviceDriver->availableBufferSizes() : std::string {}) });
+                      deviceDriver ? deviceDriver->availableBufferSizes() : std::string {}),
+                  wfg::osc::Value::int32 (deviceDriver ? deviceDriver->inputLatency() : 0),
+                  wfg::osc::Value::int32 (deviceDriver ? deviceDriver->outputLatency() : 0) });
 
             if (deviceDriver)
                 engine.submit ("engine", "audio.editBuilt",
@@ -4778,7 +4802,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
 
     app.addCommand ({ "serve",
                       "serve <bundle> --sample-rate=N --buffer=N [--proxy-deadline-us=N]"
-                      " [--hosted [--render=<wav>] | --device[=<name>] [--device-type=<type>]]"
+                      " [--hosted [--render=<wav>] [--input-wav=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
                       " [--window [--theme=<file>]] [--engine-folder=<dir>]",

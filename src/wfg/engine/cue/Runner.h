@@ -321,6 +321,14 @@ namespace wfg::cue
             so a replay's player and a test's are still complete. */
         virtual float takeOutputPeak (int) { return 0.0f; }
 
+        /*  THE INPUTS' SIDE (Phase 9b, namespace draft §18.2): how many logical
+            inputs the interface hands the graph, and the loudest sample on one
+            since the last take, linear, the count starting again - the
+            soundcheck's meter, taken once a tick. None, and silence, by
+            default: the answer for a player with no interface. */
+        virtual int inputCount() const { return 0; }
+        virtual float takeInputPeak (int) { return 0.0f; }
+
         /*  Whether the media for that track is actually ready to sound.
 
             SEPARATE FROM THE ARM BEING ACCEPTED, and the separation is the
@@ -373,6 +381,12 @@ namespace wfg::cue
             Const, because the table's one writer is the command handler and
             that is the whole point of the arrangement. */
         const RunTable& runTable() const noexcept { return runs; }
+
+        /*  Each logical input's loudest sample over the last tick, in decibels,
+            -120 for silence - taken from the player once a tick, and empty with
+            no player (Phase 9b). What the tree publishes as each named input's
+            meter. */
+        const std::vector<double>& inputMetersDb() const noexcept { return inputMeters; }
         Player* player() const noexcept          { return audio; }
 
         /** How many samples make a tick. Set once, from the tick schedule. */
@@ -840,6 +854,10 @@ namespace wfg::cue
             replay leaves `position` at nought exactly as it leaves
             `rangeIteration`, which is §3.15: a readout is not an event. */
         void updatePositions (std::int64_t tick);
+
+        /*  The inputs' peaks, taken once a tick into `inputMeters`. */
+        void takeInputMeters();
+        std::vector<double> inputMeters;
 
         /*  Recomputes every live run's effective level from its own and its
             ancestors', and hands the media ones to the audio side.

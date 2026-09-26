@@ -99,7 +99,12 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # the processors every voice carries, declared once as the
                 # tracks are. `plugins` is a CONTAINER token like `dcas`,
                 # addressed /godot/plugin/order beside /godot/plugin/<id>.
-                "plugins", "plugin")
+                "plugins", "plugin",
+                # Phase 9b (2026-09-26, namespace draft 18.2). The show's NAMED
+                # INPUTS, the other side of the interface from the buses:
+                # `inputs` is a CONTAINER token like `plugins`, addressed
+                # /godot/input/order beside /godot/input/<id>.
+                "inputs", "input")
 
 VALUE_TYPES = {
     "s": "string",

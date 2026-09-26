@@ -174,7 +174,10 @@ TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch s
         lands rather than after: the engine's layout rule materialises the patch
         it had before repacking, so it has to already know the show has stopped
         following its list. */
-    tabs->setCurrentTabIndex (3);   // the output patch
+    /*  BY NAME since the Inputs tab (Phase 9b): the strip has grown a tab
+        between Outputs and the patches, and a number would now open the input
+        patch - whose first edit settles the inputs, not the outputs. */
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Output patch"));
     auto* matrix = component<spatcore::ui::patch::PatchMatrixComponent> (panel);
     REQUIRE (matrix != nullptr);
 
@@ -201,6 +204,101 @@ TEST_CASE ("audio settings UI: the Outputs tab makes outputs, and a hand patch s
 
     REQUIRE (rig.sent.back().command == "audio.setup");
     CHECK_FALSE (rig.sent.back().args[6].getString().empty());
+}
+
+TEST_CASE ("show settings UI: the Inputs tab makes named inputs, and a hand patch of the inputs settles them")
+{
+    /*  Phase 9b (namespace draft 18.9): the output list's twin, beside it. Two
+        named inputs to look at, made through the commands, and the engine's
+        readings of them - one loud, one quiet - as a running interface would
+        publish them. */
+    Rig rig;
+
+    REQUIRE (rig.document.createInput (1).ok);
+    const auto keys = rig.document.createInput (2);
+    REQUIRE (keys.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/input/" + keys.id + "/name", "Keys").ok);
+
+    rig.state.logicalInputs = 3;
+    rig.state.inputMetersDb = { -18.0, -3.0, -42.0 };
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    const auto names = tabs->getTabNames();
+    CHECK (names.indexOf ("Inputs") == names.indexOf ("Outputs") + 1);
+    tabs->setCurrentTabIndex (names.indexOf ("Inputs"));
+
+    for (const auto& [label, width] : { std::pair<const char*, int> { "+ mono input", 1 },
+                                        std::pair<const char*, int> { "+ stereo input", 2 } })
+    {
+        INFO (label);
+
+        auto* add = button (panel, label);
+        REQUIRE (add != nullptr);
+
+        const auto before = rig.sent.size();
+        add->onClick();
+
+        REQUIRE (rig.sent.size() == before + 1);
+        CHECK (rig.sent.back().command == "input.create");
+        CHECK (rig.sent.back().args[0].getInt32() == width);
+        CHECK (rig.sent.back().args[1].getInt32() == -1);
+    }
+
+    /*  A LOOK, with no screen: the tab painted into a PNG when WFG_SNAPSHOT_DIR
+        is set - the meters lit, the stereo one hot - and skipped otherwise. */
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        panel.setSize (880, 610);
+        panel.refresh (*rig.publish());
+
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("inputs-tab.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    /*  UNTOUCHED, THE INPUT PATCH FOLLOWS THE LIST and Apply sends none of it:
+        writing the diagonal out would settle the inputs, and somebody
+        applying a buffer size did not ask for that. */
+    auto* apply = button (panel, "Apply while stopped");
+    REQUIRE (apply != nullptr);
+    apply->onClick();
+    REQUIRE (rig.sent.back().command == "audio.setup");
+    CHECK (rig.sent.back().args[5].getString().empty());
+
+    //  Apply is waiting for its answer; complete it, as the engine would.
+    rig.state.audioSettingsRevision++;
+    panel.refresh (*rig.publish());
+
+    /*  AND THE FIRST HAND EDIT OF THE INPUT PATCH SETTLES THE INPUTS - its own
+        flag, never the outputs' - once. */
+    tabs->setCurrentTabIndex (names.indexOf ("Input patch"));
+    auto* matrix = component<spatcore::ui::patch::PatchMatrixComponent> (*tabs->getCurrentContentComponent());
+    REQUIRE (matrix != nullptr);
+    REQUIRE (matrix->onBeforeUserPatchEdit != nullptr);
+
+    const auto before = rig.sent.size();
+    matrix->onBeforeUserPatchEdit();
+
+    REQUIRE (rig.sent.size() == before + 1);
+    CHECK (rig.sent.back().command == "node.set");
+    CHECK (rig.sent.back().args[0].getString() == "/godot/audio/inputPatchSettled");
+    CHECK (rig.sent.back().args[1].getBool());
+
+    matrix->onBeforeUserPatchEdit();
+    CHECK (rig.sent.size() == before + 1);
 }
 
 //==============================================================================
@@ -307,9 +405,9 @@ TEST_CASE ("show settings UI: the Network tab declares devices and switches the 
         configures rather than after "Interface", which the network tab could
         equally have claimed. */
     CHECK (tabs->getTabNames()[0] == "Audio");
-    CHECK (tabs->getTabNames()[4] == "Network");
+    CHECK (tabs->getTabNames().indexOf ("Network") > tabs->getTabNames().indexOf ("Output patch"));
 
-    tabs->setCurrentTabIndex (4);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Network"));
 
     /*  A TAB'S CONTENT IS ONLY A LIVE CHILD WHILE IT SHOWS - juce::
         TabbedComponent's own arrangement - so nothing below can be found until
@@ -365,9 +463,9 @@ TEST_CASE ("show settings UI: the MIDI tab declares ports and offers this machin
 
     auto* tabs = component<juce::TabbedComponent> (panel);
     REQUIRE (tabs != nullptr);
-    CHECK (tabs->getTabNames()[5] == "MIDI");
+    CHECK (tabs->getTabNames().indexOf ("MIDI") == tabs->getTabNames().indexOf ("Network") + 1);
 
-    tabs->setCurrentTabIndex (5);
+    tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("MIDI"));
 
     /*  ADD DECLARES A PORT, and nothing about a cable: the name is the show's
         and which socket it is on is said afterwards, because the two are
@@ -547,7 +645,7 @@ TEST_CASE ("audio settings UI: held output tests clear on tab exit and window cl
     REQUIRE (tabs != nullptr);
     for (bool close : { false, true })
     {
-        tabs->setCurrentTabIndex (3);   // the output patch, after Interface and Outputs
+        tabs->setCurrentTabIndex (tabs->getTabNames().indexOf ("Output patch"));
         auto* page = tabs->getCurrentContentComponent();
         REQUIRE (page != nullptr);
         auto* test = button (*page, "Test");

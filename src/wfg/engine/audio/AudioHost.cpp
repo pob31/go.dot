@@ -32,8 +32,10 @@
     mid-translation-unit. Nothing below is called VERSION.
 */
 #include <algorithm>
+#include <atomic>
 #include <cstdint>
 #include <cstring>
+#include <memory>
 #include <typeinfo>
 #include <utility>
 #include <vector>
@@ -219,10 +221,11 @@ namespace wfg::audio
             parameters.blockSize = requested.blockSize;
             parameters.outputChannels = requested.outputChannels;
 
-            /*  No inputs and no MIDI in this phase. Live input is Phase 9's
-                rack and MIDI cues are Phase 3; asking for either now would
-                build graph nodes nothing drives and make the block cost
-                measured here a measurement of the wrong thing. */
+            /*  The inputs are handed over, and Tracktion is given no input
+                device to take them (`describeWaveDevices`): its own path locks
+                and allocates on the audio thread, so the live rack reads them
+                from the tap below instead (Phase 9b, namespace draft §18.4). No
+                MIDI: nothing drives it. */
             parameters.inputChannels = requested.inputChannels;
             parameters.useMidiDevices = false;
 
@@ -240,6 +243,16 @@ namespace wfg::audio
             scratch.setSize (std::max (requested.outputChannels, requested.inputChannels),
                              requested.blockSize, false, true, true);
             midi.ensureSize (256);
+
+            /*  THE TAP, for every logical input the interface was opened with
+                - one channel at least, so an interface with none still has a
+                buffer to read silence from. */
+            tapChannels = std::max (0, requested.inputChannels);
+            tap.setSize (std::max (1, tapChannels), requested.blockSize, false, true, true);
+            inputPeaks = std::make_unique<std::atomic<float>[]> (static_cast<std::size_t> (std::max (1, tapChannels)));
+
+            for (int channel = 0; channel < std::max (1, tapChannels); ++channel)
+                inputPeaks[static_cast<std::size_t> (channel)].store (0.0f, std::memory_order_relaxed);
 
             current = requested;
             sampleRate = static_cast<double> (requested.sampleRate);
@@ -714,6 +727,29 @@ namespace wfg::audio
                 if (inputs != nullptr && inputs[channel] != nullptr)
                     scratch.copyFrom (channel, 0, inputs[channel], current.blockSize);
             midi.clear();
+
+            /*  THE TAP, filled before Tracktion runs (namespace draft §18.4):
+                the rack's input stage reads it during the call below, in this
+                same block, so a live input adds no block of delay. Every
+                logical input is written - its samples, or zeros where this
+                block brought none - and its peak kept for the tick. */
+            for (int channel = 0; channel < tapChannels; ++channel)
+            {
+                if (inputs != nullptr && channel < numInputs && inputs[channel] != nullptr)
+                {
+                    tap.copyFrom (channel, 0, inputs[channel], current.blockSize);
+
+                    const auto peak = tap.getMagnitude (channel, 0, current.blockSize);
+                    auto& held = inputPeaks[static_cast<std::size_t> (channel)];
+
+                    if (peak > held.load (std::memory_order_relaxed))
+                        held.store (peak, std::memory_order_relaxed);
+                }
+                else
+                {
+                    tap.clear (channel, 0, current.blockSize);
+                }
+            }
 
             {
                 const rt::ScopedRealtimeCheck tracktionsBlock { rt::Region::foreign };
@@ -1623,6 +1659,14 @@ namespace wfg::audio
         juce::AudioBuffer<float> scratch;
         juce::MidiBuffer midi;
 
+        /*  THE INPUT TAP and each logical input's peak since the last take
+            (Phase 9b). Sized at `start`, never on the audio thread; the peaks
+            are written there with relaxed stores and taken on the tick thread
+            with an exchange, the output stage's pattern. */
+        juce::AudioBuffer<float> tap;
+        std::unique_ptr<std::atomic<float>[]> inputPeaks;
+        int tapChannels = 0;
+
         AudioClockSource samples;
         std::atomic<std::int64_t> blocks { 0 };
 
@@ -1911,6 +1955,27 @@ namespace wfg::audio
             return 0.0f;
 
         return impl->plugins[static_cast<std::size_t> (trackIndex)]->takeOutputPeak();
+    }
+
+    int AudioHost::inputChannelCount() const noexcept
+    {
+        return impl->tapChannels;
+    }
+
+    float AudioHost::takeInputPeak (int channel) noexcept
+    {
+        if (channel < 0 || channel >= impl->tapChannels || impl->inputPeaks == nullptr)
+            return 0.0f;
+
+        return impl->inputPeaks[static_cast<std::size_t> (channel)].exchange (0.0f, std::memory_order_relaxed);
+    }
+
+    const float* AudioHost::inputTapChannel (int channel) const noexcept
+    {
+        if (channel < 0 || channel >= impl->tapChannels)
+            return nullptr;
+
+        return impl->tap.getReadPointer (channel);
     }
 
     int AudioHost::editChannelsPerTrack() const noexcept  { return impl->editChannels; }

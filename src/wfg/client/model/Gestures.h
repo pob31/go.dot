@@ -232,6 +232,16 @@ namespace wfg::client::gesture
     Event moveBus (const std::string& busId, int index);
     Event setBusWidth (const std::string& busId, int width);
 
+    /*  THE NAMED INPUTS (Phase 9b): the buses' gestures for the other side of
+        the interface, with the same index convention. */
+    Event createInput (int width, int index);
+    Event deleteInput (const std::string& inputId);
+    Event moveInput (const std::string& inputId, int index);
+
+    /*  The input patch's flag, the output patch's twin: true at the first hand
+        edit, false when the 1:1 button hands the inputs back to the list. */
+    Event setInputPatchSettled (bool settled);
+
     /*  A DEVICE THIS SHOW TALKS TO, declared at a prefix.
 
         WITH NO NAMESPACE FILE, which is what makes it an opaque device: the

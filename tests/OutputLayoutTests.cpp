@@ -442,3 +442,159 @@ TEST_CASE ("bus commands: firstChannel and width refuse every client that is not
     CHECK (document.setAttribute ("/godot/bus/J3MT5XYA/name", "Renamed").ok);
     CHECK (document.setAttribute ("/godot/bus/J3MT5XYA/kind", "mix").ok);
 }
+
+//==============================================================================
+/*  THE NAMED INPUTS (Phase 9b, namespace draft §18.2): the output layout's four
+    commands for the other side of the interface. One arithmetic, a container
+    of their own, and `inputPatch` with `inputPatchSettled` in place of the
+    outputs' pair. */
+TEST_CASE ("input commands: the four of them keep the logical inputs packed, in a container after the buses")
+{
+    doc::ShowDocument document;
+    REQUIRE (doc::CanonicalXml::read (
+        "<Show><Lists><List id=\"7K2QM9X4\"/></Lists><Mounts/>"
+        "<Audio tracks=\"2\"><Bus id=\"J3MT5XYA\" name=\"Main\" width=\"2\"/></Audio></Show>",
+        document).ok);
+
+    document.beginTransaction ("input.create", 0, "test", {});
+    const auto voice = document.createInput (1);
+    REQUIRE (voice.ok);
+    const auto keys = document.createInput (2);
+    REQUIRE (keys.ok);
+    const auto spare = document.createInput (1);
+    REQUIRE (spare.ok);
+
+    CHECK (document.getAttribute ("/godot/input/" + voice.id + "/firstChannel") == "0");
+    CHECK (document.getAttribute ("/godot/input/" + keys.id + "/firstChannel") == "1");
+    CHECK (document.getAttribute ("/godot/input/" + spare.id + "/firstChannel") == "3");
+
+    /*  Named on arrival, as an output is, and counted over the inputs there
+        are: "Input 3" is renamed by somebody who knows it is Voix solo. */
+    CHECK (document.getAttribute ("/godot/input/" + voice.id + "/name") == "Input 1");
+    CHECK (document.getAttribute ("/godot/input/" + spare.id + "/name") == "Input 3");
+
+    /*  THEIR OWN SPACE: the buses' first channels are the outputs' and never
+        moved by an input, and the patch the fresh show follows is not written. */
+    CHECK (document.getAttribute ("/godot/bus/J3MT5XYA/firstChannel") == "0");
+    CHECK (document.getAttribute ("/godot/audio/inputPatch") == "");
+
+    /*  IN A CONTAINER, AFTER THE BUSES, so an input's position counts from
+        nought whatever the outputs are doing. */
+    const auto audio = document.root().getChildWithName ("Audio");
+    const auto container = audio.getChildWithName ("Inputs");
+    REQUIRE (container.isValid());
+    CHECK (audio.indexOf (container) == 1);
+    CHECK (container.getNumChildren() == 3);
+
+    REQUIRE (document.moveInput (spare.id, 0).ok);
+    CHECK (document.getAttribute ("/godot/input/" + spare.id + "/firstChannel") == "0");
+    CHECK (document.getAttribute ("/godot/input/" + voice.id + "/firstChannel") == "1");
+    CHECK (container.getChild (0)["id"].toString().toStdString() == spare.id);
+
+    REQUIRE (document.resizeInput (voice.id, 2).ok);
+    CHECK (document.getAttribute ("/godot/input/" + keys.id + "/firstChannel") == "3");
+
+    REQUIRE (document.removeInput (voice.id).ok);
+    CHECK (document.getAttribute ("/godot/input/" + keys.id + "/firstChannel") == "1");
+    CHECK_FALSE (document.findById (voice.id).isValid());
+}
+
+TEST_CASE ("input commands: a width outside one to eight, or an input nobody declared, is refused and changes nothing")
+{
+    doc::ShowDocument document;
+    REQUIRE (doc::CanonicalXml::read (
+        "<Show><Lists><List id=\"7K2QM9X4\"/></Lists><Mounts/>"
+        "<Audio tracks=\"2\"><Bus id=\"J3MT5XYA\" name=\"Main\" width=\"2\"/></Audio></Show>",
+        document).ok);
+
+    const auto before = doc::CanonicalXml::write (document);
+
+    document.beginTransaction ("input.create", 0, "test", {});
+    CHECK (document.createInput (0).reason == reason::badValue);
+    CHECK (document.createInput (9).reason == reason::badValue);
+
+    /*  A refused create leaves no empty container behind. */
+    CHECK_FALSE (document.root().getChildWithName ("Audio").getChildWithName ("Inputs").isValid());
+    CHECK (doc::CanonicalXml::write (document) == before);
+
+    CHECK (document.removeInput ("NQNQNQNQ").reason == reason::unknownId);
+    CHECK (document.moveInput ("NQNQNQNQ", 0).reason == reason::unknownId);
+
+    const auto made = document.createInput (2);
+    REQUIRE (made.ok);
+    CHECK (document.resizeInput (made.id, 9).reason == reason::badValue);
+    CHECK (document.getAttribute ("/godot/input/" + made.id + "/width") == "2");
+
+    /*  And a bus is not an input, whatever the command is asked. */
+    CHECK (document.removeInput ("J3MT5XYA").reason == reason::unknownId);
+}
+
+TEST_CASE ("input commands: a settled show keeps every input on the channels it is plugged into")
+{
+    doc::ShowDocument document;
+    REQUIRE (doc::CanonicalXml::read (
+        "<Show><Lists><List id=\"7K2QM9X4\"/></Lists><Mounts/>"
+        "<Audio tracks=\"2\"><Inputs><Input id=\"N1000001\" name=\"Voix\"/>"
+        "<Input firstChannel=\"1\" id=\"N1000002\" name=\"Keys\" width=\"2\"/></Inputs></Audio></Show>",
+        document).ok);
+
+    document.beginTransaction ("node.set", 0, "test", {});
+    REQUIRE (document.setAttribute ("/godot/audio/inputPatchSettled", "true").ok);
+
+    REQUIRE (document.createInput (1, 0).ok);
+
+    /*  The two inputs that existed keep interface 0 and 1-2; the new one takes
+        3 although it now sits first in the list. */
+    CHECK (document.getAttribute ("/godot/audio/inputPatch") == "3 0 1 2");
+    CHECK (document.getAttribute ("/godot/input/N1000001/firstChannel") == "1");
+
+    /*  State, not show, as the outputs' flag is. */
+    CHECK (doc::CanonicalXml::write (document).find ("inputPatchSettled") == std::string::npos);
+}
+
+TEST_CASE ("input commands: firstChannel and width refuse every client that is not a layout command")
+{
+    doc::ShowDocument document;
+    REQUIRE (doc::CanonicalXml::read (
+        "<Show><Lists><List id=\"7K2QM9X4\"/></Lists><Mounts/>"
+        "<Audio tracks=\"2\"><Inputs><Input id=\"N1000001\" name=\"Voix\"/></Inputs></Audio></Show>",
+        document).ok);
+
+    CHECK (document.setAttribute ("/godot/input/N1000001/firstChannel", "4").reason == reason::readOnly);
+    CHECK (document.setAttribute ("/godot/input/N1000001/width", "2").reason == reason::readOnly);
+    CHECK (document.setAttribute ("/godot/input/N1000001/name", "Voix solo").ok);
+}
+
+TEST_CASE ("input commands: the inputs and the plugin set land in one place whichever came first")
+{
+    /*  The canonical bytes of a show must not depend on the order two creates
+        happened in: the inputs' container after the buses, the set's after the
+        buses and the inputs. */
+    const auto made = [] (bool inputsFirst)
+    {
+        doc::ShowDocument document;
+        REQUIRE (doc::CanonicalXml::read (
+            "<Show><Lists><List id=\"7K2QM9X4\"/></Lists><Mounts/>"
+            "<Audio tracks=\"2\"><Bus id=\"J3MT5XYA\" name=\"Main\" width=\"2\"/></Audio></Show>",
+            document).ok);
+
+        document.beginTransaction ("create", 0, "test", {});
+
+        if (inputsFirst)
+        {
+            REQUIRE (document.createInput (1, -1, "N1000001").ok);
+            REQUIRE (document.createPlugin ("Comp", "VST3-Comp-1", "VST3", "", "PG7N0001").ok);
+        }
+        else
+        {
+            REQUIRE (document.createPlugin ("Comp", "VST3-Comp-1", "VST3", "", "PG7N0001").ok);
+            REQUIRE (document.createInput (1, -1, "N1000001").ok);
+        }
+
+        return doc::CanonicalXml::write (document);
+    };
+
+    const auto inputsFirst = made (true);
+    CHECK (inputsFirst == made (false));
+    CHECK (inputsFirst.find ("<Inputs>") < inputsFirst.find ("<Plugins>"));
+}

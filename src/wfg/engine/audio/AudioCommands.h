@@ -68,6 +68,11 @@ namespace wfg::audio
         std::function<void (const OutputTestSettings&)> sendTest;
         int sampleRate = 0, bufferSize = 0, inputs = 0, hardwareOutputs = 0;
         int settingsRevision = 0;
+
+        /*  The interface's own delays in samples, carried on the logged
+            `audio.settingsReady` (Phase 9b) so that a replay reads what the
+            session read; nought for the hosted interface. */
+        int inputLatency = 0, outputLatency = 0;
         SettingsRequest requestSettings;
 
         /*  `plugin.load` applied (2026-09-26): the audio graph built again

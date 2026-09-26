@@ -4835,3 +4835,79 @@ TEST_CASE ("eq: a peak on the voice doubles a sine at its centre, written live t
 
     CHECK (20.0 * std::log10 (rmsOf (again, 0) / flatRms) == doctest::Approx (0.0).scale (1.0).epsilon (0.05));
 }
+
+//==============================================================================
+TEST_CASE ("input tap: a block's inputs are copied before the graph runs, each one's peak taken once")
+{
+    /*  Phase 9b (namespace draft §18.4). The rack's input stage reads the tap
+        during the block, so the tap must hold THIS block's inputs; a block
+        pumped with none must read silence, never the last one again; and each
+        input's peak is taken once a tick, the output meter's rule. All of it
+        inside Go.dot's own part of the block, which allocates nothing. */
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+    CHECK (rig.host.inputChannelCount() == 2);
+
+    std::vector<float> left (128), right (128);
+
+    for (int n = 0; n < 128; ++n)
+    {
+        left[static_cast<std::size_t> (n)] = 0.5f * std::sin (0.1f * static_cast<float> (n));
+        right[static_cast<std::size_t> (n)] = 0.25f;
+    }
+
+    const float* inputs[] { left.data(), right.data() };
+
+    rt::resetCounts();
+    rig.host.processBlock (inputs, 2);
+    CHECK (rt::violations() == 0);
+
+    const auto* tapped = rig.host.inputTapChannel (0);
+    REQUIRE (tapped != nullptr);
+
+    auto same = true;
+
+    for (int n = 0; n < 128; ++n)
+        same = same && juce::exactlyEqual (tapped[n], left[static_cast<std::size_t> (n)]);
+
+    CHECK (same);
+    CHECK (rig.host.inputTapChannel (1)[64] == doctest::Approx (0.25f));
+
+    /*  The peak, taken: the loudest sample, then nothing until another block. */
+    CHECK (rig.host.takeInputPeak (1) == doctest::Approx (0.25f));
+    CHECK (rig.host.takeInputPeak (0) > 0.49f);
+    CHECK (rig.host.takeInputPeak (1) == doctest::Approx (0.0f));
+
+    /*  A block with no inputs is silence, not the last block again. */
+    rig.host.processBlock();
+    CHECK (rig.host.inputTapChannel (1)[64] == doctest::Approx (0.0f));
+    CHECK (rig.host.takeInputPeak (1) == doctest::Approx (0.0f));
+
+    /*  An input the tap does not hold answers nothing rather than something. */
+    CHECK (rig.host.inputTapChannel (2) == nullptr);
+    CHECK (rig.host.takeInputPeak (7) == doctest::Approx (0.0f));
+}
+
+TEST_CASE ("input tap: an interface with no inputs holds none, and reads silence")
+{
+    HostRig rig;
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 128;
+    settings.outputChannels = 2;
+
+    REQUIRE (rig.host.start (settings));
+    CHECK (rig.host.inputChannelCount() == 0);
+
+    rig.host.processBlock();
+    CHECK (rig.host.inputTapChannel (0) == nullptr);
+    CHECK (rig.host.takeInputPeak (0) == doctest::Approx (0.0f));
+}

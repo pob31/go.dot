@@ -489,6 +489,7 @@ class Server:
                  device_type: "str | None" = None,
                  proxy_deadline_us: "int | None" = None,
                  engine_folder: "Path | None" = None,
+                 input_wav: "Path | None" = None,
                  env: "dict | None" = None):
         argv = [str(find_binary()), "serve", str(bundle), "--http-port=0", "--osc-port=0"]
         if sample_rate is not None:
@@ -505,6 +506,11 @@ class Server:
             argv.append("--hosted")
         if render is not None:
             argv.append(f"--render={render}")
+
+        # --input-wav feeds the hosted interface's logical inputs from a file,
+        # looped (Phase 9b): how a runner with no interface hears a live one.
+        if input_wav is not None:
+            argv.append(f"--input-wav={input_wav}")
 
         # --ui serves a client from /ui on this same HTTP port. Same origin as
         # the tree it reads, so there is no CORS anywhere and a tablet reaches

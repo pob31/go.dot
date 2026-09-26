@@ -54,6 +54,7 @@
 #include <wfg/client/model/Media.h>
 #include <wfg/client/model/NewCue.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Foot.h>
 #include <wfg/client/model/Panic.h>
 #include <wfg/client/model/Ranges.h>
@@ -5446,4 +5447,50 @@ TEST_CASE ("client: a click on a number puts it on the master dial, and the wind
     REQUIRE (rig.apply (10, "window", "surface.dial",
                         { osc::Value::string ("/godot/cue/" + cue + "/initialLevel") }).applied == 1);
     CHECK (model::dialLine (*rig.publish (11)).rfind (name + ": initial level ", 0) == 0);
+}
+
+TEST_CASE ("client: the input list reads the named inputs, names the patch rows, and says which regime it is in")
+{
+    /*  Phase 9b (namespace draft §18.2): the output list's twin, made through
+        the same commands a window sends, so the rows are what a client would
+        read off a real engine. */
+    Rig rig;
+
+    REQUIRE (rig.apply (1, "window", "input.create",
+                        { osc::Value::int32 (1), osc::Value::int32 (-1), osc::Value::string ("N1000001") }).applied == 1);
+    REQUIRE (rig.apply (2, "window", "input.create",
+                        { osc::Value::int32 (2), osc::Value::int32 (-1), osc::Value::string ("N1000002") }).applied == 1);
+    REQUIRE (rig.apply (3, "window", "node.set",
+                        { osc::Value::string ("/godot/input/N1000001/name"), osc::Value::string ("Voix solo") }).applied == 1);
+
+    const auto snapshot = rig.publish (3);
+    const auto rows = model::readInputs (*snapshot);
+
+    REQUIRE (rows.size() == 2);
+    CHECK (rows[0].name == "Voix solo");
+    CHECK (rows[0].widthWord() == "Mono");
+    CHECK (rows[1].widthWord() == "Stereo");
+    CHECK (rows[0].channelWord() == "1");
+    CHECK (rows[1].channelWord() == "2-3");
+    CHECK (model::inputChannelCount (rows) == 3);
+
+    /*  No interface in this rig: every input says so in words, where the
+        window would draw its meter. */
+    CHECK (rows[0].problem == "no input interface is open");
+    CHECK (rows[0].meterFill() == doctest::Approx (0.0));
+
+    const auto labels = model::inputChannelLabels (rows, 0);
+    REQUIRE (labels.size() == 3);
+    CHECK (labels[0] == "Voix solo");
+    CHECK (labels[1] == "Input 2 \xc2\xb7 L");
+    CHECK (labels[2] == "Input 2 \xc2\xb7 R");
+    CHECK (model::inputChannelLabels (rows, 5).back() == "Input 5");
+
+    CHECK_FALSE (model::inputPatchHasSettled (*snapshot));
+    CHECK (model::inputRegime (false).find ("follows this list") != std::string::npos);
+
+    /*  A meter reads in fills from nought to one: -60 dB and below is dark. */
+    model::InputRow loud;
+    loud.meterDb = -6.0;
+    CHECK (loud.meterFill() == doctest::Approx (0.9));
 }

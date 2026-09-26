@@ -323,6 +323,9 @@ namespace wfg::doc
 
         /*  And Phase 9a's: `/godot/plugin/order` beside `/godot/plugin/<id>/name`. */
         if (element == "Plugins")  return "plugin";
+
+        /*  And Phase 9b's: `/godot/input/order` beside `/godot/input/<id>/name`. */
+        if (element == "Inputs")   return "input";
         return {};
     }
 
@@ -391,6 +394,10 @@ namespace wfg::doc
         /*  PHASE 9a. The plugin set and its entries, under Audio. */
         if (element == "Plugins")                   return "plugins";
         if (element == "Plugin")                    return "plugin";
+
+        /*  PHASE 9b. The named inputs and their container, under Audio. */
+        if (element == "Inputs")                    return "inputs";
+        if (element == "Input")                     return "input";
 
         return {};
     }
@@ -1488,8 +1495,68 @@ namespace wfg::doc
         return buses;
     }
 
+    std::vector<juce::ValueTree> ShowDocument::inputNodes() const
+    {
+        std::vector<juce::ValueTree> inputs;
+
+        const auto container = showNode.getChildWithName ("Audio").getChildWithName ("Inputs");
+
+        if (! container.isValid())
+            return inputs;
+
+        for (const auto& child : container)
+            if (child.hasType ("Input"))
+                inputs.push_back (child);
+
+        /*  READ ORDER IS CHANNEL ORDER, as the buses' is and for their reason:
+            the list is read beside an interface, not beside a file. The default
+            first channel is nought, which is what the table says. */
+        const auto channelOf = [] (const juce::ValueTree& input)
+        {
+            static const juce::Identifier property { "firstChannel" };
+
+            return input.hasProperty (property) ? static_cast<int> (input[property]) : 0;
+        };
+
+        std::stable_sort (inputs.begin(), inputs.end(),
+                          [&channelOf] (const juce::ValueTree& a, const juce::ValueTree& b)
+                          { return channelOf (a) < channelOf (b); });
+
+        return inputs;
+    }
+
+    juce::ValueTree ShowDocument::inputsContainer (bool make)
+    {
+        auto audio = showNode.getChildWithName ("Audio");
+
+        if (! audio.isValid())
+            return {};
+
+        auto inputs = audio.getChildWithName ("Inputs");
+
+        if (! inputs.isValid() && make)
+        {
+            /*  AT A FIXED PLACE - after the last bus - whichever container was
+                asked for first, so the canonical bytes of a show do not depend
+                on the order two creates happened in: `createPlugin` puts the
+                plugin set after the last bus AND after this. Outside the
+                history, as the plugin set's container is: it carries nothing,
+                and the input that made it is the step Undo takes back. */
+            int at = 0;
+
+            for (int i = 0; i < audio.getNumChildren(); ++i)
+                if (audio.getChild (i).hasType ("Bus"))
+                    at = i + 1;
+
+            inputs = juce::ValueTree ("Inputs");
+            audio.addChild (inputs, at, nullptr);
+        }
+
+        return inputs;
+    }
+
     EditResult ShowDocument::applyLayout (const LayoutEdit& edit, const std::string& id,
-                                          const std::string& kind)
+                                          const std::string& kind, LayoutSide side)
     {
         /*  ASKED HERE, not only at `insertObject`'s door, for the reason
             `createRackChannel` gives: everything below changes the document
@@ -1504,7 +1571,19 @@ namespace wfg::doc
         if (! audio.isValid())
             return EditResult::failed (reason::unknownId);
 
-        const auto nodes = busNodes();
+        /*  THE TWO SIDES OF THE INTERFACE (2026-09-26, namespace draft §18.2).
+            The buses are the outputs and live in <Audio> itself; the named
+            inputs are the other side and live in its <Inputs>. One arithmetic,
+            and these are everything that differs. */
+        const auto outputs = side == LayoutSide::outputs;
+        const std::string element = outputs ? "Bus" : "Input";
+        const juce::Identifier elementType { element.c_str() };
+        const std::string prefix = outputs ? "/godot/bus/" : "/godot/input/";
+        const std::string patchRow = outputs ? "/godot/audio/outputPatch" : "/godot/audio/inputPatch";
+        const std::string settledRow = outputs ? "/godot/audio/patchSettled"
+                                               : "/godot/audio/inputPatchSettled";
+
+        const auto nodes = outputs ? busNodes() : inputNodes();
 
         std::vector<BusShape> before;
         before.reserve (nodes.size());
@@ -1520,8 +1599,8 @@ namespace wfg::doc
                 saved-and-reopened show refuse its feeds as `bad-route`
                 (`cue/ShowWalk.h` records it), and it is the same tree and the
                 same omission here. */
-            const auto width = getAttribute ("/godot/bus/" + shape.id + "/width");
-            const auto first = getAttribute ("/godot/bus/" + shape.id + "/firstChannel");
+            const auto width = getAttribute (prefix + shape.id + "/width");
+            const auto first = getAttribute (prefix + shape.id + "/firstChannel");
 
             /*  `getIntValue` rather than `std::stoi`, which throws: every value
                 here has been through the schema, so a number is what is there -
@@ -1532,8 +1611,8 @@ namespace wfg::doc
             before.push_back (std::move (shape));
         }
 
-        const auto settledText = getAttribute ("/godot/audio/patchSettled");
-        const auto patchText = getAttribute ("/godot/audio/outputPatch");
+        const auto settledText = getAttribute (settledRow);
+        const auto patchText = getAttribute (patchRow);
 
         std::vector<int> patch;
 
@@ -1548,6 +1627,22 @@ namespace wfg::doc
                                          || edit.kind == LayoutEdit::Kind::resize
                                        ? reason::badValue : reason::unknownId);
 
+        /*  AN INPUT IS ONE TO EIGHT CHANNELS - a microphone, a stereo line, a
+            small multichannel feed - where a bus may be as wide as a processor
+            send. Said here rather than by the arithmetic, which knows nothing
+            of either side. */
+        if (! outputs && (edit.kind == LayoutEdit::Kind::create || edit.kind == LayoutEdit::Kind::resize)
+              && (edit.width < 1 || edit.width > 8))
+            return EditResult::failed (reason::badValue);
+
+        /*  WHERE THE LIST LIVES: <Audio> for the buses, its <Inputs> for the
+            named inputs - made by the first input, after every check above has
+            passed, so a refused create leaves no container behind. */
+        auto parent = outputs ? audio : inputsContainer (edit.kind == LayoutEdit::Kind::create);
+
+        if (! parent.isValid())
+            return EditResult::failed (reason::unknownId);
+
         /*  THE STRUCTURAL STEP FIRST, so that a refusal inside it - an
             identifier already taken, a lock that arrived between two lines -
             leaves the channels as they were rather than repacked around a bus
@@ -1558,6 +1653,21 @@ namespace wfg::doc
         {
             case LayoutEdit::Kind::create:
             {
+                /*  AN INPUT IS NAMED AS AN OUTPUT IS, by how many there are:
+                    "Input 3", renamed when somebody knows it is Voix solo. */
+                if (! outputs)
+                {
+                    const auto created = insertObject (parent, edit.index < 0 ? endOfSequence : edit.index,
+                                                       element, id,
+                                                       { { "name", "Input " + std::to_string (nodes.size() + 1) } });
+
+                    if (! created.ok)
+                        return created;
+
+                    made = created.id;
+                    break;
+                }
+
                 /*  A NAME IT CAN BE CALLED BY AT ONCE. An output with no name
                     is a row reading "Bus" in a menu of them, and the first
                     thing anybody would do is type one - so it arrives with
@@ -1594,8 +1704,22 @@ namespace wfg::doc
             {
                 auto node = findById (id);
 
-                if (! node.isValid() || ! node.hasType ("Bus"))
+                if (! node.isValid() || ! node.hasType (elementType))
                     return EditResult::failed (reason::unknownId);
+
+                /*  AN INPUT TAKES NOTHING WITH IT today: no cue names one until
+                    the mic cue does (namespace draft §18.2). */
+                if (! outputs)
+                {
+                    std::vector<std::string> released;
+                    collectIds (node, released);
+                    parent.removeChild (node, structuralHistory());
+
+                    for (const auto& gone : released)
+                        registry.release (gone);
+
+                    break;
+                }
 
                 /*  EVERY DESTINATION THAT NAMED IT GOES WITH IT, in this same
                     transaction. A route left naming a bus that has gone is a
@@ -1671,7 +1795,7 @@ namespace wfg::doc
             {
                 const auto node = findById (id);
 
-                if (! node.isValid() || ! node.hasType ("Bus"))
+                if (! node.isValid() || ! node.hasType (elementType))
                     return EditResult::failed (reason::unknownId);
 
                 break;
@@ -1691,11 +1815,11 @@ namespace wfg::doc
             if (! node.isValid())
                 continue;
 
-            if (const auto raw = audio.indexOf (node);
-                raw >= 0 && raw != rawIndexForPosition (audio, static_cast<int> (at)))
-                audio.moveChild (raw, std::min (rawIndexForPosition (audio, static_cast<int> (at)),
-                                                audio.getNumChildren() - 1),
-                                 structuralHistory());
+            if (const auto raw = parent.indexOf (node);
+                raw >= 0 && raw != rawIndexForPosition (parent, static_cast<int> (at)))
+                parent.moveChild (raw, std::min (rawIndexForPosition (parent, static_cast<int> (at)),
+                                                 parent.getNumChildren() - 1),
+                                  structuralHistory());
         }
 
         for (const auto& wanted : layout.buses)
@@ -1705,12 +1829,12 @@ namespace wfg::doc
             if (! node.isValid())
                 continue;
 
-            if (const auto result = writeOwned (node, "Bus", "firstChannel",
+            if (const auto result = writeOwned (node, element, "firstChannel",
                                                 std::to_string (wanted.firstChannel));
                 ! result.ok)
                 return result;
 
-            if (const auto result = writeOwned (node, "Bus", "width",
+            if (const auto result = writeOwned (node, element, "width",
                                                 std::to_string (wanted.width));
                 ! result.ok)
                 return result;
@@ -1721,8 +1845,7 @@ namespace wfg::doc
             stays empty and the outputs follow the order, and an edit that
             moved nothing the patch could see. */
         if (layout.patchChanged)
-            if (const auto result = setAttribute ("/godot/audio/outputPatch",
-                                                  audio::writePatch (layout.outputPatch));
+            if (const auto result = setAttribute (patchRow, audio::writePatch (layout.outputPatch));
                 ! result.ok)
                 return result;
 
@@ -1798,6 +1921,45 @@ namespace wfg::doc
         edit.width = width;
 
         return applyLayout (edit, id, {});
+    }
+
+    EditResult ShowDocument::createInput (int width, int index, const std::string& id)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::create;
+        edit.index = index;
+        edit.width = width;
+
+        return applyLayout (edit, id, {}, LayoutSide::inputs);
+    }
+
+    EditResult ShowDocument::removeInput (const std::string& id)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::remove;
+        edit.id = id;
+
+        return applyLayout (edit, id, {}, LayoutSide::inputs);
+    }
+
+    EditResult ShowDocument::moveInput (const std::string& id, int index)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::move;
+        edit.id = id;
+        edit.index = index;
+
+        return applyLayout (edit, id, {}, LayoutSide::inputs);
+    }
+
+    EditResult ShowDocument::resizeInput (const std::string& id, int width)
+    {
+        LayoutEdit edit;
+        edit.kind = LayoutEdit::Kind::resize;
+        edit.id = id;
+        edit.width = width;
+
+        return applyLayout (edit, id, {}, LayoutSide::inputs);
     }
 
     EditResult ShowDocument::createFeed (const std::string& cueId,
@@ -2274,15 +2436,15 @@ namespace wfg::doc
 
         if (! plugins.isValid())
         {
-            /*  AT A FIXED PLACE - after the last bus, before the rack -
-                whichever container was asked for first, so the canonical
-                bytes of a show do not depend on the order two creates
-                happened in. The rack appends itself at the end; a bus made
-                afterwards lands among the buses through its own create. */
+            /*  AT A FIXED PLACE - after the last bus and the named inputs,
+                before the rack - whichever container was asked for first, so
+                the canonical bytes of a show do not depend on the order two
+                creates happened in. The rack appends itself at the end; a bus
+                made afterwards lands among the buses through its own create. */
             int at = 0;
 
             for (int i = 0; i < audio.getNumChildren(); ++i)
-                if (audio.getChild (i).hasType ("Bus"))
+                if (audio.getChild (i).hasType ("Bus") || audio.getChild (i).hasType ("Inputs"))
                     at = i + 1;
 
             plugins = juce::ValueTree ("Plugins");

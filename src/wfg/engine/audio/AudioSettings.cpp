@@ -229,7 +229,10 @@ namespace wfg::audio
             } });
         engine.commands().add ({ "audio.settingsReady", "The audio settings operation finished.",
             { { "error", 's', false }, { "sampleRate", 'i', false }, { "bufferSize", 'i', false },
-              { "inputs", 'i', false }, { "outputs", 'i', false }, { "bufferSizes", 's', true } }, false,
+              { "inputs", 'i', false }, { "outputs", 'i', false }, { "bufferSizes", 's', true },
+              /*  AFTER THE LAST ONE A SESSION ALWAYS SENT (Phase 9b), so a log
+                  written before them replays as it always did. */
+              { "inputLatency", 'i', true }, { "outputLatency", 'i', true } }, false,
             [&] (CommandContext&, const std::vector<osc::Value>& args)
             {
                 state.settingsError = args[0].getString();
@@ -240,6 +243,8 @@ namespace wfg::audio
                 state.inputs = args[3].getInt32();
                 state.hardwareOutputs = args[4].getInt32();
                 state.availableBufferSizes = args.size() > 5 ? args[5].getString() : std::string {};
+                state.inputLatency = args.size() > 6 ? std::max (0, args[6].getInt32()) : 0;
+                state.outputLatency = args.size() > 7 ? std::max (0, args[7].getInt32()) : 0;
                 state.status = state.hardwareOutputs > 0 ? "running" : "stopped";
                 if (state.hardwareOutputs == 0) { state.device.clear(); state.outputs = 0; }
                 if (state.sampleRate > 0) runner.setSamplesPerTick (state.sampleRate / 50);

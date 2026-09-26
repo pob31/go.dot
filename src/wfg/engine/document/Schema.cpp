@@ -291,7 +291,7 @@ namespace wfg::doc
                     an identifier, a name and two port numbers, and an
                     attribute cannot grow children. */
                 { "Network", false, {},                    { "network" } },
-                { "Audio",  false, { "Bus", "Rack", "Plugins" }, { "audio" } },
+                { "Audio",  false, { "Bus", "Inputs", "Rack", "Plugins" }, { "audio" } },
                 { "Bus",    true,  {},                     { "bus" } },
 
                 /*  PHASE 4'S SLOTS (PRD §3.9e). A slot is one position in a
@@ -367,6 +367,18 @@ namespace wfg::doc
                     `order`, as `Dcas` carries `dcas`. */
                 { "Plugins",  false, { "Plugin" },         { "plugins" } },
                 { "Plugin",   true,  {},                   { "plugin" } },
+
+                /*  PHASE 9b'S NAMED INPUTS (PRD §3.18, §6.2, 2026-09-26): the
+                    other side of the interface from the buses, and named for
+                    §3.9b's reason - "Voix solo" is what somebody wrote down and
+                    "input 3" is a fact about a patch. A container like
+                    `Plugins`, made on demand at a fixed place after the buses,
+                    so an input's position counts from nought whatever the
+                    buses are doing and the canonical bytes do not depend on
+                    which container was asked for first. `Inputs` carries
+                    `inputs` for its `order`, as `Plugins` carries `plugins`. */
+                { "Inputs",   false, { "Input" },          { "inputs" } },
+                { "Input",    true,  {},                   { "input" } },
             };
 
             return table;

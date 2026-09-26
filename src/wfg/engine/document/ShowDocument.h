@@ -317,6 +317,19 @@ namespace wfg::doc
 
         EditResult resizeBus (const std::string& id, int width);
 
+        /*  THE NAMED INPUTS (Phase 9b, namespace draft §18.2): the buses' four
+            for the other side of the interface. A name and a width, packed onto
+            the logical inputs the input patch maps to hardware, and kept in the
+            `<Audio><Inputs>` container, made on demand at a fixed place after
+            the buses. The same arithmetic as the outputs (`OutputLayout.h`),
+            the same patch rule with `inputPatch` and `inputPatchSettled`, and
+            the same answers: a width outside one to eight is `bad-value`, an
+            input the show does not have is `unknown-id`. */
+        EditResult createInput (int width, int index = -1, const std::string& id = {});
+        EditResult removeInput (const std::string& id);
+        EditResult moveInput (const std::string& id, int index);
+        EditResult resizeInput (const std::string& id, int width);
+
         EditResult createFeed (const std::string& cueId, const std::string& slotId,
                                const std::string& id = {});
 
@@ -806,12 +819,28 @@ namespace wfg::doc
             `firstChannel` order, ties broken by document order. */
         std::vector<juce::ValueTree> busNodes() const;
 
+        /*  Every named input, read the same way: first logical input, ties
+            broken by document order. */
+        std::vector<juce::ValueTree> inputNodes() const;
+
+        /*  The `<Inputs>` container, made when `make` asks and there is none:
+            at a fixed place, after the last bus, so the canonical bytes do not
+            depend on whether the inputs or the plugin set were asked for first
+            (`createPlugin` places its own after the last bus and after this). */
+        juce::ValueTree inputsContainer (bool make);
+
+        /*  WHICH LIST A LAYOUT EDIT IS ABOUT. The arithmetic is one; what the
+            two sides differ in is the element, where it lives, the patch kept
+            in step and the flag that says the patch has settled. */
+        enum class LayoutSide { outputs, inputs };
+
         /*  Applies a layout edit and writes everything that came out of it: the
             structural change, every repacked `firstChannel`, the document order
-            and the patch. The four layout commands are this and a
+            and the patch. The eight layout commands are this and a
             `doc::LayoutEdit`. */
         EditResult applyLayout (const LayoutEdit& edit, const std::string& id,
-                                const std::string& kind);
+                                const std::string& kind,
+                                LayoutSide side = LayoutSide::outputs);
 
         /*  The histories, built empty. Called by the constructor and by the
             move, which is why it is a function rather than two loops that could

@@ -1276,6 +1276,7 @@ namespace wfg::tree
             the runtime half publishes. */
         std::vector<std::string> dcaOrder;
         std::vector<std::string> pluginOrder;
+        std::vector<DeclaredInput> inputOrder;
 
         /*  And every strip, for what it is riding and its word. */
         std::vector<DeclaredStrip> stripOrder;
@@ -1705,10 +1706,14 @@ namespace wfg::tree
                         than by a name test: `Rack` is a container element and
                         carries no identifier, exactly like `Mounts`. Had it
                         carried one, `/godot/bus` would have grown a bus with a
-                        default width and stopped being the show's buses. */
+                        default width and stopped being the show's buses.
+
+                        AND BY ITS TYPE AS WELL, since the named inputs (Phase
+                        9b): anything identified under <Audio> that is not a
+                        bus must never be published as one. */
                     const auto id = bus[idProperty].toString().toStdString();
 
-                    if (id.empty())
+                    if (id.empty() || ! bus.hasType ("Bus"))
                         continue;
 
                     const auto base = std::string (godot) + "/bus/" + id;
@@ -1731,6 +1736,67 @@ namespace wfg::tree
 
                         nodes.push_back (makeLeaf (base + "/" + name, *row, text));
                     }
+                }
+
+                /*  THE NAMED INPUTS (Phase 9b, namespace draft §18.2): the
+                    order a menu offers them in - by first logical input, then
+                    identifier, as the outputs are read - and each one's rows
+                    from the show. `meter` and `problem` are the runtime
+                    half's, against the roster kept below. */
+                {
+                    std::vector<DeclaredInput> found;
+                    const auto inputs = container.getChildWithName ("Inputs");
+
+                    if (inputs.isValid())
+                        for (const auto& input : inputs)
+                        {
+                            const auto id = input[idProperty].toString().toStdString();
+
+                            if (id.empty() || ! input.hasType ("Input"))
+                                continue;
+
+                            /*  Through the schema's defaults, for the reason a
+                                bus's width is: the canonical writer leaves out a
+                                width of one and a first channel of nought. */
+                            DeclaredInput shape;
+                            shape.id = id;
+                            shape.firstChannel = static_cast<int> (input.getProperty ("firstChannel", 0));
+                            shape.width = std::max (1, static_cast<int> (input.getProperty ("width", 1)));
+                            found.push_back (shape);
+
+                            const auto base = std::string (godot) + "/input/" + id;
+
+                            for (const auto* row : doc::Schema::rowsForOwner ("input"))
+                            {
+                                if (row->persist == doc::Persist::none)
+                                    continue;
+
+                                const doc::Attribute attribute { "Input", row };
+                                nodes.push_back (makeLeaf (base + "/" + std::string (row->name), *row,
+                                                           storedText (attribute, input)));
+                            }
+                        }
+
+                    std::stable_sort (found.begin(), found.end(),
+                                      [] (const DeclaredInput& a, const DeclaredInput& b)
+                                      {
+                                          if (a.firstChannel != b.firstChannel)
+                                              return a.firstChannel < b.firstChannel;
+
+                                          return a.id < b.id;
+                                      });
+
+                    std::string order;
+
+                    for (const auto& shape : found)
+                        order += (order.empty() ? "" : " ") + shape.id;
+
+                    for (const auto* row : doc::Schema::rowsForOwner ("inputs"))
+                        nodes.push_back (makeLeaf (std::string (godot) + "/input/" + std::string (row->name),
+                                                   *row, std::string (row->name) == "order" ? order
+                                                                                            : std::string {}));
+
+                    inputOrder = std::move (found);
                 }
 
                 /*  The rack's channels, which are slots of the second kind
@@ -1979,6 +2045,7 @@ namespace wfg::tree
         declaredLists = std::move (listOrder);
         declaredDcas = std::move (dcaOrder);
         declaredPlugins = std::move (pluginOrder);
+        declaredInputs = std::move (inputOrder);
         declaredStrips = std::move (stripOrder);
         declaredSurfaces = std::move (surfaceOrder);
 
@@ -2490,9 +2557,48 @@ namespace wfg::tree
             else if (name == "testHold") text = state.audioTest.hold ? "true" : "false";
             else if (name == "hardwareInputs") text = std::to_string (state.hardwareInputs);
             else if (name == "hardwareOutputs") text = std::to_string (state.hardwareOutputs);
+            else if (name == "inputLatency") text = std::to_string (state.inputLatency);
+            else if (name == "outputLatency") text = std::to_string (state.outputLatency);
             else                         text = std::string (row->defaultText);
 
             engineValue (*row, "audio", text);
+        }
+
+        /*  EACH NAMED INPUT'S METER AND PROBLEM (Phase 9b): the loudest of its
+            channels over the last tick, whether or not anything listens - the
+            soundcheck's question - and why it is not arriving, in words. Here
+            and not in the cached half, because a meter moves every tick. */
+        for (const auto& input : declaredInputs)
+        {
+            const auto base = std::string (godot) + "/input/" + input.id;
+
+            auto loudest = -120.0;
+
+            for (int channel = input.firstChannel; channel < input.firstChannel + input.width; ++channel)
+                if (channel >= 0 && channel < static_cast<int> (state.inputMetersDb.size()))
+                    loudest = std::max (loudest, state.inputMetersDb[static_cast<std::size_t> (channel)]);
+
+            std::string problem;
+
+            if (state.logicalInputs <= 0)
+                problem = "no input interface is open";
+            else if (input.firstChannel + input.width > state.logicalInputs)
+                problem = "input " + std::to_string (input.firstChannel + input.width)
+                        + " is past the last of the " + std::to_string (state.logicalInputs)
+                        + " the interface gives";
+
+            for (const auto* row : doc::Schema::rowsForOwner ("input"))
+            {
+                if (row->persist != doc::Persist::none)
+                    continue;
+
+                const auto name = std::string (row->name);
+                const auto text = name == "meter"   ? osc::formatDouble (loudest)
+                                : name == "problem" ? problem
+                                                    : std::string (row->defaultText);
+
+                runtime.push_back (makeLeaf (base + "/" + name, *row, text));
+            }
         }
 
         /*  WHAT THIS MACHINE HAS TO PLUG A PORT INTO.
@@ -2983,6 +3089,11 @@ namespace wfg::tree
             std::string (godot) + "/document",
             std::string (godot) + "/audio",
 
+            /*  `/godot/input` for the reason `/godot/dca` is below: both
+                halves publish under it - an input's name from the show, its
+                meter from the interface. */
+            std::string (godot) + "/input",
+
             /*  `/godot/network` belongs to the document half for the reason
                 `/godot/audio` does: both halves publish rows under it -
                 `strictSenders` is a decision and `refused` is a count - and
@@ -3015,6 +3126,9 @@ namespace wfg::tree
 
         for (const auto& id : declaredPlugins)
             ownedByTheDocument.push_back (std::string (godot) + "/plugin/" + id);
+
+        for (const auto& input : declaredInputs)
+            ownedByTheDocument.push_back (std::string (godot) + "/input/" + input.id);
 
         for (const auto& id : declaredLists)
             ownedByTheDocument.push_back (std::string (godot) + "/list/" + id);

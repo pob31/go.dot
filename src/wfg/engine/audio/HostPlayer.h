@@ -91,6 +91,8 @@ namespace wfg::audio
         bool isPlaying (int track) const override;
         bool isArmReady (int track) const override;
         float takeOutputPeak (int track) override;
+        int inputCount() const override;
+        float takeInputPeak (int channel) override;
 
         /*  Performs every queued arm. MESSAGE THREAD - it writes a Tracktion
             ValueTree, which every one of those writes asserts.

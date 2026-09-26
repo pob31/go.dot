@@ -120,6 +120,16 @@ namespace wfg::tree
         int audioSampleRate = 0, audioBufferSize = 0, hardwareInputs = 0, hardwareOutputs = 0;
         int audioSettingsRevision = 0;
 
+        /*  THE INPUTS' SIDE (Phase 9b, namespace draft §18.2). How many logical
+            inputs the open interface hands the graph, the interface's own two
+            delays as its driver reported them, and the loudest sample on each
+            logical input over the last tick in decibels - the soundcheck's
+            meter, published per named input. Machine facts, so runtime: they
+            read nought, nought, nought and nothing until something opens one. */
+        int logicalInputs = 0;
+        int inputLatency = 0, outputLatency = 0;
+        std::vector<double> inputMetersDb;
+
         std::uint64_t errorCount = 0;
         std::string lastError;
 
@@ -466,6 +476,19 @@ namespace wfg::tree
 
         /** Every plugin of the set, in document order - the chain's order. */
         std::vector<std::string> declaredPlugins;
+
+        /*  Every named input, in the order the list reads them, with the logical
+            inputs it takes (Phase 9b): the roster its meter and its problem are
+            published against from the runtime half, because a meter moves fifty
+            times a second while nothing about the show does. */
+        struct DeclaredInput
+        {
+            std::string id;
+            int firstChannel = 0;
+            int width = 1;
+        };
+
+        std::vector<DeclaredInput> declaredInputs;
 
         /*  Every strip, in document order, with the two decisions its live rows
             are read against - its role, and the DCA a dca strip rides. The

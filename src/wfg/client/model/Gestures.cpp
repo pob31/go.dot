@@ -332,6 +332,30 @@ namespace wfg::client::gesture
                  { osc::Value::string (busId), osc::Value::int32 (width) } };
     }
 
+    Event createInput (int width, int index)
+    {
+        return { origin::window, "input.create",
+                 { osc::Value::int32 (width), osc::Value::int32 (index) } };
+    }
+
+    Event deleteInput (const std::string& inputId)
+    {
+        return { origin::window, "input.delete", { osc::Value::string (inputId) } };
+    }
+
+    Event moveInput (const std::string& inputId, int index)
+    {
+        return { origin::window, "input.move",
+                 { osc::Value::string (inputId), osc::Value::int32 (index) } };
+    }
+
+    Event setInputPatchSettled (bool settled)
+    {
+        return { origin::window, "node.set",
+                 { osc::Value::string ("/godot/audio/inputPatchSettled"),
+                   osc::Value::boolean (settled) } };
+    }
+
     Event setPatchSettled (bool settled)
     {
         /*  A boolean rather than the word, as `setLocked` explains: the row is

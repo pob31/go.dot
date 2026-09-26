@@ -1479,3 +1479,65 @@ TEST_CASE ("tree: a run counts down the wait it is in, and says nought when it i
     rig.runs.find ("R1")->state = cue::runState::playing;
     CHECK (left (250) == osc::Value::float64 (0.0));
 }
+
+//==============================================================================
+TEST_CASE ("tree: a named input publishes its order, its meter and why it is not arriving")
+{
+    /*  Phase 9b (namespace draft §18.2): the document half publishes what an
+        input is, the runtime half what it hears - the loudest of its channels
+        over the last tick, whether or not anything listens - and why it is not
+        arriving, in words. */
+    Engine engine;
+    doc::ShowDocument document;
+    MountTable mounts;
+    cue::RunTable runs;
+
+    document.beginTransaction ("input.create", 0, "test", {});
+    REQUIRE (document.createInput (1, -1, "N1000001").ok);
+    REQUIRE (document.createInput (2, -1, "N1000002").ok);
+
+    ParameterTree parameters { document, engine.commands(), mounts, runs };
+    parameters.markStale();
+
+    /*  Two logical inputs from the interface: the mono input sits on the
+        first, the stereo one on the second and on a third that is not there. */
+    EngineState state;
+    state.logicalInputs = 2;
+    state.inputMetersDb = { -20.0, -6.0 };
+    state.inputLatency = 64;
+    state.outputLatency = 96;
+
+    const auto snapshot = parameters.publish (1, state);
+
+    const auto valueAt = [&snapshot] (const std::string& address)
+    {
+        const auto* node = snapshot->find (address);
+        REQUIRE_MESSAGE (node != nullptr, "no node at " << address);
+        REQUIRE (node->soleValue().has_value());
+        return *node->soleValue();
+    };
+
+    CHECK (valueAt ("/godot/input/order").getString() == "N1000001 N1000002");
+    CHECK (valueAt ("/godot/input/N1000001/name").getString() == "Input 1");
+    CHECK (valueAt ("/godot/input/N1000002/firstChannel").asDouble() == doctest::Approx (1.0));
+
+    CHECK (valueAt ("/godot/input/N1000001/meter").asDouble() == doctest::Approx (-20.0));
+    CHECK (valueAt ("/godot/input/N1000002/meter").asDouble() == doctest::Approx (-6.0));
+
+    CHECK (valueAt ("/godot/input/N1000001/problem").getString().empty());
+    CHECK (valueAt ("/godot/input/N1000002/problem").getString().find ("past the last") != std::string::npos);
+
+    CHECK (valueAt ("/godot/audio/inputLatency").asDouble() == doctest::Approx (64.0));
+    CHECK (valueAt ("/godot/audio/outputLatency").asDouble() == doctest::Approx (96.0));
+
+    /*  AND NEVER AS A BUS: the outputs' list is the buses' alone, whatever
+        else is identified under <Audio>. */
+    CHECK (snapshot->find ("/godot/bus/N1000001") == nullptr);
+
+    /*  With no interface open, every input says so rather than reading silent. */
+    EngineState closed;
+    const auto later = parameters.publish (2, closed);
+    const auto* problem = later->find ("/godot/input/N1000001/problem");
+    REQUIRE (problem != nullptr);
+    CHECK (problem->soleValue()->getString() == "no input interface is open");
+}

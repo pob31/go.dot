@@ -336,6 +336,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Foot.cpp
     wfg/client/model/OutputList.h
     wfg/client/model/OutputList.cpp
+    wfg/client/model/InputList.h
+    wfg/client/model/InputList.cpp
     wfg/client/model/Ranges.h
     wfg/client/model/Ranges.cpp
     wfg/client/model/Curve.h

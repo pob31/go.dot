@@ -1149,6 +1149,19 @@ add_test(NAME blackbox.phase9b-width.fr_FR
 set_tests_properties(blackbox.phase9b-width.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# The live rack, stage 9b.2 (namespace draft 18.10): named inputs made over OSC
+# on a hosted interface fed from a WAV, one meter reading a tone and one
+# silence with nothing listening, one input past the interface saying so, and
+# the session replayed.
+add_test(NAME blackbox.phase9b-inputs.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_inputs.py" --wfg-locale=C)
+set_tests_properties(blackbox.phase9b-inputs.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9b-inputs.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_inputs.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase9b-inputs.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The client the engine serves at /ui: the page, its files as bytes, and since
 # PR 5.10 its modules - the graph walked from app.js the way a browser loads it,
 # every file answering as JavaScript and none left that nothing imports - and

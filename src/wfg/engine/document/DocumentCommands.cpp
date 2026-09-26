@@ -446,6 +446,61 @@ namespace wfg::doc
                         } });
 
         //----------------------------------------------------------------------
+        /*  THE NAMED INPUTS (Phase 9b, namespace draft §18.3): the output
+            layout's four for the other side of the interface, for its reason -
+            the logical inputs are the running sum of the widths before each
+            input and nothing else may set them. `inputPatch` follows the list
+            until `inputPatchSettled`, as `outputPatch` follows the buses. The
+            index is required for `bus.create`'s reason: the identifier after
+            it is the optional one. */
+        registry.add ({ "input.create",
+                        "Adds a named input to the show: a microphone or a line, one to eight"
+                        " channels wide, packed onto the logical inputs. Index is a position in"
+                        " the input list; -1 appends.",
+                        { { "width", 'i', false }, { "index", 'i', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 2 ? args[2].getString() : std::string {};
+
+                            const auto edit = document.createInput (args[0].getInt32(),
+                                                                    args[1].getInt32(), id);
+
+                            return fromEdit (edit, withId (args, 2, edit.id));
+                        } });
+
+        registry.add ({ "input.delete",
+                        "Takes a named input away and repacks the ones after it.",
+                        { { "input", 's', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.removeInput (args[0].getString()), args);
+                        } });
+
+        registry.add ({ "input.move",
+                        "Puts a named input at another place in the list. Index is a position in"
+                        " the list as it stands.",
+                        { { "input", 's', false }, { "index", 'i', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.moveInput (args[0].getString(),
+                                                                 args[1].getInt32()), args);
+                        } });
+
+        registry.add ({ "input.width",
+                        "Makes a named input mono, stereo or wider, up to eight channels, and"
+                        " repacks the ones after it.",
+                        { { "input", 's', false }, { "width", 'i', false } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            return fromEdit (document.resizeInput (args[0].getString(),
+                                                                   args[1].getInt32()), args);
+                        } });
+
+        //----------------------------------------------------------------------
         registry.add ({ "channel.create",
                         "Adds a channel to the live rack: one position in the pool a cue's insert"
                         " claims. Makes the rack if the show has none.",

@@ -233,6 +233,11 @@ namespace wfg::audio
         juce::AudioBuffer<float> inputScratch;
         int hardwareInputs = 0, hardwareOutputs = 0;
 
+        /*  THE INTERFACE'S OWN DELAYS, as its driver reports them at open
+            (Phase 9b, namespace draft §18.7): what a mic cue is late by before
+            any plugin, said in words beside the budget. */
+        int inputLatency = 0, outputLatency = 0;
+
         HostSettings granted;
         std::string openedName;
         std::string bufferSizes;
@@ -497,6 +502,8 @@ namespace wfg::audio
         impl->pinnedType = device->getTypeName();
         impl->sink.test.prepare (settings.sampleRate, settings.blockSize);
         impl->openedName = device->getName().toStdString();
+        impl->inputLatency = std::max (0, device->getInputLatencyInSamples());
+        impl->outputLatency = std::max (0, device->getOutputLatencyInSamples());
         for (const auto size : device->getAvailableBufferSizes())
         {
             if (! impl->bufferSizes.empty()) impl->bufferSizes += ' ';
@@ -517,6 +524,7 @@ namespace wfg::audio
         impl->closeDevice();
         impl->granted = {};
         impl->openedName.clear();
+        impl->inputLatency = impl->outputLatency = 0;
         impl->bufferSizes.clear();
         impl->running = false;
     }
@@ -529,6 +537,8 @@ namespace wfg::audio
     AudioHost& DeviceAudioDriver::host() noexcept               { return impl->audioHost; }
     int DeviceAudioDriver::inputChannels() const noexcept { return impl->hardwareInputs; }
     int DeviceAudioDriver::outputChannels() const noexcept { return impl->hardwareOutputs; }
+    int DeviceAudioDriver::inputLatency() const noexcept { return impl->inputLatency; }
+    int DeviceAudioDriver::outputLatency() const noexcept { return impl->outputLatency; }
     const std::string& DeviceAudioDriver::availableBufferSizes() const noexcept { return impl->bufferSizes; }
     void DeviceAudioDriver::setOutputTest (const OutputTestSettings& settings) noexcept { impl->sink.test.set (settings); }
 

@@ -573,6 +573,29 @@ namespace wfg::audio
             tick (2026-09-25). The input peak is left to the diagnostics. */
         float takeTrackOutputPeak (int trackIndex);
 
+        //======================================================================
+        /*  THE INPUT TAP (Phase 9b, namespace draft §18.4). Every block's
+            logical inputs, copied into a buffer set aside at `start` - inside
+            Go.dot's own part of the block and BEFORE Tracktion is called,
+            because the buffer Tracktion is handed is its outputs as well and is
+            cleared before it renders. Zeros where a block brings no inputs, so
+            a block pumped without any never repeats the last one.
+
+            How many logical inputs the tap holds: what the interface was
+            opened with, which is the input patch's length when there is one. */
+        int inputChannelCount() const noexcept;
+
+        /*  The loudest sample on one logical input since the last take, linear,
+            and the count starts again - the soundcheck's meter, taken once a
+            tick. Nought for an input the tap does not hold. */
+        float takeInputPeak (int channel) noexcept;
+
+        /*  One logical input's samples for the block being processed, for the
+            rack's input stage to read during it - the AUDIO THREAD, inside
+            `processBlock`, and nowhere else. Null for an input the tap does not
+            hold. */
+        const float* inputTapChannel (int channel) const noexcept;
+
     private:
         struct Impl;
         std::unique_ptr<Impl> impl;

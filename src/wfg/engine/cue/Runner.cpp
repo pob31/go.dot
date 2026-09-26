@@ -6235,6 +6235,10 @@ namespace wfg::cue
         observeAfterStep (engine, tick);
         assertPersistent (engine, tick);
 
+        /*  Above the gate too: with no player there are no inputs, and the
+            meters say so rather than holding the last numbers a player left. */
+        takeInputMeters();
+
         if (audio == nullptr)
             return;
 
@@ -6249,6 +6253,26 @@ namespace wfg::cue
         updatePositions (tick);
         enforceStops();
         observeEdges (engine);
+    }
+
+    void Runner::takeInputMeters()
+    {
+        /*  THE SOUNDCHECK'S METER (Phase 9b, namespace draft §18.2): each
+            logical input's loudest sample over the last tick, whether or not
+            anything listens, TAKEN so each tick reads its own twenty
+            milliseconds - the output meter's rule. Resized here on the tick
+            thread when the interface changes width, never on the audio one. */
+        const auto count = audio != nullptr ? std::max (0, audio->inputCount()) : 0;
+
+        inputMeters.resize (static_cast<std::size_t> (count), Run::silentDb);
+
+        for (int channel = 0; channel < count; ++channel)
+        {
+            const auto peak = static_cast<double> (audio->takeInputPeak (channel));
+
+            inputMeters[static_cast<std::size_t> (channel)]
+                = peak > 0.0 ? std::max (Run::silentDb, 20.0 * std::log10 (peak)) : Run::silentDb;
+        }
     }
 
     void Runner::launchIfDue (Engine& engine, std::int64_t tick)

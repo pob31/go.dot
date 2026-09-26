@@ -6,6 +6,7 @@
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Fx.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
@@ -15,6 +16,7 @@
 #include <juce_audio_devices/juce_audio_devices.h>
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <functional>
 #include <initializer_list>
@@ -59,33 +61,25 @@ namespace wfg::client::ui
         class PatchPage final : public juce::Component
         {
         public:
-            PatchPage (const model::Theme& colours, bool input, std::vector<int> initial, int minimumRows,
+            PatchPage (const model::Theme& colours, bool input, std::vector<int> initial,
                        std::function<void (Event)> dispatch = {})
-                : theme (colours), isInput (input), minimum (minimumRows), mapping (std::move (initial)), send (std::move (dispatch))
+                : theme (colours), isInput (input), mapping (std::move (initial)), send (std::move (dispatch))
             {
-                /*  THE OUTPUT SIDE HAS NO CHANNEL COUNT TO TYPE (author,
-                    2026-09-22: "I think we can remove the logical channel.
-                    Adding and removing channels is redundant with this").
+                /*  NEITHER SIDE HAS A CHANNEL COUNT TO TYPE (author,
+                    2026-09-22, for the outputs: "I think we can remove the
+                    logical channel. Adding and removing channels is redundant
+                    with this").
 
-                    The show's OUTPUT LIST is the count: every bus declares a
-                    width, `firstChannel` is the running sum, and the four
-                    `bus.*` commands keep it packed. A second number beside it
-                    was a second answer to one question, and the two could
-                    disagree - a patch row past the last bus went nowhere and
-                    said nothing about it.
+                    The show's OUTPUT LIST is the outputs' count: every bus
+                    declares a width, `firstChannel` is the running sum, and the
+                    four `bus.*` commands keep it packed. A second number beside
+                    it was a second answer to one question, and the two could
+                    disagree.
 
-                    THE INPUT SIDE KEEPS IT, because nothing else declares
-                    inputs. There is no list of them to read a count off, so
-                    the box is the only place the number can come from. */
-                if (isInput)
-                {
-                    addAndMakeVisible (countLabel);
-                    countLabel.setText ("Logical channels", juce::dontSendNotification);
-                    addAndMakeVisible (count); count.setInputRestrictions (3, "0123456789");
-                    count.setText (juce::String (static_cast<int> (mapping.size())));
-                    count.onReturnKey = [this] { changeRows(); };
-                    count.onFocusLost = [this] { changeRows(); };
-                }
+                    AND SINCE THE NAMED INPUTS (Phase 9b, 2026-09-26) THE INPUT
+                    LIST IS THE INPUTS' COUNT, for the same reason. The box the
+                    input side kept "because nothing else declares inputs" had
+                    nothing left to decide once something did. */
                 for (auto* button : { &scroll, &patch, &identity, &clear }) addAndMakeVisible (*button);
                 scroll.onClick = [this] { stopTest(); matrix->setMode (Matrix::Mode::Scrolling); resized(); };
                 patch.onClick = [this] { stopTest(); matrix->setMode (Matrix::Mode::Patching); resized(); };
@@ -139,7 +133,7 @@ namespace wfg::client::ui
                     touched = false;
                     rebuild();
 
-                    if (! isInput && follow)
+                    if (follow)
                         follow();
                 };
                 clear.onClick = [this] { matrix->clearAllPatches(); };
@@ -173,7 +167,6 @@ namespace wfg::client::ui
 
             std::string value()
             {
-                changeRows();
                 readMatrix();
 
                 /*  A SHOW STILL FOLLOWING ITS LIST SENDS NO PATCH AT ALL.
@@ -182,8 +175,9 @@ namespace wfg::client::ui
                     diagonal out in full would settle the show - and somebody
                     who pressed Apply to change a buffer size did not mean to
                     freeze their patch. Only a hand edit does that, and a hand
-                    edit sets `touched`. */
-                if (! isInput && ! touched && ! settled)
+                    edit sets `touched`. The same for the inputs since they
+                    have a list of their own to follow (Phase 9b). */
+                if (! touched && ! settled)
                     return {};
 
                 return audio::writePatch (mapping);
@@ -197,10 +191,10 @@ namespace wfg::client::ui
                 readMatrix(); hardware = channels; rebuild();
             }
 
-            /*  THE OUTPUT LIST, ARRIVING FROM THE DOCUMENT. Two things follow
-                from it: the rows are named after the outputs, and how many
-                there are is the layout's, so the number box on this page has
-                nothing left to decide.
+            /*  THE LIST, ARRIVING FROM THE DOCUMENT - the outputs' for the
+                output patch, the named inputs' for the input patch (Phase 9b).
+                Two things follow from it: the rows are named after the list,
+                and how many there are is the layout's.
 
                 THE TWO MOVE SEPARATELY, and that is the point of the split. A
                 RENAMED output must reach the rows whatever the operator has
@@ -208,7 +202,7 @@ namespace wfg::client::ui
                 the rebuild - while RESIZING the draft to a new output count is
                 held off once they have started patching, because that would
                 move the rows under their hand. */
-            void setOutputs (std::vector<std::string> names, int channelCount)
+            void setListRows (std::vector<std::string> names, int channelCount)
             {
                 /*  THE LAYOUT IS A FLOOR AND NOT THE COUNT. It says how many
                     logical outputs the show's buses need; it does not say how
@@ -245,12 +239,6 @@ namespace wfg::client::ui
                         const auto taken = std::find (mapping.begin(), mapping.end(), wanted) != mapping.end();
                         mapping[row] = taken ? -1 : wanted;
                     }
-
-                    minimum = channelCount;
-
-                    //  Only the input side has one to keep in step.
-                    if (isInput)
-                        count.setText (juce::String (channelCount), false);
                 }
 
                 rebuild();
@@ -269,12 +257,6 @@ namespace wfg::client::ui
             {
                 auto area = getLocalBounds().reduced (10);
                 auto bar = area.removeFromTop (30);
-                if (isInput)
-                {
-                    countLabel.setBounds (bar.removeFromLeft (145));
-                    count.setBounds (bar.removeFromLeft (65));
-                    bar.removeFromLeft (20);
-                }
                 for (auto* button : { &scroll, &patch, &identity, &clear })
                 { button->setBounds (bar.removeFromLeft (80).reduced (3, 0)); }
                 if (! isInput) test.setBounds (bar.removeFromLeft (80).reduced (3, 0));
@@ -309,13 +291,6 @@ namespace wfg::client::ui
                 if (! matrix) return;
                 for (std::size_t row = 0; row < mapping.size(); ++row)
                     mapping[row] = matrix->getHardwareChannelForWFS (static_cast<int> (row));
-            }
-            void changeRows()
-            {
-                const auto rows = juce::jlimit (minimum, audio::maximumPatchChannels, count.getText().getIntValue());
-                count.setText (juce::String (rows), false);
-                if (rows == static_cast<int> (mapping.size())) return;
-                readMatrix(); mapping.resize (static_cast<std::size_t> (rows), -1); rebuild();
             }
             void rebuild()
             {
@@ -354,7 +329,7 @@ namespace wfg::client::ui
                         nobody can patch without counting. The labels come from
                         the output list and fall back to the number for a
                         channel no output claims. */
-                    if (! isInput && row >= 0 && static_cast<std::size_t> (row) < labels.size())
+                    if (row >= 0 && static_cast<std::size_t> (row) < labels.size())
                         return juce::String (labels[static_cast<std::size_t> (row)]);
 
                     return juce::String (isInput ? "Input " : "Output ") + juce::String (row + 1);
@@ -397,7 +372,7 @@ namespace wfg::client::ui
             }
             const model::Theme& theme;
             bool isInput;
-            int minimum, hardware = 0;
+            int hardware = 0;
             bool touched = false, settled = false;
             std::vector<std::string> labels;
             std::vector<int> mapping;
@@ -412,8 +387,6 @@ namespace wfg::client::ui
             juce::ToggleButton hold { "Hold" };
             juce::Slider level, frequency;
             juce::Label hint;
-            juce::Label countLabel;
-            juce::TextEditor count;
             juce::TextButton scroll { "Scroll" }, patch { "Patch" }, identity { "1:1" }, clear { "Unpatch all" };
         };
 
@@ -871,6 +844,364 @@ namespace wfg::client::ui
             juce::Label regime, summary, polyphonyLabel;
             juce::TextEditor polyphony;
         };
+
+        /*  THE INPUT LIST (Phase 9b, namespace draft §18.2): the show's named
+            inputs, the output list's twin for the other side of the interface.
+            "Voix solo" is what somebody wrote down and "input 3" is a fact
+            about a patch (PRD §3.9b), so a mic cue names one of these.
+
+            EVERY ROW IS A COMMAND, as the outputs' are: a rename is a
+            `node.set`, the two add buttons, the cross and a dragged row are
+            `input.create`, `input.delete` and `input.move`, and Ctrl-Z takes
+            any of them back.
+
+            AND EVERY ROW HAS A METER, which the outputs do not: whether the
+            microphone is alive is the soundcheck's first question, and it is
+            answered here before anybody presses GO. Where an input is not
+            arriving at all, the row says why in words instead. */
+        class InputPage final : public juce::Component,
+                                public juce::DragAndDropContainer,
+                                public juce::DragAndDropTarget,
+                                private juce::ListBoxModel
+        {
+        public:
+            InputPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch))
+            {
+                list.setModel (this);
+                list.setRowHeight (34);
+                list.setOutlineThickness (0);
+                list.setColour (juce::ListBox::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                addAndMakeVisible (list);
+
+                for (auto* button : { &addMono, &addStereo })
+                    addAndMakeVisible (*button);
+
+                addChildComponent (nameEditor);
+                nameEditor.setEditable (false, true, false);
+                nameEditor.setColour (juce::Label::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                nameEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                nameEditor.onEditorHide = [this] { commitName(); };
+
+                addAndMakeVisible (regime);
+                addAndMakeVisible (summary);
+                regime.setJustificationType (juce::Justification::topLeft);
+                summary.setJustificationType (juce::Justification::topLeft);
+
+                addMono.setTooltip ("A microphone or a mono line: one logical input.");
+                addStereo.setTooltip ("A stereo line - a keyboard, another machine: two consecutive logical inputs.");
+
+                addMono.onClick   = [this] { if (send) send (gesture::createInput (1, -1)); };
+                addStereo.onClick = [this] { if (send) send (gesture::createInput (2, -1)); };
+            }
+
+            void show (std::vector<model::InputRow> inputs, bool settled, bool editable)
+            {
+                const auto sameRows = inputs.size() == rows.size()
+                                        && std::equal (inputs.begin(), inputs.end(), rows.begin(),
+                                                       [] (const model::InputRow& a, const model::InputRow& b)
+                                                       {
+                                                           return a.id == b.id && a.name == b.name
+                                                               && a.width == b.width
+                                                               && a.firstChannel == b.firstChannel
+                                                               && a.problem == b.problem;
+                                                       });
+
+                /*  THE METERS MOVE WITHOUT THE ROWS CHANGING, so they are
+                    compared on their own: a repaint when a meter has moved by
+                    more than a sliver, and none for a list of silent inputs. */
+                auto metersMoved = inputs.size() != rows.size();
+
+                for (std::size_t at = 0; ! metersMoved && at < inputs.size(); ++at)
+                    metersMoved = std::abs (inputs[at].meterFill() - rows[at].meterFill()) > 0.01;
+
+                const auto sameLock = locked == ! editable;
+
+                rows = std::move (inputs);
+                locked = ! editable;
+
+                for (auto* button : { &addMono, &addStereo })
+                    button->setVisible (editable);
+
+                regime.setText (juce::String (model::inputRegime (settled)), juce::dontSendNotification);
+
+                const auto wanted = model::inputChannelCount (rows);
+
+                /*  HOW MANY, and nothing about the interface: each row says in
+                    words when it is not arriving, which is where somebody
+                    looking for a dead microphone is looking already. */
+                summary.setText (wanted == 0
+                                   ? juce::String ("No inputs yet. Add one to hear a microphone or a line"
+                                                   " through a mic cue.")
+                                   : juce::String (wanted) + " logical input" + (wanted == 1 ? "" : "s") + ".",
+                                 juce::dontSendNotification);
+
+                if (! sameRows)
+                    list.updateContent();
+
+                if (! sameRows || ! sameLock || metersMoved)
+                    list.repaint();
+            }
+
+            void paintOverChildren (juce::Graphics& g) override
+            {
+                if (dropRow < 0)
+                    return;
+
+                const auto y = list.getY() + dropRow * list.getRowHeight()
+                                 - list.getViewport()->getViewPositionY();
+
+                g.setColour (Look::colour (theme, "picked"));
+                g.fillRect (list.getX(), y - 1, list.getWidth(), 2);
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (10);
+                auto bar = area.removeFromTop (30);
+
+                for (auto* button : { &addMono, &addStereo })
+                    button->setBounds (bar.removeFromLeft (128).reduced (3, 0));
+
+                area.removeFromTop (8);
+                regime.setBounds (area.removeFromTop (34));
+                summary.setBounds (area.removeFromBottom (26));
+                area.removeFromTop (4);
+                list.setBounds (area);
+            }
+
+        private:
+            int getNumRows() override { return static_cast<int> (rows.size()); }
+
+            /*  The columns off the right, in one place so the painter and the
+                click carve the same cells: the cross, the channels, the width,
+                then the meter - which is wide, because it is read at a glance
+                from across the booth. */
+            static constexpr int crossWidth = 24, channelsWidth = 64, widthWidth = 80, meterWidth = 190;
+
+            void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return;
+
+                const auto& entry = rows[static_cast<std::size_t> (row)];
+
+                g.setColour (Look::colour (theme, row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                auto area = juce::Rectangle<int> (0, 0, width, height).reduced (8, 0);
+
+                if (! locked)
+                {
+                    g.setColour (Look::colour (theme, "ink-off"));
+                    g.setFont (Look::font (theme, 13.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x89\xa1"), area.removeFromLeft (18),
+                                juce::Justification::centred);
+
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), area.removeFromRight (crossWidth),
+                                juce::Justification::centred);
+                }
+                else
+                {
+                    area.removeFromLeft (18);
+                    area.removeFromRight (crossWidth);
+                }
+
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (entry.channelWord()), area.removeFromRight (channelsWidth),
+                            juce::Justification::centredLeft);
+                g.drawText (juce::String (entry.widthWord()), area.removeFromRight (widthWidth),
+                            juce::Justification::centredLeft);
+
+                /*  THE METER, OR WHY THERE IS NONE. A bar lit in proportion
+                    and its number beside it in dB - never the colour alone
+                    (§4.8) - or, for an input that is not arriving, the reason
+                    in words where the bar would be. */
+                auto meterCell = area.removeFromRight (meterWidth);
+                meterCell.removeFromRight (12);   // air between the number and the width word
+                auto meter = meterCell.reduced (6, 10);
+
+                if (! entry.problem.empty())
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String (entry.problem), meter.expanded (0, 8),
+                                juce::Justification::centredLeft, true);
+                }
+                else
+                {
+                    auto number = meter.removeFromRight (56);
+
+                    g.setColour (Look::colour (theme, "rule"));
+                    g.drawRect (meter);
+
+                    const auto lit = meter.reduced (1).withWidth (juce::roundToInt (entry.meterFill()
+                                                                                      * static_cast<double> (meter.getWidth() - 2)));
+                    g.setColour (Look::colour (theme, entry.meterDb > -6.0 ? "failed" : "live"));
+                    g.fillRect (lit);
+
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (entry.meterDb <= -119.0 ? juce::String ("-inf")
+                                                        : juce::String (entry.meterDb, 1) + " dB",
+                                number, juce::Justification::centredRight);
+                }
+
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawText (juce::String (entry.name), area, juce::Justification::centredLeft, true);
+            }
+
+            void listBoxItemClicked (int row, const juce::MouseEvent& event) override
+            {
+                if (locked || row < 0 || static_cast<std::size_t> (row) >= rows.size() || ! send)
+                    return;
+
+                const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                   : list.getWidth();
+
+                if (event.x > width - 32)
+                    send (gesture::deleteInput (rows[static_cast<std::size_t> (row)].id));
+                else
+                    renameAt (row, event);
+            }
+
+            void listBoxItemDoubleClicked (int, const juce::MouseEvent&) override {}
+
+            static juce::Rectangle<int> nameCellOf (juce::Rectangle<int> row)
+            {
+                auto area = row.reduced (8, 0);
+                area.removeFromLeft (18);
+                area.removeFromRight (crossWidth + channelsWidth + widthWidth + meterWidth);
+                return area;
+            }
+
+            void renameAt (int row, const juce::MouseEvent& event)
+            {
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return;
+
+                const auto width = event.eventComponent != nullptr ? event.eventComponent->getWidth()
+                                                                   : list.getWidth();
+
+                const auto cell = nameCellOf (juce::Rectangle<int> (0, 0, width, list.getRowHeight()));
+
+                if (event.x < cell.getX() || event.x >= cell.getRight())
+                    return;
+
+                auto place = list.getRowPosition (row, true);
+                place.translate (list.getX(), list.getY());
+
+                editing = rows[static_cast<std::size_t> (row)].id;
+
+                nameEditor.setBounds (nameCellOf (place));
+                nameEditor.setText (juce::String (rows[static_cast<std::size_t> (row)].name),
+                                    juce::dontSendNotification);
+                nameEditor.setVisible (true);
+                nameEditor.showEditor();
+            }
+
+            bool isInterestedInDragSource (const SourceDetails& details) override
+            {
+                return ! locked && details.description.isString();
+            }
+
+            void itemDragMove (const SourceDetails& details) override
+            {
+                const auto row = rowAt (details.localPosition);
+
+                if (row != dropRow)
+                {
+                    dropRow = row;
+                    list.repaint();
+                }
+            }
+
+            void itemDragExit (const SourceDetails&) override
+            {
+                dropRow = -1;
+                list.repaint();
+            }
+
+            void itemDropped (const SourceDetails& details) override
+            {
+                const auto row = rowAt (details.localPosition);
+                const auto id = details.description.toString().toStdString();
+
+                dropRow = -1;
+                list.repaint();
+
+                if (locked || ! send || id.empty())
+                    return;
+
+                const auto from = indexOf (id);
+
+                if (from < 0 || row < 0)
+                    return;
+
+                const auto to = row > from ? row - 1 : row;
+
+                if (to != from)
+                    send (gesture::moveInput (id, to));
+            }
+
+            juce::var getDragSourceDescription (const juce::SparseSet<int>& selected) override
+            {
+                if (locked || selected.isEmpty())
+                    return {};
+
+                const auto row = selected[0];
+
+                if (row < 0 || static_cast<std::size_t> (row) >= rows.size())
+                    return {};
+
+                return juce::var (juce::String (rows[static_cast<std::size_t> (row)].id));
+            }
+
+            int rowAt (juce::Point<int> where) const
+            {
+                const auto inList = where - list.getPosition();
+                const auto height = juce::jmax (1, list.getRowHeight());
+                const auto row = (inList.y + height / 2) / height;
+
+                return juce::jlimit (0, static_cast<int> (rows.size()), row);
+            }
+
+            int indexOf (const std::string& id) const
+            {
+                for (std::size_t at = 0; at < rows.size(); ++at)
+                    if (rows[at].id == id)
+                        return static_cast<int> (at);
+
+                return -1;
+            }
+
+            void commitName()
+            {
+                const auto typed = nameEditor.getText().trim().toStdString();
+                const auto id = editing;
+
+                editing.clear();
+                nameEditor.setVisible (false);
+
+                if (id.empty() || typed.empty() || send == nullptr)
+                    return;
+
+                send (gesture::setNode ("/godot/input/" + id + "/name", typed));
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+            std::vector<model::InputRow> rows;
+            bool locked = false;
+            int dropRow = -1;
+            juce::ListBox list;
+            juce::TextButton addMono { "+ mono input" }, addStereo { "+ stereo input" };
+            juce::Label nameEditor;
+            std::string editing;
+            juce::Label regime, summary;
+        };
+
 
 
         /*  THE PORTS THIS SHOW SENDS ON, AND THE CABLES THEY TURNED OUT TO BE.
@@ -3429,9 +3760,10 @@ namespace wfg::client::ui
                                                              : audio::identityPatch (2);
             if (out.empty()) out = audio::identityPatch (minimumOutputs);
             out.resize (std::max (out.size(), static_cast<std::size_t> (minimumOutputs)), -1);
-            inputs = std::make_unique<PatchPage> (theme, true, in, 0);
-            outputs = std::make_unique<PatchPage> (theme, false, out, minimumOutputs, send);
+            inputs = std::make_unique<PatchPage> (theme, true, in, send);
+            outputs = std::make_unique<PatchPage> (theme, false, out, send);
             outputList = std::make_unique<OutputPage> (theme, send);
+            inputList = std::make_unique<InputPage> (theme, send);
             network = std::make_unique<NetworkPage> (theme, send);
             midi = std::make_unique<MidiPage> (theme, send);
             surfaces = std::make_unique<SurfacesPage> (theme, send);
@@ -3458,6 +3790,23 @@ namespace wfg::client::ui
                 send (gesture::setPatchSettled (false));
             };
 
+            /*  AND THE INPUT PATCH THE SAME WAY (Phase 9b): it follows the
+                named inputs until the first hand edit, and 1:1 hands it back. */
+            inputs->edited = [this]
+            {
+                if (! inputSettled)
+                {
+                    inputSettled = true;
+                    send (gesture::setInputPatchSettled (true));
+                }
+            };
+
+            inputs->follow = [this]
+            {
+                inputSettled = false;
+                send (gesture::setInputPatchSettled (false));
+            };
+
             addAndMakeVisible (tabs);
             const auto background = Look::colour (theme, "panel");
             /*  "Audio" and not "Interface", since this window stopped being
@@ -3466,6 +3815,10 @@ namespace wfg::client::ui
                 better than one named after a word both could use. */
             tabs.addTab ("Audio", background, &interfacePage, false);
             tabs.addTab ("Outputs", background, outputList.get(), false);
+
+            /*  BESIDE THE OUTPUTS: the other side of the interface, named the
+                same way and read the same way (Phase 9b). */
+            tabs.addTab ("Inputs", background, inputList.get(), false);
             tabs.addTab ("Input patch", background, inputs.get(), false);
             tabs.addTab ("Output patch", background, outputs.get(), false);
             tabs.addTab ("Network", background, network.get(), false);
@@ -3487,7 +3840,7 @@ namespace wfg::client::ui
             inputLabel.setText ("Input interface", juce::dontSendNotification);
             bufferLabel.setText ("Buffer size", juce::dontSendNotification);
             buffer.setTooltip ("Use the device default, a supported size from the active interface, or enter a requested size in samples.");
-            explanation.setText ("Sample rate follows the interface clock.\nInput patching supplies the engine's inputs; live-input monitoring and rack processing are not available yet.", juce::dontSendNotification);
+            explanation.setText ("Sample rate follows the interface clock.\nName the show's inputs on the Inputs tab; the input patch maps them to the interface's channels.", juce::dontSendNotification);
             explanation.setJustificationType (juce::Justification::topLeft);
             type.onChange = [this] { fillDevices ({}, {}); };
             output.onChange = [this] { capabilities(); };
@@ -3529,11 +3882,25 @@ namespace wfg::client::ui
                 outputList->show (rows, settled, ! lockedShow, hardware,
                                   juce::String (model::text (snapshot, "/godot/audio/tracks")).getIntValue());
 
-                /*  Unconditional: `setOutputs` reads the draft back before it
+                /*  Unconditional: `setListRows` reads the draft back before it
                     redraws, so a rename reaches the rows without disturbing a
                     patch somebody is halfway through. */
-                outputs->setOutputs (model::channelLabels (rows, 0),
-                                     model::outputChannelCount (rows));
+                outputs->setListRows (model::channelLabels (rows, 0),
+                                      model::outputChannelCount (rows));
+            }
+
+            /*  THE NAMED INPUTS, read every pass like the outputs, with their
+                meters - which is why this list is refreshed with the window
+                rather than when the show changes. The same rows name the input
+                patch's rows and set how many there are (Phase 9b). */
+            {
+                const auto rows = model::readInputs (snapshot);
+                const auto lockedShow = model::isYes (model::flag (snapshot, "/godot/document/locked"));
+
+                inputSettled = model::inputPatchHasSettled (snapshot);
+                inputs->setSettled (inputSettled);
+                inputList->show (rows, inputSettled, ! lockedShow);
+                inputs->setListRows (model::inputChannelLabels (rows, 0), model::inputChannelCount (rows));
             }
             /*  THE DEVICES ARE THE DOCUMENT'S, so they are re-read every pass
                 like the outputs above them rather than held as a draft:
@@ -3728,7 +4095,7 @@ namespace wfg::client::ui
                         if (size.getIntValue() > 0) buffer.addItem (size, id++);
                 }
             }
-            explanation.setText ("Sample rate follows the interface clock. Channel counts update after applying the interface.\nInput patching supplies the engine's inputs; live-input monitoring and rack processing are not available yet.", juce::dontSendNotification);
+            explanation.setText ("Sample rate follows the interface clock. Channel counts update after applying the interface.\nName the show's inputs on the Inputs tab; the input patch maps them to the interface's channels.", juce::dontSendNotification);
             inputs->setHardware (numInputs); outputs->setHardware (numOutputs);
             buffer.setEditableText (true);
             buffer.setText (previous.isEmpty() ? "Device default" : previous, juce::dontSendNotification);
@@ -3765,11 +4132,15 @@ namespace wfg::client::ui
         juce::Component interfacePage;
         std::unique_ptr<PatchPage> inputs, outputs;
         std::unique_ptr<OutputPage> outputList;
+        std::unique_ptr<InputPage> inputList;
         std::unique_ptr<NetworkPage> network;
         std::unique_ptr<MidiPage> midi;
         std::unique_ptr<SurfacesPage> surfaces;
         std::unique_ptr<PluginsPage> plugins;
         bool settled = false;
+
+        /*  The input patch's own regime, the twin of `settled` (Phase 9b). */
+        bool inputSettled = false;
         juce::TabbedComponent tabs;
         juce::ComboBox type, output, input, buffer;
         juce::Label typeLabel, outputLabel, inputLabel, bufferLabel, rate, explanation, status;

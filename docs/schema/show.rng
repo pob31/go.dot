@@ -1764,6 +1764,9 @@
       </optional>
       <interleave>
         <optional>
+          <ref name="Inputs"/>
+        </optional>
+        <optional>
           <ref name="Rack"/>
         </optional>
         <optional>
@@ -2209,6 +2212,45 @@
     </element>
   </define>
 
+  <define name="Inputs">
+    <element name="Inputs">
+      <zeroOrMore>
+        <ref name="Input"/>
+      </zeroOrMore>
+    </element>
+  </define>
+
+  <define name="Input">
+    <element name="Input">
+      <attribute name="id">
+        <ref name="identifier"/>
+      </attribute>
+      <optional>
+        <attribute name="firstChannel">
+          <a:documentation>Its first logical input, counting from zero: the running sum of the widths before it, maintained by input.create, input.delete, input.move and input.width as a bus first channel is by the bus commands. The input patch maps logical inputs to the channels of the interface.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">0</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="name">
+          <a:documentation>What the input is called - Voix solo - in every menu that offers one. PRD 3.9b: names appear in a dropdown and on a scribble strip, channel numbers do not, because an input number is a fact about a patch that will change.</a:documentation>
+          <data type="string"/>
+        </attribute>
+      </optional>
+      <optional>
+        <attribute name="width">
+          <a:documentation>How many consecutive logical inputs it takes: one for a microphone, two for a stereo line. Read-only at the door and changed by input.width, which repacks the inputs after it, exactly as bus.width does for the outputs.</a:documentation>
+          <data type="integer">
+            <param name="minInclusive">1</param>
+            <param name="maxInclusive">8</param>
+          </data>
+        </attribute>
+      </optional>
+    </element>
+  </define>
+
   <define name="State">
     <element name="State">
       <attribute name="formatVersion">
@@ -2341,6 +2383,15 @@
 
   <define name="State.Audio">
     <element name="Audio">
+      <optional>
+        <attribute name="inputPatchSettled">
+          <a:documentation>Whether the input patch has stopped following the list of named inputs one for one - the twin of patchSettled, for the other side of the interface. False in a fresh show: the input patch stays empty, which the device layer reads as identity, so every input added, removed, moved or widened re-flows it. True once somebody edits the input patch by hand, after which every named input keeps the interface channels it has and a new one takes the next free ones. State rather than show, for the reason patchSettled gives.</a:documentation>
+          <choice>
+            <value>true</value>
+            <value>false</value>
+          </choice>
+        </attribute>
+      </optional>
       <optional>
         <attribute name="patchSettled">
           <a:documentation>Whether the output patch has stopped following the output layout one for one. False in a fresh show: the patch stays empty, which the device layer already reads as identity, so every output added, removed, moved or widened simply re-flows it and the designer never touches a matrix. It goes true when somebody edits the patch by hand, and when the first media run launches with audio - after which every output keeps the interface channels it has and a new one takes the next free ones. State rather than show: it records what has happened to this rig, not a decision about what the show plays, so it lands in state.xml beside the standby and does not mark the show unsaved.</a:documentation>

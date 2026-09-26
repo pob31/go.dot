@@ -10724,12 +10724,15 @@ is the sound of a mistake. The price is a channel held a little longer after a s
 
 ### 18.2 The objects and their rows
 
-**A named input is `<Input>` under `<Audio>`**, beside the buses and after them, owner `input`,
-published at `/godot/input/<id>`. It is the `Bus` shape exactly, for PRD §3.9b's reason — *"Voix
-solo"* is what somebody wrote down and *input 3* is a fact about a patch that will change — so a
-name, a width, and a first channel that nobody types: the running sum of the widths before it, kept
-so by `input.create|delete|move|width` through `document/OutputLayout.h`'s arithmetic, which never
-knew it was drawing outputs. The first channel is a **logical** input; `audio/@inputPatch` maps
+**A named input is `<Input>` in an `<Inputs>` container under `<Audio>`**, owner `input`,
+published at `/godot/input/<id>` with `/godot/input/order` beside it — the `Plugins` shape for the
+container, made on demand at a fixed place after the buses, so an input's position counts from
+nought whatever the buses are doing and the canonical bytes do not depend on which container was
+asked for first. The input itself is the `Bus` shape exactly, for PRD §3.9b's reason — *"Voix solo"*
+is what somebody wrote down and *input 3* is a fact about a patch that will change — so a name, a
+width, and a first channel that nobody types: the running sum of the widths before it, kept so by
+`input.create|delete|move|width` through `document/OutputLayout.h`'s arithmetic, which never knew it
+was drawing outputs. The first channel is a **logical** input; `audio/@inputPatch` maps
 logical to hardware as it always did, and follows the list while the show is fresh exactly as the
 output patch follows the buses (`audio/@inputPatchSettled`, the twin of `patchSettled`). Inputs are
 not slots: two channels may read one, which is how a mic changes processing without a gap.
@@ -10761,7 +10764,8 @@ therefore its own commit, proven by byte-identical tree dumps and replays of eve
 **The containment**, in `Schema.cpp`'s table:
 
 ```
-{ "Audio",   false, { "Bus", "Input", "Rack", "Plugins" },            { "audio" } },
+{ "Audio",   false, { "Bus", "Inputs", "Rack", "Plugins" },           { "audio" } },
+{ "Inputs",  false, { "Input" },                                       { "inputs" } },
 { "Input",   true,  {},                                                { "input" } },
 { "Channel", true,  { "Plugin" },                                      { "slot", "rackChannel" } },
 { "Media",   true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger", "Fx" }, { "cue", "sound", "media" } },
@@ -10775,6 +10779,7 @@ default.
 
 | Node | Type, default | Access | Persist | Meaning |
 |---|---|---|---|---|
+| `/godot/input/order` | `s` | r | none | the named inputs by first logical input, then identifier — what every input menu offers |
 | `/godot/input/<id>/name` | `s` | rw | show | what the input is called — *Voix solo* — in every menu |
 | `…/width` | `i`, 1 (1..8) | r | show | how many consecutive logical inputs it takes; changed by `input.width` |
 | `…/firstChannel` | `i`, 0 | r | show | its first logical input, the running sum of the widths before it |

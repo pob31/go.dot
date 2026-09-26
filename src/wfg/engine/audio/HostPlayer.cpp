@@ -254,6 +254,16 @@ namespace wfg::audio
         return audioHost.takeTrackOutputPeak (track);
     }
 
+    int HostPlayer::inputCount() const
+    {
+        return audioHost.inputChannelCount();
+    }
+
+    float HostPlayer::takeInputPeak (int channel)
+    {
+        return audioHost.takeInputPeak (channel);
+    }
+
     bool HostPlayer::isArmReady (int track) const
     {
         /*  READY IS THE DISK AND THE STATES: a cue whose plugin is still
