@@ -110,9 +110,11 @@ namespace wfg::surface
         THE TRANSPORT (§16.6): PLAY is `go`; STOP is `run.stopAll` and STOP
         again inside `doubleStopTicks` is `run.killAll` - PRD §4.4's first two
         levels under the hand already on the surface; rewind and forward move
-        the standby. The bank and channel arrows do nothing, because banking is
-        §3.9d's decision to take with the hardware in hand, and the
-        transport's REC does nothing.
+        the standby. On a Mackie the bank and channel arrows do nothing,
+        because banking is §3.9d's decision to take with the hardware in hand;
+        on the D700, which has no rewind or forward, its two arrows (the bank
+        notes) are rewind and forward (2026-09-26). The transport's REC does
+        nothing.
 
         MUTE ON A STRIP KILLS WHAT IT PLAYS (author, 2026-09-25: "Can the mute
         switch of a sampler fader be a kill switch for it? Not temporary

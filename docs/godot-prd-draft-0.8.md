@@ -276,6 +276,10 @@ may not stand on is a cue that is not one of the list's stops: a header cue, a
 footer cue or a cue of the persistent section (§3.29), which are a group's own
 preparation, its release and a list's standing assertion rather than rows an
 operator steps through; or a cue of another list, which has its own pointer.
+*(2026-09-26, at the author's direction:)* parking on a header's, a footer's or a
+sampler group's cue puts the pointer on **the group that holds it** instead of
+refusing; only a persistent cue, a disabled cue and another list's cue are
+refused (§3.27).
 Inside an automatic or a timeline group the pointer sits on one member, GO
 fires **that member**, and stepping standby forward or back walks that group's
 members and climbs out at its ends — which is how an operator tries the cues of
@@ -2315,6 +2319,14 @@ yet.
 *Added 2026-09-23:* Phase 6 is that phase, and it builds the refusal as written
 — `standby.set` on a member of a sampler group answers `not-a-stop` — which
 remains the author's to overturn (`docs/godot-namespace-draft-0.1.md` §16.5).
+
+*Answered 2026-09-26, at the author's direction:* a member is still not a stop —
+the walk never enters a bank — but **parking on one lands on the sampler group
+that holds it** rather than being refused (*"move the pointer to the group
+instead of showing an error"*). A header's or a footer's cue lands on its group
+the same way (§3.5); a persistent cue and a disabled one are still refused. The
+document's own write of the standby stays strict — only the gesture is lifted
+(`docs/godot-namespace-draft-0.1.md` §17.17, BH-BL).
 
 **Voices.** Each playing member is a track (§3.25), and a full bank as one
 track per cell is the wrong price; the group declares its voices, and the claim

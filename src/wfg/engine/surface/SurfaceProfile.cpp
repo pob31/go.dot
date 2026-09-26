@@ -140,6 +140,18 @@ namespace wfg::surface
         if (button.button == Button::rewind)    return Action::rewind;
         if (button.button == Button::forward)   return Action::forward;
 
+        /*  THE D700'S ARROWS MOVE THE STANDBY (author, 2026-09-26: "Can the
+            up(-left) and down(-right) arrows on the D700 be used to move the
+            standby cursor?"). They send the Mackie bank notes, and the D700 has
+            no rewind or forward, so without this nothing on it moved the
+            pointer but GO. A Mackie keeps its bank arrows for banking (§3.9d);
+            it has the transport's own pair. */
+        if (profile == Profile::d700)
+        {
+            if (button.button == Button::bankLeft)  return Action::rewind;
+            if (button.button == Button::bankRight) return Action::forward;
+        }
+
         return Action::none;
     }
 

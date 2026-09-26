@@ -953,16 +953,31 @@ TEST_CASE ("sampler: a member fired by name is a press on its strip, and without
     CHECK (rig.runsOf (members[0]) == 1u);
 }
 
-TEST_CASE ("sampler: a member is not a place for the pointer, and the group is")
+TEST_CASE ("sampler: a member is not a place for the pointer, and parking on one lands on the group")
 {
+    /*  Refused `not-a-stop` until 2026-09-26, when the author asked for a cue
+        the pointer cannot stand on to "move the pointer to the group instead
+        of showing an error". The member is still not a stop - the walk never
+        enters a bank - but the gesture lands on the bank that holds it. */
     Rig rig;
     const auto& members = rig.membersOf[rig.bankA];
+    const auto standby = [&rig]
+    {
+        return rig.document.findById (rig.listId)["standby"].toString().toStdString();
+    };
 
-    const auto refused = rig.send ("standby.set", { osc::Value::string (members[0]) });
-    CHECK (refused.rejected == 1);
-    CHECK (rig.engine.lastError().find ("not-a-stop") != std::string::npos);
+    CHECK (rig.send ("standby.set", { osc::Value::string (members[0]) }).applied >= 1);
+    CHECK (standby() == rig.bankA);
 
     CHECK (rig.send ("standby.set", { osc::Value::string (rig.bankA) }).applied >= 1);
+    CHECK (standby() == rig.bankA);
+
+    /*  THE DOCUMENT'S OWN DOOR stays strict: a value written to the node is a
+        value, and a door that stored a different one would be a lie. */
+    CHECK (rig.send ("node.set", { osc::Value::string ("/godot/list/" + rig.listId + "/standby"),
+                                   osc::Value::string (members[0]) }).rejected == 1);
+    CHECK (rig.engine.lastError().find ("not-a-stop") != std::string::npos);
+    CHECK (standby() == rig.bankA);
 }
 
 TEST_CASE ("sampler: a stop cue aimed at the bank disarms it, footer and all")

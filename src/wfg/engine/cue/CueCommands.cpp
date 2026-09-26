@@ -62,7 +62,8 @@ namespace wfg::cue
         //----------------------------------------------------------------------
         registry.add ({ "standby.set",
                         "Parks the focused list's standby on a cue, including one inside a group."
-                        " GO acts on whatever this names.",
+                        " A cue of a sampler group, a header or a footer parks on the group holding"
+                        " it. GO acts on whatever this names.",
                         { { "cue", 's', false } },
                         true,
                         [&document, &focus] (CommandContext&, const std::vector<osc::Value>& args)
@@ -130,16 +131,28 @@ namespace wfg::cue
                                 The two refusals are told apart because they send
                                 somebody somewhere different. `not-in-list` means
                                 the cue belongs to another list. `not-a-stop`
-                                means it is in THIS list and is not a row of the
-                                show at all - a cue in some group's header, its
-                                footer or a persistent section - and the remedy
-                                is to park on the group that owns it. */
+                                means it is in THIS list and nothing here can
+                                stand for it - a cue in a persistent section, or
+                                one somebody switched off. A header's, a footer's
+                                or a sampler group's cue has a group that does,
+                                and lands there (below). */
                             if (! mayStandOn (list, cueId))
                             {
-                                const auto elsewhere = ! isInList (list, cueId);
+                                if (! isInList (list, cueId))
+                                    return Outcome::rejected (reason::notInList);
 
-                                return Outcome::rejected (elsewhere ? reason::notInList
-                                                                    : reason::notAStop);
+                                /*  AND THE GROUP STANDS FOR WHAT IT HOLDS
+                                    (author, 2026-09-26): a sampler member, a
+                                    header's cue or a footer's cue parks on the
+                                    group holding it rather than being refused.
+                                    What is left refused is a persistent bed
+                                    and a disabled cue - `nearestStop` says why. */
+                                const auto group = nearestStop (list, cueId);
+
+                                if (group.empty())
+                                    return Outcome::rejected (reason::notAStop);
+
+                                return moveStandbyTo (document, list, group, args);
                             }
 
                             return moveStandbyTo (document, list, cueId, args);

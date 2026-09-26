@@ -10538,3 +10538,34 @@ layer's plugin values, the door, the Runner and tree overlays, `fx,live`, and Ke
 carrying them (9e4bfdc). **Owed to the bench:** whether a hundred-and-twenty-eighth a detent
 feels right on a real reverb, how the plugin names read cut to the D700's field, the FX LED, and
 the plugin's own window following a turn under the lock.
+
+### 17.17 The D700's arrows move the standby, and a park on a cue that is not a stop lands on its group (2026-09-26)
+
+Asked by the author on 2026-09-26: *"Can the up(-left) and down(-right) arrows on the D700 be used to
+move the standby cursor (playhead) to the next playable cue? Can pointing it at non triggerable cue
+(like a sample cue in a sampler group) move the pointer to the group instead of showing an error?"*
+Both answered yes and built the same day. The letters go on from §17.16's BF.
+
+| | Decision | Whose |
+|---|---|---|
+| **BG** | **The D700's ↖ ↘ arrows are `standby.previous` and `standby.next`**, as ◀◀ ▶▶ are on a Mackie. They send the Mackie bank notes (`0x2E`/`0x2F`), and the D700 has no rewind or forward, so until now nothing on it moved the pointer but GO | the author's |
+| **BH** | **`standby.set` on a sampler group's member parks on the group** instead of answering `not-a-stop` - PRD §3.27's flagged sentence, answered | the author's |
+| **BI** | The same for a **header's or a footer's cue**: it parks on the group the section belongs to, and the desktop's gutter sends the group for those rows (a band's too) instead of saying a sentence | implementer's call, from the author's "non triggerable cue (like …)" |
+| **BJ** | On a **Mackie** the bank arrows still do nothing: it has the transport's pair, and banking is §3.9d's decision with the hardware in hand. On the D700 the arrows move the standby on **every** page - the FX page turns with FX pressed again (§17.16), so they are free there | implementer's call |
+| **BK** | What is **still refused** `not-a-stop`: a cue of a **persistent** section (its parent is the list; there is no group to stand for it) and a **disabled** cue, which is refused for what it is rather than where it is and is not lifted onto its group | implementer's call |
+| **BL** | **The document's own door stays strict.** A `node.set` of `/godot/list/<id>/standby`, and a state file restoring one, naming a member is still refused: a value written to the node is a value, and a door that quietly stored a different one would be one nobody could reason about. Only the command - a gesture - lands on the group | implementer's call |
+
+**Where it lives.** `cue::nearestStop (list, cueId)` in `cue/CueList`: the cue itself when
+`mayStandOn` says yes; otherwise, for an enabled cue of this list, the first enclosing cue element
+the pointer may stand on; otherwise empty. `standby.set` asks it once `mayStandOn` has said no and
+the cue is in this list; a cue of another list is still `not-in-list`. The command's reply echoes
+the argument it was sent, as before - the published standby says where the pointer went. The walk
+is unchanged: `standby.next` never entered a bank or a section, and still does not.
+
+**On the surface.** `surface::actionFor` maps the bank notes to `Action::rewind`/`forward` for the
+`d700` profile only, so the bridge sends the same two commands ◀◀ ▶▶ already sent. The ↖ arrow is
+back (previous), ↘ forward (next). Neither lights: the D700 has no local LED feedback and nothing
+asks for one.
+
+**Owed to the bench:** the arrows pressed on the D700 itself - the notes are read from the protocol
+note (`godot-asparion-d700-protocol-0.1.md` §2.1), not yet from a press.

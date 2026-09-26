@@ -269,6 +269,24 @@ namespace wfg::cue
             return {};
         }
 
+        /*  The cue with this identifier ANYWHERE in the container, stops or
+            not - the search `isInList` makes, returning the tree. Kept to the
+            container, so a cue of another list never climbs into this one. */
+        juce::ValueTree findAnywhere (const juce::ValueTree& container, const std::string& cueId)
+        {
+            for (const auto& child : container)
+            {
+                if (child.hasProperty (idProperty)
+                      && child[idProperty].toString().toStdString() == cueId)
+                    return child;
+
+                if (const auto found = findAnywhere (child, cueId); found.isValid())
+                    return found;
+            }
+
+            return {};
+        }
+
         /*  The step after `from` within its own container, descending into what
             it finds; or an invalid tree when there is nothing after it, which is
             what tells the caller to climb.
@@ -439,6 +457,31 @@ namespace wfg::cue
         }
 
         return false;
+    }
+
+    std::string nearestStop (const juce::ValueTree& list, const std::string& cueId)
+    {
+        if (mayStandOn (list, cueId))
+            return cueId;
+
+        const auto cue = findAnywhere (list, cueId);
+
+        /*  A DISABLED CUE IS REFUSED FOR WHAT IT IS, not for where it is, so it
+            does not climb: somebody switched it off, and parking on its group
+            instead would answer a question they did not ask. */
+        if (! cue.isValid() || ! isEnabled (cue))
+            return {};
+
+        /*  Up through whatever holds it - a sampler group, a <Header>, a
+            <Footer> - to the first thing the pointer may stand on. A
+            <Persistent> section's parent is the list itself, where the climb
+            stops with nothing, because a bed has no group to stand for it. */
+        for (auto up = cue.getParent(); up.isValid() && up != list; up = up.getParent())
+            if (up.hasProperty (idProperty) && isCueElement (up))
+                if (const auto id = up[idProperty].toString().toStdString(); mayStandOn (list, id))
+                    return id;
+
+        return {};
     }
 
     std::string nextStandby (const juce::ValueTree& list, const std::string& current,

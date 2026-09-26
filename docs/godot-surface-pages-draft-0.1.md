@@ -87,7 +87,7 @@ capture did not tabulate, to be read at the bench (§10).
 | Play | note `0x5E` | GO |
 | Stop | note `0x5D` | Esc; a second press within 750 ms is double Esc |
 | Rec | note `0x5F` | nothing |
-| ↖ / ↘ arrows | notes `0x2E` / `0x2F` (MCU bank left / right) | nothing — banking is undecided |
+| ↖ / ↘ arrows | notes `0x2E` / `0x2F` (MCU bank left / right) | the standby back / forward (2026-09-26, §5.7) |
 | Pan / EQ / Send / FX | notes `0x2A` / `0x2C` / `0x29` / `0x2B` | nothing — the page buttons of §5 |
 | `*` | note `0x36` under the Mackie preset (`0x5A` under Reaper's); `0x37` on a double click if enabled | nothing |
 | Metronome | note `0x59`, MCU *Click* — *to confirm* | nothing |
@@ -219,6 +219,8 @@ undoes as one step and two faders are two.
 - The **↖ ↘ arrows** move the standby back and forward on the Show page — the D700 has no
   rewind or forward, so today nothing on it moves the standby but GO — and page through
   parameters on the FX page.
+  *As built, 2026-09-26 (namespace draft §17.17):* they move the standby on **every** page,
+  since the FX page turns with FX pressed again (§7.2).
 - The **volume knob** is free; a main level, or a DCA *"Everything"*, are the obvious candidates.
 
 ## 6. The other surfaces

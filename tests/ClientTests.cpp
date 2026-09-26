@@ -432,12 +432,26 @@ TEST_CASE ("client: a row the pointer cannot stand on is not offered, and a refu
     row.section = model::Section::member;
     CHECK (row.mayPark());
 
+    row.id = "CUE";
+    row.parent = "GROUP";
+    CHECK (row.parksOn() == "CUE");
+
     for (const auto section : { model::Section::header, model::Section::footer,
                                 model::Section::persistent })
     {
         row.section = section;
         CHECK_FALSE (row.mayPark());
     }
+
+    /*  BUT A HEADER'S OR A FOOTER'S LINE SENDS ITS GROUP (author, 2026-09-26:
+        "move the pointer to the group instead of showing an error"), and only
+        a persistent bed, which has no group, is still told why not. */
+    row.section = model::Section::header;
+    CHECK (row.parksOn() == "GROUP");
+    row.section = model::Section::footer;
+    CHECK (row.parksOn() == "GROUP");
+    row.section = model::Section::persistent;
+    CHECK (row.parksOn().empty());
 
     /*  AND THE REFUSAL READS AS A SENTENCE. The node is five fields written
         for grep at four in the morning; an operator who just pressed

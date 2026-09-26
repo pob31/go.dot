@@ -1101,38 +1101,31 @@ namespace wfg::client::ui
         }
 
         /*  AND A ROW THAT CANNOT TAKE THE POINTER SAYS SO rather than being
-            sent and refused. The engine answers `standby.set` on a header, a
-            footer or a persistent cue with `not-a-stop`, which is right -
-            those run with their group or from the top of the show, and none is
-            a place anybody waits. What was wrong was this client offering the
-            gesture anyway: the first thing the author did with the cue list
-            was click two such rows and get `error: 5411 26 window not-a-stop
-            standby.set` where an answer should have been.
+            sent and refused - or, since 2026-09-26, sends its GROUP. The first
+            thing the author did with the cue list was click a footer's row and
+            a persistent one and get `error: 5411 26 window not-a-stop
+            standby.set` where an answer should have been; this client answered
+            with a sentence for all three sections. Now a header's or a footer's
+            line parks on the group it runs with, which is what the author asked
+            for ("move the pointer to the group instead of showing an error"),
+            and only a persistent bed - which has no group - is still told.
 
-            A CLIENT THAT KNOWS THE RULE ASKS IT FIRST. `Row::mayPark` is that
-            rule, in the model where a test can reach it, and the sentence
-            below says which of the three reasons applies - because "nothing
-            happened" and "this is not that kind of row" look identical from a
-            chair. */
-        if (! entry.mayPark())
+            A CLIENT THAT KNOWS THE RULE ASKS IT FIRST. `Row::parksOn` is that
+            rule, in the model where a test can reach it. */
+        const auto target = entry.parksOn();
+
+        if (target.empty())
         {
-            if (actions.say)
-            {
-                const auto why = entry.section == model::Section::persistent
-                                   ? "runs from the moment the show starts"
-                                   : entry.section == model::Section::header
-                                       ? "runs before its group, with it"
-                                       : "runs after its group, with it";
-
+            if (actions.say && entry.section == model::Section::persistent)
                 actions.say (juce::String (entry.name.empty() ? entry.id : entry.name)
-                               + " " + why + ", so the pointer cannot stand there");
-            }
+                               + " runs from the moment the show starts, so the pointer cannot"
+                                 " stand there");
 
             return;
         }
 
         if (actions.park)
-            actions.park (entry.id);
+            actions.park (target);
     }
 
     //==========================================================================

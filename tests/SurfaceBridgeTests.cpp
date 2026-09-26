@@ -735,6 +735,14 @@ TEST_CASE ("surface bridge: the profiles say what each surface has and what its 
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x37)) == surface::Action::leavePage);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x38)) == surface::Action::none);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2e)) == surface::Action::none);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x2f)) == surface::Action::none);
+
+    /*  THE D700'S TWO ARROWS ARE THE BANK NOTES, and it has no rewind or
+        forward: on it they move the standby (author, 2026-09-26). */
+    const auto d700 = surface::Profile::d700;
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x2e)) == surface::Action::rewind);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x2f)) == surface::Action::forward);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x30)) == surface::Action::none);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5f)) == surface::Action::none);
     CHECK (surface::actionFor (surface::Profile::midiPads, surface::buttonForNote (0x5e))
              == surface::Action::none);
