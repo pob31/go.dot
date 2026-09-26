@@ -18,8 +18,15 @@ sample strip, or a running cue whose name was clicked in the window** - not the 
 is unlocked, where a bar offers Keep or Discard - the opposite of §5.5's proposal (§9 question 3);
 each surface keeps its own page, and `*` leaves it (§9 question 5). The EQ map is the author's own
 sixteen controls, not §7.1's three a band; a press switches a band, a filter or a send in and out
-(new saved switches `eqB<n>On` and `send/on`), and SELECT's light is the pick. Pan, FX, the
+(new saved switches `eqB<n>On` and `send/on`), and SELECT's light is the pick. Pan, the
 shortcuts, the Stream Deck and the Icon are not built.
+
+**Built, 2026-09-26: the FX page**, decisions AZ-BF in the namespace draft §17.16. FX (the Mackie
+"Plug-In" button) puts the aimed cue's switched-in inserts on the rotaries, each plugin's
+parameters in its own order: sixteen a page on a two-unit D700, eight on one unit or a Mackie
+surface. FX again turns to the next page, then to the next insert's; after the last, the surface's
+own page. Under the lock a parameter rides live, as the EQ does. A press puts a parameter back to
+the plugin's own default. §9 question 9 is answered.
 
 This document serves PRD §3.16 (control surfaces) and §3.18 (plugin hosting), and builds on the
 measured protocol (`docs/godot-asparion-d700-protocol-0.1.md`), the byte-level recipe book
@@ -260,6 +267,16 @@ A VST has tens or hundreds of parameters and cannot be laid out by hand:
   (values 1, 2, 3 … — sign and magnitude), so a slow turn is fine and a fast one coarse.
 - A **click resets that parameter** to its default.
 
+*As built, 2026-09-26 (namespace draft §17.16):* the first sixteen in the plugin's own order, as
+proposed, but the pages turn with **FX pressed again**, not the arrows, and **the page walks the
+inserts in chain order** instead of Select choosing one. The D700's third row names the insert and
+the page ("Verb 1/2"). The value text is the plugin's own (`t<n>`), read from the catalogue with no
+instance, so a cue that is not sounding is labelled too: §7.3's third point, answered by the
+catalogue cache. A continuous parameter moves a hundred-and-twenty-eighth of its travel a detent, a
+stepped one a step. The click resets to **the plugin's own default** (what the plugin reports as
+its default), which is not the preset's value when the set entry loads a preset. The curated maps
+wait for Phase 9b.
+
 ### 7.3 What the engine decides — PRD §3.18
 
 Three facts already recorded shape all of this:
@@ -347,7 +364,8 @@ Each with the recommendation made in the conversation.
 8. **Per-cue inserts** — a fixed insert chain on every track, switched per cue, or rack channels the
    cue claims (PRD §3.18 as written). It decides whether the plugin exists before the cue plays.
 9. **VST pages** — automatic, first sixteen and page, with curated maps later (*recommended*), or
-   curated from the start.
+   curated from the start. **Answered 2026-09-26:** automatic, in the plugin's own order, paged by
+   pressing FX again, the inserts walked in chain order; curated maps later (namespace §17.16).
 10. **A DCA's initial level** — a level stored on each DCA that its fader flies to when the show
     opens, or a zero-length fade aimed at the DCA where the scene starts (which works today).
 11. **Carried from Phase 6** — a stop cue aimed at a sampler group cuts its clips rather than fading

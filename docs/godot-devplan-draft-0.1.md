@@ -554,7 +554,9 @@ for the inserts.
   `Media/Insert` and `Rack/Channel`, and the shared reverb channel.
 - **Inline hosting** (PRD §3.18's opt-in) with §3.4's message-thread handover;
   AU presets; AUv3; curated per-plugin parameter maps
-  (the pages draft's §7.2); macOS audio workgroups for the child. *(LV2 left
+  (the pages draft's §7.2) for the FX page, which is built in each plugin's own
+  order and takes a rack's plugins as it takes a cue's inserts (namespace
+  §17.16); macOS audio workgroups for the child. *(LV2 left
   this list on 2026-09-26: built on every platform, with AU on macOS, the scan
   in the app and the mono→stereo widening on the voice inserts - namespace
   §17.15. The width classes above remain the rack channels' own.)*

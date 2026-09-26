@@ -8362,7 +8362,7 @@ resting value is its default.
 | `/godot/surface/<id>/problem` | `s` | ro | none | why it is not, in one sentence — a port with no device behind it, a port whose `rx` or `tx` is off, a profile that names no port |
 | `/godot/surface/<id>/serial` | `s` | ro | none | the serial the hardware reported in the Mackie handshake, when it made one. Nothing depends on it; it is the one identifier that survives the operating system renumbering the ports |
 | `/godot/surface/aim` | `s` | ro | none | *(2026-09-25)* the media cue every surface's rotaries edit on their EQ and Send pages, set by `surface.aim` — a SELECT on a sample strip, or a click on a running cue's name in the window. Not the window's pick and not the list GO acts on; empty when the cue it named is gone |
-| `/godot/surface/<id>/page` | `s`, `show` — `show \| eq \| send` | ro | none | *(2026-09-25)* what this surface's rotaries show. The surface's own, moved by its EQ, Send and `*` buttons and by no command — which page a controller shows is where its hands are, like the window's selection. Published from the runtime half, every tick |
+| `/godot/surface/<id>/page` | `s`, `show` — `show \| eq \| send \| fx` | ro | none | *(2026-09-25; `fx` 2026-09-26, §17.16)* what this surface's rotaries show. The surface's own, moved by its EQ, Send, FX and `*` buttons and by no command — which page a controller shows is where its hands are, like the window's selection. Published from the runtime half, every tick |
 | `/godot/surface/<id>/pageIndex`, `…/pageCount` | `i`, 0 / 1 | ro | none | *(2026-09-25)* which page of that kind, from nought, and how many there are on this surface: the EQ's sixteen controls are one page on sixteen rotaries and two on eight |
 | `/godot/surface/<id>/edited` | `s` | ro | none | *(2026-09-25)* the address the page last wrote, empty since it came up — how the window knows the surface is adjusting a cue, and which control it moved |
 | `/godot/slot/<id>/kind` | `s` — gains `strip` | ro | none | derived from the element, as for the other two kinds |
@@ -10476,3 +10476,65 @@ stereo out and summed on a mono one, and whether switching it in mid-cue bumps; 
 saying "plays dry"; the latency words against a look-ahead plugin; how long Load now's gap is; M36
 (LV2 at a session's start); and on the Mac mini a third-party AUv2 from scan to sound, its window and
 a state round trip, M31 there, and the AUv3 sentence read by a person.
+
+### 17.16 The FX page: an insert's parameters on the rotaries (2026-09-26)
+
+Asked by the author on 2026-09-26: *"When pressing the FX button on the MIDI controller (Mackie mode
+or D700) can the selected effect on the selected media cue (and future fx processing chain in the
+Effects rack) be assigned to the rotaries in a similar fashion to the ones for the EQ and Sends?"*
+Four decisions, each the recommendation offered (AskUserQuestion), and three implementer's calls.
+The letters go on from §17.15's AY. The pages draft's §7.2 and its §9 question 9 are answered here.
+
+| | Decision | Recommended? |
+|---|---|---|
+| **AZ** | **The plugin's own parameter order**: the first sixteen on a two-unit D700, eight on one unit or a Mackie surface; FX pressed again pages through the rest. Curated per-plugin maps later (Phase 9b) | yes — the author's |
+| **BA** | **FX walks the inserts in chain order**: insert 1's pages, then insert 2's, then back to the surface's own page. The first rotary's third row says which ("Verb 1/2", or the name alone for a one-page insert) | yes — the author's |
+| **BB** | **Under the lock a parameter rides live**, as EQ and sends do (AM): heard on the next tick, written to nothing, no step of the history; Keep or Discard once unlocked | yes — the author's |
+| **BC** | **The encoder's press puts that parameter back to its default**: the plugin's own, as the catalogue read it. Switching an insert in and out stays in the window | yes — the author's |
+| **BD** | The page walks the cue's **switched-in** inserts (`/godot/cue/<id>/fx`), not every entry of the set: a turn never switches a plugin in | implementer's call |
+| **BE** | A cue with no insert switched in still shows the page, saying "no FX in", so the press is never silently ignored | implementer's call |
+| **BF** | The page is built on one plugin's parameter list - `/godot/plugin/<pid>/param/<n>/…` for the names, the steps and the default, and a writable 0..1 node for the value - so the live rack's plugins (Phase 9b) take the same page | implementer's call |
+
+**The rows.**
+
+| Node | Type, default | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/surface/<id>/page` | `s` | ro | none | gains `fx` (§16.2); `pageIndex` and `pageCount` count across every insert's pages, `edited` is the `p<n>` last turned |
+| `/godot/fx/<id>/live` | `s` | ro | none | the parameters a locked show is riding live on this insert, by index, space-separated (BB) |
+| `/godot/fx/<id>/values` | `s` | rw | show | publishes the values **heard**: under the lock, what rides live over what the show says, so the plugin's own window and the panel follow a turn |
+| `/godot/fx/<id>/p<n>`, `t<n>` | | | | the value heard and the plugin's text for it, as the row |
+
+**The door.** `cue::fxWriteFor` takes the live layer: under the lock a write to `p<n>` is refused
+as it would be unlocked (a value outside nought and one, a word, a parameter the catalogue says the
+plugin does not have, an insert nobody made) and otherwise held in `cue::LiveEdits`, per insert and
+per parameter; the show's own value back again drops what rode there. Once unlocked, a write is the
+show's and drops what rode at that parameter only. `cue::isLiveEdit` answers yes to a `p<n>` write
+under the lock, so it opens no transaction. `live.keep` merges each insert's riding values into its
+`values` row in the same one transaction as the EQ and the sends, and skips an insert deleted
+since; `live.drop` lets them go, and a parameter the show never set goes back to the preset (-1 to
+the voice). `Runner::fxOf` lays the layer over the row, so an arm carries what is heard, and
+`applyFx` is gated on the layer's revision as well. `/godot/document/live` counts a parameter as
+one change.
+
+**The bridge.** The FX button (note `0x2B`, the Mackie "Plug-In") is `Action::fxPage`. A page is
+one plugin's parameters from `first`, as many as the surface has rotaries; the display shows the
+parameter's name (the short name on a Mackie's seven characters) and `t<n>`; the ring fills from
+the centre for a parameter the catalogue guesses bipolar and from the left otherwise, in the
+insert's colour from the EQ band palette. A turn writes `node.set /godot/fx/<id>/p<n>` with origin
+`surface:<id>`, so undo's coalescing makes a turn one step per parameter; a continuous parameter
+moves `pageParameterTravelPerDetent` (1/128) of its travel a detent, a stepped one a step. The
+window's foot follows the page onto the cue's FX panel.
+
+**What it costs, said as it was chosen.** A press puts the plugin's own default, not the preset's
+value: a set entry that loads a preset whose value differs is not restored by the press, and
+withdrawing a value from the row (so it rests at the preset) stays a job for the window. The
+tree's `p<n>` for a parameter the cue does not set shows the plugin's default while the voice
+plays the preset's, as it did before the page (§17.4). Two sixteen-parameter pages of an insert
+with hundreds of parameters are a long walk; that is what the curated maps are for.
+
+**Built** (2026-09-26, on `main`): the page, the bridge's FX paging, the rings and the parameter
+law (`surface/SurfacePages`), the page word in the schema and the client's foot (4dd9b28); the live
+layer's plugin values, the door, the Runner and tree overlays, `fx,live`, and Keep and Discard
+carrying them (9e4bfdc). **Owed to the bench:** whether a hundred-and-twenty-eighth a detent
+feels right on a real reverb, how the plugin names read cut to the D700's field, the FX LED, and
+the plugin's own window following a turn under the lock.
