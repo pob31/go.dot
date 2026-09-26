@@ -532,11 +532,16 @@ namespace wfg::plugin
 
         /*  MISSING IS ITS OWN WORD (§17.2): the show names a plugin this
             machine's scan does not know. No child is launched for it; the
-            entry says so, and every voice plays dry through the slot. */
+            entry says so, and every voice plays dry through the slot. Asked
+            once more first, since a scan may have found it since. */
+        if (impl->spec.descriptionXml.empty() && impl->spec.describe
+              && impl->spec.identifier != Catalogue::testGainIdentifier())
+            impl->spec.descriptionXml = impl->spec.describe (impl->spec.identifier);
+
         if (impl->spec.descriptionXml.empty() && impl->spec.identifier != Catalogue::testGainIdentifier())
         {
             problem = "this machine's scan does not know " + impl->spec.identifier
-                        + "; run wfg plugins --scan, or install it";
+                        + "; scan for it in Show settings, Plugins, or install it";
             impl->state = Impl::State::missing;
             impl->problem = problem;
             impl->publish();

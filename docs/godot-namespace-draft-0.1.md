@@ -9778,6 +9778,24 @@ text — and why `t<n>` is published with no round trip. The `godot:test-gain` c
 A catalogue arriving, or a child reporting a baseline, **marks the tree stale**, or the first
 snapshot would publish `p<n>` from an empty table for ever — §15.8's trap, met before.
 
+**Amended 2026-09-26 — the list is Go.dot's own file, and every serve reads it.** The scan's
+results no longer live in Tracktion's `Settings.xml`: that file is written whole two seconds after
+any of its keys changes, a running serve changes several (the device setup, the wave devices), and
+it holds the plugin list it read at start — so a scan beside a running show would be written over
+by the next save of a key that has nothing to do with plugins. The list is
+`<storage>/plugins/known.xml`, JUCE's own `KNOWNPLUGINS` form (the plugins and the skipped files),
+**written only by the scan**, whole, by replacement; everything else reads it with a plain
+`KnownPluginList` and no engine. A machine that scanned before the file existed has its list
+imported from `Settings.xml` on the first read. Serve reads it at start **whatever its audio is**
+(it had been read off the hosted engine alone, so a show on a real interface offered nothing in its
+Plugins tab) into a list with a revision the tree compares at every publish, and the children make
+their plugins from the same list. `/godot/plugin/known/<n>/format` is the show's word — `VST3`, `AU`
+or `LV2` — where JUCE says `AudioUnit`, and `plugin.create` refuses any other word `bad-value`, since
+the schema allows only those three. `serve` and `plugins` take `--engine-folder=<dir>` so a test
+never reads or scans into the developer's real list. Two corrections to the text above: the
+catalogue file is named by the first 32 hex digits of the identifier's SHA-256, not its SHA-1; and
+`JUCE_PLUGINHOST_AU` was not compiled in 9a (§17.12) — see §17.15.
+
 ### 17.8 The client
 
 The desktop client keeps its rules: one snapshot a pass, `model/` std-only, one call site per

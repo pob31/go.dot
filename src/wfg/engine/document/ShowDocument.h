@@ -415,7 +415,8 @@ namespace wfg::doc
             machine that has never scanned needs no known list. <Plugins> is
             made on demand under <Audio>, after the last <Bus> and before
             <Rack>, so the canonical bytes do not depend on which of the two
-            containers was asked for first. */
+            containers was asked for first. A format other than VST3, AU or
+            LV2 (or none) is refused `bad-value`. */
         EditResult createPlugin (const std::string& name, const std::string& identifier,
                                  const std::string& format, const std::string& path,
                                  const std::string& id = {});

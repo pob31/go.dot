@@ -56,6 +56,7 @@
 #include <wfg/engine/cue/SamplerLayout.h>
 #include <wfg/engine/cue/SlotAnalysis.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/KnownList.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/tree/Mount.h>
@@ -295,8 +296,10 @@ namespace wfg::tree
 
         /*  What this machine's last scan found, for `/godot/plugin/known/<n>`,
             so a client can offer them. Absent - a tree dump, a replay - nothing
-            is listed, which is the truth. */
-        void setKnownPlugins (const std::vector<plugin::KnownPlugin>* listToRead) noexcept { knownPlugins = listToRead; }
+            is listed, which is the truth. Its revision is compared at every
+            publish, as the plugin table's is: a scan finishing on the
+            message thread refills it (2026-09-26). */
+        void setKnownList (const plugin::KnownList* listToRead) noexcept { knownList = listToRead; }
 
         /*  How long each media file is, read once when the show was opened, for
             `/godot/cue/<id>/duration`. Keyed by the `file` the document names.
@@ -398,7 +401,7 @@ namespace wfg::tree
         const cue::DcaTable* dcas = nullptr;
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
-        const std::vector<plugin::KnownPlugin>* knownPlugins = nullptr;
+        const plugin::KnownList* knownList = nullptr;
         /*  What a test handed in, when one did. Otherwise the lengths come
             from `mediaInfo` at the top of every publish. */
         const std::map<std::string, double>* fixedDurations = nullptr;
@@ -526,6 +529,9 @@ namespace wfg::tree
 
         const cue::LiveEdits* liveEdits = nullptr;
         std::uint64_t liveRevision = 0;
+
+        /** The known list's revision the document half was built from. */
+        std::uint64_t knownRevision = 0;
 
         /*  How many times the mounted half has actually been rebuilt.
 

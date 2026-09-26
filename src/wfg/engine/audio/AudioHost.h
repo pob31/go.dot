@@ -92,6 +92,12 @@ namespace wfg::audio
         plugin::ProxyLaunch launch;
         std::function<void (const std::string& pluginId, const std::string& problem)> onFailed;
         std::function<void()> onChanged;
+
+        /*  THIS MACHINE'S LIST, for the description each child makes its
+            plugin from (2026-09-26): Go.dot's own known.xml as serve holds
+            it, asked at every start of a host. Empty in a test rig, which
+            then falls back to whatever Tracktion's own list holds. */
+        std::function<std::string (const std::string& identifier)> describe;
     };
 
     /** The shape of the show's audio, read out of the document's <Audio>. */
@@ -483,16 +489,6 @@ namespace wfg::audio
             what a media cue writes when it is armed, and what a fade writes at
             50 Hz. Null for an index no track answers to. */
         CueMatrix* trackMatrix (int trackIndex) noexcept;
-
-        /*  WHAT THIS MACHINE'S LAST SCAN FOUND, read off the engine's own list
-            at start (Phase 9a, §17.7). Empty before a scan and on a machine
-            that never had one. */
-        std::vector<plugin::KnownPlugin> knownPlugins() const;
-
-        /*  One scanned plugin's description, as the XML a child makes it
-            from - for the editing helper a plugin's own window runs in.
-            Empty when this machine's scan does not know the identifier. */
-        std::string describe (const std::string& identifier) const;
 
         /*  A track's EQ stage, sitting before its output stage: what a media
             cue's twenty-three eq rows write (Phase 9a). Null for an index no

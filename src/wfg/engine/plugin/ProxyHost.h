@@ -82,6 +82,12 @@ namespace wfg::plugin
             the identifier, and the entry reads `missing`. */
         std::string descriptionXml;
 
+        /*  Asked for the description again at each start when the one above
+            is empty (2026-09-26): so an entry that read `missing` comes up
+            after a scan finds its plugin, without the show being reopened.
+            May be empty; then `descriptionXml` is all there is. */
+        std::function<std::string (const std::string& identifier)> describe;
+
         /** Where a child's catalogue report goes once it arrives; may be null. */
         CatalogueStore* catalogues = nullptr;
 

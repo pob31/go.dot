@@ -1170,6 +1170,7 @@ namespace wfg::tree
         const auto pluginRevisionSeen = pluginTable != nullptr ? pluginTable->revision() : 0;
         const auto catalogueRevisionSeen = catalogues != nullptr ? catalogues->revision() : 0;
         const auto liveRevisionSeen = liveEdits != nullptr ? liveEdits->revision() : 0;
+        const auto knownRevisionSeen = knownList != nullptr ? knownList->revision() : 0;
 
         std::vector<Node> nodes;
 
@@ -1792,35 +1793,41 @@ namespace wfg::tree
                         }
                     }
 
-                    /*  AND WHAT THIS MACHINE'S SCAN FOUND, beside the set, so a client
-                        can offer them: not the show's, and stored nowhere in it. */
-                    if (knownPlugins != nullptr)
-                    {
-                        for (std::size_t n = 0; n < knownPlugins->size(); ++n)
-                        {
-                            const auto& known = (*knownPlugins)[n];
-                            const auto at = std::string (godot) + "/plugin/known/" + std::to_string (n) + "/";
-
-                            const auto leaf = [&nodes, &at] (const char* name, const char* description, const std::string& value)
-                            {
-                                Node node;
-                                node.address = at + name;
-                                node.kind = Kind::state;
-                                node.access = Access::read;
-                                node.typeTags = "s";
-                                node.description = description;
-                                node.values.push_back (osc::Value::string (value));
-                                nodes.push_back (std::move (node));
-                            };
-
-                            leaf ("name", "A plugin this machine has, by the name its file gives", known.name);
-                            leaf ("identifier", "The identifier plugin.create takes for it", known.identifier);
-                            leaf ("format", "Its format: VST3, AudioUnit", known.format);
-                            leaf ("manufacturer", "Who made it, as the file says", known.manufacturer);
-                            leaf ("path", "Where its file is on this machine - plugin.create's fourth word", known.path);
-                        }
-                    }
                 }
+            }
+        }
+
+        //----------------------------------------------------------------------
+        /*  AND WHAT THIS MACHINE'S SCAN FOUND, so a client can offer them: not
+            the show's, and stored nowhere in it - published whatever the show
+            holds (2026-09-26), since a show with no audio section yet is the
+            one most in need of a plugin list, and whatever the audio is doing,
+            since the list is read from known.xml and not off an engine. */
+        if (knownList != nullptr)
+        {
+            const auto known = knownList->all();
+
+            for (std::size_t n = 0; n < known.size(); ++n)
+            {
+                const auto at = std::string (godot) + "/plugin/known/" + std::to_string (n) + "/";
+
+                const auto leaf = [&nodes, &at] (const char* name, const char* description, const std::string& value)
+                {
+                    Node node;
+                    node.address = at + name;
+                    node.kind = Kind::state;
+                    node.access = Access::read;
+                    node.typeTags = "s";
+                    node.description = description;
+                    node.values.push_back (osc::Value::string (value));
+                    nodes.push_back (std::move (node));
+                };
+
+                leaf ("name", "A plugin this machine has, by the name its file gives", known[n].name);
+                leaf ("identifier", "The identifier plugin.create takes for it", known[n].identifier);
+                leaf ("format", "Its format: VST3, AU or LV2 - plugin.create's third word", known[n].format);
+                leaf ("manufacturer", "Who made it, as the file says", known[n].manufacturer);
+                leaf ("path", "Where its file is on this machine - plugin.create's fourth word", known[n].path);
             }
         }
 
@@ -1987,6 +1994,7 @@ namespace wfg::tree
         pluginRevision = pluginRevisionSeen;
         catalogueRevision = catalogueRevisionSeen;
         liveRevision = liveRevisionSeen;
+        knownRevision = knownRevisionSeen;
         stale = false;
     }
 
@@ -2166,7 +2174,8 @@ namespace wfg::tree
         if (stale || documentPart == nullptr
              || (pluginTable != nullptr && pluginTable->revision() != pluginRevision)
              || (catalogues != nullptr && catalogues->revision() != catalogueRevision)
-             || (liveEdits != nullptr && liveEdits->revision() != liveRevision))
+             || (liveEdits != nullptr && liveEdits->revision() != liveRevision)
+             || (knownList != nullptr && knownList->revision() != knownRevision))
             rebuildDocumentPart();
 
         /*  ASKED RATHER THAN TOLD. The mount table bumps its own revision on

@@ -27,14 +27,24 @@
     of `runConsole` before any verb is read, which is what `runScanChildIfAsked`
     is for.
 
-    MACHINE STATE, NEVER THE BUNDLE. The list is kept where Tracktion keeps its
-    settings, under the engine's own folder in the user's application data -
-    which plugins a machine has is a fact about the machine, as its MIDI device
-    identifiers are. A show names what it needs by identifier; the list says
-    whether tonight's machine has it.
+    MACHINE STATE, NEVER THE BUNDLE. The list is kept under the engine's own
+    folder in the user's application data - which plugins a machine has is a
+    fact about the machine, as its MIDI device identifiers are. A show names
+    what it needs by identifier; the list says whether tonight's machine has it.
 
-    NAMES NO JUCE TYPE IN THIS HEADER. The .cpp stands a Tracktion engine up
-    with no device, on the shared storage, to do the work.
+    IN A FILE OF GO.DOT'S OWN, `<engine>/plugins/known.xml` (2026-09-26), and
+    no longer inside Tracktion's Settings.xml. That file is one Tracktion
+    writes whole, two seconds after ANY of its keys changes - and a running
+    serve changes several (the device setup, the wave devices) while holding
+    the plugin list it read when it started. A scan run beside it would be
+    written over by the next save of a key that has nothing to do with
+    plugins. So the scan is the one writer of known.xml, by replacing the
+    file whole, and everything else only reads it; a machine that scanned
+    before the file existed has its list imported from Settings.xml once, on
+    the first read.
+
+    NAMES NO JUCE TYPE IN THIS HEADER. The scan stands a Tracktion engine up
+    with no device to do the work; reading the list needs none.
 */
 
 #include <string>
@@ -50,13 +60,27 @@ namespace wfg::plugin
             and what a load resolves by. */
         std::string identifier;
 
-        /** `VST3`, `AudioUnit`, … as the format names itself. */
+        /** `VST3`, `AU` or `LV2`: the show's word for the format, which is
+            JUCE's name for it except that JUCE calls an AU `AudioUnit`. */
         std::string format;
         std::string manufacturer;
 
         /** The file, on this machine. */
         std::string path;
+
+        /*  The scan's whole description of it, as XML: what a child makes the
+            plugin from. Empty when nobody asked the list for it. */
+        std::string description;
     };
+
+    /*  THE SHOW'S WORD FOR A FORMAT from JUCE's name for it: `AudioUnit`
+        (and JUCE's `AudioUnit v3`-style variants) are `AU`; everything else
+        is its own name. The schema allows `VST3 | AU | LV2`, so the word a
+        known list publishes is the word `plugin.create` stores. */
+    std::string formatWordOf (const std::string& juceFormatName);
+
+    /** `<storageFolder>/plugins/known.xml`, the list's own file. */
+    std::string knownListPath (const std::string& storageFolder);
 
     /*  If this process was launched as Tracktion's scan child, runs it to
         completion and answers true - the caller then exits 0 without reading a
@@ -65,7 +89,7 @@ namespace wfg::plugin
 
     /*  Scans this machine, out of process, and persists what it found where
         `knownPlugins` reads it. `formatWord` is empty for every format, or
-        `vst3` / `au`; `extraFolder` is searched beside the format's default
+        `vst3` / `au` / `lv2`; `extraFolder` is searched beside the format's default
         places when given. Answers what is known afterwards; `problem` says
         why nothing could be done. Blocks for as long as the scan takes, on
         the calling thread, which runs a message loop meanwhile.
@@ -87,7 +111,11 @@ namespace wfg::plugin
                                           std::vector<std::string>& skipped,
                                           std::string& problem);
 
-    /** What the last scan found, from storage; empty when nothing was scanned. */
+    /*  What the last scan found, from known.xml (imported from Settings.xml
+        once when there is no file yet); empty when nothing was scanned. Each
+        entry carries its description. Reads a file and nothing more - no
+        engine, no format, no plugin loaded - so serve can call it at start
+        and after every scan. */
     std::vector<KnownPlugin> knownPlugins (const std::string& storageFolder);
 
     /*  The scan's description of one identifier, as XML, for a child to

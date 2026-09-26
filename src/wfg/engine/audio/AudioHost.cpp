@@ -596,12 +596,19 @@ namespace wfg::audio
 
                 /*  THE DESCRIPTION, off this machine's scan (PR 9a.7): what the
                     child makes the plugin from. An identifier the scan does not
-                    know leaves it empty, and the host reads `missing`. */
+                    know leaves it empty, and the host reads `missing` - and
+                    asks again at its next start, since a scan may find it. */
+                proxySpec.describe = services.describe;
+
                 if (entry.identifier != plugin::Catalogue::testGainIdentifier())
-                    if (const auto description = engine->getPluginManager().knownPluginList
-                                                       .getTypeForIdentifierString (juce::String (entry.identifier)))
+                {
+                    if (services.describe)
+                        proxySpec.descriptionXml = services.describe (entry.identifier);
+                    else if (const auto description = engine->getPluginManager().knownPluginList
+                                                            .getTypeForIdentifierString (juce::String (entry.identifier)))
                         if (const auto xml = description->createXml())
                             proxySpec.descriptionXml = xml->toString().toStdString();
+                }
 
                 std::vector<plugin::ProxyLane*> slotLanes;
                 slotLanes.reserve (static_cast<std::size_t> (voices));
@@ -1640,45 +1647,6 @@ namespace wfg::audio
             return nullptr;
 
         return impl->matrices[static_cast<std::size_t> (trackIndex)];
-    }
-
-    std::string AudioHost::describe (const std::string& identifier) const
-    {
-        if (impl->engine == nullptr)
-            return {};
-
-        if (const auto description = impl->engine->getPluginManager().knownPluginList
-                                           .getTypeForIdentifierString (juce::String (identifier)))
-            if (const auto xml = description->createXml())
-                return xml->toString().toStdString();
-
-        return {};
-    }
-
-    std::vector<plugin::KnownPlugin> AudioHost::knownPlugins() const
-    {
-        std::vector<plugin::KnownPlugin> out;
-
-        if (impl->engine == nullptr)
-            return out;
-
-        for (const auto& description : impl->engine->getPluginManager().knownPluginList.getTypes())
-        {
-            plugin::KnownPlugin known;
-            known.name = description.name.toStdString();
-            known.identifier = description.createIdentifierString().toStdString();
-            known.format = description.pluginFormatName.toStdString();
-            known.manufacturer = description.manufacturerName.toStdString();
-            known.path = description.fileOrIdentifier.toStdString();
-            out.push_back (std::move (known));
-        }
-
-        std::sort (out.begin(), out.end(), [] (const plugin::KnownPlugin& a, const plugin::KnownPlugin& b)
-        {
-            return a.name < b.name || (a.name == b.name && a.identifier < b.identifier);
-        });
-
-        return out;
     }
 
     CueEq* AudioHost::trackEq (int trackIndex) noexcept

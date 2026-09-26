@@ -94,17 +94,21 @@ namespace wfg::plugin
             KnownPlugin out;
             out.name = description.name.toStdString();
             out.identifier = description.createIdentifierString().toStdString();
-            out.format = description.pluginFormatName.toStdString();
+            out.format = formatWordOf (description.pluginFormatName.toStdString());
             out.manufacturer = description.manufacturerName.toStdString();
             out.path = description.fileOrIdentifier.toStdString();
+
+            if (const auto xml = description.createXml())
+                out.description = xml->toString().toStdString();
+
             return out;
         }
 
-        std::vector<KnownPlugin> knownFrom (te::Engine& engine)
+        std::vector<KnownPlugin> knownFrom (const juce::KnownPluginList& list)
         {
             std::vector<KnownPlugin> out;
 
-            for (const auto& description : engine.getPluginManager().knownPluginList.getTypes())
+            for (const auto& description : list.getTypes())
                 out.push_back (knownFrom (description));
 
             std::sort (out.begin(), out.end(), [] (const KnownPlugin& a, const KnownPlugin& b)
@@ -113,6 +117,49 @@ namespace wfg::plugin
             });
 
             return out;
+        }
+
+        /*  Tracktion's key for the list inside its Settings.xml, on a 64-bit
+            build - the only kind this project makes. Read once, for the
+            import below, and never written. */
+        constexpr const char* tracktionListKey = "knownPluginList64";
+
+        /*  THE LIST AS THE MACHINE KNOWS IT: known.xml, or - on a machine that
+            scanned before that file existed - what Tracktion's Settings.xml
+            holds, which is where the scans of Phase 9a left it. A plain parse:
+            a properties file stores an XML value as the child of its VALUE
+            element. False when neither file says anything. */
+        bool readList (const juce::File& storage, juce::KnownPluginList& list)
+        {
+            if (const auto own = juce::parseXML (juce::File (juce::String (knownListPath (storage.getFullPathName().toStdString()))));
+                own != nullptr)
+            {
+                list.recreateFromXml (*own);
+                return true;
+            }
+
+            if (const auto settings = juce::parseXML (storage.getChildFile ("Settings.xml")); settings != nullptr)
+                if (const auto* value = settings->getChildByAttribute ("name", tracktionListKey))
+                    if (const auto* held = value->getFirstChildElement())
+                    {
+                        list.recreateFromXml (*held);
+                        return true;
+                    }
+
+            return false;
+        }
+
+        /*  Written WHOLE, by replacement: JUCE writes a temporary beside the
+            file and moves it over, so a reader never meets half a list. */
+        bool writeList (const juce::File& storage, const juce::KnownPluginList& list)
+        {
+            const juce::File file { juce::String (knownListPath (storage.getFullPathName().toStdString())) };
+            file.getParentDirectory().createDirectory();
+
+            if (const auto xml = list.createXml())
+                return xml->writeTo (file);
+
+            return false;
         }
 
         bool formatMatches (const juce::AudioPluginFormat& format, const std::string& word)
@@ -388,6 +435,20 @@ namespace wfg::plugin
         return { "vst3", "au", "lv2" };
     }
 
+    std::string formatWordOf (const std::string& juceFormatName)
+    {
+        if (juce::String (juceFormatName).startsWithIgnoreCase ("AudioUnit"))
+            return "AU";
+
+        return juceFormatName;
+    }
+
+    std::string knownListPath (const std::string& storageFolder)
+    {
+        return juce::File (juce::String (storageFolder)).getChildFile ("plugins").getChildFile ("known.xml")
+                 .getFullPathName().toStdString();
+    }
+
     bool runScanChildIfAsked (int argc, char** argv)
     {
         /*  Tracktion's child looks for its pipe option in the whole command
@@ -469,14 +530,28 @@ namespace wfg::plugin
             disk when the engine goes away. */
         juce::ScopedJuceInitialiser_GUI juceForTheScan;
 
+        const juce::File storage { juce::String (storageFolder) };
         auto engine = engineOn (storageFolder);
         auto& manager = engine->getPluginManager();
         manager.setUsesSeparateProcessForScanning (true);
 
+        /*  THE SCAN STARTS FROM THE MACHINE'S LIST, known.xml, rather than
+            from whatever Tracktion's own settings happen to hold - which a
+            running serve may have written over since (see the header). Each
+            file already listed and unchanged is skipped as up to date, so a
+            second scan only reads what is new. */
+        {
+            juce::KnownPluginList seed;
+
+            if (readList (storage, seed))
+                if (const auto xml = seed.createXml())
+                    manager.knownPluginList.recreateFromXml (*xml);
+        }
+
         if (retrySkipped)
             manager.knownPluginList.clearBlacklistedFiles();
 
-        ScanThread thread (manager, formatWord, extraFolder, juce::File (juce::String (storageFolder)));
+        ScanThread thread (manager, formatWord, extraFolder, storage);
         Watchdog watchdog (thread, manager);
         watchdog.startTimer (250);
         thread.startThread();
@@ -485,21 +560,26 @@ namespace wfg::plugin
         watchdog.stopTimer();
 
         skipped = thread.skipped;
-        return knownFrom (*engine);
+
+        if (! writeList (storage, manager.knownPluginList))
+            problem = "the scan could not write " + knownListPath (storageFolder);
+
+        return knownFrom (manager.knownPluginList);
     }
 
     std::vector<KnownPlugin> knownPlugins (const std::string& storageFolder)
     {
-        auto engine = engineOn (storageFolder);
-        return knownFrom (*engine);
+        juce::KnownPluginList list;
+        readList (juce::File (juce::String (storageFolder)), list);
+        return knownFrom (list);
     }
 
     std::string describePlugin (const std::string& storageFolder, const std::string& identifier)
     {
-        auto engine = engineOn (storageFolder);
+        juce::KnownPluginList list;
+        readList (juce::File (juce::String (storageFolder)), list);
 
-        if (const auto description = engine->getPluginManager().knownPluginList
-                                           .getTypeForIdentifierString (juce::String (identifier)))
+        if (const auto description = list.getTypeForIdentifierString (juce::String (identifier)))
             if (const auto xml = description->createXml())
                 return xml->toString().toStdString();
 
@@ -508,10 +588,11 @@ namespace wfg::plugin
 
     std::vector<std::string> skippedPlugins (const std::string& storageFolder)
     {
-        auto engine = engineOn (storageFolder);
+        juce::KnownPluginList list;
+        readList (juce::File (juce::String (storageFolder)), list);
         std::vector<std::string> out;
 
-        for (const auto& file : engine->getPluginManager().knownPluginList.getBlacklistedFiles())
+        for (const auto& file : list.getBlacklistedFiles())
             out.push_back (file.toStdString());
 
         return out;

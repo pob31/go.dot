@@ -2257,6 +2257,14 @@ namespace wfg::doc
         if (auto refusal = refuseIfLocked())
             return *refusal;
 
+        /*  THE SHOW'S THREE WORDS FOR A FORMAT, and nothing else (2026-09-26):
+            the schema allows `VST3 | AU | LV2`, and JUCE calls an AU
+            `AudioUnit` - a client passing the scan's own name through would
+            write a show that no longer validates. The known list publishes
+            the show's words; this is the door that holds them to it. */
+        if (! format.empty() && format != "VST3" && format != "AU" && format != "LV2")
+            return EditResult::failed (reason::badValue);
+
         auto audio = showNode.getChildWithName ("Audio");
 
         if (! audio.isValid())

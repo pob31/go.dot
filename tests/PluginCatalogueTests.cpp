@@ -290,11 +290,11 @@ TEST_CASE ("catalogue: the tree publishes a plugin's parameters and the machine'
 
     SUBCASE ("and the machine's known list is published beside the set")
     {
-        std::vector<plugin::KnownPlugin> known {
-            { "Verb", "VST3-0badf00d-verb", "VST3", "Someone", "C:/plugins/verb.vst3" },
-            { "Comp", "VST3-c0ffee00-comp", "VST3", "Somebody", "C:/plugins/comp.vst3" } };
+        plugin::KnownList known;
+        known.set ({ { "Verb", "VST3-0badf00d-verb", "VST3", "Someone", "C:/plugins/verb.vst3", {} },
+                     { "Comp", "VST3-c0ffee00-comp", "VST3", "Somebody", "C:/plugins/comp.vst3", {} } });
 
-        rig.parameters.setKnownPlugins (&known);
+        rig.parameters.setKnownList (&known);
 
         CHECK (rig.at ("/godot/plugin/known/0/name") == "Verb");
         CHECK (rig.at ("/godot/plugin/known/0/identifier") == "VST3-0badf00d-verb");
@@ -302,6 +302,16 @@ TEST_CASE ("catalogue: the tree publishes a plugin's parameters and the machine'
         CHECK (rig.at ("/godot/plugin/known/0/manufacturer") == "Someone");
         CHECK (rig.at ("/godot/plugin/known/1/name") == "Comp");
         CHECK_FALSE (rig.exists ("/godot/plugin/known/2/name"));
+
+        /*  A LIST REFILLED ON ANOTHER THREAD reaches the next publish with
+            nobody marking the tree stale: the revision is compared. */
+        const auto before = rig.parameters.publish (rig.tick, rig.state);
+        known.set ({ { "Amp", "LV2-amp", "LV2", "Someone else", "/usr/lib/lv2/amp.lv2", {} } });
+        const auto after = rig.parameters.publish (rig.tick, rig.state);
+
+        CHECK (client::model::text (*before, "/godot/plugin/known/0/name") == "Verb");
+        CHECK (client::model::text (*after, "/godot/plugin/known/0/name") == "Amp");
+        CHECK (client::model::text (*after, "/godot/plugin/known/0/format") == "LV2");
     }
 }
 

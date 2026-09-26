@@ -155,7 +155,7 @@ namespace wfg::client::ui
 
             if (spec.descriptionXml.empty())
             {
-                say (pluginId, "this machine's scan does not know it: run wfg plugins --scan");
+                say (pluginId, "this machine's scan does not know it: scan for it in Show settings, Plugins");
                 return;
             }
         }

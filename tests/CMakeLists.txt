@@ -98,6 +98,7 @@ add_executable(wfg_tests
     SurfaceTests.cpp
     PluginSetTests.cpp
     PluginCatalogueTests.cpp
+    PluginScanTests.cpp
     ProxyTests.cpp
     EditorHelperTests.cpp
     FxRowsTests.cpp
@@ -190,6 +191,15 @@ add_test(NAME wfg.selftest COMMAND wfg selftest)
 # and that is what makes the verb testable at all. A port list is a fact about
 # the machine; an empty one is a fact too.
 add_test(NAME wfg.midi COMMAND wfg midi)
+
+# `wfg plugins` reads the machine's known list from Go.dot's own known.xml
+# (2026-09-26) - here a committed one, through --engine-folder, so the run
+# never touches the developer's real list. The AU in it must read as the show's
+# word, AU, and not JUCE's AudioUnit.
+add_test(NAME wfg.plugins.known
+         COMMAND wfg plugins "--engine-folder=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/engine")
+set_tests_properties(wfg.plugins.known PROPERTIES
+                     PASS_REGULAR_EXPRESSION "Fixture Delay [|] AU [|] Go[.]dot tests")
 
 add_test(NAME wfg.commands.C     COMMAND wfg commands --wfg-locale=C)
 add_test(NAME wfg.commands.fr_FR COMMAND wfg commands --wfg-locale=${WFG_LOCALE_FR})

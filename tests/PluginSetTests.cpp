@@ -288,6 +288,29 @@ TEST_CASE ("plugin set: the four rows the machine fills read off the table, and 
     CHECK (table.statusOf ("NOPE0001").state == "unloaded");
 }
 
+TEST_CASE ("plugin set: a format word the show cannot store is refused bad-value, and makes nothing")
+{
+    Rig rig;
+
+    /*  JUCE calls an AU `AudioUnit`; the schema says `AU` (2026-09-26). A
+        client passing the scan's own name through would write a show that
+        no longer validates, so the door refuses it. */
+    const auto result = rig.apply ("plugin.create", entry ("Delay", "AudioUnit:Effects/aufx,dely,appl",
+                                                           "AudioUnit", ""));
+    CHECK (result.rejected == 1);
+    CHECK (rig.audioChildren().empty());
+
+    const auto parsed = LogFile::parse (rig.engine.log().contents());
+    REQUIRE (! parsed.records.empty());
+    CHECK (parsed.records.back().kind == LogRecord::Kind::rejected);
+    CHECK (parsed.records.back().reason == reason::badValue);
+
+    //  The three words, and none at all, are the show's.
+    CHECK (rig.apply ("plugin.create", entry ("Delay", "AudioUnit:Effects/aufx,dely,appl", "AU", "")).applied == 1);
+    CHECK (rig.apply ("plugin.create", entry ("Amp", "LV2-amp-00000000-00000000", "LV2", "")).applied == 1);
+    CHECK (rig.apply ("plugin.create", entry ("Test gain", "godot:test-gain", "", "")).applied == 1);
+}
+
 TEST_CASE ("plugin set: a locked show refuses the create, and gains no empty container")
 {
     Rig rig;

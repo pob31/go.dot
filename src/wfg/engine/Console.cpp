@@ -29,6 +29,7 @@
 #include <wfg/engine/surface/SurfaceBridge.h>
 #include <wfg/engine/surface/SurfaceCommands.h>
 #include <wfg/engine/plugin/Catalogue.h>
+#include <wfg/engine/plugin/KnownList.h>
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/engine/plugin/PluginEditorChild.h>
 #include <wfg/engine/plugin/PluginHostChild.h>
@@ -1706,11 +1707,32 @@ namespace
         Tracktion's settings, and the silent placeholder WAV that every resident
         clip sits on until a cue is armed onto it. Per user, shared between
         runs, and outside every bundle. */
+    juce::File& engineFolderOverride()
+    {
+        static juce::File folder;
+        return folder;
+    }
+
     juce::File engineCacheFolder()
     {
+        if (engineFolderOverride() != juce::File())
+            return engineFolderOverride();
+
         return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
                  .getChildFile ("Go.dot")
                  .getChildFile ("engine");
+    }
+
+    /*  `--engine-folder=<dir>` (2026-09-26): the machine's own folder somewhere
+        else - for a test, which must never scan into or read from the
+        developer's real list, and for a second installation on one machine.
+        `serve` and `plugins` take it; everything under the engine folder
+        follows it, and so does the sibling audio-defaults file. */
+    void useEngineFolderOption (const juce::ArgumentList& args)
+    {
+        if (args.containsOption ("--engine-folder"))
+            engineFolderOverride() = juce::File::getCurrentWorkingDirectory()
+                                       .getChildFile (args.getValueForOption ("--engine-folder"));
     }
 
     /*  `wfg plugins`: what this machine has, and finding out (Phase 9a, §17.7).
@@ -1799,6 +1821,7 @@ namespace
 
     int runPlugins (const juce::ArgumentList& args)
     {
+        useEngineFolderOption (args);
         const auto storage = engineCacheFolder().getFullPathName().toStdString();
 
         if (args.containsOption ("--catalogue"))
@@ -2136,6 +2159,8 @@ namespace
             used to be: a Component on macOS wants NSApp already there. */
         juce::initialiseNSApplication();
        #endif
+
+        useEngineFolderOption (args);
 
         const auto path = args.arguments.size() > 1 ? args.arguments[1].text : juce::String();
 
@@ -2504,7 +2529,14 @@ namespace
         wfg::plugin::CatalogueStore catalogues {
             engineCacheFolder().getChildFile ("plugins").getChildFile ("catalogue")
                 .getFullPathName().toStdString() };
-        std::vector<wfg::plugin::KnownPlugin> knownPlugins;
+
+        /*  AND WHAT THIS MACHINE'S SCAN FOUND, read from known.xml now,
+            whatever the audio turns out to be (2026-09-26): it used to be read
+            off the hosted engine alone, so a show served on a real interface
+            offered nothing in its Plugins tab. A file read and nothing more. */
+        wfg::plugin::KnownList knownList;
+        knownList.set (wfg::plugin::knownPlugins (engineCacheFolder().getFullPathName().toStdString()),
+                       wfg::plugin::skippedPlugins (engineCacheFolder().getFullPathName().toStdString()));
 
         /*  THE SURFACES' RUNTIME STATE, declared here rather than beside the
             bridge further down because `surface.aim` writes it and is
@@ -2589,8 +2621,20 @@ namespace
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
 
+        /*  EVERY FIELD FILLED HERE, before any driver is handed a copy: the
+            device path takes its copy a few hundred lines down, long before
+            the tree is wired, and a field set afterwards never reached it -
+            which is how children on a real interface came to report their
+            catalogues into nothing (found 2026-09-26). The children report
+            into the machine's catalogue cache (PR 9a.7) and make their
+            plugins from the same list the tree publishes. */
         wfg::audio::ProxyServices proxyServices;
         proxyServices.table = &pluginTable;
+        proxyServices.catalogues = &catalogues;
+        proxyServices.describe = [&knownList] (const std::string& identifier)
+        {
+            return knownList.describe (identifier);
+        };
         proxyServices.onFailed = [&engine] (const std::string& id, const std::string& problem)
         {
             /*  ONE record per failure, never per miss: the queue is finite
@@ -2945,12 +2989,9 @@ namespace
             §17.7): the catalogue cache, one file per identifier under the
             engine's own folder, read here for every entry of the set - at
             start and again when the show changes - and never on a tick that
-            edits nothing. The known list is filled once the host is up. */
+            edits nothing. */
         parameters.setCatalogues (&catalogues);
-        parameters.setKnownPlugins (&knownPlugins);
-
-        /*  And the children report into the same cache (PR 9a.7). */
-        proxyServices.catalogues = &catalogues;
+        parameters.setKnownList (&knownList);
 
         const auto loadShowCatalogues = [&catalogues, &document]
         {
@@ -3452,13 +3493,6 @@ namespace
                 std::cerr << "wfg serve --hosted: " << driver->host().lastError() << std::endl;
                 return 2;
             }
-
-            /*  THE MACHINE'S LIST, read off the engine that just came up: what
-                the last `wfg plugins --scan` left in the shared storage - and
-                the tree told to look again, since the list is published from
-                the cached document half. */
-            knownPlugins = driver->host().knownPlugins();
-            parameters.markStale();
 
             /*  Asked once, at load, about the graph that will play. A duplicate
                 is a defect rather than a warning - two nodes sharing an id
@@ -4284,20 +4318,11 @@ namespace
                                              [] { interrupted = 1; }, themePath, launchAnother, {}, {} };
 
                 /*  A PLUGIN'S DESCRIPTION, for its editing helper: off this
-                    machine's scan, which the audio host has open when there
-                    is one, and read from the shared storage when there is
-                    not - a moment's work, once per plugin, when Edit... is
-                    first pressed. */
-                clientHost.describePlugin = [&driver, &deviceDriver] (const std::string& identifier)
+                    machine's scan, the same list the voices' children are
+                    made from, whatever the audio is doing. */
+                clientHost.describePlugin = [&knownList] (const std::string& identifier)
                 {
-                    if (driver != nullptr)
-                        return driver->host().describe (identifier);
-
-                    if (deviceDriver != nullptr)
-                        return deviceDriver->host().describe (identifier);
-
-                    return wfg::plugin::describePlugin (engineCacheFolder().getFullPathName().toStdString(),
-                                                        identifier);
+                    return knownList.describe (identifier);
                 };
 
                 clientHost.pluginWorkFolder = engineCacheFolder().getChildFile ("editor")
@@ -4532,7 +4557,8 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
         `--device` alone opens the default device, and `--device-type` takes
         the heading `wfg devices` prints above each group of names. */
     app.addCommand ({ "plugins",
-                      "plugins [--scan[=vst3|au|lv2]] [--path=<dir>] [--retry-skipped] [--list] [--catalogue=<identifier>]",
+                      "plugins [--scan[=vst3|au|lv2]] [--path=<dir>] [--retry-skipped] [--list] [--catalogue=<identifier>]"
+                      " [--engine-folder=<dir>]",
                       "Scans this machine for plugins, out of process, or lists what the last scan found",
                       {},
                       [] (const juce::ArgumentList& args)
@@ -4546,7 +4572,7 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
                       " [--hosted [--render=<wav>] | --device[=<name>] [--device-type=<type>]]"
                       " [--ui=<dir>] [--midi-in=<device>] [--midi-out=<port>=<device>]"
                       " [--http-port=N] [--osc-port=N] [--log=<file>] [--recover]"
-                      " [--window [--theme=<file>]]",
+                      " [--window [--theme=<file>]] [--engine-folder=<dir>]",
                       "Serves a bundle over OSCQuery and OSC until interrupted",
                       {},
                       [&makeClient] (const juce::ArgumentList& args)

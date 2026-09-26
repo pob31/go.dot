@@ -746,12 +746,18 @@ TEST_CASE ("proxy: a plugin this machine's scan does not know reads missing, wit
     auto spec = testGainSpec (folder, 1);
     spec.identifier = "VST3-Nowhere-00000000-00000000";
     spec.descriptionXml.clear();
+
+    /*  Asked once more at the start (2026-09-26), since a scan may have found
+        it since the graph was built - and this machine's list still says no. */
+    std::vector<std::string> asked;
+    spec.describe = [&asked] (const std::string& identifier) { asked.push_back (identifier); return std::string(); };
     plugin::ProxyHost host (spec, { &lane }, &table);
 
     std::string problem;
     CHECK_FALSE (host.start (problem));
+    CHECK (asked == std::vector<std::string> { "VST3-Nowhere-00000000-00000000" });
     CHECK (host.status().state == "missing");
-    CHECK (host.status().problem.find ("wfg plugins --scan") != std::string::npos);
+    CHECK (host.status().problem.find ("Show settings, Plugins") != std::string::npos);
     CHECK_FALSE (host.childIsRunning());
     CHECK (table.statusOf ("PG7N0001").state == "missing");
     host.stop();

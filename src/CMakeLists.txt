@@ -138,6 +138,7 @@ add_library(wfg_engine STATIC
     wfg/engine/plugin/Catalogue.cpp
     wfg/engine/plugin/PluginScan.h
     wfg/engine/plugin/PluginScan.cpp
+    wfg/engine/plugin/KnownList.h
     wfg/engine/plugin/ProcessUtil.h
     wfg/engine/plugin/ChildLaunch.h
     wfg/engine/plugin/ChildLaunch.cpp
