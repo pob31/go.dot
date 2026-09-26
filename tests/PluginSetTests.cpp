@@ -272,15 +272,15 @@ TEST_CASE ("plugin set: the four rows the machine fills read off the table, and 
     /*  THE HOST'S REPORT: loaded, sixty-four samples late, twelve parameters.
         `set` answers whether a reader could tell, which is what the host asks
         before it marks the tree stale. */
-    CHECK (table.set (id, { "loaded", "", 64, 12, 0.0, {} }));
-    CHECK_FALSE (table.set (id, { "loaded", "", 64, 12, 0.0, {} }));
+    CHECK (table.set (id, { "loaded", "", 64, 12, 0.0, {}, 0, 0, {} }));
+    CHECK_FALSE (table.set (id, { "loaded", "", 64, 12, 0.0, {}, 0, 0, {} }));
 
     CHECK (rig.at (base + "state") == "loaded");
     CHECK (rig.at (base + "problem") == "");
     CHECK (rig.at (base + "latencySamples") == "64");
     CHECK (rig.at (base + "paramCount") == "12");
 
-    CHECK (table.set (id, { "failed", "the child died after 8 misses", 64, 12, 0.0, {} }));
+    CHECK (table.set (id, { "failed", "the child died after 8 misses", 64, 12, 0.0, {}, 0, 0, {} }));
     CHECK (rig.at (base + "state") == "failed");
     CHECK (rig.at (base + "problem") == "the child died after 8 misses");
 

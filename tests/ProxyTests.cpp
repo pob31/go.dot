@@ -1032,7 +1032,7 @@ TEST_CASE ("proxy: plugin.failed writes the table and plugin.restart reaches the
 {
     CommandRegistry registry;
     plugin::PluginTable table;
-    table.set ("PG7N0001", { "loaded", "", 12, 3, 0.0, {} });
+    table.set ("PG7N0001", { "loaded", "", 12, 3, 0.0, {}, 0, 0, {} });
 
     std::vector<std::string> restarted;
     plugin::PluginCommandHooks hooks;
