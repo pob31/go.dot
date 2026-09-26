@@ -580,6 +580,7 @@ namespace wfg::audio
                     ids.push_back (entry.id);
 
                 services.table->setBuilt (std::move (ids));
+                toldTable = true;
             }
 
             /*  No voices, nothing to host: the entries stay `unloaded`, which
@@ -656,8 +657,15 @@ namespace wfg::audio
             lanes.clear();
             proxySlots = 0;
 
-            if (services.table != nullptr)
+            /*  ONLY WHEN IT TOLD THE TABLE SOMETHING: `stop` runs again from
+                the destructor, and a table that went first - a test's, declared
+                after the host - must not be touched then (the macOS job aborted
+                on the destroyed mutex, 2026-09-26). The proxies go by the same
+                rule, being gone after the first stop. */
+            if (toldTable && services.table != nullptr)
                 services.table->clearBuilt();
+
+            toldTable = false;
 
             edit.reset();
             matrices.clear();
@@ -1550,6 +1558,9 @@ namespace wfg::audio
             destroyed before the Edit because the lanes live in it. */
         std::vector<plugin::ProxyLane*> lanes;
         int proxySlots = 0;
+
+        /** Whether the plugin table holds this graph's slots, to clear at stop. */
+        bool toldTable = false;
         std::vector<std::unique_ptr<plugin::ProxyHost>> proxies;
         ProxyServices services;
 

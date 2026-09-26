@@ -10464,8 +10464,11 @@ amendment above: a device session handed the proxies before the catalogue store 
 a real interface reported their catalogues into nothing; a set edited mid-session sent a cue's
 settings to the wrong plugin; on a real interface a preset reached the child as a bare name (so no
 preset loaded) and `--proxy-deadline-us` was dropped; hosted voices ignored the show's channels per
-track; a mono bus last in a saved show was built no output; JUCE's LV2 search answered nothing on
-macOS for a folder it was given; and a set `LV2_PATH` crashed JUCE's LV2 host on Windows.
+track; a mono bus last in a saved show was built no output; `wfg plugins --scan` had never scanned
+anything on macOS - its message loop is `[NSApp run]` and returned at once without the application,
+stopping the scan before its first file (9a.7's trap, met again); the audio host cleared a plugin
+table at its destructor that a test had already destroyed (macOS aborts on the dead mutex); and a set
+`LV2_PATH` crashed JUCE's LV2 host on Windows.
 
 **Owed to the bench and the Mac mini:** a real scan of the author's plugin folder from the app, and
 M37 (a scan during a rehearsal); a mono cue through a real stereo reverb on the MADIface, stereo on a

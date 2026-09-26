@@ -419,12 +419,13 @@ namespace wfg::plugin
                     auto files = format->searchPathsForPlugins (where, true, false);
 
                     /*  AND EVERY LV2 BUNDLE BY ITS FOLDER, beside JUCE's search
-                        (2026-09-26): on macOS that search answered nothing for
-                        a folder handed to it, where Windows and Linux listed the
-                        bundle - while asking for a bundle by its folder, which
-                        is what each file below is, worked everywhere. So the
-                        folders are listed here too, and the de-duplication
-                        below makes the two lists one. */
+                        (2026-09-26): asking for a bundle by its folder is what
+                        hosting one does, and it does not depend on the LV2
+                        world having read the folder already. Added when the
+                        macOS scan found nothing - which turned out to be the
+                        message loop below returning at once, not the search -
+                        and kept as the second way in; the de-duplication below
+                        makes the two lists one. */
                     if (format->getName() == "LV2")
                         for (int p = 0; p < where.getNumPaths(); ++p)
                             for (const auto& bundle : where[p].findChildFiles (juce::File::findDirectories, false, "*.lv2"))
@@ -759,6 +760,16 @@ namespace wfg::plugin
         Watchdog watchdog (thread, manager);
         watchdog.startTimer (250);
         thread.startThread();
+
+       #if JUCE_MAC
+        /*  THE LOOP IS [NSApp run] ON A MAC, and without the application it
+            returns at once - which stopped the thread below before it had
+            looked at a single file: `wfg plugins --scan` found nothing on
+            macOS from its first day (the CI job, 2026-09-26). The scan child
+            and the plugin children do the same, for the same reason. */
+        juce::initialiseNSApplication();
+       #endif
+
         juce::MessageManager::getInstance()->runDispatchLoop();
         thread.stopThread (-1);
         watchdog.stopTimer();
