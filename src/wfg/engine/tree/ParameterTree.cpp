@@ -395,9 +395,35 @@ namespace wfg::tree
             int index = -1;
         };
 
-        SetEntry setEntryFor (const juce::ValueTree& anyNode, const std::string& pluginId)
+        /*  THE CHAIN A CUE'S INSERTS NAME: the show's set for a media cue, and
+            for a mic cue the rack channel it plays through (Phase 9b, namespace
+            draft 18.2) - whose plugins are the same element in its own order.
+            Invalid for a mic cue that names no channel, or one the show does
+            not have: its inserts then name nothing. */
+        juce::ValueTree insertChainOf (const juce::ValueTree& cue)
         {
-            const auto plugins = anyNode.getRoot().getChildWithName ("Audio").getChildWithName ("Plugins");
+            const auto audio = cue.getRoot().getChildWithName ("Audio");
+
+            if (! cue.hasType ("Mic"))
+                return audio.getChildWithName ("Plugins");
+
+            const auto channelId = cue["channel"].toString();
+
+            if (channelId.isEmpty())
+                return {};
+
+            for (const auto rack : audio)
+                if (rack.hasType ("Rack"))
+                    for (const auto channel : rack)
+                        if (channel.hasType ("Channel") && channel[idProperty].toString() == channelId)
+                            return channel;
+
+            return {};
+        }
+
+        SetEntry setEntryFor (const juce::ValueTree& cue, const std::string& pluginId)
+        {
+            const auto plugins = insertChainOf (cue);
             auto index = 0;
 
             for (const auto entry : plugins)
@@ -463,7 +489,7 @@ namespace wfg::tree
             if (fxId.empty())
                 return;
 
-            const auto entry = setEntryFor (fx, fx["plugin"].toString().toStdString());
+            const auto entry = setEntryFor (fx.getParent(), fx["plugin"].toString().toStdString());
             const auto base = std::string (godot) + "/fx/" + fxId;
 
             /*  WHAT A LOCKED SHOW IS RIDING on this insert (2026-09-26, the FX
@@ -480,9 +506,11 @@ namespace wfg::tree
                 if (name == "cue")        text = cueId;
                 else if (name == "name")  text = entry.element.isValid() ? entry.element["name"].toString().toStdString() : std::string {};
                 else if (name == "index") text = std::to_string (std::max (0, entry.index));
-                else if (name == "problem")
+                else if (name == "problem" && fx.getParent().hasType ("Media"))
                 {
-                    /*  Why this insert plays its cue dry, off the chain. */
+                    /*  Why this insert plays its cue dry, off the chain. A mic
+                        cue's chain is its channel's, worked out when it sounds
+                        (Phase 9b); until then it says nothing here. */
                     const auto cue = fx.getParent();
                     const auto slots = cue::slotIdsOf (cue.getRoot().getChildWithName ("Audio").getChildWithName ("Plugins"),
                                                        walkPlugins().table);
@@ -806,6 +834,7 @@ namespace wfg::tree
             const auto element = node.getType().toString().toStdString();
             const auto isGroup = element == "Group";
             const auto isMedia = element == "Media";
+            const auto isMic = element == "Mic";
             const auto isFade = element == "Fade";
             const auto isStop = element == "Transport";
             const auto isOsc = element == "Osc";
@@ -850,6 +879,17 @@ namespace wfg::tree
                     rows.push_back (row);
 
                 for (auto* row : doc::Schema::rowsForOwner ("media"))
+                    rows.push_back (row);
+            }
+
+            /*  A MIC CUE IS A CUE, THEN A SOUND, THEN A LIVE INPUT (Phase 9b):
+                the same rows as a media cue's sound, and its own three. */
+            if (isMic)
+            {
+                for (auto* row : doc::Schema::rowsForOwner ("sound"))
+                    rows.push_back (row);
+
+                for (auto* row : doc::Schema::rowsForOwner ("mic"))
                     rows.push_back (row);
             }
 
@@ -905,6 +945,7 @@ namespace wfg::tree
                     it read-only in a way a client cannot argue with. */
                 if (name == "kind")        text = isGroup ? "group"
                                                   : isMedia ? "media"
+                                                  : isMic   ? "mic"
                                                   : isFade  ? "fade"
                                                   : isStop  ? "transport"
                                                   : isOsc   ? "osc"
@@ -914,7 +955,7 @@ namespace wfg::tree
                 else if (name == "parent") text = parentId;
                 else if (name == "index")  text = std::to_string (index);
                 else if (name == "role")   text = role;
-                else if (name == "fx" && isMedia) text = enabledFxInChainOrder (node);
+                else if (name == "fx" && (isMedia || isMic)) text = enabledFxInChainOrder (node);
                 else if (name == "chainChannels" && isMedia)
                     text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).channels);
                 else if (name == "insertLatency" && isMedia)
@@ -2161,7 +2202,7 @@ namespace wfg::tree
                 if (element.hasType ("Fx"))
                 {
                     const auto fxId = element[idProperty].toString().toStdString();
-                    const auto entry = setEntryFor (element, element["plugin"].toString().toStdString());
+                    const auto entry = setEntryFor (element.getParent(), element["plugin"].toString().toStdString());
 
                     if (fxId.empty() || ! entry.element.isValid() || catalogues == nullptr)
                         return;

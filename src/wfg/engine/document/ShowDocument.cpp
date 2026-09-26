@@ -275,11 +275,26 @@ namespace wfg::doc
     }
 
     //==============================================================================
+    namespace
+    {
+        /*  A CUE THAT SOUNDS: a media cue, or a mic cue (Phase 9b). The two
+            carry the `sound` rows - level, routing, EQ, inserts, sends - and so
+            take the children that are made of them: a route, a feed, a send,
+            an insert of a plugin. What names a file - a range, a split, a
+            media cue's Insert - stays the media cue's. */
+        bool isSoundingCue (const juce::ValueTree& cue)
+        {
+            return cue.hasType ("Media") || cue.hasType ("Mic");
+        }
+    }
+
+    //==============================================================================
     std::string_view ShowDocument::elementForKind (std::string_view kind)
     {
         if (kind == "memo")  return "Cue";
         if (kind == "group") return "Group";
         if (kind == "media") return "Media";
+        if (kind == "mic")   return "Mic";
         if (kind == "fade")  return "Fade";
         if (kind == "transport") return "Transport";
         if (kind == "osc")   return "Osc";
@@ -335,7 +350,7 @@ namespace wfg::doc
             client that has an identifier does not have to know which it got,
             and a cue that becomes a group keeps its address. */
         if (element == "Cue" || element == "Group" || element == "Media"
-              || element == "Fade" || element == "Transport"
+              || element == "Mic" || element == "Fade" || element == "Transport"
               || element == "Osc" || element == "Midi"
               || element == "Start")                                return "cue";
         if (element == "Lists")                     return "lists";
@@ -1336,7 +1351,7 @@ namespace wfg::doc
         /*  Only a media cue has anywhere for a sound to go. Refusing here
             rather than in the grammar means the client is told which of its two
             identifiers was wrong, and told it at the moment it asked. */
-        if (cue.getType().toString() != "Media")
+        if (! isSoundingCue (cue))
             return EditResult::failed (reason::typeMismatch);
 
         return insertObject (cue, endOfSequence, "Route", id,
@@ -1744,7 +1759,7 @@ namespace wfg::doc
                             orphans.push_back (child);
                         else if (child.hasType ("Slot") && child["bus"].toString().toStdString() == id)
                             clear.push_back (child);
-                        else if (child.hasType ("Media")
+                        else if (isSoundingCue (child)
                                    && child["directOut"].toString().toStdString() == id)
                             unpoint.push_back (child);
 
@@ -1971,7 +1986,7 @@ namespace wfg::doc
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        if (cue.getType().toString() != "Media")
+        if (! isSoundingCue (cue))
             return EditResult::failed (reason::typeMismatch);
 
         return insertObject (cue, endOfSequence, "Feed", id,
@@ -2004,7 +2019,7 @@ namespace wfg::doc
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        if (cue.getType().toString() != "Media")
+        if (! isSoundingCue (cue))
             return EditResult::failed (reason::typeMismatch);
 
         /*  ONE SEND PER BUS PER CUE, refused here rather than tolerated.
@@ -2041,7 +2056,7 @@ namespace wfg::doc
         if (! cue.isValid())
             return EditResult::failed (reason::unknownId);
 
-        if (cue.getType().toString() != "Media")
+        if (! isSoundingCue (cue))
             return EditResult::failed (reason::typeMismatch);
 
         /*  AN ENTRY OF THE SET, by its id: a plugin the show declared, whether
@@ -2050,6 +2065,22 @@ namespace wfg::doc
 
         if (! entry.isValid() || entry.getType().toString() != "Plugin")
             return EditResult::failed (reason::unknownId);
+
+        /*  AND OF THE RIGHT LIST (Phase 9b, namespace draft 18.3): a media cue
+            switches in an entry of the set, which every voice carries; a mic
+            cue a plugin of the rack channel it plays through, which only that
+            channel's track carries. A plugin of the other list is the wrong
+            kind of plugin for this cue - `bad-value`, as a second Fx for one
+            entry is - and not an unknown one. Both answers are the document's,
+            so a replay refuses what the session refused. */
+        const auto list = entry.getParent();
+        const auto rightList = cue.hasType ("Media")
+                                 ? list.hasType ("Plugins")
+                                 : list.hasType ("Channel")
+                                     && list[idProperty].toString() == cue["channel"].toString();
+
+        if (! rightList)
+            return EditResult::failed (reason::badValue);
 
         /*  ONE FX PER ENTRY PER CUE, for createSend's reason: the entry is on
             the voice once, and two children switching it in would be two
@@ -3607,12 +3638,12 @@ namespace wfg::doc
                 const auto element = node.getType().toString().toStdString();
                 const auto id = node[idProperty].toString().toStdString();
 
-                if (element == "Media")
+                if (element == "Media" || element == "Mic")
                 {
                     const auto out = node[juce::Identifier ("directOut")].toString().toStdString();
 
                     if (! out.empty())
-                        say ("/Show/.../Media[" + id + "]/@directOut", out, "direct out", "mix");
+                        say ("/Show/.../" + element + "[" + id + "]/@directOut", out, "direct out", "mix");
                 }
                 else if (element == "Send")
                 {
@@ -3660,7 +3691,7 @@ namespace wfg::doc
 
             void visit (const juce::ValueTree& node)
             {
-                if (node.hasType ("Media"))
+                if (isSoundingCue (node))
                 {
                     const auto out = node[juce::Identifier ("directOut")].toString().toStdString();
 
@@ -3669,7 +3700,8 @@ namespace wfg::doc
                             if ((child.hasType ("Route") || child.hasType ("Send"))
                                   && child[juce::Identifier ("bus")].toString().toStdString() == out)
                                 problems.push_back (
-                                    "/Show/.../Media[" + node[idProperty].toString().toStdString()
+                                    "/Show/.../" + node.getType().toString().toStdString() + "["
+                                      + node[idProperty].toString().toStdString()
                                       + "]: its direct out and its "
                                       + child.getType().toString().toStdString()
                                       + " both name \"" + out + "\", so the cue arrives there"
@@ -3721,6 +3753,92 @@ namespace wfg::doc
         };
 
         Presets { problems, {} }.visit (showNode);
+
+        /*  A MIC CUE THAT CANNOT PLAY (Phase 9b, namespace draft 18.5), said
+            before the show rather than at GO: one that takes no input, one
+            that plays through no rack channel, one whose channel is shared - a
+            mic cue holds its channel alone - and one whose input is not as
+            wide as its channel takes. An input or a channel that is not in the
+            show, or is the wrong kind of thing, is the `refers` check's above.
+
+            WARNINGS AND NEVER A REFUSAL, as every mistake here is: the repair
+            is somebody picking something from a menu, and the show has to
+            open to be repaired. A run fired all the same fails with the same
+            words (`no-input`, `bad-channel`, `bad-width`). */
+        struct Mics
+        {
+            std::vector<std::string>& problems;
+            const ShowDocument& document;
+
+            static std::string calledOf (const juce::ValueTree& node, const std::string& id)
+            {
+                const auto name = node["name"].toString().toStdString();
+                return name.empty() ? id : name;
+            }
+
+            static std::string widthWords (int width)
+            {
+                return width == 1 ? std::string ("mono")
+                     : width == 2 ? std::string ("stereo")
+                                  : std::to_string (width) + " channels wide";
+            }
+
+            void visit (const juce::ValueTree& node)
+            {
+                if (node.hasType ("Mic"))
+                    check (node);
+
+                for (const auto& child : node)
+                    visit (child);
+            }
+
+            void check (const juce::ValueTree& mic) const
+            {
+                const auto here = "/Show/.../Mic[" + mic[idProperty].toString().toStdString() + "]";
+                const auto inputId = mic["input"].toString().toStdString();
+                const auto channelId = mic["channel"].toString().toStdString();
+
+                if (inputId.empty())
+                    problems.push_back (here + ": takes no input - pick one of the show's named inputs,"
+                                               " or it plays nothing");
+
+                if (channelId.empty())
+                    problems.push_back (here + ": plays through no rack channel - pick one, or it plays"
+                                               " nothing");
+
+                const auto channel = channelId.empty() ? juce::ValueTree() : document.findById (channelId);
+
+                if (! channel.isValid() || ! channel.hasType ("Channel"))
+                    return;
+
+                const auto called = calledOf (channel, channelId);
+
+                if (channel.getProperty ("access", "exclusive").toString() == "shared")
+                    problems.push_back (here + ": plays through " + called + ", a shared channel - a mic"
+                                               " cue holds its channel alone, so it fails when it is"
+                                               " fired (bad-channel)");
+
+                const auto input = inputId.empty() ? juce::ValueTree() : document.findById (inputId);
+
+                if (! input.isValid() || ! input.hasType ("Input"))
+                    return;
+
+                /*  WHAT A CLASS TAKES IN, which is the first half of its name:
+                    mono and mono-to-stereo take one channel, stereo takes two
+                    (PRD §3.9e). */
+                const auto width = static_cast<int> (input.getProperty ("width", 1));
+                const auto channelClass = channel.getProperty ("class", "mono").toString().toStdString();
+                const auto takes = channelClass == "stereo" ? 2 : 1;
+
+                if (width != takes)
+                    problems.push_back (here + ": takes " + calledOf (input, inputId) + ", "
+                                          + widthWords (width) + ", through " + called + ", which"
+                                            " takes " + widthWords (takes) + " - so it fails when it"
+                                            " is fired (bad-width)");
+            }
+        };
+
+        Mics { problems, *this }.visit (showNode);
 
         /*  AND A MOUNT THAT SAYS ITS NODES MAY BE WRITTEN EARLY BUT CANNOT BE
             ASKED WHAT THEY HELD.

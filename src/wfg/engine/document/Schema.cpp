@@ -124,10 +124,10 @@ namespace wfg::doc
                     exactly as `Audio` carries the track count, which is a fact
                     about the whole show and not about any bus. */
                 { "Lists",  false, { "List" },             { "lists" } },
-                { "List",   true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
+                { "List",   true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
                                      "Midi", "Start", "Persistent" }, { "list" } },
                 { "Cue",    true,  { "Trigger" },                     { "cue" } },
-                { "Group",  true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
+                { "Group",  true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
                                      "Midi", "Start", "Header", "Footer", "Trigger" },
                                                                           { "cue", "group" } },
 
@@ -150,9 +150,9 @@ namespace wfg::doc
                     content models to express a rule that fits in one line of
                     validate() would be paying a great deal for a smaller
                     diagnostic. */
-                { "Header", true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
+                { "Header", true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
                                      "Midi", "Start" }, {} },
-                { "Footer", true,  { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
+                { "Footer", true,  { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
                                      "Midi", "Start" }, {} },
 
                 /*  THE PERSISTENT SECTION IS A LIST'S, not a group's (§3.29,
@@ -162,7 +162,7 @@ namespace wfg::doc
                     validate() - and the same children, so that a fade or a stop
                     put there is a validate WARNING that the section ignores
                     rather than a file that refuses to open. */
-                { "Persistent", true, { "Cue", "Group", "Media", "Fade", "Transport", "Osc",
+                { "Persistent", true, { "Cue", "Group", "Media", "Mic", "Fade", "Transport", "Osc",
                                         "Midi", "Start" }, {} },
 
                 /*  ONE ELEMENT PER CUE KIND (author, 2026-09-05), which is the
@@ -186,6 +186,15 @@ namespace wfg::doc
                     /godot/cue/<id>/<row>. */
                 { "Media",  true,  { "Route", "Send", "Feed", "Insert", "Range", "Trigger", "Fx" },
                                                           { "cue", "sound", "media" } },
+
+                /*  A LIVE INPUT PLAYED AS A CUE (Phase 9b, decisions BW and CE):
+                    a cue first, a sound second - the same level, routing, DCA,
+                    EQ, inserts and sends as a media cue - and a mic third: the
+                    named input it takes, the rack channel it plays through, its
+                    fade-in. Without what names a file: no Range, and no Insert,
+                    whose claim a mic cue's channel IS (namespace draft 18.2). */
+                { "Mic",    true,  { "Route", "Send", "Feed", "Fx", "Trigger" },
+                                                          { "cue", "sound", "mic" } },
 
                 /*  A DESTINATION IS AN OBJECT (author, 2026-09-05). PRD §3.9b
                     says a cue's destinations are a list rather than a choice,

@@ -394,7 +394,7 @@ function controlFor(field) {
 /*  Every word `cue.create` takes. `midi` was missing until the desktop's
     new-cue row was built from the same list (2026-09-18) and the two clients
     were held to one answer: the engine has made MIDI cues since Phase 4. */
-const KINDS = ["memo", "media", "fade", "transport", "osc", "midi", "group", "start"];
+const KINDS = ["memo", "media", "mic", "fade", "transport", "osc", "midi", "group", "start"];
 
 /*  ─────────────────────────────────────────────── several cues at once ──
 

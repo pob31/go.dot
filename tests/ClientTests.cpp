@@ -5504,6 +5504,89 @@ TEST_CASE ("client: the input list reads the named inputs, names the patch rows,
     CHECK (loud.meterFill() == doctest::Approx (0.9));
 }
 
+TEST_CASE ("client: a mic cue is inspected by its input and its channel, and its FX are its channel's")
+{
+    /*  Phase 9b (namespace draft 18.9): the `mic` fixture's cue MC000002,
+        "Voix solo" through Vox 1 with the channel's test gain switched in.
+        What the window reads of one before it makes a sound: two menus of
+        what the show declares where a media cue has its file, a media cue's
+        outputs, EQ and FX openers and no waveform, the FX panel's strips
+        from the channel's chain, and an EQ like a media cue's. */
+    Rig rig ("mic");
+    const auto snapshot = rig.publish (1);
+
+    const auto panel = model::inspect (*snapshot, "MC000002");
+    REQUIRE_FALSE (panel.empty());
+    CHECK (panel.kind == "mic");
+
+    const auto fieldNamed = [&panel] (const std::string& name) -> const model::Field*
+    {
+        for (const auto& block : panel.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == name)
+                    return &field;
+
+        return nullptr;
+    };
+
+    const auto* input = fieldNamed ("input");
+    REQUIRE (input != nullptr);
+    CHECK (input->control == model::Control::inputRef);
+    CHECK (input->value == "MC000021");
+    REQUIRE (input->choices.size() == 3u);
+    CHECK (input->choices[0] == std::pair<std::string, std::string> { "", "(none)" });
+    CHECK (input->choices[1].first == "MC000021");
+    CHECK (input->choices[1].second == "Voix solo \xc2\xb7 Mono, input 1");
+    CHECK (input->choices[2].second == "Keys \xc2\xb7 Stereo, inputs 2-3");
+
+    const auto* channel = fieldNamed ("channel");
+    REQUIRE (channel != nullptr);
+    CHECK (channel->control == model::Control::channelRef);
+    REQUIRE (channel->choices.size() == 2u);
+    CHECK (channel->choices[1] == std::pair<std::string, std::string> { "MC000011", "Vox 1 \xc2\xb7 Mono to stereo" });
+
+    //  A media cue's outputs, and its fade-in.
+    REQUIRE (fieldNamed ("directOut") != nullptr);
+    CHECK (fieldNamed ("directOut")->control == model::Control::busRef);
+    CHECK (fieldNamed ("fadeIn") != nullptr);
+    CHECK (fieldNamed ("level") != nullptr);
+
+    //  No file, and the EQ's rows are the panel's, behind its opener.
+    CHECK (fieldNamed ("file") == nullptr);
+    CHECK (fieldNamed ("eqB1Freq") == nullptr);
+    CHECK (fieldNamed ("eq") != nullptr);
+    CHECK (fieldNamed ("fx") != nullptr);
+    CHECK (fieldNamed ("waveform") == nullptr);
+
+    /*  ITS FX ARE ITS CHANNEL'S: one strip, the channel's test gain, the
+        fixture's Fx switched in - and the set, which is empty, is not asked. */
+    const auto fx = model::readFx (*snapshot, "MC000002");
+    REQUIRE (fx.present);
+    CHECK (fx.notice.empty());
+    REQUIRE (fx.strips.size() == 1u);
+    CHECK (fx.strips[0].pluginId == "MC000012");
+    CHECK (fx.strips[0].name == "Test gain");
+    CHECK (fx.strips[0].fxId == "MC000005");
+    CHECK (fx.strips[0].enabled);
+
+    //  An EQ like a media cue's.
+    CHECK (model::readEq (*snapshot, "MC000002").present);
+
+    //  Its sends are a sound's too: the foot does not turn a mic cue away.
+    model::Subject sends;
+    sends.kind = model::Subject::Kind::sends;
+    sends.objectId = "MC000002";
+    CHECK (model::readFoot (*snapshot, sends).notice.find ("Only a media") == std::string::npos);
+
+    /*  A MIC CUE THROUGH NO CHANNEL says so where its strips would be. */
+    REQUIRE (rig.apply (2, "window", "node.set", { osc::Value::string ("/godot/cue/MC000002/channel"),
+                                                  osc::Value::string ("") }).applied == 1);
+    const auto none = model::readFx (*rig.publish (3), "MC000002");
+    CHECK (none.present);
+    CHECK (none.strips.empty());
+    CHECK (none.notice == "This mic cue plays through no rack channel yet: pick one in the inspector.");
+}
+
 TEST_CASE ("client: the rack reads each channel with its own chain, and says the worst case against the budget")
 {
     /*  Phase 9b (namespace draft §18.3): the Rack tab's reading, made through

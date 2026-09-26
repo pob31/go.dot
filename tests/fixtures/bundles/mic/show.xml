@@ -1,0 +1,28 @@
+<Show>
+  <Lists>
+    <List id="MC000001" name="Live">
+      <Mic id="MC000002" channel="MC000011" fadeIn="0.5" input="MC000021" name="Voix solo" number="1">
+        <Route id="MC000003" bus="MC000004" gains="1 0 0 1"/>
+        <Fx id="MC000005" plugin="MC000012"/>
+      </Mic>
+      <Cue id="MC000006" name="Clear" number="2"/>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="MC000004" name="Main L/R" width="2"/>
+    <Inputs>
+      <Input id="MC000021" name="Voix solo"/>
+      <Input id="MC000022" firstChannel="1" name="Keys" width="2"/>
+    </Inputs>
+    <Rack>
+      <Channel id="MC000011" class="monoToStereo" name="Vox 1">
+        <Plugin id="MC000012" format="VST3" identifier="godot:test-gain" name="Test gain"/>
+      </Channel>
+    </Rack>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

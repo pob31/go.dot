@@ -139,8 +139,8 @@ namespace wfg::client::model
             out.cueLevel = osc::parseDouble (at (cue + "level")).value_or (0.0);
             out.sends = readSends (snapshot, subject.objectId);
 
-            if (out.cueKind != "media")
-                out.notice = "Only a media cue has send levels.";
+            if (out.cueKind != "media" && out.cueKind != "mic")
+                out.notice = "Only a media or a mic cue has send levels.";
             else if (out.sends.empty())
                 out.notice = "This show declares no mix channels yet - Show, Audio settings, "
                              "Outputs, add a mix channel.";

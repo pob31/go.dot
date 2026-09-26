@@ -10761,6 +10761,24 @@ asking `media` for a row that moved returns an empty string rather than an error
 therefore its own commit, proven by byte-identical tree dumps and replays of every fixture before
 `Mic` exists.
 
+*As built (9b.4, 6dcf8a5).* As drawn. `wfg tree` of all 28 fixture bundles is byte-identical before
+and after, every fixture log replays in both locales, and `show.rng` did not change. The reads that
+had to follow: the Reader's owner list, the Runner's EQ reads, the fold and the direct out, the slot
+analysis, the solver's level, `eq.reset`'s walk of the EQ rows (which would have become a silent
+no-op), the tree's rows for a media cue, and two test helpers. A `RunTests` case is the tripwire: a
+cue nobody shaped is armed, and every EQ number and the level are compared with the table's
+defaults - put one Runner read back to `media` and it fails.
+
+*As built (9b.4), the element.* `Mic` as drawn, published with the `cue`, `sound` and `mic` rows
+and nothing about a file. Its inserts are looked up in its channel (`insertChainOf` in the tree),
+and `fx.create` now checks the list for both kinds - which closed a hole 9b.3 had opened: a
+channel's plugin is a `Plugin` like any, and a media cue could switch one in. A route, a feed, a
+send and an insert take a mic cue; a range, a split and an `Insert` do not; deleting a bus lets go
+of a mic cue's direct out as of a media cue's. Until 9b.5 a mic cue fired is a line with a run, as
+a memo is, so nothing waits on a run nothing would end. The inspector offers the input and the
+channel as menus (`inputRef`, `channelRef`), each item saying the width or the class the other must
+fit; the fold stays greyed on a mic cue until its chain's width is published (9b.5).
+
 **The containment**, in `Schema.cpp`'s table:
 
 ```
@@ -10814,6 +10832,11 @@ already is with `voice` there (`Runner.cpp:2576-2582`); one ringing out after it
 | `plugin.load` | — | Load now rebuilds the rack as it stands with the set | while anything plays — a sounding mic counts, and the refusal names it |
 
 Moving a channel's plugin is `object.move`; removing one, `object.delete`.
+
+`wfg validate` (as built, 9b.4) says, as warnings, each reason a mic cue would fail when fired: it
+takes no input; it plays through no rack channel; its channel is shared (`bad-channel`); its input
+is not as wide as its channel takes - mono and mono-to-stereo take one channel, stereo two
+(`bad-width`). An input or a channel naming the wrong kind of thing is the `refers` check's.
 
 ### 18.4 The input, end to end
 

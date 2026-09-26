@@ -139,6 +139,18 @@ namespace wfg::client::model
             the list put there, or free. "automatic" is the empty id. */
         stripRef,
 
+        /*  A MENU OF THE SHOW'S NAMED INPUTS (Phase 9b), the output menu's
+            twin on the other side of the interface: it writes an input's
+            IDENTIFIER to a mic cue's `input` row, and a person reads its name,
+            how wide it is and which logical inputs it takes. */
+        inputRef,
+
+        /*  A MENU OF THE RACK'S CHANNELS (Phase 9b): it writes a channel's
+            IDENTIFIER to a mic cue's `channel` row, and each item says what
+            the channel takes in and puts out - which the cue's input has to
+            fit. */
+        channelRef,
+
         /*  A BUTTON THAT OPENS THE PANEL AT THE FOOT on this cue (author,
             2026-09-21: "it would be great if the controls to show the
             waveform, the send levels, the EQ, the group timeline were in the

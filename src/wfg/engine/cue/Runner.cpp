@@ -72,6 +72,7 @@ namespace wfg::cue
             if (element == "Cue")   return "memo";
             if (element == "Group") return "group";
             if (element == "Media") return "media";
+            if (element == "Mic")   return "mic";
             if (element == "Fade")  return "fade";
             if (element == "Transport") return "transport";
             if (element == "Osc")   return "osc";
@@ -2385,6 +2386,19 @@ namespace wfg::cue
 
             if (const auto target = textOf (cue, "target"); ! target.empty())
                 startsToFire.push_back (target);
+
+            finishing.push_back (runId);
+            return;
+        }
+
+        /*  A MIC CUE, UNTIL IT SOUNDS (Phase 9b): a line in the book with a
+            run, as a memo is, so that a sequence moves past it and nothing
+            waits on a run that nothing will end. Stage 9b.5 gives it its
+            channel, its gate and its tail. */
+        if (kind == "mic")
+        {
+            if (auto* run = runs.find (runId))
+                run->state = runState::playing;
 
             finishing.push_back (runId);
             return;

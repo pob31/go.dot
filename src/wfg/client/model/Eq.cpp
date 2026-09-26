@@ -73,7 +73,7 @@ namespace wfg::client::model
 
         if (on == Flag::unsaid)
         {
-            out.notice = "Only a media cue has an EQ.";
+            out.notice = "Only a media or a mic cue has an EQ.";
             return out;
         }
 

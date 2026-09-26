@@ -70,6 +70,10 @@ KNOWN_OWNERS = ("engine", "document", "list", "lists", "cue", "group", "mount",
                 # namespace draft 18.2). A media cue and a mic cue both carry
                 # it; `media` keeps what is about a file.
                 "sound",
+                # A live input played as a cue (Phase 9b, decision BW): the
+                # named input it takes, the rack channel it plays through and
+                # its fade-in. Its sound rows are `sound`'s.
+                "mic",
                 # `transport` was `stop` until 2026-09-22. A cue that ADVANCES
                 # is not a cue that stops, and the verb list had grown past the
                 # name: hard, fade, afterMember, afterIteration, advance - the

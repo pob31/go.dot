@@ -50,7 +50,7 @@ namespace wfg::cue
         {
             const auto element = node.getType().toString();
 
-            return element == "Media" || element == "Cue" || element == "Fade"
+            return element == "Media" || element == "Mic" || element == "Cue" || element == "Fade"
                 || element == "Transport" || element == "Osc" || element == "Midi"
                 || element == "Start";
         }

@@ -181,19 +181,50 @@ namespace wfg::client::model
             return out;
         }
 
-        if (text (snapshot, "/godot/cue/" + cueId + "/kind") != "media")
+        const auto kind = text (snapshot, "/godot/cue/" + cueId + "/kind");
+
+        if (kind != "media" && kind != "mic")
         {
-            out.notice = "Inserts belong to media cues; this cue plays no file.";
+            out.notice = "Inserts belong to media and mic cues; this cue plays no sound.";
             return out;
         }
 
         out.present = true;
-        const auto order = words (text (snapshot, "/godot/plugin/order"));
 
-        if (order.empty())
+        /*  WHOSE PLUGINS: the show's set for a media cue, which every voice
+            carries in `plugins/order`; and for a mic cue the rack channel it
+            plays through (Phase 9b, decision BX), in that channel's order. */
+        std::vector<std::string> order;
+
+        if (kind == "mic")
         {
-            out.notice = "The show declares no plugins yet: Show settings, Plugins.";
-            return out;
+            const auto channel = text (snapshot, "/godot/cue/" + cueId + "/channel");
+
+            if (channel.empty())
+            {
+                out.notice = "This mic cue plays through no rack channel yet: pick one in the inspector.";
+                return out;
+            }
+
+            order = words (text (snapshot, "/godot/slot/" + channel + "/plugins"));
+
+            if (order.empty())
+            {
+                const auto called = text (snapshot, "/godot/slot/" + channel + "/name");
+                out.notice = (called.empty() ? std::string ("Its channel") : called)
+                               + " carries no plugins yet: Show settings, Rack.";
+                return out;
+            }
+        }
+        else
+        {
+            order = words (text (snapshot, "/godot/plugin/order"));
+
+            if (order.empty())
+            {
+                out.notice = "The show declares no plugins yet: Show settings, Plugins.";
+                return out;
+            }
         }
 
         const auto mine = fxOfCue (snapshot, cueId);

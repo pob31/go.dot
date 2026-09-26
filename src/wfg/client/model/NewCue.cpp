@@ -23,7 +23,7 @@ namespace wfg::client::model
     const std::vector<std::string>& cueKinds()
     {
         static const std::vector<std::string> kinds {
-            "memo", "media", "fade", "transport", "osc", "midi", "group", "start"
+            "memo", "media", "mic", "fade", "transport", "osc", "midi", "group", "start"
         };
 
         return kinds;

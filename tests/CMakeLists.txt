@@ -97,6 +97,7 @@ add_executable(wfg_tests
     MidiTests.cpp
     SurfaceTests.cpp
     PluginSetTests.cpp
+    MicTests.cpp
     PluginCatalogueTests.cpp
     PluginScanTests.cpp
     ProxyTests.cpp

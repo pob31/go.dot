@@ -197,7 +197,10 @@ namespace wfg::cue
                             if (! cue.isValid())
                                 return Outcome::rejected (reason::unknownId);
 
-                            if (! cue.hasType ("Media"))
+                            /*  A MEDIA CUE'S EQ, OR A MIC CUE'S (Phase 9b):
+                                the rows are the `sound` owner's, and both
+                                carry them. */
+                            if (! cue.hasType ("Media") && ! cue.hasType ("Mic"))
                                 return Outcome::rejected (reason::badValue);
 
                             /*  UNDER THE LOCK, FLAT RIDES LIVE with the rest of

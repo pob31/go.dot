@@ -33,7 +33,7 @@
 namespace wfg::doc::generated
 {
     inline constexpr std::string_view enum_engine_clock[] = { "dummy", "device" };
-    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start" };
+    inline constexpr std::string_view enum_cue_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic" };
     inline constexpr std::string_view enum_cue_role[] = { "member", "header", "footer", "persistent" };
     inline constexpr std::string_view enum_cue_prepare[] = { "idle", "preparing", "pending", "partial", "armed", "verified" };
     inline constexpr std::string_view enum_media_release[] = { "hold", "playOut" };
@@ -48,7 +48,7 @@ namespace wfg::doc::generated
     inline constexpr std::string_view enum_osc_wait[] = { "none", "sent", "verified" };
     inline constexpr std::string_view enum_midi_type[] = { "noteOn", "noteOff", "programChange", "controlChange", "pitchBend", "aftertouch", "channelPressure", "sysex" };
     inline constexpr std::string_view enum_midi_wait[] = { "none", "sent" };
-    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start" };
+    inline constexpr std::string_view enum_run_kind[] = { "memo", "group", "media", "fade", "transport", "osc", "midi", "start", "mic" };
     inline constexpr std::string_view enum_run_phase[] = { "entering", "preparing", "prepared", "header", "members", "footer" };
     inline constexpr std::string_view enum_run_state[] = { "preparing", "waiting", "armed", "playing", "stopping", "postWait", "done", "failed" };
     inline constexpr std::string_view enum_run_warning[] = { "no-channel", "revoked", "not-sent" };
@@ -455,7 +455,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           true, "memo",
           false, 0.0, false, 0.0,
-          enum_cue_kind, 8,
+          enum_cue_kind, 9,
           "", 50.0, false, "park",
           "",
           "What kind of cue this is, derived from the element rather than stored: a Group is a group and a Media is media. Deriving it is what stops a client turning one kind into another by writing a word, and what lets the grammar refuse a file attribute on a cue that plays nothing." },
@@ -963,6 +963,30 @@ namespace wfg::doc::generated
           "samples", 5.0, false, "park",
           "",
           "How many samples late the cue sounds through the inserts that take it, as their plugins declare it - never compensated: PDC is off and a cue is not started early for it. Nought with none in." },
+        { "mic", "input",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "input",
+          "The named input this cue takes, by identifier - Voix solo, not input 3 (PRD 3.18, namespace draft 18.2). Empty takes nothing, and is what a new mic cue starts as. An input its channel cannot take fails the run in words, and wfg validate says so before the show." },
+        { "mic", "channel",
+          ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
+          false, "",
+          false, 0.0, false, 0.0,
+          nullptr, 0,
+          "", 50.0, false, "park",
+          "rackChannel",
+          "The rack channel it plays through, by identifier: the channel's plugins, EQ and output are the cue's for as long as it holds the channel (decision BX). A cue wanting a channel another holds waits for it and says so. Empty plays through nothing, and wfg validate says so." },
+        { "mic", "fadeIn",
+          ValueType::number, 'd', false, Access::readWrite, Kind::state, Persist::show,
+          true, "0",
+          true, 0.0, false, 0.0,
+          nullptr, 0,
+          "s", 50.0, false, "park",
+          "",
+          "How long GO takes to bring it from silence to its level. Nought opens it at once, behind a click-free ramp (namespace draft 18.5)." },
         { "route", "bus",
           ValueType::string, 's', false, Access::readWrite, Kind::state, Persist::show,
           false, "",
@@ -1415,7 +1439,7 @@ namespace wfg::doc::generated
           ValueType::string, 's', false, Access::read, Kind::state, Persist::none,
           false, "",
           false, 0.0, false, 0.0,
-          enum_run_kind, 8,
+          enum_run_kind, 9,
           "", 50.0, false, "park",
           "",
           "The kind of the cue this run instantiates, copied at launch so a client reading a run does not have to go and look the cue up - and so the answer survives the cue being edited underneath it." },

@@ -19,7 +19,9 @@
 #include <wfg/client/model/Devices.h>
 #include <wfg/client/model/MidiPorts.h>
 #include <wfg/client/model/DirectOuts.h>
+#include <wfg/client/model/InputList.h>
 #include <wfg/client/model/OutputList.h>
+#include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/Node.h>
@@ -71,6 +73,12 @@ namespace wfg::client::model
                                "level", "startOffset", "dca", "strip", "initialLevel", "release",
                                "secondPress", "velocity", "velocityFloor", "pressure",
                                "releaseFade" } },
+
+                /*  A MIC CUE (Phase 9b): what it takes and through what, how it
+                    comes in, then where it goes - a media cue's sound rows with
+                    the input and the channel where the file was. */
+                { "mic",     { "input", "channel", "fadeIn", "stereoToMono", "directOut",
+                               "level", "dca" } },
 
                 //  What it moves - a cue, or a DCA instead - then where to and how.
                 { "fade",    { "target", "dca", "level", "curve", "points", "stopWhenDone" } },
@@ -395,6 +403,45 @@ namespace wfg::client::model
             }
         }
 
+        /*  WHAT A MIC CUE TAKES AND WHAT IT PLAYS THROUGH (Phase 9b), as two
+            menus of what the show declares - its named inputs and its rack
+            channels - rather than eight characters typed from memory. The rows
+            store identifiers and a person reads names, as for a DCA: renaming
+            an input must leave every mic cue on it where it was. Each item
+            says the fact the other menu has to agree with - an input's width,
+            a channel's class - since a mono channel cannot take a stereo line
+            and the run would fail saying so. Always menus, even before the
+            show has any, when "(none)" alone says what is true. */
+        void offerTheInputsAndChannels (const tree::TreeSnapshot& snapshot, std::vector<Field>& decided)
+        {
+            for (auto& field : decided)
+            {
+                if (! field.writable)
+                    continue;
+
+                if (field.name == "input")
+                {
+                    field.control = Control::inputRef;
+                    field.choices = { { "", "(none)" } };
+
+                    for (const auto& input : readInputs (snapshot))
+                        field.choices.push_back ({ input.id, input.name + " \xc2\xb7 "
+                                                                + input.widthWord()
+                                                                + (input.width > 1 ? ", inputs " : ", input ")
+                                                                + input.channelWord() });
+                }
+                else if (field.name == "channel")
+                {
+                    field.control = Control::channelRef;
+                    field.choices = { { "", "(none)" } };
+
+                    for (const auto& channel : readRack (snapshot).channels)
+                        field.choices.push_back ({ channel.id, channel.name + " \xc2\xb7 "
+                                                                  + channel.classWord() });
+                }
+            }
+        }
+
         /*  WHAT ONLY A HAND ON A STRIP ASKS, greyed where no hand can reach it
             (PRD §3.27). A media cue carries the sampler rows whatever group it
             is in, and they mean something only on a MEMBER of a SAMPLER group:
@@ -552,6 +599,12 @@ namespace wfg::client::model
             offer ("EQ, four bands and two filters", "eq");
             offer ("FX, the signal chain on this cue", "fx");
         }
+        else if (kind == "mic")
+        {
+            /*  A LIVE INPUT HAS NO WAVEFORM: nothing is recorded to draw. */
+            offer ("EQ, four bands and two filters", "eq");
+            offer ("FX, its channel's plugins on this cue", "fx");
+        }
         else if (kind == "fade")
         {
             /*  OFFERED EVEN THOUGH PICKING A FADE OPENS IT, because the row is
@@ -693,6 +746,14 @@ namespace wfg::client::model
             offerTheStrips (snapshot, cueId, decided);
         }
 
+        /*  A MIC CUE'S OUTPUTS are a media cue's, and its source is two menus
+            of its own (Phase 9b). */
+        if (out.kind == "mic")
+        {
+            fitToTheRig (snapshot, cueId, decided);
+            offerTheInputsAndChannels (snapshot, decided);
+        }
+
         /*  And the same kind of second pass for a network cue, for the same
             reason: which devices exist is a fact about THIS show and cannot
             come from the parameter table. */
@@ -717,7 +778,7 @@ namespace wfg::client::model
             panel at the foot, and are not listed here - by prefix, so a
             twentieth row joins the panel without a name in this file.
             They stay reachable: the opener below is the door. */
-        if (out.kind == "media")
+        if (out.kind == "media" || out.kind == "mic")
             std::erase_if (decided, [] (const Field& field)
                                     { return field.name.rfind ("eq", 0) == 0; });
 
