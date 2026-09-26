@@ -163,6 +163,10 @@ namespace wfg::client::gesture
         lets go. */
     Event aimSurfaces (const std::string& cueId);
 
+    /*  `surface.dial`: the number a click or a touch put on the surfaces'
+        master dial (author, 2026-09-26), by its address. Empty frees it. */
+    Event dial (const std::string& address);
+
     /*  What a locked show rode live, kept in the show as one undo step, or
         let go of (2026-09-25): the two buttons of the window's bar. */
     Event keepLive();

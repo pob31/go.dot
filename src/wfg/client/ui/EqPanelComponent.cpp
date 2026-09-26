@@ -95,13 +95,16 @@ namespace wfg::client::ui
         into it is the same write a drag makes. An editable label, as the send
         mixer's value boxes are, because that is the one control a test can
         drive without inventing a mouse event. */
-    struct EqPanelComponent::Box
+    struct EqPanelComponent::Box final : private juce::MouseListener
     {
         Box (EqPanelComponent& ownerToUse, std::string rowToUse, int decimalsToUse,
              juce::String unitToUse)
             : owner (ownerToUse), row (std::move (rowToUse)), decimals (decimalsToUse),
               unit (std::move (unitToUse))
         {
+            /*  A PRESS ON THE BOX PUTS ITS ROW ON THE MASTER DIAL (2026-09-26),
+                heard beside the label's own editing rather than instead of it. */
+            value.addMouseListener (this, false);
             value.setEditable (true, false, false);
             value.setJustificationType (juce::Justification::centredRight);
             value.setTooltip (juce::String (row) + (unit.isNotEmpty() ? ", in " + unit : ""));
@@ -137,6 +140,16 @@ namespace wfg::client::ui
             }
 
             return 0.0;
+        }
+
+        ~Box() override
+        {
+            value.removeMouseListener (this);
+        }
+
+        void mouseDown (const juce::MouseEvent&) override
+        {
+            owner.dialRow (row);
         }
 
         EqPanelComponent& owner;
@@ -287,6 +300,8 @@ namespace wfg::client::ui
         for (auto& box : boxes)
             addAndMakeVisible (box->value);
 
+        markDial();
+
         applyTheme (theme);
         refreshControls();
         resized();
@@ -327,6 +342,32 @@ namespace wfg::client::ui
     {
         if (actions.set && ! reading.subject.objectId.empty())
             actions.set (model::eqAddress (reading.subject.objectId, row), text);
+    }
+
+    void EqPanelComponent::dialRow (const std::string& row)
+    {
+        if (actions.dial && ! reading.subject.objectId.empty())
+            actions.dial (model::eqAddress (reading.subject.objectId, row));
+    }
+
+    void EqPanelComponent::markDial()
+    {
+        for (auto& box : boxes)
+        {
+            const auto on = ! dialed.empty() && ! reading.subject.objectId.empty()
+                              && model::eqAddress (reading.subject.objectId, box->row) == dialed;
+            box->value.setColour (juce::Label::outlineColourId,
+                                  on ? Look::colour (theme, "picked") : juce::Colours::transparentBlack);
+        }
+    }
+
+    void EqPanelComponent::showDial (const std::string& address)
+    {
+        if (address == dialed)
+            return;
+
+        dialed = address;
+        markDial();
     }
 
     void EqPanelComponent::writeNumber (const std::string& row, double value, int decimals)

@@ -134,7 +134,10 @@ namespace wfg::client::ui
                     repaint();
                 };
 
+                shaping.dial = actions.dial;
+
                 eq = std::make_unique<EqPanelComponent> (theme, std::move (shaping));
+                eq->showDial (dialed);
                 addAndMakeVisible (*eq);
                 break;
             }
@@ -182,7 +185,10 @@ namespace wfg::client::ui
                     repaint();
                 };
 
+                mixing.dial = actions.dial;
+
                 sends = std::make_unique<SendMixerComponent> (theme, std::move (mixing));
+                sends->showDial (dialed);
                 addAndMakeVisible (*sends);
                 break;
             }
@@ -217,6 +223,17 @@ namespace wfg::client::ui
     {
         if (eq != nullptr)
             eq->setEditedHandle (handle);
+    }
+
+    void FootPanelComponent::showDial (const std::string& address)
+    {
+        dialed = address;
+
+        if (eq != nullptr)
+            eq->showDial (address);
+
+        if (sends != nullptr)
+            sends->showDial (address);
     }
 
     void FootPanelComponent::show (const model::FootReading& reading,

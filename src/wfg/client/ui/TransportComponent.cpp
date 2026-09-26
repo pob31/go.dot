@@ -46,7 +46,7 @@ namespace wfg::client::ui
     {
         for (auto* label : { &showLabel, &tickLabel, &clockLabel, &rateLabel,
                              &listLabel, &standbyLabel, &notesLabel, &statusLabel, &errorLabel,
-                             &noticeLabel })
+                             &noticeLabel, &dialLabel })
         {
             label->setJustificationType (juce::Justification::centredLeft);
             label->setMinimumHorizontalScale (1.0f);
@@ -132,6 +132,13 @@ namespace wfg::client::ui
         statusLabel.setFont (Look::font (theme, 13.0f));
         statusLabel.setColour (juce::Label::textColourId, dim);
 
+        dialLabel.setFont (Look::font (theme, 13.0f));
+        dialLabel.setColour (juce::Label::textColourId, dim);
+        dialLabel.setJustificationType (juce::Justification::centredRight);
+        dialLabel.setTooltip ("What the surface's master dial turns: the number last clicked or "
+                              "touched here. The dial's click lets go; its double click puts the "
+                              "number back to its default.");
+
         errorLabel.setFont (Look::font (theme, 13.0f));
         errorLabel.setColour (juce::Label::textColourId, Look::colour (theme, "failed"));
 
@@ -164,6 +171,12 @@ namespace wfg::client::ui
         notesLabel.setText (text (reading.standbyNotes), juce::dontSendNotification);
 
         statusLabel.setText (text (reading.lockLine()), juce::dontSendNotification);
+
+        /*  WHAT THE MASTER DIAL TURNS (2026-09-26), said wherever that number
+            is on screen or not: it stays on its cue when the pick moves. */
+        dialLabel.setText (reading.dial.empty() ? juce::String()
+                                                : juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89 ")) + text (reading.dial),
+                           juce::dontSendNotification);
 
         /*  THE WRITER'S OWN SENTENCE COMES FIRST when there is one: a write
             that failed belongs to a command that was APPLIED, so it is not
@@ -389,6 +402,12 @@ namespace wfg::client::ui
             statusLabel.setBounds (bottom.removeFromLeft (row * 4));
         else
             statusLabel.setBounds ({});
+
+        /*  THE DIAL'S LINE AT THE FAR RIGHT, while it has one. */
+        if (dialLabel.getText().isNotEmpty())
+            dialLabel.setBounds (bottom.removeFromRight (juce::jmin (row * 14, bottom.getWidth() / 2)));
+        else
+            dialLabel.setBounds ({});
 
         errorLabel.setBounds (bottom);
         noticeLabel.setBounds (bottom);

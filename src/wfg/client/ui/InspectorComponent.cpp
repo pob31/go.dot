@@ -127,7 +127,71 @@ namespace wfg::client::ui
         viewport.setScrollBarsShown (true, false);
         addAndMakeVisible (viewport);
 
+        /*  EVERY PRESS ON A LINE IS HEARD HERE TOO, before the box takes it
+            to edit: a click or a touch on a number is what puts it on the
+            master dial (mouseDown, below). */
+        content.addMouseListener (this, true);
+
         applyTheme (theme);
+    }
+
+    juce::String InspectorComponent::nameOf (const model::Field& field) const
+    {
+        const auto name = juce::String (field.label.empty() ? field.name : field.label);
+
+        if (dialed.empty() || field.address != dialed)
+            return name;
+
+        return juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89 ")) + name;
+    }
+
+    void InspectorComponent::markDial()
+    {
+        for (auto& line : lines)
+        {
+            if (line->isHeading)
+                continue;
+
+            const auto on = ! dialed.empty() && line->field.address == dialed;
+            line->name.setText (nameOf (line->field), juce::dontSendNotification);
+            line->box.setColour (juce::Label::outlineColourId,
+                                 on ? Look::colour (theme, "picked") : juce::Colours::transparentBlack);
+        }
+    }
+
+    void InspectorComponent::showDial (const std::string& address)
+    {
+        if (address == dialed)
+            return;
+
+        dialed = address;
+        markDial();
+    }
+
+    /*  A PRESS ON A LINE'S NAME OR ITS VALUE puts that number on the master
+        dial (author, 2026-09-26: "any click or touch"), and anything else here
+        is left to the control it landed on. Only a number the dial can turn
+        is sent; the window decides nothing else about it. */
+    void InspectorComponent::mouseDown (const juce::MouseEvent& event)
+    {
+        pressedOn (event.eventComponent);
+    }
+
+    void InspectorComponent::pressedOn (const juce::Component* hit)
+    {
+        if (hit == nullptr)
+            return;
+
+        for (auto& line : lines)
+        {
+            if (hit != &line->name && hit != &line->box && ! line->box.isParentOf (hit))
+                continue;
+
+            if (actions.dial && model::mayDial (line->field))
+                actions.dial (line->field.address);
+
+            return;
+        }
     }
 
     InspectorComponent::~InspectorComponent() = default;
@@ -341,9 +405,11 @@ namespace wfg::client::ui
                 the first cue's words over the second cue's numbers: pick two
                 program changes and a note-on and the note-on's labels stuck to
                 everything after it (author, looking at it). */
-            line.name.setText (juce::String (field.label.empty() ? field.name : field.label),
-                               juce::dontSendNotification);
+            line.name.setText (nameOf (field), juce::dontSendNotification);
             line.name.setTooltip (juce::String (field.description));
+            line.box.setColour (juce::Label::outlineColourId,
+                                ! dialed.empty() && field.address == dialed
+                                    ? Look::colour (theme, "picked") : juce::Colours::transparentBlack);
 
             /*  AND WHETHER THE ROW MEANS ANYTHING FOR THIS CUE. Set in the
                 layout as well, which is where it was set alone - and a refill
@@ -486,8 +552,7 @@ namespace wfg::client::ui
             line->field = field;
             line->isDetail = detail;
 
-            line->name.setText (juce::String (field.label.empty() ? field.name : field.label),
-                                juce::dontSendNotification);
+            line->name.setText (nameOf (field), juce::dontSendNotification);
             line->name.setTooltip (juce::String (field.description));
             content.addAndMakeVisible (line->name);
 

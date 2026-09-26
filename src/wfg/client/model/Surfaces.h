@@ -115,6 +115,11 @@ namespace wfg::client::model
     /** Every declared surface, in /godot/surface/order. */
     std::vector<SurfaceRow> readSurfaces (const tree::TreeSnapshot&);
 
+    /*  WHETHER THE SHOW HAS A MASTER DIAL TO PUT A NUMBER ON (2026-09-26): a
+        Mackie or a D700 it declares and has not switched off. A show with
+        none sends no `surface.dial` for every click in the inspector. */
+    bool hasMasterDial (const tree::TreeSnapshot&);
+
     /** Every strip of every surface: surface order, then index. */
     std::vector<StripRow> readStrips (const tree::TreeSnapshot&);
 

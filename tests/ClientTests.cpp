@@ -646,6 +646,9 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         /*  THE ROTARIES' AIM AND THE LIVE BAR (2026-09-25). */
         gesture::aimSurfaces ("B3N8R5TW"), gesture::aimSurfaces (""),
         gesture::keepLive(), gesture::dropLive(),
+
+        /*  THE MASTER DIAL (2026-09-26): a number clicked, and letting go. */
+        gesture::dial ("/godot/cue/B3N8R5TW/level"), gesture::dial (""),
         gesture::setNode ("/godot/cue/B3N8R5TW/eqB2On", "false"),
     };
 
@@ -5365,4 +5368,82 @@ TEST_CASE ("client: a surface adjusting a cue holds the foot on it, and the rest
     CHECK (page.word == "fx");
     CHECK (model::footForSurface (page.up, page.word, page.edited, page.aim)
              == model::Subject { model::Subject::Kind::fx, cue });
+}
+
+TEST_CASE ("client: a click on a number puts it on the master dial, and the window says what the dial turns")
+{
+    /*  The author, 2026-09-26: "Can selecting a parameter in the inspector or
+        foot panel on-screen via mouse or touch assign it to the master rotary
+        encoder on the D700?" - any click or touch, and it stays on that cue. */
+    Rig rig ("first-sound");
+    surface::SurfaceTable surfaces;
+    rig.parameters.setSurfaces (&surfaces);
+    surface::registerSurfaceCommands (rig.engine.commands(), rig.document, surfaces);
+
+    const std::string cue = "B3N8R5TW";
+
+    //  A show with no Mackie and no D700 has no dial, so a click sends nothing.
+    CHECK_FALSE (model::hasMasterDial (*rig.publish (1)));
+
+    REQUIRE (rig.apply (2, "cli", "surface.create", { osc::Value::string ("virtual") }).applied == 1);
+    CHECK_FALSE (model::hasMasterDial (*rig.publish (3)));
+
+    REQUIRE (rig.apply (4, "cli", "surface.create", { osc::Value::string ("d700") }).applied == 1);
+    CHECK (model::hasMasterDial (*rig.publish (5)));
+
+    /*  WHICH FIELDS A CLICK PUTS ON IT: a number a hand decides - not a name,
+        a switch, a menu, or a reading. */
+    const auto inspection = model::inspect (*rig.publish (6), cue);
+
+    const auto fieldNamed = [&inspection] (const std::string& name) -> const model::Field*
+    {
+        for (const auto& block : inspection.blocks)
+            for (const auto& field : block.fields)
+                if (field.name == name)
+                    return &field;
+
+        for (const auto& field : inspection.details)
+            if (field.name == name)
+                return &field;
+
+        return nullptr;
+    };
+
+    for (const auto* name : { "level", "preWait", "startOffset" })
+    {
+        INFO (std::string (name));
+        const auto* field = fieldNamed (name);
+        REQUIRE (field != nullptr);
+        CHECK (model::mayDial (*field));
+    }
+
+    for (const auto* name : { "name", "enabled", "kind" })
+    {
+        INFO (std::string (name));
+        const auto* field = fieldNamed (name);
+        REQUIRE (field != nullptr);
+        CHECK_FALSE (model::mayDial (*field));
+    }
+
+    //  Free, the window says nothing.
+    CHECK (model::dialLine (*rig.publish (7)).empty());
+    CHECK (model::readTransport (*rig.publish (7)).dial.empty());
+
+    //  On the cue's level: its name, the row, the value and the unit.
+    const auto level = fieldNamed ("level")->address;
+    REQUIRE (rig.apply (8, "window", "surface.dial", { osc::Value::string (level) }).applied == 1);
+
+    const auto snapshot = rig.publish (9);
+    const auto name = model::text (*snapshot, "/godot/cue/" + cue + "/name");
+    const auto line = model::dialLine (*snapshot);
+
+    CHECK (line.rfind (name + ": level ", 0) == 0);
+    CHECK (line.size() > 3);
+    CHECK (line.substr (line.size() - 3) == " dB");
+    CHECK (model::readTransport (*snapshot).dial == line);
+
+    //  A row the inspector renames keeps the inspector's words.
+    REQUIRE (rig.apply (10, "window", "surface.dial",
+                        { osc::Value::string ("/godot/cue/" + cue + "/initialLevel") }).applied == 1);
+    CHECK (model::dialLine (*rig.publish (11)).rfind (name + ": initial level ", 0) == 0);
 }

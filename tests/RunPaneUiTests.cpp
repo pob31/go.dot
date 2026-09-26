@@ -24,6 +24,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <functional>
 #include <memory>
 #include <string>
 #include <utility>
@@ -318,6 +319,103 @@ TEST_CASE ("inspector: an opener is a button that asks the window to open the pa
 
     //  And it is a door, not a decision: nothing was written.
     CHECK (written.empty());
+}
+
+TEST_CASE ("inspector: a press on a number puts it on the master dial, and its line wears the dial")
+{
+    /*  The author, 2026-09-26: "Can selecting a parameter in the inspector or
+        foot panel on-screen via mouse or touch assign it to the master rotary
+        encoder on the D700?" - any click or touch. */
+    std::vector<std::string> dialed;
+
+    ui::InspectorComponent::Actions actions;
+    actions.dial = [&] (const std::string& address) { dialed.push_back (address); };
+
+    ui::InspectorComponent inspector (model::Theme {}, actions);
+    inspector.setSize (320, 200);
+
+    const auto field = [] (std::string name, std::string tags, std::string value, std::string unit)
+    {
+        model::Field made;
+        made.address = "/godot/cue/CUE00001/" + name;
+        made.name = name;
+        made.label = name;
+        made.typeTags = std::move (tags);
+        made.value = std::move (value);
+        made.unit = std::move (unit);
+        made.writable = true;
+        return made;
+    };
+
+    model::Inspection inspection;
+    inspection.cueId = "CUE00001";
+    inspection.cueName = "The bed";
+    inspection.kind = "media";
+    inspection.count = 1;
+    inspection.blocks.push_back ({ "what it is", { field ("name", "s", "The bed", "") } });
+    inspection.blocks.push_back ({ "what it does", { field ("level", "d", "-6", "dB"),
+                                                     field ("preWait", "d", "0.5", "s") } });
+    inspector.show (inspection);
+
+    const auto labelSaying = [&inspector] (const juce::String& word) -> juce::Label*
+    {
+        juce::Label* found = nullptr;
+
+        std::function<void (juce::Component&)> walk = [&] (juce::Component& at)
+        {
+            for (auto* child : at.getChildren())
+            {
+                if (auto* label = dynamic_cast<juce::Label*> (child))
+                    if (label->getText().endsWith (word) && found == nullptr)
+                        found = label;
+
+                walk (*child);
+            }
+        };
+
+        walk (inspector);
+        return found;
+    };
+
+    auto* levelName = labelSaying ("level");
+    auto* nameName = labelSaying ("name");
+    REQUIRE (levelName != nullptr);
+    REQUIRE (nameName != nullptr);
+
+    //  A press on a number's name sends its address; on a word, nothing.
+    inspector.pressedOn (levelName);
+    inspector.pressedOn (nameName);
+    CHECK (dialed == std::vector<std::string> { "/godot/cue/CUE00001/level" });
+
+    //  The tree says the dial is on it: the dial before its name.
+    inspector.showDial ("/godot/cue/CUE00001/level");
+    CHECK (levelName->getText().startsWith (juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89"))));
+    CHECK_FALSE (nameName->getText().startsWith (juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89"))));
+
+    //  And a poll of the same values keeps it.
+    inspector.show (inspection);
+    CHECK (levelName->getText().startsWith (juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89"))));
+
+    inspector.showDial ({});
+    CHECK (levelName->getText() == "level");
+
+    const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {});
+
+    if (dir.isNotEmpty())
+    {
+        inspector.showDial ("/godot/cue/CUE00001/level");
+
+        const auto picture = inspector.createComponentSnapshot (inspector.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("inspector-dial.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+    }
 }
 
 TEST_CASE ("send mixer: a strip per mix channel, and raising a silent one makes the send first")

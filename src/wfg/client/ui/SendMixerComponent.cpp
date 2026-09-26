@@ -58,6 +58,11 @@ namespace wfg::client::ui
             value.setJustificationType (juce::Justification::centred);
             addAndMakeVisible (value);
 
+            /*  A PRESS ON THE VALUE COUNTS AS ONE ON THE STRIP for the master
+                dial (2026-09-26) - and for nothing else: the drags, the double
+                click and the wheel stay the throw's. */
+            value.addMouseListener (this, false);
+
             value.onTextChange = [this]
             {
                 /*  TYPED IS AS GOOD AS DRAGGED, and it is read the way a
@@ -163,14 +168,22 @@ namespace wfg::client::ui
 
         void mouseDown (const juce::MouseEvent& event) override
         {
+            owner.dialAt (at);
+
+            if (event.eventComponent != this)
+                return;
+
             held = levelHere();
             shown = held;
             dragging = true;
             dragFrom = event.position.y;
         }
 
-        void mouseUp (const juce::MouseEvent&) override
+        void mouseUp (const juce::MouseEvent& event) override
         {
+            if (event.eventComponent != this)
+                return;
+
             /*  AND THE READING TAKES OVER AGAIN. By now the level that was
                 asked for has been applied and published; if it has not, the
                 next pass corrects the cap rather than this holding a number
@@ -181,6 +194,9 @@ namespace wfg::client::ui
 
         void mouseDrag (const juce::MouseEvent& event) override
         {
+            if (event.eventComponent != this)
+                return;
+
             const auto area = throwArea();
 
             if (area.getHeight() <= 0)
@@ -201,8 +217,12 @@ namespace wfg::client::ui
             owner.refresh();
         }
 
-        void mouseDoubleClick (const juce::MouseEvent&) override
+        void mouseDoubleClick (const juce::MouseEvent& event) override
         {
+            //  The value's own double click is its editor's.
+            if (event.eventComponent != this)
+                return;
+
             //  Unity, which is where a strip is when nobody has decided otherwise.
             owner.levelWanted (at, 0.0);
         }
@@ -210,6 +230,9 @@ namespace wfg::client::ui
         void mouseWheelMove (const juce::MouseEvent& event,
                              const juce::MouseWheelDetails& wheel) override
         {
+            if (event.eventComponent != this)
+                return;
+
             const auto clicks = juce::roundToInt (wheel.deltaY * 10.0f);
 
             if (clicks != 0)
@@ -235,8 +258,13 @@ namespace wfg::client::ui
 
             g.setColour (Look::colour (look, "ink"));
             g.setFont (Look::font (look, 12.0f));
-            g.drawFittedText (isMaster ? juce::String ("Cue level")
-                                       : juce::String (send().name),
+            /*  THE DIAL'S MARK before the name of the strip whose level the
+                master dial turns (2026-09-26). */
+            const auto dialHere = ! owner.dialed.empty() && owner.levelAddressAt (at) == owner.dialed;
+
+            g.drawFittedText ((dialHere ? juce::String (juce::CharPointer_UTF8 ("\xe2\x97\x89 ")) : juce::String())
+                                + (isMaster ? juce::String ("Cue level")
+                                            : juce::String (send().name)),
                               head.removeFromTop (scaled (14, look)), juce::Justification::centred, 1);
 
             g.setColour (Look::colour (look, "ink-faint"));
@@ -320,6 +348,40 @@ namespace wfg::client::ui
         bool dragging = false;
         float dragFrom = 0.0f;
     };
+
+    //==============================================================================
+    std::string SendMixerComponent::levelAddressAt (std::size_t at) const
+    {
+        if (reading.subject.objectId.empty())
+            return {};
+
+        if (at == 0)
+            return "/godot/cue/" + reading.subject.objectId + "/level";
+
+        //  A silent strip with no send behind it has no level to turn yet.
+        if (at - 1 >= reading.sends.size() || reading.sends[at - 1].sendId.empty())
+            return {};
+
+        return "/godot/send/" + reading.sends[at - 1].sendId + "/level";
+    }
+
+    void SendMixerComponent::dialAt (std::size_t at)
+    {
+        if (actions.dial)
+            if (const auto address = levelAddressAt (at); ! address.empty())
+                actions.dial (address);
+    }
+
+    void SendMixerComponent::showDial (const std::string& address)
+    {
+        if (address == dialed)
+            return;
+
+        dialed = address;
+
+        for (auto& strip : strips)
+            strip->repaint();
+    }
 
     //==============================================================================
     SendMixerComponent::SendMixerComponent (const model::Theme& themeToUse, Actions actionsToUse)

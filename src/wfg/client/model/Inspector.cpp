@@ -571,6 +571,71 @@ namespace wfg::client::model
         return out;
     }
 
+    bool mayDial (const Field& field)
+    {
+        return field.writable && field.applies && ! field.boolean
+                 && field.options.empty() && field.choices.empty()
+                 && (field.typeTags == "d" || field.typeTags == "i")
+                 && (field.control == Control::text || field.control == Control::loopCount);
+    }
+
+    std::string dialLine (const tree::TreeSnapshot& snapshot)
+    {
+        const auto address = text (snapshot, "/godot/surface/dial");
+
+        if (address.empty())
+            return {};
+
+        //  /godot/<owner>/<id>/<row>
+        std::vector<std::string> parts;
+        std::string::size_type from = 1;
+
+        while (from <= address.size())
+        {
+            const auto slash = address.find ('/', from);
+            parts.push_back (address.substr (from, slash == std::string::npos ? std::string::npos
+                                                                              : slash - from));
+            if (slash == std::string::npos)
+                break;
+
+            from = slash + 1;
+        }
+
+        if (parts.size() != 4)
+            return address;
+
+        const auto& owner = parts[1];
+        const auto& id = parts[2];
+        const auto& row = parts[3];
+
+        const auto nameOf = [&snapshot] (const std::string& kind, const std::string& objectId)
+        {
+            const auto name = text (snapshot, "/godot/" + kind + "/" + objectId + "/name");
+            return name.empty() ? objectId : name;
+        };
+
+        /*  A SEND IS NAMED BY ITS CUE AND WHERE IT GOES, which is how the
+            send mixer names it; anything else by its own name. */
+        std::string who;
+
+        if (owner == "send")
+            who = nameOf ("cue", text (snapshot, "/godot/send/" + id + "/cue")) + " to "
+                    + nameOf ("bus", text (snapshot, "/godot/send/" + id + "/bus"));
+        else
+            who = nameOf (owner, id);
+
+        const auto found = labels().find (row);
+        auto line = who + ": " + (found != labels().end() ? found->second : row);
+
+        if (const auto* node = snapshot.find (address))
+        {
+            if (const auto value = text (node); ! value.empty())
+                line += " " + value + (node->unit.empty() ? std::string {} : " " + node->unit);
+        }
+
+        return line;
+    }
+
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId)
     {
         Inspection out;

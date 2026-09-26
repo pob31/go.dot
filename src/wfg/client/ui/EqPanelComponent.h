@@ -80,6 +80,9 @@ namespace wfg::client::ui
 
             /** A sentence for the panel's head. */
             std::function<void (const juce::String&)> say;
+
+            /** A click or a touch on a box: that row on the master dial (2026-09-26). */
+            std::function<void (const std::string& address)> dial;
         };
 
         EqPanelComponent (const model::Theme&, Actions);
@@ -128,6 +131,10 @@ namespace wfg::client::ui
             same way, so the band under the hand on the desk is the band ringed
             on the screen. -1 lets it go. */
         void setEditedHandle (int handle);
+
+        /*  THE NUMBER THE MASTER DIAL TURNS (2026-09-26): the box of that row,
+            if this cue's, framed - a line and not a colour alone. */
+        void showDial (const std::string& address);
 
         void mouseDoubleClick (const juce::MouseEvent&) override;
         void mouseWheelMove (const juce::MouseEvent&, const juce::MouseWheelDetails&) override;
@@ -207,6 +214,11 @@ namespace wfg::client::ui
 
         /** The cue the controls were built for; a different one rebuilds them. */
         std::string builtFor;
+        std::string dialed;
+
+        /** The dial asked for one of this cue's rows, by a press on its box. */
+        void dialRow (const std::string& row);
+        void markDial();
 
         audio::EqSettings held;
         bool dragging = false;

@@ -92,7 +92,7 @@ capture did not tabulate, to be read at the bench (§10).
 | `*` | note `0x36` under the Mackie preset (`0x5A` under Reaper's); `0x37` on a double click if enabled | nothing |
 | Metronome | note `0x59`, MCU *Click* — *to confirm* | nothing |
 | Loop | note `0x56`, MCU *Cycle* — *to confirm* | nothing |
-| Master dial | turn: MCU jog, CC `0x3C` — *to confirm*; click: note `0x38` | nothing |
+| Master dial | turn: MCU jog, CC `0x3C` — *to confirm*; click: note `0x38`; double click: `0x39` expected | the number last clicked in the window; click lets go, double click back to its default (2026-09-26) |
 | Volume knob | pitch bend on channel 9, 14-bit, absolute, **no touch sense**; a click, if it has one, never captured | nothing |
 
 **Each strip** (16, two banks of 8 by port): a 100 mm touch-sensitive **motor fader** (pitch bend,
@@ -176,6 +176,9 @@ what is being edited. On the surface itself:
 
 - **Select** on a strip picks the cue on it — a sampler strip's member;
 - the **master dial** walks the cue list, and its **click** picks.
+  *Not built, 2026-09-26:* the author gave the dial to the window instead - it turns the number
+  last clicked or touched in the inspector or the foot panel, its click lets go and its double click
+  puts the number back to its default (namespace draft §17.18).
 
 The flow this gives: *Select a strip, press Send, ride its sends, press Send again.*
 
@@ -380,7 +383,8 @@ Each with the recommendation made in the conversation.
   clicks.
 - The note an **encoder's double click** sends, with double click enabled on one encoder in the
   Configurator — only `*`'s is known (`0x37`).
-- The **master dial's turn** (CC `0x3C` expected).
+- The **master dial's turn** (CC `0x3C` expected), and its **double click** with double click ticked
+  for it in the Configurator (`0x39` expected, by `*`'s F1/F2 pattern).
 - **M27** (the colour rate the unit takes) and **M28** (how soon its idle animation returns) —
   instruments in `tests/blackbox/`, which need `python-rtmidi`.
 

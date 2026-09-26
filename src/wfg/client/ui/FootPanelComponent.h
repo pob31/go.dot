@@ -87,6 +87,10 @@ namespace wfg::client::ui
 
             /** The height changed by a drag on the top edge, in pixels. */
             std::function<void (int)> resizeBy;
+
+            /*  A CLICK OR A TOUCH ON A NUMBER in the EQ or the send mixer: that
+                number on the surfaces' master dial (2026-09-26). */
+            std::function<void (const std::string& address)> dial;
         };
 
         FootPanelComponent (const model::Theme&, Actions);
@@ -111,6 +115,9 @@ namespace wfg::client::ui
         /*  The EQ band a surface's rotary last turned, ringed on the EQ panel
             while it is the one open (2026-09-25); -1 lets it go. */
         void showEditedEqHandle (int handle);
+
+        /** The number the master dial turns, marked in whichever panel draws it. */
+        void showDial (const std::string& address);
 
         void paint (juce::Graphics&) override;
         void resized() override;
@@ -137,6 +144,8 @@ namespace wfg::client::ui
         std::unique_ptr<TimelineComponent> timeline;
         std::unique_ptr<CurveEditorComponent> curve;
         std::unique_ptr<EqPanelComponent> eq;
+
+        std::string dialed;
         std::unique_ptr<FxPanelComponent> fx;
         std::map<std::string, std::string> editorWords;
         juce::TextButton shut { "x" };

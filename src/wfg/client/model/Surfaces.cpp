@@ -263,6 +263,15 @@ namespace wfg::client::model
         return inOrder (found, words (order));
     }
 
+    bool hasMasterDial (const tree::TreeSnapshot& snapshot)
+    {
+        for (const auto& surface : readSurfaces (snapshot))
+            if (surface.enabled && (surface.profile == "d700" || surface.profile == "mcu"))
+                return true;
+
+        return false;
+    }
+
     std::vector<StripRow> readStrips (const tree::TreeSnapshot& snapshot)
     {
         /*  ONE PASS for the strips themselves, which live among the other

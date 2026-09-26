@@ -10569,3 +10569,51 @@ asks for one.
 
 **Owed to the bench:** the arrows pressed on the D700 itself - the notes are read from the protocol
 note (`godot-asparion-d700-protocol-0.1.md` §2.1), not yet from a press.
+
+### 17.18 The master dial: the number last clicked in the window (2026-09-26)
+
+Asked by the author on 2026-09-26: *"Can selecting a parameter in the inspector or foot panel
+on-screen via mouse or touch assign it to the master rotary encoder on the D700?"* Four questions
+(AskUserQuestion), each answered as recommended, and one answer revised while it was being built:
+*"The D700 can register a double click, in this case click could be deselect and double click back
+to default"* - *"The D700 can do it at hardware level."* The letters go on from §17.17's BL. The
+pages draft's §5.4 proposed the dial walk the cue list; this replaces that.
+
+| | Decision | Whose |
+|---|---|---|
+| **BM** | **Any click or touch on a number** in the inspector or the foot panel puts it on the master dial - no gesture of its own | the author's |
+| **BN** | **It stays on that cue's row** when the pick moves; only another click, or the dial's own click, moves it | the author's |
+| **BO** | **The dial's click lets go; its double click puts the number back to its default** - the D700's firmware telling the two apart (revised from the first answer, "press = back to its default") | the author's |
+| **BP** | **Free, it does nothing and is dark** | the author's |
+| **BQ** | What a click can put on it: a number the show stores and a hand may write - one value, `d` or `i`, not a closed set, not a switch, not a word. Its law is read off its row (below), so a row added to the table turns with no line written | implementer's call |
+| **BR** | The double click is **F4, note `0x39`**, by the `*` button's pattern (F1 single, F2 double); the dial's click is F3, `0x38`. It needs **double click ticked for the dial in the Configurator**, and the note is to confirm at the bench | implementer's call |
+| **BS** | A **Mackie's jog wheel** turns the same number; its F3 and F4 stay its own function keys | implementer's call |
+| **BT** | **Under the lock the row's own door decides**: an EQ band or a send rides live (AM), anything else is refused `locked` as it would be from the window | implementer's call |
+| **BU** | **What says where it is**: the dial wears its cue's colour (white for a number with no cue of its own, dark while free); in the window the line wears **◉ before its name and a frame round its value**, a send strip ◉ before its name, and the transport's foot row says **"◉ Kick: level -6 dB"** wherever the number is - a mark and words, never the colour alone (§4.8) | implementer's call |
+| **BV** | **Where a click is heard**: the inspector's lines (name or value), the EQ panel's boxes and the send mixer's strips. Not the EQ picture's handles (a handle is two numbers), not a plugin's own window (another process). A field over several picked cues gives the dial its first cue's row. A click is sent only when the show has a Mackie or a D700 switched on and the number is not on the dial already, so nothing is logged for nothing | implementer's call |
+
+**The rows and the command.**
+
+| Node | Type, default | Access | Persist | Meaning |
+|---|---|---|---|---|
+| `/godot/surface/dial` | `s` | r | none | the address the dial turns, or empty; empty too once what it named is gone (an Undo of the delete brings it back) |
+| `/godot/cmd/surface/dial` | `s` | w | — | `surface.dial <address>`; empty frees it. Refused `bad-address` for an address that names nothing and `bad-value` for anything BQ leaves out. No step of the history, allowed under the lock |
+
+**The law, `surface::dialTurned`.** A frequency whose floor is above nought turns in ratios, a
+sixteenth of an octave a detent, as a band's rotary does; a decibel that reaches silence
+(`-120`) is a level and moves along the fader, a narrower one a gain in half decibels; a time in
+seconds a tenth a detent, and a whole second from ten seconds up; a number with no unit that
+spans a hundredfold (a Q) in ratios; any other number with two ends a hundred-and-twenty-eighth
+of its travel; a whole number one a detent. All held at the row's ends. The command reads the row
+once and keeps what the bridge needs in the surface table, so the tick never asks the document.
+
+**The bridge.** The jog's detents (CC `0x3C`, sign and magnitude) are folded into one `node.set` a
+tick, with the surface's origin, so a turn is one undo step per hand. The double click writes the
+row's default, and writes nothing when the number is already there. The dial's colour is sent on
+the first port, at a strip's pace (`colourIntervalTicks`, re-asserted every
+`idleColourReassertTicks`).
+
+**Built** (2026-09-26, on `main`): the command, the row, the law, the bridge and the light
+(85f16db); the window's clicks, marks and the transport's line. **Owed to the bench:** the jog's
+CC and the sign of its turn, the double click's note with the Configurator ticked, whether a tenth
+of a second a detent is the right grain for a pre-wait, and the dial's colour.

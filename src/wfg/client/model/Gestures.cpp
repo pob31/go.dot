@@ -133,6 +133,11 @@ namespace wfg::client::gesture
         return { origin::window, "surface.aim", { osc::Value::string (cueId) } };
     }
 
+    Event dial (const std::string& address)
+    {
+        return { origin::window, "surface.dial", { osc::Value::string (address) } };
+    }
+
     Event keepLive()
     {
         return { origin::window, "live.keep", {} };

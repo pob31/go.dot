@@ -288,6 +288,10 @@ namespace wfg::client
                     like the folds and never reaches the engine. */
                 inspectorActions.close = [this] { selection.clear(); };
 
+                /*  A CLICK OR A TOUCH ON A NUMBER PUTS IT ON THE MASTER DIAL
+                    (author, 2026-09-26) - here and at the foot. */
+                inspectorActions.dial = [this] (const std::string& address) { dialTo (address); };
+
                 /*  THE PANEL AT THE FOOT, ASKED FOR FROM THE CUE ITSELF. The
                     inspector hands back a word; the words are the ones
                     `model::Subject` spells, and an unknown one opens nothing
@@ -399,6 +403,7 @@ namespace wfg::client
                     shell->setFoot ({});
                 };
                 footActions.resizeBy = [this] (int pixels) { shell->growFoot (pixels); };
+                footActions.dial = [this] (const std::string& address) { dialTo (address); };
 
                 footActions.createRange = [this] (const std::string& cueId, double in, double out)
                                           { send (gesture::createRange (cueId, in, out)); };
@@ -1039,6 +1044,23 @@ namespace wfg::client
                                         + juce::String (show);
             }
 
+            /*  A NUMBER ON THE MASTER DIAL, from a click or a touch (author,
+                2026-09-26): sent only where there is a dial to put it on and
+                it is not on it already, so a click in a show with no surface,
+                or a second click on the same box, writes nothing to the log.
+                Read against the last pass's snapshot, as every gesture between
+                passes is. */
+            void dialTo (const std::string& address)
+            {
+                if (latest == nullptr || address.empty() || ! model::hasMasterDial (*latest))
+                    return;
+
+                if (model::text (*latest, "/godot/surface/dial") == address)
+                    return;
+
+                send (gesture::dial (address));
+            }
+
             /*  RULE 2's ONE CALL SITE. A pointer copy, never null, and the
                 snapshot is only ever swapped whole. */
             void pass()
@@ -1353,6 +1375,11 @@ namespace wfg::client
 
                 if (inspecting && ! loadingToTime && ! browsingUndo)
                     shell->inspector.show (model::inspectMany (*snapshot, selection.ids()));
+
+                /*  THE MASTER DIAL'S NUMBER, marked wherever it is drawn. */
+                const auto dialed = model::text (*snapshot, "/godot/surface/dial");
+                shell->inspector.showDial (dialed);
+                shell->foot.showDial (dialed);
 
                 last = reading;
             }

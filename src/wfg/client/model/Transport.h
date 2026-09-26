@@ -84,6 +84,7 @@ namespace wfg::client::model
 
         std::string status;           ///< `/godot/audio/status`
         std::string lastError;        ///< `/godot/engine/lastError`; empty when nothing was refused
+        std::string dial;             ///< what the master dial turns, in words (`dialLine`); empty while free
         std::string writeError;       ///< `/godot/document/writeError`; empty when no write is outstanding
 
         /*  `/godot/document/warnings` IS NOT CARRIED WHOLE, and that is a

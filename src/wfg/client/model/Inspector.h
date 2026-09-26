@@ -242,6 +242,17 @@ namespace wfg::client::model
     /** Everything published under one cue, sorted into blocks. Empty for no cue. */
     Inspection inspect (const tree::TreeSnapshot& snapshot, const std::string& cueId);
 
+    /*  WHETHER A CLICK ON THIS FIELD PUTS IT ON THE MASTER DIAL (author,
+        2026-09-26): a number somebody decides and may write, one value, not a
+        switch or a menu - the rows `surface.dial` takes. A field over several
+        cues gives the dial its first cue's row. */
+    bool mayDial (const Field& field);
+
+    /*  WHAT THE MASTER DIAL IS ON, in words: "Kick: level -6 dB", "Kick to
+        Reverb: level -12 dB" for a send. Empty while it is free. The row's
+        name is the one the inspector gives it. */
+    std::string dialLine (const tree::TreeSnapshot& snapshot);
+
     /*  WHAT SEVERAL CUES HAVE IN COMMON: the writable rows every one of them
         has, by name, with the value they agree on or `mixed`; the reported
         rows are left out, since a run position is one cue's. One cue is
