@@ -1214,16 +1214,42 @@ namespace wfg::cue
             side), so this is what tells the sweep below what it may end. */
         const auto listOf = [this] (const std::string& cueId) { return listOfCue (cueId); };
 
+        /*  WHETHER A CUE SITS IN THE LIST'S PERSISTENT SECTION, at any depth.
+            The section is outside the jump (§3.29): the solver never plans
+            it, so a sweep that asked only "is this run in the list" ended every
+            sounding bed - and a jump is not a step, so nothing asserted it again
+            until the next GO (2026-09-26, namespace draft §18.8). What the
+            section should be doing after a jump is the assertion's question at
+            the next step, never this sweep's. */
+        const auto inPersistent = [this] (const std::string& cueId)
+        {
+            for (auto node = document.findById (cueId); node.isValid(); node = node.getParent())
+                if (node.getType().toString() == "Persistent")
+                    return true;
+
+            return false;
+        };
+
         //----------------------------------------------------------------------
         /*  WHAT THE JUMP ABANDONS, ENDED BEFORE ANYTHING IS BUILT.
 
-            Every run of THIS list the plan does not name: the group runs and
-            their jobs, the members under them, the armed run at the old
-            standby. Ended the way `run.kill` ends one - the whole descent, and
-            NO FOOTER, because a footer is arbitrary and need not be an inverse.
-            Running one here would be arbitrary work fighting the values this is
-            about to send, and one that blocks on a fade would make the jump
-            wait for it.
+            Every run of THIS list outside its persistent section: the group
+            runs and their jobs, the members under them, the armed run at the
+            old standby. Ended the way `run.kill` ends one - the whole descent,
+            and NO FOOTER, because a footer is arbitrary and need not be an
+            inverse. Running one here would be arbitrary work fighting the
+            values this is about to send, and one that blocks on a fade would
+            make the jump wait for it.
+
+            THE PLAN'S OWN CUES INCLUDED (2026-09-26). The build below makes
+            every planned cue afresh - a jump hands `seatPlan` an empty map -
+            so a run of a planned cue left standing here was the same cue
+            twice: a playing one sounding on under its own relaunch, where
+            §3.25 says a cue at the wrong offset is stopped and relaunched, or
+            the old standby's armed run holding a voice the relaunch needed,
+            which failed it `no-track` once the persistent section began
+            keeping its voices through a jump. This asked "does the plan name
+            it" until then, and the build never adopted what it kept.
 
             THE HANDLER DOES IT ITSELF rather than submitting, exactly as a
             revocation does (§13.6): the jump is one record, and a replay
@@ -1233,17 +1259,9 @@ namespace wfg::cue
             is before the build rather than after: a claim released a tick later
             would leave the plan's runs queued behind runs the jump had already
             ended. */
-        std::vector<std::string> wanted;
-
-        for (const auto& wants : plan.runs)
-            wanted.push_back (wants.cue);
-
         for (const auto& snapshot : runs.all())
         {
-            if (snapshot.isFinished() || listOf (snapshot.cue) != listId)
-                continue;
-
-            if (std::find (wanted.begin(), wanted.end(), snapshot.cue) != wanted.end())
+            if (snapshot.isFinished() || listOf (snapshot.cue) != listId || inPersistent (snapshot.cue))
                 continue;
 
             if (auto* run = runs.find (snapshot.id))

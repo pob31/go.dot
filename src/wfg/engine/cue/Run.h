@@ -818,11 +818,13 @@ namespace wfg::cue
         bool skipFooter = false;
 
         /*  WHETHER `run.kill` ENDED IT, which `skipFooter` alone cannot say
-            once Phase 10's double Esc sets that too. The persistent assertion
-            reads it (§3.29, decision S): a kill on a persistent run suspends
-            the assertion for the session, until a load-to-time re-solves - so
-            the operator never fights the machine over a bed they just stopped.
-            Written by the handler, so a replay has it. */
+            because a double Esc (`run.killAll`) sets that too and never this.
+            The persistent assertion reads it (§3.29, decision S): a kill on a
+            persistent run suspends the assertion for the session, until a
+            load-to-time re-solves - so the operator never fights the machine
+            over a bed they just stopped - while a double Esc suspends nothing
+            and the next GO restores the section. Written by the handler, so a
+            replay has it. */
         bool killed = false;
 
         /*  Started by the persistent assertion rather than by anybody. Published

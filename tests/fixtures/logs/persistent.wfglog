@@ -1,0 +1,70 @@
+# wfg-log 1
+# fixture persistent - the persistent section through a double Esc and a jump
+# (PRD 3.29; namespace draft 13.11 planned it, 18.8 wrote it, 2026-09-26).
+#
+# WHAT IT IS FOR: that the section is asserted at a step, that a double Esc
+# silences it WITHOUT suspending it - the next GO brings the bed back - and that
+# a jump leaves a sounding bed alone. Until 2026-09-26 the engine did neither:
+# `run.killAll` marked every run killed, which is how the running pane's kill
+# suspends a persistent cue for the session, and the load-to-time sweep ended
+# every run of the list the plan did not name, and the solver never plans the
+# section. Recorded from a real `wfg serve --hosted` of a copy of
+# tests/fixtures/bundles/persistent with two generated thirty-second tones under
+# its media/ folder (so the hash below is that copy's), driven over OSC. Two
+# tracks: the bed holds one through the jump, which is what showed that the
+# sweep also kept the jump's own cue's armed run standing (fixed the same day).
+#
+# bundle persistent sha256:b009d4118def37340d5dea9276953f1a6f14678796f57f555393c8ea2150dd86
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+# media rain.wav 2880044 30.000
+# media scene.wav 2880044 30.000
+A 0 0 engine audio.editBuilt s:"hosted" i:2 i:2 i:56
+#
+# GO on the memo at the top. A step: the memo is over on the next tick, the
+# pointer's next cue is armed, and the section asserts its bed - a machine
+# action, `run.assert`, that moves no pointer.
+A 18 1 udp:127.0.0.1:58984 go s:"ZM3FPGE0"
+A 19 2 engine run.ended s:"ZM3FPGE0"
+A 19 3 engine audio.arm s:"PS000003" s:"WGR8AD3W"
+A 19 4 engine run.assert s:"PS000006" s:"SZ299WBW"
+A 20 5 engine audio.armed s:"WGR8AD3W" i:0
+A 20 6 engine audio.armed s:"SZ299WBW" i:1
+A 21 7 engine run.started s:"SZ299WBW"
+A 21 8 engine node.set s:"/godot/audio/patchSettled" T
+A 21 9 engine run.late s:"SZ299WBW" i:7
+#
+# DOUBLE ESC. Everything stops, footers skipped - the armed scene and the bed.
+# Nothing is suspended: for the next second and a half nothing puts the bed
+# back, because the check is human-paced, and nothing forbids the next press
+# from doing so.
+A 78 10 udp:127.0.0.1:58985 run.killAll
+A 79 11 engine run.ended s:"WGR8AD3W"
+A 80 12 engine run.ended s:"SZ299WBW"
+#
+# THE NEXT GO, from the memo again, and the declared world comes back: the bed
+# is asserted as a new run.
+A 164 13 udp:127.0.0.1:58987 standby.set s:"PS000002"
+A 174 14 udp:127.0.0.1:58988 go s:"2R7F4QWJ"
+A 175 15 engine run.ended s:"2R7F4QWJ"
+A 175 16 engine audio.arm s:"PS000003" s:"XQ4BMYGH"
+A 175 17 engine run.assert s:"PS000006" s:"ZHMWD46S"
+A 176 18 engine audio.armed s:"XQ4BMYGH" i:0
+A 176 19 engine audio.armed s:"ZHMWD46S" i:1
+A 177 20 engine run.started s:"ZHMWD46S"
+A 177 21 engine run.late s:"ZHMWD46S" i:7
+#
+# A JUMP half a second into the scene. The sweep inside the handler ends the
+# scene's armed run (it is the jump's own cue, rebuilt afresh at the offset) and
+# leaves the bed alone; the relaunch takes the voice the armed run gave back.
+# No record for either: the handler does it, and a replay does the same.
+A 237 22 udp:127.0.0.1:58989 list.aim s:"PS000001" s:"PS000003" d:0.5
+A 247 23 udp:127.0.0.1:58990 list.loadToTime s:"PS000001" s:"VST0RJ2J"
+A 248 24 engine audio.armed s:"VST0RJ2J" i:0
+A 249 25 engine run.started s:"VST0RJ2J"
+A 249 26 engine run.late s:"VST0RJ2J" i:7
+#
+# And a double Esc to end the session: the bed that sounded through the jump -
+# the same run, ZHMWD46S - and the scene.
+A 317 27 udp:127.0.0.1:58991 run.killAll
+A 319 28 engine run.ended s:"ZHMWD46S"
+A 319 29 engine run.ended s:"VST0RJ2J"

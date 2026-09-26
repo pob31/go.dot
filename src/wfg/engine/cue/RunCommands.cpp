@@ -631,6 +631,14 @@ namespace wfg::cue
                             return Outcome::ok (args);
                         } });
 
+        /*  NOT `killed`, only `skipFooter` (2026-09-26, namespace draft §18.8).
+            `killed` is what the persistent assertion reads as the operator's
+            kill from the running pane, which suspends a persistent cue for the
+            session (decision S). A double Esc is not that: PRD §3.29 says it
+            does not suspend - "the next GO restoring the declared world is the
+            point of declaring it" - and until this date it set `killed` on
+            every root, so a double Esc suspended every persistent cue in the
+            show until a load-to-time. `run.kill` still sets both. */
         registry.add ({ "run.killAll",
                         "Drops every run now: double Esc. No footer runs, and the world is left"
                         " as it was.",
@@ -644,7 +652,6 @@ namespace wfg::cue
                                 if (auto* run = runs.find (id))
                                 {
                                     run->skipFooter = true;
-                                    run->killed = true;
                                     run->state = runState::stopping;
                                 }
                             }

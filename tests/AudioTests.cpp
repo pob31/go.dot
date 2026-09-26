@@ -3586,6 +3586,13 @@ TEST_CASE ("ranges: a range plays the part of the file it names, and goes on pla
     /*  And the cue-wide question answers yes, because a ranged cue sounds out
         of whichever slot its current range is in. */
     CHECK (rig.host.isTrackPlaying (0));
+
+    /*  AND THE PLAYER ANSWERS IT TOO (2026-09-26). `HostPlayer::isPlaying` is
+        what the Runner reads a cue's end from, and it asked slot nought: this
+        cue, sounding out of its second slot, read silent there. */
+    Engine engine;
+    const audio::HostPlayer player { rig.host, engine };
+    CHECK (player.isPlaying (0));
 }
 
 TEST_CASE ("ranges: arming a cue with none of them puts the whole file back in the first slot")

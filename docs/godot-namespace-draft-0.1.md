@@ -10920,7 +10920,7 @@ output; its plugins add 5.8 ms, over the 5 ms budget: Pro-L 2 adds 5.0 ms*. The 
 than discovered on the night. Over the budget is a reading the tree derives from the plugin table
 and the device, like a plugin's state; it refuses nothing and is logged nowhere.
 
-### 18.8 Two faults in the persistent section, found drawing this, and one in the player
+### 18.8 Two faults in the persistent section, one in the jump, and one in the player
 
 A mic cue that must run all show is the persistent section's first real tenant, and two things
 there did not do what §3.29 says.
@@ -10935,12 +10935,22 @@ there did not do what §3.29 says.
   not name (`Runner.cpp:1241-1263`), and the solver never plans the persistent section, so a jump
   ended a sounding bed — and a jump is not a step, so nothing asserted it again until the next GO.
   Now the sweep leaves the section's runs alone.
+- **A jump doubled a cue it planned that was already running** — found by recording the fixture
+  below, once the first fix held. The sweep passed over every run of a cue the plan names, and
+  `seatPlan` builds every planned cue afresh (a jump hands it an empty map), so the old run stood
+  beside the new one: a playing cue sounding on under its own relaunch, where PRD §3.25 says a cue
+  at the wrong offset is stopped and relaunched, or the old standby's armed run holding a voice.
+  With two tracks and a bed now keeping one, the jump's own cue failed `no-track`. Now the sweep
+  ends every run of the list outside its persistent section, the plan's own cues included.
 - **`HostPlayer::isPlaying` asked slot 0 alone** (`HostPlayer.cpp:241-244`), where the interface
-  promises any slot and `AudioHost::isTrackPlaying` checks every one (`:1378`): a range on another
-  slot read as stopped.
+  promises any slot and `AudioHost::isTrackPlaying` checks every one (`:1378`). The Runner forgives
+  the silence of a range that is not finished, so it was masked until the last range's end had been
+  placed; then a cue whose last range was on another slot read silent and ended early, freeing a
+  voice that was still sounding.
 
 `tests/fixtures/logs/persistent.wfglog`, which §13.11 planned and nobody wrote, is written with the
-fixes.
+fixes: a real hosted session of `bundles/persistent` through a double Esc, the GO after it and a
+jump.
 
 ### 18.9 The client and the hands
 

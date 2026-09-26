@@ -1,0 +1,20 @@
+<Show>
+  <Lists>
+    <List id="PS000001" name="Main">
+      <Cue id="PS000002" name="House to half" number="1"/>
+      <Media channels="1" directOut="PS000020" file="scene.wav" id="PS000003" name="Scene one" number="2"/>
+      <Cue id="PS000004" name="Blackout" number="3"/>
+      <Persistent id="PS000005">
+        <Media channels="1" directOut="PS000020" file="rain.wav" id="PS000006" name="Rain" number="P1"/>
+      </Persistent>
+    </List>
+  </Lists>
+  <Mounts/>
+  <Audio tracks="2">
+    <Bus id="PS000020" name="Main L/R" width="2"/>
+  </Audio>
+  <MidiPorts/>
+  <Network/>
+  <Surfaces/>
+  <Dcas/>
+</Show>

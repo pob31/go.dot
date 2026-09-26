@@ -4970,6 +4970,43 @@ TEST_CASE ("jump: what it abandons is ended, and its voices come back")
     CHECK (rig.runs.find (abandoned)->claims.empty());
 }
 
+TEST_CASE ("jump: a planned cue that is already running is relaunched at the offset, never doubled")
+{
+    /*  PRD §3.25: load-to-time "stops and relaunches a cue already playing at
+        the wrong offset". Until 2026-09-26 the sweep passed over every run of a
+        cue the plan names, and the build - which makes every planned cue
+        afresh - made a second one beside it: a playing run sounding on under
+        its own relaunch, or an armed standby run holding a voice the relaunch
+        needed. The persistent section keeping its voices through a jump (the
+        same day) is what made the second of those fail `no-track`. */
+    JumpRig rig;
+
+    rig.setStandby (rig.mediaId);
+    CHECK (rig.submitAndTick ("go").applied == 1);
+    REQUIRE (rig.tickUntil ([&] { return ! rig.runOf (rig.mediaId).empty(); }));
+
+    const auto before = rig.runOf (rig.mediaId);
+    REQUIRE_FALSE (rig.runs.find (before)->isFinished());
+
+    REQUIRE (rig.jumpTo (rig.mediaId, 1.0).applied == 1);
+
+    CHECK (rig.runs.find (before)->isFinished());
+    CHECK_FALSE (rig.runs.find (before)->holdsTrack());
+
+    auto live = 0;
+
+    for (const auto& run : rig.runs.all())
+        if (run.cue == rig.mediaId && ! run.isFinished())
+            ++live;
+
+    CHECK (live == 1);
+
+    const auto* relaunched = rig.liveRunOf (rig.mediaId);
+    REQUIRE (relaunched != nullptr);
+    CHECK (relaunched->id != before);
+    CHECK (relaunched->startOffset == doctest::Approx (1.0));
+}
+
 TEST_CASE ("jump: the record carries every run it drew, and the signature accepts them")
 {
     /*  The `go` guarantee, widened to a jump: a replay never draws a number of
@@ -7164,6 +7201,91 @@ TEST_CASE ("persistent: a kill leaves it silent, and a load-to-time brings it ba
     rig.settle();
 
     CHECK (rig.liveBed() != nullptr);
+}
+
+TEST_CASE ("persistent: a double Esc leaves it silent, suspends nothing, and the next GO brings it back")
+{
+    /*  PRD §3.29: "a double Esc does not [suspend]: the next GO restoring the
+        declared world is the point of declaring it". Until 2026-09-26 it did -
+        `run.killAll` marked every root `killed`, which is how the running
+        pane's kill suspends, so one double Esc silenced the section for the
+        rest of the session (namespace draft §18.8). */
+    PersistentRig rig;
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    const auto* live = rig.liveBed();
+    REQUIRE (live != nullptr);
+    const auto first = live->id;
+
+    REQUIRE (rig.submitAndTick ("run.killAll").applied == 1);
+
+    const auto* killed = rig.runs.find (first);
+    REQUIRE (killed != nullptr);
+    CHECK (killed->skipFooter);
+    CHECK_FALSE (killed->killed);
+
+    REQUIRE (rig.engine.submit (origin::engine, "run.ended", { osc::Value::string (first) }));
+    rig.tickOnce();
+
+    CHECK (rig.liveBed() == nullptr);
+
+    /*  Silent until somebody presses: ticks alone put nothing back. */
+    rig.settle (60);
+    CHECK (rig.liveBed() == nullptr);
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    CHECK_FALSE (rig.runner.isSuspended (rig.bed));
+
+    const auto* again = rig.liveBed();
+    REQUIRE (again != nullptr);
+    CHECK (again->id != first);
+    CHECK (again->asserted);
+}
+
+TEST_CASE ("persistent: a jump leaves the section sounding")
+{
+    /*  The section is outside the jump: the solver never plans it, so the
+        load-to-time sweep - which ends every run of the list the plan does not
+        name - ended a sounding bed, and a jump is not a step, so nothing put
+        it back until the next GO (2026-09-26, namespace draft §18.8). The same
+        run, still sounding, is the whole answer. */
+    PersistentRig rig;
+
+    rig.step();
+    rig.settle();
+    rig.audio.completeArms (rig.engine);
+    rig.settle();
+
+    const auto* live = rig.liveBed();
+    REQUIRE (live != nullptr);
+    const auto sounding = live->id;
+
+    REQUIRE (rig.engine.submit ("cli", "list.aim",
+                                { osc::Value::string (rig.listId),
+                                  osc::Value::string (rig.mediaId),
+                                  osc::Value::float64 (0.5) }));
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("list.loadToTime",
+                                { osc::Value::string (rig.listId) }).applied >= 1);
+    rig.settle();
+
+    /*  The jump happened - the plan built its cue - so the sweep before it ran
+        and passed the bed by, rather than never running at all. */
+    REQUIRE_FALSE (rig.runOf (rig.mediaId).empty());
+
+    const auto* still = rig.runs.find (sounding);
+    REQUIRE (still != nullptr);
+    CHECK_FALSE (still->isFinished());
+    REQUIRE (rig.liveBed() != nullptr);
+    CHECK (rig.liveBed()->id == sounding);
 }
 
 TEST_CASE ("persistent: a stop before the pointer suspends it, and the solver is what sees that")

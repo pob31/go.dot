@@ -238,9 +238,15 @@ namespace wfg::audio
         audioHost.setTrackFxShape (track, slot, feed, back);
     }
 
+    /*  ANY SLOT, as the Player's contract says (2026-09-26). This asked slot
+        nought, which a ranged cue leaves behind at its first boundary: the
+        Runner forgives the silence of a range that is not finished, and so it
+        was masked until the last range's end had been placed - and then a cue
+        whose last range was on another slot read silent and ended early,
+        freeing a voice that was still sounding. */
     bool HostPlayer::isPlaying (int track) const
     {
-        return audioHost.trackPlayState (track).playing;
+        return audioHost.isTrackPlaying (track);
     }
 
     float HostPlayer::takeOutputPeak (int track)

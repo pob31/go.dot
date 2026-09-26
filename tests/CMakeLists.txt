@@ -548,6 +548,18 @@ add_test(NAME wfg.replay.plugins.fr_FR
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/fx
                  --wfg-locale=${WFG_LOCALE_FR})
 
+# The persistent section through a double Esc and a jump (2026-09-26, namespace
+# draft 18.8): asserted at a step, silenced but not suspended by a double Esc and
+# back at the next GO, and left sounding by a jump whose own cue is relaunched.
+add_test(NAME wfg.replay.persistent.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/persistent.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/persistent
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.persistent.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/persistent.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/persistent
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 # A cue's insert made, turned, switched off and a turn undone (Phase 9a, PR 9a.8):
 # the FX door's records replay on a machine with no child and no plugin.
 add_test(NAME wfg.replay.fx.C
