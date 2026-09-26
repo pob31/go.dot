@@ -107,8 +107,13 @@ namespace wfg::audio
         for (const auto& range : request.ranges)
             ranges.push_back ({ range.in, range.out, range.loops });
 
-        if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges,
-                                        request.startOffset))
+        /*  A LIVE INPUT HAS NO FILE (Phase 9b): its source is which logical
+            inputs its channel's stage takes, two atomics, and nothing about the
+            graph moves - the gate stays shut until the launch. */
+        if (request.live)
+            audioHost.setRackSource (request.track, request.firstInput, request.inputWidth);
+        else if (! audioHost.setTrackRanges (request.track, request.mediaFile, ranges,
+                                             request.startOffset))
         {
             /*  MEDIA-MISSING COVERS ALL THREE, for now: a file that is not
                 there, one that is there and is not audio, and a range that
@@ -170,16 +175,64 @@ namespace wfg::audio
 
     bool HostPlayer::launchAtSample (int track, int slot, std::int64_t sample)
     {
+        /*  A rack channel has no launcher slot: its launch is its gate. */
+        if (audioHost.isRackTrack (track))
+            return openLive (track, sample, 0.0);
+
         /*  The tick thread, and the whole of what GO does to the audio side:
             one sample turned into a beat through the anchor, then two stores. */
         return audioHost.launchTrackAt (track, slot, audioHost.beatsAtSample (sample));
     }
 
-    bool HostPlayer::stop (int track)           { return audioHost.stopTrack (track); }
+    bool HostPlayer::stop (int track)
+    {
+        /*  A RACK CHANNEL'S STOP SHUTS ITS INPUT, and its plugins ring out
+            until they are quiet (decision CG); `isPlaying` says when. */
+        if (audioHost.isRackTrack (track))
+        {
+            audioHost.shutRackGate (track);
+            return true;
+        }
+
+        return audioHost.stopTrack (track);
+    }
 
     bool HostPlayer::stopAtSample (int track, int slot, std::int64_t sample)
     {
+        if (audioHost.isRackTrack (track))
+            return stop (track);
+
         return audioHost.stopTrackAt (track, slot, audioHost.beatsAtSample (sample));
+    }
+
+    int HostPlayer::rackTrackOf (const std::string& channelId) const
+    {
+        return audioHost.rackTrackOf (channelId);
+    }
+
+    bool HostPlayer::openLive (int track, std::int64_t sample, double fadeInSeconds)
+    {
+        if (! audioHost.isRackTrack (track))
+            return false;
+
+        audioHost.openRackGate (track, sample, fadeInSeconds);
+        return true;
+    }
+
+    void HostPlayer::shutLive (int track, double seconds)
+    {
+        audioHost.shutRackGate (track, seconds);
+    }
+
+    bool HostPlayer::kill (int track)
+    {
+        if (audioHost.isRackTrack (track))
+        {
+            audioHost.killRack (track);
+            return true;
+        }
+
+        return audioHost.stopTrack (track);
     }
 
     void HostPlayer::setLevelDb (int track, double levelDb)
@@ -255,6 +308,10 @@ namespace wfg::audio
         freeing a voice that was still sounding. */
     bool HostPlayer::isPlaying (int track) const
     {
+        /*  A rack channel plays while its gate passes and while its tail rings. */
+        if (audioHost.isRackTrack (track))
+            return audioHost.isRackSounding (track);
+
         return audioHost.isTrackPlaying (track);
     }
 
@@ -279,7 +336,8 @@ namespace wfg::audio
             taking its whole state would sound through the last cue's
             (the author's decision of 2026-09-25) - so it waits, and is late
             by the load rather than wrong, and `run.late` says by how much. */
-        return audioHost.isTrackSourceReady (track) && audioHost.isTrackFxSettled (track);
+        return (audioHost.isRackTrack (track) || audioHost.isTrackSourceReady (track))
+                 && audioHost.isTrackFxSettled (track);
     }
 
     void HostPlayer::requestFxState (int track, int slot, const std::string& path)

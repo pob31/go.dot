@@ -252,15 +252,38 @@ namespace wfg::audio
 
         /*  THE RACK CHANNEL'S INPUT STAGE (Phase 9b, namespace draft §18.4):
             which logical input it takes and how many, and its gate - opened at
-            a sample of Go.dot's count (-1 for at once), shut on a ramp or a
-            fifth of one. Tick thread; atomics. Nothing on a voice. */
+            a sample of Go.dot's count (-1 for at once) over a ramp of so many
+            seconds (a mic cue's fade-in, five milliseconds at the least), and
+            shut over one (a stop's fade, or the five milliseconds). Tick
+            thread; atomics. Nothing on a voice. */
         void setRackSource (int trackIndex, int firstInput, int width) noexcept;
-        void openRackGate (int trackIndex, std::int64_t sample) noexcept;
-        void shutRackGate (int trackIndex, bool fast) noexcept;
+        void openRackGate (int trackIndex, std::int64_t sample, double rampSeconds = 0.005) noexcept;
+        void shutRackGate (int trackIndex, double rampSeconds = 0.005) noexcept;
+
+        /*  A KILL (namespace draft §18.5, decision CN): the input shut in a
+            millisecond, the output stage's level to silence behind its own
+            ramp, the channel's plugins reset so that the next cue does not open
+            onto a tail left inside them - and no ring-out: the channel is free
+            at once. Tick thread. */
+        void killRack (int trackIndex) noexcept;
+
+        /** Whether this track is a rack channel's rather than a voice. Any thread. */
+        bool isRackTrack (int trackIndex) const noexcept;
 
         /*  Whether a rack channel's gate lets anything through - open, or still
             ramping shut. False for a voice. Any thread. */
         bool isRackPassing (int trackIndex) const noexcept;
+
+        /*  WHETHER A RACK CHANNEL STILL SOUNDS: its gate passing, or - after a
+            shut that was not a kill - its plugins still ringing, until what
+            reaches the output stage has been quiet for a quarter of a second
+            or ten seconds have passed since the shut (decision CG). What a mic
+            run's `isPlaying` is, so a stopped cue ends when its tail has, and
+            the channel frees then. Tick thread. */
+        bool isRackSounding (int trackIndex) const noexcept;
+
+        static constexpr double rackQuietSeconds = 0.25;
+        static constexpr double rackTailCapSeconds = 10.0;
 
         /** How many channels each of those tracks carries - a cue's input width. */
         int editChannelsPerTrack() const noexcept;

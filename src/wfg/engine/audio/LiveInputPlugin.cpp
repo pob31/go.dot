@@ -79,16 +79,16 @@ namespace wfg::audio
         sourceWidth.store (std::clamp (width, 1, maxTaken), std::memory_order_relaxed);
     }
 
-    void LiveInputPlugin::openAt (std::int64_t sample) noexcept
+    void LiveInputPlugin::openAt (std::int64_t sample, double seconds) noexcept
     {
+        rampLength.store (std::max (rampSeconds, seconds), std::memory_order_relaxed);
         openSample.store (sample, std::memory_order_relaxed);
-        shutFast.store (false, std::memory_order_relaxed);
         wantOpen.store (true, std::memory_order_relaxed);
     }
 
-    void LiveInputPlugin::shut (bool fast) noexcept
+    void LiveInputPlugin::shut (double seconds) noexcept
     {
-        shutFast.store (fast, std::memory_order_relaxed);
+        rampLength.store (std::max (killSeconds, seconds), std::memory_order_relaxed);
         wantOpen.store (false, std::memory_order_relaxed);
     }
 
@@ -104,8 +104,7 @@ namespace wfg::audio
             `initialiseWithoutStopping` instead, so a gate open across a media
             arm's rebuild stays open; this runs at the first build and at a
             change of rate or block. */
-        const auto rampSamples = std::max (1.0, std::round (rampSeconds * info.sampleRate));
-        rampStep = static_cast<float> (1.0 / rampSamples);
+        sampleRate = info.sampleRate > 0.0 ? info.sampleRate : 48000.0;
         gain.store (0.0f, std::memory_order_relaxed);
         lastBlockEnd = -1;
     }
@@ -146,7 +145,8 @@ namespace wfg::audio
         const auto take = std::clamp (sourceWidth.load (std::memory_order_relaxed), 1, maxTaken);
         const auto open = wantOpen.load (std::memory_order_relaxed);
         const auto at = openSample.load (std::memory_order_relaxed);
-        const auto step = ! open && shutFast.load (std::memory_order_relaxed) ? rampStep * 5.0f : rampStep;
+        const auto step = static_cast<float> (1.0 / std::max (1.0, rampLength.load (std::memory_order_relaxed)
+                                                                      * sampleRate));
 
         const float* source[maxTaken] { nullptr, nullptr };
 
@@ -183,10 +183,14 @@ namespace wfg::audio
             const auto target = open && (at < 0 || firstSample + n >= at) ? 1.0f : 0.0f;
             g = target > g ? std::min (target, g + step) : std::max (target, g - step);
 
+            /*  EQUAL POWER: the gain is the sine of how far along the ramp it
+                is, the same curve both ways. */
+            const auto shaped = std::sin (juce::MathConstants<float>::halfPi * g);
+
             for (int channel = 0; channel < width; ++channel)
             {
                 const auto* from = channel < maxTaken ? source[channel] : nullptr;
-                destination.setSample (channel, start + n, from != nullptr ? from[n] * g : 0.0f);
+                destination.setSample (channel, start + n, from != nullptr ? from[n] * shaped : 0.0f);
             }
         }
 

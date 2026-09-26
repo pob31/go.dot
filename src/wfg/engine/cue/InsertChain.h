@@ -103,4 +103,12 @@ namespace wfg::cue
         its inserts: which of the slots it switches in, their shapes, its
         file's width and the voice's. */
     InsertChain chainOfCue (const juce::ValueTree& cue, const plugin::PluginTable* table, int trackChannels);
+
+    /*  HOW MANY CHANNELS A CUE'S SOURCE HAS: a media cue's file's, as its
+        `channels` row says; a mic cue's named input's width (Phase 9b), one
+        for a mic that names none. */
+    int sourceChannelsOf (const juce::ValueTree& cue);
+
+    /** A rack channel's track is two channels wide, whatever its class (AudioHost). */
+    inline constexpr int rackTrackChannels = 2;
 }

@@ -46,10 +46,14 @@
     turned round to face the inputs.
 
     THE GATE. A channel no cue holds is silent, and a cue opens it at a sample
-    Go.dot places, as a launch is placed; it opens and shuts on a short ramp so
-    that neither is a click. A shut asked to be fast - a kill - takes a fifth of
-    the ramp. And after a gap in the blocks - a device that went away and came
-    back (PRD §6.2) - an open gate ramps in again rather than stepping.
+    Go.dot places, as a launch is placed; it opens and shuts on a ramp so that
+    neither is a click - five milliseconds at the least, a mic cue's fade-in
+    when it has one, a stop's fade when the stop fades, a millisecond for a
+    kill (Phase 9b, namespace draft §18.5). The ramp is equal power: the gain
+    is the sine of how far along it is, so a long fade-in is not a quarter
+    of a second of near-silence and a sudden arrival. And after a gap in the
+    blocks - a device that went away and came back (PRD §6.2) - an open gate
+    ramps in again rather than stepping.
 
     NO AUTOMATABLE PARAMETERS and no latency, for CueOutputPlugin's reasons.
 */
@@ -91,17 +95,20 @@ namespace wfg::audio
         void setSource (int firstInput, int width) noexcept;
 
         /*  THE GATE, opened at a sample of Go.dot's count - the launch's own
-            instant - or at once for -1. Tick thread. */
-        void openAt (std::int64_t sample) noexcept;
+            instant - or at once for -1, over a ramp of that many seconds, never
+            shorter than `rampSeconds`. Tick thread. */
+        void openAt (std::int64_t sample, double seconds = rampSeconds) noexcept;
 
-        /*  And shut: on the ordinary ramp, or on a fifth of it for a kill. */
-        void shut (bool fast) noexcept;
+        /*  And shut, over a ramp of that many seconds: the ordinary five
+            milliseconds, a stop's fade, or `killSeconds` for a kill. */
+        void shut (double seconds = rampSeconds) noexcept;
 
         /*  Whether anything is coming through: the gate open, or still ramping
             down. Any thread. */
         bool isPassing() const noexcept;
 
         static constexpr double rampSeconds = 0.005;
+        static constexpr double killSeconds = 0.001;
 
         //======================================================================
         juce::String getName() const override;
@@ -130,13 +137,19 @@ namespace wfg::audio
         const LiveInputTap* boundTap = nullptr;
 
         std::atomic<int> sourceFirst { -1 }, sourceWidth { 1 };
-        std::atomic<bool> wantOpen { false }, shutFast { false };
+        std::atomic<bool> wantOpen { false };
         std::atomic<std::int64_t> openSample { -1 };
 
-        /*  The audio thread's own: the gain now, how far a sample moves it, and
-            where the last block ended, which is how a gap is noticed. */
+        /*  How long the ramp under way takes, in seconds: written with the
+            open or the shut that asks for it, read by the audio thread at each
+            block against the rate it was initialised at. */
+        std::atomic<double> rampLength { rampSeconds };
+        double sampleRate = 48000.0;
+
+        /*  The audio thread's own: how far along the ramp the gate is, nought
+            shut and one open - the gain is its sine - and where the last block
+            ended, which is how a gap is noticed. Read from any thread. */
         std::atomic<float> gain { 0.0f };
-        float rampStep = 1.0f;
         std::int64_t lastBlockEnd = -1;
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (LiveInputPlugin)

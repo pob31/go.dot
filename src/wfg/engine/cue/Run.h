@@ -259,6 +259,17 @@ namespace wfg::cue
             entire practical difference between the two, and the reason `sent`
             is worth having. */
         inline constexpr const char* sendFailed = "send-failed";
+
+        /*  A MIC CUE THAT CANNOT PLAY (Phase 9b, namespace draft §18.5), each
+            said by `wfg validate` before the show as well: it takes no input,
+            or one the show does not have; its channel is missing or shared - a
+            mic cue holds its channel alone; its input is not as wide as its
+            channel takes; or the channel was declared after the graph was
+            built, and waits for Load now. */
+        inline constexpr const char* noInput = "no-input";
+        inline constexpr const char* badChannel = "bad-channel";
+        inline constexpr const char* badWidth = "bad-width";
+        inline constexpr const char* notBuilt = "not-built";
     }
 
     //==============================================================================
@@ -793,6 +804,15 @@ namespace wfg::cue
 
         /** The audio side has confirmed a voice and made the media ready. */
         bool armConfirmed = false;
+
+        /*  A MIC RUN'S FADE-IN, copied at its arm (Phase 9b): how long its
+            channel's gate takes to open at the launch. */
+        double fadeIn = 0.0;
+
+        /*  A MIC RUN WAITING FOR ITS CHANNEL, armed with no track (decision
+            CM): set when the claim queued, cleared when the tick asks for the
+            arm again once the claim has landed - which it asks once. */
+        bool waitsForChannel = false;
 
         /** The sample the launch was placed at. Zero before it is placed. */
         std::int64_t launchedAtSample = 0;

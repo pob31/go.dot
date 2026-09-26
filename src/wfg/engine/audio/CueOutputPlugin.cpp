@@ -173,12 +173,20 @@ namespace wfg::audio
                     = destination.getWritePointer (channel, start);
 
             {
-                auto peak = lastInputPeak.load (std::memory_order_relaxed);
+                auto arriving = 0.0f;
 
                 for (int channel = 0; channel < copied; ++channel)
-                    peak = std::max (peak, scratch.getMagnitude (channel, 0, frames));
+                    arriving = std::max (arriving, scratch.getMagnitude (channel, 0, frames));
 
-                lastInputPeak.store (peak, std::memory_order_relaxed);
+                lastInputPeak.store (std::max (lastInputPeak.load (std::memory_order_relaxed), arriving),
+                                     std::memory_order_relaxed);
+
+                /*  The quiet run: back to nought on a chunk that is not, and
+                    longer by the chunk on one that is. One writer. */
+                quietRun.store (arriving > quietThreshold
+                                  ? 0
+                                  : quietRun.load (std::memory_order_relaxed) + frames,
+                                std::memory_order_relaxed);
             }
 
             cueMatrix.process (scratch.getArrayOfReadPointers(), copied,

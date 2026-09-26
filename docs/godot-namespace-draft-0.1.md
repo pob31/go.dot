@@ -10908,6 +10908,34 @@ relaunch, having no position to remember. §18.8 is what that needed.
 and the refusal names the cue — a persistent mic would otherwise refuse them all show with no clue
 why. A double Esc clears the way and the next GO restores the section.
 
+*As built (9b.5).* The life above, with these particulars. **The claim** is made in `claimSlotsFor`
+with a processor input's policy - queued behind the holder, never played dry - and a waiting run
+holds no track; `armWaitingMics`, on the tick with an audio side, sends `run.arm` once when the
+claim lands, and `armAgain` takes a mic cue through `armMic`. **The failures** - `no-input`,
+`bad-channel` (no channel, or a shared one), `bad-width`, `not-built` - are `run.failed` records
+from below the audio return, so a replay reads them from the log. **The arm** carries `live`, the
+input's first logical channel and its width, no file and no ranges; `fxOf` reads the channel's chain
+as the graph built it, `chainOfCue` has a mic branch (the input's width at the head of a two-channel
+track), `resolveRouting` is given the rack track's two channels, and `sourceChannelsOf` answers the
+direct out's and the sends' spread with the input's width where a media cue's gives its file's.
+**The launch** is `Player::openLive`: the gate opened at the launch's own sample over the cue's
+`fadeIn`, *on the gate's own ramp* - equal power, the gain the sine of how far along it is - and
+**not** a fade job, which is where this departs from the text above: nothing else can take the
+fade-in over, and the level a fade would move is the cue's level all along. **A stop**
+(`HostPlayer::stop`) shuts the input in five milliseconds; the channel reads as playing while what
+reaches its output stage - the chain's output, before the level - has crossed -60 dBFS inside the
+last quarter of a second, or until ten seconds since the shut (`AudioHost::isRackSounding`, fed by
+the output stage's quiet count); then `observeEdges` ends the run and the claim goes to the next in
+the queue. **A fade that stops a mic cue** closes the input over the fade (`Player::shutLive`) and
+its job keeps the level where it was, on the session and on a replay alike. **A kill** - any run
+whose `skipFooter` is set, which is double Esc and the running pane's kill - is `Player::kill`,
+which on a voice is the stop it always was and on a rack channel is `killRack`: the input shut in a
+millisecond, the level to silence, every lane reset, nothing left ringing. The routing, EQ and FX
+pushes reach a sounding mic run as a media run's. **Not in 9b.5:** a mic cue armed at standby or
+prepared by a header, asserted in the persistent section, or named by the refusal of Load now (all
+9b.6); and the path's delay and `overBudget` rows, which §18.7 makes readings the tree derives and
+the window says - with the window, in 9b.7.
+
 ### 18.6 The rack's plugins and their children
 
 Hosted as the set's are (§17.6): out of process, behind the proxy, with the same region, lanes,

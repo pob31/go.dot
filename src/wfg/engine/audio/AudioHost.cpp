@@ -291,6 +291,7 @@ namespace wfg::audio
             plugins.clear();
             liveInputs.clear();
             rackTracks.clear();
+            rackShutAt.clear();
             voices = 0;
             handles.clear();
             context = nullptr;
@@ -797,6 +798,7 @@ namespace wfg::audio
                     track.getOutput().setOutputToDeviceID (wide->getDeviceID());
 
             rackTracks[channel.id] = index;
+            rackShutAt.push_back (-1);
             return true;
         }
 
@@ -911,6 +913,7 @@ namespace wfg::audio
             trackLanes.clear();
             liveInputs.clear();
             rackTracks.clear();
+            rackShutAt.clear();
             voices = 0;
             proxySlots = 0;
 
@@ -1853,6 +1856,12 @@ namespace wfg::audio
         std::map<std::string, int> rackTracks;
         LiveInputTap tapView;
 
+        /*  WHEN EACH RACK CHANNEL WAS LAST SHUT, in Go.dot's count - the start
+            of its ring-out - or -1 while it is open or has never been, and -2
+            after a kill, which rings out nothing. Tick thread's own, sized with
+            the rack when the graph is built. */
+        std::vector<std::int64_t> rackShutAt;
+
         /** Whether the plugin table holds this graph's slots, to clear at stop. */
         bool toldTable = false;
         std::vector<std::unique_ptr<plugin::ProxyHost>> proxies;
@@ -1987,16 +1996,81 @@ namespace wfg::audio
             stage->setSource (firstInput, width);
     }
 
-    void AudioHost::openRackGate (int trackIndex, std::int64_t sample) noexcept
+    void AudioHost::openRackGate (int trackIndex, std::int64_t sample, double rampSeconds) noexcept
     {
         if (auto* stage = impl->liveInputOf (trackIndex))
-            stage->openAt (sample);
+        {
+            stage->openAt (sample, rampSeconds);
+            impl->rackShutAt[static_cast<std::size_t> (trackIndex - impl->voices)] = -1;
+        }
     }
 
-    void AudioHost::shutRackGate (int trackIndex, bool fast) noexcept
+    void AudioHost::shutRackGate (int trackIndex, double rampSeconds) noexcept
     {
         if (auto* stage = impl->liveInputOf (trackIndex))
-            stage->shut (fast);
+        {
+            stage->shut (rampSeconds);
+
+            /*  THE RING-OUT STARTS NOW, and a second shut - a stop's fade that
+                ends in a stop - starts it again from there. A kill's stays a
+                kill. */
+            auto& shutAt = impl->rackShutAt[static_cast<std::size_t> (trackIndex - impl->voices)];
+
+            if (shutAt != -2)
+                shutAt = impl->samples.samplesElapsed();
+        }
+    }
+
+    void AudioHost::killRack (int trackIndex) noexcept
+    {
+        auto* stage = impl->liveInputOf (trackIndex);
+
+        if (stage == nullptr)
+            return;
+
+        stage->shut (LiveInputPlugin::killSeconds);
+        impl->rackShutAt[static_cast<std::size_t> (trackIndex - impl->voices)] = -2;
+
+        if (auto* matrix = trackMatrix (trackIndex))
+            matrix->setLevelDb (-120.0f);
+
+        for (auto* lane : impl->trackLanes[static_cast<std::size_t> (trackIndex)])
+            if (lane != nullptr)
+                lane->requestReset();
+    }
+
+    bool AudioHost::isRackTrack (int trackIndex) const noexcept
+    {
+        return impl->liveInputOf (trackIndex) != nullptr;
+    }
+
+    bool AudioHost::isRackSounding (int trackIndex) const noexcept
+    {
+        const auto* stage = impl->liveInputOf (trackIndex);
+
+        if (stage == nullptr)
+            return false;
+
+        if (stage->isPassing())
+            return true;
+
+        const auto shutAt = impl->rackShutAt[static_cast<std::size_t> (trackIndex - impl->voices)];
+
+        if (shutAt < 0)
+            return false;
+
+        /*  RINGING UNTIL QUIET, OR UNTIL THE CAP. What reaches the output
+            stage is the chain's output - the reverb's tail after the input has
+            gone - so a quarter of a second of it under -60 dB is the tail
+            over. Read against the rate the graph runs at. */
+        const auto rate = impl->current.sampleRate > 0 ? impl->current.sampleRate : 48000;
+        const auto* output = impl->plugins[static_cast<std::size_t> (trackIndex)];
+        const auto quietEnough = output != nullptr
+                                   && output->quietSamples() >= static_cast<std::int64_t> (rackQuietSeconds * rate);
+        const auto capped = impl->samples.samplesElapsed() - shutAt
+                              >= static_cast<std::int64_t> (rackTailCapSeconds * rate);
+
+        return ! quietEnough && ! capped;
     }
 
     bool AudioHost::isRackPassing (int trackIndex) const noexcept

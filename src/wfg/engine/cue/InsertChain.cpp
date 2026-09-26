@@ -109,9 +109,76 @@ namespace wfg::cue
         return out;
     }
 
+    namespace
+    {
+        /*  A child of `Audio` by its container's element and its own id. */
+        juce::ValueTree audioChild (const juce::ValueTree& anyNode, const char* container,
+                                    const char* element, const juce::String& id)
+        {
+            if (id.isEmpty())
+                return {};
+
+            for (const auto holder : anyNode.getRoot().getChildWithName ("Audio"))
+                if (holder.hasType (container))
+                    for (const auto child : holder)
+                        if (child.hasType (element) && child.getProperty ("id").toString() == id)
+                            return child;
+
+            return {};
+        }
+    }
+
+    int sourceChannelsOf (const juce::ValueTree& cue)
+    {
+        static const Reader schema;
+
+        if (cue.hasType ("Mic"))
+        {
+            const auto input = audioChild (cue, "Inputs", "Input", cue.getProperty ("input").toString());
+            return input.isValid() ? std::max (1, static_cast<int> (schema.integer (input, "input", "width"))) : 1;
+        }
+
+        return static_cast<int> (schema.integer (cue, "media", "channels"));
+    }
+
     InsertChain chainOfCue (const juce::ValueTree& cue, const plugin::PluginTable* table, int trackChannels)
     {
         static const Reader schema;
+
+        /*  A MIC CUE'S CHAIN IS ITS CHANNEL'S (Phase 9b): the plugins as the
+            graph built that channel - as declared, with no graph - its own
+            inserts switched in or not, its input's width at the head, on a
+            track two channels wide whatever the class. */
+        if (cue.hasType ("Mic"))
+        {
+            const auto channel = audioChild (cue, "Rack", "Channel", cue.getProperty ("channel").toString());
+            const auto channelId = channel.getProperty ("id").toString().toStdString();
+
+            std::vector<std::string> declared;
+
+            for (const auto entry : channel)
+                if (entry.hasType ("Plugin"))
+                    declared.push_back (entry.getProperty ("id").toString().toStdString());
+
+            const auto slots = table != nullptr && table->rackBuilt (channelId) ? table->builtRackOf (channelId)
+                                                                                : declared;
+            std::vector<bool> switchedIn (slots.size(), false);
+
+            for (std::size_t slot = 0; slot < slots.size(); ++slot)
+            {
+                if (std::find (declared.begin(), declared.end(), slots[slot]) == declared.end())
+                    continue;
+
+                for (const auto child : cue)
+                    if (child.hasType ("Fx") && child.getProperty ("plugin").toString().toStdString() == slots[slot])
+                    {
+                        switchedIn[slot] = schema.flag (child, "fx", "enabled");
+                        break;
+                    }
+            }
+
+            return chainOf (sourceChannelsOf (cue), rackTrackChannels, switchedIn, shapesOf (slots, table));
+        }
 
         const auto plugins = cue.getRoot().getChildWithName ("Audio").getChildWithName ("Plugins");
         const auto slots = slotIdsOf (plugins, table);

@@ -93,6 +93,16 @@ namespace wfg::audio
             milliseconds longer, and nothing on the audio thread waits. */
         float takeOutputPeak() noexcept    { return lastOutputPeak.exchange (0.0f, std::memory_order_relaxed); }
 
+        /*  HOW LONG WHAT ARRIVES HAS BEEN QUIET, in samples (Phase 9b): the run
+            of blocks since one came in above `quietThreshold`. What tells a
+            rack channel's tail has rung out after its input was shut - the
+            chain's reverb decaying under -60 dB - so the channel frees when it
+            is quiet and not at a guess. Written on the audio thread; any thread
+            reads it. */
+        std::int64_t quietSamples() const noexcept  { return quietRun.load (std::memory_order_relaxed); }
+
+        static constexpr float quietThreshold = 0.001f;   // -60 dBFS
+
         int numOutputChannels() const noexcept    { return outputs; }
         int numInputChannels() const noexcept     { return inputs; }
 
@@ -152,6 +162,7 @@ namespace wfg::audio
 
         std::atomic<float> lastInputPeak { 0.0f };
         std::atomic<float> lastOutputPeak { 0.0f };
+        std::atomic<std::int64_t> quietRun { 0 };
 
         JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (CueOutputPlugin)
     };

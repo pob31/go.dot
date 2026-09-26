@@ -552,6 +552,22 @@ add_test(NAME wfg.replay.plugins.fr_FR
 # The persistent section through a double Esc and a jump (2026-09-26, namespace
 # draft 18.8): asserted at a step, silenced but not suspended by a double Esc and
 # back at the next GO, and left sounding by a jump whose own cue is relaunched.
+# A mic cue's life (stage 9b.5, namespace draft 18.5): GO on its rack channel, Esc
+# ringing out, fired again, its plugin's child killed and the failure in words, and a
+# double Esc - recorded from a hosted session with an input WAV, replayed with no child.
+# The plugin's parameter write left the show unsaved long enough to autosave, so the
+# replay is given somewhere to save to, never the fixture itself.
+add_test(NAME wfg.replay.mic.C
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/mic.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/mic
+                 --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/mic-C
+                 --wfg-locale=C)
+add_test(NAME wfg.replay.mic.fr_FR
+         COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/mic.wfglog"
+                 --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/mic
+                 --out=${CMAKE_CURRENT_BINARY_DIR}/replayed/mic-fr_FR
+                 --wfg-locale=${WFG_LOCALE_FR})
+
 add_test(NAME wfg.replay.persistent.C
          COMMAND wfg replay "${CMAKE_CURRENT_SOURCE_DIR}/fixtures/logs/persistent.wfglog"
                  --bundle=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/bundles/persistent
@@ -1161,6 +1177,20 @@ set_tests_properties(blackbox.phase9b-inputs.C PROPERTIES
 add_test(NAME blackbox.phase9b-inputs.fr_FR
          COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_inputs.py" --wfg-locale=${WFG_LOCALE_FR})
 set_tests_properties(blackbox.phase9b-inputs.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
+# The live rack, stage 9b.5 (namespace draft 18.5 and 18.10): the `mic` fixture on
+# a hosted interface fed a steady input, its mic cue heard through Vox 1's own
+# test-gain child after rising over its fade-in, Esc ringing out and freeing the
+# channel, the child killed mid-cue and the voice going on dry with the failure in
+# words, a double Esc ending it at once, and the session replayed with no child.
+add_test(NAME blackbox.phase9b-mic.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_mic.py" --wfg-locale=C)
+set_tests_properties(blackbox.phase9b-mic.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9b-mic.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_mic.py" --wfg-locale=${WFG_LOCALE_FR})
+set_tests_properties(blackbox.phase9b-mic.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
 # The client the engine serves at /ui: the page, its files as bytes, and since

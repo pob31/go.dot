@@ -1,0 +1,35 @@
+# wfg-log 1
+# fixture mic - a mic cue through its rack channel: heard, stopped, fired again, its
+# plugin's child killed, and a double Esc (namespace draft 18.5, stage 9b.5, 2026-09-26).
+#
+# WHAT IT IS FOR: that a mic cue's life replays from the document and the log alone,
+# with no interface and no child. GO claims Vox 1 and arms on its track - audio.armed is
+# the audio side's word, re-injected - and the run starts; Esc ends it only when its
+# tail has rung out, run.ended fourteen ticks after run.stopAll: the five-millisecond
+# shut, then a quarter of a second of quiet at the channel's output stage. Fired again,
+# the cue takes the channel again; its plugin's child dies from its own parameter and
+# the failure says which channel plays without it; and a double Esc ends the run at
+# once. Recorded from a real `wfg serve --hosted --input-wav` of a copy of
+# tests/fixtures/bundles/mic fed a steady level at its first input, driven over OSC by
+# tests/blackbox/phase9b_mic.py --keep-log.
+#
+# bundle mic sha256:302b8a997a4df022ebf7df01b8d14ee86b55e40406dd34282adb042c29043e57
+# clock sampleRate=48000 blockSize=128 samplesPerTick=960
+A 0 0 engine audio.editBuilt s:"hosted" i:2 i:2 i:66
+A 5 1 udp:127.0.0.1:56989 go s:"GKC0SAJ1"
+A 6 2 engine audio.armed s:"GKC0SAJ1" i:2
+A 7 3 engine run.started s:"GKC0SAJ1"
+A 7 4 engine node.set s:"/godot/audio/patchSettled" T
+A 7 5 engine run.late s:"GKC0SAJ1" i:7
+A 102 6 udp:127.0.0.1:56990 run.stopAll
+A 116 7 engine run.ended s:"GKC0SAJ1"
+A 202 8 udp:127.0.0.1:56991 cue.fire s:"MC000002" s:"5PQPDKY6"
+A 203 9 engine audio.armed s:"5PQPDKY6" i:2
+A 204 10 engine run.started s:"5PQPDKY6"
+A 204 11 engine run.late s:"5PQPDKY6" i:7
+A 303 12 udp:127.0.0.1:56993 node.set s:"/godot/fx/MC000005/p1" f:1
+A 307 13 engine plugin.failed s:"MC000012" s:"the plugin stopped answering: 8 blocks late in a row on channel Vox 1; Vox 1 plays without it; restarting in two seconds"
+A 403 14 udp:127.0.0.1:58719 run.killAll
+A 403 15 engine document.autosave
+A 405 16 engine run.ended s:"5PQPDKY6"
+A 420 17 engine plugin.failed s:"MC000012" s:"the plugin stopped answering: 8 blocks late in a row on channel Vox 1; Vox 1 plays without it; failed again inside a minute, so it stays down until plugin.restart"

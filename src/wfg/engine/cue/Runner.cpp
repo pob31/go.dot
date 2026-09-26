@@ -345,7 +345,7 @@ namespace wfg::cue
             one where GO does nothing at all. A cue in its PRE-WAIT is the same
             case one step earlier, and is left alone for the same reason: it is
             already on its way. */
-        if (kind == "media")
+        if (kind == "media" || kind == "mic")
             if (const auto* live = runs.liveRunOf (cueId))
             {
                 if (fireAtOnce && live->state == runState::armed)
@@ -472,6 +472,8 @@ namespace wfg::cue
 
             if (kind == "media")
                 armMedia (engine, cue, id);
+            else if (kind == "mic")
+                armMic (engine, cue, id);
 
             return id;
         }
@@ -1758,12 +1760,15 @@ namespace wfg::cue
     }
 
     void Runner::requestArmOn (Engine& engine, const juce::ValueTree& cue, Run& run,
-                               double levelDb)
+                               double levelDb, int liveFirstInput, int liveWidth)
     {
         /*  Where it goes, resolved through the buses the show declares, so the
-            audio side never has to know what a bus is. */
+            audio side never has to know what a bus is. A rack channel's track
+            is two channels wide whatever the voices are. */
+        const auto live = liveFirstInput >= 0;
         std::string problem;
-        const auto routing = resolveRouting (cue, audio->channelsPerTrack(), problem, chainChannelsOf (cue));
+        const auto routing = resolveRouting (cue, live ? rackTrackChannels : audio->channelsPerTrack(),
+                                             problem, chainChannelsOf (cue));
 
         if (! problem.empty())
         {
@@ -1797,6 +1802,12 @@ namespace wfg::cue
         run.eq = request.eq;
         request.fx = fxOf (cue);
         run.fx = request.fx;
+
+        /*  A LIVE INPUT (Phase 9b): no file, no ranges - the logical inputs its
+            channel's stage takes. */
+        request.live = live;
+        request.firstInput = liveFirstInput;
+        request.inputWidth = liveWidth;
 
         /*  READ THE SAME WAY THE LEVEL IS, and the reason it is worth a line of
             its own: this row has existed since Phase 2, the grammar has always
@@ -2391,16 +2402,23 @@ namespace wfg::cue
             return;
         }
 
-        /*  A MIC CUE, UNTIL IT SOUNDS (Phase 9b): a line in the book with a
-            run, as a memo is, so that a sequence moves past it and nothing
-            waits on a run that nothing will end. Stage 9b.5 gives it its
-            channel, its gate and its tail. */
+        /*  A MIC CUE (Phase 9b, namespace draft §18.5): a launch asked for, as
+            a media cue's is, and the arm for one fired cold - its channel
+            claimed, or waited for, and its plugins set as the cue says. */
         if (kind == "mic")
         {
-            if (auto* run = runs.find (runId))
-                run->state = runState::playing;
+            auto* run = runs.find (runId);
 
-            finishing.push_back (runId);
+            if (run == nullptr)
+                return;
+
+            run->launchRequested = true;
+            run->launchRequestedAtTick = tick;
+            run->prepare.clear();
+
+            if (run->track < 0)
+                armMic (engine, cue, runId);
+
             return;
         }
 
@@ -2452,6 +2470,33 @@ namespace wfg::cue
 
         if (run == nullptr)
             return;
+
+        /*  A MIC CUE'S CHANNEL IS A CLAIM (Phase 9b, decision BX): held alone,
+            and queued behind another run that holds it - a processor input's
+            policy and not an insert's, because a live voice played dry without
+            the plugins it was given is not the cue somebody fired. A shared
+            channel is refused at the arm, in words. */
+        if (cue.hasType ("Mic"))
+        {
+            const auto channelId = textOf (cue, "channel");
+            const auto channel = channelId.empty() ? juce::ValueTree() : document.findById (channelId);
+
+            if (channel.isValid() && channel.hasType ("Channel")
+                  && channel.getProperty ("access", "exclusive").toString() != "shared")
+            {
+                const auto* holder = runs.holderOf (channelId);
+                const auto queued = std::find (run->pending.begin(), run->pending.end(), channelId)
+                                      != run->pending.end();
+
+                if (holder != run && ! queued)
+                {
+                    if (holder == nullptr)
+                        run->claims.push_back (channelId);
+                    else
+                        run->pending.push_back (channelId);
+                }
+            }
+        }
 
         for (const auto& destination : cue)
         {
@@ -2629,6 +2674,92 @@ namespace wfg::cue
         requestArmOn (engine, cue, *run, numberOf (cue, "level"));
     }
 
+    void Runner::armMic (Engine& engine, const juce::ValueTree& cue, const std::string& runId)
+    {
+        auto* run = runs.find (runId);
+
+        if (run == nullptr || run->track >= 0)
+            return;
+
+        /*  THE CHANNEL'S CLAIM FIRST, above the return below, for armMedia's
+            reason: which channel a cue holds is a fact about the document and
+            the run table, so a replay takes the same one (§13.4). */
+        claimSlotsFor (cue, runId);
+
+        run->fadeIn = std::max (0.0, numberOf (cue, "fadeIn"));
+
+        if (audio == nullptr)
+            return;
+
+        /*  WHAT WOULD FAIL IT, each in its own word, and `wfg validate` says
+            the first three before the show. Reported from below the return,
+            as every run report is, so a replay has the log's copy only. */
+        const auto fail = [&engine, &runId] (const char* why)
+        {
+            engine.submit (origin::engine, "run.failed",
+                           { osc::Value::string (runId), osc::Value::string (why) });
+        };
+
+        const auto inputId = textOf (cue, "input");
+        const auto channelId = textOf (cue, "channel");
+        const auto input = inputId.empty() ? juce::ValueTree() : document.findById (inputId);
+        const auto channel = channelId.empty() ? juce::ValueTree() : document.findById (channelId);
+
+        if (! input.isValid() || ! input.hasType ("Input"))
+            return fail (runError::noInput);
+
+        if (! channel.isValid() || ! channel.hasType ("Channel")
+              || channel.getProperty ("access", "exclusive").toString() == "shared")
+            return fail (runError::badChannel);
+
+        /*  WHAT A CLASS TAKES IN, the first half of its name: mono and
+            mono-to-stereo take one channel, stereo two (PRD §3.9e). */
+        const auto width = sourceChannelsOf (cue);
+        const auto takes = channel.getProperty ("class", "mono").toString() == "stereo" ? 2 : 1;
+
+        if (width != takes)
+            return fail (runError::badWidth);
+
+        /*  WAITING FOR ITS CHANNEL, armed with no track (decision CM): a run
+            holding a track would receive every live push the Runner makes and
+            move the sounding cue's matrix, EQ and plugins. `armWaitingMics`
+            asks again when the claim lands; the row says `pending` meanwhile. */
+        if (std::find (run->pending.begin(), run->pending.end(), channelId) != run->pending.end())
+        {
+            run->waitsForChannel = true;
+            return;
+        }
+
+        /*  A CHANNEL THE GRAPH WAS BUILT WITHOUT - declared since the show
+            opened - until Load now builds it. */
+        const auto track = audio->rackTrackOf (channelId);
+
+        if (track < 0)
+            return fail (runError::notBuilt);
+
+        run->track = track;
+
+        static const Reader schema;
+        const auto first = static_cast<int> (schema.integer (input, "input", "firstChannel"));
+
+        requestArmOn (engine, cue, *run, numberOf (cue, "level"), first, width);
+    }
+
+    void Runner::armWaitingMics (Engine& engine)
+    {
+        for (const auto& snapshot : runs.all())
+        {
+            if (! snapshot.waitsForChannel || snapshot.isFinished() || snapshot.track >= 0
+                  || ! snapshot.pending.empty())
+                continue;
+
+            if (auto* run = runs.find (snapshot.id))
+                run->waitsForChannel = false;
+
+            engine.submit (origin::engine, "run.arm", one (snapshot.id));
+        }
+    }
+
     std::string Runner::statePathOf (const std::string& named) const
     {
         if (named.empty() || pluginsFolder.empty())
@@ -2803,7 +2934,7 @@ namespace wfg::cue
                                    double gain, const char* what,
                                    std::string& why) -> std::vector<double>
         {
-            const auto fileChannels = static_cast<int> (schema.integer (mediaCue, "media", "channels"));
+            const auto fileChannels = sourceChannelsOf (mediaCue);
 
             if (fileChannels <= 0)
             {
@@ -3463,6 +3594,20 @@ namespace wfg::cue
                 are the same number here and diverge only when somebody fades
                 over the top of it. */
             job.stopsAtTick = currentTick + job.ticksTotal;
+        }
+
+        /*  A MIC CUE FADED OUT IS ITS INPUT FADED (Phase 9b, namespace draft
+            §18.5): the level moves into the chain rather than out of it, so
+            the channel's reverb rings on at the cue's level after the voice
+            has gone. The output stays where it is - here and on a replay, which
+            publishes the same level - and the stop at the end lets the tail
+            ring out. */
+        if (stopWhenDone && target->kind == "mic")
+        {
+            job.toDb = fromDb;
+
+            if (audio != nullptr && target->track >= 0)
+                audio->shutLive (target->track, seconds);
         }
 
         /*  A cue on its way out says so from the moment it is asked, not when
@@ -4147,7 +4292,11 @@ namespace wfg::cue
 
         const auto cue = document.findById (run->cue);
 
-        if (cue.isValid())
+        /*  A MIC CUE WHOSE CHANNEL CAME FREE (Phase 9b) takes it through the
+            same door a sampler member takes a voice by. */
+        if (cue.isValid() && cue.hasType ("Mic"))
+            armMic (engine, cue, runId);
+        else if (cue.isValid())
             armMedia (engine, cue, runId);
     }
 
@@ -6256,6 +6405,7 @@ namespace wfg::cue
         if (audio == nullptr)
             return;
 
+        armWaitingMics (engine);
         launchIfDue (engine, tick);
         advanceRanges (engine);
 
@@ -6371,7 +6521,12 @@ namespace wfg::cue
                 which range that is. */
             const auto slot = run->startRange;
 
-            if (audio->launchAtSample (run->track, slot, target))
+            /*  A MIC CUE'S LAUNCH IS ITS GATE (Phase 9b): opened at the same
+                instant a media cue's clip would start, over its fade-in. */
+            const auto launched = run->kind == "mic" ? audio->openLive (run->track, target, run->fadeIn)
+                                                     : audio->launchAtSample (run->track, slot, target);
+
+            if (launched)
             {
                 run->launchRequested = false;
                 run->launchedAtSample = target;
@@ -6921,7 +7076,7 @@ namespace wfg::cue
 
             const auto cue = document.findById (run->cue);
 
-            if (! cue.isValid() || ! cue.hasType ("Media"))
+            if (! cue.isValid() || (! cue.hasType ("Media") && ! cue.hasType ("Mic")))
                 continue;
 
             std::string problem;
@@ -6944,12 +7099,33 @@ namespace wfg::cue
             voice is not left playing. With no graph to ask, the set's own
             order is the slots. */
         std::vector<std::string> inSet;
+        std::vector<std::string> slots;
 
-        for (const auto entry : document.root().getChildWithName ("Audio").getChildWithName ("Plugins"))
-            if (entry.hasType ("Plugin"))
-                inSet.push_back (entry.getProperty ("id").toString().toStdString());
+        if (cue.hasType ("Mic"))
+        {
+            /*  A MIC CUE'S ARE ITS CHANNEL'S (Phase 9b): the channel's track as
+                the graph built it, its declared chain with no graph. */
+            const auto channelId = textOf (cue, "channel");
 
-        const auto slots = pluginTable != nullptr && pluginTable->hasGraph() ? pluginTable->built() : inSet;
+            for (const auto rack : document.root().getChildWithName ("Audio"))
+                if (rack.hasType ("Rack"))
+                    for (const auto channel : rack)
+                        if (channel.hasType ("Channel") && channel.getProperty ("id").toString().toStdString() == channelId)
+                            for (const auto entry : channel)
+                                if (entry.hasType ("Plugin"))
+                                    inSet.push_back (entry.getProperty ("id").toString().toStdString());
+
+            slots = pluginTable != nullptr && pluginTable->rackBuilt (channelId) ? pluginTable->builtRackOf (channelId)
+                                                                                  : inSet;
+        }
+        else
+        {
+            for (const auto entry : document.root().getChildWithName ("Audio").getChildWithName ("Plugins"))
+                if (entry.hasType ("Plugin"))
+                    inSet.push_back (entry.getProperty ("id").toString().toStdString());
+
+            slots = pluginTable != nullptr && pluginTable->hasGraph() ? pluginTable->built() : inSet;
+        }
 
         for (std::size_t slot = 0; slot < slots.size(); ++slot)
         {
@@ -7038,7 +7214,7 @@ namespace wfg::cue
 
             const auto cue = document.findById (run->cue);
 
-            if (! cue.isValid() || ! cue.hasType ("Media"))
+            if (! cue.isValid() || (! cue.hasType ("Media") && ! cue.hasType ("Mic")))
                 continue;
 
             auto wanted = fxOf (cue);
@@ -7130,7 +7306,7 @@ namespace wfg::cue
 
             const auto cue = document.findById (run->cue);
 
-            if (! cue.isValid() || ! cue.hasType ("Media"))
+            if (! cue.isValid() || (! cue.hasType ("Media") && ! cue.hasType ("Mic")))
                 continue;
 
             const auto wanted = eqOf (cue);
@@ -7195,7 +7371,14 @@ namespace wfg::cue
             if (auto* run = runs.find (snapshot.id))
                 run->stopIssued = true;
 
-            audio->stop (snapshot.track);
+            /*  A KILL IS NOT A STOP ON A RACK CHANNEL (Phase 9b, decision CN):
+                a double Esc, or the pane's own kill, silences a mic cue at once
+                with nothing left ringing, where Esc lets its tail ring out. On a
+                voice the two are the same stop, as they always were. */
+            if (snapshot.skipFooter)
+                audio->kill (snapshot.track);
+            else
+                audio->stop (snapshot.track);
         }
     }
 
@@ -8014,9 +8197,12 @@ namespace wfg::cue
 
         /*  A VOICE FREED, AND A SAMPLER MEMBER WAITING FOR ONE TAKES IT
             (decision Z). What the scheduler sends itself when a track frees;
-            anyone may, as with every engine-origin command. */
+            anyone may, as with every engine-origin command. AND A RACK CHANNEL
+            FREED (Phase 9b): a mic cue waiting for it takes it by the same
+            door. */
         registry.add ({ "run.arm",
-                        "A sampler member waiting for a voice takes the track that has come free.",
+                        "A sampler member waiting for a voice takes the track that has come free;"
+                        " a mic cue waiting for its rack channel takes the channel.",
                         { { "run", 's', false } },
                         true,
                         [&engine, &runner] (CommandContext&, const std::vector<osc::Value>& args)

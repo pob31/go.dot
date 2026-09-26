@@ -210,6 +210,14 @@ namespace wfg::cue
         /*  And its inserts, one per entry of the set in chain order (PR
             9a.8): switched in or not, and the values the cue sets. */
         std::vector<FxSetting> fx;
+
+        /*  A LIVE INPUT (Phase 9b, namespace draft §18.5): no file - the
+            source is `inputWidth` logical inputs from `firstInput`, through the
+            rack channel whose track this is, and `fx` is that channel's chain.
+            The gate stays shut until the launch. */
+        bool live = false;
+        int firstInput = -1;
+        int inputWidth = 1;
     };
 
     /*  The audio side, as the cue layer sees it.
@@ -326,6 +334,18 @@ namespace wfg::cue
             since the last take, linear, the count starting again - the
             soundcheck's meter, taken once a tick. None, and silence, by
             default: the answer for a player with no interface. */
+        /*  THE LIVE RACK (Phase 9b, namespace draft §18.5). The track a rack
+            channel was built as, or -1 for one the graph does not have; a mic
+            cue's launch, its channel's gate opened at a sample over its
+            fade-in; a stop's fade taken by the input, the tail left to ring;
+            and a kill, which for a voice is its stop and for a rack channel is
+            silence at once with nothing left ringing. Defaults a test's player
+            is complete with. */
+        virtual int rackTrackOf (const std::string&) const { return -1; }
+        virtual bool openLive (int track, std::int64_t sample, double) { return launchAtSample (track, 0, sample); }
+        virtual void shutLive (int, double) {}
+        virtual bool kill (int track) { return stop (track); }
+
         virtual int inputCount() const { return 0; }
         virtual float takeInputPeak (int) { return 0.0f; }
 
@@ -1020,6 +1040,17 @@ namespace wfg::cue
         void armMedia (Engine& engine, const juce::ValueTree& cue,
                        const std::string& runId);
 
+        /*  A MIC CUE CLAIMING ITS CHANNEL AND TAKING ITS TRACK (Phase 9b,
+            namespace draft §18.5): the claim first, as a media cue's are; then,
+            with an audio side, what would fail it in words, the wait when the
+            channel is held - armed with no track - and the arm on the
+            channel's own track. */
+        void armMic (Engine& engine, const juce::ValueTree& cue, const std::string& runId);
+
+        /*  A mic run whose channel has come free asks to be armed, once:
+            `run.arm`, the sampler's door. The tick's, with an audio side. */
+        void armWaitingMics (Engine& engine);
+
         /*  The half of an arm below the track: the routing, the offset, the
             ranges and the request itself, for a run that already holds its
             voice. `armMedia` reaches it after choosing a track; a seek reaches
@@ -1027,7 +1058,7 @@ namespace wfg::cue
             two disagree about it: an arm plays the cue's authored level, a
             seek keeps the one a fade had brought the run to. */
         void requestArmOn (Engine& engine, const juce::ValueTree& cue, Run& run,
-                           double levelDb);
+                           double levelDb, int liveFirstInput = -1, int liveWidth = 1);
 
         /** A bundle-relative file name as the path the audio side opens. */
         std::string mediaPathOf (const std::string& named) const;

@@ -2066,7 +2066,7 @@ TEST_CASE ("rack: each channel is a track after the voices, its chain one child 
 
     /*  A fast shut on the first: silent inside a block or two, the second
         untouched. */
-    host.shutRackGate (1, true);
+    host.killRack (1);
 
     for (int i = 0; i < 4; ++i)
         host.processBlock (inputs, 2);
@@ -2079,4 +2079,97 @@ TEST_CASE ("rack: each channel is a track after the voices, its chain one child 
     host.setBlockSink (nullptr);
     host.stop();
     CHECK (failures == 0);
+}
+
+TEST_CASE ("rack: a gate opens over its fade-in, a stop rings until the output is quiet, and a kill leaves nothing")
+{
+    /*  Phase 9b (namespace draft 18.5, decisions CG and CN), at the host and
+        with no plugin on the channel, so no child is needed. The fade-in is
+        equal power: half way through it the gain is the sine of an eighth of
+        a turn, 0.707, not a half. A stop is heard as sounding - the run is not
+        over - until what reaches the output stage has been quiet for a
+        quarter of a second. A kill is silent inside a block and leaves nothing
+        ringing. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+
+    audio::RackChannelSpec channel;
+    channel.id = "CH000001";
+    channel.name = "Vox 1";
+    spec.rack.push_back (channel);
+
+    REQUIRE (host.buildEdit (spec));
+
+    const auto rack = host.rackTrackOf ("CH000001");
+    REQUIRE (rack == 1);
+    CHECK (host.isRackTrack (rack));
+    CHECK_FALSE (host.isRackTrack (0));
+    CHECK_FALSE (host.isRackSounding (rack));
+
+    auto* matrix = host.trackMatrix (rack);
+    REQUIRE (matrix != nullptr);
+    matrix->setLevelDb (0.0f);
+    matrix->setGain (0, 0, 1.0f);
+    matrix->snapToTargets();
+    host.setRackSource (rack, 0, 1);
+
+    LastSamples sink;
+    host.setBlockSink (&sink);
+
+    const std::vector<float> steady (64, 0.5f), silent (64, 0.0f);
+    const float* inputs[] { steady.data(), silent.data() };
+
+    const auto run = [&host, &inputs] (double seconds)
+    {
+        const auto blocks = static_cast<int> (std::lround (seconds * 48000.0 / 64.0));
+
+        for (int i = 0; i < blocks; ++i)
+            host.processBlock (inputs, 2);
+    };
+
+    /*  THE FADE-IN, over a fifth of a second: equal power at its middle. */
+    host.openRackGate (rack, -1, 0.2);
+    run (0.1);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5 * std::sin (juce::MathConstants<double>::pi / 4.0)).epsilon (0.02));
+
+    run (0.15);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5f).epsilon (0.001));
+    CHECK (host.isRackSounding (rack));
+
+    /*  A STOP: the input shut in five milliseconds, and the channel still
+        sounding while the output stage has been quiet for less than a quarter
+        of a second - the tail a reverb would be ringing - and not after. */
+    host.shutRackGate (rack);
+    run (0.1);
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+    CHECK (host.isRackSounding (rack));
+
+    run (0.2);
+    CHECK_FALSE (host.isRackSounding (rack));
+
+    /*  A KILL: open again at once, then killed - silent inside two blocks, and
+        not sounding at all, with no quarter of a second to wait out. */
+    host.openRackGate (rack, -1);
+    run (0.05);
+    CHECK (sink.last[0].load() == doctest::Approx (0.5f).epsilon (0.001));
+
+    host.killRack (rack);
+    host.processBlock (inputs, 2);
+    host.processBlock (inputs, 2);
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+    CHECK_FALSE (host.isRackSounding (rack));
+
+    host.setBlockSink (nullptr);
+    host.stop();
 }

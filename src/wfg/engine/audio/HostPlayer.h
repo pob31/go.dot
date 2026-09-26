@@ -89,6 +89,16 @@ namespace wfg::audio
         void setFxParameter (int track, int slot, int parameter, float normalised) override;
         void setFxShape (int track, int slot, int feed, int back) override;
         void requestFxState (int track, int slot, const std::string& path) override;
+
+        /*  THE LIVE RACK (Phase 9b): a rack channel's track is played through
+            its gate - opened at the launch's sample over the cue's fade-in,
+            shut over a stop's fade or five milliseconds, and its tail left to
+            ring out - and a kill is silence at once. On a voice, `kill` is the
+            stop it always was. */
+        int rackTrackOf (const std::string& channelId) const override;
+        bool openLive (int track, std::int64_t sample, double fadeInSeconds) override;
+        void shutLive (int track, double seconds) override;
+        bool kill (int track) override;
         bool isPlaying (int track) const override;
         bool isArmReady (int track) const override;
         float takeOutputPeak (int track) override;
