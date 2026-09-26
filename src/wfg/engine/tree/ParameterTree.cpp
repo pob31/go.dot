@@ -1829,6 +1829,23 @@ namespace wfg::tree
                 leaf ("manufacturer", "Who made it, as the file says", known[n].manufacturer);
                 leaf ("path", "Where its file is on this machine - plugin.create's fourth word", known[n].path);
             }
+
+            /*  THE FILES A SCAN GAVE UP ON, which every scan skips until one
+                is tried again - plugin.scanRetry's one word. */
+            const auto skipped = knownList->skippedFiles();
+
+            for (std::size_t n = 0; n < skipped.size(); ++n)
+            {
+                Node node;
+                node.address = std::string (godot) + "/plugin/skipped/" + std::to_string (n);
+                node.kind = Kind::state;
+                node.access = Access::read;
+                node.typeTags = "s";
+                node.description = "A file a scan gave up on - it hung past the deadline or took the scan down"
+                                   " - skipped until plugin.scanRetry names it";
+                node.values.push_back (osc::Value::string (skipped[n]));
+                nodes.push_back (std::move (node));
+            }
         }
 
         //----------------------------------------------------------------------
@@ -2186,6 +2203,40 @@ namespace wfg::tree
             rebuildMountPart();
 
         std::vector<Node> runtime;
+
+        /*  WHERE THE APP'S PLUGIN SCAN IS (2026-09-26): on this half, because
+            it moves file by file while nothing in the show changes. Hand-built,
+            as the known list is: machine state about plugins, never stored. */
+        if (scans != nullptr)
+        {
+            const auto scan = scans->reading();
+
+            const auto scanLeaf = [&runtime] (const char* name, const char* tags, const char* description,
+                                              osc::Value value)
+            {
+                Node node;
+                node.address = std::string (godot) + "/plugin/scan/" + name;
+                node.kind = Kind::state;
+                node.access = Access::read;
+                node.typeTags = tags;
+                node.description = description;
+                node.values.push_back (std::move (value));
+                runtime.push_back (std::move (node));
+            };
+
+            scanLeaf ("state", "s", "The app's plugin scan: idle, scanning, finished or failed",
+                      osc::Value::string (scan.state));
+            scanLeaf ("format", "s", "The format asked for - vst3, au, lv2 - or empty for every format",
+                      osc::Value::string (scan.format));
+            scanLeaf ("file", "s", "The file under scan, empty between scans", osc::Value::string (scan.file));
+            scanLeaf ("done", "i", "Files looked at so far, of total", osc::Value::int32 (scan.done));
+            scanLeaf ("total", "i", "Files this scan will look at", osc::Value::int32 (scan.total));
+            scanLeaf ("found", "i", "Plugins this machine knows, so far or once the scan is over",
+                      osc::Value::int32 (scan.found));
+            scanLeaf ("skipped", "i", "Files this scan gave up on", osc::Value::int32 (scan.skipped));
+            scanLeaf ("problem", "s", "Why the scan failed, in one sentence; empty when it did not",
+                      osc::Value::string (scan.problem));
+        }
 
         /*  The engine's own numbers, and the three that say which bundle is
             open. Both are runtime: PRD §4.10 keeps "what the machine happened

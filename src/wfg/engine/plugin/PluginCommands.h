@@ -32,11 +32,25 @@
     which is the right answer for a log of a performance.
 
     `unknown-id` for an entry no proxy host holds and no table knows.
+
+    THE SCAN (2026-09-26, the author's decision: a Scan button in the app).
+    `plugin.scan [format:s] [folder:s]` begins one - every format, or `vst3` /
+    `au` / `lv2`, and a folder to search beside the format's own (an LV2 folder
+    that is not a default one, say) - and `plugin.scanRetry <file:s>` scans one
+    skipped file again,
+    alone. Both are refused `locked` while the show is locked and
+    `scan-running` while a scan is under way; that a scan is under way is
+    the commands' own state (ScanTable.h), set by the one and cleared by
+    `plugin.scanned <found:i> <skipped:i> <problem:s>`, which the engine
+    submits when the scan's child has gone - so a replay, which launches
+    nothing, refuses exactly where the session did. The launch is a hook, as
+    the restart is; a replay has none.
 */
 
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/document/ShowDocument.h>
 #include <wfg/engine/plugin/PluginTable.h>
+#include <wfg/engine/plugin/ScanTable.h>
 
 #include <functional>
 #include <string>
@@ -52,9 +66,28 @@ namespace wfg::plugin
         /** Whether an id names an entry of the show's set, for `unknown-id`.
             Absent, the table alone decides. */
         std::function<bool (const std::string& pluginId)> knows;
+
+        /** Whether the show is locked, for the scan's refusal - read off the
+            document, which a replay has as the session had it. Absent, never. */
+        std::function<bool()> locked;
+
+        /** `plugin.scan` / `plugin.scanRetry` applied: launch the scan (the
+            format word, or empty; one file to retry, or empty; a folder to
+            search too, or empty). Called on the tick thread and expected to
+            hand the work to the message thread. Absent in a replay. */
+        std::function<void (const std::string& formatWord, const std::string& retryFile,
+                            const std::string& folder)> scan;
+
+        /** Where the scan's state is kept. Absent, the commands keep one of
+            their own - a replay's or a listing's, which nobody reads. */
+        ScanTable* scans = nullptr;
     };
 
     void registerPluginCommands (CommandRegistry& registry, PluginTable& table, PluginCommandHooks hooks);
+
+    /*  The `locked` hook every session should use, read off the document; the
+        document must outlive the registry. */
+    std::function<bool()> showLockedBy (const doc::ShowDocument& document);
 
     /*  The `knows` hook every session should use: whether the id names an
         entry of the show's set, read off the document - which a replay has

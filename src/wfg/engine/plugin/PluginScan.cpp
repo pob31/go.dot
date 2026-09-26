@@ -330,19 +330,39 @@ namespace wfg::plugin
             dead man's pedal is JUCE's idea kept by hand: the file being scanned
             is written before and cleared after, so one that took THIS process
             down is blacklisted by the next scan's first act. Posts the loop's
-            stop when done, behind the known list's last change message. */
+            stop when done, behind the known list's last change message.
+
+            THE WORK IS LISTED FIRST (2026-09-26), every format's files before
+            the first is scanned, so a scan launched by the app can say "12 of
+            140" from the start; progress is written after every file, and the
+            stop file is looked for between two. A retry scans one file, with
+            the first format that claims it. */
         struct ScanThread final : juce::Thread
         {
-            ScanThread (te::PluginManager& managerToUse, std::string formatWordToUse,
-                        std::string extraFolderToUse, juce::File storageToUse)
+            ScanThread (te::PluginManager& managerToUse, ScanOptions optionsToUse, juce::File storageToUse)
                 : juce::Thread ("wfg plugin scan"),
                   manager (managerToUse),
-                  formatWord (std::move (formatWordToUse)),
-                  extraFolder (std::move (extraFolderToUse)),
+                  options (std::move (optionsToUse)),
                   pedal (storageToUse.getChildFile ("plugin-scan.pedal")),
                   pidFile (storageToUse.getChildFile ("plugin-scan.child"))
             {
                 setEnvironment (pidFileVariable, pidFile.getFullPathName());
+            }
+
+            /** Where the scan is, for whoever asked; a scan run by hand has no file. */
+            void publish()
+            {
+                progress.skipped = skipped;
+                progress.found = manager.knownPluginList.getNumTypes();
+
+                if (! options.progressFile.empty())
+                    juce::File (juce::String (options.progressFile))
+                        .replaceWithText (juce::String (progress.toJson()), false, false, "\n");
+            }
+
+            bool stopAsked() const
+            {
+                return ! options.stopFile.empty() && juce::File (juce::String (options.stopFile)).existsAsFile();
             }
 
             void run() override
@@ -358,11 +378,14 @@ namespace wfg::plugin
 
                 pedal.deleteFile();
 
+                std::vector<std::pair<juce::AudioPluginFormat*, juce::String>> work;
+                const juce::String retry { options.retryFile };
+
                 for (int i = 0; i < manager.pluginFormatManager.getNumFormats() && ! threadShouldExit(); ++i)
                 {
                     auto* format = manager.pluginFormatManager.getFormat (i);
 
-                    if (format == nullptr || ! formatMatches (*format, formatWord))
+                    if (format == nullptr || ! formatMatches (*format, options.formatWord))
                         continue;
 
                     /*  Tracktion's built-in format has nothing to scan, and
@@ -371,10 +394,18 @@ namespace wfg::plugin
                     if (format->getName() == te::PluginManager::builtInPluginFormatName)
                         continue;
 
+                    if (retry.isNotEmpty())
+                    {
+                        if (work.empty() && format->fileMightContainThisPluginType (retry))
+                            work.emplace_back (format, retry);
+
+                        continue;
+                    }
+
                     auto where = format->getDefaultLocationsToSearch();
 
-                    if (! extraFolder.empty())
-                        where.addIfNotAlreadyThere (juce::File (juce::String (extraFolder)));
+                    if (! options.extraFolder.empty())
+                        where.addIfNotAlreadyThere (juce::File (juce::String (options.extraFolder)));
 
                     if (where.getNumPaths() == 0)
                         continue;
@@ -385,56 +416,82 @@ namespace wfg::plugin
                     files.removeDuplicates (false);
 
                     for (const auto& file : files)
-                    {
-                        if (threadShouldExit())
-                            break;
-
-                        if (list.getBlacklistedFiles().contains (file) || list.isListingUpToDate (file, *format))
-                            continue;
-
-                        pedal.replaceWithText (file, false, false, "\n");
-                        fileStartedMs.store (std::max<std::uint32_t> (1u, juce::Time::getMillisecondCounter()),
-                                             std::memory_order_release);
-
-                        juce::OwnedArray<juce::PluginDescription> found;
-                        list.scanAndAddFile (file, true, found, *format);
-
-                        if (format->getName() == "LV2")
-                            for (const auto* description : found)
-                                bundles[description->fileOrIdentifier] = file;
-
-                        /*  Nought back means the watchdog claimed the file
-                            while the child was on it: the scan under it was
-                            aborted. One that answered at the very edge is in
-                            the list and is kept; one that did not is
-                            blacklisted. Either way the abort has to be undone
-                            and the child put down, which is what Tracktion's
-                            scanFinished does - the next file gets a new one. */
-                        const auto claimed = fileStartedMs.exchange (0, std::memory_order_acq_rel) == 0;
-                        pedal.deleteFile();
-
-                        if (claimed)
-                        {
-                            if (! list.isListingUpToDate (file, *format))
-                            {
-                                list.addToBlacklist (file);
-                                skipped.push_back (file.toStdString());
-                            }
-
-                            putDownTheChild (list, pidFile);
-                        }
-                    }
+                        work.emplace_back (format, file);
                 }
 
+                progress.state = "scanning";
+                progress.total = static_cast<int> (work.size());
+                publish();
+
+                for (const auto& [format, file] : work)
+                {
+                    if (threadShouldExit())
+                        break;
+
+                    if (stopAsked())
+                    {
+                        stopped = true;
+                        break;
+                    }
+
+                    progress.file = file.toStdString();
+                    progress.format = formatWordOf (format->getName().toStdString());
+
+                    if (retry.isEmpty() && (list.getBlacklistedFiles().contains (file) || list.isListingUpToDate (file, *format)))
+                    {
+                        ++progress.done;
+                        continue;
+                    }
+
+                    publish();
+                    pedal.replaceWithText (file, false, false, "\n");
+                    fileStartedMs.store (std::max<std::uint32_t> (1u, juce::Time::getMillisecondCounter()),
+                                         std::memory_order_release);
+
+                    juce::OwnedArray<juce::PluginDescription> found;
+                    list.scanAndAddFile (file, true, found, *format);
+
+                    if (format->getName() == "LV2")
+                        for (const auto* description : found)
+                            bundles[description->fileOrIdentifier] = file;
+
+                    /*  Nought back means the watchdog claimed the file
+                        while the child was on it: the scan under it was
+                        aborted. One that answered at the very edge is in
+                        the list and is kept; one that did not is
+                        blacklisted. Either way the abort has to be undone
+                        and the child put down, which is what Tracktion's
+                        scanFinished does - the next file gets a new one. */
+                    const auto claimed = fileStartedMs.exchange (0, std::memory_order_acq_rel) == 0;
+                    pedal.deleteFile();
+
+                    if (claimed)
+                    {
+                        if (! list.isListingUpToDate (file, *format))
+                        {
+                            list.addToBlacklist (file);
+                            skipped.push_back (file.toStdString());
+                        }
+
+                        putDownTheChild (list, pidFile);
+                    }
+
+                    ++progress.done;
+                    publish();
+                }
+
+                progress.file.clear();
                 putDownTheChild (list, pidFile);
                 juce::MessageManager::callAsync ([] { juce::MessageManager::getInstance()->stopDispatchLoop(); });
             }
 
             te::PluginManager& manager;
-            std::string formatWord;
-            std::string extraFolder;
+            ScanOptions options;
             juce::File pedal;
             juce::File pidFile;
+
+            ScanProgress progress;
+            bool stopped = false;
 
             /** When the file under scan was handed to the child; nought between files. */
             std::atomic<std::uint32_t> fileStartedMs { 0 };
@@ -483,6 +540,21 @@ namespace wfg::plugin
     std::vector<std::string> formatWords()
     {
         return { "vst3", "au", "lv2" };
+    }
+
+    std::string setAsideLv2PathOnWindows()
+    {
+       #if JUCE_WINDOWS
+        const auto held = juce::SystemStats::getEnvironmentVariable ("LV2_PATH", {});
+
+        if (held.isEmpty())
+            return {};
+
+        ::_putenv_s ("LV2_PATH", "");
+        return held.toStdString();
+       #else
+        return {};
+       #endif
     }
 
     std::string formatWordOf (const std::string& juceFormatName)
@@ -549,6 +621,54 @@ namespace wfg::plugin
     }
 
     //==============================================================================
+    std::string ScanProgress::toJson() const
+    {
+        auto object = std::make_unique<juce::DynamicObject>();
+        object->setProperty ("state", juce::String (state));
+        object->setProperty ("format", juce::String (format));
+        object->setProperty ("file", juce::String (file));
+        object->setProperty ("done", done);
+        object->setProperty ("total", total);
+        object->setProperty ("found", found);
+
+        juce::Array<juce::var> files;
+
+        for (const auto& one : skipped)
+            files.add (juce::String (one));
+
+        object->setProperty ("skipped", files);
+        return juce::JSON::toString (juce::var (object.release()), true).toStdString();
+    }
+
+    bool ScanProgress::fromJson (const std::string& text, ScanProgress& out)
+    {
+        const auto parsed = juce::JSON::parse (juce::String (text));
+        const auto* object = parsed.getDynamicObject();
+
+        if (object == nullptr || ! object->hasProperty ("state"))
+            return false;
+
+        out = {};
+        out.state = object->getProperty ("state").toString().toStdString();
+        out.format = object->getProperty ("format").toString().toStdString();
+        out.file = object->getProperty ("file").toString().toStdString();
+        out.done = static_cast<int> (object->getProperty ("done"));
+        out.total = static_cast<int> (object->getProperty ("total"));
+        out.found = static_cast<int> (object->getProperty ("found"));
+
+        if (const auto* files = object->getProperty ("skipped").getArray())
+            for (const auto& one : *files)
+                out.skipped.push_back (one.toString().toStdString());
+
+        return true;
+    }
+
+    bool readScanProgress (const std::string& path, ScanProgress& out)
+    {
+        const juce::File file { juce::String (path) };
+        return file.existsAsFile() && ScanProgress::fromJson (file.loadFileAsString().toStdString(), out);
+    }
+
     std::vector<KnownPlugin> scanPlugins (const std::string& storageFolder,
                                           const std::string& formatWord,
                                           const std::string& extraFolder,
@@ -556,10 +676,21 @@ namespace wfg::plugin
                                           std::vector<std::string>& skipped,
                                           std::string& problem)
     {
+        ScanOptions options;
+        options.formatWord = formatWord;
+        options.extraFolder = extraFolder;
+        options.retrySkipped = retrySkipped;
+        return scanPlugins (storageFolder, options, skipped, problem);
+    }
+
+    std::vector<KnownPlugin> scanPlugins (const std::string& storageFolder, const ScanOptions& options,
+                                          std::vector<std::string>& skipped, std::string& problem)
+    {
         problem.clear();
         skipped.clear();
 
         const auto words = formatWords();
+        const auto& formatWord = options.formatWord;
 
         if (! formatWord.empty() && std::find (words.begin(), words.end(), formatWord) == words.end())
         {
@@ -600,10 +731,13 @@ namespace wfg::plugin
                     manager.knownPluginList.recreateFromXml (*xml);
         }
 
-        if (retrySkipped)
+        if (options.retrySkipped)
             manager.knownPluginList.clearBlacklistedFiles();
 
-        ScanThread thread (manager, formatWord, extraFolder, storage);
+        if (! options.retryFile.empty())
+            manager.knownPluginList.removeFromBlacklist (juce::String (options.retryFile));
+
+        ScanThread thread (manager, options, storage);
         thread.bundles = bundles;
         Watchdog watchdog (thread, manager);
         watchdog.startTimer (250);
@@ -616,6 +750,11 @@ namespace wfg::plugin
 
         if (! writeList (storage, manager.knownPluginList, thread.bundles))
             problem = "the scan could not write " + knownListPath (storageFolder);
+
+        /*  THE LAST WORD, after the list is on disk: whoever reads `finished`
+            and then the list finds this scan's list. */
+        thread.progress.state = thread.stopped ? "stopped" : "finished";
+        thread.publish();
 
         return knownFrom (manager.knownPluginList, thread.bundles);
     }

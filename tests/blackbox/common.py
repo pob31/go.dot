@@ -487,7 +487,9 @@ class Server:
                  ui: "Path | None" = None, device: "str | None" = None,
                  window: bool = False, theme: "Path | None" = None,
                  device_type: "str | None" = None,
-                 proxy_deadline_us: "int | None" = None):
+                 proxy_deadline_us: "int | None" = None,
+                 engine_folder: "Path | None" = None,
+                 env: "dict | None" = None):
         argv = [str(find_binary()), "serve", str(bundle), "--http-port=0", "--osc-port=0"]
         if sample_rate is not None:
             argv.append(f"--sample-rate={sample_rate}")
@@ -521,6 +523,12 @@ class Server:
         if proxy_deadline_us is not None:
             argv.append(f"--proxy-deadline-us={proxy_deadline_us}")
 
+        # --engine-folder keeps the machine's own folder - the known plugin
+        # list above all - out of the developer's real one (2026-09-26). A
+        # driver that scans must pass one: a scan WRITES the list.
+        if engine_folder is not None:
+            argv.append(f"--engine-folder={engine_folder}")
+
         # --window opens the compiled client over this same engine, in this
         # same process (namespace draft section 14.16). Off by default here as
         # it is in the verb, and for the same reason: every driver in this
@@ -538,8 +546,16 @@ class Server:
             argv.append(f"--wfg-locale={locale}")
 
         self.argv = argv
+
+        # Extra environment for the engine and every child it launches - the
+        # plugin scan reads LV2_PATH, for one.
+        environment = None
+        if env:
+            environment = dict(os.environ)
+            environment.update(env)
+
         self.process = subprocess.Popen(
-            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            argv, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, env=environment)
 
         self.http_port = 0
         self.osc_port = 0

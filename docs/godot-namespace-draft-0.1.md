@@ -9807,6 +9807,29 @@ scan de-duplicates JUCE's answer (a bundle of two plugins is named twice). An in
 (`tests/fixtures/lv2/`, a stereo gain and a mono-to-stereo widener in plain C) gives every CI runner
 a real LV2 to scan and host.
 
+**Amended 2026-09-26 — the app scans (the author's decision: a Scan button in Show settings, Plugins).**
+Scanning is no longer only a verb (plan decision 16 is overturned). `plugin.scan [format:s] [folder:s]`
+— every format, or `vst3` / `au` / `lv2`, and a folder to search beside the format's own — and
+`plugin.scanRetry <file:s>`, one skipped file scanned alone, taken off the skip list. Both are refused
+`locked` while the show is locked, `scan-running` while a scan is under way, `bad-value` for a word
+that is not a format. **That a scan is under way is the commands' own state**: `plugin.scan` begins it
+and `plugin.scanned <found:i> <skipped:i> <problem:s>` — submitted by the engine when the scan's child
+has gone — ends it, so a replay, which launches nothing, refuses exactly where the session did. The
+scan is the command line's own, run as a child through the inheritance-free launcher, never inside
+serve: Tracktion's scan coordinator launches its workers with handle inheritance on (serve's sockets
+would go with them — the §17.12 hang), sets a process-wide environment variable, and waits in a message
+loop of its own. The child reports through two files — a progress file it rewrites whole after every
+plugin (`wfg plugins --progress=<file>`, with `--stop-file=<file>` and `--retry=<file>` beside it) and
+known.xml — and serve reads the list again when the child has gone, asks every entry of the set that
+read `missing` to start again, and submits `plugin.scanned`. Published, hand-built as the known list
+is: `/godot/plugin/scan/{state,format,file,done,total,found,skipped,problem}` on the runtime half
+(`state` is `idle | scanning | finished | failed`), and `/godot/plugin/skipped/<n>`, the files every
+scan skips until one is retried. **LV2_PATH is set aside on Windows**: JUCE reads it with every `:`
+made a `;`, which cuts a Windows path at its drive letter, and a path written the Windows way then
+crashes the LV2 host outright — in the scan and in every engine start. The process forgets it before
+anything reads it, says so once on stderr, and an LV2 folder that is not a default one is scanned by
+name instead.
+
 ### 17.8 The client
 
 The desktop client keeps its rules: one snapshot a pass, `model/` std-only, one call site per

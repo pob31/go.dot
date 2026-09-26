@@ -21,12 +21,21 @@
     description a child makes it from, and the skipped files beside them; and
     the list serve holds, whose revision moves only when a reader could see
     a change.
+
+    AND THE APP'S SCAN: its progress file round-trips; its table takes
+    progress only while a scan runs; and its three commands refuse where a
+    replay would refuse too - locked, a scan already running, a word that is
+    not a format - because whether a scan runs is their own state.
 */
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
+#include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/plugin/KnownList.h>
+#include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/engine/plugin/PluginScan.h>
+#include <wfg/engine/plugin/PluginTable.h>
+#include <wfg/engine/plugin/ScanTable.h>
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <juce_core/juce_core.h>
@@ -159,6 +168,162 @@ TEST_CASE ("known list: a machine that scanned before known.xml imports Tracktio
     CHECK (known[0].name == "Amp");
     CHECK (known[0].format == "LV2");
     CHECK (plugin::skippedPlugins (folder.path()).empty());
+}
+
+TEST_CASE ("scan: the progress file round-trips, and a torn or absent one is not read")
+{
+    plugin::ScanProgress progress;
+    progress.state = "scanning";
+    progress.format = "VST3";
+    progress.file = "C:/Program Files/Common Files/VST3/Verb, big.vst3";
+    progress.done = 12;
+    progress.total = 140;
+    progress.found = 38;
+    progress.skipped = { "C:/plugins/hangs.vst3" };
+
+    plugin::ScanProgress back;
+    REQUIRE (plugin::ScanProgress::fromJson (progress.toJson(), back));
+    CHECK (back.state == "scanning");
+    CHECK (back.format == "VST3");
+    CHECK (back.file == progress.file);
+    CHECK (back.done == 12);
+    CHECK (back.total == 140);
+    CHECK (back.found == 38);
+    CHECK (back.skipped == progress.skipped);
+
+    CHECK_FALSE (plugin::ScanProgress::fromJson ("{\"state\": \"scann", back));
+    CHECK_FALSE (plugin::ScanProgress::fromJson ("{}", back));
+
+    Folder folder;
+    const auto path = folder.root.getChildFile ("scan-progress.json");
+    CHECK_FALSE (plugin::readScanProgress (path.getFullPathName().toStdString(), back));
+    REQUIRE (path.replaceWithText (juce::String (progress.toJson())));
+    REQUIRE (plugin::readScanProgress (path.getFullPathName().toStdString(), back));
+    CHECK (back.done == 12);
+}
+
+TEST_CASE ("scan: the table takes progress only while a scan runs, and ends finished or failed")
+{
+    plugin::ScanTable table;
+    CHECK (table.reading().state == "idle");
+    CHECK_FALSE (table.scanning());
+
+    //  Progress with no scan under way is the tail of one already over: dropped.
+    table.progress ("C:/late.vst3", 3, 4, 5, 0);
+    CHECK (table.reading().file.empty());
+
+    table.begin ("lv2");
+    CHECK (table.scanning());
+    CHECK (table.reading().format == "lv2");
+
+    const auto before = table.revision();
+    table.progress ("/usr/lib/lv2/amp.lv2", 1, 2, 7, 0);
+    CHECK (table.revision() > before);
+    CHECK (table.reading().file == "/usr/lib/lv2/amp.lv2");
+    CHECK (table.reading().done == 1);
+    CHECK (table.reading().total == 2);
+
+    table.end (8, 1, {});
+    CHECK_FALSE (table.scanning());
+    CHECK (table.reading().state == "finished");
+    CHECK (table.reading().file.empty());
+    CHECK (table.reading().found == 8);
+    CHECK (table.reading().skipped == 1);
+
+    table.begin ({});
+    table.end (8, 0, "the scan ended on C:/crash.vst3");
+    CHECK (table.reading().state == "failed");
+    CHECK (table.reading().problem == "the scan ended on C:/crash.vst3");
+}
+
+TEST_CASE ("scan: plugin.scan begins one and reaches the hook, is refused locked, running or for a word that is no format; plugin.scanned ends it")
+{
+    CommandRegistry registry;
+    plugin::PluginTable plugins;
+    plugin::ScanTable scans;
+
+    auto locked = false;
+    struct Launched { std::string word, file, folder; };
+    std::vector<Launched> launched;
+
+    plugin::PluginCommandHooks hooks;
+    hooks.locked = [&locked] { return locked; };
+    hooks.scans = &scans;
+    hooks.scan = [&launched] (const std::string& word, const std::string& file, const std::string& folder)
+    {
+        launched.push_back ({ word, file, folder });
+    };
+    plugin::registerPluginCommands (registry, plugins, hooks);
+
+    CommandContext context;
+    const std::string origin = "cli";
+    context.origin = &origin;
+
+    const auto dispatch = [&registry, &context] (const char* name, std::vector<osc::Value> args)
+    {
+        const auto* command = registry.find (name);
+        return command != nullptr ? command->handler (context, args) : Outcome::rejected (reason::unknownCommand);
+    };
+
+    SUBCASE ("a locked show refuses both, and launches nothing")
+    {
+        locked = true;
+        CHECK (dispatch ("plugin.scan", {}).reason == reason::locked);
+        CHECK (dispatch ("plugin.scanRetry", { osc::Value::string ("C:/plugins/hangs.vst3") }).reason == reason::locked);
+        CHECK (launched.empty());
+        CHECK (scans.reading().state == "idle");
+    }
+
+    SUBCASE ("a word that is not a format is refused")
+    {
+        CHECK (dispatch ("plugin.scan", { osc::Value::string ("vst2") }).reason == reason::badValue);
+        CHECK (dispatch ("plugin.scanRetry", { osc::Value::string ("") }).reason == reason::badValue);
+        CHECK (launched.empty());
+    }
+
+    SUBCASE ("one scan at a time, until plugin.scanned")
+    {
+        CHECK (dispatch ("plugin.scan", { osc::Value::string ("lv2"), osc::Value::string ("D:/lv2") }).applied);
+        REQUIRE (launched.size() == 1u);
+        CHECK (launched[0].word == "lv2");
+        CHECK (launched[0].folder == "D:/lv2");
+        CHECK (scans.reading().state == "scanning");
+
+        CHECK (dispatch ("plugin.scan", {}).reason == "scan-running");
+        CHECK (dispatch ("plugin.scanRetry", { osc::Value::string ("C:/plugins/hangs.vst3") }).reason == "scan-running");
+        CHECK (launched.size() == 1u);
+
+        CHECK (dispatch ("plugin.scanned", { osc::Value::int32 (2), osc::Value::int32 (0),
+                                             osc::Value::string ("") }).applied);
+        CHECK (scans.reading().state == "finished");
+        CHECK (scans.reading().found == 2);
+
+        CHECK (dispatch ("plugin.scanRetry", { osc::Value::string ("C:/plugins/hangs.vst3") }).applied);
+        REQUIRE (launched.size() == 2u);
+        CHECK (launched[1].word.empty());
+        CHECK (launched[1].file == "C:/plugins/hangs.vst3");
+        CHECK (launched[1].folder.empty());
+    }
+
+    SUBCASE ("and a replay, with no hook and no table of its own, refuses in the same places")
+    {
+        CommandRegistry quiet;
+        plugin::PluginCommandHooks replayHooks;
+        replayHooks.locked = [&locked] { return locked; };
+        plugin::registerPluginCommands (quiet, plugins, replayHooks);
+
+        const auto replayed = [&quiet, &context] (const char* name, std::vector<osc::Value> args)
+        {
+            return quiet.find (name)->handler (context, args);
+        };
+
+        CHECK (replayed ("plugin.scan", {}).applied);
+        CHECK (replayed ("plugin.scan", {}).reason == "scan-running");
+        CHECK (replayed ("plugin.scanned", { osc::Value::int32 (0), osc::Value::int32 (0),
+                                             osc::Value::string ("the scan was stopped before it was over") }).applied);
+        CHECK (replayed ("plugin.scan", {}).applied);
+        CHECK (launched.empty());
+    }
 }
 
 TEST_CASE ("known list: serve's list moves its revision only on a change a reader could see, and describes by identifier")

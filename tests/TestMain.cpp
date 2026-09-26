@@ -36,6 +36,7 @@
 
 #include <wfg/engine/plugin/PluginEditorChild.h>
 #include <wfg/engine/plugin/PluginHostChild.h>
+#include <wfg/engine/plugin/PluginScan.h>
 
 #include <juce_events/juce_events.h>
 
@@ -62,6 +63,10 @@ namespace wfgtest
 //==============================================================================
 int main (int argc, char** argv)
 {
+    /*  As the console does first: on Windows a set LV2_PATH crashes JUCE's
+        LV2 host (plugin/PluginScan.h), in this process and its children. */
+    wfg::plugin::setAsideLv2PathOnWindows();
+
     /*  THE PLUGIN HOST CHILD, when this binary is launched as one (Phase
         9a, §17.6): the proxy tests name the test executable as the child,
         so no other build product has to exist for them. Before JUCE and

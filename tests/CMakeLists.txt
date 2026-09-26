@@ -1094,6 +1094,23 @@ add_test(NAME blackbox.phase9a-fx.fr_FR
 set_tests_properties(blackbox.phase9a-fx.fr_FR PROPERTIES
                      ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
 
+# Finishing plugin hosting, stage 3 (the author's decision of 2026-09-26: a Scan
+# button in the app): `plugin.scan lv2 <folder>` runs the command line's own scan
+# as a child of a serve with an engine folder of its own, /godot/plugin/scan/...
+# says where it is, the known list read again offers the in-tree test bundle's
+# two plugins as LV2, a locked show refuses the scan in the log, and the session
+# replays with no scan launched.
+add_test(NAME blackbox.phase9b-plugins.C
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_plugins.py"
+                 --wfg-locale=C "--lv2-folder=${GODOT_TEST_LV2_FOLDER}")
+set_tests_properties(blackbox.phase9b-plugins.C PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+add_test(NAME blackbox.phase9b-plugins.fr_FR
+         COMMAND ${WFG_PYTHON} "${CMAKE_CURRENT_SOURCE_DIR}/blackbox/phase9b_plugins.py"
+                 --wfg-locale=${WFG_LOCALE_FR} "--lv2-folder=${GODOT_TEST_LV2_FOLDER}")
+set_tests_properties(blackbox.phase9b-plugins.fr_FR PROPERTIES
+                     ENVIRONMENT "WFG_BINARY=$<TARGET_FILE:wfg>" TIMEOUT 300)
+
 # The client the engine serves at /ui: the page, its files as bytes, and since
 # PR 5.10 its modules - the graph walked from app.js the way a browser loads it,
 # every file answering as JavaScript and none left that nothing imports - and

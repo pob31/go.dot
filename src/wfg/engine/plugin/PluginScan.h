@@ -111,6 +111,55 @@ namespace wfg::plugin
                                           std::vector<std::string>& skipped,
                                           std::string& problem);
 
+    /*  WHERE A SCAN IS, for whoever launched it (2026-09-26): the app runs
+        `wfg plugins --scan` as a child of its own and reads this file to say
+        which plugin it is on. Written whole, by replacement, at the start,
+        after every file and at the end - so a reader never meets half of one,
+        and one that reads `scanning` after the child has gone knows the child
+        died on `file`. */
+    struct ScanProgress
+    {
+        /** `scanning`, `finished`, or `stopped` when the stop file was found. */
+        std::string state;
+
+        /** The show's word for the format of the file under scan: VST3, AU, LV2. */
+        std::string format;
+
+        /** The file under scan; empty once the scan is over. */
+        std::string file;
+
+        /** Files looked at, of `total`; what the machine knows so far. */
+        int done = 0;
+        int total = 0;
+        int found = 0;
+
+        /** Files this scan gave up on, as it gave up on them. */
+        std::vector<std::string> skipped;
+
+        std::string toJson() const;
+        static bool fromJson (const std::string& text, ScanProgress& out);
+    };
+
+    /** The progress file read back; false when it is not there or not whole. */
+    bool readScanProgress (const std::string& path, ScanProgress& out);
+
+    /*  WHAT A SCAN LAUNCHED BY THE APP IS ASKED FOR, beyond the verb's own
+        words: a file to report progress in, a file whose appearance stops
+        the scan between two plugins, and one skipped file to try again - taken
+        off the skip list and scanned alone. */
+    struct ScanOptions
+    {
+        std::string formatWord;
+        std::string extraFolder;
+        bool retrySkipped = false;
+        std::string retryFile;
+        std::string progressFile;
+        std::string stopFile;
+    };
+
+    std::vector<KnownPlugin> scanPlugins (const std::string& storageFolder, const ScanOptions& options,
+                                          std::vector<std::string>& skipped, std::string& problem);
+
     /*  What the last scan found, from known.xml (imported from Settings.xml
         once when there is no file yet); empty when nothing was scanned. Each
         entry carries its description. Reads a file and nothing more - no
@@ -128,4 +177,17 @@ namespace wfg::plugin
 
     /** The words `scanPlugins` takes for a format, in the order they are tried. */
     std::vector<std::string> formatWords();
+
+    /*  LV2_PATH, SET ASIDE ON WINDOWS (found 2026-09-26). JUCE reads it with
+        every ':' made a ';' - the Unix separator turned into Windows' - which
+        on Windows cuts every absolute path at its drive letter; a path written
+        the Windows way then reaches the LV2 library as an invalid URI and the
+        process dies (an access violation, in the scan and in every engine
+        start, since Tracktion makes the LV2 format when it starts). So this
+        process forgets it before anything reads it, and so does every child it
+        launches. Answers what it was, empty when it was not set or this is not
+        Windows, so the caller can say it was set aside. An LV2 folder that is
+        not a default one is scanned by name instead, and the scan remembers
+        where it found each plugin. */
+    std::string setAsideLv2PathOnWindows();
 }

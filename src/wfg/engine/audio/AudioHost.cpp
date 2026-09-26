@@ -1758,6 +1758,16 @@ namespace wfg::audio
         return false;
     }
 
+    void AudioHost::startMissingProxies()
+    {
+        for (auto& proxy : impl->proxies)
+            if (proxy->status().state == "missing")
+            {
+                std::string problem;
+                proxy->start (problem);
+            }
+    }
+
     AudioHost::NodeIdReport AudioHost::inspectNodeIds() const  { return impl->inspectNodeIds(); }
     int AudioHost::residentClipCount() const { return impl->residentClipCount(); }
 

@@ -35,6 +35,7 @@
 #include <wfg/engine/plugin/PluginHostChild.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
+#include <wfg/engine/plugin/ScanJob.h>
 #include <wfg/engine/surface/SurfaceTable.h>
 #include <wfg/engine/midi/MidiInputs.h>
 #include <wfg/engine/midi/MidiSender.h>
@@ -291,6 +292,7 @@ namespace
         {
             wfg::plugin::PluginCommandHooks hooks;
             hooks.knows = wfg::plugin::pluginKnownBy (document);
+            hooks.locked = wfg::plugin::showLockedBy (document);
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
         wfg::tree::registerTreeCommands (engine.commands(), touches);
@@ -571,6 +573,7 @@ namespace
         {
             wfg::plugin::PluginCommandHooks hooks;
             hooks.knows = wfg::plugin::pluginKnownBy (document);
+            hooks.locked = wfg::plugin::showLockedBy (document);
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
 
@@ -1181,6 +1184,7 @@ namespace
         {
             wfg::plugin::PluginCommandHooks hooks;
             hooks.knows = wfg::plugin::pluginKnownBy (document);
+            hooks.locked = wfg::plugin::showLockedBy (document);
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
         wfg::tree::registerTreeCommands (engine.commands(), touches);
@@ -1831,14 +1835,26 @@ namespace
 
         if (args.containsOption ("--scan"))
         {
-            const auto word = args.getValueForOption ("--scan").toLowerCase().toStdString();
-            const auto extra = args.containsOption ("--path")
-                                 ? args.getValueForOption ("--path").toStdString() : std::string {};
+            /*  --progress, --stop-file and --retry are what the app hands a
+                scan it launches (2026-09-26): where to say how far it is,
+                what to look for between two plugins, and one skipped file to
+                try again alone. By hand they mean the same. */
+            const auto optionText = [&args] (const char* name)
+            {
+                return args.containsOption (name) ? args.getValueForOption (name).toStdString() : std::string {};
+            };
+
+            wfg::plugin::ScanOptions options;
+            options.formatWord = args.getValueForOption ("--scan").toLowerCase().toStdString();
+            options.extraFolder = optionText ("--path");
+            options.retrySkipped = args.containsOption ("--retry-skipped");
+            options.retryFile = optionText ("--retry");
+            options.progressFile = optionText ("--progress");
+            options.stopFile = optionText ("--stop-file");
 
             std::string problem;
             std::vector<std::string> skipped;
-            known = wfg::plugin::scanPlugins (storage, word, extra, args.containsOption ("--retry-skipped"),
-                                              skipped, problem);
+            known = wfg::plugin::scanPlugins (storage, options, skipped, problem);
 
             if (! problem.empty())
             {
@@ -2607,6 +2623,35 @@ namespace
         wfg::plugin::PluginTable pluginTable;
         std::function<bool (const std::string&, std::string&)> restartPlugin;
 
+        /*  THE APP'S PLUGIN SCAN (2026-09-26, the author's decision): the
+            command line's own scan run as a child (plugin/ScanJob.h), on the
+            message thread, reporting into a table the tree publishes. When it
+            is over the machine's list is read again from known.xml, any entry
+            of the set that read `missing` is asked again - a scan may just
+            have found it - and `plugin.scanned` ends the scan in the log. The
+            graph's own entries are the audio host's, filled in where it is
+            built. */
+        wfg::plugin::ScanTable scanTable;
+        std::function<void()> startMissingPlugins;
+        wfg::plugin::ScanJob::Launch scanLaunch;
+        scanLaunch.executable = juce::File::getSpecialLocation (juce::File::currentExecutableFile)
+                                    .getFullPathName().toStdString();
+
+        wfg::plugin::ScanJob scanJob {
+            engineCacheFolder().getFullPathName().toStdString(), scanLaunch, scanTable,
+            [&engine, &knownList, &startMissingPlugins] (int found, int skipped, const std::string& problem)
+            {
+                const auto storage = engineCacheFolder().getFullPathName().toStdString();
+                knownList.set (wfg::plugin::knownPlugins (storage), wfg::plugin::skippedPlugins (storage));
+
+                if (startMissingPlugins)
+                    startMissingPlugins();
+
+                engine.submit (wfg::origin::engine, "plugin.scanned",
+                               { wfg::osc::Value::int32 (found), wfg::osc::Value::int32 (skipped),
+                                 wfg::osc::Value::string (problem) });
+            } };
+
         {
             wfg::plugin::PluginCommandHooks hooks;
             hooks.restart = [&restartPlugin] (const std::string& id, std::string& problem)
@@ -2618,6 +2663,19 @@ namespace
                 return false;
             };
             hooks.knows = wfg::plugin::pluginKnownBy (document);
+            hooks.locked = wfg::plugin::showLockedBy (document);
+            hooks.scans = &scanTable;
+
+            /*  Applied on the tick thread; launched on the message thread,
+                which is where the job and its timer live. */
+            hooks.scan = [&scanJob] (const std::string& formatWord, const std::string& retryFile,
+                                     const std::string& folder)
+            {
+                juce::MessageManager::callAsync ([&scanJob, formatWord, retryFile, folder]
+                {
+                    scanJob.start (formatWord, retryFile, folder);
+                });
+            };
             wfg::plugin::registerPluginCommands (engine.commands(), pluginTable, std::move (hooks));
         }
 
@@ -2992,6 +3050,7 @@ namespace
             edits nothing. */
         parameters.setCatalogues (&catalogues);
         parameters.setKnownList (&knownList);
+        parameters.setScans (&scanTable);
 
         const auto loadShowCatalogues = [&catalogues, &document]
         {
@@ -3390,6 +3449,16 @@ namespace
             device mode rather than a simulation of it. */
         std::unique_ptr<wfg::DummyAudioClock> dummy;
         std::unique_ptr<wfg::audio::HostedAudioDriver> driver;
+
+        /*  Whichever graph there is tonight, once a scan is over: the entries
+            that read `missing` asked again. */
+        startMissingPlugins = [&deviceDriver, &driver]
+        {
+            if (deviceDriver != nullptr)
+                deviceDriver->host().startMissingProxies();
+            else if (driver != nullptr)
+                driver->host().startMissingProxies();
+        };
         std::unique_ptr<wfg::audio::HostPlayer> player;
         const wfg::SampleClock* blockSource = nullptr;
 
@@ -4436,6 +4505,13 @@ namespace
 //==============================================================================
 int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
 {
+    /*  BEFORE ANYTHING MAKES AN LV2 FORMAT (plugin/PluginScan.h): on Windows
+        a set LV2_PATH crashes JUCE's LV2 host, so it is forgotten here - and
+        by every child launched from here - and said so once, on stderr. */
+    if (const auto setAside = wfg::plugin::setAsideLv2PathOnWindows(); ! setAside.empty())
+        std::cerr << "wfg: LV2_PATH (" << setAside << ") is set aside: JUCE reads it with Unix separators,"
+                     " which a Windows drive letter breaks; scan an LV2 folder by name instead" << std::endl;
+
     /*  TRACKTION'S SCAN CHILD, dispatched before any verb is read (Phase 9a,
         §17.7): a plugin scan launches this same binary with a pipe option,
         and that process is the scan and nothing else. */
@@ -4557,7 +4633,8 @@ int wfg::runConsole (int argc, char** argv, ClientFactory makeClient)
         `--device` alone opens the default device, and `--device-type` takes
         the heading `wfg devices` prints above each group of names. */
     app.addCommand ({ "plugins",
-                      "plugins [--scan[=vst3|au|lv2]] [--path=<dir>] [--retry-skipped] [--list] [--catalogue=<identifier>]"
+                      "plugins [--scan[=vst3|au|lv2]] [--path=<dir>] [--retry-skipped] [--retry=<file>]"
+                      " [--progress=<file>] [--stop-file=<file>] [--list] [--catalogue=<identifier>]"
                       " [--engine-folder=<dir>]",
                       "Scans this machine for plugins, out of process, or lists what the last scan found",
                       {},

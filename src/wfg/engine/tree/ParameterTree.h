@@ -57,6 +57,7 @@
 #include <wfg/engine/cue/SlotAnalysis.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/plugin/KnownList.h>
+#include <wfg/engine/plugin/ScanTable.h>
 #include <wfg/engine/plugin/PluginScan.h>
 #include <wfg/engine/plugin/PluginTable.h>
 #include <wfg/engine/tree/Mount.h>
@@ -301,6 +302,12 @@ namespace wfg::tree
             message thread refills it (2026-09-26). */
         void setKnownList (const plugin::KnownList* listToRead) noexcept { knownList = listToRead; }
 
+        /*  Where the app's plugin scan is, for `/godot/plugin/scan/...` on
+            the runtime half - read at every publish, since it moves while a
+            scan runs and nothing in the show changes. Absent, a scan that
+            never ran reads idle. */
+        void setScans (const plugin::ScanTable* tableToRead) noexcept { scans = tableToRead; }
+
         /*  How long each media file is, read once when the show was opened, for
             `/godot/cue/<id>/duration`. Keyed by the `file` the document names.
 
@@ -402,6 +409,7 @@ namespace wfg::tree
         const plugin::PluginTable* pluginTable = nullptr;
         const plugin::CatalogueStore* catalogues = nullptr;
         const plugin::KnownList* knownList = nullptr;
+        const plugin::ScanTable* scans = nullptr;
         /*  What a test handed in, when one did. Otherwise the lengths come
             from `mediaInfo` at the top of every publish. */
         const std::map<std::string, double>* fixedDurations = nullptr;

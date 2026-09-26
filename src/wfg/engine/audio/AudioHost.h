@@ -545,6 +545,12 @@ namespace wfg::audio
         /** `plugin.restart`: false with a sentence for an id not in the set. */
         bool restartProxy (const std::string& pluginId, std::string& problem);
 
+        /*  After a scan (2026-09-26): every entry of the set that read
+            `missing` asked again, since the scan may have found its plugin -
+            the host re-reads its description and brings its child up. An
+            entry in any other state is left as it is. Message thread. */
+        void startMissingProxies();
+
         /*  The loudest sample the track's output plugin saw arriving and
             leaving, since the last reset.
 
