@@ -111,6 +111,12 @@ TEST_CASE ("toolchain: the wfg::deps compile definitions reached this target")
     static_assert (JUCE_PLUGINHOST_LV2 == 1,
                    "JUCE_PLUGINHOST_LV2 must be 1 - see cmake/WfgThirdParty.cmake (2026-09-26)");
 
+   #if JUCE_MAC
+    /*  And AU where there is such a thing (2026-09-26). */
+    static_assert (JUCE_PLUGINHOST_AU == 1,
+                   "JUCE_PLUGINHOST_AU must be 1 on macOS - see cmake/WfgThirdParty.cmake (2026-09-26)");
+   #endif
+
     // Our own definitions travel the same path, so proving one of them arrives
     // as a usable string literal proves the mechanism, not just the flags.
     CHECK (std::string (WFG_PRODUCT_NAME) == "Go.dot");

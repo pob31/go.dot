@@ -975,6 +975,62 @@ TEST_CASE ("proxy: the in-tree LV2 comes up in the child through JUCE's real LV2
     host.stop();
 }
 
+#if JUCE_MAC
+/*  A REAL AU, ON THE macOS RUNNER (2026-09-26): Apple's own AUBandpass, which
+    every Mac has, described by JUCE's AU format as a scan would and hosted in
+    the child through that format alone. A band-pass takes a constant away:
+    a block of DC goes in and, once the filter has settled, next to nothing
+    comes back - which proves the AU both came up and sounds. */
+TEST_CASE ("proxy: Apple's AUBandpass comes up in the child through JUCE's AU host, and takes a constant away")
+{
+    juce::AudioUnitPluginFormat format;
+    juce::OwnedArray<juce::PluginDescription> found;
+    format.findAllTypesForFile (found, "AudioUnit:Effects/aufx,bpas,appl");
+    REQUIRE (found.size() >= 1);
+    CHECK (found[0]->pluginFormatName == "AudioUnit");
+
+    auto xml = found[0]->createXml();
+    REQUIRE (xml != nullptr);
+
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::ProxyLane lanes[1];
+
+    auto spec = testGainSpec (folder, 1, 2, 256);
+    spec.identifier = found[0]->createIdentifierString().toStdString();
+    spec.name = "AUBandpass";
+    spec.descriptionXml = xml->toString().toStdString();
+    plugin::ProxyHost host (spec, { &lanes[0] }, &table);
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    const auto up = waitForState (host, "loaded", 20000);
+    INFO ("state " << host.status().state << ": " << host.status().problem);
+    REQUIRE (up);
+
+    lanes[0].setDeadlineMicroseconds (200000);
+    lanes[0].setEnabled (true);
+    host.poll();
+
+    Block block (2, 256, 0.5f);
+
+    for (int i = 0; i < 200; ++i)
+    {
+        std::fill (block.storage.begin(), block.storage.end(), 0.5f);
+        lanes[0].process (block.data(), 2, 256);
+    }
+
+    auto loudest = 0.0f;
+
+    for (const auto sample : block.storage)
+        loudest = std::max (loudest, std::fabs (sample));
+
+    CHECK (lanes[0].answered() >= 1);
+    CHECK (loudest < 0.05f);
+    host.stop();
+}
+#endif
+
 //==============================================================================
 namespace
 {

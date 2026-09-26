@@ -245,6 +245,18 @@ set_tests_properties(wfg.plugins.scan-lv2 PROPERTIES
                      TIMEOUT 120
                      PASS_REGULAR_EXPRESSION "Go[.]dot test LV2 gain [|] LV2 [|] Go[.]dot tests.*Go[.]dot test LV2 widen [|] LV2 [|] Go[.]dot tests")
 
+if(APPLE)
+    # And a real AU scan on the macOS runner (2026-09-26): Apple's AUBandpass,
+    # which every Mac has, scanned alone by its identifier - an AU has no folder,
+    # the system lists its components.
+    add_test(NAME wfg.plugins.scan-au
+             COMMAND wfg plugins --scan=au "--retry=AudioUnit:Effects/aufx,bpas,appl"
+                     "--engine-folder=${CMAKE_CURRENT_BINARY_DIR}/au-scan-engine")
+    set_tests_properties(wfg.plugins.scan-au PROPERTIES
+                         TIMEOUT 120
+                         PASS_REGULAR_EXPRESSION "AUBandpass [|] AU [|] Apple")
+endif()
+
 add_test(NAME wfg.commands.C     COMMAND wfg commands --wfg-locale=C)
 add_test(NAME wfg.commands.fr_FR COMMAND wfg commands --wfg-locale=${WFG_LOCALE_FR})
 

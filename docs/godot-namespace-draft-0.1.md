@@ -9851,6 +9851,15 @@ the show stores, so no preset loaded**, and `--proxy-deadline-us` was dropped; t
 the show's channels per track at two. One function (`editSpecOf`) now describes the graph for every
 path.
 
+**Amended 2026-09-26 — AU on macOS.** `JUCE_PLUGINHOST_AU=1` on Darwin, and this build — JUCE's modules,
+never its `juce_add_*` helpers — links `AudioUnit` and `CoreAudioKit` itself, which is all the "link
+line the Mac mini had to check" (§17.12) turned out to be. An AU has no folder: the scan asks JUCE's AU
+format for the system's components whatever path it is handed, where every other format with nowhere
+to look is skipped. The show's word is `AU` (JUCE says `AudioUnit`). AUv3 is refused by JUCE with a
+sentence, since the children make their plugins synchronously; AU preset files (`.aupreset`) are not
+read - a cue's whole saved state does their work. On the macOS CI runner Apple's AUBandpass is scanned
+by its identifier and hosted in the child, where it takes a constant away.
+
 ### 17.8 The client
 
 The desktop client keeps its rules: one snapshot a pass, `model/` std-only, one call site per

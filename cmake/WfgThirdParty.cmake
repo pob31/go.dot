@@ -270,6 +270,10 @@ target_compile_definitions(wfg_deps INTERFACE
     # (plugin/PluginLoad.cpp), since JUCE's LV2 format reads every bundle on
     # the default folders the moment it is made.
     JUCE_PLUGINHOST_LV2=1
+    # And AU on macOS, the author's decision of the same day. JUCE's own
+    # helpers would link AudioUnit and CoreAudioKit for a plugin host; this
+    # build uses its modules only, so the APPLE block below links them.
+    $<$<PLATFORM_ID:Darwin>:JUCE_PLUGINHOST_AU=1>
 
     # --- juce_simpleweb, TLS off.
     #     Upstream defaults SECURE support ON, which compiles asio's OpenSSL
@@ -439,6 +443,12 @@ if(APPLE)
     # fine on Windows and Linux, where these macros mean nothing at all.
     target_compile_definitions(wfg_deps INTERFACE
         $<IF:$<CONFIG:Debug>,_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_DEBUG,_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_FAST>)
+
+    # AU hosting (2026-09-26): the frameworks JUCE's juce_add_* helpers would
+    # have linked for a plugin host, which a modules-only build must name
+    # itself - AudioUnit for the component API, CoreAudioKit for an AU's own
+    # window in the editing helper.
+    target_link_libraries(wfg_deps INTERFACE "-framework AudioUnit" "-framework CoreAudioKit")
 endif()
 
 # DECLINED from TE's examples/TestRunner/CMakeLists.txt, so nobody "fixes" it later:

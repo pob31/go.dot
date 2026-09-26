@@ -407,7 +407,11 @@ namespace wfg::plugin
                     if (! options.extraFolder.empty())
                         where.addIfNotAlreadyThere (juce::File (juce::String (options.extraFolder)));
 
-                    if (where.getNumPaths() == 0)
+                    /*  AN AU HAS NO FOLDER TO SEARCH: the system registers
+                        components and JUCE's AU format lists them, whatever
+                        path it is handed. Every other format with nowhere to
+                        look has nothing to find. */
+                    if (where.getNumPaths() == 0 && ! format->getName().startsWith ("AudioUnit"))
                         continue;
 
                     /*  ONCE EACH: an LV2 bundle holding two plugins is answered
