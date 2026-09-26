@@ -79,6 +79,17 @@ namespace wfg::audio
         std::string presetPath;
     };
 
+    /*  ONE RACK CHANNEL, as the document declares it (Phase 9b, namespace
+        draft §18.2): a track of its own after the voices, with its own chain.
+        Its name is for the words a failure says; its plugins are in the order
+        of the chain, each a proxy between the EQ and the output stage. */
+    struct RackChannelSpec
+    {
+        std::string id;
+        std::string name;
+        std::vector<PluginSpec> plugins;
+    };
+
     /*  What the proxies need from outside the host (Phase 9a, §17.6): the
         table their state is written to, how to launch a child, and who hears
         of a failure. Set before buildEdit; a host with none builds its proxies
@@ -128,6 +139,11 @@ namespace wfg::audio
             one proxy per entry on every voice, between the EQ and the output
             stage, fixed with the graph like everything else here. */
         std::vector<PluginSpec> plugins;
+
+        /*  THE LIVE RACK (Phase 9b, decisions BX and CK): one track per rack
+            channel, AFTER the voices and outside their count, each with the
+            live input stage at its head and its own chain. */
+        std::vector<RackChannelSpec> rack;
 
         /** The proxies' spin limit; nought means the rule (§17.6). */
         std::int64_t proxyDeadlineMicroseconds = 0;
@@ -221,8 +237,30 @@ namespace wfg::audio
             `lastError` says which. */
         bool buildEdit (const EditSpec& spec);
 
-        /** How many tracks the generated Edit has. Zero before one is built. */
+        /*  HOW MANY VOICES the generated Edit has - the tracks a media cue
+            plays on, and so the polyphony ceiling. The rack's tracks come after
+            them and are not counted (Phase 9b, decision CK). Zero before an
+            Edit is built. */
         int trackCount() const noexcept;
+
+        /** Every track, the voices and then the rack's channels. */
+        int allTrackCount() const noexcept;
+
+        /*  The track a rack channel was built as, or -1 for one the graph was
+            built without (declared since, until Load now). */
+        int rackTrackOf (const std::string& channelId) const noexcept;
+
+        /*  THE RACK CHANNEL'S INPUT STAGE (Phase 9b, namespace draft §18.4):
+            which logical input it takes and how many, and its gate - opened at
+            a sample of Go.dot's count (-1 for at once), shut on a ramp or a
+            fifth of one. Tick thread; atomics. Nothing on a voice. */
+        void setRackSource (int trackIndex, int firstInput, int width) noexcept;
+        void openRackGate (int trackIndex, std::int64_t sample) noexcept;
+        void shutRackGate (int trackIndex, bool fast) noexcept;
+
+        /*  Whether a rack channel's gate lets anything through - open, or still
+            ramping shut. False for a voice. Any thread. */
+        bool isRackPassing (int trackIndex) const noexcept;
 
         /** How many channels each of those tracks carries - a cue's input width. */
         int editChannelsPerTrack() const noexcept;

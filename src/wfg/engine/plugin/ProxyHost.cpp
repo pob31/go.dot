@@ -83,7 +83,18 @@ namespace wfg::plugin
         /** Writes the table and tells the tree, when something a reader could see moved. */
         void publish()
         {
-            if (table != nullptr && table->set (spec.pluginId, statusNow()) && changed)
+            if (table == nullptr)
+                return;
+
+            const auto status = statusNow();
+            auto moved = table->set (spec.pluginId, status);
+
+            /*  And every other entry it stands for, each the same: one child,
+                one truth about it (Phase 9b). */
+            for (const auto& id : spec.alsoIds)
+                moved = table->set (id, status) || moved;
+
+            if (moved && changed)
                 changed();
         }
 
@@ -295,19 +306,27 @@ namespace wfg::plugin
             if (failures.size() == 1)
             {
                 restartDueAt = std::max<std::uint32_t> (1, now + static_cast<std::uint32_t> (restartDelayMs));
-                problem += "; every voice plays dry through it; restarting in two seconds";
+                problem += "; " + (spec.dryWords.empty() ? std::string ("every voice plays dry through it")
+                                                         : spec.dryWords)
+                         + "; restarting in two seconds";
             }
             else
             {
                 restartDueAt = 0;
-                problem += "; every voice plays dry through it; failed again inside a minute, so it stays"
-                           " down until plugin.restart";
+                problem += "; " + (spec.dryWords.empty() ? std::string ("every voice plays dry through it")
+                                                         : spec.dryWords)
+                         + "; failed again inside a minute, so it stays down until plugin.restart";
             }
 
             publish();
 
             if (failed)
+            {
                 failed (spec.pluginId, problem);
+
+                for (const auto& id : spec.alsoIds)
+                    failed (id, problem);
+            }
         }
 
         void becomeLoaded()
@@ -402,7 +421,9 @@ namespace wfg::plugin
                     if (lane->consecutiveMisses() >= static_cast<std::uint32_t> (ProxyLane::missesBeforeFailure))
                     {
                         fail ("the plugin stopped answering: " + std::to_string (ProxyLane::missesBeforeFailure)
-                              + " blocks late in a row on voice " + std::to_string (i + 1));
+                              + " blocks late in a row on "
+                              + (i < spec.laneWords.size() ? spec.laneWords[i]
+                                                           : "voice " + std::to_string (i + 1)));
                         return;
                     }
                 }
@@ -630,6 +651,12 @@ namespace wfg::plugin
 
     //==============================================================================
     const std::string& ProxyHost::pluginId() const noexcept     { return impl->spec.pluginId; }
+
+    bool ProxyHost::serves (const std::string& id) const noexcept
+    {
+        return id == impl->spec.pluginId
+                 || std::find (impl->spec.alsoIds.begin(), impl->spec.alsoIds.end(), id) != impl->spec.alsoIds.end();
+    }
     PluginTable::Status ProxyHost::status() const               { return impl->statusNow(); }
     std::string ProxyHost::regionPath() const                   { return impl->regionFile.getFullPathName().toStdString(); }
     bool ProxyHost::childIsRunning() const                      { return impl->child != nullptr && impl->child->isRunning(); }

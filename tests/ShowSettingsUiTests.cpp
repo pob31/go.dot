@@ -301,6 +301,136 @@ TEST_CASE ("show settings UI: the Inputs tab makes named inputs, and a hand patc
     CHECK (rig.sent.size() == before + 1);
 }
 
+TEST_CASE ("show settings UI: the Rack tab makes channels, and says each chain's worst case against the budget")
+{
+    /*  Phase 9b (namespace draft 18.3): two channels to look at, made through
+        the document, and their plugins' states as a sandbox would write them
+        tonight - one chain over the budget, one plugin down. */
+    Rig rig;
+    plugin::PluginTable table;
+    rig.parameters.setPlugins (&table);
+    rig.state.sampleRate = 48000;
+
+    const auto vox = rig.document.createRackChannel ("mono");
+    REQUIRE (vox.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/slot/" + vox.id + "/name", "Vox 1").ok);
+
+    const auto room = rig.document.createChannelPlugin (vox.id, "Room", "VST3-0badf00d-room", "VST3", "C:/plugins/room.vst3");
+    const auto deEss = rig.document.createChannelPlugin (vox.id, "De-esser", "VST3-0badf00d-dess", "VST3", "C:/plugins/dess.vst3");
+    REQUIRE (room.ok);
+    REQUIRE (deEss.ok);
+
+    const auto band = rig.document.createRackChannel ("stereo");
+    REQUIRE (band.ok);
+    REQUIRE (rig.document.setAttribute ("/godot/slot/" + band.id + "/name", "Band").ok);
+
+    const auto eq = rig.document.createChannelPlugin (band.id, "Bus EQ", "VST3-0badf00d-beq", "VST3", "C:/plugins/beq.vst3");
+    REQUIRE (eq.ok);
+
+    plugin::PluginTable::Status loaded;
+    loaded.state = "loaded";
+    loaded.inputs = 2;
+    loaded.outputs = 2;
+    loaded.layout = "stereo in, stereo out";
+
+    auto roomStatus = loaded;
+    roomStatus.latencySamples = 256;
+    auto deEssStatus = loaded;
+    deEssStatus.latencySamples = 64;
+    table.set (room.id, roomStatus);
+    table.set (deEss.id, deEssStatus);
+
+    plugin::PluginTable::Status failed;
+    failed.state = "failed";
+    failed.problem = "its child process stopped answering; Band plays without it";
+    table.set (eq.id, failed);
+
+    client::ui::ShowSettingsWindow panel (rig.theme, *rig.publish(),
+        [&rig] (Event event) { rig.sent.push_back (std::move (event)); });
+
+    auto* tabs = component<juce::TabbedComponent> (panel);
+    REQUIRE (tabs != nullptr);
+
+    const auto names = tabs->getTabNames();
+    CHECK (names.indexOf ("Rack") == names.indexOf ("Plugins") + 1);
+    tabs->setCurrentTabIndex (names.indexOf ("Rack"));
+
+    auto* page = tabs->getCurrentContentComponent();
+    REQUIRE (page != nullptr);
+
+    for (const auto& [label, channelClass] : { std::pair<const char*, const char*> { "+ Mono", "mono" },
+                                               std::pair<const char*, const char*> { "+ Mono to stereo", "monoToStereo" },
+                                               std::pair<const char*, const char*> { "+ Stereo", "stereo" } })
+    {
+        INFO (label);
+
+        auto* add = button (*page, label);
+        REQUIRE (add != nullptr);
+
+        const auto before = rig.sent.size();
+        add->onClick();
+
+        REQUIRE (rig.sent.size() == before + 1);
+        CHECK (rig.sent.back().command == "channel.create");
+        CHECK (rig.sent.back().args[0].getString() == channelClass);
+    }
+
+    /*  THE FIRST CHANNEL IS PICKED, so its chain is what the right side shows
+        and Add... has somewhere to put a plugin. */
+    auto* addPlugin = button (*page, "Add...");
+    REQUIRE (addPlugin != nullptr);
+    CHECK (addPlugin->isEnabled());
+
+    /*  THE WORST CASE IS SAID: 320 samples at 48 kHz is 6.7 ms, over the 5 ms
+        the show allows - in words at the foot, never a colour alone. */
+    const auto saying = [] (juce::Component& root, const juce::String& words)
+    {
+        std::function<bool (juce::Component&)> find = [&] (juce::Component& at)
+        {
+            if (auto* label = dynamic_cast<juce::Label*> (&at); label != nullptr && label->getText().contains (words))
+                return true;
+
+            for (auto* child : at.getChildren())
+                if (find (*child))
+                    return true;
+
+            return false;
+        };
+
+        return find (root);
+    };
+
+    CHECK (saying (*page, "Vox 1: 6.7 ms at worst, with every plugin in - over the 5 ms budget."));
+
+    /*  A LOOK, with no screen: the tab painted into a PNG when WFG_SNAPSHOT_DIR
+        is set, and skipped otherwise. */
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        panel.setSize (880, 610);
+        panel.refresh (*rig.publish());
+
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("rack-tab.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+
+    /*  LOCKED, NOTHING IS OFFERED THAT WOULD EDIT THE SHOW - and a failed
+        plugin can still be restarted, which is not an edit. */
+    REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+    panel.refresh (*rig.publish());
+    CHECK_FALSE (button (*page, "+ Mono")->isVisible());
+    CHECK_FALSE (addPlugin->isVisible());
+    CHECK (button (*page, "Restart")->isVisible());
+}
+
 //==============================================================================
 /*  A ROW'S NAME CAN CHANGE NOW, AND THE PANEL HAS TO FOLLOW IT.
 

@@ -155,6 +155,16 @@ namespace wfg::client::gesture
     Event retryScan (const std::string& file);
     Event loadPlugins();
 
+    /*  THE LIVE RACK (Phase 9b, namespace draft §18.3): `channel.create`, a
+        channel of a class - mono, monoToStereo or stereo - and
+        `channel.plugin`, a known plugin at the end of a channel's chain with
+        the four words a replay needs. A chain is reordered with `object.move`
+        into its channel, and emptied with `object.delete`, as anything is. */
+    Event createRackChannel (const std::string& channelClass);
+    Event createChannelPlugin (const std::string& channelId, const std::string& name,
+                               const std::string& identifier, const std::string& format,
+                               const std::string& path);
+
     /** `eq.reset`: a media cue's EQ back to flat, one transaction (Phase 9a). */
     Event eqReset (const std::string& cueId);
 

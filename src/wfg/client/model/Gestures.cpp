@@ -123,6 +123,21 @@ namespace wfg::client::gesture
         return { origin::window, "plugin.load", {} };
     }
 
+    Event createRackChannel (const std::string& channelClass)
+    {
+        return { origin::window, "channel.create", { osc::Value::string (channelClass) } };
+    }
+
+    Event createChannelPlugin (const std::string& channelId, const std::string& name,
+                               const std::string& identifier, const std::string& format,
+                               const std::string& path)
+    {
+        return { origin::window, "channel.plugin",
+                 { osc::Value::string (channelId), osc::Value::string (name),
+                   osc::Value::string (identifier), osc::Value::string (format),
+                   osc::Value::string (path) } };
+    }
+
     Event eqReset (const std::string& cueId)
     {
         return { origin::window, "eq.reset", { osc::Value::string (cueId) } };

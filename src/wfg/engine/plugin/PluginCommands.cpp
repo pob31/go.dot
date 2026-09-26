@@ -24,11 +24,18 @@ namespace wfg::plugin
     {
         return [&document] (const std::string& id)
         {
-            const auto plugins = document.root().getChildWithName ("Audio").getChildWithName ("Plugins");
+            const auto audio = document.root().getChildWithName ("Audio");
 
-            for (const auto& entry : plugins)
+            for (const auto& entry : audio.getChildWithName ("Plugins"))
                 if (entry.hasType ("Plugin") && entry.getProperty ("id").toString().toStdString() == id)
                     return true;
+
+            /*  AND THE RACK'S (Phase 9b): a channel's plugins are hosted and
+                fail as the set's are, so their records are as known. */
+            for (const auto& channel : audio.getChildWithName ("Rack"))
+                for (const auto& entry : channel)
+                    if (entry.hasType ("Plugin") && entry.getProperty ("id").toString().toStdString() == id)
+                        return true;
 
             return false;
         };

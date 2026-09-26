@@ -1755,6 +1755,15 @@
         </attribute>
       </optional>
       <optional>
+        <attribute name="rackBudget">
+          <a:documentation>How much delay the plugins of a mic cue may add, in milliseconds, before the cue, its channel and the plugin that did it say so (PRD 3.18, decision BY). Never refused and never compensated: a budget is a line drawn, and crossing it is said in words.</a:documentation>
+          <data type="double">
+            <param name="minInclusive">0</param>
+            <param name="maxInclusive">100</param>
+          </data>
+        </attribute>
+      </optional>
+      <optional>
         <attribute name="tracks">
           <a:documentation>How many cues can sound at once - the fixed number of audio tracks, and so the polyphony ceiling. Zero is legal and means a show with no audio. Required, and deliberately without a default: the number is a decision about the shape of a show, and no value here could be right for every rig. WRITABLE since 2026-09-21, because a decision a client cannot state is a decision nobody can take: it was read-only, no command set it, and a show made by File - New therefore declared nought and could never play anything. The graph is built from it when the audio settings are applied, so a change lands at the next apply and not under a running show - which is the same moment a changed buffer size lands.</a:documentation>
           <data type="integer">
@@ -1856,6 +1865,9 @@
           <data type="string"/>
         </attribute>
       </optional>
+      <zeroOrMore>
+        <ref name="Plugin"/>
+      </zeroOrMore>
     </element>
   </define>
 

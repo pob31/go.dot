@@ -2467,6 +2467,34 @@ namespace wfg::doc
         return insertObject (plugins, endOfSequence, "Plugin", id, attributes);
     }
 
+    EditResult ShowDocument::createChannelPlugin (const std::string& channelId, const std::string& name,
+                                                  const std::string& identifier, const std::string& format,
+                                                  const std::string& path, const std::string& id)
+    {
+        if (! format.empty() && format != "VST3" && format != "AU" && format != "LV2")
+            return EditResult::failed (reason::badValue);
+
+        auto channel = findById (channelId);
+
+        if (! channel.isValid() || ! channel.hasType ("Channel"))
+            return EditResult::failed (reason::unknownId);
+
+        std::vector<std::pair<std::string_view, std::string>> attributes;
+
+        if (! name.empty())
+            attributes.push_back ({ "name", name });
+
+        attributes.push_back ({ "identifier", identifier });
+
+        if (! format.empty())
+            attributes.push_back ({ "format", format });
+
+        if (! path.empty())
+            attributes.push_back ({ "path", path });
+
+        return insertObject (channel, endOfSequence, "Plugin", id, attributes);
+    }
+
     //==============================================================================
     void ShowDocument::collectIds (const juce::ValueTree& node, std::vector<std::string>& out) const
     {

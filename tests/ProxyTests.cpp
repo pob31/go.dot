@@ -30,6 +30,7 @@
 #include <3rd_party/doctest/tracktion_doctest.hpp>
 
 #include <wfg/engine/audio/AudioHost.h>
+#include <wfg/engine/audio/CueMatrix.h>
 #include <wfg/engine/plugin/Catalogue.h>
 #include <wfg/engine/command/CommandRegistry.h>
 #include <wfg/engine/plugin/PluginCommands.h>
@@ -48,6 +49,7 @@
 #include <juce_core/juce_core.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cmath>
@@ -56,6 +58,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 using namespace wfg;
@@ -1923,5 +1926,157 @@ TEST_CASE ("proxy: the graph carries one proxy per set entry on every voice, its
     for (const auto& region : regions)
         CHECK_FALSE (juce::File (region).existsAsFile());
 
+    CHECK (failures == 0);
+}
+
+//==============================================================================
+namespace
+{
+    /*  The last sample of each output channel of every block: enough to read a
+        constant input's level once the gates have settled. The audio thread
+        writes it, so fixed storage and nothing allocated. */
+    struct LastSamples final : audio::BlockSink
+    {
+        std::array<std::atomic<float>, 2> last {};
+
+        void blockProduced (const float* const* channels, int numChannels, int numSamples) noexcept override
+        {
+            for (int channel = 0; channel < std::min (numChannels, 2); ++channel)
+                last[static_cast<std::size_t> (channel)].store (channels[channel][numSamples - 1],
+                                                                std::memory_order_relaxed);
+        }
+    };
+}
+
+TEST_CASE ("rack: each channel is a track after the voices, its chain one child per distinct plugin, and its input comes out through it")
+{
+    /*  Phase 9b (namespace draft 18.4 and 18.6, decisions CH, CK and CL). Two
+        rack channels, each with the test-gain plugin in its chain: two tracks
+        after the one voice, which is still the polyphony; ONE child for the
+        two entries, a lane each, both entries loaded; and each channel's input
+        heard at its own output once its gate opens - through its plugin where
+        that is switched in, dry where it is not - and gone again on a shut. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    plugin::PluginTable table;
+    audio::ProxyServices services;
+    services.table = &table;
+    services.launch = launchOfThisBinary();
+    int failures = 0;
+    services.onFailed = [&failures] (const std::string&, const std::string&) { ++failures; };
+    host.setProxyServices (services);
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+    spec.proxyDeadlineMicroseconds = 200000;
+
+    for (const auto& [channelId, name, pluginId] : { std::tuple<const char*, const char*, const char*> { "CH000001", "Vox 1", "PG7N0011" },
+                                                     std::tuple<const char*, const char*, const char*> { "CH000002", "Vox 2", "PG7N0012" } })
+    {
+        audio::RackChannelSpec channel;
+        channel.id = channelId;
+        channel.name = name;
+
+        audio::PluginSpec entry;
+        entry.id = pluginId;
+        entry.identifier = plugin::Catalogue::testGainIdentifier();
+        entry.name = "Test gain";
+        channel.plugins.push_back (entry);
+
+        spec.rack.push_back (channel);
+    }
+
+    REQUIRE (host.buildEdit (spec));
+
+    CHECK (host.trackCount() == 1);
+    CHECK (host.allTrackCount() == 3);
+    CHECK (host.rackTrackOf ("CH000001") == 1);
+    CHECK (host.rackTrackOf ("CH000002") == 2);
+    CHECK (host.rackTrackOf ("NQNQNQNQ") == -1);
+    CHECK (host.inspectNodeIds().ok());
+    CHECK (table.builtRackOf ("CH000001") == std::vector<std::string> { "PG7N0011" });
+
+    /*  One child stands for both entries of the one plugin. */
+    REQUIRE (host.proxy (0) != nullptr);
+    CHECK (host.proxy (0)->serves ("PG7N0011"));
+    CHECK (host.proxy (0)->serves ("PG7N0012"));
+    CHECK (host.proxy (1) == nullptr);
+
+    const auto until = std::chrono::steady_clock::now() + std::chrono::seconds (10);
+
+    while (! (table.statusOf ("PG7N0011").state == "loaded" && table.statusOf ("PG7N0012").state == "loaded")
+             && std::chrono::steady_clock::now() < until)
+    {
+        host.pollProxies();
+        std::this_thread::sleep_for (std::chrono::milliseconds (10));
+    }
+
+    REQUIRE (table.statusOf ("PG7N0011").state == "loaded");
+    REQUIRE (table.statusOf ("PG7N0012").state == "loaded");
+
+    /*  Each channel takes an input of its own and sends it to an output of its
+        own; the first channel's plugin switched in, the second's left out. */
+    for (int rack = 1; rack <= 2; ++rack)
+    {
+        auto* matrix = host.trackMatrix (rack);
+        REQUIRE (matrix != nullptr);
+        matrix->setLevelDb (0.0f);
+        matrix->setGain (0, rack - 1, 1.0f);
+        matrix->snapToTargets();
+        host.setRackSource (rack, rack - 1, 1);
+        host.setTrackFxShape (rack, 0, 1, 1);
+    }
+
+    host.setTrackFxEnabled (1, 0, true);
+    host.pollProxies();
+
+    LastSamples sink;
+    host.setBlockSink (&sink);
+
+    const std::vector<float> one (64, 0.8f), two (64, 0.6f);
+    const float* inputs[] { one.data(), two.data() };
+
+    /*  SHUT: a channel no cue has opened is silent. */
+    for (int i = 0; i < 4; ++i)
+        host.processBlock (inputs, 2);
+
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+    CHECK (sink.last[1].load() == doctest::Approx (0.0f));
+
+    /*  OPEN, past the ramp: the first through its plugin at half, the second
+        dry. */
+    host.openRackGate (1, -1);
+    host.openRackGate (2, -1);
+
+    for (int i = 0; i < 20; ++i)
+        host.processBlock (inputs, 2);
+
+    CHECK (sink.last[0].load() == doctest::Approx (0.4f).epsilon (0.001));
+    CHECK (sink.last[1].load() == doctest::Approx (0.6f).epsilon (0.001));
+    CHECK (host.isRackPassing (1));
+
+    /*  A fast shut on the first: silent inside a block or two, the second
+        untouched. */
+    host.shutRackGate (1, true);
+
+    for (int i = 0; i < 4; ++i)
+        host.processBlock (inputs, 2);
+
+    CHECK (sink.last[0].load() == doctest::Approx (0.0f));
+    CHECK (sink.last[1].load() == doctest::Approx (0.6f).epsilon (0.001));
+    CHECK_FALSE (host.isRackPassing (1));
+    CHECK (host.isRackPassing (2));
+
+    host.setBlockSink (nullptr);
+    host.stop();
     CHECK (failures == 0);
 }

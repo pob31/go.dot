@@ -10788,8 +10788,8 @@ default.
 | `/godot/audio/inputLatency`, `outputLatency` | `i`, 0 samples | r | none | the interface's own delays as its driver reports them, read when the device opens |
 | `/godot/audio/rackBudget` | `d`, 5 ms (0..100) | rw | show | what a mic cue's plugins may add before they say so (BY) |
 | `/godot/audio/inputPatchSettled` | `T`, false | rw | state | the input patch no longer follows the list of inputs (the `patchSettled` rule) |
-| `/godot/slot/<id>/plugins` | `s` | r | none | a rack channel's plugins, in the order of its chain |
-| `…/latency` | `d`, 0 ms | r | none | what its chain declares with every plugin in — the worst case, shown when somebody adds a plugin rather than discovered on the night |
+| `/godot/slot/<id>/plugins` | `s` | r | none | a rack channel's plugins by id, space-separated, in the order of its chain. Each is published at `/godot/plugin/<id>` with the set's rows — name, state, problem, latency, layout, preset — and never in `plugin/order`, which stays the chain on every voice |
+| `…/latencySamples` | `i`, 0 samples | r | none | what its chain declares with every plugin in — the worst case, shown when somebody adds a plugin rather than discovered on the night. In samples, as a plugin's own row is; the Rack tab says it in milliseconds against the budget |
 | `/godot/cue/<id>/input` | `s`, `refers=input` | rw | show | on a mic cue: the input it takes |
 | `…/channel` | `s`, `refers=rackChannel` | rw | show | on a mic cue: the rack channel it goes through |
 | `…/fadeIn` | `d`, 0 s (0..) | rw | show | on a mic cue: how long GO takes to bring it from silence to its level; nought opens it at once, behind a click-free ramp |
@@ -10921,8 +10921,8 @@ proxy's answer as it does on the voices.
 the list and the inspector, the channel in the Rack tab, and the plugin's box at the foot each say
 so — in words and a mark, never colour alone (§4.8): *Vox 1 is 7.3 ms from the microphone to the
 output; its plugins add 5.8 ms, over the 5 ms budget: Pro-L 2 adds 5.0 ms*. The channel's own
-`latency` row is the worst case, every plugin in, shown the moment somebody adds a plugin rather
-than discovered on the night. Over the budget is a reading the tree derives from the plugin table
+`latencySamples` row is the worst case, every plugin in, shown the moment somebody adds a plugin
+rather than discovered on the night. Over the budget is a reading the tree derives from the plugin table
 and the device, like a plugin's state; it refuses nothing and is logged nowhere.
 
 ### 18.8 Two faults in the persistent section, one in the jump, and one in the player
@@ -10964,6 +10964,20 @@ jump.
   input monitoring and rack processing are not available yet"* goes. A **Rack** tab lists the
   channels: name, class, each chain with Add, Remove, order and preset, each plugin's state in
   words, the worst-case delay against the budget, and Load now.
+
+  *As built (9b.3).* After the Plugins tab, whose scan the chain is made from. The channels on
+  the left, two lines a row — the name, then the class and how many plugins, with *over budget*
+  in words where it is; *+ Mono*, *+ Mono to stereo* and *+ Stereo* above them are
+  `channel.create`; a double click renames, the class is a menu, the cross deletes the channel and
+  its chain. The picked channel's chain on the right, two lines a plugin — the name, then its
+  state and sentence; *Add…* is a menu of this machine's plugins (grouped by maker past two dozen)
+  and sends `channel.plugin`; a row dragged is `object.move` within the channel; *Preset file…*
+  and *Restart* act on the picked plugin as on the Plugins tab. At the foot, the picked channel's
+  worst case against the budget in one sentence — *Vox 1: 6.7 ms at worst, with every plugin in -
+  over the 5 ms budget* — naming any plugin not counted because it has not loaded; the budget
+  itself is typed at the top right; *Load now* is lit when the set or the rack differs from the
+  graph. The channels are not dragged: the `Rack` element carries no id for `object.move` to name,
+  and nothing about the sound depends on their order. The model is `client/model/Rack.h`.
 - **The cue list and the inspector.** The new-cue bar gains *Mic*. A mic cue's row wears its mark
   and its input's name where a media cue shows its file. The inspector's input menu lists the
   named inputs with their widths; its channel menu lists the channels with their class and who

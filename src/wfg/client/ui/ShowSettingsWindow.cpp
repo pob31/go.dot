@@ -8,6 +8,7 @@
 #include <wfg/client/model/OutputList.h>
 #include <wfg/client/model/InputList.h>
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Surfaces.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -3598,7 +3599,7 @@ namespace wfg::client::ui
                 const auto picked = which == Which::known ? row == pickedKnown
                                   : which == Which::set   ? row == pickedSet
                                                           : row == pickedSkipped;
-                g.setColour (Look::colour (theme, picked ? "panel-raised" : row % 2 == 0 ? "panel" : "panel-in"));
+                g.setColour (Look::colour (theme, picked ? "panel-high" : row % 2 == 0 ? "panel" : "panel-in"));
                 g.fillRect (0, 0, width, height - 1);
                 g.setColour (Look::colour (theme, "ink"));
                 g.setFont (Look::font (theme, 14.0f));
@@ -3699,6 +3700,768 @@ namespace wfg::client::ui
                              folderButton { "Scan a folder..." }, retryButton { "Retry" }, loadButton { "Load now" };
             std::unique_ptr<juce::FileChooser> chooser;
         };
+
+        /*  THE RACK TAB (Phase 9b, namespace draft §18.3). The live rack's
+            channels on the left, each a name, what it takes in and puts out,
+            and how many plugins it carries; the picked channel's chain on the
+            right, in the order it processes, each plugin with what became of
+            it tonight in a word and its sentence beside it (PRD §4.8). Under
+            both, what the chain would make a microphone late by with every
+            plugin in, against the show's budget, in words (decision BY) - and
+            Load now, which rebuilds the graph with the rack as it stands.
+
+            EVERY ROW IS A COMMAND, as the Inputs tab's are: the three add
+            buttons are `channel.create`; a double click on a name renames it
+            and the class cell is a menu of the three, both `node.set`; the
+            cross is `object.delete`. In the chain, Add... is `channel.plugin`
+            with a plugin this machine's scan found, a dragged row is
+            `object.move` within the channel, the cross takes a plugin out,
+            Preset file... names a preset as the Plugins tab does, and Restart
+            is `plugin.restart`. Ctrl-Z takes any edit back.
+
+            The channels are not dragged: the rack has no order anybody hears,
+            and a list that moves when dragged says it has one. */
+        class RackPage final : public juce::Component,
+                               public juce::DragAndDropContainer,
+                               public juce::DragAndDropTarget
+        {
+        public:
+            RackPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
+                : theme (themeToUse), send (std::move (dispatch)),
+                  channelLister (*this, Which::channels), chainLister (*this, Which::chain)
+            {
+                for (auto* list : { &channelList, &chainList })
+                {
+                    list->setRowHeight (rowHeight);
+                    list->setOutlineThickness (0);
+                    list->setColour (juce::ListBox::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                    addAndMakeVisible (*list);
+                }
+
+                channelList.setModel (&channelLister);
+                chainList.setModel (&chainLister);
+
+                for (auto* label : { &channelHeading, &chainHeading, &budgetLabel, &budgetUnit, &said })
+                {
+                    label->setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                    addAndMakeVisible (*label);
+                }
+
+                channelHeading.setText ("Channels", juce::dontSendNotification);
+                budgetLabel.setText ("Delay a mic cue's plugins may add", juce::dontSendNotification);
+                budgetLabel.setJustificationType (juce::Justification::centredRight);
+                budgetUnit.setText ("ms", juce::dontSendNotification);
+                said.setJustificationType (juce::Justification::topLeft);
+
+                addAndMakeVisible (budget);
+                budget.setInputRestrictions (6, "0123456789.,");
+                budget.setJustification (juce::Justification::centredRight);
+                budget.setTooltip ("How much delay the plugins a mic cue switches in may add before the cue,"
+                                   " its channel and the plugin that did it say so. Never refused and never"
+                                   " compensated: crossing it is said in words.");
+                budget.onReturnKey = [this] { commitBudget(); };
+                budget.onFocusLost = [this] { commitBudget(); };
+
+                addChildComponent (nameEditor);
+                nameEditor.setEditable (false, true, false);
+                nameEditor.setColour (juce::Label::backgroundColourId, Look::colour (themeToUse, "panel-in"));
+                nameEditor.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
+                nameEditor.onEditorHide = [this] { commitName(); };
+
+                for (auto* button : { &addMono, &addWide, &addStereo, &addPlugin, &presetButton,
+                                      &restartButton, &loadButton })
+                    addAndMakeVisible (*button);
+
+                addMono.setTooltip ("A channel for a microphone: mono in, mono out.");
+                addWide.setTooltip ("A channel for a microphone through a stereo effect - a reverb, a"
+                                    " chorus: mono in, stereo out.");
+                addStereo.setTooltip ("A channel for a stereo line - a keyboard, another machine.");
+                addPlugin.setTooltip ("Put a plugin this machine's scan found at the end of the picked"
+                                      " channel's chain. It loads switched off; a mic cue switches it in.");
+                presetButton.setTooltip ("A .vstpreset file for the picked plugin, copied into the bundle's"
+                                         " plugins/ folder and applied when the show opens.");
+                restartButton.setTooltip ("A fresh child process for the picked plugin - for one that"
+                                          " failed, or that stays down after failing twice.");
+
+                const auto add = [this] (const char* channelClass)
+                {
+                    if (! send || locked)
+                        return;
+
+                    /*  THE NEW CHANNEL IS PICKED when it arrives, so Add... goes
+                        where somebody who just made one expects it to. */
+                    channelsWhenAdded = static_cast<int> (rack.channels.size());
+                    send (gesture::createRackChannel (channelClass));
+                };
+
+                addMono.onClick   = [add] { add ("mono"); };
+                addWide.onClick   = [add] { add ("monoToStereo"); };
+                addStereo.onClick = [add] { add ("stereo"); };
+                addPlugin.onClick = [this] { choosePlugin(); };
+                presetButton.onClick = [this] { choosePreset(); };
+
+                restartButton.onClick = [this]
+                {
+                    if (send && ! pickedPluginId.empty())
+                        send (gesture::restartPlugin (pickedPluginId));
+                };
+
+                loadButton.onClick = [this]
+                {
+                    if (send && ! locked && changed)
+                        send (gesture::loadPlugins());
+                };
+            }
+
+            void show (model::RackReading rackNow, std::string budgetTextNow,
+                       std::vector<model::KnownPluginRow> knownNow, std::string bundlePathNow,
+                       bool editable, bool changedNow)
+            {
+                const auto keyWas = keyOf (rack) + (locked ? "L" : "U");
+
+                rack = std::move (rackNow);
+                known = std::move (knownNow);
+                bundlePath = std::move (bundlePathNow);
+                locked = ! editable;
+                changed = changedNow;
+
+                /*  WHAT IS PICKED IS AN IDENTIFIER, kept across passes: the rows
+                    are re-read every time, and a channel added above the picked
+                    one must not move the pick onto its neighbour. */
+                if (channelsWhenAdded >= 0 && static_cast<int> (rack.channels.size()) > channelsWhenAdded)
+                {
+                    pickedChannelId = rack.channels.back().id;
+                    channelsWhenAdded = -1;
+                }
+
+                if (channelIndex (pickedChannelId) < 0)
+                    pickedChannelId = rack.channels.empty() ? std::string {} : rack.channels.front().id;
+
+                if (pluginIndex (pickedPluginId) < 0)
+                    pickedPluginId.clear();
+
+                if (! budget.hasKeyboardFocus (true) && budget.getText() != juce::String (budgetTextNow))
+                    budget.setText (juce::String (budgetTextNow), juce::dontSendNotification);
+
+                for (auto* button : { &addMono, &addWide, &addStereo, &addPlugin, &presetButton, &loadButton })
+                    button->setVisible (editable);
+
+                budget.setReadOnly (locked);
+
+                loadButton.setTooltip (changed
+                                         ? juce::String ("The rack or the set differs from the audio graph: rebuild the"
+                                                         " graph as they stand. Only while nothing plays; the sound"
+                                                         " stops for a moment.")
+                                         : juce::String ("The audio graph holds the rack as it stands."));
+
+                const auto* channel = pickedChannel();
+
+                chainHeading.setText (channel == nullptr
+                                        ? juce::String ("The picked channel's chain")
+                                        : juce::String (channel->name) + "'s chain, in the order it processes",
+                                      juce::dontSendNotification);
+
+                said.setText (channel == nullptr
+                                ? juce::String ("No rack channels yet. Add one for a microphone to pass through"
+                                                " plugins of its own - a mic cue names the channel it plays through.")
+                                : juce::String (channel->name) + ": " + juce::String (model::budgetWords (*channel, rack)),
+                              juce::dontSendNotification);
+
+                updateButtons();
+
+                if (keyWas != keyOf (rack) + (locked ? "L" : "U"))
+                {
+                    channelList.updateContent();
+                    chainList.updateContent();
+                    channelList.repaint();
+                    chainList.repaint();
+                }
+            }
+
+            void paintOverChildren (juce::Graphics& g) override
+            {
+                if (dropRow < 0)
+                    return;
+
+                const auto y = chainList.getY() + dropRow * chainList.getRowHeight()
+                                 - chainList.getViewport()->getViewPositionY();
+
+                g.setColour (Look::colour (theme, "picked"));
+                g.fillRect (chainList.getX(), y - 1, chainList.getWidth(), 2);
+            }
+
+            void resized() override
+            {
+                auto area = getLocalBounds().reduced (10);
+                auto bar = area.removeFromTop (30);
+
+                for (auto* button : { &addMono, &addWide, &addStereo })
+                    button->setBounds (bar.removeFromLeft (button == &addWide ? 150 : 110).reduced (3, 0));
+
+                budgetUnit.setBounds (bar.removeFromRight (30));
+                budget.setBounds (bar.removeFromRight (56).reduced (0, 2));
+                budgetLabel.setBounds (bar.withTrimmedLeft (8));
+
+                area.removeFromTop (8);
+
+                auto foot = area.removeFromBottom (44);
+                loadButton.setBounds (foot.removeFromRight (100).withSizeKeepingCentre (100, 26));
+                said.setBounds (foot.withTrimmedRight (8));
+                area.removeFromBottom (4);
+
+                auto left = area.removeFromLeft (area.getWidth() * 2 / 5).withTrimmedRight (4);
+                auto right = area.withTrimmedLeft (4);
+
+                channelHeading.setBounds (left.removeFromTop (22));
+                channelList.setBounds (left);
+
+                chainHeading.setBounds (right.removeFromTop (22));
+                auto buttons = right.removeFromBottom (26);
+                addPlugin.setBounds (buttons.removeFromLeft (90));
+                buttons.removeFromLeft (6);
+                presetButton.setBounds (buttons.removeFromLeft (110));
+                buttons.removeFromLeft (6);
+                restartButton.setBounds (buttons.removeFromLeft (80));
+                chainList.setBounds (right.withTrimmedBottom (4));
+            }
+
+        private:
+            enum class Which { channels, chain };
+
+            struct Lister final : public juce::ListBoxModel
+            {
+                Lister (RackPage& ownerToUse, Which whichToUse) : owner (ownerToUse), which (whichToUse) {}
+                int getNumRows() override { return owner.rowsIn (which); }
+                void paintListBoxItem (int row, juce::Graphics& g, int width, int height, bool) override
+                {
+                    owner.paintRow (which, row, g, width, height);
+                }
+                void listBoxItemClicked (int row, const juce::MouseEvent& event) override { owner.clicked (which, row, event); }
+                void listBoxItemDoubleClicked (int row, const juce::MouseEvent& event) override
+                {
+                    owner.doubleClicked (which, row, event);
+                }
+                juce::var getDragSourceDescription (const juce::SparseSet<int>& selected) override
+                {
+                    return owner.dragOf (which, selected);
+                }
+                RackPage& owner;
+                Which which;
+            };
+
+            static constexpr int rowHeight = 42;
+
+            /*  A CHANNEL'S ROW IS TWO LINES, so its name has the column's width:
+                the name above, and under it the class - a menu - and how many
+                plugins the chain carries. Carved in one place so the painter and
+                the click cut the same cells. */
+            static constexpr int crossWidth = 24, markWidth = 14, classWidth = 118;
+
+            struct ChannelCells
+            {
+                juce::Rectangle<int> mark, name, channelClass, count, cross;
+            };
+
+            static ChannelCells channelCells (int width, int height)
+            {
+                ChannelCells cells;
+                auto area = juce::Rectangle<int> (0, 0, width, height).reduced (8, 0);
+
+                cells.cross = area.removeFromRight (crossWidth);
+                cells.mark = area.removeFromLeft (markWidth).removeFromTop (height / 2).withTrimmedTop (4);
+
+                auto top = area.removeFromTop (height / 2);
+                cells.name = top.withTrimmedTop (4);
+                cells.channelClass = area.removeFromLeft (classWidth).withTrimmedBottom (4);
+                cells.count = area.withTrimmedBottom (4);
+                return cells;
+            }
+
+            const model::RackChannelRow* pickedChannel() const
+            {
+                const auto at = channelIndex (pickedChannelId);
+                return at < 0 ? nullptr : &rack.channels[static_cast<std::size_t> (at)];
+            }
+
+            int channelIndex (const std::string& id) const
+            {
+                for (std::size_t at = 0; at < rack.channels.size(); ++at)
+                    if (rack.channels[at].id == id)
+                        return static_cast<int> (at);
+
+                return -1;
+            }
+
+            int pluginIndex (const std::string& id) const
+            {
+                if (const auto* channel = pickedChannel())
+                    for (std::size_t at = 0; at < channel->chain.size(); ++at)
+                        if (channel->chain[at].id == id)
+                            return static_cast<int> (at);
+
+                return -1;
+            }
+
+            int rowsIn (Which which) const
+            {
+                if (which == Which::channels)
+                    return static_cast<int> (rack.channels.size());
+
+                const auto* channel = pickedChannel();
+                return channel == nullptr ? 0 : static_cast<int> (channel->chain.size());
+            }
+
+            void updateButtons()
+            {
+                const auto* channel = pickedChannel();
+
+                addPlugin.setEnabled (channel != nullptr && ! locked);
+                presetButton.setEnabled (! pickedPluginId.empty() && ! locked && ! bundlePath.empty());
+                restartButton.setEnabled (! pickedPluginId.empty());
+                loadButton.setEnabled (changed && ! locked);
+            }
+
+            static std::string keyOf (const model::RackReading& reading)
+            {
+                std::string out = std::to_string (reading.sampleRate) + '|' + std::to_string (reading.budgetMs) + '\n';
+
+                for (const auto& channel : reading.channels)
+                {
+                    out += channel.id + '|' + channel.name + '|' + channel.channelClass + '|'
+                             + std::to_string (channel.latencySamples) + '\n';
+
+                    for (const auto& entry : channel.chain)
+                        out += ' ' + entry.id + '|' + entry.name + '|' + entry.state + '|' + entry.problem + '|'
+                                 + entry.preset + '|' + std::to_string (entry.latencySamples) + '|' + entry.layout + '\n';
+                }
+
+                return out;
+            }
+
+            void paintRow (Which which, int row, juce::Graphics& g, int width, int height)
+            {
+                if (row < 0 || row >= rowsIn (which))
+                    return;
+
+                if (which == Which::channels)
+                    paintChannel (rack.channels[static_cast<std::size_t> (row)], row, g, width, height);
+                else
+                    paintEntry (pickedChannel()->chain[static_cast<std::size_t> (row)], row, g, width, height);
+            }
+
+            void paintChannel (const model::RackChannelRow& channel, int row, juce::Graphics& g, int width, int height)
+            {
+                const auto isPicked = channel.id == pickedChannelId;
+                const auto cells = channelCells (width, height);
+
+                g.setColour (Look::colour (theme, isPicked ? "panel-high" : row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                /*  THE PICKED CHANNEL IS MARKED WITH A SHAPE as well as a shade
+                    (§4.8), as the Surfaces tab marks its surface: the chain on
+                    the right is this one's. */
+                if (isPicked)
+                {
+                    g.setColour (Look::colour (theme, "ink"));
+                    g.setFont (Look::font (theme, 11.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x96\xb8"), cells.mark, juce::Justification::centredLeft);
+                }
+
+                if (! locked)
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.setFont (Look::font (theme, 13.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cells.cross, juce::Justification::centred);
+                }
+
+                g.setFont (Look::font (theme, 13.0f));
+                g.setColour (Look::colour (theme, "ink"));
+                g.drawText (juce::String (channel.name), cells.name, juce::Justification::centredLeft, true);
+
+                /*  THE CLASS IS A MENU, and drawn as one - its word and a small
+                    arrow - so that it is found by looking and not by accident. */
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, "ink-dim"));
+                g.drawText (juce::String (channel.classWord()) + (locked ? juce::String() : juce::String::fromUTF8 (" \xe2\x96\xbe")),
+                            cells.channelClass, juce::Justification::centredLeft, true);
+
+                /*  OVER BUDGET IS SAID, never only coloured (§4.8): the words go
+                    after the count, and the whole sentence is at the foot. */
+                g.drawText (juce::String (channel.chainWord())
+                              + (model::overBudget (channel, rack) ? juce::String::fromUTF8 (" \xc2\xb7 over budget")
+                                                                   : juce::String()),
+                            cells.count, juce::Justification::centredLeft, true);
+            }
+
+            void paintEntry (const model::PluginRow& entry, int row, juce::Graphics& g, int width, int height)
+            {
+                const auto isPicked = entry.id == pickedPluginId;
+
+                g.setColour (Look::colour (theme, isPicked ? "panel-high" : row % 2 == 0 ? "panel" : "panel-in"));
+                g.fillRect (0, 0, width, height - 1);
+
+                auto area = juce::Rectangle<int> (0, 0, width, height).reduced (8, 0);
+                auto cross = area.removeFromRight (crossWidth);
+
+                if (! locked)
+                {
+                    g.setColour (Look::colour (theme, "ink-off"));
+                    g.setFont (Look::font (theme, 13.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x89\xa1"), area.removeFromLeft (18),
+                                juce::Justification::centred);
+
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (juce::String::fromUTF8 ("\xc3\x97"), cross, juce::Justification::centred);
+                }
+                else
+                {
+                    area.removeFromLeft (18);
+                }
+
+                /*  The picked plugin - the one Preset file... and Restart act
+                    on - marked with a shape as well as the shade. */
+                const auto mark = area.removeFromLeft (markWidth).removeFromTop (height / 2).withTrimmedTop (4);
+
+                g.setColour (Look::colour (theme, "ink"));
+
+                if (isPicked)
+                {
+                    g.setFont (Look::font (theme, 11.0f));
+                    g.drawText (juce::String::fromUTF8 ("\xe2\x96\xb8"), mark, juce::Justification::centredLeft);
+                }
+
+                /*  TWO LINES, as a channel's row: the plugin above, and under it
+                    the whole of what became of it - which, for one that failed,
+                    is a sentence that would never fit beside its name. */
+                g.setFont (Look::font (theme, 14.0f));
+                g.drawText (juce::String (row + 1) + ". " + juce::String (entry.name),
+                            area.removeFromTop (height / 2).withTrimmedTop (4), juce::Justification::centredLeft, true);
+                area = area.withTrimmedBottom (4);
+
+                /*  The state is a WORD and the sentence follows it, as on the
+                    Plugins tab: what somebody reads when a voice has gone dry. */
+                juce::String words = entry.state;
+
+                if (! entry.layout.empty())
+                    words += ", " + juce::String (entry.layout);
+
+                if (entry.latencySamples > 0)
+                    words += ", " + juce::String (entry.latencySamples) + " samples late";
+
+                if (! entry.preset.empty())
+                    words += ", preset " + juce::String (entry.preset);
+
+                if (! entry.problem.empty())
+                    words += " - " + juce::String (entry.problem);
+
+                g.setFont (Look::font (theme, 12.0f));
+                g.setColour (Look::colour (theme, entry.state == "failed" || entry.state == "missing" ? "ink" : "ink-dim"));
+                g.drawText (words, area, juce::Justification::centredLeft, true);
+            }
+
+            static int widthOf (const juce::MouseEvent& event, const juce::ListBox& list)
+            {
+                return event.eventComponent != nullptr ? event.eventComponent->getWidth() : list.getWidth();
+            }
+
+            void clicked (Which which, int row, const juce::MouseEvent& event)
+            {
+                if (row < 0 || row >= rowsIn (which))
+                    return;
+
+                if (which == Which::channels)
+                {
+                    const auto& channel = rack.channels[static_cast<std::size_t> (row)];
+                    const auto cells = channelCells (widthOf (event, channelList), channelList.getRowHeight());
+
+                    if (! locked && send && event.x >= cells.cross.getX())
+                    {
+                        send (gesture::deleteObject (channel.id));
+                        return;
+                    }
+
+                    if (channel.id != pickedChannelId)
+                    {
+                        pickedChannelId = channel.id;
+                        pickedPluginId.clear();
+                        said.setText (juce::String (channel.name) + ": " + juce::String (model::budgetWords (channel, rack)),
+                                      juce::dontSendNotification);
+                        chainHeading.setText (juce::String (channel.name) + "'s chain, in the order it processes",
+                                              juce::dontSendNotification);
+                        chainList.updateContent();
+                    }
+
+                    if (! locked && cells.channelClass.contains (event.x, event.y))
+                        chooseClass (channel);
+
+                    updateButtons();
+                    channelList.repaint();
+                    chainList.repaint();
+                    return;
+                }
+
+                const auto& entry = pickedChannel()->chain[static_cast<std::size_t> (row)];
+
+                if (! locked && send && event.x >= widthOf (event, chainList) - 8 - crossWidth)
+                {
+                    send (gesture::deleteObject (entry.id));
+                    return;
+                }
+
+                pickedPluginId = entry.id;
+                updateButtons();
+                chainList.repaint();
+            }
+
+            void doubleClicked (Which which, int row, const juce::MouseEvent& event)
+            {
+                if (which != Which::channels || locked || row < 0 || row >= rowsIn (which))
+                    return;
+
+                const auto cells = channelCells (widthOf (event, channelList), channelList.getRowHeight());
+
+                if (! cells.name.contains (event.x, event.y))
+                    return;
+
+                auto place = channelList.getRowPosition (row, true);
+                place.translate (channelList.getX(), channelList.getY());
+
+                editingId = rack.channels[static_cast<std::size_t> (row)].id;
+
+                nameEditor.setBounds (cells.name.translated (place.getX(), place.getY()));
+                nameEditor.setText (juce::String (rack.channels[static_cast<std::size_t> (row)].name),
+                                    juce::dontSendNotification);
+                nameEditor.setVisible (true);
+                nameEditor.showEditor();
+            }
+
+            void commitName()
+            {
+                const auto typed = nameEditor.getText().trim().toStdString();
+                const auto id = editingId;
+
+                editingId.clear();
+                nameEditor.setVisible (false);
+
+                if (id.empty() || typed.empty() || ! send)
+                    return;
+
+                send (gesture::setNode ("/godot/slot/" + id + "/name", typed));
+            }
+
+            void commitBudget()
+            {
+                if (locked || ! send)
+                    return;
+
+                /*  A COMMA IS A DECIMAL POINT HERE: somebody in a French booth
+                    types 2,5 - and the engine reads its own text, never the
+                    locale's, so the comma becomes the point it means. */
+                const auto typed = budget.getText().trim().replaceCharacter (',', '.').toStdString();
+
+                if (typed.empty() || std::abs (osc::parseDouble (typed).value_or (-1.0) - rack.budgetMs) < 1.0e-9)
+                    return;
+
+                send (gesture::setNode ("/godot/audio/rackBudget", typed));
+            }
+
+            void chooseClass (const model::RackChannelRow& channel)
+            {
+                juce::PopupMenu menu;
+                const std::pair<const char*, const char*> classes[] = {
+                    { "mono", "Mono - mono in, mono out" },
+                    { "monoToStereo", "Mono to stereo - mono in, stereo out" },
+                    { "stereo", "Stereo - stereo in, stereo out" } };
+
+                for (int at = 0; at < 3; ++at)
+                    menu.addItem (at + 1, classes[at].second, true, channel.channelClass == classes[at].first);
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&channelList),
+                                    [safe = juce::Component::SafePointer<RackPage> (this), id = channel.id,
+                                     was = channel.channelClass] (int chosen)
+                                    {
+                                        const char* words[] = { "", "mono", "monoToStereo", "stereo" };
+
+                                        if (safe == nullptr || chosen <= 0 || chosen > 3 || ! safe->send
+                                              || was == words[chosen])
+                                            return;
+
+                                        safe->send (gesture::setNode ("/godot/slot/" + id + "/class", words[chosen]));
+                                    });
+            }
+
+            /*  THIS MACHINE'S PLUGINS, as a menu under the button: the scan's
+                list, which the Plugins tab keeps. A long list is grouped by
+                maker, which is how somebody looks for one. */
+            void choosePlugin()
+            {
+                const auto* channel = pickedChannel();
+
+                if (channel == nullptr || locked || ! send)
+                    return;
+
+                juce::PopupMenu menu;
+
+                if (known.empty())
+                    menu.addItem (-1, "Nothing scanned yet: scan on the Plugins tab.", false);
+                else if (known.size() <= 24)
+                {
+                    for (std::size_t at = 0; at < known.size(); ++at)
+                        menu.addItem (static_cast<int> (at) + 1,
+                                      juce::String (known[at].name) + "  (" + juce::String (known[at].format) + ")");
+                }
+                else
+                {
+                    std::map<std::string, juce::PopupMenu> makers;
+
+                    for (std::size_t at = 0; at < known.size(); ++at)
+                        makers[known[at].manufacturer.empty() ? std::string ("Unknown maker") : known[at].manufacturer]
+                            .addItem (static_cast<int> (at) + 1,
+                                      juce::String (known[at].name) + "  (" + juce::String (known[at].format) + ")");
+
+                    for (auto& [maker, items] : makers)
+                        menu.addSubMenu (juce::String (maker), items);
+                }
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&addPlugin),
+                                    [safe = juce::Component::SafePointer<RackPage> (this), channelId = channel->id] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen <= 0 || ! safe->send
+                                              || chosen > static_cast<int> (safe->known.size()))
+                                            return;
+
+                                        const auto& k = safe->known[static_cast<std::size_t> (chosen - 1)];
+                                        safe->send (gesture::createChannelPlugin (channelId, k.name, k.identifier,
+                                                                                  k.format, k.path));
+                                    });
+            }
+
+            /*  THE CHOOSER IS A MEMBER because launchAsync returns at once; the
+                answer copies the file into the bundle's plugins/ folder and
+                names it on the row, as the Plugins tab does. */
+            void choosePreset()
+            {
+                const auto at = pluginIndex (pickedPluginId);
+
+                if (at < 0 || bundlePath.empty() || locked)
+                    return;
+
+                const auto entry = pickedChannel()->chain[static_cast<std::size_t> (at)];
+                chooser = std::make_unique<juce::FileChooser> ("A preset for " + entry.name, juce::File(),
+                                                               "*.vstpreset;*.preset;*");
+
+                chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+                                      [safe = juce::Component::SafePointer<RackPage> (this), entry] (const juce::FileChooser& answered)
+                                      {
+                                          if (safe == nullptr)
+                                              return;
+
+                                          const auto file = answered.getResult();
+
+                                          if (! file.existsAsFile())
+                                              return;
+
+                                          const auto folder = juce::File (juce::String (safe->bundlePath)).getChildFile ("plugins");
+                                          folder.createDirectory();
+                                          const auto copy = folder.getChildFile (file.getFileName());
+
+                                          if (! file.copyFileTo (copy) || ! safe->send)
+                                              return;
+
+                                          safe->send (gesture::setNode ("/godot/plugin/" + entry.id + "/preset",
+                                                                        file.getFileName().toStdString()));
+                                      });
+            }
+
+            //==========================================================================
+            /*  A CHAIN IS REORDERED BY DRAGGING, as the inputs are: the row's
+                id, tagged so that nothing else dropped here is mistaken for it. */
+            juce::var dragOf (Which which, const juce::SparseSet<int>& selected) const
+            {
+                if (which != Which::chain || locked || selected.isEmpty())
+                    return {};
+
+                const auto row = selected[0];
+
+                if (row < 0 || row >= rowsIn (Which::chain))
+                    return {};
+
+                return juce::var ("plugin:" + juce::String (pickedChannel()->chain[static_cast<std::size_t> (row)].id));
+            }
+
+            bool isInterestedInDragSource (const SourceDetails& details) override
+            {
+                return ! locked && details.description.toString().startsWith ("plugin:");
+            }
+
+            void itemDragMove (const SourceDetails& details) override
+            {
+                const auto row = dropRowAt (details.localPosition);
+
+                if (row != dropRow)
+                {
+                    dropRow = row;
+                    repaint();
+                }
+            }
+
+            void itemDragExit (const SourceDetails&) override
+            {
+                dropRow = -1;
+                repaint();
+            }
+
+            void itemDropped (const SourceDetails& details) override
+            {
+                const auto row = dropRowAt (details.localPosition);
+                const auto id = details.description.toString().fromFirstOccurrenceOf ("plugin:", false, false).toStdString();
+
+                dropRow = -1;
+                repaint();
+
+                const auto from = pluginIndex (id);
+
+                if (locked || ! send || from < 0 || row < 0)
+                    return;
+
+                /*  WHERE IT ENDS UP, counting the others: `object.move` within
+                    one parent leaves the child at the index it is given. */
+                const auto to = row > from ? row - 1 : row;
+
+                if (to != from)
+                    send (gesture::moveObject (id, pickedChannelId, to));
+            }
+
+            int dropRowAt (juce::Point<int> where) const
+            {
+                if (! chainList.getBounds().expanded (0, rowHeight / 2).contains (where))
+                    return -1;
+
+                const auto inList = where.y - chainList.getY() + chainList.getViewport()->getViewPositionY();
+                const auto height = juce::jmax (1, chainList.getRowHeight());
+
+                return juce::jlimit (0, rowsIn (Which::chain), (inList + height / 2) / height);
+            }
+
+            const model::Theme& theme;
+            std::function<void (Event)> send;
+            model::RackReading rack;
+            std::vector<model::KnownPluginRow> known;
+            std::string bundlePath;
+            bool locked = false;
+            bool changed = false;
+            std::string pickedChannelId, pickedPluginId, editingId;
+            int channelsWhenAdded = -1;
+            int dropRow = -1;
+            Lister channelLister, chainLister;
+            juce::ListBox channelList, chainList;
+            juce::Label channelHeading, chainHeading, budgetLabel, budgetUnit, said, nameEditor;
+            juce::TextEditor budget;
+            juce::TextButton addMono { "+ Mono" }, addWide { "+ Mono to stereo" }, addStereo { "+ Stereo" },
+                             addPlugin { "Add..." }, presetButton { "Preset file..." }, restartButton { "Restart" },
+                             loadButton { "Load now" };
+            std::unique_ptr<juce::FileChooser> chooser;
+        };
     }
 
     class ShowSettingsWindow::Panel final : public juce::Component
@@ -3768,6 +4531,7 @@ namespace wfg::client::ui
             midi = std::make_unique<MidiPage> (theme, send);
             surfaces = std::make_unique<SurfacesPage> (theme, send);
             plugins = std::make_unique<PluginsPage> (theme, send);
+            rackPage = std::make_unique<RackPage> (theme, send);
 
             /*  THE FIRST HAND EDIT OF THE OUTPUT PATCH IS WHAT SETTLES IT
                 (PRD §6.2). Sent BEFORE the edit lands, so that the engine's own
@@ -3831,6 +4595,10 @@ namespace wfg::client::ui
             /*  AFTER SURFACES: the set is what a cue's FX switches in, and the
                 tab is where a plugin is declared before a cue can (Phase 9a). */
             tabs.addTab ("Plugins", background, plugins.get(), false);
+
+            /*  AFTER PLUGINS: a channel's chain is made of what the machine's
+                scan found, and the scan is on the tab before (Phase 9b). */
+            tabs.addTab ("Rack", background, rackPage.get(), false);
             for (auto* component : std::initializer_list<juce::Component*> { &enabled, &type, &output, &input,
                      &buffer, &typeLabel, &outputLabel, &inputLabel, &bufferLabel, &rate, &explanation, &rescan })
                 interfacePage.addAndMakeVisible (*component);
@@ -3941,6 +4709,15 @@ namespace wfg::client::ui
                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
                            model::readScan (snapshot), model::readSkippedPlugins (snapshot),
                            model::readSetChanged (snapshot));
+
+            /*  THE RACK, re-read every pass for the same reason: its channels
+                and chains are the document's, and its plugins' state words the
+                sandbox's. `changed` is the one flag both tabs' Load now reads -
+                a set or a rack that differs from the graph (Phase 9b). */
+            rackPage->show (model::readRack (snapshot), model::text (snapshot, "/godot/audio/rackBudget"),
+                            model::readKnownPlugins (snapshot), model::text (snapshot, "/godot/document/path"),
+                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
+                            model::readSetChanged (snapshot));
 
             if (readCapabilities (snapshot)) capabilities();
             const auto state = model::text (snapshot, "/godot/audio/settingsStatus");
@@ -4137,6 +4914,7 @@ namespace wfg::client::ui
         std::unique_ptr<MidiPage> midi;
         std::unique_ptr<SurfacesPage> surfaces;
         std::unique_ptr<PluginsPage> plugins;
+        std::unique_ptr<RackPage> rackPage;
         bool settled = false;
 
         /*  The input patch's own regime, the twin of `settled` (Phase 9b). */

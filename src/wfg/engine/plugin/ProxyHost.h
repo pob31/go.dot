@@ -69,6 +69,20 @@ namespace wfg::plugin
         /** The document's Plugin id: what the table is keyed by. */
         std::string pluginId;
 
+        /*  THE OTHER ENTRIES ONE CHILD SERVES (Phase 9b, decision CL): the
+            rack's plugins are hosted one child per distinct plugin and preset,
+            a lane for each channel that has one, so a child can stand for
+            several of the document's entries. Each is written the same status
+            and hears of the same failure. Empty for an entry of the set. */
+        std::vector<std::string> alsoIds;
+
+        /*  WHAT A LANE IS CALLED in a sentence - "channel Vox 1" - and what
+            failing costs, said the same way: "Vox 1 and Vox 2 play without it".
+            Empty for the set's, which are voices by number and "every voice
+            plays dry through it". */
+        std::vector<std::string> laneWords;
+        std::string dryWords;
+
         /** JUCE's identifier, or `godot:test-gain`. */
         std::string identifier;
         std::string name;
@@ -157,6 +171,10 @@ namespace wfg::plugin
 
         //======================================================================
         const std::string& pluginId() const noexcept;
+
+        /*  Whether this child stands for the entry: its own id, or one of the
+            others it serves (Phase 9b). */
+        bool serves (const std::string& id) const noexcept;
 
         /** What the table holds for this entry. */
         PluginTable::Status status() const;

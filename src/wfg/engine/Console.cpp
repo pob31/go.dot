@@ -1914,6 +1914,10 @@ namespace
         /** The show's plugin set, in document order (Phase 9a). */
         std::vector<wfg::audio::PluginSpec> plugins;
 
+        /*  The live rack's channels, each with its own chain, in document
+            order (Phase 9b): a track each, after the voices. */
+        std::vector<wfg::audio::RackChannelSpec> rack;
+
         std::string problem;
     };
 
@@ -2059,6 +2063,32 @@ namespace
             shape.outputs = std::max (shape.outputs, first + width);
         }
 
+        /*  THE RACK (Phase 9b, decision BX): every Channel under Audio/Rack in
+            document order, each with its own Plugin children in the order of
+            its chain. A track each, after the voices. */
+        for (const auto rack : audio)
+            if (rack.hasType ("Rack"))
+                for (const auto channel : rack)
+                    if (channel.hasType ("Channel"))
+                    {
+                        wfg::audio::RackChannelSpec spec;
+                        spec.id = channel["id"].toString().toStdString();
+                        spec.name = channel["name"].toString().toStdString();
+
+                        for (const auto entry : channel)
+                            if (entry.hasType ("Plugin"))
+                            {
+                                wfg::audio::PluginSpec plugin;
+                                plugin.id = entry["id"].toString().toStdString();
+                                plugin.identifier = entry["identifier"].toString().toStdString();
+                                plugin.name = entry["name"].toString().toStdString();
+                                plugin.presetPath = entry["preset"].toString().toStdString();
+                                spec.plugins.push_back (std::move (plugin));
+                            }
+
+                        shape.rack.push_back (std::move (spec));
+                    }
+
         /*  THE SET (Phase 9a, decision AE): every Plugin under Audio/Plugins in
             document order, which is the chain's order on every voice. The
             preset is the row's word here; serve resolves it under the bundle. */
@@ -2106,13 +2136,23 @@ namespace
         spec.channelsPerTrack = shape.channelsPerTrack;
         spec.slots = shape.slots;
         spec.plugins = shape.plugins;
+        spec.rack = shape.rack;
         spec.proxyDeadlineMicroseconds = proxyDeadlineMicroseconds;
 
-        for (auto& plugin : spec.plugins)
+        const auto resolve = [&bundle] (wfg::audio::PluginSpec& plugin)
+        {
             if (! plugin.presetPath.empty())
                 plugin.presetPath = bundle.getChildFile ("plugins")
                                         .getChildFile (juce::String (plugin.presetPath))
                                         .getFullPathName().toStdString();
+        };
+
+        for (auto& plugin : spec.plugins)
+            resolve (plugin);
+
+        for (auto& channel : spec.rack)
+            for (auto& plugin : channel.plugins)
+                resolve (plugin);
 
         return spec;
     }

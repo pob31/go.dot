@@ -423,3 +423,68 @@ TEST_CASE ("plugin set: an Fx is one entry switched in on one media cue, made on
     REQUIRE (rig.apply ("undo").applied == 1);
     CHECK (rig.at ("/godot/fx/" + fxId + "/plugin") == gainId);
 }
+
+//==============================================================================
+TEST_CASE ("rack: a channel's plugins are its own chain, published beside the set's and never in its order")
+{
+    /*  Phase 9b (namespace draft 18.2 and 18.3, decision BX). `channel.plugin`
+        puts a Plugin under a rack channel, in chain order; it is published at
+        /godot/plugin/<id> with the set's rows, so the window, the editor and
+        the FX page take it as they take an entry of the set - and it is never
+        in /godot/plugin/order, which is the chain on every voice. */
+    Rig rig;
+    plugin::PluginTable table;
+    rig.parameters.setPlugins (&table);
+
+    REQUIRE (rig.apply ("channel.create", { osc::Value::string ("mono"), osc::Value::string ("CH000001") }).applied == 1);
+    REQUIRE (rig.apply ("node.set", { osc::Value::string ("/godot/slot/CH000001/name"),
+                                      osc::Value::string ("Vox 1") }).applied == 1);
+
+    std::vector<osc::Value> comp { osc::Value::string ("CH000001") };
+    for (auto& word : entry ("Comp", "godot:test-gain", "VST3", "", "PG7N0011"))
+        comp.push_back (word);
+
+    std::vector<osc::Value> verb { osc::Value::string ("CH000001") };
+    for (auto& word : entry ("Verb", "VST3-abcd1234-verb", "VST3", "", "PG7N0012"))
+        verb.push_back (word);
+
+    REQUIRE (rig.apply ("channel.plugin", comp).applied == 1);
+    REQUIRE (rig.apply ("channel.plugin", verb).applied == 1);
+
+    CHECK (rig.at ("/godot/slot/CH000001/plugins") == "PG7N0011 PG7N0012");
+    CHECK (rig.at ("/godot/plugin/PG7N0011/name") == "Comp");
+    CHECK (rig.at ("/godot/plugin/PG7N0012/identifier") == "VST3-abcd1234-verb");
+    CHECK (rig.at ("/godot/plugin/order").empty());
+
+    /*  THE WORST CASE, every plugin in, read off the table. */
+    plugin::PluginTable::Status verbStatus;
+    verbStatus.state = "loaded";
+    verbStatus.latencySamples = 240;
+    table.set ("PG7N0012", verbStatus);
+    CHECK (rig.at ("/godot/slot/CH000001/latencySamples") == "240");
+
+    /*  A graph built with the channel and its first plugin: the second reads
+        "added since", and the set reads changed until it is rebuilt. */
+    table.setBuilt ({});
+    table.setBuiltRack ({ { "CH000001", { "PG7N0011" } } });
+    CHECK (rig.at ("/godot/plugin/changed") == "true");
+    CHECK (rig.at ("/godot/plugin/PG7N0011/problem") == "");
+    CHECK (rig.at ("/godot/plugin/PG7N0012/problem").find ("Load now") != std::string::npos);
+
+    table.setBuiltRack ({ { "CH000001", { "PG7N0011", "PG7N0012" } } });
+    CHECK (rig.at ("/godot/plugin/changed") == "false");
+
+    /*  Refused: a channel the show does not have, and a format word it cannot
+        store - each making nothing. */
+    std::vector<osc::Value> nowhere { osc::Value::string ("NQNQNQNQ") };
+    for (auto& word : entry ("Comp", "godot:test-gain", "VST3", ""))
+        nowhere.push_back (word);
+    CHECK (rig.apply ("channel.plugin", nowhere).rejected == 1);
+
+    std::vector<osc::Value> badFormat { osc::Value::string ("CH000001") };
+    for (auto& word : entry ("Comp", "godot:test-gain", "AudioUnit", ""))
+        badFormat.push_back (word);
+    CHECK (rig.apply ("channel.plugin", badFormat).rejected == 1);
+
+    CHECK (rig.at ("/godot/slot/CH000001/plugins") == "PG7N0011 PG7N0012");
+}

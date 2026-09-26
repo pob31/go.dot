@@ -434,6 +434,14 @@ namespace wfg::doc
                                  const std::string& format, const std::string& path,
                                  const std::string& id = {});
 
+        /*  PHASE 9b: a plugin at the end of a rack channel's chain - the same
+            four words as an entry of the set, the same `Plugin` element, under
+            the channel instead of the set. `unknown-id` for a channel the show
+            does not have, `bad-value` for a format it does not know. */
+        EditResult createChannelPlugin (const std::string& channelId, const std::string& name,
+                                        const std::string& identifier, const std::string& format,
+                                        const std::string& path, const std::string& id = {});
+
         /** How many strips a fresh surface of this profile is made with, or
             -1 for a word that is not a profile. */
         static int stripsForProfile (std::string_view profile);

@@ -1812,8 +1812,32 @@ namespace wfg::tree
                         if (channel.getType().toString() != "Channel")
                             continue;
 
+                        /*  ITS CHAIN, AND WHAT THE CHAIN DECLARES (Phase 9b): the
+                            plugins in the order they process, and the worst
+                            case of their delays - every plugin in - read off the
+                            plugin table as each entry's own `latencySamples`
+                            is, so it is shown the moment somebody adds one. */
+                        std::map<std::string, std::string> chain;
+                        std::string ids;
+                        auto worst = 0;
+
+                        for (const auto& entry : channel)
+                        {
+                            if (! entry.hasType ("Plugin"))
+                                continue;
+
+                            const auto entryId = entry[idProperty].toString().toStdString();
+                            ids += (ids.empty() ? "" : " ") + entryId;
+
+                            if (pluginTable != nullptr)
+                                worst += std::max (0, pluginTable->statusOf (entryId).latencySamples);
+                        }
+
+                        chain["plugins"] = ids;
+                        chain["latencySamples"] = std::to_string (worst);
+
                         collectSlot (channel, "Channel", "rackChannel", "rackChannel",
-                                     analysis, nodes);
+                                     analysis, nodes, &chain);
 
                         if (const auto channelId = channel[idProperty].toString().toStdString();
                             ! channelId.empty())
@@ -1848,7 +1872,34 @@ namespace wfg::tree
                             builtOrder += (builtOrder.empty() ? "" : " ") + id;
 
                         setChanged = builtOrder != order;
+
+                        /*  AND THE RACK (Phase 9b): a channel added, taken out,
+                            or its chain changed since the graph was built is
+                            as much a thing Load now is for. */
+                        std::map<std::string, std::vector<std::string>> declaredRack;
+
+                        for (const auto& channel : container.getChildWithName ("Rack"))
+                        {
+                            if (! channel.hasType ("Channel"))
+                                continue;
+
+                            auto& chainIds = declaredRack[channel[idProperty].toString().toStdString()];
+
+                            for (const auto& entry : channel)
+                                if (entry.hasType ("Plugin"))
+                                    chainIds.push_back (entry[idProperty].toString().toStdString());
+                        }
+
+                        setChanged = setChanged || declaredRack != pluginTable->builtRackAll();
                     }
+
+                    /*  WHICH OF THE RACK'S PLUGINS THE GRAPH HOLDS, asked once
+                        for the loop below. */
+                    std::vector<std::string> builtRackIds;
+
+                    if (pluginTable != nullptr)
+                        for (const auto& [channelId, chainIds] : pluginTable->builtRackAll())
+                            builtRackIds.insert (builtRackIds.end(), chainIds.begin(), chainIds.end());
 
                     for (const auto* row : doc::Schema::rowsForOwner ("plugins"))
                     {
@@ -1860,9 +1911,23 @@ namespace wfg::tree
                         nodes.push_back (makeLeaf (std::string (godot) + "/plugin/" + name, *row, text));
                     }
 
-                    if (plugins.isValid())
+                    /*  THE SET'S ENTRIES, AND THE RACK'S (Phase 9b): a rack
+                        channel's plugins are the same element with the same
+                        rows, published at /godot/plugin/<id> beside the set's so
+                        the window, the editor and the FX page take them as they
+                        are - while `order` above stays the set's alone, which is
+                        the chain on every voice. */
+                    std::vector<juce::ValueTree> entries;
+
+                    for (const auto& entry : plugins)
+                        entries.push_back (entry);
+
+                    for (const auto& channel : container.getChildWithName ("Rack"))
+                        for (const auto& entry : channel)
+                            entries.push_back (entry);
+
                     {
-                        for (const auto& entry : plugins)
+                        for (const auto& entry : entries)
                         {
                             if (entry.getType().toString() != "Plugin")
                                 continue;
@@ -1879,7 +1944,8 @@ namespace wfg::tree
                             /*  AN ENTRY THE GRAPH WAS BUILT WITHOUT (2026-09-26):
                                 added since it was built, it has no slot and no
                                 child, and says what brings it in. */
-                            if (pluginTable != nullptr && pluginTable->hasGraph() && pluginTable->builtSlotOf (id) < 0)
+                            if (pluginTable != nullptr && pluginTable->hasGraph() && pluginTable->builtSlotOf (id) < 0
+                                  && std::find (builtRackIds.begin(), builtRackIds.end(), id) == builtRackIds.end())
                             {
                                 status.state = "unloaded";
                                 status.problem = "added since the audio graph was built; Load now rebuilds it";

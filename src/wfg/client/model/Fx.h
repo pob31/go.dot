@@ -167,6 +167,10 @@ namespace wfg::client::model
     /** The set, in chain order. */
     std::vector<PluginRow> readPluginSet (const tree::TreeSnapshot&);
 
+    /*  ONE ENTRY, by its id, off /godot/plugin/<id>/: the set's or a rack
+        channel's alike (Phase 9b), since the two are the same element. */
+    PluginRow readPluginEntry (const tree::TreeSnapshot&, const std::string& pluginId);
+
     /** One plugin this machine's scan found. */
     struct KnownPluginRow
     {

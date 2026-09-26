@@ -63,6 +63,7 @@
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/Eq.h>
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/Rack.h>
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/client/model/Sends.h>
 #include <wfg/client/model/Timeline.h>
@@ -651,6 +652,14 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         /*  THE MASTER DIAL (2026-09-26): a number clicked, and letting go. */
         gesture::dial ("/godot/cue/B3N8R5TW/level"), gesture::dial (""),
         gesture::setNode ("/godot/cue/B3N8R5TW/eqB2On", "false"),
+
+        /*  PHASE 9b: the Inputs tab's list and its patch rule, and the Rack
+            tab's two creates. */
+        gesture::createInput (1, -1), gesture::createInput (2, 0),
+        gesture::deleteInput ("N1000001"), gesture::moveInput ("N1000001", 1),
+        gesture::setInputPatchSettled (true), gesture::setInputPatchSettled (false),
+        gesture::createRackChannel ("mono"),
+        gesture::createChannelPlugin ("K1000001", "Verb", "VST3-0badf00d-verb", "VST3", "C:/plugins/verb.vst3"),
     };
 
     for (const auto& event : gestures)
@@ -5493,4 +5502,135 @@ TEST_CASE ("client: the input list reads the named inputs, names the patch rows,
     model::InputRow loud;
     loud.meterDb = -6.0;
     CHECK (loud.meterFill() == doctest::Approx (0.9));
+}
+
+TEST_CASE ("client: the rack reads each channel with its own chain, and says the worst case against the budget")
+{
+    /*  Phase 9b (namespace draft §18.3): the Rack tab's reading, made through
+        the commands the tab sends - the tab's own gestures for the creates, a
+        rename, a class and a budget by `node.set`, a reorder by `object.move`
+        within the channel, a preset named as the Plugins tab names one - so
+        the rows are what a client would read off a real engine. */
+    using V = osc::Value;
+    Rig rig;
+
+    const auto send = [&rig] (std::int64_t tick, const Event& event)
+    {
+        INFO (event.command);
+        REQUIRE (rig.apply (tick, event.origin, event.command, event.args).applied == 1);
+    };
+
+    REQUIRE (rig.apply (1, "window", "channel.create", { V::string ("mono"), V::string ("K1000001") }).applied == 1);
+    send (2, gesture::createRackChannel ("stereo"));
+    send (3, gesture::setNode ("/godot/slot/K1000001/name", "Vox 1"));
+
+    for (const auto* name : { "Gain A", "Gain B" })
+        send (4, gesture::createChannelPlugin ("K1000001", name, "godot:test-gain", "VST3", ""));
+
+    auto snapshot = rig.publish (5);
+    auto rack = model::readRack (*snapshot);
+
+    REQUIRE (rack.channels.size() == 2u);
+    CHECK (rack.channels[0].id == "K1000001");
+    CHECK (rack.channels[0].name == "Vox 1");
+    CHECK (rack.channels[0].classWord() == "Mono");
+    CHECK (rack.channels[0].chainWord() == "2 plugins");
+    REQUIRE (rack.channels[0].chain.size() == 2u);
+    CHECK (rack.channels[0].chain[0].name == "Gain A");
+    CHECK (rack.channels[0].chain[1].name == "Gain B");
+    CHECK (rack.channels[0].chain[0].identifier == "godot:test-gain");
+    CHECK (rack.channels[0].chain[0].state == "unloaded");
+    CHECK (rack.channels[0].latencySamples == 0);
+
+    /*  A channel nobody named reads by its place among the rack's. */
+    CHECK (rack.channels[1].name == "Channel 2");
+    CHECK (rack.channels[1].classWord() == "Stereo");
+    CHECK (rack.channels[1].chainWord() == "No plugins");
+
+    CHECK (rack.budgetMs == doctest::Approx (5.0));
+    CHECK (rack.sampleRate == 48000);
+
+    /*  A RACK'S PLUGINS ARE NEVER THE SET'S: the set's order is the chain on
+        every voice, and a channel's plugins are on its track alone. */
+    CHECK (model::readPluginSet (*snapshot).empty());
+
+    const auto gainA = rack.channels[0].chain[0].id;
+    const auto gainB = rack.channels[0].chain[1].id;
+
+    send (6, gesture::moveObject (gainB, "K1000001", 0));
+    send (7, gesture::setNode ("/godot/plugin/" + gainA + "/preset", "room.vstpreset"));
+    send (8, gesture::setNode ("/godot/slot/K1000001/class", "monoToStereo"));
+    send (9, gesture::setNode ("/godot/audio/rackBudget", "2.5"));
+
+    snapshot = rig.publish (10);
+    rack = model::readRack (*snapshot);
+
+    REQUIRE (rack.channels.size() == 2u);
+    REQUIRE (rack.channels[0].chain.size() == 2u);
+    CHECK (rack.channels[0].chain[0].id == gainB);
+    CHECK (rack.channels[0].chain[1].id == gainA);
+    CHECK (rack.channels[0].chain[1].preset == "room.vstpreset");
+    CHECK (rack.channels[0].classWord() == "Mono to stereo");
+    CHECK (rack.budgetMs == doctest::Approx (2.5));
+
+    /*  THE WORDS. Nothing loads in a rig with no audio graph, and nothing
+        loaded is nothing known - which is said, and not read as no delay. */
+    CHECK (model::budgetWords (rack.channels[0], rack)
+             == "No plugin has loaded yet, so none has said how late it makes the channel.");
+    CHECK (model::budgetWords (rack.channels[1], rack) == "No plugins: the channel adds no delay.");
+
+    auto closed = rack;
+    closed.sampleRate = 0;
+    CHECK (model::budgetWords (closed.channels[0], closed)
+             == "The plugins load when the audio opens, and say then how late they make the channel.");
+
+    /*  And as the engine gives them once the plugins have loaded: the sum it
+        publishes, in milliseconds at the rate, against the budget. */
+    auto vox = rack.channels[0];
+
+    for (auto& entry : vox.chain)
+        entry.state = "loaded";
+
+    vox.latencySamples = 0;
+    CHECK (model::budgetWords (vox, rack) == "Adds no delay, with every plugin in.");
+
+    vox.latencySamples = 96;
+    CHECK_FALSE (model::overBudget (vox, rack));
+    CHECK (model::budgetWords (vox, rack) == "2 ms at worst, with every plugin in - within the 2.5 ms budget.");
+
+    vox.latencySamples = 350;
+    CHECK (model::overBudget (vox, rack));
+    CHECK (model::budgetWords (vox, rack)
+             == "7.3 ms at worst, with every plugin in - over the 2.5 ms budget. A mic cue that switches"
+                " them all in says so, and plays.");
+
+    /*  A plugin that failed has declared nothing, and the sentence names it. */
+    vox.chain[1].state = "failed";
+    CHECK (model::budgetWords (vox, rack).ends_with (" Not counted, not loaded: Gain A."));
+
+    /*  With no audio open, samples - and nothing is over a budget in ms. */
+    auto silent = rack;
+    silent.sampleRate = 0;
+    vox.chain[1].state = "loaded";
+    CHECK_FALSE (model::overBudget (vox, silent));
+    CHECK (model::budgetWords (vox, silent) == "350 samples at worst, with every plugin in.");
+
+    CHECK (model::millisecondWords (5.0) == "5 ms");
+    CHECK (model::millisecondWords (7.2916) == "7.3 ms");
+    CHECK (model::millisecondWords (0.04) == "0 ms");
+
+    /*  A CHANNEL TAKES ITS CHAIN WITH IT when it goes, and an undo brings both
+        back. The rig cuts no transactions - serve's hook does - so the delete
+        is given its own, as a window's command would be. */
+    rig.document.beginTransaction ("object.delete", 11, "window", {});
+    send (11, gesture::deleteObject ("K1000001"));
+    snapshot = rig.publish (12);
+    CHECK (model::readRack (*snapshot).channels.size() == 1u);
+    CHECK (snapshot->find ("/godot/plugin/" + gainA + "/name") == nullptr);
+
+    send (13, gesture::undo());
+    snapshot = rig.publish (14);
+    rack = model::readRack (*snapshot);
+    REQUIRE (rack.channels.size() == 2u);
+    CHECK (rack.channels[0].chain.size() == 2u);
 }

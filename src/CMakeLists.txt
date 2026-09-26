@@ -178,6 +178,8 @@ add_library(wfg_engine STATIC
     wfg/engine/audio/CueEq.cpp
     wfg/engine/audio/EqPlugin.h
     wfg/engine/audio/EqPlugin.cpp
+    wfg/engine/audio/LiveInputPlugin.h
+    wfg/engine/audio/LiveInputPlugin.cpp
     wfg/engine/audio/ProxyPlugin.h
     wfg/engine/audio/ProxyPlugin.cpp
     wfg/engine/audio/DeviceLayer.h
@@ -358,6 +360,8 @@ add_library(wfg_client_model STATIC
     wfg/client/model/Eq.cpp
     wfg/client/model/Fx.h
     wfg/client/model/Fx.cpp
+    wfg/client/model/Rack.h
+    wfg/client/model/Rack.cpp
     wfg/client/model/FxEditor.h
     wfg/client/model/FxEditor.cpp
     wfg/client/model/Timeline.h

@@ -307,7 +307,10 @@ namespace wfg::doc
                     `Rack` carries no owner at all, like `Mounts`: it is a
                     container holding channels and says nothing itself. */
                 { "Rack",    false, { "Channel" },         {} },
-                { "Channel", true,  {},                    { "slot", "rackChannel" } },
+                /*  A RACK CHANNEL'S CHAIN is its own `Plugin` children, in
+                    order (Phase 9b, decision BX): the same element, and so the
+                    same rows, as an entry of the show's set. */
+                { "Channel", true,  { "Plugin" },          { "slot", "rackChannel" } },
                 { "Slot",    true,  {},                    { "slot", "processorInput" } },
 
                 /*  And what a cue says about them. A `Route` sends a cue to a

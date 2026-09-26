@@ -158,10 +158,11 @@ namespace wfg::plugin
         {
             const std::lock_guard<std::mutex> lock { mutex };
 
-            if (! graphBuilt && builtIds.empty())
+            if (! graphBuilt && builtIds.empty() && builtRack.empty())
                 return;
 
             builtIds.clear();
+            builtRack.clear();
             graphBuilt = false;
             ++revisionCount;
         }
@@ -190,11 +191,46 @@ namespace wfg::plugin
             return builtIds;
         }
 
+        /*  THE RACK THE GRAPH WAS BUILT WITH (Phase 9b, namespace draft
+            §18.6): each rack channel's plugins, by id, in the order of its
+            chain. A channel is a track fixed with the graph and so is its chain,
+            so a mic cue's inserts are sent by a plugin's place in it, read from
+            here for the reason the set's slots are - never counted off the
+            document as it stands now. Written with `setBuilt`, cleared with it. */
+        void setBuiltRack (std::map<std::string, std::vector<std::string>> channels)
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            builtRack = std::move (channels);
+            ++revisionCount;
+        }
+
+        /** Whether the graph was built with this rack channel at all. */
+        bool rackBuilt (const std::string& channelId) const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return builtRack.count (channelId) > 0;
+        }
+
+        /** A rack channel's plugins as the graph has them, in chain order. */
+        std::vector<std::string> builtRackOf (const std::string& channelId) const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            const auto found = builtRack.find (channelId);
+            return found != builtRack.end() ? found->second : std::vector<std::string> {};
+        }
+
+        std::map<std::string, std::vector<std::string>> builtRackAll() const
+        {
+            const std::lock_guard<std::mutex> lock { mutex };
+            return builtRack;
+        }
+
     private:
         mutable std::mutex mutex;
         std::map<std::string, Status> table;
         std::uint64_t revisionCount = 0;
         std::vector<std::string> builtIds;
+        std::map<std::string, std::vector<std::string>> builtRack;
         bool graphBuilt = false;
     };
 }

@@ -270,28 +270,31 @@ namespace wfg::client::model
     }
 
     //==============================================================================
+    PluginRow readPluginEntry (const tree::TreeSnapshot& snapshot, const std::string& pluginId)
+    {
+        const auto base = "/godot/plugin/" + pluginId + "/";
+
+        PluginRow row;
+        row.id = pluginId;
+        row.name = text (snapshot, base + "name");
+        row.identifier = text (snapshot, base + "identifier");
+        row.format = text (snapshot, base + "format");
+        row.path = text (snapshot, base + "path");
+        row.preset = text (snapshot, base + "preset");
+        row.state = text (snapshot, base + "state");
+        row.problem = text (snapshot, base + "problem");
+        row.latencySamples = integer (snapshot, base + "latencySamples");
+        row.paramCount = integer (snapshot, base + "paramCount");
+        row.layout = text (snapshot, base + "layout");
+        return row;
+    }
+
     std::vector<PluginRow> readPluginSet (const tree::TreeSnapshot& snapshot)
     {
         std::vector<PluginRow> out;
 
         for (const auto& id : words (text (snapshot, "/godot/plugin/order")))
-        {
-            const auto base = "/godot/plugin/" + id + "/";
-
-            PluginRow row;
-            row.id = id;
-            row.name = text (snapshot, base + "name");
-            row.identifier = text (snapshot, base + "identifier");
-            row.format = text (snapshot, base + "format");
-            row.path = text (snapshot, base + "path");
-            row.preset = text (snapshot, base + "preset");
-            row.state = text (snapshot, base + "state");
-            row.problem = text (snapshot, base + "problem");
-            row.latencySamples = integer (snapshot, base + "latencySamples");
-            row.paramCount = integer (snapshot, base + "paramCount");
-            row.layout = text (snapshot, base + "layout");
-            out.push_back (std::move (row));
-        }
+            out.push_back (readPluginEntry (snapshot, id));
 
         return out;
     }

@@ -4911,3 +4911,53 @@ TEST_CASE ("input tap: an interface with no inputs holds none, and reads silence
     CHECK (rig.host.inputTapChannel (0) == nullptr);
     CHECK (rig.host.takeInputPeak (0) == doctest::Approx (0.0f));
 }
+
+//==============================================================================
+TEST_CASE ("M10: rack channels beside the voices keep every node's identity unique")
+{
+    /*  Phase 9b (decision CK): every rack channel is a track after the voices,
+        with the live input stage, the EQ, its own proxies and the output stage,
+        and no launcher slot. A new shape of track is a new shape of graph, so
+        the identity check M10 asked of the voices is asked of it too - beside
+        the voices at the sizes a show uses, each channel with a chain of two. */
+    HostRig rig;
+    REQUIRE (rig.host.start (hostFor (8)));
+
+    for (const int tracks : { 1, 8, 32, 64 })
+        for (const int channels : { 1, 4, 8 })
+            for (const int slots : { 1, 4 })
+            {
+                INFO ("tracks " << tracks << ", rack channels " << channels << ", slots " << slots);
+
+                audio::EditSpec spec;
+                spec.tracks = tracks;
+                spec.slots = slots;
+
+                for (int at = 0; at < channels; ++at)
+                {
+                    audio::RackChannelSpec channel;
+                    channel.id = "CH0000" + std::to_string (10 + at);
+
+                    for (int plugin = 0; plugin < 2; ++plugin)
+                    {
+                        audio::PluginSpec entry;
+                        entry.id = "PG" + std::to_string (100000 + at * 10 + plugin);
+                        entry.identifier = "godot:test-gain";
+                        channel.plugins.push_back (entry);
+                    }
+
+                    spec.rack.push_back (channel);
+                }
+
+                REQUIRE (rig.host.buildEdit (spec));
+                CHECK (rig.host.trackCount() == tracks);
+                CHECK (rig.host.allTrackCount() == tracks + channels);
+
+                const auto report = rig.host.inspectNodeIds();
+
+                INFO ("nodes " << report.nodes << ", duplicates " << report.duplicates);
+                CHECK (report.duplicates == 0);
+                CHECK (report.typedDuplicates == 0);
+                CHECK (report.nodes > tracks + channels);
+            }
+}

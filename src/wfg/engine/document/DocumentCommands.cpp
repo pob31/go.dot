@@ -709,6 +709,29 @@ namespace wfg::doc
                             return fromEdit (edit, withId (args, 4, edit.id));
                         } });
 
+        /*  PHASE 9b: a plugin at the end of a rack channel's chain (namespace
+            draft 18.3). Its own command rather than an argument on
+            `plugin.create`, whose identifier is its trailing optional one: a
+            log written before would read the channel as the identifier. */
+        registry.add ({ "channel.plugin",
+                        "Adds a plugin at the end of a rack channel's chain: loaded switched off when"
+                        " the graph is built, switched in by the mic cues through the channel. Name,"
+                        " the scan's identifier, format and path.",
+                        { { "channel", 's', false }, { "name", 's', false }, { "identifier", 's', false },
+                          { "format", 's', false }, { "path", 's', false }, { "id", 's', true } },
+                        true,
+                        [&document] (CommandContext&, const std::vector<osc::Value>& args)
+                        {
+                            const auto id = args.size() > 5 ? args[5].getString() : std::string {};
+                            const auto edit = document.createChannelPlugin (args[0].getString(),
+                                                                            args[1].getString(),
+                                                                            args[2].getString(),
+                                                                            args[3].getString(),
+                                                                            args[4].getString(), id);
+
+                            return fromEdit (edit, withId (args, 5, edit.id));
+                        } });
+
         //----------------------------------------------------------------------
         registry.add ({ "mount.create",
                         "Declares a foreign namespace to be mounted at a prefix.",
