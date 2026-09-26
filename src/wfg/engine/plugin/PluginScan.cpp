@@ -26,6 +26,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
+#include <map>
 #include <memory>
 #include <string>
 
@@ -89,7 +90,30 @@ namespace wfg::plugin
                                                  std::make_unique<ScanBehaviour>());
         }
 
-        KnownPlugin knownFrom (const juce::PluginDescription& description)
+        /*  WHERE EACH LV2 WAS FOUND, by its URI (2026-09-26). An LV2 is
+            named by a URI, not a file, and a child can only make one whose
+            bundle its LV2 world has loaded - the default folders and
+            LV2_PATH, and nothing a scan was pointed at with --path. So the
+            scan remembers the bundle folder of every LV2 it found, as a
+            `bundle` attribute on the plugin's element in known.xml, and the
+            description a child is handed carries it. JUCE's own reading of
+            the list passes over an attribute it does not know. */
+        using Bundles = std::map<juce::String, juce::String>;
+
+        constexpr const char* bundleAttribute = "bundle";
+
+        Bundles bundlesIn (const juce::XmlElement& list)
+        {
+            Bundles out;
+
+            for (const auto* element : list.getChildWithTagNameIterator ("PLUGIN"))
+                if (element->hasAttribute (bundleAttribute))
+                    out[element->getStringAttribute ("file")] = element->getStringAttribute (bundleAttribute);
+
+            return out;
+        }
+
+        KnownPlugin knownFrom (const juce::PluginDescription& description, const Bundles& bundles)
         {
             KnownPlugin out;
             out.name = description.name.toStdString();
@@ -99,17 +123,22 @@ namespace wfg::plugin
             out.path = description.fileOrIdentifier.toStdString();
 
             if (const auto xml = description.createXml())
+            {
+                if (const auto bundle = bundles.find (description.fileOrIdentifier); bundle != bundles.end())
+                    xml->setAttribute (bundleAttribute, bundle->second);
+
                 out.description = xml->toString().toStdString();
+            }
 
             return out;
         }
 
-        std::vector<KnownPlugin> knownFrom (const juce::KnownPluginList& list)
+        std::vector<KnownPlugin> knownFrom (const juce::KnownPluginList& list, const Bundles& bundles)
         {
             std::vector<KnownPlugin> out;
 
             for (const auto& description : list.getTypes())
-                out.push_back (knownFrom (description));
+                out.push_back (knownFrom (description, bundles));
 
             std::sort (out.begin(), out.end(), [] (const KnownPlugin& a, const KnownPlugin& b)
             {
@@ -129,12 +158,15 @@ namespace wfg::plugin
             holds, which is where the scans of Phase 9a left it. A plain parse:
             a properties file stores an XML value as the child of its VALUE
             element. False when neither file says anything. */
-        bool readList (const juce::File& storage, juce::KnownPluginList& list)
+        bool readList (const juce::File& storage, juce::KnownPluginList& list, Bundles& bundles)
         {
+            bundles.clear();
+
             if (const auto own = juce::parseXML (juce::File (juce::String (knownListPath (storage.getFullPathName().toStdString()))));
                 own != nullptr)
             {
                 list.recreateFromXml (*own);
+                bundles = bundlesIn (*own);
                 return true;
             }
 
@@ -151,13 +183,19 @@ namespace wfg::plugin
 
         /*  Written WHOLE, by replacement: JUCE writes a temporary beside the
             file and moves it over, so a reader never meets half a list. */
-        bool writeList (const juce::File& storage, const juce::KnownPluginList& list)
+        bool writeList (const juce::File& storage, const juce::KnownPluginList& list, const Bundles& bundles)
         {
             const juce::File file { juce::String (knownListPath (storage.getFullPathName().toStdString())) };
             file.getParentDirectory().createDirectory();
 
             if (const auto xml = list.createXml())
+            {
+                for (auto* element : xml->getChildWithTagNameIterator ("PLUGIN"))
+                    if (const auto bundle = bundles.find (element->getStringAttribute ("file")); bundle != bundles.end())
+                        element->setAttribute (bundleAttribute, bundle->second);
+
                 return xml->writeTo (file);
+            }
 
             return false;
         }
@@ -341,7 +379,12 @@ namespace wfg::plugin
                     if (where.getNumPaths() == 0)
                         continue;
 
-                    for (const auto& file : format->searchPathsForPlugins (where, true, false))
+                    /*  ONCE EACH: an LV2 bundle holding two plugins is answered
+                        twice, once per plugin, by JUCE's search. */
+                    auto files = format->searchPathsForPlugins (where, true, false);
+                    files.removeDuplicates (false);
+
+                    for (const auto& file : files)
                     {
                         if (threadShouldExit())
                             break;
@@ -355,6 +398,10 @@ namespace wfg::plugin
 
                         juce::OwnedArray<juce::PluginDescription> found;
                         list.scanAndAddFile (file, true, found, *format);
+
+                        if (format->getName() == "LV2")
+                            for (const auto* description : found)
+                                bundles[description->fileOrIdentifier] = file;
 
                         /*  Nought back means the watchdog claimed the file
                             while the child was on it: the scan under it was
@@ -394,6 +441,9 @@ namespace wfg::plugin
 
             /** The files given up on, read after the thread has stopped. */
             std::vector<std::string> skipped;
+
+            /** Every LV2's bundle, seeded from the list and added to as found. */
+            Bundles bundles;
         };
 
         /*  THE DEADLINE, on the message thread's timer. A file overdue is
@@ -540,10 +590,12 @@ namespace wfg::plugin
             running serve may have written over since (see the header). Each
             file already listed and unchanged is skipped as up to date, so a
             second scan only reads what is new. */
+        Bundles bundles;
+
         {
             juce::KnownPluginList seed;
 
-            if (readList (storage, seed))
+            if (readList (storage, seed, bundles))
                 if (const auto xml = seed.createXml())
                     manager.knownPluginList.recreateFromXml (*xml);
         }
@@ -552,6 +604,7 @@ namespace wfg::plugin
             manager.knownPluginList.clearBlacklistedFiles();
 
         ScanThread thread (manager, formatWord, extraFolder, storage);
+        thread.bundles = bundles;
         Watchdog watchdog (thread, manager);
         watchdog.startTimer (250);
         thread.startThread();
@@ -561,27 +614,28 @@ namespace wfg::plugin
 
         skipped = thread.skipped;
 
-        if (! writeList (storage, manager.knownPluginList))
+        if (! writeList (storage, manager.knownPluginList, thread.bundles))
             problem = "the scan could not write " + knownListPath (storageFolder);
 
-        return knownFrom (manager.knownPluginList);
+        return knownFrom (manager.knownPluginList, thread.bundles);
     }
 
     std::vector<KnownPlugin> knownPlugins (const std::string& storageFolder)
     {
         juce::KnownPluginList list;
-        readList (juce::File (juce::String (storageFolder)), list);
-        return knownFrom (list);
+        Bundles bundles;
+        readList (juce::File (juce::String (storageFolder)), list, bundles);
+        return knownFrom (list, bundles);
     }
 
     std::string describePlugin (const std::string& storageFolder, const std::string& identifier)
     {
         juce::KnownPluginList list;
-        readList (juce::File (juce::String (storageFolder)), list);
+        Bundles bundles;
+        readList (juce::File (juce::String (storageFolder)), list, bundles);
 
         if (const auto description = list.getTypeForIdentifierString (juce::String (identifier)))
-            if (const auto xml = description->createXml())
-                return xml->toString().toStdString();
+            return knownFrom (*description, bundles).description;
 
         return {};
     }
@@ -589,7 +643,8 @@ namespace wfg::plugin
     std::vector<std::string> skippedPlugins (const std::string& storageFolder)
     {
         juce::KnownPluginList list;
-        readList (juce::File (juce::String (storageFolder)), list);
+        Bundles bundles;
+        readList (juce::File (juce::String (storageFolder)), list, bundles);
         std::vector<std::string> out;
 
         for (const auto& file : list.getBlacklistedFiles())

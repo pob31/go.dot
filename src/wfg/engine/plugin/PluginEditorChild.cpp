@@ -1033,14 +1033,16 @@ namespace wfg::plugin
         }
         else
         {
-            juce::addDefaultFormatsToManager (manager);
             juce::PluginDescription description;
+            juce::String bundle;
 
-            if (! readDescription (optionFrom (args, "--description"), description, problem))
+            if (! readDescription (optionFrom (args, "--description"), description, bundle, problem))
             {
                 reportFailure (region, problem);
                 return 4;
             }
+
+            addFormatFor (manager, description, bundle);
 
             if (description.createIdentifierString().toStdString() != identifier)
             {

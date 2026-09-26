@@ -370,10 +370,11 @@ namespace wfg::plugin
         struct RealHost
         {
             /** Message thread. False with a sentence when the plugin will not come up. */
-            bool create (const juce::PluginDescription& description, int instanceCount, int channels,
-                         double sampleRate, int blockSize, const juce::File& preset, std::string& problem)
+            bool create (const juce::PluginDescription& description, const juce::String& bundle,
+                         int instanceCount, int channels, double sampleRate, int blockSize,
+                         const juce::File& preset, std::string& problem)
             {
-                juce::addDefaultFormatsToManager (manager);
+                addFormatFor (manager, description, bundle);
 
                 for (int i = 0; i < instanceCount; ++i)
                 {
@@ -675,9 +676,10 @@ namespace wfg::plugin
             juce::ScopedJuceInitialiser_GUI juceForTheChild;
 
             juce::PluginDescription description;
+            juce::String bundle;
             std::string problem;
 
-            if (! readDescription (optionFrom (args, "--description"), description, problem))
+            if (! readDescription (optionFrom (args, "--description"), description, bundle, problem))
             {
                 std::fprintf (stderr, "wfg plugin-host: %s\n", problem.c_str());
                 return 2;
@@ -685,7 +687,7 @@ namespace wfg::plugin
 
             RealHost host;
 
-            if (! host.create (description, 1, 2, 48000.0, 256, {}, problem))
+            if (! host.create (description, bundle, 1, 2, 48000.0, 256, {}, problem))
             {
                 std::fprintf (stderr, "wfg plugin-host: %s\n", problem.c_str());
                 return 4;
@@ -782,9 +784,10 @@ namespace wfg::plugin
         else
         {
             juce::PluginDescription description;
+            juce::String bundle;
             std::string problem;
 
-            if (! readDescription (optionFrom (args, "--description"), description, problem))
+            if (! readDescription (optionFrom (args, "--description"), description, bundle, problem))
             {
                 reportFailure (header, problem);
                 return 4;
@@ -799,7 +802,7 @@ namespace wfg::plugin
             real = std::make_unique<RealHost>();
             const auto preset = optionFrom (args, "--preset");
 
-            if (! real->create (description, laneCount, channels,
+            if (! real->create (description, bundle, laneCount, channels,
                                 static_cast<double> (std::max<std::uint32_t> (1, header.sampleRate.load (std::memory_order_relaxed))),
                                 maxSamples, preset.empty() ? juce::File() : juce::File (juce::String (preset)), problem))
             {

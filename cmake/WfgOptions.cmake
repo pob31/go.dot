@@ -22,7 +22,7 @@
 # help string says. Phase 9a added JUCE_PLUGINHOST_VST3 in exactly one place
 # (cmake/WfgThirdParty.cmake), the day the scan and the sandbox arrived to read
 # it; until then the switch was left out, because a switch nothing consumes is
-# exactly the rot above.
+# exactly the rot above. JUCE_PLUGINHOST_LV2 joined it there on 2026-09-26.
 
 # Two of the author's Phase-0 "Needs from the author" (devplan:49-50) are still OPEN:
 # the default fixed track count, and the target sample rates / buffer sizes.

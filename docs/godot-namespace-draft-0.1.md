@@ -9796,6 +9796,17 @@ never reads or scans into the developer's real list. Two corrections to the text
 catalogue file is named by the first 32 hex digits of the identifier's SHA-256, not its SHA-1; and
 `JUCE_PLUGINHOST_AU` was not compiled in 9a (§17.12) — see §17.15.
 
+**Amended 2026-09-26 — LV2 on every platform.** `JUCE_PLUGINHOST_LV2=1` everywhere; the SDK is JUCE's
+vendored copy, so no system package. An LV2 is named by a URI, not a file, and a child can only make
+one whose bundle its LV2 world has loaded — the default folders and `LV2_PATH`, never a folder a scan
+was pointed at with `--path` — so the scan records each LV2's **bundle folder** as a `bundle`
+attribute on its element in known.xml, and the description a child is handed carries it; the child
+loads that bundle before making the plugin. Each child registers **only the format of the plugin it
+hosts**, since JUCE's LV2 format reads every bundle on the default folders the moment it is made. The
+scan de-duplicates JUCE's answer (a bundle of two plugins is named twice). An in-tree test bundle
+(`tests/fixtures/lv2/`, a stereo gain and a mono-to-stereo widener in plain C) gives every CI runner
+a real LV2 to scan and host.
+
 ### 17.8 The client
 
 The desktop client keeps its rules: one snapshot a pass, `model/` std-only, one call site per

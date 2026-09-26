@@ -2714,7 +2714,7 @@ namespace wfg::doc::generated
           enum_plugin_format, 3,
           "", 50.0, false, "park",
           "",
-          "Which kind of plugin it is, from the scan. LV2 is listed and not built (Phase 9b)." },
+          "Which kind of plugin it is, from the scan: VST3 on every platform, LV2 on every platform since 2026-09-26, AU on macOS. JUCE names an AU AudioUnit; the show says AU." },
         { "plugin", "path",
           ValueType::string, 's', false, Access::read, Kind::state, Persist::show,
           false, "",

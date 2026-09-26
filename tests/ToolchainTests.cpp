@@ -106,6 +106,11 @@ TEST_CASE ("toolchain: the wfg::deps compile definitions reached this target")
     static_assert (JUCE_PLUGINHOST_VST3 == 1,
                    "JUCE_PLUGINHOST_VST3 must be 1 - see cmake/WfgThirdParty.cmake (Phase 9a)");
 
+    /*  And LV2 beside it on every platform (2026-09-26), the SDK being
+        JUCE's own vendored copy. */
+    static_assert (JUCE_PLUGINHOST_LV2 == 1,
+                   "JUCE_PLUGINHOST_LV2 must be 1 - see cmake/WfgThirdParty.cmake (2026-09-26)");
+
     // Our own definitions travel the same path, so proving one of them arrives
     // as a usable string literal proves the mechanism, not just the flags.
     CHECK (std::string (WFG_PRODUCT_NAME) == "Go.dot");

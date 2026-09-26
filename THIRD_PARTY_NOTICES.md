@@ -275,6 +275,43 @@ cannot write `T`/`F` — not because of the JUCE version. Full text:
 
 ---
 
+## The LV2 SDK: lilv, serd, sord, sratom, zix and the LV2 headers
+
+Compiled in since 2026-09-26, when LV2 hosting was switched on
+(`JUCE_PLUGINHOST_LV2=1` in `cmake/WfgThirdParty.cmake`). The copies are the ones
+JUCE vendors under
+`ThirdParty/JUCE/modules/juce_audio_processors_headless/format_types/LV2_SDK/`,
+compiled into JUCE's own module (`juce_LV2SupportLibs.cpp`); no system package is
+needed on any platform. The in-tree test plugin (`tests/fixtures/lv2/`) uses the
+LV2 headers only.
+
+All five are under the ISC licence:
+
+- **lilv** — Copyright 2011-2021 David Robillard. Full text:
+  `LV2_SDK/lilv/COPYING`.
+- **serd** — Copyright 2011-2021 David Robillard. Full text: `LV2_SDK/serd/COPYING`.
+- **sord** (with **zix**, in `sord/src/zix`) — Copyright 2011-2021 David Robillard.
+  Full text: `LV2_SDK/sord/COPYING`.
+- **sratom** — Copyright 2012-2021 David Robillard. Full text:
+  `LV2_SDK/sratom/COPYING`.
+- **LV2** (the specification's headers) — Copyright 2006-2012 Steve Harris, David
+  Robillard; based on LADSPA, Copyright 2000-2002 Richard W.E. Furse and others.
+  Full text: `LV2_SDK/lv2/COPYING`.
+
+> Permission to use, copy, modify, and/or distribute this software for any
+> purpose with or without fee is hereby granted, provided that the above
+> copyright notice and this permission notice appear in all copies.
+>
+> THIS SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+> WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+> MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+> ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+> WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+> ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+> OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+---
+
 ## Not present, and why it is worth saying
 
 - **RubberBand** is *not* a dependency. Enabling it would mean a licence decision
@@ -285,9 +322,6 @@ cannot write `T`/`F` — not because of the JUCE version. Full text:
   build by `JUCE_USE_CURL=0`, `JUCE_WEB_BROWSER=0`, `JUCE_JACK=0` and
   `JUCE_PLUGINHOST_LADSPA=0`. Each is a package the Linux dependency list does
   not have to carry; `scripts/install-linux-deps.sh` records the pairing.
-- **The LV2 SDK** (lilv, serd, sord, sratom) *is* vendored by JUCE and attached
-  automatically. When Phase 9 turns plugin hosting on, LV2 costs one compile
-  definition and zero system packages on all three platforms.
 - **OpenSSL** is *not* a dependency, and keeping it that way took deliberate
   work. `juce_simpleweb` declares `libssl` and `libcrypto` as link libraries on
   all three platforms — and in two different spellings, bare on Linux and

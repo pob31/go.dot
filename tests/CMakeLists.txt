@@ -129,6 +129,39 @@ target_compile_definitions(wfg_tests PRIVATE
 # hold (ClientTests.cpp); the window is tested by opening it.
 target_link_libraries(wfg_tests PRIVATE wfg::engine wfg::client_model wfg::warnings)
 
+# -----------------------------------------------------------------------------
+# A REAL LV2 PLUGIN, FOR THE TESTS ONLY (2026-09-26). A CI runner has no plugin
+# of its own, so without this every hosting test there goes through the built-in
+# `godot:test-gain`, which bypasses JUCE's formats altogether. This bundle is
+# two plugins in plain C against the LV2 core header JUCE vendors: a stereo gain
+# and a mono-to-stereo widener (tests/fixtures/lv2/godot_test_lv2.c says what
+# each does). It is built into a bundle folder beside the tests, never installed
+# and never on an LV2 path; the scan finds it through --path, and the unit case
+# through WFG_TEST_LV2_BUNDLE. The manifest names the binary, whose suffix is
+# the platform's, so it is configured rather than copied.
+# -----------------------------------------------------------------------------
+set(GODOT_TEST_LV2_FOLDER "${CMAKE_CURRENT_BINARY_DIR}/lv2")
+set(GODOT_TEST_LV2_BUNDLE "${GODOT_TEST_LV2_FOLDER}/godot-test.lv2")
+set(GODOT_TEST_LV2_BINARY "godot_test_lv2${CMAKE_SHARED_MODULE_SUFFIX}")
+
+add_library(godot_test_lv2 MODULE fixtures/lv2/godot_test_lv2.c)
+target_include_directories(godot_test_lv2 PRIVATE
+    "${CMAKE_SOURCE_DIR}/ThirdParty/JUCE/modules/juce_audio_processors_headless/format_types/LV2_SDK/lv2")
+
+# `$<1:...>` keeps a multi-config generator from adding its Debug/Release
+# folder: the binary must sit inside the bundle, beside its manifest.
+set_target_properties(godot_test_lv2 PROPERTIES
+    PREFIX ""
+    C_VISIBILITY_PRESET hidden
+    LIBRARY_OUTPUT_DIRECTORY "$<1:${GODOT_TEST_LV2_BUNDLE}>"
+    RUNTIME_OUTPUT_DIRECTORY "$<1:${GODOT_TEST_LV2_BUNDLE}>")
+
+configure_file(fixtures/lv2/manifest.ttl.in "${GODOT_TEST_LV2_BUNDLE}/manifest.ttl" @ONLY)
+configure_file(fixtures/lv2/plugin.ttl "${GODOT_TEST_LV2_BUNDLE}/plugin.ttl" COPYONLY)
+
+add_dependencies(wfg_tests godot_test_lv2)
+target_compile_definitions(wfg_tests PRIVATE WFG_TEST_LV2_BUNDLE="${GODOT_TEST_LV2_BUNDLE}")
+
 # These native-window checks need a Windows desktop and exercise the actual
 # settings panel with a live device; keep the ordinary unit runner headless.
 if(WIN32)
@@ -200,6 +233,17 @@ add_test(NAME wfg.plugins.known
          COMMAND wfg plugins "--engine-folder=${CMAKE_CURRENT_SOURCE_DIR}/fixtures/engine")
 set_tests_properties(wfg.plugins.known PROPERTIES
                      PASS_REGULAR_EXPRESSION "Fixture Delay [|] AU [|] Go[.]dot tests")
+
+# A real scan, out of process as always, of the in-tree LV2 bundle (built with
+# the tests, above) through --path, into an engine folder of the build's own:
+# both plugins of the bundle must come back as LV2, the second one proving the
+# bundle's path was not scanned twice into one entry.
+add_test(NAME wfg.plugins.scan-lv2
+         COMMAND wfg plugins --scan=lv2 "--path=${GODOT_TEST_LV2_FOLDER}"
+                 "--engine-folder=${CMAKE_CURRENT_BINARY_DIR}/lv2-scan-engine")
+set_tests_properties(wfg.plugins.scan-lv2 PROPERTIES
+                     TIMEOUT 120
+                     PASS_REGULAR_EXPRESSION "Go[.]dot test LV2 gain [|] LV2 [|] Go[.]dot tests.*Go[.]dot test LV2 widen [|] LV2 [|] Go[.]dot tests")
 
 add_test(NAME wfg.commands.C     COMMAND wfg commands --wfg-locale=C)
 add_test(NAME wfg.commands.fr_FR COMMAND wfg commands --wfg-locale=${WFG_LOCALE_FR})

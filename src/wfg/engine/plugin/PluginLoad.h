@@ -47,6 +47,21 @@ namespace wfg::plugin
                                                                    int channels, double sampleRate, int blockSize,
                                                                    const juce::File& preset, std::string& problem);
 
+    /*  THE ONE FORMAT THE PLUGIN IS, registered alone (2026-09-26): a child
+        hosting a VST3 has no business standing up an LV2 world, which JUCE
+        does by reading every bundle on the default folders the moment the
+        format is made. An LV2 is told the bundle folder the scan found it
+        in, so one found through `--path` - outside the folders an LV2 world
+        reads by itself - can still be made. A format this build does not
+        name gets every compiled format, as before. */
+    void addFormatFor (juce::AudioPluginFormatManager&, const juce::PluginDescription&,
+                       const juce::String& bundle);
+
     /** The description written beside the region, back into a PluginDescription. */
     bool readDescription (const std::string& path, juce::PluginDescription&, std::string& problem);
+
+    /** The same, and the LV2 bundle folder the scan recorded beside it
+        (known.xml's `bundle` attribute) - empty for any other plugin. */
+    bool readDescription (const std::string& path, juce::PluginDescription&, juce::String& bundle,
+                          std::string& problem);
 }

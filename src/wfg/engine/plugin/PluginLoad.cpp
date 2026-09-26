@@ -81,7 +81,57 @@ namespace wfg::plugin
         return instance;
     }
 
+    void addFormatFor (juce::AudioPluginFormatManager& manager, const juce::PluginDescription& description,
+                       const juce::String& bundle)
+    {
+        const auto& name = description.pluginFormatName;
+
+       #if JUCE_INTERNAL_HAS_VST3
+        if (name == "VST3")
+        {
+            manager.addFormat (std::make_unique<juce::VST3PluginFormat>());
+            return;
+        }
+       #endif
+
+       #if JUCE_INTERNAL_HAS_LV2
+        if (name == "LV2")
+        {
+            auto lv2 = std::make_unique<juce::LV2PluginFormat>();
+
+            /*  Loading the bundle by its folder is what JUCE's own scan does
+                for a file it is given; the plugins in it join the world. */
+            if (bundle.isNotEmpty())
+            {
+                juce::OwnedArray<juce::PluginDescription> found;
+                lv2->findAllTypesForFile (found, bundle);
+            }
+
+            manager.addFormat (std::move (lv2));
+            return;
+        }
+       #endif
+
+       #if JUCE_INTERNAL_HAS_AU
+        if (name == "AudioUnit")
+        {
+            manager.addFormat (std::make_unique<juce::AudioUnitPluginFormat>());
+            return;
+        }
+       #endif
+
+        juce::ignoreUnused (bundle);
+        juce::addDefaultFormatsToManager (manager);
+    }
+
     bool readDescription (const std::string& path, juce::PluginDescription& description, std::string& problem)
+    {
+        juce::String bundle;
+        return readDescription (path, description, bundle, problem);
+    }
+
+    bool readDescription (const std::string& path, juce::PluginDescription& description, juce::String& bundle,
+                          std::string& problem)
     {
         const juce::File file { juce::String (path) };
         const auto xml = juce::parseXML (file);
@@ -92,6 +142,7 @@ namespace wfg::plugin
             return false;
         }
 
+        bundle = xml->getStringAttribute ("bundle");
         return true;
     }
 }

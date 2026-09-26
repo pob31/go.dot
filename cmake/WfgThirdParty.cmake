@@ -261,9 +261,15 @@ target_compile_definitions(wfg_deps INTERFACE
     # Phase 9a (2026-09-23, decision AF): VST3 hosting compiled in, on every
     # platform, in the one place WfgOptions.cmake reserved for it. What hosts
     # a plugin is the child process (wfg plugin-host) and the scan child;
-    # the engine's own process never instantiates one. AU waits for the Mac
-    # mini to check its link line; LV2 is Phase 9b's.
+    # the engine's own process never instantiates one.
     JUCE_PLUGINHOST_VST3=1
+    # 2026-09-26 (the author's decision): LV2 on every platform. JUCE vendors
+    # the LV2 SDK (lilv, serd, sord, sratom, zix), so this costs no system
+    # package on any platform - THIRD_PARTY_NOTICES.md carries their licences.
+    # Each child registers only the format of the plugin it hosts
+    # (plugin/PluginLoad.cpp), since JUCE's LV2 format reads every bundle on
+    # the default folders the moment it is made.
+    JUCE_PLUGINHOST_LV2=1
 
     # --- juce_simpleweb, TLS off.
     #     Upstream defaults SECURE support ON, which compiles asio's OpenSSL

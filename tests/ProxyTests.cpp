@@ -897,6 +897,84 @@ TEST_CASE ("proxy: a real VST3 from this machine's scan comes up, reports its ca
     host.stop();
 }
 
+/*  A REAL LV2, ON EVERY RUNNER (2026-09-26): the in-tree test bundle, built
+    with the tests, described by JUCE's own LV2 format as a scan would, handed
+    to a child that registers the LV2 format alone and loads the bundle from
+    the folder the description names - so a plugin found through --path,
+    outside every folder an LV2 world reads by itself, still comes up. A block
+    goes through at the plugin's default gain of a half, and a value written
+    to its one parameter reaches it. */
+TEST_CASE ("proxy: the in-tree LV2 comes up in the child through JUCE's real LV2 host, and processes a block at its gain")
+{
+    const juce::File bundle { juce::String (WFG_TEST_LV2_BUNDLE) };
+    REQUIRE (bundle.getChildFile ("manifest.ttl").existsAsFile());
+
+    juce::LV2PluginFormat format;
+    juce::OwnedArray<juce::PluginDescription> found;
+    format.findAllTypesForFile (found, bundle.getFullPathName());
+
+    const juce::PluginDescription* gain = nullptr;
+
+    for (const auto* description : found)
+        if (description->fileOrIdentifier == "urn:godot:test-lv2-gain")
+            gain = description;
+
+    REQUIRE (gain != nullptr);
+    CHECK (gain->pluginFormatName == "LV2");
+    CHECK (gain->name == "Go.dot test LV2 gain");
+    CHECK (gain->numInputChannels == 2);
+    CHECK (gain->numOutputChannels == 2);
+
+    auto xml = gain->createXml();
+    REQUIRE (xml != nullptr);
+    xml->setAttribute ("bundle", bundle.getFullPathName());
+
+    Folder folder;
+    plugin::PluginTable table;
+    plugin::CatalogueStore store { folder.path.getChildFile ("catalogue").getFullPathName().toStdString() };
+    plugin::ProxyLane lanes[1];
+
+    auto spec = testGainSpec (folder, 1, 2, 64);
+    spec.identifier = gain->createIdentifierString().toStdString();
+    spec.name = "LV2 gain";
+    spec.descriptionXml = xml->toString().toStdString();
+    spec.catalogues = &store;
+    plugin::ProxyHost host (spec, { &lanes[0] }, &table);
+
+    std::string problem;
+    REQUIRE (host.start (problem));
+    const auto up = waitForState (host, "loaded", 20000);
+    INFO ("state " << host.status().state << ": " << host.status().problem);
+    REQUIRE (up);
+    CHECK (host.status().paramCount >= 1);
+
+    lanes[0].setDeadlineMicroseconds (200000);
+    lanes[0].setEnabled (true);
+    host.poll();
+
+    Block block (2, 64, 0.25f);
+
+    const auto blocksAt = [&] (float in)
+    {
+        for (int i = 0; i < 10; ++i)
+        {
+            std::fill (block.storage.begin(), block.storage.end(), in);
+            lanes[0].process (block.data(), 2, 64);
+        }
+    };
+
+    blocksAt (0.25f);
+    CHECK (lanes[0].answered() >= 1);
+    CHECK (block.allEqual (0.125f));
+
+    lanes[0].setParameter (0, 1.0f);
+    blocksAt (0.25f);
+    CHECK (block.allEqual (0.25f));
+    CHECK (lanes[0].misses() == 0);
+
+    host.stop();
+}
+
 //==============================================================================
 namespace
 {
