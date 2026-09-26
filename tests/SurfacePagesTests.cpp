@@ -321,3 +321,81 @@ TEST_CASE ("pages: a plugin parameter turns along its travel, a step at a time w
     CHECK (surface::pageWord (surface::Page::fx) == "fx");
 }
 
+TEST_CASE ("surface pages: the master dial turns a number by what its own row says")
+{
+    /*  THE MASTER DIAL (author, 2026-09-26) turns whatever number was last
+        clicked in the window, so its law is read off the row: type, unit and
+        range. Each case here is a real row of the table, so a row whose unit
+        or range changes shows up here as a law that changed with it. */
+    const auto law = surface::FaderLaw::d700;
+
+    const auto rangeOf = [] (std::string_view owner, std::string_view name)
+    {
+        surface::DialRange range;
+
+        for (const auto* row : doc::Schema::rowsForOwner (owner))
+            if (row->name == name)
+            {
+                range.integer = row->type == doc::ValueType::integer;
+                range.hasMinimum = row->hasMin;
+                range.minimum = row->minimum;
+                range.hasMaximum = row->hasMax;
+                range.maximum = row->maximum;
+                range.unit = row->unit;
+                return range;
+            }
+
+        FAIL ("no such row");
+        return range;
+    };
+
+    const auto turned = [&] (std::string_view owner, std::string_view name, double value, int steps)
+    {
+        return surface::dialTurned (rangeOf (owner, name), value, steps, law);
+    };
+
+    SUBCASE ("a frequency, as a band's rotary turns it")
+    {
+        CHECK (near (turned ("media", "eqB1Freq", 100.0, 16), 200.0));
+        CHECK (near (turned ("media", "eqHpfFreq", 1900.0, 40), 2000.0));
+    }
+
+    SUBCASE ("a decibel that reaches silence is a level, along the fader")
+    {
+        CHECK (near (turned ("media", "level", -6.0, 1),
+                     surface::turned (surface::Law::level, -6.0, 1, -120.0, 12.0, law)));
+        CHECK (near (turned ("send", "level", -120.0, -1), -120.0));
+    }
+
+    SUBCASE ("a narrower decibel is a gain, half a decibel a detent")
+    {
+        CHECK (near (turned ("media", "eqB2Gain", 0.0, 3), 1.5));
+        CHECK (near (turned ("media", "eqB2Gain", 23.5, 4), 24.0));
+    }
+
+    SUBCASE ("a width spans a hundredfold with no unit, and turns in ratios")
+    {
+        CHECK (near (turned ("media", "eqB1Q", 0.7, 8), 1.4));
+    }
+
+    SUBCASE ("a time, a tenth of a second, and a whole one past ten")
+    {
+        CHECK (near (turned ("cue", "preWait", 0.0, 3), 0.3));
+        CHECK (near (turned ("cue", "preWait", 0.0, -1), 0.0));
+        CHECK (near (turned ("cue", "preWait", 9.9, 2), 11.0));
+        CHECK (near (turned ("cue", "preWait", 11.0, -2), 9.9));
+        CHECK (near (turned ("cue", "preWait", 30.0, 5), 35.0));
+    }
+
+    SUBCASE ("a whole number, one a detent, held at its ends")
+    {
+        CHECK (near (turned ("group", "loops", 3.0, 2), 5.0));
+        CHECK (near (turned ("group", "loops", 0.0, -1), 0.0));
+        CHECK (near (turned ("midi", "channel", 16.0, 3), 16.0));
+    }
+
+    SUBCASE ("no detent, no move")
+    {
+        CHECK (near (turned ("media", "level", -6.0, 0), -6.0));
+    }
+}

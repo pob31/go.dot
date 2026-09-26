@@ -1531,6 +1531,13 @@ namespace wfg::tree
                           && document.findById (surfaces->aim()).isValid())
                         text = surfaces->aim();
 
+                    /*  THE MASTER DIAL'S NUMBER, the same way: an address that
+                        names nothing any more - its cue deleted, its send
+                        removed - is no dial, and an Undo brings it back. */
+                    if (name == "dial" && surfaces != nullptr && ! surfaces->dial().address.empty()
+                          && document.resolve (surfaces->dial().address).isValid())
+                        text = surfaces->dial().address;
+
                     nodes.push_back (makeLeaf (std::string (godot) + "/surface/" + name,
                                                *row, text));
                 }

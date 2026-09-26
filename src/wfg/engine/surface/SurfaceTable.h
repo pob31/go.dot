@@ -110,6 +110,30 @@ namespace wfg::surface
         void setAim (std::string cueId)                   { aimed = std::move (cueId); }
 
         //==============================================================================
+        /*  WHAT THE MASTER DIAL TURNS (author, 2026-09-26): the number last
+            clicked or touched in the window's inspector or foot panel, by its
+            address, with what its row says about how it moves - carried here
+            so the bridge turns it without asking the document on the tick.
+            One for every surface, like the aim; set by `surface.dial` only,
+            and it stays on that cue's row until another field is clicked or
+            the dial's click lets go. Never stored (PRD §4.10). */
+        struct Dial
+        {
+            std::string address;            ///< empty: the dial is free
+            bool integer = false;
+            bool hasMinimum = false;
+            double minimum = 0.0;
+            bool hasMaximum = false;
+            double maximum = 0.0;
+            std::string unit;
+            bool hasRest = false;
+            double rest = 0.0;              ///< the row's default: where the double click puts it
+        };
+
+        const Dial& dial() const noexcept                 { return dialed; }
+        void setDial (Dial wanted)                        { dialed = std::move (wanted); }
+
+        //==============================================================================
         /** What one surface's rotaries are showing. */
         struct Page
         {
@@ -137,6 +161,7 @@ namespace wfg::surface
         }
 
     private:
+        Dial dialed;
         std::map<std::string, Status> table;
         std::map<std::string, Page> pages;
         std::string aimed;

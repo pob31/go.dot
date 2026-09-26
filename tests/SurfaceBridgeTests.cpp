@@ -743,6 +743,14 @@ TEST_CASE ("surface bridge: the profiles say what each surface has and what its 
     CHECK (surface::actionFor (d700, surface::buttonForNote (0x2e)) == surface::Action::rewind);
     CHECK (surface::actionFor (d700, surface::buttonForNote (0x2f)) == surface::Action::forward);
     CHECK (surface::actionFor (d700, surface::buttonForNote (0x30)) == surface::Action::none);
+
+    /*  THE MASTER DIAL'S CLICK LETS GO AND ITS DOUBLE CLICK RESTS (author,
+        2026-09-26): F3 and F4 on a D700, and a Mackie's own function keys
+        elsewhere. */
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x38)) == surface::Action::dialLetGo);
+    CHECK (surface::actionFor (d700, surface::buttonForNote (0x39)) == surface::Action::dialRest);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x38)) == surface::Action::none);
+    CHECK (surface::actionFor (mcu, surface::buttonForNote (0x39)) == surface::Action::none);
     CHECK (surface::actionFor (mcu, surface::buttonForNote (0x5f)) == surface::Action::none);
     CHECK (surface::actionFor (surface::Profile::midiPads, surface::buttonForNote (0x5e))
              == surface::Action::none);
@@ -3343,4 +3351,149 @@ TEST_CASE ("surface bridge: seventeen mix channels on sixteen rotaries are two S
     desk.press ("PORTBNK1", 0x29);
     desk.press ("PORTBNK1", 0x2c);
     CHECK (desk.page().word == "eq");
+}
+
+TEST_CASE ("surface bridge: the master dial turns the number last clicked, its click lets go and its double click rests")
+{
+    /*  The author, 2026-09-26: "Can selecting a parameter in the inspector or
+        foot panel on-screen via mouse or touch assign it to the master rotary
+        encoder on the D700?" - and "click could be deselect and double click
+        back to default". The window's click is `surface.dial`; here the table
+        holds what it chose and the tree says it, as the engine would. */
+    PageDesk desk;
+
+    const std::string level = "/godot/cue/CUE00001/level";
+
+    const auto dialOn = [&desk, &level]
+    {
+        surface::SurfaceTable::Dial dial;
+        dial.address = level;
+        dial.hasMinimum = true;
+        dial.minimum = -120.0;
+        dial.hasMaximum = true;
+        dial.maximum = 12.0;
+        dial.unit = "dB";
+        dial.hasRest = true;
+        dial.rest = 0.0;
+        desk.table.setDial (dial);
+        desk.fake.text ("/godot/surface/dial", level);
+    };
+
+    const auto jog = [] (int value) -> midi::Bytes
+    {
+        return { 0xb0, 0x3c, static_cast<std::uint8_t> (value) };
+    };
+
+    desk.fake.number (level, -6.0);
+    desk.fake.text ("/godot/surface/dial", "");
+    desk.publish();
+
+    SUBCASE ("a free dial turns nothing, and its click sends nothing")
+    {
+        desk.hands ({ { "PORTBNK1", jog (1) } });
+        desk.press ("PORTBNK1", 0x38);
+        CHECK (desk.submitted.empty());
+    }
+
+    SUBCASE ("a turn is one write a tick, the detents folded, by the row's law")
+    {
+        dialOn();
+        desk.publish();
+
+        desk.hands ({ { "PORTBNK1", jog (1) }, { "PORTBNK1", jog (2) } });
+        REQUIRE (desk.submitted.size() == 1u);
+        CHECK (desk.submitted[0].command == "node.set");
+        CHECK (desk.submitted[0].origin == "surface:SURF0001");
+        CHECK (desk.submitted[0].args[0].getString() == level);
+        CHECK (desk.submitted[0].args[1].asDouble()
+                 == doctest::Approx (surface::turned (surface::Law::level, -6.0, 3, -120.0, 12.0,
+                                                      surface::FaderLaw::d700)));
+
+        //  Sign and magnitude: 0x41 is one detent down.
+        desk.submitted.clear();
+        desk.hands ({ { "PORTBNK2", jog (0x41) } });
+        REQUIRE (desk.submitted.size() == 1u);
+        CHECK (desk.submitted[0].args[1].asDouble() < -6.0);
+    }
+
+    SUBCASE ("the double click puts it back to its rest, and at its rest writes nothing")
+    {
+        dialOn();
+        desk.publish();
+
+        desk.press ("PORTBNK1", 0x39);
+        REQUIRE (desk.submitted.size() == 1u);
+        CHECK (desk.submitted[0].args[0].getString() == level);
+        CHECK (desk.submitted[0].args[1].asDouble() == doctest::Approx (0.0));
+
+        desk.submitted.clear();
+        desk.fake.number (level, 0.0);
+        desk.publish();
+        desk.press ("PORTBNK1", 0x39);
+        CHECK (desk.submitted.empty());
+    }
+
+    SUBCASE ("the click lets go")
+    {
+        dialOn();
+        desk.publish();
+
+        desk.press ("PORTBNK1", 0x38);
+        CHECK (desk.writes() == std::vector<std::string> { "surface.dial " });
+    }
+
+    SUBCASE ("a number the tree no longer has - its cue gone - is not turned")
+    {
+        dialOn();
+        desk.fake.text ("/godot/surface/dial", "");
+        desk.publish();
+
+        desk.hands ({ { "PORTBNK1", jog (1) } });
+        CHECK (desk.submitted.empty());
+    }
+
+    SUBCASE ("the dial is dark while free and wears its cue's colour while it turns something")
+    {
+        //  Painted dark from the first paint on.
+        const auto dark = surface::d700Colour (0x38, 0, 0, 0);
+        const auto sentDark = colourOf (desk.sink, "PORTBNK1", 0x38);
+        REQUIRE (sentDark.size() == 3u);
+        CHECK (sentDark[0] == midi::Bytes (dark.begin(), dark.begin() + 3));
+
+        dialOn();
+        desk.fake.text ("/godot/cue/CUE00001/colour", "#FF0000");
+        desk.sink.sent.clear();
+        desk.settle();
+
+        const auto red = surface::forTheLeds (*surface::colourFromHex ("#FF0000"));
+        const auto three = surface::d700Colour (0x38, red.red, red.green, red.blue);
+        const auto sentRed = colourOf (desk.sink, "PORTBNK1", 0x38);
+        REQUIRE (sentRed.size() == 3u);
+        CHECK (sentRed[0] == midi::Bytes (three.begin(), three.begin() + 3));
+    }
+}
+
+TEST_CASE ("surface bridge: a Mackie's jog wheel turns the dial's number, and its F3 is its own")
+{
+    PageDesk desk { "mcu", 8 };
+
+    const std::string wait = "/godot/cue/CUE00001/preWait";
+    surface::SurfaceTable::Dial dial;
+    dial.address = wait;
+    dial.hasMinimum = true;
+    dial.unit = "s";
+    dial.hasRest = true;
+    desk.table.setDial (dial);
+    desk.fake.text ("/godot/surface/dial", wait);
+    desk.fake.number (wait, 1.0);
+    desk.publish();
+
+    desk.hands ({ { "PORTBNK1", { 0xb0, 0x3c, 0x02 } } });
+    REQUIRE (desk.submitted.size() == 1u);
+    CHECK (desk.submitted[0].args[1].asDouble() == doctest::Approx (1.2));
+
+    desk.submitted.clear();
+    desk.press ("PORTBNK1", 0x38);
+    desk.press ("PORTBNK1", 0x39);
+    CHECK (desk.submitted.empty());
 }

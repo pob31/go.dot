@@ -68,6 +68,7 @@ namespace wfg::surface
         constexpr int sendButtonNote = 0x29;    // Send, lit while its page is up
         constexpr int fxButtonNote = 0x2b;      // FX (Mackie's Plug-In), lit while its page is up
         constexpr int eqButtonNote = 0x2c;      // EQ, lit while its page is up
+        constexpr int masterDialNote = 0x38;    // the D700's master dial: its colour, as its press (McuCodec)
 
         constexpr int ringFillMode = 2;         // MCU "wrap" and the D700's channel 3: fill from the left
         constexpr int d700RingSteps = 127;      // a D700 ring's value, 0..127 (control guide §4.3)
@@ -99,6 +100,14 @@ namespace wfg::surface
         }
 
         /*  And the show's mix channels in output order: a Send page's rotaries. */
+        /*  The number the master dial turns, for every surface, set by
+            `surface.dial` (2026-09-26); empty when what it named is gone. */
+        const std::string& dialAddress()
+        {
+            static const std::string address { "/godot/surface/dial" };
+            return address;
+        }
+
         const std::string& mixesAddress()
         {
             static const std::string address { "/godot/audio/mixes" };
@@ -589,6 +598,15 @@ namespace wfg::surface
             int padCounter = 0;
 
             Paging paging;
+
+            /*  THE MASTER DIAL (2026-09-26): its detents this tick, folded
+                like a rotary's, whether its double click asked for the rest,
+                and its light as last sent. */
+            int dialSteps = 0;
+            bool dialRest = false;
+            bool dialColourKnown = false;
+            Rgb dialColourLevel;
+            std::int64_t dialColourTick = std::numeric_limits<std::int64_t>::min() / 2;
 
             bool isMackie() const noexcept
             {
@@ -1272,13 +1290,18 @@ namespace wfg::surface
                     identify (box, bank, event.serial);
                     break;
 
-                /*  The D700's volume knob, the master touch, the jog wheel:
-                    nothing in Go.dot is under them yet. And no reply to the
-                    handshake is ever sent (plan decision 6), so its answers do
-                    not come. */
+                /*  THE MASTER DIAL - a Mackie's jog wheel - turns the number
+                    last clicked or touched in the window (author, 2026-09-26),
+                    folded and written once a tick (flushDialWrites). */
+                case McuEvent::Kind::jog:
+                    box.dialSteps += event.value;
+                    break;
+
+                /*  The D700's volume knob and the master touch: nothing in
+                    Go.dot is under them yet. And no reply to the handshake is
+                    ever sent (plan decision 6), so its answers do not come. */
                 case McuEvent::Kind::masterFader:
                 case McuEvent::Kind::masterTouch:
-                case McuEvent::Kind::jog:
                 case McuEvent::Kind::hostConnectionConfirmation:
                 case McuEvent::Kind::hostConnectionError:
                     break;
@@ -1367,6 +1390,21 @@ namespace wfg::surface
                 case Action::go:
                     if (event.down)
                         submit (commandFrom (box.origin, "go"));
+                    break;
+
+                /*  THE DIAL'S CLICK LETS GO, and its double click puts the
+                    number back to its rest (author, 2026-09-26). The firmware
+                    tells the two apart, so each is one press here. A click on
+                    a free dial sends nothing - there is nothing to let go. */
+                case Action::dialLetGo:
+                    if (event.down && ! textAt (published.get(), dialAddress()).empty())
+                        submit (commandFrom (box.origin, "surface.dial",
+                                             { osc::Value::string (std::string {}) }));
+                    break;
+
+                case Action::dialRest:
+                    if (event.down)
+                        box.dialRest = true;
                     break;
 
                 case Action::stop:
@@ -1690,6 +1728,63 @@ namespace wfg::surface
             }
         }
 
+        /*  THE TICK'S DIAL WRITE, one per surface whose dial moved or was
+            double-clicked: the number turned by its row's law from what the
+            tree last said (`dialTurned`), or put back to its rest. A
+            `node.set` like a rotary's, with the surface's origin, so a turn is
+            one undo step per hand, and under the lock the row's own door
+            decides - an EQ band or a send rides live, anything else is
+            refused as it would be from the window. */
+        void flushDialWrites (const Submit& submit)
+        {
+            const auto& dial = table.dial();
+            const auto* at = published.get();
+
+            for (auto& box : surfaces)
+            {
+                const auto steps = std::exchange (box.dialSteps, 0);
+                const auto rest = std::exchange (box.dialRest, false);
+
+                if ((steps == 0 && ! rest) || dial.address.empty())
+                    continue;
+
+                //  The tree empties the dial when what it named is gone.
+                if (textAt (at, dialAddress()) != dial.address)
+                    continue;
+
+                const auto current = numberAt (at, dial.address);
+
+                if (! current.has_value())
+                    continue;
+
+                auto next = *current;
+
+                if (rest && dial.hasRest)
+                    next = dial.rest;
+
+                if (steps != 0)
+                {
+                    DialRange range;
+                    range.integer = dial.integer;
+                    range.hasMinimum = dial.hasMinimum;
+                    range.minimum = dial.minimum;
+                    range.hasMaximum = dial.hasMaximum;
+                    range.maximum = dial.maximum;
+                    range.unit = dial.unit;
+                    next = dialTurned (range, next, steps, box.topology.faderLaw);
+                }
+
+                //  Turned against an end, or double-clicked at its rest, it is where it was.
+                if (std::abs (next - *current) < 1.0e-9)
+                    continue;
+
+                submit (commandFrom (box.origin, "node.set",
+                                     { osc::Value::string (dial.address),
+                                       dial.integer ? osc::Value::int32 (static_cast<std::int32_t> (std::lround (next)))
+                                                    : osc::Value::float64 (next) }));
+            }
+        }
+
         void eqWrite (Surface& box, const Strip& strip, int steps, bool pressed, const Submit& submit) const
         {
             const auto* at = published.get();
@@ -1962,6 +2057,8 @@ namespace wfg::surface
 
                 for (auto& strip : box.strips)
                     forgetShown (strip);
+
+                box.dialColourKnown = false;
             }
 
             /*  A PAGE WITH NOTHING TO SHOW - its cue let go of, or gone - is
@@ -2003,6 +2100,49 @@ namespace wfg::surface
 
                 paintPageButtons (box, bank, tick);
             }
+
+            if (box.topology.hasRgb && ! box.banks.empty())
+                paintDial (box, tick);
+        }
+
+        /*  THE DIAL SAYS WHETHER IT HAS A NUMBER (2026-09-26): dark when it is
+            free, lit when it turns something - in the colour of the cue it is
+            on, white for anything without one. The window names what it is
+            (§4.8: never the colour alone). Sent on the first port, where the
+            master section is, at a strip's pace. */
+        void paintDial (Surface& box, std::int64_t tick)
+        {
+            const auto* at = published.get();
+            const auto& address = textAt (at, dialAddress());
+
+            Rgb colour {};
+
+            if (! address.empty())
+            {
+                colour = Rgb { 127, 127, 127 };
+
+                if (address.rfind ("/godot/cue/", 0) == 0)
+                {
+                    const auto slash = address.find ('/', 11);
+
+                    if (slash != std::string::npos)
+                        if (const auto own = colourFromHex (textAt (at, address.substr (0, slash) + "/colour")))
+                            colour = *own;
+                }
+            }
+
+            const auto levels = colourLevels (colour);
+            const auto since = tick - box.dialColourTick;
+            const auto due = ! box.dialColourKnown || levels != box.dialColourLevel
+                             || since >= idleColourReassertTicks;
+
+            if (! due || since < colourIntervalTicks)
+                return;
+
+            sendColour (box.banks.front().port, masterDialNote, forTheLeds (colour));
+            box.dialColourKnown = true;
+            box.dialColourLevel = levels;
+            box.dialColourTick = tick;
         }
 
         /*  EQ AND SEND SAY WHICH PAGE IS UP, on the bank whose button asked:
@@ -2851,6 +2991,7 @@ namespace wfg::surface
 
         s.flushWrites (to);
         s.flushPageWrites (to);
+        s.flushDialWrites (to);
         return s.tableMoved;
     }
 

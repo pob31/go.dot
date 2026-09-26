@@ -136,6 +136,7 @@ namespace wfg::surface
         a LED pulse."): the level the fader is at, written as its member's
         `initialLevel` - an edit to the show and one undo step. */
     enum class Action { none, gate, go, stop, rewind, forward, kill, solo, startLevel,
+                        dialLetGo, dialRest,
                         aim, eqPage, sendPage, fxPage, leavePage };
 
     /*  AND IT SAYS SO: the red MUTE light is on for half a second after a
@@ -187,6 +188,15 @@ namespace wfg::surface
         as several detents at once, so the whole travel is a spin or two. A
         stepped parameter moves one step a detent whatever this is. */
     inline constexpr double pageParameterTravelPerDetent = 1.0 / 128.0;
+
+    /*  THE MASTER DIAL'S DETENT on a time (2026-09-26): a tenth of a second
+        under `dialCoarseFromSeconds`, a whole second from there up. A
+        pre-wait is set to the tenth, and a long one is not turned a tenth at
+        a time. Every other kind of number takes the page's law for its unit
+        (SurfacePages.h, `dialTurned`). */
+    inline constexpr double dialFineSeconds = 0.1;
+    inline constexpr double dialCoarseSeconds = 1.0;
+    inline constexpr double dialCoarseFromSeconds = 10.0;
 
     /*  A CONTROL WHOSE BAND IS OUT is lit at this share of its colour - still
         its band's colour, so the eye finds it, and plainly dimmer. The text

@@ -285,6 +285,91 @@ TEST_CASE ("surface: the rotaries' aim is one media cue, named by a command and 
     }
 }
 
+TEST_CASE ("surface: the master dial takes a number by its address, and refuses what has nothing to turn")
+{
+    /*  surface.dial (author, 2026-09-26): any click or touch on a number in the
+        window's inspector or foot panel puts it on the master dial. One for
+        every surface; not stored; stays on that cue's row; gone with it. */
+    Rig rig;
+
+    REQUIRE (rig.apply ("surface.create", { osc::Value::string ("d700") }).applied == 1);
+
+    const auto list = rig.document.createList ("Main");
+    REQUIRE (list.ok);
+    const auto media = rig.document.createCue (list.id, 0, "media", "Kick");
+    const auto group = rig.document.createCue (list.id, 1, "group", "Scene");
+    REQUIRE (media.ok);
+    REQUIRE (group.ok);
+
+    const auto level = "/godot/cue/" + media.id + "/level";
+
+    CHECK (rig.exists ("/godot/surface/dial"));
+    CHECK (rig.at ("/godot/surface/dial").empty());
+
+    CHECK (rig.apply ("surface.dial", { osc::Value::string (level) }).applied == 1);
+    CHECK (rig.at ("/godot/surface/dial") == level);
+
+    //  What the bridge will turn it by, read off the row once.
+    const auto& dial = rig.surfaces.dial();
+    CHECK (dial.address == level);
+    CHECK_FALSE (dial.integer);
+    CHECK (dial.unit == "dB");
+    CHECK (dial.hasMinimum);
+    CHECK (dial.minimum == doctest::Approx (-120.0));
+    CHECK (dial.hasRest);
+    CHECK (dial.rest == doctest::Approx (0.0));
+
+    SUBCASE ("a whole number is one")
+    {
+        CHECK (rig.apply ("surface.dial", { osc::Value::string ("/godot/cue/" + group.id + "/loops") }).applied == 1);
+        CHECK (rig.surfaces.dial().integer);
+    }
+
+    SUBCASE ("a word, a switch, a reading or nothing at all is refused, and moves nothing")
+    {
+        for (const auto& refused : { "/godot/cue/" + media.id + "/name",
+                                     "/godot/cue/" + media.id + "/enabled",
+                                     "/godot/cue/" + media.id + "/kind",
+                                     std::string ("/godot/cue/NQSCHQ00/level"),
+                                     std::string ("/nowhere") })
+        {
+            INFO (refused);
+            CHECK (rig.apply ("surface.dial", { osc::Value::string (refused) }).rejected == 1);
+        }
+
+        CHECK (rig.at ("/godot/surface/dial") == level);
+    }
+
+    SUBCASE ("an empty argument frees it, and is applied")
+    {
+        CHECK (rig.apply ("surface.dial", { osc::Value::string ("") }).applied == 1);
+        CHECK (rig.at ("/godot/surface/dial").empty());
+        CHECK (rig.surfaces.dial().address.empty());
+    }
+
+    SUBCASE ("a deleted cue takes it with it, and an undo of the delete brings it back")
+    {
+        REQUIRE (rig.apply ("object.delete", { osc::Value::string (media.id) }).applied == 1);
+        CHECK (rig.at ("/godot/surface/dial").empty());
+
+        REQUIRE (rig.apply ("undo").applied == 1);
+        CHECK (rig.at ("/godot/surface/dial") == level);
+    }
+
+    SUBCASE ("and it is no step of the show's history, and allowed under the lock")
+    {
+        const auto& history = rig.document.history (doc::UndoDomain::document);
+        const auto steps = history.getUndoDescriptions().size();
+
+        REQUIRE (rig.apply ("surface.dial", { osc::Value::string ("") }).applied == 1);
+        REQUIRE (rig.apply ("surface.dial", { osc::Value::string (level) }).applied == 1);
+        CHECK (history.getUndoDescriptions().size() == steps);
+
+        REQUIRE (rig.document.setAttribute ("/godot/document/locked", "true").ok);
+        CHECK (rig.apply ("surface.dial", { osc::Value::string ("") }).applied == 1);
+    }
+}
+
 TEST_CASE ("surface: each surface's page is published every tick, from the runtime half")
 {
     /*  The page a surface's rotaries show moves with no command - the

@@ -151,6 +151,26 @@ namespace wfg::surface
     Ring d700ParameterRing (double value, bool bipolar) noexcept;
     Ring mcuParameterRing (double value, bool bipolar) noexcept;
 
+    /*  THE MASTER DIAL (author, 2026-09-26): whichever number was last
+        clicked or touched in the window's inspector or foot panel, turned by
+        the law its own row implies - the parameter table's type, unit and
+        range, and nothing named. A frequency in ratios, a level along the
+        fader, a gain in half decibels, a width in ratios, a time in tenths
+        of a second (whole seconds past ten), a whole number by one. So a row
+        added to the table tomorrow turns sensibly with no line written here. */
+    struct DialRange
+    {
+        bool integer = false;
+        bool hasMinimum = false;
+        double minimum = 0.0;
+        bool hasMaximum = false;
+        double maximum = 0.0;
+        std::string_view unit;
+    };
+
+    /** A number turned `steps` detents of the dial, kept in its range. */
+    double dialTurned (const DialRange& range, double value, int steps, FaderLaw fader) noexcept;
+
     /** A shape's ring, which reads a word rather than a number. */
     Ring d700ShapeRing (std::string_view shape) noexcept;
     Ring mcuShapeRing (std::string_view shape) noexcept;

@@ -130,6 +130,20 @@ namespace wfg::surface
         /*  FX, the Mackie "Plug-In" (2026-09-26): the aimed cue's inserts. */
         if (button.button == Button::assignPlugin)  return Action::fxPage;
 
+        /*  THE MASTER DIAL'S CLICK AND DOUBLE CLICK (author, 2026-09-26: "click
+            could be deselect and double click back to default" - "The D700
+            can do it at hardware level"). The dial presses F3; with double
+            click ticked for it in the Configurator the firmware withholds the
+            click until the gesture resolves and sends a double as another note
+            alone - F4, by `*`'s pattern (F1 single, F2 double), to confirm at
+            the bench. A Mackie's F3 and F4 are its own function keys and stay
+            unmapped. */
+        if (profile == Profile::d700 && button.button == Button::function)
+        {
+            if (button.index == 2) return Action::dialLetGo;
+            if (button.index == 3) return Action::dialRest;
+        }
+
         /*  `*`, under the Mackie preset the D700 is pinned to: F1, and F2 for
             its double press when the Configurator is asked for one. */
         if (button.button == Button::function && (button.index == 0 || button.index == 1))

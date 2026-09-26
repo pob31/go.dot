@@ -36,6 +36,10 @@
     sends; an empty argument clears it. Nothing is stored in the show: the aim
     is what the hands are on tonight (PRD §4.10), held in the SurfaceTable and
     published at /godot/surface/aim.
+
+    `surface.dial <address>` (2026-09-26) is its twin for the master dial: the
+    number last clicked or touched in the window, published at
+    /godot/surface/dial, freed by an empty argument.
 */
 
 #include <wfg/engine/command/CommandRegistry.h>

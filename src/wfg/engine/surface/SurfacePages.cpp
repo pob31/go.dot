@@ -22,6 +22,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <limits>
 
 namespace wfg::surface
 {
@@ -225,6 +226,62 @@ namespace wfg::surface
         }
 
         return std::clamp (at + static_cast<double> (steps) * pageParameterTravelPerDetent, 0.0, 1.0);
+    }
+
+    double dialTurned (const DialRange& range, double value, int steps, FaderLaw fader) noexcept
+    {
+        constexpr auto unbounded = std::numeric_limits<double>::infinity();
+
+        const auto low = range.hasMinimum ? range.minimum : -unbounded;
+        const auto high = range.hasMaximum ? range.maximum : unbounded;
+        const auto detents = static_cast<double> (steps);
+
+        if (steps == 0)
+            return std::clamp (value, low, high);
+
+        if (range.integer)
+            return std::clamp (std::round (value) + detents, low, high);
+
+        /*  A FREQUENCY, where its floor is above nought: a ratio a detent,
+            as a band's rotary turns it. The table's ceiling, or none. */
+        if (range.unit == "Hz" && low > 0.0)
+            return turned (Law::frequency, std::max (value, low), steps, low, high, fader);
+
+        /*  A DECIBEL READS TWO WAYS, and the floor says which: a row that
+            reaches silence is a LEVEL and moves along the fader, fine near
+            nought and coarse near the bottom; a narrower one is a GAIN,
+            boost and cut, half a decibel a detent. */
+        if (range.unit == "dB")
+            return turned (low <= faderSilenceDb ? Law::level : Law::gain, value, steps, low, high, fader);
+
+        if (range.unit == "s")
+        {
+            const auto upwards = steps > 0;
+            auto at = std::max (value, 0.0);
+
+            //  Detent by detent, so a turn across ten seconds changes its step there.
+            for (auto left = std::abs (steps); left > 0; --left)
+            {
+                const auto coarse = upwards ? at >= dialCoarseFromSeconds - 1.0e-9
+                                            : at > dialCoarseFromSeconds + 1.0e-9;
+                const auto step = coarse ? dialCoarseSeconds : dialFineSeconds;
+                at = roundedTo (at + (upwards ? step : -step), step);
+            }
+
+            return std::clamp (std::max (at, 0.0), low, high);
+        }
+
+        /*  A WIDTH, or anything else that spans a hundredfold with no unit: in
+            ratios, as a band's Q turns. */
+        if (low > 0.0 && high / low >= 50.0 && high < unbounded)
+            return turned (Law::width, std::max (value, low), steps, low, high, fader);
+
+        /*  Anything else with two ends: a hundred-and-twenty-eighth of its
+            travel. With none: one a detent. */
+        if (low > -unbounded && high < unbounded && high > low)
+            return std::clamp (value + detents * (high - low) * pageParameterTravelPerDetent, low, high);
+
+        return std::clamp (value + detents, low, high);
     }
 
     Ring d700ParameterRing (double value, bool bipolar) noexcept
