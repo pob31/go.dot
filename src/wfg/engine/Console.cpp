@@ -2043,10 +2043,18 @@ namespace
             shape.channelsPerTrack = declared;
         shape.slots = std::max (slotFloor, widestRangeCount (document.root()) + slotHeadroom);
 
+        /*  A BUS'S WIDTH THROUGH ITS DEFAULT TOO (found 2026-09-26): the
+            canonical writer leaves out a width of one, which read raw is
+            nought - so a mono bus last in a saved show was built no output
+            at all, and whatever was sent to it went nowhere. Buses only: the
+            set and the rack sit among them and have no channels. */
         for (const auto bus : audio)
         {
-            const auto first = static_cast<int> (bus["firstChannel"]);
-            const auto width = static_cast<int> (bus["width"]);
+            if (! bus.hasType ("Bus"))
+                continue;
+
+            const auto first = static_cast<int> (bus.getProperty ("firstChannel", 0));
+            const auto width = static_cast<int> (bus.getProperty ("width", 1));
 
             shape.outputs = std::max (shape.outputs, first + width);
         }
