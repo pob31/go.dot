@@ -156,4 +156,33 @@ namespace wfg::client::model
 
     /** What the last scan found, as the tree lists it; empty when none was run. */
     std::vector<KnownPluginRow> readKnownPlugins (const tree::TreeSnapshot&);
+
+    /*  WHERE THE APP'S PLUGIN SCAN IS (2026-09-26, the author's decision: a
+        Scan button in Show settings, Plugins), read off /godot/plugin/scan. */
+    struct ScanRow
+    {
+        /** idle, scanning, finished, failed. */
+        std::string state = "idle";
+        std::string format;
+        std::string file;
+        int done = 0;
+        int total = 0;
+        int found = 0;
+        int skipped = 0;
+        std::string problem;
+    };
+
+    ScanRow readScan (const tree::TreeSnapshot&);
+
+    /** The files a scan gave up on - the ones Retry names. */
+    std::vector<std::string> readSkippedPlugins (const tree::TreeSnapshot&);
+
+    /** Whether the show's set differs from the audio graph: what Load now is for. */
+    bool readSetChanged (const tree::TreeSnapshot&);
+
+    /*  What the Plugins tab says under the machine's list, in words: the
+        scan's progress while it runs, why it failed when it did, how many
+        plugins the machine knows otherwise - and what to press when it knows
+        none. */
+    std::string scanWords (const ScanRow& scan, std::size_t knownCount);
 }

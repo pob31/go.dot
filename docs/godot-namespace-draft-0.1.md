@@ -9885,6 +9885,18 @@ for a failed one, *Preset file…* (a native dialog, a copy into `plugins/`, one
 the latency and the state word beside each. With nothing scanned it says *run `wfg plugins --scan`
 to see this machine's plugins* — scanning stays a verb this phase.
 
+*Since 2026-09-26, at the author's direction (a Scan button in the app):* the tab scans. **Scan**
+opens a menu of the formats (every format, VST3, AU where there is such a thing, LV2) and sends
+`plugin.scan`; **Scan a folder…** sends it with a folder chosen in a native dialog. Under the
+machine's list the scan says where it is in words — *Scanning 12 of 140 - Verb.vst3*, *The scan
+failed: …*, *N plugin(s) known to this machine*, and with nothing known *Nothing scanned yet: press
+Scan.* (`model::scanWords`). The files a scan gave up on are listed below, when there are any, each
+with **Retry** (`plugin.scanRetry`). **Load now** (`plugin.load`) is lit when `/godot/plugin/changed`
+says the set differs from the audio graph, and its tooltip says the sound stops for a moment and
+that it waits for nothing to be playing. Scan, the folder, Retry, Add and Load now are refused while
+the show is locked, and the tooltip says which of the two things - the lock, a scan already running
+- stops them. Gestures `scanPlugins`, `retryScan`, `loadPlugins`, pinned in `ClientTests.cpp`.
+
 **The page** gains the rows and nothing else (plan decision 19): its generic inspector already
 writes any writable node with `node.set`, so §8's second item is free there; the nineteen names
 join `KIND_ORDER.media`; an EQ curve on the page is the tablet phase's to decide.

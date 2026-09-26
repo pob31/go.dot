@@ -105,6 +105,24 @@ namespace wfg::client::gesture
         return { origin::window, "plugin.restart", { osc::Value::string (pluginId) } };
     }
 
+    Event scanPlugins (const std::string& formatWord, const std::string& folder)
+    {
+        if (folder.empty())
+            return { origin::window, "plugin.scan", { osc::Value::string (formatWord) } };
+
+        return { origin::window, "plugin.scan", { osc::Value::string (formatWord), osc::Value::string (folder) } };
+    }
+
+    Event retryScan (const std::string& file)
+    {
+        return { origin::window, "plugin.scanRetry", { osc::Value::string (file) } };
+    }
+
+    Event loadPlugins()
+    {
+        return { origin::window, "plugin.load", {} };
+    }
+
     Event eqReset (const std::string& cueId)
     {
         return { origin::window, "eq.reset", { osc::Value::string (cueId) } };

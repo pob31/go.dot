@@ -2940,16 +2940,24 @@ namespace wfg::client::ui
             is object.delete; Restart is plugin.restart, for an entry that
             failed; Preset file… copies a .vstpreset into the bundle's plugins/
             folder and names it on the row, the way a media file is named
-            (§17.7). Scanning stays a verb: with nothing scanned the left list
-            says which one. */
+            (§17.7).
+
+            SCANNING IS HERE TOO (2026-09-26, the author's decision): Scan, with
+            a menu of the formats, and Scan a folder… for one outside the
+            formats' own - the command line's scan run as a child, its progress
+            said in words under the list; the files a scan gave up on listed
+            below it, each with Retry; and Load now, lit when the set differs
+            from the audio graph, which rebuilds it. Scanning, adding and
+            loading are refused while the show is locked, and say so. */
         class PluginsPage final : public juce::Component
         {
         public:
             PluginsPage (const model::Theme& themeToUse, std::function<void (Event)> dispatch)
                 : theme (themeToUse), send (std::move (dispatch)),
-                  knownLister (*this, Which::known), setLister (*this, Which::set)
+                  knownLister (*this, Which::known), setLister (*this, Which::set),
+                  skippedLister (*this, Which::skipped)
             {
-                for (auto* list : { &knownList, &setList })
+                for (auto* list : { &knownList, &setList, &skippedList })
                 {
                     list->setRowHeight (rowHeight);
                     list->setOutlineThickness (0);
@@ -2959,8 +2967,9 @@ namespace wfg::client::ui
 
                 knownList.setModel (&knownLister);
                 setList.setModel (&setLister);
+                skippedList.setModel (&skippedLister);
 
-                for (auto* label : { &knownHeading, &setHeading, &notice })
+                for (auto* label : { &knownHeading, &setHeading, &notice, &skippedHeading })
                 {
                     label->setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink"));
                     addAndMakeVisible (*label);
@@ -2968,11 +2977,31 @@ namespace wfg::client::ui
 
                 knownHeading.setText ("This machine", juce::dontSendNotification);
                 setHeading.setText ("The show's set, in chain order", juce::dontSendNotification);
+                skippedHeading.setText ("Skipped by a scan", juce::dontSendNotification);
                 notice.setColour (juce::Label::textColourId, Look::colour (themeToUse, "ink-dim"));
                 notice.setJustificationType (juce::Justification::centredLeft);
 
-                for (auto* button : { &addButton, &removeButton, &restartButton, &presetButton })
+                for (auto* button : { &addButton, &removeButton, &restartButton, &presetButton,
+                                      &scanButton, &folderButton, &retryButton, &loadButton })
                     addAndMakeVisible (*button);
+
+                scanButton.onClick = [this] { chooseFormat(); };
+                folderButton.onClick = [this] { chooseFolder(); };
+
+                retryButton.setTooltip ("Scan the picked file again, alone - one that hung the scan or took"
+                                        " it down. It is skipped by every scan until it is tried again.");
+                retryButton.onClick = [this]
+                {
+                    if (send && ! locked && ! scanning() && pickedSkipped >= 0
+                          && pickedSkipped < static_cast<int> (skipped.size()))
+                        send (gesture::retryScan (skipped[static_cast<std::size_t> (pickedSkipped)]));
+                };
+
+                loadButton.onClick = [this]
+                {
+                    if (send && ! locked && setChanged)
+                        send (gesture::loadPlugins());
+                };
 
                 addButton.setTooltip ("Declare the picked plugin in the show's set: every voice carries"
                                       " it, and a media cue switches it in from its FX.");
@@ -3008,32 +3037,47 @@ namespace wfg::client::ui
             }
 
             void show (std::vector<model::KnownPluginRow> knownNow, std::vector<model::PluginRow> setNow,
-                       std::string bundlePathNow, bool editable)
+                       std::string bundlePathNow, bool editable, model::ScanRow scanNow,
+                       std::vector<std::string> skippedNow, bool setChangedNow)
             {
                 const auto knownWere = keyOf (known);
                 const auto setWere = keyOf (set);
+                const auto skippedWere = keyOf (skipped);
                 const auto wasLocked = locked;
+                const auto hadSkipped = ! skipped.empty();
 
                 known = std::move (knownNow);
                 set = std::move (setNow);
                 bundlePath = std::move (bundlePathNow);
                 locked = ! editable;
+                scan = std::move (scanNow);
+                skipped = std::move (skippedNow);
+                setChanged = setChangedNow;
 
-                if (pickedKnown >= static_cast<int> (known.size())) pickedKnown = -1;
-                if (pickedSet >= static_cast<int> (set.size()))     pickedSet = -1;
+                if (pickedKnown >= static_cast<int> (known.size()))     pickedKnown = -1;
+                if (pickedSet >= static_cast<int> (set.size()))         pickedSet = -1;
+                if (pickedSkipped >= static_cast<int> (skipped.size())) pickedSkipped = -1;
 
-                notice.setText (known.empty()
-                                  ? "Nothing scanned yet: run  wfg plugins --scan  and reopen the show."
-                                  : juce::String (known.size()) + " plugin(s) known to this machine.",
-                                juce::dontSendNotification);
+                notice.setText (model::scanWords (scan, known.size()), juce::dontSendNotification);
 
-                for (auto* button : { &addButton, &removeButton, &presetButton })
+                for (auto* button : { &addButton, &removeButton, &presetButton, &loadButton })
                     button->setVisible (editable);
 
-                addButton.setEnabled (pickedKnown >= 0);
-                removeButton.setEnabled (pickedSet >= 0);
-                presetButton.setEnabled (pickedSet >= 0 && ! bundlePath.empty());
-                restartButton.setEnabled (pickedSet >= 0);
+                /*  SAID, NOT ONLY GREYED (PRD §4.8): what stops the scan is in
+                    its tooltip, whichever it is. */
+                scanButton.setTooltip (locked     ? juce::String ("The show is locked: unlock it to scan for plugins.")
+                                       : scanning() ? juce::String ("A scan is running - its progress is under the list.")
+                                                    : juce::String ("Scan this machine for plugins, in a process of its own:"
+                                                                    " a plugin that hangs is skipped after 30 seconds."));
+                folderButton.setTooltip ("Scan one folder beside the formats' own - an LV2 folder that is"
+                                         " not a default one, say.");
+                loadButton.setTooltip (setChanged
+                                         ? juce::String ("The set differs from the audio graph: rebuild the graph with the"
+                                                         " set as it stands. Only while nothing plays; the sound stops for"
+                                                         " a moment.")
+                                         : juce::String ("The audio graph holds the set as it stands."));
+
+                updateButtons();
 
                 const auto lockMoved = wasLocked != locked;
 
@@ -3041,6 +3085,10 @@ namespace wfg::client::ui
                 if (knownWere != keyOf (known) || lockMoved) knownList.repaint();
                 if (setWere != keyOf (set)) setList.updateContent();
                 if (setWere != keyOf (set) || lockMoved) setList.repaint();
+                if (skippedWere != keyOf (skipped)) { skippedList.updateContent(); skippedList.repaint(); }
+
+                if (hadSkipped != ! skipped.empty())
+                    resized();
             }
 
             void resized() override
@@ -3051,21 +3099,108 @@ namespace wfg::client::ui
 
                 knownHeading.setBounds (left.removeFromTop (22));
                 notice.setBounds (left.removeFromBottom (22));
-                addButton.setBounds (left.removeFromBottom (26).removeFromLeft (120));
+
+                auto machineButtons = left.removeFromBottom (26);
+                addButton.setBounds (machineButtons.removeFromLeft (100));
+                machineButtons.removeFromLeft (6);
+                scanButton.setBounds (machineButtons.removeFromLeft (80));
+                machineButtons.removeFromLeft (6);
+                folderButton.setBounds (machineButtons.removeFromLeft (120));
+
+                /*  The skipped files only when there are some: most machines
+                    have none, and a list of nothing is a question nobody asked. */
+                const auto showSkipped = ! skipped.empty();
+
+                for (auto* part : { static_cast<juce::Component*> (&skippedHeading),
+                                    static_cast<juce::Component*> (&skippedList),
+                                    static_cast<juce::Component*> (&retryButton) })
+                    part->setVisible (showSkipped);
+
+                if (showSkipped)
+                {
+                    auto skippedArea = left.removeFromBottom (22 + rowHeight * 3 + 30);
+                    skippedHeading.setBounds (skippedArea.removeFromTop (22));
+                    retryButton.setBounds (skippedArea.removeFromBottom (26).removeFromLeft (90));
+                    skippedList.setBounds (skippedArea.withTrimmedBottom (4));
+                }
+
                 knownList.setBounds (left.withTrimmedBottom (4));
 
                 setHeading.setBounds (right.removeFromTop (22));
                 auto buttons = right.removeFromBottom (26);
-                removeButton.setBounds (buttons.removeFromLeft (90));
+                removeButton.setBounds (buttons.removeFromLeft (80));
                 buttons.removeFromLeft (6);
-                restartButton.setBounds (buttons.removeFromLeft (90));
+                restartButton.setBounds (buttons.removeFromLeft (80));
                 buttons.removeFromLeft (6);
                 presetButton.setBounds (buttons.removeFromLeft (110));
+                buttons.removeFromLeft (6);
+                loadButton.setBounds (buttons.removeFromLeft (90));
                 setList.setBounds (right.withTrimmedBottom (4));
             }
 
         private:
-            enum class Which { known, set };
+            enum class Which { known, set, skipped };
+
+            bool scanning() const { return scan.state == "scanning"; }
+
+            void updateButtons()
+            {
+                addButton.setEnabled (pickedKnown >= 0 && ! locked);
+                removeButton.setEnabled (pickedSet >= 0 && ! locked);
+                presetButton.setEnabled (pickedSet >= 0 && ! locked && ! bundlePath.empty());
+                restartButton.setEnabled (pickedSet >= 0);
+                scanButton.setEnabled (! locked && ! scanning());
+                folderButton.setEnabled (! locked && ! scanning());
+                retryButton.setEnabled (pickedSkipped >= 0 && ! locked && ! scanning());
+                loadButton.setEnabled (setChanged && ! locked);
+            }
+
+            /*  THE FORMATS, as a menu under the button: every one, or one. AU
+                only where there is such a thing. */
+            void chooseFormat()
+            {
+                if (locked || scanning() || ! send)
+                    return;
+
+                juce::PopupMenu menu;
+                menu.addItem (1, "Every format");
+                menu.addItem (2, "VST3");
+               #if JUCE_MAC
+                menu.addItem (3, "AU");
+               #endif
+                menu.addItem (4, "LV2");
+
+                menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&scanButton),
+                                    [safe = juce::Component::SafePointer<PluginsPage> (this)] (int chosen)
+                                    {
+                                        if (safe == nullptr || chosen == 0 || ! safe->send)
+                                            return;
+
+                                        const char* words[] = { "", "", "vst3", "au", "lv2" };
+                                        safe->send (gesture::scanPlugins (words[chosen]));
+                                    });
+            }
+
+            /*  A FOLDER, for plugins outside the formats' own places; every
+                format is asked about it. A member for launchAsync's reason. */
+            void chooseFolder()
+            {
+                if (locked || scanning() || ! send)
+                    return;
+
+                chooser = std::make_unique<juce::FileChooser> ("A folder to scan for plugins", juce::File());
+                chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectDirectories,
+                                      [safe = juce::Component::SafePointer<PluginsPage> (this)] (const juce::FileChooser& answered)
+                                      {
+                                          if (safe == nullptr || ! safe->send)
+                                              return;
+
+                                          const auto folder = answered.getResult();
+
+                                          if (folder.isDirectory())
+                                              safe->send (gesture::scanPlugins ({}, folder.getFullPathName().toStdString()));
+                                      });
+            }
 
             struct Lister final : public juce::ListBoxModel
             {
@@ -3089,6 +3224,13 @@ namespace wfg::client::ui
                 return out;
             }
 
+            static std::string keyOf (const std::vector<std::string>& rows)
+            {
+                std::string out;
+                for (const auto& row : rows) out += row + '\n';
+                return out;
+            }
+
             static std::string keyOf (const std::vector<model::PluginRow>& rows)
             {
                 std::string out;
@@ -3100,20 +3242,21 @@ namespace wfg::client::ui
 
             int rowsIn (Which which) const
             {
-                return static_cast<int> (which == Which::known ? known.size() : set.size());
+                return static_cast<int> (which == Which::known ? known.size()
+                                       : which == Which::set   ? set.size()
+                                                               : skipped.size());
             }
 
             void pick (Which which, int row)
             {
-                if (which == Which::known) pickedKnown = row < static_cast<int> (known.size()) ? row : -1;
-                else                       pickedSet = row < static_cast<int> (set.size()) ? row : -1;
+                if (which == Which::known)    pickedKnown = row < static_cast<int> (known.size()) ? row : -1;
+                else if (which == Which::set) pickedSet = row < static_cast<int> (set.size()) ? row : -1;
+                else                          pickedSkipped = row < static_cast<int> (skipped.size()) ? row : -1;
 
-                addButton.setEnabled (pickedKnown >= 0 && ! locked);
-                removeButton.setEnabled (pickedSet >= 0 && ! locked);
-                presetButton.setEnabled (pickedSet >= 0 && ! locked && ! bundlePath.empty());
-                restartButton.setEnabled (pickedSet >= 0);
+                updateButtons();
                 knownList.repaint();
                 setList.repaint();
+                skippedList.repaint();
             }
 
             void paintRow (Which which, int row, juce::Graphics& g, int width, int height)
@@ -3121,13 +3264,22 @@ namespace wfg::client::ui
                 if (row < 0 || row >= rowsIn (which))
                     return;
 
-                const auto picked = which == Which::known ? row == pickedKnown : row == pickedSet;
+                const auto picked = which == Which::known ? row == pickedKnown
+                                  : which == Which::set   ? row == pickedSet
+                                                          : row == pickedSkipped;
                 g.setColour (Look::colour (theme, picked ? "panel-raised" : row % 2 == 0 ? "panel" : "panel-in"));
                 g.fillRect (0, 0, width, height - 1);
                 g.setColour (Look::colour (theme, "ink"));
                 g.setFont (Look::font (theme, 14.0f));
 
                 auto cell = juce::Rectangle<int> (0, 0, width, height).reduced (6, 0);
+
+                if (which == Which::skipped)
+                {
+                    g.setColour (Look::colour (theme, "ink-dim"));
+                    g.drawText (skipped[static_cast<std::size_t> (row)], cell, juce::Justification::centredLeft, true);
+                    return;
+                }
 
                 if (which == Which::known)
                 {
@@ -3199,14 +3351,18 @@ namespace wfg::client::ui
             std::function<void (Event)> send;
             std::vector<model::KnownPluginRow> known;
             std::vector<model::PluginRow> set;
+            std::vector<std::string> skipped;
+            model::ScanRow scan;
             std::string bundlePath;
             bool locked = false;
-            int pickedKnown = -1, pickedSet = -1;
-            Lister knownLister, setLister;
-            juce::ListBox knownList, setList;
-            juce::Label knownHeading, setHeading, notice;
+            bool setChanged = false;
+            int pickedKnown = -1, pickedSet = -1, pickedSkipped = -1;
+            Lister knownLister, setLister, skippedLister;
+            juce::ListBox knownList, setList, skippedList;
+            juce::Label knownHeading, setHeading, notice, skippedHeading;
             juce::TextButton addButton { "Add to set" }, removeButton { "Remove" }, restartButton { "Restart" },
-                             presetButton { "Preset file..." };
+                             presetButton { "Preset file..." }, scanButton { "Scan" },
+                             folderButton { "Scan a folder..." }, retryButton { "Retry" }, loadButton { "Load now" };
             std::unique_ptr<juce::FileChooser> chooser;
         };
     }
@@ -3412,7 +3568,9 @@ namespace wfg::client::ui
                 comes up or goes down. */
             plugins->show (model::readKnownPlugins (snapshot), model::readPluginSet (snapshot),
                            model::text (snapshot, "/godot/document/path"),
-                           ! model::isYes (model::flag (snapshot, "/godot/document/locked")));
+                           ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
+                           model::readScan (snapshot), model::readSkippedPlugins (snapshot),
+                           model::readSetChanged (snapshot));
 
             if (readCapabilities (snapshot)) capabilities();
             const auto state = model::text (snapshot, "/godot/audio/settingsStatus");

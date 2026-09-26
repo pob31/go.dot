@@ -18,6 +18,7 @@
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
 
+#include <algorithm>
 #include <map>
 #include <sstream>
 
@@ -258,6 +259,76 @@ namespace wfg::client::model
         }
 
         return out;
+    }
+
+    ScanRow readScan (const tree::TreeSnapshot& snapshot)
+    {
+        ScanRow out;
+        const std::string base = "/godot/plugin/scan/";
+
+        if (snapshot.find (base + "state") == nullptr)
+            return out;
+
+        out.state = text (snapshot, base + "state");
+        out.format = text (snapshot, base + "format");
+        out.file = text (snapshot, base + "file");
+        out.done = integer (snapshot, base + "done");
+        out.total = integer (snapshot, base + "total");
+        out.found = integer (snapshot, base + "found");
+        out.skipped = integer (snapshot, base + "skipped");
+        out.problem = text (snapshot, base + "problem");
+        return out;
+    }
+
+    std::vector<std::string> readSkippedPlugins (const tree::TreeSnapshot& snapshot)
+    {
+        std::vector<std::string> out;
+
+        for (int n = 0;; ++n)
+        {
+            const auto address = "/godot/plugin/skipped/" + std::to_string (n);
+
+            if (snapshot.find (address) == nullptr)
+                break;
+
+            out.push_back (text (snapshot, address));
+        }
+
+        return out;
+    }
+
+    bool readSetChanged (const tree::TreeSnapshot& snapshot)
+    {
+        return isYes (flag (snapshot, "/godot/plugin/changed"));
+    }
+
+    std::string scanWords (const ScanRow& scan, std::size_t knownCount)
+    {
+        if (scan.state == "scanning")
+        {
+            /*  The file's own name, not its folder: what a person recognises. */
+            const auto slash = scan.file.find_last_of ("/\\");
+            const auto name = slash == std::string::npos ? scan.file : scan.file.substr (slash + 1);
+
+            if (scan.total <= 0)
+                return "Scanning...";
+
+            return "Scanning " + std::to_string (std::min (scan.done + 1, scan.total)) + " of "
+                     + std::to_string (scan.total) + (name.empty() ? std::string {} : " - " + name);
+        }
+
+        if (scan.state == "failed")
+            return "The scan failed: " + scan.problem;
+
+        if (knownCount == 0)
+            return "Nothing scanned yet: press Scan.";
+
+        auto said = std::to_string (knownCount) + " plugin(s) known to this machine.";
+
+        if (scan.state == "finished" && scan.skipped > 0)
+            said += " The scan gave up on " + std::to_string (scan.skipped) + " file(s).";
+
+        return said;
     }
 
     std::vector<KnownPluginRow> readKnownPlugins (const tree::TreeSnapshot& snapshot)

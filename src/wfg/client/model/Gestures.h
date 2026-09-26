@@ -147,6 +147,14 @@ namespace wfg::client::gesture
                         const std::string& format, const std::string& path);
     Event restartPlugin (const std::string& pluginId);
 
+    /*  THE APP'S PLUGIN SCAN (2026-09-26): `plugin.scan` - every format for
+        an empty word, or vst3 / au / lv2, and a folder to search too -
+        `plugin.scanRetry` for one skipped file, and `plugin.load`, which
+        rebuilds the audio graph with the set as it stands (Load now). */
+    Event scanPlugins (const std::string& formatWord = {}, const std::string& folder = {});
+    Event retryScan (const std::string& file);
+    Event loadPlugins();
+
     /** `eq.reset`: a media cue's EQ back to flat, one transaction (Phase 9a). */
     Event eqReset (const std::string& cueId);
 

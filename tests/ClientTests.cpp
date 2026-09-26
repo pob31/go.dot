@@ -74,6 +74,8 @@
 #include <wfg/client/model/Transport.h>
 #include <wfg/client/model/UndoHistory.h>
 #include <wfg/client/model/Waveform.h>
+#include <wfg/engine/audio/AudioCommands.h>
+#include <wfg/engine/audio/AudioSettings.h>
 #include <wfg/engine/audio/Peaks.h>
 #include <wfg/engine/audio/Timbre.h>
 #include <wfg/engine/Engine.h>
@@ -563,6 +565,11 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
     plugin::PluginTable pluginTable;
     plugin::registerPluginCommands (rig.engine.commands(), pluginTable, {});
 
+    /*  And the audio settings' commands, where Load now's plugin.load lives
+        beside audio.apply (2026-09-26). */
+    audio::AudioState audioState;
+    audio::registerAudioSettingsCommands (rig.engine, rig.document, runner, audioState);
+
     /*  And the surfaces' aim and the live layer's two (2026-09-25): the running
         pane's name and the bar's buttons. */
     surface::SurfaceTable surfaces;
@@ -604,6 +611,11 @@ TEST_CASE ("client: every gesture is a real command, with arguments it will acce
         gesture::captureFx ("FX7N0001", "state/PG7N0001-0123456789abcdef.state", "0:0.5 1:0"),
         gesture::createPlugin ("Verb", "VST3-0badf00d-verb", "VST3", "C:/plugins/verb.vst3"),
         gesture::restartPlugin ("PG7N0001"),
+
+        /*  THE APP'S SCAN AND LOAD NOW (2026-09-26): the Plugins tab's Scan,
+            its folder, a skipped file's Retry, and Load now. */
+        gesture::scanPlugins(), gesture::scanPlugins ("lv2"), gesture::scanPlugins ("", "D:/lv2"),
+        gesture::retryScan ("C:/plugins/hangs.vst3"), gesture::loadPlugins(),
         gesture::createPort ("Lights"),
 
         /*  PHASE 6: the Surfaces tab's three ADD buttons, and the virtual
