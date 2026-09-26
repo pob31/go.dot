@@ -193,8 +193,13 @@ def run_load_now(report: Report, locale: "str | None") -> None:
                 report.equal(wait_for(server, "/godot/plugin/PG7N0002/state", "loaded", timeout=30.0), "loaded",
                              "plugin.load rebuilds the graph and the new entry comes up loaded",
                              str(value_of(server, "/godot/plugin/PG7N0002/problem")))
-                report.equal(value_of(server, f"/godot/plugin/{FIRST}/state"), "loaded",
-                             "and so does the first, again")
+                # WAITED FOR, not read once: the rebuild brings every entry up
+                # again and they need not finish in order, so the first could
+                # still say "loading" the moment the second says "loaded"
+                # (seen on Linux runners, 688730e and 8e02faa). One stuck in
+                # "loading" still fails, on the timeout.
+                report.equal(wait_for(server, f"/godot/plugin/{FIRST}/state", "loaded", timeout=30.0),
+                             "loaded", "and so does the first, again")
                 report.equal(value_of(server, "/godot/plugin/changed"), False,
                              "the set no longer reads changed")
                 report.equal(value_of(server, "/godot/audio/settingsStatus"), "ready",
