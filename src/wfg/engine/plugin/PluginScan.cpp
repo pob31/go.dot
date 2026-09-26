@@ -417,6 +417,19 @@ namespace wfg::plugin
                     /*  ONCE EACH: an LV2 bundle holding two plugins is answered
                         twice, once per plugin, by JUCE's search. */
                     auto files = format->searchPathsForPlugins (where, true, false);
+
+                    /*  AND EVERY LV2 BUNDLE BY ITS FOLDER, beside JUCE's search
+                        (2026-09-26): on macOS that search answered nothing for
+                        a folder handed to it, where Windows and Linux listed the
+                        bundle - while asking for a bundle by its folder, which
+                        is what each file below is, worked everywhere. So the
+                        folders are listed here too, and the de-duplication
+                        below makes the two lists one. */
+                    if (format->getName() == "LV2")
+                        for (int p = 0; p < where.getNumPaths(); ++p)
+                            for (const auto& bundle : where[p].findChildFiles (juce::File::findDirectories, false, "*.lv2"))
+                                files.add (bundle.getFullPathName());
+
                     files.removeDuplicates (false);
 
                     for (const auto& file : files)
