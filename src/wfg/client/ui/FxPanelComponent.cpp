@@ -282,11 +282,11 @@ namespace wfg::client::ui
 
             g.setFont (Look::font (owner.theme, 12.0f));
 
-            //  "file", then an arrow into the first box.
+            //  "file" - or a mic cue's input (Phase 9b) - then an arrow into the first box.
             const auto first = owner.boxes.front()->getBounds();
-            const auto fileArea = juce::Rectangle<int> (owner.scaled (margin), 0, owner.scaled (endWidth), getHeight());
+            const auto fileArea = juce::Rectangle<int> (owner.scaled (margin), 0, owner.sourceWidth(), getHeight());
             g.setColour (Look::colour (owner.theme, "ink-dim"));
-            g.drawText ("file", fileArea, juce::Justification::centred, false);
+            g.drawText (juce::String (owner.reading.fx.source), fileArea, juce::Justification::centred, false);
             arrow (fileArea.getRight(), first.getX());
 
             for (std::size_t at = 1; at < owner.boxes.size(); ++at)
@@ -498,10 +498,18 @@ namespace wfg::client::ui
 
         /*  file, then an arrow and a box per link, then an arrow and out -
             and room after it for the sentence a show with no plugins says. */
-        return scaled (margin) + scaled (endWidth)
+        return scaled (margin) + sourceWidth()
                + count * (scaled (linkWidth) + scaled (boxWidth))
                + scaled (linkWidth) + scaled (endWidth) + scaled (margin)
-               + (reading.fx.notice.empty() ? 0 : scaled (360));
+               + (reading.fx.notice.empty() && model::chainWords (reading.fx).empty() ? 0 : scaled (360));
+    }
+
+    int FxPanelComponent::sourceWidth() const
+    {
+        const auto said = juce::String (reading.fx.source);
+        const auto wide = juce::GlyphArrangement::getStringWidthInt (Look::font (theme, 12.0f), said) + scaled (8);
+
+        return juce::jmax (scaled (endWidth), wide);
     }
 
     void FxPanelComponent::layOut()
@@ -514,7 +522,7 @@ namespace wfg::client::ui
         canvas->setSize (juce::jmax (wantedWidth(), viewport.getMaximumVisibleWidth()),
                          juce::jmax (1, viewport.getMaximumVisibleHeight()));
 
-        auto x = scaled (margin) + scaled (endWidth);
+        auto x = scaled (margin) + sourceWidth();
         const auto height = juce::jmax (0, canvas->getHeight() - 2 * scaled (4));
 
         for (auto& box : boxes)

@@ -125,6 +125,10 @@ namespace wfg::client::ui
         int scaled (int base) const;
         int wantedWidth() const;
 
+        /*  How wide the chain's source is drawn: "file", or a mic cue's input
+            by name (Phase 9b) - never narrower than "file" was. */
+        int sourceWidth() const;
+
         model::Theme theme;
         Actions actions;
 

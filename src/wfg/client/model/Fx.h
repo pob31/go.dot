@@ -109,10 +109,26 @@ namespace wfg::client::model
         int chainChannels = 0;
         int insertLatency = 0;
         int sampleRate = 0;
+
+        /*  WHERE THE CHAIN BEGINS, in words: "file" for a media cue, and for a
+            mic cue "in" and its named input - "in · Voix solo" (Phase 9b). */
+        std::string source = "file";
+
+        /*  A MIC CUE'S PATH (Phase 9b, namespace draft §18.7): the interface's
+            own delays in and out, in samples, and the show's budget for what
+            the plugins may add, in milliseconds. `live` says which sentence
+            `chainWords` writes. */
+        bool live = false;
+        int inputLatency = 0;
+        int outputLatency = 0;
+        double budgetMs = 5.0;
     };
 
     /*  "Plays as stereo through its inserts, 21 ms late." - or nothing, for a
-        cue its inserts neither widen nor delay. */
+        cue its inserts neither widen nor delay. For a mic cue the whole path,
+        always, against the budget (decision BY): "7.3 ms from the microphone
+        to the output: 2.5 ms the interface's, 4.8 ms its plugins' - within the
+        5 ms budget." */
     std::string chainWords (const FxReading&);
 
     /*  The cue's strips against the set. `present` is false, with a sentence,

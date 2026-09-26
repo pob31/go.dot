@@ -16,6 +16,7 @@
 
 #include <wfg/client/model/Rack.h>
 
+#include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
 #include <wfg/engine/tree/TreeSnapshot.h>
@@ -108,6 +109,43 @@ namespace wfg::client::model
         const auto whole = std::to_string (tenths / 10);
 
         return (tenths % 10 == 0 ? whole : whole + "." + std::to_string (tenths % 10)) + " ms";
+    }
+
+    std::string busyWords (const tree::TreeSnapshot& snapshot)
+    {
+        std::vector<std::string> names;
+
+        for (const auto& row : readRuns (snapshot))
+        {
+            if (row.state == "done" || row.state == "failed" || row.state == "preparing")
+                continue;
+
+            /*  A CUE ONLY GOT READY is not a sound: the horizon's arm, which
+                the engine lets go of when the graph is rebuilt. */
+            if (row.state == "armed")
+                if (const auto prepared = text (snapshot, "/godot/cue/" + row.cueId + "/prepare");
+                    ! prepared.empty() && prepared != "idle")
+                    continue;
+
+            const auto called = row.cueName.empty() ? row.cueId : row.cueName;
+
+            if (std::find (names.begin(), names.end(), called) == names.end())
+                names.push_back (called);
+        }
+
+        if (names.empty())
+            return {};
+
+        std::string said;
+        const auto shown = std::min<std::size_t> (names.size(), 3);
+
+        for (std::size_t at = 0; at < shown; ++at)
+            said += (at == 0 ? "" : at + 1 == shown && names.size() == shown ? " and " : ", ") + names[at];
+
+        if (names.size() > shown)
+            said += " and " + std::to_string (names.size() - shown) + " more";
+
+        return said + (names.size() == 1 ? " is sounding" : " are sounding");
     }
 
     std::string budgetWords (const RackChannelRow& channel, const RackReading& rack)

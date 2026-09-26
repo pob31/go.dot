@@ -812,9 +812,12 @@ namespace wfg::client::ui
             position: a group's count of its members, a member's strip and what
             the strip is doing (§16.7). Measured, and never more than half the
             line, so the name keeps the room it is read by. */
-        if (! entry.samplerWords.empty())
+        /*  AND A MIC RUN'S (Phase 9b): the channel it is on, or that it waits
+            for one or rings out - in the same place, by the same rule. */
+        if (const auto& beside = entry.samplerWords.empty() ? entry.liveWords : entry.samplerWords;
+            ! beside.empty())
         {
-            const auto said = juce::String (entry.samplerWords);
+            const auto said = juce::String (beside);
 
             g.setFont (Look::font (theme, 12.0f));
 
@@ -888,7 +891,7 @@ namespace wfg::client::ui
             scrub, and a scrub that did not move is a grab and nothing else. */
         const auto onNameLine = y < topOf (index) + rowHeight();
 
-        if (entry.kind == "media" && onNameLine && actions.aim)
+        if ((entry.kind == "media" || entry.kind == "mic") && onNameLine && actions.aim)
             actions.aim (entry.aimed ? std::string {} : entry.cueId);
     }
 

@@ -5035,3 +5035,89 @@ TEST_CASE ("host player: an arm and a state asked for the same insert land in th
         CHECK (lane->wantedState() == "older.state");
     }
 }
+
+//==============================================================================
+TEST_CASE ("M38: the live rack's cost in the audio callback, with 0, 8 and 32 channels open")
+{
+    /*  Phase 9b (namespace draft 18.10). Each rack channel is a track of its
+        own - the input stage, the EQ and the output stage - and open, it copies
+        its input from the tap every block and sends it through the matrix.
+        Measured with no plugin on any channel, since the proxy's own cost is
+        M31's, beside eight idle voices, at 48 kHz and 128 samples into eight
+        outputs. In alternation, twice over, for M11's reason: the cost of a
+        block drifts with how many engines this process has built before it. */
+    constexpr int rate = 48000;
+    constexpr int blockSize = 128;
+    constexpr int blocks = 1500;
+
+    const auto measure = [] (int channels)
+    {
+        HostRig rig;
+
+        audio::HostSettings settings;
+        settings.sampleRate = rate;
+        settings.blockSize = blockSize;
+        settings.outputChannels = 8;
+        settings.inputChannels = 2;
+        REQUIRE (rig.host.start (settings));
+
+        audio::EditSpec spec;
+        spec.tracks = 8;
+        spec.channelsPerTrack = 2;
+
+        for (int n = 0; n < channels; ++n)
+        {
+            audio::RackChannelSpec channel;
+            channel.id = "CH" + juce::String (n).paddedLeft ('0', 6).toStdString();
+            channel.name = "Mic " + std::to_string (n + 1);
+            spec.rack.push_back (channel);
+        }
+
+        REQUIRE (rig.host.buildEdit (spec));
+
+        for (int n = 0; n < channels; ++n)
+        {
+            const auto track = rig.host.rackTrackOf ("CH" + juce::String (n).paddedLeft ('0', 6).toStdString());
+            REQUIRE (track >= 0);
+
+            auto* matrix = rig.host.trackMatrix (track);
+            REQUIRE (matrix != nullptr);
+            matrix->setLevelDb (0.0f);
+            matrix->setGain (0, n % 8, 1.0f);
+            matrix->snapToTargets();
+
+            rig.host.setRackSource (track, n % 2, 1);
+            rig.host.openRackGate (track, -1);
+        }
+
+        const std::vector<float> one (blockSize, 0.25f), two (blockSize, -0.25f);
+        const float* inputs[] { one.data(), two.data() };
+
+        for (int i = 0; i < 200; ++i)
+            rig.host.processBlock (inputs, 2);
+
+        const auto from = std::chrono::steady_clock::now();
+
+        for (int i = 0; i < blocks; ++i)
+            rig.host.processBlock (inputs, 2);
+
+        const auto took = std::chrono::duration<double, std::micro> (std::chrono::steady_clock::now() - from).count();
+
+        rig.host.stop();
+        return took / blocks;
+    };
+
+    const auto budget = 1.0e6 * blockSize / rate;
+
+    for (int pass = 0; pass < 2; ++pass)
+        for (const auto channels : { 0, 8, 32 })
+        {
+            const auto cost = measure (channels);
+
+            MESSAGE ("M38 pass " << pass + 1 << ": " << channels << " rack channels open, 8 voices idle: "
+                     << cost << " us/block of " << budget << " us (" << 100.0 * cost / budget
+                     << "% of real time)");
+
+            CHECK (cost > 0.0);
+        }
+}

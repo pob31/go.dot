@@ -67,16 +67,19 @@ namespace wfg::client::model
         if (pickedCueId.empty())
         {
             out.title = name;
-            out.reason = "Nothing is picked: pick a media cue to set its " + name + ".";
+            out.reason = "Nothing is picked: pick a media or a mic cue to set its " + name + ".";
             return out;
         }
 
         const auto label = labelOf (snapshot, pickedCueId);
         out.title = name + dash + label;
 
-        if (text (snapshot, "/godot/cue/" + pickedCueId + "/kind") != "media")
+        /*  A MEDIA CUE'S INSERTS, OR A MIC CUE'S (Phase 9b): the helper follows
+            the pick onto a mic cue whose channel carries this plugin. */
+        if (const auto kind = text (snapshot, "/godot/cue/" + pickedCueId + "/kind");
+            kind != "media" && kind != "mic")
         {
-            out.reason = label + " plays no file: inserts belong to media cues.";
+            out.reason = label + " plays nothing: inserts belong to media and mic cues.";
             return out;
         }
 

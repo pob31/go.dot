@@ -1603,6 +1603,99 @@ TEST_CASE ("fx panel: a picture of it, when somebody asks for one")
     MESSAGE ("wrote " << file.getFullPathName().toStdString());
 }
 
+TEST_CASE ("fx panel: a mic cue's chain starts at its input, and its path is said against the budget")
+{
+    /*  Phase 9b (namespace draft 18.9): the chain drawn from "in" and the
+        input's name where a media cue's says "file", its boxes the channel's
+        plugins, and the path's delay in words - always, for a live voice. With
+        WFG_SNAPSHOT_DIR set, fx-panel-mic.png as well. */
+    ui::FxPanelComponent::Actions actions;
+    ui::FxPanelComponent panel (model::Theme {}, actions);
+    panel.setSize (2050, 250);
+
+    auto reading = chainReading ("CUE00009");
+    reading.cueName = "Voix solo";
+    reading.cueKind = "mic";
+    reading.fx.source = "in \xc2\xb7 Voix solo";
+    reading.fx.live = true;
+    reading.fx.fileChannels = 1;
+    reading.fx.chainChannels = 2;
+    reading.fx.sampleRate = 48000;
+    reading.fx.inputLatency = 64;
+    reading.fx.outputLatency = 56;
+    reading.fx.insertLatency = 230;
+    reading.fx.budgetMs = 5.0;
+
+    CHECK (model::chainWords (reading.fx) == "7.3 ms from the microphone to the output: 2.5 ms the interface's,"
+                                              " 4.8 ms its plugins' - within the 5 ms budget.");
+
+    panel.show (reading);
+
+    juce::Image canvas (juce::Image::ARGB, panel.getWidth(), panel.getHeight(), true);
+    juce::Graphics g (canvas);
+    panel.paintEntireComponent (g, false);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto picture = panel.createComponentSnapshot (panel.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("fx-panel-mic.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
+TEST_CASE ("run pane: a mic run says the channel it is on, that it waits for one, or that it rings out")
+{
+    /*  Phase 9b (namespace draft 18.9): the words a mic run reads beside its
+        name, drawn where a sampler member's are. With WFG_SNAPSHOT_DIR set,
+        run-pane-mic.png as well. */
+    const auto mic = [] (const char* runId, const char* name, const char* runState, const char* words)
+    {
+        model::RunRow row;
+        row.id = runId;
+        row.cueId = std::string ("CUE") + runId;
+        row.cueName = name;
+        row.kind = "mic";
+        row.state = runState;
+        row.liveWords = words;
+        return row;
+    };
+
+    const std::vector<model::RunRow> rows { mic ("MIC00001", "Voix solo", "playing", "on Vox 1"),
+                                            mic ("MIC00002", "Voix deux", "armed", "waiting for Vox 1"),
+                                            mic ("MIC00003", "Choeur", "stopping", "ringing out") };
+
+    ui::RunPaneComponent pane (model::Theme {}, {});
+    pane.setSize (450, 200);
+    pane.show (rows, {});
+
+    juce::Image canvas (juce::Image::ARGB, 450, 200, true);
+    juce::Graphics g (canvas);
+    pane.paintEntireComponent (g, false);
+
+    if (const auto dir = juce::SystemStats::getEnvironmentVariable ("WFG_SNAPSHOT_DIR", {}); dir.isNotEmpty())
+    {
+        const auto picture = pane.createComponentSnapshot (pane.getLocalBounds());
+        const juce::File file { juce::File (dir).getChildFile ("run-pane-mic.png") };
+        file.getParentDirectory().createDirectory();
+        file.deleteFile();
+
+        juce::FileOutputStream out { file };
+        REQUIRE (out.openedOk());
+
+        juce::PNGImageFormat png;
+        CHECK (png.writeImageToStream (picture, out));
+        MESSAGE ("wrote " << file.getFullPathName().toStdString());
+    }
+}
+
 namespace
 {
     /*  A TREE BY HAND: the few nodes the plugin windows read, sorted as a

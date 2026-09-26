@@ -15,6 +15,7 @@
 */
 
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/Rack.h>
 #include <wfg/client/model/Text.h>
 #include <wfg/engine/osc/OscValue.h>
 
@@ -128,6 +129,31 @@ namespace wfg::client::model
 
     std::string chainWords (const FxReading& reading)
     {
+        /*  A MIC CUE'S PATH, always said: a delay a performer hears in their
+            own ears is a fact to know before GO, not only when it is over a
+            line (decision BY). */
+        if (reading.live)
+        {
+            if (reading.sampleRate <= 0)
+                return reading.insertLatency > 0
+                         ? "Its plugins add " + std::to_string (reading.insertLatency) + " samples."
+                         : std::string {};
+
+            const auto ms = [&reading] (int samples) { return 1000.0 * samples / reading.sampleRate; };
+            const auto interface = ms (reading.inputLatency + reading.outputLatency);
+            const auto plugins = ms (reading.insertLatency);
+
+            auto said = millisecondWords (interface + plugins) + " from the microphone to the output: "
+                          + millisecondWords (interface) + " the interface's, "
+                          + millisecondWords (plugins) + " its plugins'";
+
+            said += plugins > reading.budgetMs + 1.0e-9
+                      ? " - over the " + millisecondWords (reading.budgetMs) + " budget."
+                      : " - within the " + millisecondWords (reading.budgetMs) + " budget.";
+
+            return said;
+        }
+
         std::string out;
 
         const auto widthWord = [] (int channels)
@@ -234,6 +260,21 @@ namespace wfg::client::model
         out.chainChannels = integer (snapshot, "/godot/cue/" + cueId + "/chainChannels");
         out.insertLatency = integer (snapshot, "/godot/cue/" + cueId + "/insertLatency");
         out.sampleRate = integer (snapshot, "/godot/engine/sampleRate");
+
+        /*  A MIC CUE'S SOURCE IS ITS INPUT, as wide as the input is, and its
+            path is said against the interface's delays and the budget. */
+        if (kind == "mic")
+        {
+            const auto input = text (snapshot, "/godot/cue/" + cueId + "/input");
+            const auto called = text (snapshot, "/godot/input/" + input + "/name");
+
+            out.source = called.empty() ? std::string ("in") : "in \xc2\xb7 " + called;
+            out.fileChannels = std::max (1, integer (snapshot, "/godot/input/" + input + "/width"));
+            out.live = true;
+            out.inputLatency = integer (snapshot, "/godot/audio/inputLatency");
+            out.outputLatency = integer (snapshot, "/godot/audio/outputLatency");
+            out.budgetMs = number (snapshot, "/godot/audio/rackBudget");
+        }
 
         for (const auto& pluginId : order)
         {

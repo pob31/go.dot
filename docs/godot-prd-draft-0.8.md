@@ -3125,7 +3125,12 @@ Mackie vs HUI first — first week with the D700.
   with 0, 4 and 8 rack channels open: the input copy, the input stages and the chains; **M39** —
   microphone to output on the author's MADIface through a loopback cable, against the words: the
   rack must add nothing beyond the interface and what the plugins declare; **M40** — the cores the
-  rack's children spin with 1, 2 and 4 channels, each with a plugin switched in.
+  rack's children spin with 1, 2 and 4 channels, each with a plugin switched in. *Taken
+  2026-09-26 on a Debug build:* M38 at 0, 8 and 32 channels open beside eight idle voices, 48 kHz
+  and 128 samples - about 40 µs a channel a block, thirty-two channels 62 % of real time, the same
+  per-track cost as a media voice (M11); Release at the bench. M40 as eight channels carrying ten
+  slots of two plugins - two children, so at most two cores, whatever the number of channels
+  (decision CL). M39 waits for the bench.
 - **A sampling channel** (§3.31, 2026-09-26): **M41** — a take's memory and the time to set it aside
   and touch it at open (sixty seconds and four layers, at 48 and 96 kHz); **M42** — a block's cost by
   layers, 1 to 16; **M43** — the largest step at a wrap on a sine, against the sine unbroken; **M44**

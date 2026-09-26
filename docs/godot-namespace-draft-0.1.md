@@ -11087,7 +11087,51 @@ this.
 
 ### 18.12 What was built, against what §18 drew
 
-*Written at close-out.*
+*Written at close-out, 2026-09-26.* Every stage is on `main`: 9b.0 `f757cab`, 9b.1 `319bbae`, 9b.2
+`f32d43c`, 9b.3 `b11af15`, 9b.4 `6dcf8a5` (the owner split) and `503cdd9` (the `Mic` element),
+9b.5 `04f8fb1`, 9b.6 `e93a87d`, and 9b.7 with this section. Each stage's own note above says how it
+was built; what follows is where the drawing and the build part company, and what is still owed.
+
+**Where the build departs from the drawing.**
+
+- **The fade-in is the gate's**, an equal-power ramp over `fadeIn`, and not a fade job (§18.5):
+  nothing else can take it over, and the level a fade would move is the cue's all along.
+- **The path's delay is said by the window, not published by the tree.** §18.2 drew `…/latency` and
+  `…/overBudget` rows on a mic cue; the build publishes what they are made of - the cue's
+  `insertLatency` (now computed for a mic cue from its channel's chain), the interface's
+  `audio/inputLatency` and `outputLatency`, and `audio/rackBudget` - and the FX panel's words
+  (`model::chainWords`) do the arithmetic: *7.3 ms from the microphone to the output: 2.5 ms the
+  interface's, 4.8 ms its plugins' - within the 5 ms budget.* The rows are for when a second client
+  or a surface needs the answer without the arithmetic.
+- **Load now's refusal is still the word `audio-busy`.** The window names what keeps it waiting
+  instead (`model::busyWords`, the engine's own rule: every live run but a cue only got ready
+  ahead), and Load now is unlit while anything sounds, on the Rack tab and the Plugins tab alike.
+- **A mic cue inside a group is rebuilt by a jump** with the group, as members are; only a sounding
+  mic cue at the top of the list is kept through one.
+
+**Owed.**
+
+- **M39**, the loopback on the MADIface against the words, and **listening** to a mic cue through
+  a real plugin on the Release build - the bench's, with the author's interface.
+- **The edit-time slot analysis** (`usage`, `overlaps`) does not yet count mic cues' claims on
+  their channels, so two mic cues whose lives overlap on one channel are found at GO (the second
+  waits, in words) rather than while the show is written.
+- **The console** (`clients/console`) offers the kind and shows a mic cue's rows as any; its own
+  input and channel menus are the desktop's only.
+
+**Measured (Debug build, 2026-09-26).** **M38** - the callback with eight idle voices at 48 kHz and
+128 samples into eight outputs: 270-310 µs a block with no rack channel open, 500-640 µs with eight,
+1650-1690 µs with thirty-two (62 % of real time) - about 40 µs a channel, the same per-track cost as a
+media voice in M11; Release at the bench. **M40** - eight channels carrying ten plugin slots of two
+plugins make two children, so at most two cores spin: the count is the distinct plugins, never the
+slots (decision CL).
+
+**Found on the way, and fixed.** A double Esc suspended the persistent section, a jump cut it, and
+`isPlaying` read slot 0 only (9b.1). The tree published every identified child of `<Audio>` as a
+bus (9b.2). The Plugins tab's picked row was an undeclared theme colour (9b.3). Since 9b.3 a media
+cue could switch in a rack channel's plugin, closed by `fx.create`'s list check (9b.4). And, from
+the plugin-voice handoff, `HostPlayer::serviceArms` applied every queued state before every queued
+arm, so an arm and a newer state in one batch ended on the older (`723d117`).
 
 ## 19. Phase 9c — live sampling channels: a take, its layers and its loop: what the tree, the commands and the log gain
 

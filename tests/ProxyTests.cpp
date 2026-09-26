@@ -2173,3 +2173,75 @@ TEST_CASE ("rack: a gate opens over its fade-in, a stop rings until the output i
     host.setBlockSink (nullptr);
     host.stop();
 }
+
+TEST_CASE ("M40: the rack's children are its distinct plugins, not its channel slots")
+{
+    /*  Phase 9b (namespace draft 18.6 and 18.10, decision CL). A child spins
+        a core while any lane of it is switched in, so what the rack costs in
+        cores is how many children it has. Eight channels: four carry the test
+        gain, four the mono test plugin, and two of them carry both - ten
+        plugin slots, two plugins. Two children, every lane of each one its
+        channel's, whatever the number of channels. */
+    ScopedStorage storage;
+    audio::AudioHost host { storage.path() };
+
+    audio::HostSettings settings;
+    settings.sampleRate = 48000;
+    settings.blockSize = 64;
+    settings.outputChannels = 2;
+    settings.inputChannels = 2;
+    REQUIRE (host.start (settings));
+
+    plugin::PluginTable table;
+    audio::ProxyServices services;
+    services.table = &table;
+    services.launch = launchOfThisBinary();
+    host.setProxyServices (services);
+
+    audio::EditSpec spec;
+    spec.tracks = 1;
+    spec.channelsPerTrack = 2;
+    spec.proxyDeadlineMicroseconds = 200000;
+
+    auto slots = 0;
+    auto made = 0;
+
+    for (int n = 0; n < 8; ++n)
+    {
+        audio::RackChannelSpec channel;
+        channel.id = "CH00000" + std::to_string (n);
+        channel.name = "Mic " + std::to_string (n + 1);
+
+        const auto add = [&channel, &made] (const char* identifier)
+        {
+            audio::PluginSpec entry;
+            entry.id = "PG9Q" + juce::String (made++).paddedLeft ('0', 4).toStdString();
+            entry.identifier = identifier;
+            entry.name = identifier;
+            channel.plugins.push_back (entry);
+        };
+
+        add (n < 4 ? plugin::Catalogue::testGainIdentifier() : plugin::Catalogue::testMonoIdentifier());
+
+        if (n == 1 || n == 6)
+            add (n < 4 ? plugin::Catalogue::testMonoIdentifier() : plugin::Catalogue::testGainIdentifier());
+
+        slots += static_cast<int> (channel.plugins.size());
+        spec.rack.push_back (channel);
+    }
+
+    REQUIRE (host.buildEdit (spec));
+    CHECK (slots == 10);
+
+    auto children = 0;
+
+    for (int k = 0; host.proxy (k) != nullptr; ++k)
+        ++children;
+
+    MESSAGE ("M40: 8 rack channels, " << slots << " plugin slots, 2 distinct plugins: " << children
+             << " children, so at most " << children << " cores spinning");
+
+    CHECK (children == 2);
+
+    host.stop();
+}

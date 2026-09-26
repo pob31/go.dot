@@ -3370,8 +3370,9 @@ namespace wfg::client::ui
 
             void show (std::vector<model::KnownPluginRow> knownNow, std::vector<model::PluginRow> setNow,
                        std::string bundlePathNow, bool editable, model::ScanRow scanNow,
-                       std::vector<std::string> skippedNow, bool setChangedNow)
+                       std::vector<std::string> skippedNow, bool setChangedNow, std::string busyNow = {})
             {
+                busy = std::move (busyNow);
                 const auto knownWere = keyOf (known);
                 const auto setWere = keyOf (set);
                 const auto skippedWere = keyOf (skipped);
@@ -3403,11 +3404,12 @@ namespace wfg::client::ui
                                                                     " a plugin that hangs is skipped after 30 seconds."));
                 folderButton.setTooltip ("Scan one folder beside the formats' own - an LV2 folder that is"
                                          " not a default one, say.");
-                loadButton.setTooltip (setChanged
-                                         ? juce::String ("The set differs from the audio graph: rebuild the graph with the"
-                                                         " set as it stands. Only while nothing plays; the sound stops for"
-                                                         " a moment.")
-                                         : juce::String ("The audio graph holds the set as it stands."));
+                loadButton.setTooltip (! setChanged ? juce::String ("The audio graph holds the set as it stands.")
+                                       : ! busy.empty() ? juce::String (busy) + ": Load now waits for nothing to sound."
+                                                          " Stop it first - Esc."
+                                       : juce::String ("The set differs from the audio graph: rebuild the graph with the"
+                                                       " set as it stands. Only while nothing plays; the sound stops for"
+                                                       " a moment."));
 
                 updateButtons();
 
@@ -3484,7 +3486,7 @@ namespace wfg::client::ui
                 scanButton.setEnabled (! locked && ! scanning());
                 folderButton.setEnabled (! locked && ! scanning());
                 retryButton.setEnabled (pickedSkipped >= 0 && ! locked && ! scanning());
-                loadButton.setEnabled (setChanged && ! locked);
+                loadButton.setEnabled (setChanged && ! locked && busy.empty());
             }
 
             /*  THE FORMATS, as a menu under the button: every one, or one. AU
@@ -3691,6 +3693,7 @@ namespace wfg::client::ui
             std::string bundlePath;
             bool locked = false;
             bool setChanged = false;
+            std::string busy;
             int pickedKnown = -1, pickedSet = -1, pickedSkipped = -1;
             Lister knownLister, setLister, skippedLister;
             juce::ListBox knownList, setList, skippedList;
@@ -3815,8 +3818,9 @@ namespace wfg::client::ui
 
             void show (model::RackReading rackNow, std::string budgetTextNow,
                        std::vector<model::KnownPluginRow> knownNow, std::string bundlePathNow,
-                       bool editable, bool changedNow)
+                       bool editable, bool changedNow, std::string busyNow = {})
             {
+                busy = std::move (busyNow);
                 const auto keyWas = keyOf (rack) + (locked ? "L" : "U");
 
                 rack = std::move (rackNow);
@@ -3848,11 +3852,15 @@ namespace wfg::client::ui
 
                 budget.setReadOnly (locked);
 
-                loadButton.setTooltip (changed
-                                         ? juce::String ("The rack or the set differs from the audio graph: rebuild the"
-                                                         " graph as they stand. Only while nothing plays; the sound"
-                                                         " stops for a moment.")
-                                         : juce::String ("The audio graph holds the rack as it stands."));
+                /*  WHAT KEEPS IT WAITING, BY NAME (Phase 9b): the engine
+                    refuses a rebuild while anything sounds, and a persistent
+                    mic cue sounds all show. */
+                loadButton.setTooltip (! changed ? juce::String ("The audio graph holds the rack as it stands.")
+                                       : ! busy.empty() ? juce::String (busy) + ": Load now waits for nothing to sound."
+                                                          " Stop it first - Esc."
+                                       : juce::String ("The rack or the set differs from the audio graph: rebuild the"
+                                                       " graph as they stand. Only while nothing plays; the sound"
+                                                       " stops for a moment."));
 
                 const auto* channel = pickedChannel();
 
@@ -4018,7 +4026,7 @@ namespace wfg::client::ui
                 addPlugin.setEnabled (channel != nullptr && ! locked);
                 presetButton.setEnabled (! pickedPluginId.empty() && ! locked && ! bundlePath.empty());
                 restartButton.setEnabled (! pickedPluginId.empty());
-                loadButton.setEnabled (changed && ! locked);
+                loadButton.setEnabled (changed && ! locked && busy.empty());
             }
 
             static std::string keyOf (const model::RackReading& reading)
@@ -4450,6 +4458,7 @@ namespace wfg::client::ui
             std::string bundlePath;
             bool locked = false;
             bool changed = false;
+            std::string busy;
             std::string pickedChannelId, pickedPluginId, editingId;
             int channelsWhenAdded = -1;
             int dropRow = -1;
@@ -4708,7 +4717,7 @@ namespace wfg::client::ui
                            model::text (snapshot, "/godot/document/path"),
                            ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
                            model::readScan (snapshot), model::readSkippedPlugins (snapshot),
-                           model::readSetChanged (snapshot));
+                           model::readSetChanged (snapshot), model::busyWords (snapshot));
 
             /*  THE RACK, re-read every pass for the same reason: its channels
                 and chains are the document's, and its plugins' state words the
@@ -4717,7 +4726,7 @@ namespace wfg::client::ui
             rackPage->show (model::readRack (snapshot), model::text (snapshot, "/godot/audio/rackBudget"),
                             model::readKnownPlugins (snapshot), model::text (snapshot, "/godot/document/path"),
                             ! model::isYes (model::flag (snapshot, "/godot/document/locked")),
-                            model::readSetChanged (snapshot));
+                            model::readSetChanged (snapshot), model::busyWords (snapshot));
 
             if (readCapabilities (snapshot)) capabilities();
             const auto state = model::text (snapshot, "/godot/audio/settingsStatus");

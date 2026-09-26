@@ -48,7 +48,10 @@ namespace wfg::surface
                             if (! cue.isValid())
                                 return Outcome::rejected (reason::unknownId);
 
-                            if (! cue.hasType ("Media"))
+                            /*  A MEDIA CUE, OR A MIC CUE (Phase 9b): both carry
+                                the EQ, the sends and the inserts the pages
+                                put under the rotaries. */
+                            if (! cue.hasType ("Media") && ! cue.hasType ("Mic"))
                                 return Outcome::rejected (reason::badValue);
 
                             table.setAim (id);

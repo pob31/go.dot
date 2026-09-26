@@ -567,6 +567,13 @@ draft. One commit and push a stage:
 | 9b.6 | Mic cues in the show's structure: persistent, standby, the horizon, load-to-time, DCAs, the Load now refusal | 9b.5, 9b.1 |
 | 9b.7 | The hands and the window — the EQ, Send and FX pages, the chain at the foot, the running pane — M38–M40, close-out | 9b.6 |
 
+*As built, 2026-09-26:* every stage on `main` - 9b.0 `f757cab`, 9b.1 `319bbae`, 9b.2 `f32d43c`,
+9b.3 `b11af15`, 9b.4 `6dcf8a5` and `503cdd9`, 9b.5 `04f8fb1`, 9b.6 `e93a87d`, 9b.7 closing it - with
+CI green on all six jobs at `503cdd9`. Namespace §18.12 says where the build departs from the
+drawing. Of the list below, what the code can show is shown (`blackbox/phase9b_inputs.py`,
+`phase9b_mic.py`, `logs/mic.wfglog`); what waits for the bench is hearing a mic cue through a real
+plugin on the MADIface and M39's loopback against the words.
+
 **Done when:** a named input's meter moves; a mic cue through a real plugin on a rack channel is
 heard on the MADIface; the plugin's child killed mid-cue leaves it dry and saying so, the show going
 on; Esc lets its tail ring out and frees the channel for a waiting cue; a double Esc is silence at

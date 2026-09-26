@@ -122,6 +122,31 @@ namespace wfg::client::model
         }
     }
 
+    namespace
+    {
+        /*  A MIC RUN'S WORDS (Phase 9b), read off the tree: its cue's channel
+            by the name somebody gave it, its queue, and its state. */
+        std::string micWords (const tree::TreeSnapshot& snapshot, const RunRow& row)
+        {
+            const auto channel = text (snapshot, "/godot/cue/" + row.cueId + "/channel");
+            auto called = text (snapshot, "/godot/slot/" + channel + "/name");
+
+            if (called.empty())
+                called = channel;
+
+            if (! row.pending.empty())
+                return "waiting for " + called;
+
+            if (row.state == "stopping")
+                return "ringing out";
+
+            if (row.state == "playing" && ! called.empty())
+                return "on " + called;
+
+            return {};
+        }
+    }
+
     std::string samplerCounts (const std::vector<RunRow>& rows, const std::string& groupRunId)
     {
         if (groupRunId.empty())
@@ -352,6 +377,9 @@ namespace wfg::client::model
 
             if (const auto strip = at (snapshot, id, "strip"); ! strip.empty())
                 row.samplerWords = memberWords (snapshot, id, strip, row.pending);
+
+            if (row.kind == "mic")
+                row.liveWords = micWords (snapshot, row);
 
             if (const auto late = osc::parseDouble (at (snapshot, id, "late")); late.has_value())
                 row.late = static_cast<int> (*late);

@@ -63,6 +63,7 @@
 #include <wfg/client/model/RunModel.h>
 #include <wfg/client/model/Eq.h>
 #include <wfg/client/model/Fx.h>
+#include <wfg/client/model/FxEditor.h>
 #include <wfg/client/model/Rack.h>
 #include <wfg/engine/plugin/PluginCommands.h>
 #include <wfg/client/model/Sends.h>
@@ -5585,6 +5586,83 @@ TEST_CASE ("client: a mic cue is inspected by its input and its channel, and its
     CHECK (none.present);
     CHECK (none.strips.empty());
     CHECK (none.notice == "This mic cue plays through no rack channel yet: pick one in the inspector.");
+}
+
+TEST_CASE ("client: a mic cue's chain starts at its input, its path is said against the budget, and its run by its channel")
+{
+    /*  Phase 9b, stage 9b.7 (namespace draft 18.7 and 18.9): what the window
+        says of a mic cue that a media cue's words do not cover. */
+    Rig rig ("mic");
+    auto snapshot = rig.publish (1);
+
+    /*  THE CHAIN BEGINS AT THE INPUT, by its name, as wide as it is; and the
+        path is always said - here with no plugin loaded and an interface
+        with no delay of its own. */
+    const auto fx = model::readFx (*snapshot, "MC000002");
+    REQUIRE (fx.present);
+    CHECK (fx.live);
+    CHECK (fx.source == "in \xc2\xb7 Voix solo");
+    CHECK (fx.fileChannels == 1);
+    CHECK (fx.budgetMs == doctest::Approx (5.0));
+    CHECK (model::chainWords (fx) == "0 ms from the microphone to the output: 0 ms the interface's, 0 ms its"
+                                     " plugins' - within the 5 ms budget.");
+
+    /*  And as the words read with real delays: 120 samples of interface and
+        230 of plugins at 48 kHz, then the plugins over the budget. */
+    auto path = fx;
+    path.sampleRate = 48000;
+    path.inputLatency = 64;
+    path.outputLatency = 56;
+    path.insertLatency = 230;
+    CHECK (model::chainWords (path) == "7.3 ms from the microphone to the output: 2.5 ms the interface's,"
+                                       " 4.8 ms its plugins' - within the 5 ms budget.");
+
+    path.insertLatency = 300;
+    CHECK (model::chainWords (path).ends_with ("6.3 ms its plugins' - over the 5 ms budget."));
+
+    //  A media cue's source is its file, as it always was.
+    CHECK (model::FxReading {}.source == "file");
+
+    /*  THE PLUGIN'S OWN WINDOW FOLLOWS THE PICK onto a mic cue whose channel
+        carries the plugin. */
+    const auto editor = model::readEditorSubject (*snapshot, "MC000002", "MC000012");
+    CHECK_FALSE (editor.greyed);
+    CHECK (editor.fxId == "MC000005");
+
+    /*  A MIC RUN SAYS WHICH CHANNEL IT IS ON, OR WHY NOT: on it while it
+        plays, waiting for it while another cue holds it, ringing out after its
+        stop. */
+    rig.runs.create ("MICRUN01", "MC000002", "mic");
+    auto* run = rig.runs.find ("MICRUN01");
+    REQUIRE (run != nullptr);
+
+    const auto wordsOf = [&rig] (std::int64_t tick)
+    {
+        for (const auto& row : model::readRuns (*rig.publish (tick)))
+            if (row.id == "MICRUN01")
+                return row.liveWords;
+
+        return std::string ("(no row)");
+    };
+
+    run->state = cue::runState::playing;
+    CHECK (wordsOf (2) == "on Vox 1");
+
+    run->pending = { "MC000011" };
+    CHECK (wordsOf (3) == "waiting for Vox 1");
+
+    run->pending.clear();
+    run->state = cue::runState::stopping;
+    CHECK (wordsOf (4) == "ringing out");
+
+    /*  LOAD NOW SAYS WHAT KEEPS IT WAITING, by name - and a cue only got ready
+        ahead is not a sound. */
+    run->state = cue::runState::playing;
+    CHECK (model::busyWords (*rig.publish (5)) == "Voix solo is sounding");
+
+    run->state = cue::runState::armed;
+    run->prepare = "armed";
+    CHECK (model::busyWords (*rig.publish (6)).empty());
 }
 
 TEST_CASE ("client: the rack reads each channel with its own chain, and says the worst case against the budget")

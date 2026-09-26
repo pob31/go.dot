@@ -956,9 +956,9 @@ namespace wfg::tree
                 else if (name == "index")  text = std::to_string (index);
                 else if (name == "role")   text = role;
                 else if (name == "fx" && (isMedia || isMic)) text = enabledFxInChainOrder (node);
-                else if (name == "chainChannels" && isMedia)
+                else if (name == "chainChannels" && (isMedia || isMic))
                     text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).channels);
-                else if (name == "insertLatency" && isMedia)
+                else if (name == "insertLatency" && (isMedia || isMic))
                     text = std::to_string (cue::chainOfCue (node, walkPlugins().table, walkPlugins().trackChannels).latencySamples);
                 else if (name == "duration" && isMedia)
                 {

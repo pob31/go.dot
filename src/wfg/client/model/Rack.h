@@ -93,4 +93,12 @@ namespace wfg::client::model
 
     /** "5 ms", "2.5 ms": a tenth of a millisecond at most, never a locale question. */
     std::string millisecondWords (double milliseconds);
+
+    /*  WHAT KEEPS LOAD NOW WAITING (Phase 9b, namespace draft §18.5): the cues
+        sounding, by name - "Voix solo is sounding" - or nothing when the graph
+        may be rebuilt. The engine refuses `audio-busy` for exactly these runs:
+        every one that is not over, except a cue only got ready ahead. A mic cue
+        in the persistent section would otherwise refuse Load now all show with
+        no clue why. */
+    std::string busyWords (const tree::TreeSnapshot&);
 }
