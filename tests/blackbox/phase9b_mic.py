@@ -103,6 +103,18 @@ def level(samples: "list[float]", start_frame: int, seconds: float = 0.5) -> flo
     return blocks[len(blocks) // 2]
 
 
+def shares(samples: "list[float]", start_frame: int, seconds: float = 0.5) -> str:
+    """WHAT THE WINDOW'S BLOCKS WERE AT, each put with the level it is nearest -
+    for a failure's detail line only, as the plugin driver's is."""
+    part = samples[max(0, start_frame):max(0, start_frame) + int(RATE * seconds)]
+    if len(part) < BLOCK:
+        return "no blocks in the window"
+    levels = {"dry": INPUT, "processed": STEADY, "silent": 0.0}
+    blocks = [sum(abs(s) for s in part[i:i + BLOCK]) / BLOCK for i in range(0, len(part) - BLOCK + 1, BLOCK)]
+    named = [min(levels, key=lambda word: abs(levels[word] - b)) for b in blocks]
+    return ", ".join(f"{named.count(word) / len(named):.0%} {word}" for word in levels if named.count(word))
+
+
 def run(locale: "str | None", keep_log: "str | None" = None) -> int:
     report = Report(f"stage 9b.5: a mic cue, heard ({locale or 'C'})")
     with tempfile.TemporaryDirectory(prefix="wfg-phase9b-mic-") as scratch:
@@ -158,6 +170,17 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
                          "p1 at one kills the child, and the plugin reads failed")
             problem = value_of(server, f"/godot/plugin/{PLUGIN}/problem") or ""
             report.check("Vox 1" in problem, "in words naming the channel that plays without it", problem)
+
+            # DOWN FOR GOOD before the dry voice is measured. The host relaunches a
+            # failed child once, two seconds on, and the lane still asks it to die,
+            # so it fails again and stays down - which is where "dry" is a promise
+            # and not a moment between two children (a restart on a slow CI runner
+            # landed inside the window, 2026-09-26).
+            down = common.wait_until(lambda: "stays down" in (value_of(server, f"/godot/plugin/{PLUGIN}/problem") or ""),
+                                     timeout=10.0)
+            report.check(down, "relaunched once, it fails again and stays down, saying so",
+                         value_of(server, f"/godot/plugin/{PLUGIN}/problem") or "")
+            killed_at = first_sound.frames_on_disk(render)
             report.check(wait_for_frames(render, killed_at + int(RATE * 2.0)), "the render runs past the kill")
 
             # A double Esc: over at once.
@@ -193,7 +216,8 @@ def run(locale: "str | None", keep_log: "str | None" = None) -> int:
                          "on both sides: the plugin made the mono voice stereo", f"{beside:.4f} against {STEADY:.4f}")
             report.check(after <= 0.001, "silent after Esc", f"{after:.4f}")
             report.check(abs(dry - INPUT) <= TOLERANCE,
-                         "with its plugin's child dead, the voice goes on dry", f"{dry:.4f} against {INPUT:.4f}")
+                         "with its plugin's child dead, the voice goes on dry",
+                         f"{dry:.4f} against {INPUT:.4f}; {shares(left, killed_at + int(RATE * 1.0))}")
         else:
             report.check(False, "the render is long enough to read every window",
                          f"{len(left)} frames, killed at {killed_at}")
