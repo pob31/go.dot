@@ -313,6 +313,11 @@ namespace wfg::cue
                             placeInRanges (read, entry.node, at - entry.from, beside, plan.confused);
                         else if (entry.element == "Group")
                             beside.offset = at - entry.from;
+                        else if (entry.element == "Mic")
+                        {
+                            /*  A LIVE INPUT BESIDE THE TARGET IS SOUNDING
+                                (Phase 9b), with no offset to be at. */
+                        }
                         else
                             beside.when = planned::finished;
 
@@ -531,18 +536,23 @@ namespace wfg::cue
             if (entry.row >= target->row)
                 break;
 
-            if (entry.element != "Media" || ! read.flag (entry.node, "cue", "enabled"))
+            if ((entry.element != "Media" && entry.element != "Mic")
+                  || ! read.flag (entry.node, "cue", "enabled"))
                 continue;
 
             if (! stillGoing (walk, entry) || wasStopped (entry.id))
                 continue;
 
             /*  Still going, and where in it is operator-timed. `placeInRanges`
-                lands it at the start of its endless range and says so. */
+                lands it at the start of its endless range and says so. A mic
+                cue has no range and nothing to place: it is sounding (Phase 9b). */
             PlannedRun run;
             run.cue = entry.id;
             run.ancestors = entry.ancestors;
-            placeInRanges (read, entry.node, 0.0, run, plan.confused);
+
+            if (entry.element == "Media")
+                placeInRanges (read, entry.node, 0.0, run, plan.confused);
+
             plan.runs.push_back (run);
         }
 
@@ -743,7 +753,7 @@ namespace wfg::cue
                 continue;
             }
 
-            if (entry->element != "Media" && entry->element != "Group")
+            if (entry->element != "Media" && entry->element != "Group" && entry->element != "Mic")
                 continue;
 
             /*  A SOUND THAT HAS RUN OUT BY THE INSTANT IS OVER, and is left
@@ -893,7 +903,7 @@ namespace wfg::cue
             if (std::find (stopped.begin(), stopped.end(), id) != stopped.end())
                 continue;
 
-            if (element == "Media" || element == "Midi")
+            if (element == "Media" || element == "Midi" || element == "Mic")
             {
                 PlannedRun run;
                 run.cue = id;

@@ -33,6 +33,12 @@
     and takes it when the first ends; what would fail one fails it in words;
     Esc lets the tail ring and a kill does not; and a fade that stops it
     closes its input and leaves its level where it was.
+
+    AND WHERE IT STANDS IN THE SHOW (stage 9b.6): armed ahead at standby, as a
+    media cue is; kept sounding through a jump rather than relaunched, having
+    no offset to be put at; asserted in the persistent section, silenced by a
+    double Esc and back at the next GO; and trimmed by the DCA it is marked
+    with.
 */
 
 #include <3rd_party/doctest/tracktion_doctest.hpp>
@@ -43,6 +49,8 @@
 #include <wfg/engine/Engine.h>
 #include <wfg/engine/cue/CueCommands.h>
 #include <wfg/engine/cue/CueList.h>
+#include <wfg/engine/cue/DcaTable.h>
+#include <wfg/engine/cue/LiveRows.h>
 #include <wfg/engine/cue/Run.h>
 #include <wfg/engine/cue/RunCommands.h>
 #include <wfg/engine/cue/Runner.h>
@@ -421,11 +429,13 @@ namespace
             engine.log().openInMemory ({});
             REQUIRE (doc::Bundle::open (micBundle(), document).ok);
 
-            doc::registerDocumentCommands (engine.commands(), document);
+            doc::registerDocumentCommands (engine.commands(), document, {},
+                                           cue::liveWriteFor (runs, dcas, document));
             cue::registerCueCommands (engine.commands(), document, focus);
             cue::registerRunCommands (engine.commands(), runs);
             cue::registerGoCommands (engine.commands(), engine, runner, document, focus, runIds);
 
+            runner.setDcas (&dcas);
             runner.setPlayer (&audio);
             runner.setSamplesPerTick (960);
         }
@@ -482,6 +492,7 @@ namespace
         Engine engine;
         doc::ShowDocument document;
         cue::RunTable runs;
+        cue::DcaTable dcas;
         cue::Focus focus;
         doc::IdRegistry runIds { doc::IdRegistry::withSeed (19) };
         cue::Runner runner { document, runs, runIds, focus };
@@ -685,4 +696,131 @@ TEST_CASE ("mic: a fade that stops a mic cue closes its input over the fade and 
     //  And at its end, the stop that frees the channel once the tail is quiet.
     CHECK (rig.tickUntil ([&rig] { return rig.runOf ("MC000002")->isFinished(); }, 120));
     CHECK (rig.audio.stops == std::vector<int> { 2 });
+}
+
+TEST_CASE ("mic: at standby a mic cue is armed ahead - its channel claimed, the gate shut - and GO opens it")
+{
+    RunRig rig;
+
+    //  The fixture parks the standby on the mic cue; a tick lets the pointer's arm happen.
+    rig.tickOnce();
+    rig.tickOnce();
+
+    const auto* armed = rig.runOf ("MC000002");
+    REQUIRE (armed != nullptr);
+    CHECK (armed->state == cue::runState::armed);
+    CHECK (armed->track == 2);
+    CHECK_FALSE (armed->prepare.empty());
+    CHECK (std::find (armed->claims.begin(), armed->claims.end(), "MC000011") != armed->claims.end());
+    REQUIRE (rig.audio.arms.size() == 1u);
+    CHECK (rig.audio.arms.front().live);
+    CHECK (rig.audio.opens.empty());
+
+    const auto armedId = armed->id;
+    rig.audio.completeArms (rig.engine);
+    rig.submitAndTick ("go");
+    REQUIRE (rig.tickUntil ([&rig] { return ! rig.audio.opens.empty(); }));
+
+    //  The run the pointer armed is the one that opens: no second arm.
+    CHECK (rig.runOf ("MC000002")->id == armedId);
+    CHECK (rig.audio.armed.size() == 1u);
+}
+
+TEST_CASE ("mic: a jump past a sounding mic cue keeps it sounding rather than relaunching it")
+{
+    RunRig rig;
+
+    const auto* run = rig.fireAndLaunch ("MC000002");
+    REQUIRE (run != nullptr);
+    const auto micRun = run->id;
+
+    //  Aimed at the memo after it: the mic was fired before and never stopped.
+    REQUIRE (rig.engine.submit ("cli", "list.aim", { osc::Value::string ("MC000001"), osc::Value::string ("MC000006"),
+                                                     osc::Value::float64 (0.0) }));
+    rig.tickOnce();
+    REQUIRE (rig.submitAndTick ("list.loadToTime", { osc::Value::string ("MC000001") }).applied == 1);
+    rig.tickOnce();
+
+    /*  THE SAME RUN, STILL SOUNDING: not ended, not stopped on the audio side,
+        not armed a second time, the channel still its. */
+    const auto* kept = rig.runs.find (micRun);
+    REQUIRE (kept != nullptr);
+    CHECK_FALSE (kept->isFinished());
+    CHECK (kept->state == cue::runState::playing);
+    CHECK (rig.audio.stops.empty());
+    CHECK (rig.audio.kills.empty());
+    CHECK (rig.audio.armed.size() == 1u);
+    CHECK (rig.runs.holderOf ("MC000011") == kept);
+}
+
+TEST_CASE ("mic: in the persistent section a mic cue is asserted, silenced by a double Esc, and back at the next GO")
+{
+    RunRig rig;
+
+    const auto section = rig.document.createPersistent ("MC000001", "MC000070");
+    REQUIRE (section.ok);
+    REQUIRE (rig.document.createCue ("MC000070", 0, "mic", "Ambient mic", "MC000071").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000071/input", "MC000021").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000071/channel", "MC000011").ok);
+
+    /*  A step: a GO on the memo, which is what makes the section check. */
+    const auto step = [&rig]
+    {
+        REQUIRE (rig.document.setAttribute (cue::standbyAddressOf ("MC000001"), "MC000006").ok);
+        rig.tickOnce();
+        rig.submitAndTick ("go");
+
+        for (int n = 0; n < 5; ++n)
+        {
+            rig.tickOnce();
+            rig.audio.completeArms (rig.engine);
+        }
+
+        rig.tickUntil ([&rig] { const auto* run = rig.runs.liveRunOf ("MC000071");
+                                return run != nullptr && run->state == cue::runState::playing; }, 50);
+    };
+
+    step();
+
+    const auto* bed = rig.runs.liveRunOf ("MC000071");
+    REQUIRE (bed != nullptr);
+    CHECK (bed->asserted);
+    CHECK (bed->state == cue::runState::playing);
+    const auto first = bed->id;
+
+    /*  A DOUBLE ESC SILENCES IT - a kill, nothing left ringing - and does not
+        suspend it. */
+    rig.submitAndTick ("run.killAll");
+    rig.tickUntil ([&rig, &first] { return rig.runs.find (first)->isFinished(); }, 20);
+    CHECK (rig.runs.find (first)->isFinished());
+    CHECK (rig.audio.kills == std::vector<int> { 2 });
+
+    step();
+
+    const auto* again = rig.runs.liveRunOf ("MC000071");
+    REQUIRE (again != nullptr);
+    CHECK (again->id != first);
+    CHECK (again->asserted);
+    CHECK (again->state == cue::runState::playing);
+}
+
+TEST_CASE ("mic: the DCA a mic cue is marked with trims it")
+{
+    RunRig rig;
+
+    REQUIRE (rig.document.createDca ("Voices", "MC000080").ok);
+    REQUIRE (rig.document.setAttribute ("/godot/cue/MC000002/dca", "MC000080").ok);
+
+    const auto* run = rig.fireAndLaunch ("MC000002");
+    REQUIRE (run != nullptr);
+    const auto id = run->id;
+    const auto before = run->level;
+
+    REQUIRE (rig.submitAndTick ("node.set", { osc::Value::string ("/godot/dca/MC000080/trim"),
+                                              osc::Value::float64 (-6.0) }).applied == 1);
+
+    for (int n = 0; n < 3; ++n)
+        rig.tickOnce();
+
+    CHECK (rig.runs.find (id)->level == doctest::Approx (before - 6.0));
 }

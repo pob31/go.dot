@@ -3566,7 +3566,8 @@ namespace wfg::doc
             {
                 if (node.getType().toString() == "Persistent")
                 {
-                    /*  MEDIA, OSC AND MIDI ARE WHAT A SECTION CAN ASSERT (§13.11).
+                    /*  MEDIA, MIC, OSC AND MIDI ARE WHAT A SECTION CAN ASSERT (§13.11; mic
+                        since Phase 9b).
                         A fade asserts nothing, a stop is the thing that
                         SUSPENDS an assertion, and a group is a lifetime rather
                         than a state. Each is left where it is and ignored, and
@@ -3582,7 +3583,7 @@ namespace wfg::doc
                         problems.push_back (
                             "/Show/.../Persistent/" + element + "["
                               + child[idProperty].toString().toStdString()
-                              + "]: a persistent section asserts media, osc and midi cues and"
+                              + "]: a persistent section asserts media, mic, osc and midi cues and"
                                 " nothing else - a fade asserts nothing, a stop is what suspends"
                                 " an assertion, a group is a lifetime rather than a state - so"
                                 " this one is ignored");

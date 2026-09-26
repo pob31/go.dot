@@ -10936,6 +10936,22 @@ prepared by a header, asserted in the persistent section, or named by the refusa
 9b.6); and the path's delay and `overBudget` rows, which §18.7 makes readings the tree derives and
 the window says - with the window, in 9b.7.
 
+*As built (9b.6), the mic cue in the show's structure.* **A live input never ends by itself**: the
+walk's `endsOnItsOwn` says so of a `Mic`, so a mic cue fired before an instant and not stopped since
+is still sounding at it. **The solver plans it sounding** with nothing to place - in the order's
+reading of what came before the target, beside a target inside its group, in the history's
+reading, and in the persistent section's plan. **A jump keeps a sounding mic cue**: the sweep that
+ends the list's runs leaves a top-level mic run the plan still names, and `seatPlan` adopts it
+rather than making it again - a live input has no offset to be relaunched at, and a relaunch would
+have waited behind its own ringing channel. A mic cue inside a group is rebuilt with the group, as
+its members are. **At standby** a mic cue is armed ahead as a media cue is (`audio.arm` takes one):
+its channel claimed or queued, its plugins set, the gate shut; the pointer moving on lets it go.
+**The persistent section asserts it** as it asserts media, and a double Esc silences it without
+suspending it - the next GO brings it back. **Its DCA trims it** (`dcaChainOf`). Left to 9b.7:
+the refusal of Load now naming the mic cue that holds it, which the button can say from the run
+table; and the edit-time slot analysis (`usage`, `overlaps`) does not yet count mic cues' claims on
+their channels.
+
 ### 18.6 The rack's plugins and their children
 
 Hosted as the set's are (§17.6): out of process, behind the proxy, with the same region, lanes,

@@ -633,6 +633,12 @@ namespace wfg::cue
 
             const auto element = node.getType().toString();
 
+            /*  A LIVE INPUT RUNS UNTIL SOMEBODY STOPS IT (Phase 9b): nothing in
+                a microphone ends, so a mic cue fired before an instant is still
+                sounding at it unless a stop came between. */
+            if (element == "Mic")
+                return false;
+
             if (element == "Media")
             {
                 for (const auto& child : node)

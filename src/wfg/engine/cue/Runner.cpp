@@ -324,7 +324,7 @@ namespace wfg::cue
             run left sitting in `armed` would look like progress that was not
             happening. `audio.arm` refuses them at the command; this is the same
             answer for the standby path. */
-        if (! fireAtOnce && kind != "media")
+        if (! fireAtOnce && kind != "media" && kind != "mic")
             return {};
 
         /*  DECISION N, 2026-09-06: a refire is decided per kind, and this is
@@ -452,7 +452,12 @@ namespace wfg::cue
                 assignment and is the difference between an operator seeing that
                 the next cue is ready and having to know that it always is. */
             run->prepare = preparedness::armed;
-            armMedia (engine, cue, id);
+
+            if (kind == "mic")
+                armMic (engine, cue, id);
+            else
+                armMedia (engine, cue, id);
+
             return id;
         }
 
@@ -617,7 +622,10 @@ namespace wfg::cue
         /*  A MEDIA CUE ALWAYS, because an arm is revocable by construction:
             a voice reserved and a file made ready are undone by letting go of
             them, and nothing outside this machine heard anything. */
-        if (element == "Media")
+        /*  A MIC CUE TOO (Phase 9b): its channel claimed and its plugins set
+            ahead, the gate shut - undone by letting go of the claim, and
+            nothing outside this machine heard anything. */
+        if (element == "Media" || element == "Mic")
             return true;
 
         if (element != "Osc")
@@ -1106,7 +1114,7 @@ namespace wfg::cue
                 const auto cue = document.findById (planned.cue);
                 const auto kind = kindOfCue (cue);
 
-                if (kind == "media")
+                if (kind == "media" || kind == "mic")
                 {
                     if (runs.liveRunOf (planned.cue) != nullptr)
                         continue;
@@ -1262,9 +1270,37 @@ namespace wfg::cue
             is before the build rather than after: a claim released a tick later
             would leave the plan's runs queued behind runs the jump had already
             ended. */
+        /*  A MIC CUE THE PLAN STILL NAMES KEEPS SOUNDING (Phase 9b, namespace
+            draft 18.5): a live input has no offset to be relaunched at, and
+            ending it would shut its gate and ring its channel out under the
+            relaunch that has to wait for the channel. So a sounding one at the
+            top of the list, which the plan names, is kept - and handed to the
+            build, which adopts it rather than making it again. */
+        std::map<std::string, std::string> runFor;
+
+        for (const auto& snapshot : runs.all())
+        {
+            if (snapshot.kind != "mic" || snapshot.isFinished() || snapshot.parent.length() > 0
+                  || snapshot.state != runState::playing || listOf (snapshot.cue) != listId)
+                continue;
+
+            const auto stillPlanned = std::any_of (plan.runs.begin(), plan.runs.end(),
+                                              [&snapshot] (const PlannedRun& wants)
+                                              {
+                                                  return wants.cue == snapshot.cue && wants.ancestors.empty()
+                                                           && wants.when == planned::sounding;
+                                              });
+
+            if (stillPlanned)
+                runFor[snapshot.cue] = snapshot.id;
+        }
+
         for (const auto& snapshot : runs.all())
         {
             if (snapshot.isFinished() || listOf (snapshot.cue) != listId || inPersistent (snapshot.cue))
+                continue;
+
+            if (runFor.count (snapshot.cue) > 0 && runFor[snapshot.cue] == snapshot.id)
                 continue;
 
             if (auto* run = runs.find (snapshot.id))
@@ -1297,7 +1333,6 @@ namespace wfg::cue
         /*  AND THE TREE, OUTERMOST FIRST - shared with a group re-seated at a
             second of its own timeline, which is the same building with the
             scene's run already standing. */
-        std::map<std::string, std::string> runFor;
         seatPlan (engine, tick, plan.runs, runFor, nextId);
 
         //----------------------------------------------------------------------
@@ -1446,6 +1481,11 @@ namespace wfg::cue
             if (! cue.isValid() || cue.getType().toString() == "Group")
                 continue;
 
+            /*  A RUN ALREADY STANDING FOR IT - a mic cue kept sounding through
+                a jump - is adopted as it is. */
+            if (runFor.count (wants.cue) > 0)
+                continue;
+
             const auto id = nextId();
             const auto parent = wants.ancestors.empty()
                                   ? std::string {}
@@ -1497,7 +1537,10 @@ namespace wfg::cue
             run->launchRequested = true;
             run->launchRequestedAtTick = tick;
 
-            armMedia (engine, cue, id);
+            if (cue.hasType ("Mic"))
+                armMic (engine, cue, id);
+            else
+                armMedia (engine, cue, id);
         }
 
         //----------------------------------------------------------------------
@@ -3713,7 +3756,7 @@ namespace wfg::cue
                 /*  ONLY MEDIA AND GROUPS CARRY A MARK (PRD §3.28): audio and
                     video cues, and groups. A fade's `dca` is what it moves and
                     a strip's is what it rides - neither is membership. */
-                if (element == "Media" || element == "Group")
+                if (element == "Media" || element == "Mic" || element == "Group")
                     if (const auto mark = node[dcaProperty].toString().toStdString(); ! mark.empty())
                         if (auto chain = chainFrom (mark); ! chain.empty())
                             dcaChains[node[idProperty].toString().toStdString()] = std::move (chain);
@@ -6282,7 +6325,7 @@ namespace wfg::cue
         /*  ONLY A MEDIA CUE HAS ANYTHING TO MAKE READY. Asking to arm a memo
             would be a rejection every time the pointer passed over one, which
             would fill the log with a refusal about something nobody did wrong. */
-        if (element == "Media")
+        if (element == "Media" || element == "Mic")
         {
             const auto id = cue[idProperty].toString().toStdString();
             return id.empty() ? std::vector<std::string> {} : std::vector<std::string> { id };
@@ -7508,7 +7551,7 @@ namespace wfg::cue
                                 play. Arming a memo would create a run that could
                                 never leave `armed`, which looks like progress
                                 and is not. */
-                            if (cue.getType().toString() != "Media")
+                            if (cue.getType().toString() != "Media" && cue.getType().toString() != "Mic")
                                 return Outcome::rejected (reason::typeMismatch);
 
                             const auto id = args.size() > 1 ? args[1].getString()
